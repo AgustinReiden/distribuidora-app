@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, Lock } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios } from './hooks/useSupabase';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios } from './hooks/useSupabase.jsx';
 
 // ==================== PANTALLA DE LOGIN ====================
 function LoginScreen() {
