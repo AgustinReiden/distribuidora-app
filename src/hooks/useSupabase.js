@@ -1,5 +1,80 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { supabase } from '../lib/supabase'
+
+// ==================== CONTEXTO DE AUTH ====================
+const AuthContext = createContext({})
+
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null)
+  const [perfil, setPerfil] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // Obtener sesión actual
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        fetchPerfil(session.user.id)
+      } else {
+        setLoading(false)
+      }
+    })
+
+    // Escuchar cambios de auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        await fetchPerfil(session.user.id)
+      } else {
+        setPerfil(null)
+        setLoading(false)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const fetchPerfil = async (userId) => {
+    const { data, error } = await supabase
+      .from('perfiles')
+      .select('*')
+      .eq('id', userId)
+      .single()
+    
+    if (error) {
+      console.error('Error cargando perfil:', error)
+    } else {
+      setPerfil(data)
+    }
+    setLoading(false)
+  }
+
+  const login = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
+    if (error) throw error
+    return data
+  }
+
+  const logout = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) throw error
+    setUser(null)
+    setPerfil(null)
+  }
+
+  const isAdmin = perfil?.rol === 'admin'
+
+  return (
+    <AuthContext.Provider value={{ user, perfil, loading, login, logout, isAdmin }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export const useAuth = () => useContext(AuthContext)
 
 // ==================== CLIENTES ====================
 export function useClientes() {
@@ -250,5 +325,54 @@ export function usePedidos() {
     cambiarEstado, 
     eliminarPedido, 
     refetch: fetchPedidos 
+  }
+}
+
+// ==================== USUARIOS (solo admin) ====================
+export function useUsuarios() {
+  const [usuarios, setUsuarios] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchUsuarios = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('perfiles')
+      .select('*')
+      .order('nombre')
+    
+    if (error) {
+      console.error('Error cargando usuarios:', error)
+    } else {
+      setUsuarios(data || [])
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchUsuarios()
+  }, [])
+
+  const actualizarUsuario = async (id, datos) => {
+    const { data, error } = await supabase
+      .from('perfiles')
+      .update({
+        nombre: datos.nombre,
+        rol: datos.rol,
+        activo: datos.activo
+      })
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) throw error
+    setUsuarios(prev => prev.map(u => u.id === id ? data : u))
+    return data
+  }
+
+  return { 
+    usuarios, 
+    loading, 
+    actualizarUsuario,
+    refetch: fetchUsuarios 
   }
 }

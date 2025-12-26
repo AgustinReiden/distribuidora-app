@@ -1,27 +1,115 @@
 import React, { useState } from 'react';
-import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2 } from 'lucide-react';
-import { useClientes, useProductos, usePedidos } from './hooks/useSupabase';
+import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, Lock } from 'lucide-react';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios } from './hooks/useSupabase';
 
-export default function App() {
+// ==================== PANTALLA DE LOGIN ====================
+function LoginScreen() {
+  const { login } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await login(email, password);
+    } catch (err) {
+      setError('Email o contraseña incorrectos');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+            <Truck className="w-8 h-8 text-blue-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800">Distribuidora</h1>
+          <p className="text-gray-500 mt-1">Ingresá con tu cuenta</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="tu@email.com"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center"
+          >
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Ingresar'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==================== APP PRINCIPAL ====================
+function MainApp() {
+  const { perfil, logout, isAdmin } = useAuth();
   const [vista, setVista] = useState('pedidos');
   const [menuAbierto, setMenuAbierto] = useState(false);
   
   const { clientes, loading: loadingClientes, agregarCliente, actualizarCliente, eliminarCliente } = useClientes();
   const { productos, loading: loadingProductos, agregarProducto, actualizarProducto, eliminarProducto } = useProductos();
   const { pedidos, loading: loadingPedidos, crearPedido, cambiarEstado, eliminarPedido } = usePedidos();
+  const { usuarios, loading: loadingUsuarios, actualizarUsuario } = useUsuarios();
   
   const [modalCliente, setModalCliente] = useState(false);
   const [modalProducto, setModalProducto] = useState(false);
   const [modalPedido, setModalPedido] = useState(false);
+  const [modalUsuario, setModalUsuario] = useState(false);
   const [modalConfirm, setModalConfirm] = useState({ visible: false, mensaje: '', onConfirm: null });
   
   const [clienteEditando, setClienteEditando] = useState(null);
   const [productoEditando, setProductoEditando] = useState(null);
+  const [usuarioEditando, setUsuarioEditando] = useState(null);
   
   const [nuevoPedido, setNuevoPedido] = useState({ clienteId: '', items: [] });
   const [filtroEstado, setFiltroEstado] = useState('todos');
   const [busqueda, setBusqueda] = useState('');
   const [guardando, setGuardando] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error);
+    }
+  };
 
   const handleGuardarCliente = async (cliente) => {
     setGuardando(true);
@@ -75,6 +163,18 @@ export default function App() {
         setModalConfirm({ visible: false, mensaje: '', onConfirm: null });
       }
     });
+  };
+
+  const handleGuardarUsuario = async (usuario) => {
+    setGuardando(true);
+    try {
+      await actualizarUsuario(usuario.id, usuario);
+      setModalUsuario(false);
+      setUsuarioEditando(null);
+    } catch (error) {
+      alert('Error al guardar usuario: ' + error.message);
+    }
+    setGuardando(false);
   };
 
   const agregarItemPedido = (productoId) => {
@@ -153,6 +253,14 @@ export default function App() {
     </div>
   );
 
+  // Menú items según rol
+  const menuItems = [
+    { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', todos: true },
+    { id: 'clientes', icon: Users, label: 'Clientes', todos: true },
+    { id: 'productos', icon: Package, label: 'Productos', todos: true },
+    { id: 'usuarios', icon: UserCog, label: 'Usuarios', todos: false },
+  ].filter(item => item.todos || isAdmin);
+
   const Navegacion = () => (
     <nav className="bg-blue-600 text-white shadow-lg">
       <div className="max-w-7xl mx-auto px-4">
@@ -161,22 +269,35 @@ export default function App() {
             <Truck className="w-8 h-8" />
             <span className="font-bold text-xl">Distribuidora</span>
           </div>
-          <div className="hidden md:flex space-x-1">
-            {[{ id: 'pedidos', icon: ShoppingCart, label: 'Pedidos' }, { id: 'clientes', icon: Users, label: 'Clientes' }, { id: 'productos', icon: Package, label: 'Productos' }].map(item => (
+          <div className="hidden md:flex items-center space-x-1">
+            {menuItems.map(item => (
               <button key={item.id} onClick={() => setVista(item.id)} className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${vista === item.id ? 'bg-blue-700' : 'hover:bg-blue-500'}`}>
                 <item.icon className="w-5 h-5" /><span>{item.label}</span>
               </button>
             ))}
+            <div className="ml-4 pl-4 border-l border-blue-400 flex items-center space-x-3">
+              <span className="text-sm">{perfil?.nombre}</span>
+              <span className="text-xs bg-blue-500 px-2 py-1 rounded">{isAdmin ? 'Admin' : 'Preventista'}</span>
+              <button onClick={handleLogout} className="p-2 hover:bg-blue-500 rounded-lg" title="Cerrar sesión">
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
           </div>
           <button className="md:hidden p-2" onClick={() => setMenuAbierto(!menuAbierto)}><Menu className="w-6 h-6" /></button>
         </div>
         {menuAbierto && (
           <div className="md:hidden pb-4 space-y-2">
-            {[{ id: 'pedidos', icon: ShoppingCart, label: 'Pedidos' }, { id: 'clientes', icon: Users, label: 'Clientes' }, { id: 'productos', icon: Package, label: 'Productos' }].map(item => (
+            {menuItems.map(item => (
               <button key={item.id} onClick={() => { setVista(item.id); setMenuAbierto(false); }} className={`flex items-center space-x-2 w-full px-4 py-2 rounded-lg ${vista === item.id ? 'bg-blue-700' : 'hover:bg-blue-500'}`}>
                 <item.icon className="w-5 h-5" /><span>{item.label}</span>
               </button>
             ))}
+            <div className="pt-2 mt-2 border-t border-blue-400">
+              <div className="px-4 py-2 text-sm">{perfil?.nombre} ({isAdmin ? 'Admin' : 'Preventista'})</div>
+              <button onClick={handleLogout} className="flex items-center space-x-2 w-full px-4 py-2 hover:bg-blue-500 rounded-lg">
+                <LogOut className="w-5 h-5" /><span>Cerrar sesión</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -252,6 +373,38 @@ export default function App() {
     );
   };
 
+  const ModalUsuario = () => {
+    const [form, setForm] = useState(usuarioEditando || { nombre: '', rol: 'preventista', activo: true });
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+          <div className="flex justify-between items-center p-4 border-b">
+            <h2 className="text-xl font-semibold">Editar Usuario</h2>
+            <button onClick={() => { setModalUsuario(false); setUsuarioEditando(null); }}><X className="w-6 h-6 text-gray-500" /></button>
+          </div>
+          <div className="p-4 space-y-4">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" value={form.email} disabled className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label><input type="text" value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
+              <select value={form.rol} onChange={e => setForm({ ...form, rol: e.target.value })} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                <option value="preventista">Preventista</option>
+                <option value="admin">Administrador</option>
+              </select>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input type="checkbox" id="activo" checked={form.activo} onChange={e => setForm({ ...form, activo: e.target.checked })} className="w-4 h-4 text-blue-600 rounded" />
+              <label htmlFor="activo" className="text-sm text-gray-700">Usuario activo</label>
+            </div>
+          </div>
+          <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 rounded-b-xl">
+            <button onClick={() => { setModalUsuario(false); setUsuarioEditando(null); }} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg" disabled={guardando}>Cancelar</button>
+            <button onClick={() => handleGuardarUsuario({ ...form, id: usuarioEditando?.id })} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center" disabled={guardando}>{guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const ModalPedido = () => {
     const [busquedaProducto, setBusquedaProducto] = useState('');
     const productosFiltradosModal = productos.filter(p => p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase()) || (p.categoria && p.categoria.toLowerCase().includes(busquedaProducto.toLowerCase())));
@@ -306,7 +459,7 @@ export default function App() {
                   <p className="text-lg font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
                   <div className="flex space-x-2">
                     {pedido.estado === 'pendiente' ? <button onClick={() => handleCambiarEstado(pedido.id, 'enviado')} className="flex items-center space-x-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"><Check className="w-4 h-4" /><span>Enviado</span></button> : <button onClick={() => handleCambiarEstado(pedido.id, 'pendiente')} className="flex items-center space-x-1 px-3 py-1.5 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 text-sm"><Clock className="w-4 h-4" /><span>Pendiente</span></button>}
-                    <button onClick={() => handleEliminarPedido(pedido.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-5 h-5" /></button>
+                    {isAdmin && <button onClick={() => handleEliminarPedido(pedido.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-5 h-5" /></button>}
                   </div>
                 </div>
               </div>
@@ -321,7 +474,7 @@ export default function App() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800">Clientes</h1>
-        <button onClick={() => setModalCliente(true)} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-5 h-5" /><span>Nuevo Cliente</span></button>
+        {isAdmin && <button onClick={() => setModalCliente(true)} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-5 h-5" /><span>Nuevo Cliente</span></button>}
       </div>
       {loadingClientes ? <LoadingSpinner /> : clientes.length === 0 ? <div className="text-center py-12 text-gray-500"><Users className="w-12 h-12 mx-auto mb-3 opacity-50" /><p>No hay clientes</p></div> : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -329,10 +482,10 @@ export default function App() {
             <div key={cliente.id} className="bg-white border rounded-lg shadow-sm p-4">
               <div className="flex justify-between items-start">
                 <div className="flex-1"><h3 className="font-semibold text-lg">{cliente.nombre_fantasia}</h3><p className="text-sm text-gray-600">{cliente.nombre}</p></div>
-                <div className="flex space-x-1">
+                {isAdmin && <div className="flex space-x-1">
                   <button onClick={() => { setClienteEditando(cliente); setModalCliente(true); }} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button>
                   <button onClick={() => handleEliminarCliente(cliente.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
-                </div>
+                </div>}
               </div>
               <div className="mt-3 space-y-1 text-sm text-gray-500">
                 <p>📍 {cliente.direccion}</p>
@@ -350,12 +503,12 @@ export default function App() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800">Productos</h1>
-        <button onClick={() => setModalProducto(true)} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-5 h-5" /><span>Nuevo Producto</span></button>
+        {isAdmin && <button onClick={() => setModalProducto(true)} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-5 h-5" /><span>Nuevo Producto</span></button>}
       </div>
       {loadingProductos ? <LoadingSpinner /> : productos.length === 0 ? <div className="text-center py-12 text-gray-500"><Package className="w-12 h-12 mx-auto mb-3 opacity-50" /><p>No hay productos</p></div> : (
         <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Producto</th><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Categoría</th><th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Precio</th><th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Stock</th><th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Acciones</th></tr></thead>
+            <thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Producto</th><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Categoría</th><th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Precio</th><th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Stock</th>{isAdmin && <th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Acciones</th>}</tr></thead>
             <tbody className="divide-y">
               {productos.map(producto => (
                 <tr key={producto.id} className="hover:bg-gray-50">
@@ -363,7 +516,34 @@ export default function App() {
                   <td className="px-4 py-3 text-gray-600">{producto.categoria}</td>
                   <td className="px-4 py-3 text-right font-semibold text-blue-600">{formatPrecio(producto.precio)}</td>
                   <td className="px-4 py-3 text-right"><span className={`px-2 py-1 rounded-full text-sm ${producto.stock < 20 ? 'bg-red-100 text-red-700' : producto.stock < 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{producto.stock}</span></td>
-                  <td className="px-4 py-3 text-right"><div className="flex justify-end space-x-1"><button onClick={() => { setProductoEditando(producto); setModalProducto(true); }} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleEliminarProducto(producto.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button></div></td>
+                  {isAdmin && <td className="px-4 py-3 text-right"><div className="flex justify-end space-x-1"><button onClick={() => { setProductoEditando(producto); setModalProducto(true); }} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleEliminarProducto(producto.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button></div></td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  const VistaUsuarios = () => (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-gray-800">Usuarios</h1>
+      </div>
+      <p className="text-gray-600">Administrá los usuarios y sus permisos. Para crear nuevos usuarios, hacelo desde el panel de Supabase.</p>
+      {loadingUsuarios ? <LoadingSpinner /> : usuarios.length === 0 ? <div className="text-center py-12 text-gray-500"><UserCog className="w-12 h-12 mx-auto mb-3 opacity-50" /><p>No hay usuarios</p></div> : (
+        <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Nombre</th><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Email</th><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Rol</th><th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Estado</th><th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Acciones</th></tr></thead>
+            <tbody className="divide-y">
+              {usuarios.map(usuario => (
+                <tr key={usuario.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{usuario.nombre}</td>
+                  <td className="px-4 py-3 text-gray-600">{usuario.email}</td>
+                  <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-sm ${usuario.rol === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{usuario.rol === 'admin' ? 'Admin' : 'Preventista'}</span></td>
+                  <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-sm ${usuario.activo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{usuario.activo ? 'Activo' : 'Inactivo'}</span></td>
+                  <td className="px-4 py-3 text-right"><button onClick={() => { setUsuarioEditando(usuario); setModalUsuario(true); }} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button></td>
                 </tr>
               ))}
             </tbody>
@@ -380,11 +560,36 @@ export default function App() {
         {vista === 'pedidos' && <VistaPedidos />}
         {vista === 'clientes' && <VistaClientes />}
         {vista === 'productos' && <VistaProductos />}
+        {vista === 'usuarios' && isAdmin && <VistaUsuarios />}
       </main>
       {modalConfirm.visible && <ModalConfirmacion />}
       {modalCliente && <ModalCliente />}
       {modalProducto && <ModalProducto />}
       {modalPedido && <ModalPedido />}
+      {modalUsuario && <ModalUsuario />}
     </div>
   );
+}
+
+// ==================== APP CON PROVIDER ====================
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
+
+function AppContent() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  return user ? <MainApp /> : <LoginScreen />;
 }
