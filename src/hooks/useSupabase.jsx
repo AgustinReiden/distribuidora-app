@@ -9,20 +9,19 @@ export function AuthProvider({ children }) {
   const [perfil, setPerfil] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Función para buscar el perfil (separada para poder reutilizarla)
+  // Función para buscar el perfil
   const fetchPerfil = async (userId) => {
     try {
       const { data, error } = await supabase
         .from('perfiles')
         .select('*')
         .eq('id', userId)
-        .maybeSingle() // maybeSingle es mejor que single: si no hay perfil, devuelve null sin error 406
+        .maybeSingle() 
 
       if (error) {
         console.error('Error al cargar perfil:', error.message)
       }
       
-      // Si hay datos, los guardamos. Si no, perfil queda null.
       if (data) {
         setPerfil(data)
       }
@@ -34,40 +33,38 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true
 
-    // Función simple para verificar sesión inicial
-    const checkSession = async () => {
+    const initializeAuth = async () => {
       try {
+        // 1. Verificamos la sesión actual manualmente
         const { data: { session } } = await supabase.auth.getSession()
-        
-        if (mounted) {
-          if (session?.user) {
-            setUser(session.user)
-            await fetchPerfil(session.user.id)
-          }
-          // IMPORTANTE: Solo bajamos el loading si NO hay usuario. 
-          // Si hay usuario, esperamos a que termine fetchPerfil arriba.
-          if (!session?.user) {
-            setLoading(false)
-          }
+
+        if (mounted && session?.user) {
+          setUser(session.user)
+          // Buscamos el perfil inmediatamente
+          await fetchPerfil(session.user.id)
         }
       } catch (error) {
         console.error("Error verificando sesión:", error)
-        if (mounted) setLoading(false)
+      } finally {
+        // 2. CRÍTICO: Pase lo que pase, apagamos el loading
+        // Esto soluciona el problema de la pantalla congelada al refrescar
+        if (mounted) {
+          setLoading(false)
+        }
       }
     }
 
-    checkSession()
+    // Ejecutamos la inicialización
+    initializeAuth()
 
-    // Listener de cambios de estado (Login, Logout, Auto-Refresh)
+    // 3. Listener para cambios futuros (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
-      console.log('🔄 Auth Event:', event)
-
+      
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        setUser(session?.user ?? null)
         if (session?.user) {
-          setUser(session.user)
           // Solo buscamos perfil si no lo tenemos o si el usuario cambió
-          // Esto evita bucles infinitos
           if (!perfil || perfil.id !== session.user.id) {
             await fetchPerfil(session.user.id)
           }
@@ -75,17 +72,15 @@ export function AuthProvider({ children }) {
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setPerfil(null)
+        setLoading(false) 
       }
-      
-      // Aseguramos que el loading se apague siempre después de un evento
-      setLoading(false)
     })
 
     return () => {
       mounted = false
       subscription.unsubscribe()
     }
-  }, []) // Sin dependencias, se ejecuta una sola vez al montar
+  }, []) 
 
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
