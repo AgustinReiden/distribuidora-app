@@ -9,45 +9,90 @@ export function AuthProvider({ children }) {
   const [perfil, setPerfil] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    // Obtener sesión actual
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchPerfil(session.user.id)
+  const fetchPerfil = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('perfiles')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      
+      if (error) {
+        console.error('Error cargando perfil:', error)
+        setPerfil(null)
       } else {
-        setLoading(false)
+        setPerfil(data)
       }
-    })
+    } catch (err) {
+      console.error('Error en fetchPerfil:', err)
+      setPerfil(null)
+    }
+  }
+
+  useEffect(() => {
+    let isMounted = true
+
+    const initAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error('Error getting session:', error)
+          if (isMounted) {
+            setUser(null)
+            setPerfil(null)
+            setLoading(false)
+          }
+          return
+        }
+
+        if (isMounted) {
+          setUser(session?.user ?? null)
+          
+          if (session?.user) {
+            await fetchPerfil(session.user.id)
+          }
+          
+          // CLAVE: setLoading(false) SIEMPRE se ejecuta
+          setLoading(false)
+        }
+      } catch (err) {
+        console.error('Error in initAuth:', err)
+        if (isMounted) {
+          setUser(null)
+          setPerfil(null)
+          setLoading(false)
+        }
+      }
+    }
+
+    initAuth()
 
     // Escuchar cambios de auth
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        await fetchPerfil(session.user.id)
-      } else {
-        setPerfil(null)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth event:', event)
+        
+        if (!isMounted) return
+
+        setUser(session?.user ?? null)
+        
+        if (session?.user) {
+          await fetchPerfil(session.user.id)
+        } else {
+          setPerfil(null)
+        }
+        
+        // También acá aseguramos que loading sea false
         setLoading(false)
       }
-    })
+    )
 
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const fetchPerfil = async (userId) => {
-    const { data, error } = await supabase
-      .from('perfiles')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    
-    if (error) {
-      console.error('Error cargando perfil:', error)
-    } else {
-      setPerfil(data)
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
     }
-    setLoading(false)
-  }
+  }, [])
 
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
