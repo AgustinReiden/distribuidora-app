@@ -10,12 +10,16 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   const fetchPerfil = async (userId) => {
+    console.log('fetchPerfil iniciado para userId:', userId)
     try {
+      console.log('Haciendo query a perfiles...')
       const { data, error } = await supabase
         .from('perfiles')
         .select('*')
         .eq('id', userId)
         .single()
+      
+      console.log('Query completada. Data:', data, 'Error:', error)
       
       if (error) {
         console.error('Error cargando perfil:', error)
@@ -27,14 +31,19 @@ export function AuthProvider({ children }) {
       console.error('Error en fetchPerfil:', err)
       setPerfil(null)
     }
+    console.log('fetchPerfil terminado')
   }
 
   useEffect(() => {
     let isMounted = true
+    console.log('AuthProvider useEffect iniciado')
 
     const initAuth = async () => {
+      console.log('initAuth iniciado')
       try {
+        console.log('Llamando a getSession...')
         const { data: { session }, error } = await supabase.auth.getSession()
+        console.log('getSession completado. Session:', session, 'Error:', error)
         
         if (error) {
           console.error('Error getting session:', error)
@@ -50,10 +59,12 @@ export function AuthProvider({ children }) {
           setUser(session?.user ?? null)
           
           if (session?.user) {
+            console.log('Hay sesión, llamando fetchPerfil...')
             await fetchPerfil(session.user.id)
+            console.log('fetchPerfil completado en initAuth')
           }
           
-          // CLAVE: setLoading(false) SIEMPRE se ejecuta
+          console.log('Seteando loading a false')
           setLoading(false)
         }
       } catch (err) {
@@ -83,7 +94,6 @@ export function AuthProvider({ children }) {
           setPerfil(null)
         }
         
-        // También acá aseguramos que loading sea false
         setLoading(false)
       }
     )
