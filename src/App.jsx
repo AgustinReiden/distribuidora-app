@@ -580,9 +580,13 @@ export default function App() {
   );
 }
 
+// ==================== CONTENIDO PRINCIPAL ====================
+// Aquí está el arreglo final para evitar el bloqueo de render
 function AppContent() {
   const { user, loading } = useAuth();
 
+  // 1. PRIMERO: Si está cargando, mostramos spinner y NO renderizamos nada más.
+  // Esto evita que los componentes hijos intenten acceder a datos que aún no existen.
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
@@ -591,5 +595,6 @@ function AppContent() {
     );
   }
 
+  // 2. SEGUNDO: Una vez que loading es false, decidimos qué mostrar.
   return user ? <MainApp /> : <LoginScreen />;
 }
