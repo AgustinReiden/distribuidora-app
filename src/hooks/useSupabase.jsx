@@ -7,87 +7,92 @@ const AuthContext = createContext({})
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [perfil, setPerfil] = useState(null)
+  // Iniciamos en true, pero el Watchdog asegura que pase a false sí o sí
   const [loading, setLoading] = useState(true)
 
-  // Función auxiliar para traer el perfil
+  // Función para buscar el perfil (se ejecuta en segundo plano, sin bloquear)
   const fetchPerfil = async (userId) => {
     try {
       const { data, error } = await supabase
         .from('perfiles')
         .select('*')
         .eq('id', userId)
-        .maybeSingle() // maybeSingle evita errores 406 si no existe
+        .maybeSingle() 
+
+      if (error) {
+        console.error('Error al cargar perfil (segundo plano):', error.message)
+      }
       
-      if (data) setPerfil(data)
+      if (data) {
+        setPerfil(data)
+      }
     } catch (err) {
-      console.error('Error recuperando perfil:', err)
+      console.error('Error inesperado fetchPerfil:', err)
     }
   }
 
   useEffect(() => {
     let mounted = true
 
+    // 1. INICIALIZACIÓN RÁPIDA (NON-BLOCKING)
     const initAuth = async () => {
-      try {
-        // CAMBIO CLAVE: Usamos getUser() en lugar de getSession()
-        // getSession() lee del disco (LocalStorage) y a veces se cuelga.
-        // getUser() viaja al servidor de Supabase y valida el token real.
-        // Es milisegundos más lento, pero 100% seguro contra bloqueos.
-        const { data: { user: currentUser }, error } = await supabase.auth.getUser()
-        
-        if (mounted) {
-          if (currentUser) {
-            setUser(currentUser)
-            await fetchPerfil(currentUser.id)
-          } else {
-            // Si el servidor dice que no hay usuario, limpiamos todo
-            setUser(null)
-            setPerfil(null)
-          }
+      console.log("🚀 Iniciando sistema de Auth...")
+      
+      // Usamos .then() en lugar de await para no detener la ejecución si esto se cuelga
+      supabase.auth.getSession().then(({ data }) => {
+        if (mounted && data?.session?.user) {
+          console.log("⚡ Sesión recuperada de caché")
+          setUser(data.session.user)
+          // Disparamos la búsqueda de perfil en paralelo
+          fetchPerfil(data.session.user.id)
         }
-      } catch (error) {
-        console.error("Error crítico en autenticación:", error)
-        // En caso de error grave, deslogueamos para evitar bucles
-        if (mounted) {
-           setUser(null)
-           await supabase.auth.signOut() 
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false)
-        }
-      }
+      }).catch(err => console.error("Error silencioso en getSession:", err))
     }
 
-    // 1. Ejecutamos la carga inicial segura
     initAuth()
 
-    // 2. Escuchamos cambios (Login/Logout)
+    // 2. ESCUCHADOR DE EVENTOS (La fuente de verdad)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
-      
       console.log('🔄 Auth Event:', event)
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        setUser(session?.user ?? null)
         if (session?.user) {
-          // Solo buscamos perfil si cambió el usuario
-          if (!perfil || perfil.id !== session.user.id) {
-            await fetchPerfil(session.user.id)
+          setUser(session.user)
+          // Si el usuario cambió o no tenemos perfil, lo buscamos
+          if (!perfil || perfil?.id !== session.user.id) {
+            fetchPerfil(session.user.id)
           }
         }
+        // ¡CRÍTICO! Si hay login, quitamos el loading INMEDIATAMENTE.
+        // No esperamos a que termine fetchPerfil.
+        setLoading(false)
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setPerfil(null)
         setLoading(false)
+      } else if (event === 'INITIAL_SESSION') {
+        // Evento de inicialización, también desbloquea
+        setLoading(false)
       }
     })
 
+    // 3. WATCHDOG (EL SALVAVIDAS) 🚑
+    // Si por alguna razón (bug de Chrome, red corporativa, etc) 
+    // los eventos no disparan en 2 segundos, forzamos la apertura.
+    const safetyTimer = setTimeout(() => {
+      if (mounted && loading) {
+        console.warn("⚠️ Watchdog: La carga tardó mucho. Forzando apertura de la App.")
+        setLoading(false)
+      }
+    }, 2000)
+
     return () => {
       mounted = false
+      clearTimeout(safetyTimer)
       subscription.unsubscribe()
     }
-  }, []) 
+  }, []) // Array vacío: se ejecuta solo al montar
 
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -117,7 +122,6 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => useContext(AuthContext)
 
-// ==================== (SIN CAMBIOS ABAJO) ====================
 // ==================== CLIENTES ====================
 export function useClientes() {
   const [clientes, setClientes] = useState([])
