@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext } from 'react'
+import { useState, useEffect, createContext, useContext, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 // ==================== CONTEXTO DE AUTH ====================
@@ -8,10 +8,19 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [perfil, setPerfil] = useState(null)
   const [loading, setLoading] = useState(true)
+  
+  // REF: Evita que fetchPerfil se llame dos veces simultáneamente
+  const fetchingRef = useRef(false)
 
   const fetchPerfil = async (userId) => {
+    // Si ya hay una petición en curso, cancelamos esta nueva llamada
+    if (fetchingRef.current) return
+    fetchingRef.current = true
+
     try {
-      // Timeout de 5 segundos para evitar que se cuelgue
+      console.log("⚡ Fetching perfil para:", userId)
+      
+      // Timeout de seguridad por si la BD no responde
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 5000)
       
@@ -19,91 +28,74 @@ export function AuthProvider({ children }) {
         .from('perfiles')
         .select('*')
         .eq('id', userId)
-        .single()
+        .maybeSingle() // 'maybeSingle' es más seguro que 'single' (no explota si es null)
         .abortSignal(controller.signal)
       
       clearTimeout(timeoutId)
       
       if (error) {
-        console.error('Error cargando perfil:', error)
-        setPerfil(null)
-      } else {
+        console.error('❌ Error Supabase al cargar perfil:', error.message)
+        // No reseteamos perfil a null aquí para evitar parpadeos si es un error transitorio
+      } 
+      
+      if (data) {
+        console.log("✅ Perfil cargado:", data)
         setPerfil(data)
       }
     } catch (err) {
-      console.error('Error o timeout en fetchPerfil:', err)
-      setPerfil(null)
+      console.error('Crash o Timeout en fetchPerfil:', err)
+    } finally {
+      fetchingRef.current = false
+      setLoading(false)
     }
   }
 
   useEffect(() => {
-    let isMounted = true
+    let mounted = true
 
-    const initAuth = async () => {
+    const initialize = async () => {
       try {
-        // Primero intentamos refrescar la sesión para asegurar token válido
-        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession()
-        
-        if (refreshError || !session) {
-          // Si no se puede refrescar, intentamos obtener la sesión existente
-          const { data: { session: existingSession } } = await supabase.auth.getSession()
-          
-          if (isMounted) {
-            if (existingSession?.user) {
-              setUser(existingSession.user)
-              await fetchPerfil(existingSession.user.id)
-            } else {
-              setUser(null)
-              setPerfil(null)
-            }
-            setLoading(false)
-          }
-          return
-        }
+        // 1. Obtener sesión actual (sin forzar refresh agresivo)
+        const { data: { session } } = await supabase.auth.getSession()
 
-        if (isMounted) {
+        if (session?.user) {
+          if (mounted) setUser(session.user)
+          // Solo buscamos perfil si tenemos usuario
+          await fetchPerfil(session.user.id)
+        } else {
+          if (mounted) setLoading(false)
+        }
+      } catch (error) {
+        console.error("Error inicializando auth:", error)
+        if (mounted) setLoading(false)
+      }
+    }
+
+    initialize()
+
+    // 2. Escuchar cambios de autenticación
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return
+      console.log('🔄 Auth Event:', event)
+      
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+        setPerfil(null)
+        setLoading(false)
+      } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        // Solo actualizamos si el usuario cambió o si no tenemos perfil cargado
+        if (session.user.id !== user?.id || !perfil) {
           setUser(session.user)
           await fetchPerfil(session.user.id)
-          setLoading(false)
-        }
-      } catch (err) {
-        console.error('Error in initAuth:', err)
-        if (isMounted) {
-          setUser(null)
-          setPerfil(null)
-          setLoading(false)
         }
       }
-    }
-
-    initAuth()
-
-    // Escuchar cambios de auth
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Auth event:', event)
-        
-        if (!isMounted) return
-
-        if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
-          setUser(session?.user ?? null)
-          if (session?.user) {
-            await fetchPerfil(session.user.id)
-          }
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null)
-          setPerfil(null)
-        }
-        
-        setLoading(false)
-      }
-    )
+    })
 
     return () => {
-      isMounted = false
+      mounted = false
       subscription.unsubscribe()
     }
-  }, [])
+  }, []) // Array vacío para ejecutar solo al montar
 
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
