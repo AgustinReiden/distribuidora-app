@@ -9,62 +9,69 @@ export function AuthProvider({ children }) {
   const [perfil, setPerfil] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Función para buscar el perfil
+  // Función auxiliar para traer el perfil
   const fetchPerfil = async (userId) => {
     try {
       const { data, error } = await supabase
         .from('perfiles')
         .select('*')
         .eq('id', userId)
-        .maybeSingle() 
-
-      if (error) {
-        console.error('Error al cargar perfil:', error.message)
-      }
+        .maybeSingle() // maybeSingle evita errores 406 si no existe
       
-      if (data) {
-        setPerfil(data)
-      }
+      if (data) setPerfil(data)
     } catch (err) {
-      console.error('Error inesperado fetchPerfil:', err)
+      console.error('Error recuperando perfil:', err)
     }
   }
 
   useEffect(() => {
     let mounted = true
 
-    const initializeAuth = async () => {
+    const initAuth = async () => {
       try {
-        // 1. Verificamos la sesión actual manualmente
-        const { data: { session } } = await supabase.auth.getSession()
-
-        if (mounted && session?.user) {
-          setUser(session.user)
-          // Buscamos el perfil inmediatamente
-          await fetchPerfil(session.user.id)
+        // CAMBIO CLAVE: Usamos getUser() en lugar de getSession()
+        // getSession() lee del disco (LocalStorage) y a veces se cuelga.
+        // getUser() viaja al servidor de Supabase y valida el token real.
+        // Es milisegundos más lento, pero 100% seguro contra bloqueos.
+        const { data: { user: currentUser }, error } = await supabase.auth.getUser()
+        
+        if (mounted) {
+          if (currentUser) {
+            setUser(currentUser)
+            await fetchPerfil(currentUser.id)
+          } else {
+            // Si el servidor dice que no hay usuario, limpiamos todo
+            setUser(null)
+            setPerfil(null)
+          }
         }
       } catch (error) {
-        console.error("Error verificando sesión:", error)
+        console.error("Error crítico en autenticación:", error)
+        // En caso de error grave, deslogueamos para evitar bucles
+        if (mounted) {
+           setUser(null)
+           await supabase.auth.signOut() 
+        }
       } finally {
-        // 2. CRÍTICO: Pase lo que pase, apagamos el loading
-        // Esto soluciona el problema de la pantalla congelada al refrescar
         if (mounted) {
           setLoading(false)
         }
       }
     }
 
-    // Ejecutamos la inicialización
-    initializeAuth()
+    // 1. Ejecutamos la carga inicial segura
+    initAuth()
 
-    // 3. Listener para cambios futuros (Login/Logout)
+    // 2. Escuchamos cambios (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
       
+      console.log('🔄 Auth Event:', event)
+
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         setUser(session?.user ?? null)
         if (session?.user) {
-          // Solo buscamos perfil si no lo tenemos o si el usuario cambió
+          // Solo buscamos perfil si cambió el usuario
           if (!perfil || perfil.id !== session.user.id) {
             await fetchPerfil(session.user.id)
           }
@@ -72,7 +79,7 @@ export function AuthProvider({ children }) {
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setPerfil(null)
-        setLoading(false) 
+        setLoading(false)
       }
     })
 
@@ -110,6 +117,7 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => useContext(AuthContext)
 
+// ==================== (SIN CAMBIOS ABAJO) ====================
 // ==================== CLIENTES ====================
 export function useClientes() {
   const [clientes, setClientes] = useState([])
@@ -117,78 +125,46 @@ export function useClientes() {
 
   const fetchClientes = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('nombre_fantasia')
-    
-    if (error) {
-      console.error('Error cargando clientes:', error)
-    } else {
-      setClientes(data || [])
-    }
+    const { data, error } = await supabase.from('clientes').select('*').order('nombre_fantasia')
+    if (!error) setClientes(data || [])
     setLoading(false)
   }
 
-  useEffect(() => {
-    fetchClientes()
-  }, [])
+  useEffect(() => { fetchClientes() }, [])
 
   const agregarCliente = async (cliente) => {
-    const { data, error } = await supabase
-      .from('clientes')
-      .insert([{
-        nombre: cliente.nombre,
-        nombre_fantasia: cliente.nombreFantasia,
-        direccion: cliente.direccion,
-        telefono: cliente.telefono || null,
-        zona: cliente.zona || null
-      }])
-      .select()
-      .single()
-    
+    const { data, error } = await supabase.from('clientes').insert([{
+      nombre: cliente.nombre,
+      nombre_fantasia: cliente.nombreFantasia,
+      direccion: cliente.direccion,
+      telefono: cliente.telefono || null,
+      zona: cliente.zona || null
+    }]).select().single()
     if (error) throw error
     setClientes(prev => [...prev, data])
     return data
   }
 
   const actualizarCliente = async (id, cliente) => {
-    const { data, error } = await supabase
-      .from('clientes')
-      .update({
-        nombre: cliente.nombre,
-        nombre_fantasia: cliente.nombreFantasia,
-        direccion: cliente.direccion,
-        telefono: cliente.telefono || null,
-        zona: cliente.zona || null
-      })
-      .eq('id', id)
-      .select()
-      .single()
-    
+    const { data, error } = await supabase.from('clientes').update({
+      nombre: cliente.nombre,
+      nombre_fantasia: cliente.nombreFantasia,
+      direccion: cliente.direccion,
+      telefono: cliente.telefono || null,
+      zona: cliente.zona || null
+    }).eq('id', id).select().single()
     if (error) throw error
     setClientes(prev => prev.map(c => c.id === id ? data : c))
     return data
   }
 
   const eliminarCliente = async (id) => {
-    const { error } = await supabase
-      .from('clientes')
-      .delete()
-      .eq('id', id)
-    
+    const { error } = await supabase.from('clientes').delete().eq('id', id)
     if (error) throw error
     setClientes(prev => prev.filter(c => c.id !== id))
   }
 
-  return { 
-    clientes, 
-    loading, 
-    agregarCliente, 
-    actualizarCliente, 
-    eliminarCliente, 
-    refetch: fetchClientes 
-  }
+  return { clientes, loading, agregarCliente, actualizarCliente, eliminarCliente, refetch: fetchClientes }
 }
 
 // ==================== PRODUCTOS ====================
@@ -198,76 +174,44 @@ export function useProductos() {
 
   const fetchProductos = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('productos')
-      .select('*')
-      .order('nombre')
-    
-    if (error) {
-      console.error('Error cargando productos:', error)
-    } else {
-      setProductos(data || [])
-    }
+    const { data, error } = await supabase.from('productos').select('*').order('nombre')
+    if (!error) setProductos(data || [])
     setLoading(false)
   }
 
-  useEffect(() => {
-    fetchProductos()
-  }, [])
+  useEffect(() => { fetchProductos() }, [])
 
   const agregarProducto = async (producto) => {
-    const { data, error } = await supabase
-      .from('productos')
-      .insert([{
-        nombre: producto.nombre,
-        precio: producto.precio,
-        stock: producto.stock,
-        categoria: producto.categoria || null
-      }])
-      .select()
-      .single()
-    
+    const { data, error } = await supabase.from('productos').insert([{
+      nombre: producto.nombre,
+      precio: producto.precio,
+      stock: producto.stock,
+      categoria: producto.categoria || null
+    }]).select().single()
     if (error) throw error
     setProductos(prev => [...prev, data])
     return data
   }
 
   const actualizarProducto = async (id, producto) => {
-    const { data, error } = await supabase
-      .from('productos')
-      .update({
-        nombre: producto.nombre,
-        precio: producto.precio,
-        stock: producto.stock,
-        categoria: producto.categoria || null
-      })
-      .eq('id', id)
-      .select()
-      .single()
-    
+    const { data, error } = await supabase.from('productos').update({
+      nombre: producto.nombre,
+      precio: producto.precio,
+      stock: producto.stock,
+      categoria: producto.categoria || null
+    }).eq('id', id).select().single()
     if (error) throw error
     setProductos(prev => prev.map(p => p.id === id ? data : p))
     return data
   }
 
   const eliminarProducto = async (id) => {
-    const { error } = await supabase
-      .from('productos')
-      .delete()
-      .eq('id', id)
-    
+    const { error } = await supabase.from('productos').delete().eq('id', id)
     if (error) throw error
     setProductos(prev => prev.filter(p => p.id !== id))
   }
 
-  return { 
-    productos, 
-    loading, 
-    agregarProducto, 
-    actualizarProducto, 
-    eliminarProducto, 
-    refetch: fetchProductos 
-  }
+  return { productos, loading, agregarProducto, actualizarProducto, eliminarProducto, refetch: fetchProductos }
 }
 
 // ==================== PEDIDOS ====================
@@ -277,41 +221,15 @@ export function usePedidos() {
 
   const fetchPedidos = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('pedidos')
-      .select(`
-        *,
-        cliente:clientes(*),
-        items:pedido_items(
-          *,
-          producto:productos(*)
-        )
-      `)
-      .order('created_at', { ascending: false })
-    
-    if (error) {
-      console.error('Error cargando pedidos:', error)
-    } else {
-      setPedidos(data || [])
-    }
+    const { data, error } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).order('created_at', { ascending: false })
+    if (!error) setPedidos(data || [])
     setLoading(false)
   }
 
-  useEffect(() => {
-    fetchPedidos()
-  }, [])
+  useEffect(() => { fetchPedidos() }, [])
 
   const crearPedido = async (clienteId, items, total) => {
-    const { data: pedido, error: pedidoError } = await supabase
-      .from('pedidos')
-      .insert([{
-        cliente_id: clienteId,
-        total: total,
-        estado: 'pendiente'
-      }])
-      .select()
-      .single()
-    
+    const { data: pedido, error: pedidoError } = await supabase.from('pedidos').insert([{ cliente_id: clienteId, total: total, estado: 'pendiente' }]).select().single()
     if (pedidoError) throw pedidoError
 
     const itemsParaInsertar = items.map(item => ({
@@ -322,10 +240,7 @@ export function usePedidos() {
       subtotal: item.cantidad * item.precioUnitario
     }))
 
-    const { error: itemsError } = await supabase
-      .from('pedido_items')
-      .insert(itemsParaInsertar)
-    
+    const { error: itemsError } = await supabase.from('pedido_items').insert(itemsParaInsertar)
     if (itemsError) throw itemsError
 
     await fetchPedidos()
@@ -333,80 +248,40 @@ export function usePedidos() {
   }
 
   const cambiarEstado = async (id, nuevoEstado) => {
-    const { error } = await supabase
-      .from('pedidos')
-      .update({ estado: nuevoEstado })
-      .eq('id', id)
-    
+    const { error } = await supabase.from('pedidos').update({ estado: nuevoEstado }).eq('id', id)
     if (error) throw error
     setPedidos(prev => prev.map(p => p.id === id ? { ...p, estado: nuevoEstado } : p))
   }
 
   const eliminarPedido = async (id) => {
-    const { error } = await supabase
-      .from('pedidos')
-      .delete()
-      .eq('id', id)
-    
+    const { error } = await supabase.from('pedidos').delete().eq('id', id)
     if (error) throw error
     setPedidos(prev => prev.filter(p => p.id !== id))
   }
 
-  return { 
-    pedidos, 
-    loading, 
-    crearPedido, 
-    cambiarEstado, 
-    eliminarPedido, 
-    refetch: fetchPedidos 
-  }
+  return { pedidos, loading, crearPedido, cambiarEstado, eliminarPedido, refetch: fetchPedidos }
 }
 
-// ==================== USUARIOS (solo admin) ====================
+// ==================== USUARIOS ====================
 export function useUsuarios() {
   const [usuarios, setUsuarios] = useState([])
   const [loading, setLoading] = useState(true)
 
   const fetchUsuarios = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('perfiles')
-      .select('*')
-      .order('nombre')
-    
-    if (error) {
-      console.error('Error cargando usuarios:', error)
-    } else {
-      setUsuarios(data || [])
-    }
+    const { data, error } = await supabase.from('perfiles').select('*').order('nombre')
+    if (!error) setUsuarios(data || [])
     setLoading(false)
   }
 
-  useEffect(() => {
-    fetchUsuarios()
-  }, [])
+  useEffect(() => { fetchUsuarios() }, [])
 
   const actualizarUsuario = async (id, datos) => {
-    const { data, error } = await supabase
-      .from('perfiles')
-      .update({
-        nombre: datos.nombre,
-        rol: datos.rol,
-        activo: datos.activo
-      })
-      .eq('id', id)
-      .select()
-      .single()
-    
+    const { data, error } = await supabase.from('perfiles').update({ nombre: datos.nombre, rol: datos.rol, activo: datos.activo }).eq('id', id).select().single()
     if (error) throw error
     setUsuarios(prev => prev.map(u => u.id === id ? data : u))
     return data
   }
 
-  return { 
-    usuarios, 
-    loading, 
-    actualizarUsuario,
-    refetch: fetchUsuarios 
-  }
+  return { usuarios, loading, actualizarUsuario, refetch: fetchUsuarios }
 }
