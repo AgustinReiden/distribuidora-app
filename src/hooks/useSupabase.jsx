@@ -9,67 +9,83 @@ export function AuthProvider({ children }) {
   const [perfil, setPerfil] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // Función para buscar el perfil (separada para poder reutilizarla)
   const fetchPerfil = async (userId) => {
     try {
       const { data, error } = await supabase
         .from('perfiles')
         .select('*')
         .eq('id', userId)
-        .single()
+        .maybeSingle() // maybeSingle es mejor que single: si no hay perfil, devuelve null sin error 406
 
       if (error) {
-        console.error('Error cargando perfil:', error)
-        setPerfil(null)
-      } else {
+        console.error('Error al cargar perfil:', error.message)
+      }
+      
+      // Si hay datos, los guardamos. Si no, perfil queda null.
+      if (data) {
         setPerfil(data)
       }
     } catch (err) {
-      console.error('Error en fetchPerfil:', err)
-      setPerfil(null)
+      console.error('Error inesperado fetchPerfil:', err)
     }
   }
 
   useEffect(() => {
     let mounted = true
 
-    const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
+    // Función simple para verificar sesión inicial
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        
+        if (mounted) {
+          if (session?.user) {
+            setUser(session.user)
+            await fetchPerfil(session.user.id)
+          }
+          // IMPORTANTE: Solo bajamos el loading si NO hay usuario. 
+          // Si hay usuario, esperamos a que termine fetchPerfil arriba.
+          if (!session?.user) {
+            setLoading(false)
+          }
+        }
+      } catch (error) {
+        console.error("Error verificando sesión:", error)
+        if (mounted) setLoading(false)
+      }
+    }
 
+    checkSession()
+
+    // Listener de cambios de estado (Login, Logout, Auto-Refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
+      console.log('🔄 Auth Event:', event)
 
-      if (session?.user) {
-        setUser(session.user)
-        await fetchPerfil(session.user.id)
-      } else {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session?.user) {
+          setUser(session.user)
+          // Solo buscamos perfil si no lo tenemos o si el usuario cambió
+          // Esto evita bucles infinitos
+          if (!perfil || perfil.id !== session.user.id) {
+            await fetchPerfil(session.user.id)
+          }
+        }
+      } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setPerfil(null)
       }
-
+      
+      // Aseguramos que el loading se apague siempre después de un evento
       setLoading(false)
-    }
-
-    initAuth()
-
-    const { data: { subscription } } =
-      supabase.auth.onAuthStateChange(async (_event, session) => {
-        if (!mounted) return
-
-        if (session?.user) {
-          setUser(session.user)
-          await fetchPerfil(session.user.id)
-        } else {
-          setUser(null)
-          setPerfil(null)
-        }
-
-        setLoading(false)
-      })
+    })
 
     return () => {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [])
+  }, []) // Sin dependencias, se ejecuta una sola vez al montar
 
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -87,6 +103,7 @@ export function AuthProvider({ children }) {
     setPerfil(null)
   }
 
+  // Helper para verificar rol
   const isAdmin = perfil?.rol === 'admin'
 
   return (
@@ -109,10 +126,12 @@ export function useClientes() {
       .from('clientes')
       .select('*')
       .order('nombre_fantasia')
-
-    if (error) console.error('Error cargando clientes:', error)
-    else setClientes(data || [])
-
+    
+    if (error) {
+      console.error('Error cargando clientes:', error)
+    } else {
+      setClientes(data || [])
+    }
     setLoading(false)
   }
 
@@ -132,7 +151,7 @@ export function useClientes() {
       }])
       .select()
       .single()
-
+    
     if (error) throw error
     setClientes(prev => [...prev, data])
     return data
@@ -151,7 +170,7 @@ export function useClientes() {
       .eq('id', id)
       .select()
       .single()
-
+    
     if (error) throw error
     setClientes(prev => prev.map(c => c.id === id ? data : c))
     return data
@@ -162,12 +181,19 @@ export function useClientes() {
       .from('clientes')
       .delete()
       .eq('id', id)
-
+    
     if (error) throw error
     setClientes(prev => prev.filter(c => c.id !== id))
   }
 
-  return { clientes, loading, agregarCliente, actualizarCliente, eliminarCliente, refetch: fetchClientes }
+  return { 
+    clientes, 
+    loading, 
+    agregarCliente, 
+    actualizarCliente, 
+    eliminarCliente, 
+    refetch: fetchClientes 
+  }
 }
 
 // ==================== PRODUCTOS ====================
@@ -181,10 +207,12 @@ export function useProductos() {
       .from('productos')
       .select('*')
       .order('nombre')
-
-    if (error) console.error('Error cargando productos:', error)
-    else setProductos(data || [])
-
+    
+    if (error) {
+      console.error('Error cargando productos:', error)
+    } else {
+      setProductos(data || [])
+    }
     setLoading(false)
   }
 
@@ -195,10 +223,15 @@ export function useProductos() {
   const agregarProducto = async (producto) => {
     const { data, error } = await supabase
       .from('productos')
-      .insert([producto])
+      .insert([{
+        nombre: producto.nombre,
+        precio: producto.precio,
+        stock: producto.stock,
+        categoria: producto.categoria || null
+      }])
       .select()
       .single()
-
+    
     if (error) throw error
     setProductos(prev => [...prev, data])
     return data
@@ -207,11 +240,16 @@ export function useProductos() {
   const actualizarProducto = async (id, producto) => {
     const { data, error } = await supabase
       .from('productos')
-      .update(producto)
+      .update({
+        nombre: producto.nombre,
+        precio: producto.precio,
+        stock: producto.stock,
+        categoria: producto.categoria || null
+      })
       .eq('id', id)
       .select()
       .single()
-
+    
     if (error) throw error
     setProductos(prev => prev.map(p => p.id === id ? data : p))
     return data
@@ -222,12 +260,19 @@ export function useProductos() {
       .from('productos')
       .delete()
       .eq('id', id)
-
+    
     if (error) throw error
     setProductos(prev => prev.filter(p => p.id !== id))
   }
 
-  return { productos, loading, agregarProducto, actualizarProducto, eliminarProducto, refetch: fetchProductos }
+  return { 
+    productos, 
+    loading, 
+    agregarProducto, 
+    actualizarProducto, 
+    eliminarProducto, 
+    refetch: fetchProductos 
+  }
 }
 
 // ==================== PEDIDOS ====================
@@ -248,10 +293,12 @@ export function usePedidos() {
         )
       `)
       .order('created_at', { ascending: false })
-
-    if (error) console.error('Error cargando pedidos:', error)
-    else setPedidos(data || [])
-
+    
+    if (error) {
+      console.error('Error cargando pedidos:', error)
+    } else {
+      setPedidos(data || [])
+    }
     setLoading(false)
   }
 
@@ -260,40 +307,44 @@ export function usePedidos() {
   }, [])
 
   const crearPedido = async (clienteId, items, total) => {
-    const { data: pedido, error } = await supabase
+    const { data: pedido, error: pedidoError } = await supabase
       .from('pedidos')
-      .insert([{ cliente_id: clienteId, total, estado: 'pendiente' }])
+      .insert([{
+        cliente_id: clienteId,
+        total: total,
+        estado: 'pendiente'
+      }])
       .select()
       .single()
+    
+    if (pedidoError) throw pedidoError
 
-    if (error) throw error
-
-    const itemsData = items.map(i => ({
+    const itemsParaInsertar = items.map(item => ({
       pedido_id: pedido.id,
-      producto_id: i.productoId,
-      cantidad: i.cantidad,
-      precio_unitario: i.precioUnitario,
-      subtotal: i.cantidad * i.precioUnitario
+      producto_id: item.productoId,
+      cantidad: item.cantidad,
+      precio_unitario: item.precioUnitario,
+      subtotal: item.cantidad * item.precioUnitario
     }))
 
     const { error: itemsError } = await supabase
       .from('pedido_items')
-      .insert(itemsData)
-
+      .insert(itemsParaInsertar)
+    
     if (itemsError) throw itemsError
 
     await fetchPedidos()
     return pedido
   }
 
-  const cambiarEstado = async (id, estado) => {
+  const cambiarEstado = async (id, nuevoEstado) => {
     const { error } = await supabase
       .from('pedidos')
-      .update({ estado })
+      .update({ estado: nuevoEstado })
       .eq('id', id)
-
+    
     if (error) throw error
-    setPedidos(prev => prev.map(p => p.id === id ? { ...p, estado } : p))
+    setPedidos(prev => prev.map(p => p.id === id ? { ...p, estado: nuevoEstado } : p))
   }
 
   const eliminarPedido = async (id) => {
@@ -301,15 +352,22 @@ export function usePedidos() {
       .from('pedidos')
       .delete()
       .eq('id', id)
-
+    
     if (error) throw error
     setPedidos(prev => prev.filter(p => p.id !== id))
   }
 
-  return { pedidos, loading, crearPedido, cambiarEstado, eliminarPedido, refetch: fetchPedidos }
+  return { 
+    pedidos, 
+    loading, 
+    crearPedido, 
+    cambiarEstado, 
+    eliminarPedido, 
+    refetch: fetchPedidos 
+  }
 }
 
-// ==================== USUARIOS ====================
+// ==================== USUARIOS (solo admin) ====================
 export function useUsuarios() {
   const [usuarios, setUsuarios] = useState([])
   const [loading, setLoading] = useState(true)
@@ -320,10 +378,12 @@ export function useUsuarios() {
       .from('perfiles')
       .select('*')
       .order('nombre')
-
-    if (error) console.error('Error cargando usuarios:', error)
-    else setUsuarios(data || [])
-
+    
+    if (error) {
+      console.error('Error cargando usuarios:', error)
+    } else {
+      setUsuarios(data || [])
+    }
     setLoading(false)
   }
 
@@ -334,15 +394,24 @@ export function useUsuarios() {
   const actualizarUsuario = async (id, datos) => {
     const { data, error } = await supabase
       .from('perfiles')
-      .update(datos)
+      .update({
+        nombre: datos.nombre,
+        rol: datos.rol,
+        activo: datos.activo
+      })
       .eq('id', id)
       .select()
       .single()
-
+    
     if (error) throw error
     setUsuarios(prev => prev.map(u => u.id === id ? data : u))
     return data
   }
 
-  return { usuarios, loading, actualizarUsuario, refetch: fetchUsuarios }
+  return { 
+    usuarios, 
+    loading, 
+    actualizarUsuario,
+    refetch: fetchUsuarios 
+  }
 }
