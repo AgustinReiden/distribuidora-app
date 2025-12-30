@@ -10,6 +10,8 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   const fetchPerfil = async (userId) => {
+    console.log("SALTANDO fetchPerfil temporalmente");
+    setLoading(false);
     try {
       // Timeout de 5 segundos para evitar que se cuelgue
       const controller = new AbortController()
