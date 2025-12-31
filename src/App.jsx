@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, AlertTriangle, User, BarChart3, Calendar, Download, TrendingUp, DollarSign, FileDown, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, AlertTriangle, User, BarChart3, Calendar, Download, TrendingUp, DollarSign, FileDown, RefreshCw, ChevronLeft, ChevronRight, History, FileText, CreditCard } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup } from './hooks/useSupabase.jsx';
 import { ToastProvider, useToast } from './components/Toast.jsx';
-import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido } from './components/Modals.jsx';
+import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido } from './components/Modals.jsx';
 
 const formatPrecio = (p) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
 const formatFecha = (f) => f ? new Date(f).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
@@ -54,9 +54,9 @@ function MainApp() {
 
   const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
   const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, loading: loadingProductos, refetch: refetchProductos } = useProductos();
-  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
+  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
-  const { metricas, loading: loadingMetricas, refetch: refetchMetricas } = useDashboard();
+  const { metricas, reportePreventistas, calcularReportePreventistas, loading: loadingMetricas, refetch: refetchMetricas } = useDashboard();
   const { exportando, descargarJSON, exportarPedidosCSV } = useBackup();
 
   // Estados de modales
@@ -67,13 +67,18 @@ function MainApp() {
   const [modalAsignar, setModalAsignar] = useState(false);
   const [modalConfirm, setModalConfirm] = useState({ visible: false });
   const [modalFiltroFecha, setModalFiltroFecha] = useState(false);
+  const [modalHistorial, setModalHistorial] = useState(false);
+  const [modalEditarPedido, setModalEditarPedido] = useState(false);
 
   const [clienteEditando, setClienteEditando] = useState(null);
   const [productoEditando, setProductoEditando] = useState(null);
   const [usuarioEditando, setUsuarioEditando] = useState(null);
   const [pedidoAsignando, setPedidoAsignando] = useState(null);
+  const [pedidoHistorial, setPedidoHistorial] = useState(null);
+  const [historialCambios, setHistorialCambios] = useState([]);
+  const [pedidoEditando, setPedidoEditando] = useState(null);
 
-  const [nuevoPedido, setNuevoPedido] = useState({ clienteId: '', items: [] });
+  const [nuevoPedido, setNuevoPedido] = useState({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
   const [busqueda, setBusqueda] = useState('');
   const [guardando, setGuardando] = useState(false);
 
@@ -223,6 +228,18 @@ function MainApp() {
     setNuevoPedido(prev => ({ ...prev, clienteId }));
   }, []);
 
+  const handleNotasChange = useCallback((notas) => {
+    setNuevoPedido(prev => ({ ...prev, notas }));
+  }, []);
+
+  const handleFormaPagoChange = useCallback((formaPago) => {
+    setNuevoPedido(prev => ({ ...prev, formaPago }));
+  }, []);
+
+  const handleEstadoPagoChange = useCallback((estadoPago) => {
+    setNuevoPedido(prev => ({ ...prev, estadoPago }));
+  }, []);
+
   const handleCrearClienteEnPedido = useCallback(async (nuevoCliente) => {
     const cliente = await agregarCliente(nuevoCliente);
     toast.success('Cliente creado correctamente');
@@ -241,8 +258,17 @@ function MainApp() {
     }
     setGuardando(true);
     try {
-      await crearPedido(parseInt(nuevoPedido.clienteId), nuevoPedido.items, calcularTotalPedido(nuevoPedido.items), user.id, descontarStock);
-      setNuevoPedido({ clienteId: '', items: [] });
+      await crearPedido(
+        parseInt(nuevoPedido.clienteId),
+        nuevoPedido.items,
+        calcularTotalPedido(nuevoPedido.items),
+        user.id,
+        descontarStock,
+        nuevoPedido.notas,
+        nuevoPedido.formaPago,
+        nuevoPedido.estadoPago
+      );
+      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
       setModalPedido(false);
       refetchProductos();
       refetchMetricas();
@@ -326,11 +352,40 @@ function MainApp() {
     });
   };
 
+  const handleVerHistorial = async (pedido) => {
+    setPedidoHistorial(pedido);
+    setModalHistorial(true);
+    const historial = await fetchHistorialPedido(pedido.id);
+    setHistorialCambios(historial);
+  };
+
+  const handleEditarPedido = (pedido) => {
+    setPedidoEditando(pedido);
+    setModalEditarPedido(true);
+  };
+
+  const handleGuardarEdicionPedido = async ({ notas, formaPago, estadoPago }) => {
+    if (!pedidoEditando) return;
+    setGuardando(true);
+    try {
+      await actualizarNotasPedido(pedidoEditando.id, notas);
+      await actualizarFormaPago(pedidoEditando.id, formaPago);
+      await actualizarEstadoPago(pedidoEditando.id, estadoPago);
+      setModalEditarPedido(false);
+      setPedidoEditando(null);
+      toast.success('Pedido actualizado correctamente');
+    } catch (e) {
+      toast.error('Error al actualizar pedido: ' + e.message);
+    }
+    setGuardando(false);
+  };
+
   const menuItems = [
     { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin'] },
     { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista'] },
     { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
     { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista'] },
+    { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
     { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
   ].filter(item => item.roles.includes(perfil?.rol));
 
@@ -509,13 +564,42 @@ function MainApp() {
                     <p className="text-sm text-gray-400 mt-1">#{pedido.id} • {formatFecha(pedido.created_at)}</p>
                     {pedido.transportista && <p className="text-sm text-orange-600 mt-1">🚚 {pedido.transportista.nombre}</p>}
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${getEstadoColor(pedido.estado)}`}>{getEstadoLabel(pedido.estado)}</span>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${getEstadoColor(pedido.estado)}`}>{getEstadoLabel(pedido.estado)}</span>
+                    {pedido.estado_pago && (
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${pedido.estado_pago === 'pagado' ? 'bg-green-100 text-green-800' : pedido.estado_pago === 'parcial' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                        {pedido.estado_pago === 'pagado' ? 'Pagado' : pedido.estado_pago === 'parcial' ? 'Pago Parcial' : 'Pago Pendiente'}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-3 pt-3 border-t">
                   <p className="text-sm text-gray-600 mb-2">{pedido.items?.map(i => <span key={i.id} className="mr-2">{i.producto?.nombre} x{i.cantidad}</span>)}</p>
+                  {pedido.notas && (
+                    <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs text-blue-700 flex items-start">
+                        <FileText className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0" />
+                        <span>{pedido.notas}</span>
+                      </p>
+                    </div>
+                  )}
                   <div className="flex flex-wrap justify-between items-center gap-2">
-                    <p className="text-lg font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
+                    <div className="flex flex-col">
+                      <p className="text-lg font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
+                      {pedido.forma_pago && (
+                        <p className="text-xs text-gray-500 flex items-center">
+                          <CreditCard className="w-3 h-3 mr-1" />
+                          {pedido.forma_pago === 'efectivo' ? 'Efectivo' : pedido.forma_pago === 'transferencia' ? 'Transferencia' : pedido.forma_pago === 'cheque' ? 'Cheque' : pedido.forma_pago === 'cuenta_corriente' ? 'Cta. Cte.' : pedido.forma_pago}
+                        </p>
+                      )}
+                    </div>
                     <div className="flex flex-wrap gap-2">
+                      <button onClick={() => handleVerHistorial(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">
+                        <History className="w-4 h-4" /><span>Historial</span>
+                      </button>
+                      {(isAdmin || isPreventista) && <button onClick={() => handleEditarPedido(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200">
+                        <Edit2 className="w-4 h-4" /><span>Editar</span>
+                      </button>}
                       {isAdmin && pedido.estado !== 'entregado' && <button onClick={() => { setPedidoAsignando(pedido); setModalAsignar(true); }} className="flex items-center space-x-1 px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm"><User className="w-4 h-4" /><span>{pedido.transportista ? 'Reasignar' : 'Asignar'}</span></button>}
                       {(isTransportista || isAdmin) && pedido.estado === 'asignado' && <button onClick={() => handleMarcarEntregado(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm"><Check className="w-4 h-4" /><span>Entregado</span></button>}
                       {isAdmin && pedido.estado === 'entregado' && <button onClick={() => handleDesmarcarEntregado(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-sm"><AlertTriangle className="w-4 h-4" /><span>Revertir</span></button>}
@@ -568,6 +652,152 @@ function MainApp() {
     </div>
   );
 
+  const VistaReportes = () => {
+    const [fechaDesde, setFechaDesde] = useState('');
+    const [fechaHasta, setFechaHasta] = useState('');
+    const [cargandoReporte, setCargandoReporte] = useState(false);
+
+    const handleGenerarReporte = async () => {
+      setCargandoReporte(true);
+      await calcularReportePreventistas(fechaDesde || null, fechaHasta || null);
+      setCargandoReporte(false);
+    };
+
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold">Reportes por Preventista</h1>
+
+        {/* Filtros */}
+        <div className="bg-white border rounded-lg shadow-sm p-4">
+          <h2 className="font-semibold mb-3">Filtrar por Fecha</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div>
+              <label className="block text-sm font-medium mb-1">Desde</label>
+              <input
+                type="date"
+                value={fechaDesde}
+                onChange={e => setFechaDesde(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Hasta</label>
+              <input
+                type="date"
+                value={fechaHasta}
+                onChange={e => setFechaHasta(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <button
+              onClick={handleGenerarReporte}
+              disabled={cargandoReporte}
+              className="flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {cargandoReporte ? <Loader2 className="w-5 h-5 animate-spin" /> : <BarChart3 className="w-5 h-5" />}
+              <span>Generar Reporte</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Tabla de reportes */}
+        {cargandoReporte ? (
+          <LoadingSpinner />
+        ) : reportePreventistas.length === 0 ? (
+          <div className="text-center py-12 text-gray-500 bg-white border rounded-lg shadow-sm">
+            <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No hay datos para mostrar</p>
+            <p className="text-sm mt-2">Selecciona un rango de fechas y genera un reporte</p>
+          </div>
+        ) : (
+          <div className="bg-white border rounded-lg shadow-sm overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium">Preventista</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium">Total Ventas</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium">Cant. Pedidos</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium">Pendientes</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium">En Camino</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium">Entregados</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium">Total Pagado</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium">Total Pendiente</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {reportePreventistas.map((preventista, index) => (
+                  <tr key={preventista.id || index} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="font-medium">{preventista.nombre}</p>
+                        <p className="text-sm text-gray-500">{preventista.email}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right font-bold text-blue-600">
+                      {formatPrecio(preventista.totalVentas)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">
+                        {preventista.cantidadPedidos}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">
+                        {preventista.pedidosPendientes}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                        {preventista.pedidosAsignados}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-sm">
+                        {preventista.pedidosEntregados}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-green-600">
+                      {formatPrecio(preventista.totalPagado)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-red-600">
+                      {formatPrecio(preventista.totalPendiente)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-gray-50 font-bold">
+                <tr>
+                  <td className="px-4 py-3">TOTAL</td>
+                  <td className="px-4 py-3 text-right text-blue-600">
+                    {formatPrecio(reportePreventistas.reduce((sum, p) => sum + p.totalVentas, 0))}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {reportePreventistas.reduce((sum, p) => sum + p.cantidadPedidos, 0)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {reportePreventistas.reduce((sum, p) => sum + p.pedidosPendientes, 0)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {reportePreventistas.reduce((sum, p) => sum + p.pedidosAsignados, 0)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {reportePreventistas.reduce((sum, p) => sum + p.pedidosEntregados, 0)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-green-600">
+                    {formatPrecio(reportePreventistas.reduce((sum, p) => sum + p.totalPagado, 0))}
+                  </td>
+                  <td className="px-4 py-3 text-right text-red-600">
+                    {formatPrecio(reportePreventistas.reduce((sum, p) => sum + p.totalPendiente, 0))}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const VistaUsuarios = () => (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Usuarios</h1>
@@ -593,6 +823,7 @@ function MainApp() {
         {vista === 'pedidos' && <VistaPedidos />}
         {vista === 'clientes' && <VistaClientes />}
         {vista === 'productos' && <VistaProductos />}
+        {vista === 'reportes' && isAdmin && <VistaReportes />}
         {vista === 'usuarios' && isAdmin && <VistaUsuarios />}
       </main>
 
@@ -635,12 +866,15 @@ function MainApp() {
           clientes={clientes}
           categorias={categorias}
           nuevoPedido={nuevoPedido}
-          onClose={() => { setModalPedido(false); setNuevoPedido({ clienteId: '', items: [] }); }}
+          onClose={() => { setModalPedido(false); setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' }); }}
           onClienteChange={handleClienteChange}
           onAgregarItem={agregarItemPedido}
           onActualizarCantidad={actualizarCantidadItem}
           onCrearCliente={handleCrearClienteEnPedido}
           onGuardar={handleGuardarPedido}
+          onNotasChange={handleNotasChange}
+          onFormaPagoChange={handleFormaPagoChange}
+          onEstadoPagoChange={handleEstadoPagoChange}
           guardando={guardando}
           isAdmin={isAdmin}
           isPreventista={isPreventista}
@@ -662,6 +896,24 @@ function MainApp() {
           transportistas={transportistas}
           onSave={handleAsignarTransportista}
           onClose={() => { setModalAsignar(false); setPedidoAsignando(null); }}
+          guardando={guardando}
+        />
+      )}
+
+      {modalHistorial && (
+        <ModalHistorialPedido
+          pedido={pedidoHistorial}
+          historial={historialCambios}
+          onClose={() => { setModalHistorial(false); setPedidoHistorial(null); setHistorialCambios([]); }}
+          loading={false}
+        />
+      )}
+
+      {modalEditarPedido && (
+        <ModalEditarPedido
+          pedido={pedidoEditando}
+          onSave={handleGuardarEdicionPedido}
+          onClose={() => { setModalEditarPedido(false); setPedidoEditando(null); }}
           guardando={guardando}
         />
       )}
