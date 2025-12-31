@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, AlertTriangle, User, BarChart3, Calendar, Download, TrendingUp, DollarSign, FileDown, RefreshCw, ChevronLeft, ChevronRight, History, FileText, CreditCard } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup } from './hooks/useSupabase.jsx';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ToastProvider, useToast } from './components/Toast.jsx';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido } from './components/Modals.jsx';
 
@@ -52,6 +52,11 @@ function MainApp() {
   const [vista, setVista] = useState(perfil?.rol === 'admin' ? 'dashboard' : 'pedidos');
   const [menuAbierto, setMenuAbierto] = useState(false);
 
+  // Configurar el notificador de errores centralizado
+  useEffect(() => {
+    setErrorNotifier((message) => toast.error(message));
+  }, [toast]);
+
   const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
   const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, loading: loadingProductos, refetch: refetchProductos } = useProductos();
   const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
@@ -81,6 +86,7 @@ function MainApp() {
   const [nuevoPedido, setNuevoPedido] = useState({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
   const [busqueda, setBusqueda] = useState('');
   const [guardando, setGuardando] = useState(false);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
   // Paginación
   const [paginaActual, setPaginaActual] = useState(1);
@@ -144,13 +150,16 @@ function MainApp() {
       mensaje: '¿Eliminar este cliente?',
       tipo: 'danger',
       onConfirm: async () => {
+        setGuardando(true);
         try {
           await eliminarCliente(id);
           toast.success('Cliente eliminado');
         } catch (e) {
           toast.error(e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
         }
-        setModalConfirm({ visible: false });
       }
     });
   };
@@ -176,13 +185,16 @@ function MainApp() {
       mensaje: '¿Eliminar este producto?',
       tipo: 'danger',
       onConfirm: async () => {
+        setGuardando(true);
         try {
           await eliminarProducto(id);
           toast.success('Producto eliminado');
         } catch (e) {
           toast.error(e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
         }
-        setModalConfirm({ visible: false });
       }
     });
   };
@@ -287,14 +299,17 @@ function MainApp() {
       mensaje: `¿Confirmar entrega del pedido #${pedido.id}?`,
       tipo: 'success',
       onConfirm: async () => {
+        setGuardando(true);
         try {
           await cambiarEstado(pedido.id, 'entregado');
           refetchMetricas();
           toast.success(`Pedido #${pedido.id} marcado como entregado`);
         } catch (e) {
           toast.error(e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
         }
-        setModalConfirm({ visible: false });
       }
     });
   };
@@ -306,14 +321,17 @@ function MainApp() {
       mensaje: `¿Revertir entrega del pedido #${pedido.id}?`,
       tipo: 'warning',
       onConfirm: async () => {
+        setGuardando(true);
         try {
           await cambiarEstado(pedido.id, pedido.transportista_id ? 'asignado' : 'pendiente');
           refetchMetricas();
           toast.warning(`Pedido #${pedido.id} revertido`);
         } catch (e) {
           toast.error(e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
         }
-        setModalConfirm({ visible: false });
       }
     });
   };
@@ -339,6 +357,7 @@ function MainApp() {
       mensaje: '¿Eliminar este pedido? El stock será restaurado.',
       tipo: 'danger',
       onConfirm: async () => {
+        setGuardando(true);
         try {
           await eliminarPedido(id, restaurarStock);
           refetchProductos();
@@ -346,8 +365,10 @@ function MainApp() {
           toast.success('Pedido eliminado y stock restaurado');
         } catch (e) {
           toast.error(e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
         }
-        setModalConfirm({ visible: false });
       }
     });
   };
@@ -355,8 +376,16 @@ function MainApp() {
   const handleVerHistorial = async (pedido) => {
     setPedidoHistorial(pedido);
     setModalHistorial(true);
-    const historial = await fetchHistorialPedido(pedido.id);
-    setHistorialCambios(historial);
+    setCargandoHistorial(true);
+    try {
+      const historial = await fetchHistorialPedido(pedido.id);
+      setHistorialCambios(historial);
+    } catch (e) {
+      toast.error('Error al cargar historial: ' + e.message);
+      setHistorialCambios([]);
+    } finally {
+      setCargandoHistorial(false);
+    }
   };
 
   const handleEditarPedido = (pedido) => {
@@ -656,10 +685,27 @@ function MainApp() {
     const [fechaDesde, setFechaDesde] = useState('');
     const [fechaHasta, setFechaHasta] = useState('');
     const [cargandoReporte, setCargandoReporte] = useState(false);
+    const [reporteGenerado, setReporteGenerado] = useState(false);
+
+    // Cargar reporte automáticamente al montar el componente
+    useEffect(() => {
+      if (!reporteGenerado) {
+        handleGenerarReporte();
+      }
+    }, []);
 
     const handleGenerarReporte = async () => {
       setCargandoReporte(true);
       await calcularReportePreventistas(fechaDesde || null, fechaHasta || null);
+      setCargandoReporte(false);
+      setReporteGenerado(true);
+    };
+
+    const handleLimpiarFiltros = async () => {
+      setFechaDesde('');
+      setFechaHasta('');
+      setCargandoReporte(true);
+      await calcularReportePreventistas(null, null);
       setCargandoReporte(false);
     };
 
@@ -689,15 +735,32 @@ function MainApp() {
                 className="w-full px-3 py-2 border rounded-lg"
               />
             </div>
-            <button
-              onClick={handleGenerarReporte}
-              disabled={cargandoReporte}
-              className="flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {cargandoReporte ? <Loader2 className="w-5 h-5 animate-spin" /> : <BarChart3 className="w-5 h-5" />}
-              <span>Generar Reporte</span>
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleGenerarReporte}
+                disabled={cargandoReporte}
+                className="flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {cargandoReporte ? <Loader2 className="w-5 h-5 animate-spin" /> : <BarChart3 className="w-5 h-5" />}
+                <span>Generar Reporte</span>
+              </button>
+              {(fechaDesde || fechaHasta) && (
+                <button
+                  onClick={handleLimpiarFiltros}
+                  disabled={cargandoReporte}
+                  className="flex items-center justify-center space-x-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50"
+                >
+                  <X className="w-5 h-5" />
+                  <span>Limpiar</span>
+                </button>
+              )}
+            </div>
           </div>
+          {(fechaDesde || fechaHasta) && (
+            <div className="mt-2 text-sm text-gray-600">
+              Filtrando desde {fechaDesde || '(sin límite)'} hasta {fechaHasta || '(sin límite)'}
+            </div>
+          )}
         </div>
 
         {/* Tabla de reportes */}
@@ -706,8 +769,9 @@ function MainApp() {
         ) : reportePreventistas.length === 0 ? (
           <div className="text-center py-12 text-gray-500 bg-white border rounded-lg shadow-sm">
             <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>No hay datos para mostrar</p>
-            <p className="text-sm mt-2">Selecciona un rango de fechas y genera un reporte</p>
+            <p className="font-semibold">No hay datos para mostrar</p>
+            <p className="text-sm mt-2">No se encontraron pedidos con preventistas asignados en el rango seleccionado</p>
+            <p className="text-sm mt-1 text-blue-600">Verifica que los pedidos tengan un usuario (preventista) asignado</p>
           </div>
         ) : (
           <div className="bg-white border rounded-lg shadow-sm overflow-x-auto">
@@ -904,8 +968,8 @@ function MainApp() {
         <ModalHistorialPedido
           pedido={pedidoHistorial}
           historial={historialCambios}
-          onClose={() => { setModalHistorial(false); setPedidoHistorial(null); setHistorialCambios([]); }}
-          loading={false}
+          onClose={() => { setModalHistorial(false); setPedidoHistorial(null); setHistorialCambios([]); setCargandoHistorial(false); }}
+          loading={cargandoHistorial}
         />
       )}
 
