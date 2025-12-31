@@ -299,6 +299,7 @@ export function useUsuarios() {
 export function useDashboard() {
   const [metricas, setMetricas] = useState({ ventasHoy: 0, ventasSemana: 0, ventasMes: 0, pedidosHoy: 0, pedidosSemana: 0, pedidosMes: 0, productosMasVendidos: [], clientesMasActivos: [], pedidosPorEstado: { pendiente: 0, asignado: 0, entregado: 0 }, ventasPorDia: [] })
   const [loading, setLoading] = useState(true)
+  const [loadingReporte, setLoadingReporte] = useState(false)
   const [reportePreventistas, setReportePreventistas] = useState([])
 
   const calcularMetricas = async () => {
@@ -345,7 +346,7 @@ export function useDashboard() {
     }
   }
   const calcularReportePreventistas = async (fechaDesde = null, fechaHasta = null) => {
-    setLoading(true)
+    setLoadingReporte(true)
     try {
       let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
 
@@ -361,7 +362,7 @@ export function useDashboard() {
 
       if (!pedidos || pedidos.length === 0) {
         setReportePreventistas([])
-        setLoading(false)
+        setLoadingReporte(false)
         return
       }
 
@@ -413,7 +414,7 @@ export function useDashboard() {
       notifyError('Error al calcular reporte de preventistas: ' + error.message)
       setReportePreventistas([])
     } finally {
-      setLoading(false)
+      setLoadingReporte(false)
     }
   }
 
@@ -421,6 +422,7 @@ export function useDashboard() {
   return {
     metricas,
     loading,
+    loadingReporte,
     reportePreventistas,
     calcularReportePreventistas,
     refetch: calcularMetricas
