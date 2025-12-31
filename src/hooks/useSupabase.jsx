@@ -155,8 +155,8 @@ export function usePedidos() {
           *,
           cliente:clientes(*),
           items:pedido_items(*, producto:productos(*)),
-          usuario:usuario_id(id, nombre, email),
-          transportista:transportista_id(id, nombre, email)
+          usuario:perfiles!usuario_id(id, nombre, email),
+          transportista:perfiles!transportista_id(id, nombre, email)
         `)
         .order('created_at', { ascending: false })
 
@@ -355,7 +355,7 @@ export function useDashboard() {
     try {
       let query = supabase
         .from('pedidos')
-        .select(`*, usuario:usuario_id(id, nombre, email), items:pedido_items(*)`)
+        .select(`*, usuario:perfiles!usuario_id(id, nombre, email), items:pedido_items(*)`)
 
       if (fechaDesde) query = query.gte('created_at', new Date(fechaDesde).toISOString())
       if (fechaHasta) {
