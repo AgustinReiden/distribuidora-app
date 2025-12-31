@@ -90,22 +90,12 @@ export function AuthProvider({ children }) {
     setPerfil(null)
   }
 
-  // Helpers para verificar rol
   const isAdmin = perfil?.rol === 'admin'
   const isPreventista = perfil?.rol === 'preventista'
   const isTransportista = perfil?.rol === 'transportista'
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      perfil, 
-      loading, 
-      login, 
-      logout, 
-      isAdmin,
-      isPreventista,
-      isTransportista
-    }}>
+    <AuthContext.Provider value={{ user, perfil, loading, login, logout, isAdmin, isPreventista, isTransportista }}>
       {children}
     </AuthContext.Provider>
   )
@@ -120,13 +110,8 @@ export function useClientes() {
 
   const fetchClientes = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('nombre_fantasia')
-    if (error) {
-      console.error('Error fetching clientes:', error)
-    }
+    const { data, error } = await supabase.from('clientes').select('*').order('nombre_fantasia')
+    if (error) console.error('Error fetching clientes:', error)
     setClientes(data || [])
     setLoading(false)
   }
@@ -175,13 +160,8 @@ export function useProductos() {
 
   const fetchProductos = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('productos')
-      .select('*')
-      .order('nombre')
-    if (error) {
-      console.error('Error fetching productos:', error)
-    }
+    const { data, error } = await supabase.from('productos').select('*').order('nombre')
+    if (error) console.error('Error fetching productos:', error)
     setProductos(data || [])
     setLoading(false)
   }
@@ -228,37 +208,59 @@ export function usePedidos() {
 
   const fetchPedidos = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('pedidos')
-      .select(`
-        *, 
-        cliente:clientes(*), 
-        items:pedido_items(*, producto:productos(*)),
-        usuario:perfiles!pedidos_usuario_id_fkey(id, nombre, email),
-        transportista:perfiles!pedidos_transportista_id_fkey(id, nombre, email)
-      `)
-      .order('created_at', { ascending: false })
-    if (error) {
-      console.error('Error fetching pedidos:', error)
+    try {
+      // Query simplificado sin referencias FK explícitas
+      const { data, error } = await supabase
+        .from('pedidos')
+        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+        .order('created_at', { ascending: false })
+      
+      if (error) {
+        console.error('Error fetching pedidos:', error)
+        setPedidos([])
+        setLoading(false)
+        return
+      }
+
+      // Cargar usuarios y transportistas por separado
+      const pedidosCompletos = await Promise.all((data || []).map(async (pedido) => {
+        let usuario = null
+        let transportista = null
+        
+        if (pedido.usuario_id) {
+          const { data: u } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.usuario_id).maybeSingle()
+          usuario = u
+        }
+        if (pedido.transportista_id) {
+          const { data: t } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.transportista_id).maybeSingle()
+          transportista = t
+        }
+        return { ...pedido, usuario, transportista }
+      }))
+      
+      setPedidos(pedidosCompletos)
+    } catch (err) {
+      console.error('Error inesperado en fetchPedidos:', err)
+      setPedidos([])
     }
-    setPedidos(data || [])
     setLoading(false)
   }
 
   useEffect(() => { fetchPedidos() }, [])
 
   const crearPedido = async (clienteId, items, total, usuarioId) => {
+    console.log('Creando pedido:', { clienteId, items, total, usuarioId })
+    
     const { data: pedido, error: pedidoError } = await supabase
       .from('pedidos')
-      .insert([{ 
-        cliente_id: clienteId, 
-        total: total, 
-        estado: 'pendiente',
-        usuario_id: usuarioId
-      }])
+      .insert([{ cliente_id: clienteId, total, estado: 'pendiente', usuario_id: usuarioId }])
       .select()
       .single()
-    if (pedidoError) throw pedidoError
+    
+    if (pedidoError) {
+      console.error('Error creando pedido:', pedidoError)
+      throw pedidoError
+    }
 
     const itemsParaInsertar = items.map(item => ({
       pedido_id: pedido.id,
@@ -269,7 +271,10 @@ export function usePedidos() {
     }))
 
     const { error: itemsError } = await supabase.from('pedido_items').insert(itemsParaInsertar)
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      console.error('Error creando items:', itemsError)
+      throw itemsError
+    }
 
     await fetchPedidos()
     return pedido
@@ -277,15 +282,8 @@ export function usePedidos() {
 
   const cambiarEstado = async (id, nuevoEstado) => {
     const updateData = { estado: nuevoEstado }
-    
-    // Si se marca como entregado, guardar la fecha
-    if (nuevoEstado === 'entregado') {
-      updateData.fecha_entrega = new Date().toISOString()
-    }
-    // Si se desmarca de entregado, limpiar la fecha
-    if (nuevoEstado !== 'entregado') {
-      updateData.fecha_entrega = null
-    }
+    if (nuevoEstado === 'entregado') updateData.fecha_entrega = new Date().toISOString()
+    else updateData.fecha_entrega = null
     
     const { error } = await supabase.from('pedidos').update(updateData).eq('id', id)
     if (error) throw error
@@ -293,40 +291,22 @@ export function usePedidos() {
   }
 
   const asignarTransportista = async (pedidoId, transportistaId) => {
-    const { error } = await supabase
-      .from('pedidos')
-      .update({ 
-        transportista_id: transportistaId,
-        estado: transportistaId ? 'asignado' : 'pendiente'
-      })
-      .eq('id', pedidoId)
+    const { error } = await supabase.from('pedidos').update({ 
+      transportista_id: transportistaId || null,
+      estado: transportistaId ? 'asignado' : 'pendiente'
+    }).eq('id', pedidoId)
     if (error) throw error
     await fetchPedidos()
   }
 
   const eliminarPedido = async (id) => {
-    // Primero eliminar los items del pedido
-    const { error: itemsError } = await supabase
-      .from('pedido_items')
-      .delete()
-      .eq('pedido_id', id)
-    if (itemsError) throw itemsError
-
-    // Luego eliminar el pedido
+    await supabase.from('pedido_items').delete().eq('pedido_id', id)
     const { error } = await supabase.from('pedidos').delete().eq('id', id)
     if (error) throw error
     setPedidos(prev => prev.filter(p => p.id !== id))
   }
 
-  return { 
-    pedidos, 
-    loading, 
-    crearPedido, 
-    cambiarEstado, 
-    asignarTransportista,
-    eliminarPedido, 
-    refetch: fetchPedidos 
-  }
+  return { pedidos, loading, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, refetch: fetchPedidos }
 }
 
 // ==================== USUARIOS ====================
@@ -337,15 +317,9 @@ export function useUsuarios() {
 
   const fetchUsuarios = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('perfiles')
-      .select('*')
-      .order('nombre')
-    if (error) {
-      console.error('Error fetching usuarios:', error)
-    }
+    const { data, error } = await supabase.from('perfiles').select('*').order('nombre')
+    if (error) console.error('Error fetching usuarios:', error)
     setUsuarios(data || [])
-    // Filtrar transportistas activos para asignación
     setTransportistas((data || []).filter(u => u.rol === 'transportista' && u.activo))
     setLoading(false)
   }
@@ -354,18 +328,13 @@ export function useUsuarios() {
 
   const actualizarUsuario = async (id, datos) => {
     const { data, error } = await supabase.from('perfiles').update({ 
-      nombre: datos.nombre, 
-      rol: datos.rol, 
-      activo: datos.activo 
+      nombre: datos.nombre, rol: datos.rol, activo: datos.activo 
     }).eq('id', id).select().single()
     if (error) throw error
     setUsuarios(prev => prev.map(u => u.id === id ? data : u))
-    // Actualizar lista de transportistas
     setTransportistas(prev => {
       const updated = prev.filter(t => t.id !== id)
-      if (data.rol === 'transportista' && data.activo) {
-        return [...updated, data].sort((a, b) => a.nombre.localeCompare(b.nombre))
-      }
+      if (data.rol === 'transportista' && data.activo) return [...updated, data].sort((a, b) => a.nombre.localeCompare(b.nombre))
       return updated
     })
     return data
