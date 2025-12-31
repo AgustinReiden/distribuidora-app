@@ -147,21 +147,15 @@ export function usePedidos() {
   const fetchPedidos = async () => {
     setLoading(true)
     try {
-      // Optimizado: incluir relaciones de usuario y transportista en el query inicial
-      // Esto elimina el problema N+1 queries (antes: 1 + N*2 queries, ahora: 1 query)
-      const { data, error } = await supabase
-        .from('pedidos')
-        .select(`
-          *,
-          cliente:clientes(*),
-          items:pedido_items(*, producto:productos(*)),
-          usuario:perfiles!usuario_id(id, nombre, email),
-          transportista:perfiles!transportista_id(id, nombre, email)
-        `)
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setPedidos(data || [])
+      const { data, error } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).order('created_at', { ascending: false })
+      if (error) { console.error('Error fetching pedidos:', error); setPedidos([]); setLoading(false); return }
+      const pedidosCompletos = await Promise.all((data || []).map(async (pedido) => {
+        let usuario = null, transportista = null
+        if (pedido.usuario_id) { const { data: u } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.usuario_id).maybeSingle(); usuario = u }
+        if (pedido.transportista_id) { const { data: t } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.transportista_id).maybeSingle(); transportista = t }
+        return { ...pedido, usuario, transportista }
+      }))
+      setPedidos(pedidosCompletos)
     } catch (error) {
       console.error('Error fetching pedidos:', error)
       notifyError('Error al cargar pedidos: ' + error.message)
@@ -353,9 +347,7 @@ export function useDashboard() {
   const calcularReportePreventistas = async (fechaDesde = null, fechaHasta = null) => {
     setLoading(true)
     try {
-      let query = supabase
-        .from('pedidos')
-        .select(`*, usuario:perfiles!usuario_id(id, nombre, email), items:pedido_items(*)`)
+      let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
 
       if (fechaDesde) query = query.gte('created_at', new Date(fechaDesde).toISOString())
       if (fechaHasta) {
@@ -373,19 +365,26 @@ export function useDashboard() {
         return
       }
 
+      // Obtener usuarios únicos de los pedidos
+      const usuarioIds = [...new Set(pedidos.map(p => p.usuario_id).filter(Boolean))]
+      const { data: usuarios } = await supabase.from('perfiles').select('id, nombre, email').in('id', usuarioIds)
+      const usuariosMap = {}
+      ;(usuarios || []).forEach(u => { usuariosMap[u.id] = u })
+
       const reportePorPreventista = {}
 
       pedidos.forEach(pedido => {
         const usuarioId = pedido.usuario_id
-        const usuarioNombre = pedido.usuario?.nombre || 'Usuario desconocido'
+        if (!usuarioId) return
 
-        if (!usuarioId) return // Saltar pedidos sin usuario asignado
+        const usuario = usuariosMap[usuarioId]
+        const usuarioNombre = usuario?.nombre || 'Usuario desconocido'
 
         if (!reportePorPreventista[usuarioId]) {
           reportePorPreventista[usuarioId] = {
             id: usuarioId,
             nombre: usuarioNombre,
-            email: pedido.usuario?.email || 'N/A',
+            email: usuario?.email || 'N/A',
             totalVentas: 0,
             cantidadPedidos: 0,
             pedidosPendientes: 0,
