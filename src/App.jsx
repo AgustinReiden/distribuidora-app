@@ -61,7 +61,7 @@ function MainApp() {
   const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, loading: loadingProductos, refetch: refetchProductos } = useProductos();
   const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
-  const { metricas, reportePreventistas, calcularReportePreventistas, loading: loadingMetricas, refetch: refetchMetricas } = useDashboard();
+  const { metricas, reportePreventistas, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas } = useDashboard();
   const { exportando, descargarJSON, exportarPedidosCSV } = useBackup();
 
   // Estados de modales
