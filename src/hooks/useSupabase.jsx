@@ -135,6 +135,21 @@ export function usePedidos() {
   }
   useEffect(() => { fetchPedidos() }, [])
 
+  const fetchHistorialPedido = async (pedidoId) => {
+    try {
+      const { data, error } = await supabase
+        .from('pedido_historial')
+        .select('*, usuario:perfiles(id, nombre, email)')
+        .eq('pedido_id', pedidoId)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data || []
+    } catch (err) {
+      console.error('Error fetching historial:', err)
+      return []
+    }
+  }
+
   const pedidosFiltrados = () => pedidos.filter(p => {
     if (filtros.estado !== 'todos' && p.estado !== filtros.estado) return false
     if (filtros.fechaDesde) { const fp = new Date(p.created_at).setHours(0,0,0,0); const fd = new Date(filtros.fechaDesde).setHours(0,0,0,0); if (fp < fd) return false }
@@ -142,8 +157,17 @@ export function usePedidos() {
     return true
   })
 
-  const crearPedido = async (clienteId, items, total, usuarioId, descontarStockFn) => {
-    const { data: pedido, error: pedidoError } = await supabase.from('pedidos').insert([{ cliente_id: clienteId, total, estado: 'pendiente', usuario_id: usuarioId, stock_descontado: true }]).select().single()
+  const crearPedido = async (clienteId, items, total, usuarioId, descontarStockFn, notas = '', formaPago = 'efectivo', estadoPago = 'pendiente') => {
+    const { data: pedido, error: pedidoError } = await supabase.from('pedidos').insert([{
+      cliente_id: clienteId,
+      total,
+      estado: 'pendiente',
+      usuario_id: usuarioId,
+      stock_descontado: true,
+      notas: notas || null,
+      forma_pago: formaPago || 'efectivo',
+      estado_pago: estadoPago || 'pendiente'
+    }]).select().single()
     if (pedidoError) throw pedidoError
     const itemsParaInsertar = items.map(item => ({ pedido_id: pedido.id, producto_id: item.productoId, cantidad: item.cantidad, precio_unitario: item.precioUnitario, subtotal: item.cantidad * item.precioUnitario }))
     const { error: itemsError } = await supabase.from('pedido_items').insert(itemsParaInsertar)
@@ -172,7 +196,40 @@ export function usePedidos() {
     setPedidos(prev => prev.filter(p => p.id !== id))
   }
 
-  return { pedidos, pedidosFiltrados, loading, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, filtros, setFiltros, refetch: fetchPedidos }
+  const actualizarNotasPedido = async (pedidoId, notas) => {
+    const { error } = await supabase.from('pedidos').update({ notas }).eq('id', pedidoId)
+    if (error) throw error
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, notas } : p))
+  }
+
+  const actualizarEstadoPago = async (pedidoId, estadoPago) => {
+    const { error } = await supabase.from('pedidos').update({ estado_pago: estadoPago }).eq('id', pedidoId)
+    if (error) throw error
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, estado_pago: estadoPago } : p))
+  }
+
+  const actualizarFormaPago = async (pedidoId, formaPago) => {
+    const { error } = await supabase.from('pedidos').update({ forma_pago: formaPago }).eq('id', pedidoId)
+    if (error) throw error
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, forma_pago: formaPago } : p))
+  }
+
+  return {
+    pedidos,
+    pedidosFiltrados,
+    loading,
+    crearPedido,
+    cambiarEstado,
+    asignarTransportista,
+    eliminarPedido,
+    actualizarNotasPedido,
+    actualizarEstadoPago,
+    actualizarFormaPago,
+    fetchHistorialPedido,
+    filtros,
+    setFiltros,
+    refetch: fetchPedidos
+  }
 }
 
 export function useUsuarios() {
@@ -195,6 +252,7 @@ export function useUsuarios() {
 export function useDashboard() {
   const [metricas, setMetricas] = useState({ ventasHoy: 0, ventasSemana: 0, ventasMes: 0, pedidosHoy: 0, pedidosSemana: 0, pedidosMes: 0, productosMasVendidos: [], clientesMasActivos: [], pedidosPorEstado: { pendiente: 0, asignado: 0, entregado: 0 }, ventasPorDia: [] })
   const [loading, setLoading] = useState(true)
+  const [reportePreventistas, setReportePreventistas] = useState([])
 
   const calcularMetricas = async () => {
     setLoading(true)
@@ -234,8 +292,77 @@ export function useDashboard() {
     } catch (err) { console.error('Error calculando métricas:', err) }
     setLoading(false)
   }
+  const calcularReportePreventistas = async (fechaDesde = null, fechaHasta = null) => {
+    setLoading(true)
+    try {
+      let query = supabase
+        .from('pedidos')
+        .select(`*, usuario:perfiles(id, nombre, email), items:pedido_items(*)`)
+
+      if (fechaDesde) query = query.gte('created_at', new Date(fechaDesde).toISOString())
+      if (fechaHasta) {
+        const hasta = new Date(fechaHasta)
+        hasta.setHours(23, 59, 59, 999)
+        query = query.lte('created_at', hasta.toISOString())
+      }
+
+      const { data: pedidos } = await query
+
+      if (!pedidos) {
+        setReportePreventistas([])
+        setLoading(false)
+        return
+      }
+
+      const reportePorPreventista = {}
+
+      pedidos.forEach(pedido => {
+        const usuarioId = pedido.usuario_id
+        const usuarioNombre = pedido.usuario?.nombre || 'Usuario desconocido'
+
+        if (!reportePorPreventista[usuarioId]) {
+          reportePorPreventista[usuarioId] = {
+            id: usuarioId,
+            nombre: usuarioNombre,
+            email: pedido.usuario?.email || 'N/A',
+            totalVentas: 0,
+            cantidadPedidos: 0,
+            pedidosPendientes: 0,
+            pedidosAsignados: 0,
+            pedidosEntregados: 0,
+            totalPagado: 0,
+            totalPendiente: 0
+          }
+        }
+
+        reportePorPreventista[usuarioId].totalVentas += pedido.total || 0
+        reportePorPreventista[usuarioId].cantidadPedidos += 1
+
+        if (pedido.estado === 'pendiente') reportePorPreventista[usuarioId].pedidosPendientes += 1
+        if (pedido.estado === 'asignado') reportePorPreventista[usuarioId].pedidosAsignados += 1
+        if (pedido.estado === 'entregado') reportePorPreventista[usuarioId].pedidosEntregados += 1
+
+        if (pedido.estado_pago === 'pagado') reportePorPreventista[usuarioId].totalPagado += pedido.total || 0
+        else if (pedido.estado_pago === 'pendiente') reportePorPreventista[usuarioId].totalPendiente += pedido.total || 0
+      })
+
+      const reporteArray = Object.values(reportePorPreventista).sort((a, b) => b.totalVentas - a.totalVentas)
+      setReportePreventistas(reporteArray)
+    } catch (err) {
+      console.error('Error calculando reporte de preventistas:', err)
+      setReportePreventistas([])
+    }
+    setLoading(false)
+  }
+
   useEffect(() => { calcularMetricas() }, [])
-  return { metricas, loading, refetch: calcularMetricas }
+  return {
+    metricas,
+    loading,
+    reportePreventistas,
+    calcularReportePreventistas,
+    refetch: calcularMetricas
+  }
 }
 
 export function useBackup() {

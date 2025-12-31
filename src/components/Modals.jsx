@@ -1,7 +1,8 @@
 import React, { useState, useMemo, memo } from 'react';
-import { X, Loader2, Trash2, AlertTriangle, Check, Search } from 'lucide-react';
+import { X, Loader2, Trash2, AlertTriangle, Check, Search, History, FileText } from 'lucide-react';
 
 const formatPrecio = (p) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
+const formatFecha = (fecha) => new Date(fecha).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 // Modal base reutilizable
 const ModalBase = memo(function ModalBase({ children, onClose, title, maxWidth = 'max-w-md' }) {
@@ -218,7 +219,10 @@ export const ModalPedido = memo(function ModalPedido({
   onGuardar,
   guardando,
   isAdmin,
-  isPreventista
+  isPreventista,
+  onNotasChange,
+  onFormaPagoChange,
+  onEstadoPagoChange
 }) {
   const [busquedaProducto, setBusquedaProducto] = useState('');
   const [busquedaCliente, setBusquedaCliente] = useState('');
@@ -322,6 +326,48 @@ export const ModalPedido = memo(function ModalPedido({
                 )}
               </div>
             )}
+          </div>
+
+          {/* Sección Notas */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Notas / Observaciones</label>
+            <textarea
+              value={nuevoPedido.notas || ''}
+              onChange={e => onNotasChange && onNotasChange(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg"
+              placeholder="Observaciones importantes para la preparación del pedido..."
+              rows={2}
+            />
+          </div>
+
+          {/* Sección Forma de Pago y Estado de Pago */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Forma de Pago</label>
+              <select
+                value={nuevoPedido.formaPago || 'efectivo'}
+                onChange={e => onFormaPagoChange && onFormaPagoChange(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              >
+                <option value="efectivo">Efectivo</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="cheque">Cheque</option>
+                <option value="cuenta_corriente">Cuenta Corriente</option>
+                <option value="tarjeta">Tarjeta</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Estado de Pago</label>
+              <select
+                value={nuevoPedido.estadoPago || 'pendiente'}
+                onChange={e => onEstadoPagoChange && onEstadoPagoChange(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              >
+                <option value="pendiente">Pendiente</option>
+                <option value="pagado">Pagado</option>
+                <option value="parcial">Parcial</option>
+              </select>
+            </div>
           </div>
 
           {/* Sección Productos con filtro por categoría */}
@@ -432,3 +478,167 @@ export const ModalPedido = memo(function ModalPedido({
     </div>
   );
 });
+
+// Modal para ver historial de cambios de un pedido
+export const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading }) {
+  const formatearCampo = (campo) => {
+    const mapeo = {
+      estado: "Estado",
+      transportista_id: "Transportista",
+      notas: "Notas",
+      forma_pago: "Forma de pago",
+      estado_pago: "Estado de pago",
+      total: "Total",
+      creacion: "Creación"
+    };
+    return mapeo[campo] || campo;
+  };
+
+  const formatearValor = (campo, valor) => {
+    if (campo === "total") return formatPrecio(parseFloat(valor));
+    if (campo === "estado") {
+      const estados = { pendiente: "Pendiente", asignado: "En camino", entregado: "Entregado" };
+      return estados[valor] || valor;
+    }
+    if (campo === "estado_pago") {
+      const estados = { pendiente: "Pendiente", pagado: "Pagado", parcial: "Parcial" };
+      return estados[valor] || valor;
+    }
+    if (campo === "forma_pago") {
+      const formas = {
+        efectivo: "Efectivo",
+        transferencia: "Transferencia",
+        cheque: "Cheque",
+        cuenta_corriente: "Cuenta Corriente",
+        tarjeta: "Tarjeta"
+      };
+      return formas[valor] || valor;
+    }
+    return valor;
+  };
+
+  return (
+    <ModalBase title={`Historial de cambios - Pedido #${pedido?.id}`} onClose={onClose} maxWidth="max-w-2xl">
+      <div className="p-4">
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          </div>
+        ) : historial.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            <History className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No hay cambios registrados para este pedido</p>
+          </div>
+        ) : (
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {historial.map((cambio, index) => (
+              <div key={cambio.id || index} className="border rounded-lg p-3 bg-gray-50">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {formatearCampo(cambio.campo_modificado)}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {cambio.usuario?.nombre || "Usuario desconocido"}
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-500">{formatFecha(cambio.created_at)}</p>
+                </div>
+                {cambio.campo_modificado === "creacion" ? (
+                  <p className="text-sm text-green-600 font-medium">{cambio.valor_nuevo}</p>
+                ) : (
+                  <div className="flex items-center space-x-2 text-sm">
+                    <span className="px-2 py-1 bg-red-100 text-red-700 rounded">
+                      {formatearValor(cambio.campo_modificado, cambio.valor_anterior)}
+                    </span>
+                    <span className="text-gray-400">→</span>
+                    <span className="px-2 py-1 bg-green-100 text-green-700 rounded">
+                      {formatearValor(cambio.campo_modificado, cambio.valor_nuevo)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex justify-end p-4 border-t bg-gray-50">
+        <button onClick={onClose} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
+          Cerrar
+        </button>
+      </div>
+    </ModalBase>
+  );
+});
+
+// Modal para editar detalles de un pedido existente
+export const ModalEditarPedido = memo(function ModalEditarPedido({ pedido, onSave, onClose, guardando }) {
+  const [notas, setNotas] = useState(pedido?.notas || "");
+  const [formaPago, setFormaPago] = useState(pedido?.forma_pago || "efectivo");
+  const [estadoPago, setEstadoPago] = useState(pedido?.estado_pago || "pendiente");
+
+  const handleGuardar = () => {
+    onSave({ notas, formaPago, estadoPago });
+  };
+
+  return (
+    <ModalBase title={`Editar Pedido #${pedido?.id}`} onClose={onClose}>
+      <div className="p-4 space-y-4">
+        <div className="bg-gray-50 rounded-lg p-3 border">
+          <p className="text-sm text-gray-600">Cliente</p>
+          <p className="font-medium">{pedido?.cliente?.nombre_fantasia}</p>
+          <p className="text-sm text-gray-500">{pedido?.cliente?.direccion}</p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Notas / Observaciones</label>
+          <textarea
+            value={notas}
+            onChange={e => setNotas(e.target.value)}
+            className="w-full px-3 py-2 border rounded-lg"
+            placeholder="Observaciones importantes para la preparación del pedido..."
+            rows={3}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Forma de Pago</label>
+            <select
+              value={formaPago}
+              onChange={e => setFormaPago(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg"
+            >
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="cheque">Cheque</option>
+              <option value="cuenta_corriente">Cuenta Corriente</option>
+              <option value="tarjeta">Tarjeta</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Estado de Pago</label>
+            <select
+              value={estadoPago}
+              onChange={e => setEstadoPago(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg"
+            >
+              <option value="pendiente">Pendiente</option>
+              <option value="pagado">Pagado</option>
+              <option value="parcial">Parcial</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
+        <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">
+          Cancelar
+        </button>
+        <button onClick={handleGuardar} disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center">
+          {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar
+        </button>
+      </div>
+    </ModalBase>
+  );
+});
+
