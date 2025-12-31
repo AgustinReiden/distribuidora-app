@@ -7,10 +7,8 @@ const AuthContext = createContext({})
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [perfil, setPerfil] = useState(null)
-  // Iniciamos en true, pero el Watchdog asegura que pase a false sí o sí
   const [loading, setLoading] = useState(true)
 
-  // Función para buscar el perfil (se ejecuta en segundo plano, sin bloquear)
   const fetchPerfil = async (userId) => {
     try {
       const { data, error } = await supabase
@@ -20,7 +18,7 @@ export function AuthProvider({ children }) {
         .maybeSingle() 
 
       if (error) {
-        console.error('Error al cargar perfil (segundo plano):', error.message)
+        console.error('Error al cargar perfil:', error.message)
       }
       
       if (data) {
@@ -34,55 +32,40 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true
 
-    // 1. INICIALIZACIÓN RÁPIDA (NON-BLOCKING)
     const initAuth = async () => {
-      console.log("🚀 Iniciando sistema de Auth...")
-      
-      // Usamos .then() en lugar de await para no detener la ejecución si esto se cuelga
       supabase.auth.getSession().then(({ data }) => {
         if (mounted && data?.session?.user) {
-          console.log("⚡ Sesión recuperada de caché")
           setUser(data.session.user)
-          // Disparamos la búsqueda de perfil en paralelo
           fetchPerfil(data.session.user.id)
         }
-      }).catch(err => console.error("Error silencioso en getSession:", err))
+      }).catch(err => console.error("Error en getSession:", err))
     }
 
     initAuth()
 
-    // 2. ESCUCHADOR DE EVENTOS (La fuente de verdad)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
-      console.log('🔄 Auth Event:', event)
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (session?.user) {
           setUser(session.user)
-          // Si el usuario cambió o no tenemos perfil, lo buscamos
           if (!perfil || perfil?.id !== session.user.id) {
             fetchPerfil(session.user.id)
           }
         }
-        // ¡CRÍTICO! Si hay login, quitamos el loading INMEDIATAMENTE.
-        // No esperamos a que termine fetchPerfil.
         setLoading(false)
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setPerfil(null)
         setLoading(false)
       } else if (event === 'INITIAL_SESSION') {
-        // Evento de inicialización, también desbloquea
         setLoading(false)
       }
     })
 
-    // 3. WATCHDOG (EL SALVAVIDAS) 🚑
-    // Si por alguna razón (bug de Chrome, red corporativa, etc) 
-    // los eventos no disparan en 2 segundos, forzamos la apertura.
     const safetyTimer = setTimeout(() => {
       if (mounted && loading) {
-        console.warn("⚠️ Watchdog: La carga tardó mucho. Forzando apertura de la App.")
+        console.warn("Watchdog: Forzando apertura de la App.")
         setLoading(false)
       }
     }, 2000)
@@ -92,13 +75,10 @@ export function AuthProvider({ children }) {
       clearTimeout(safetyTimer)
       subscription.unsubscribe()
     }
-  }, []) // Array vacío: se ejecuta solo al montar
+  }, [])
 
   const login = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
     return data
   }
@@ -110,11 +90,22 @@ export function AuthProvider({ children }) {
     setPerfil(null)
   }
 
-  // Helper para verificar rol
+  // Helpers para verificar rol
   const isAdmin = perfil?.rol === 'admin'
+  const isPreventista = perfil?.rol === 'preventista'
+  const isTransportista = perfil?.rol === 'transportista'
 
   return (
-    <AuthContext.Provider value={{ user, perfil, loading, login, logout, isAdmin }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      perfil, 
+      loading, 
+      login, 
+      logout, 
+      isAdmin,
+      isPreventista,
+      isTransportista
+    }}>
       {children}
     </AuthContext.Provider>
   )
@@ -129,8 +120,14 @@ export function useClientes() {
 
   const fetchClientes = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('clientes').select('*').order('nombre_fantasia')
-    if (!error) setClientes(data || [])
+    const { data, error } = await supabase
+      .from('clientes')
+      .select('*')
+      .order('nombre_fantasia')
+    if (error) {
+      console.error('Error fetching clientes:', error)
+    }
+    setClientes(data || [])
     setLoading(false)
   }
 
@@ -145,7 +142,7 @@ export function useClientes() {
       zona: cliente.zona || null
     }]).select().single()
     if (error) throw error
-    setClientes(prev => [...prev, data])
+    setClientes(prev => [...prev, data].sort((a, b) => a.nombre_fantasia.localeCompare(b.nombre_fantasia)))
     return data
   }
 
@@ -178,8 +175,14 @@ export function useProductos() {
 
   const fetchProductos = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('productos').select('*').order('nombre')
-    if (!error) setProductos(data || [])
+    const { data, error } = await supabase
+      .from('productos')
+      .select('*')
+      .order('nombre')
+    if (error) {
+      console.error('Error fetching productos:', error)
+    }
+    setProductos(data || [])
     setLoading(false)
   }
 
@@ -193,7 +196,7 @@ export function useProductos() {
       categoria: producto.categoria || null
     }]).select().single()
     if (error) throw error
-    setProductos(prev => [...prev, data])
+    setProductos(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
     return data
   }
 
@@ -225,15 +228,36 @@ export function usePedidos() {
 
   const fetchPedidos = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).order('created_at', { ascending: false })
-    if (!error) setPedidos(data || [])
+    const { data, error } = await supabase
+      .from('pedidos')
+      .select(`
+        *, 
+        cliente:clientes(*), 
+        items:pedido_items(*, producto:productos(*)),
+        usuario:perfiles!pedidos_usuario_id_fkey(id, nombre, email),
+        transportista:perfiles!pedidos_transportista_id_fkey(id, nombre, email)
+      `)
+      .order('created_at', { ascending: false })
+    if (error) {
+      console.error('Error fetching pedidos:', error)
+    }
+    setPedidos(data || [])
     setLoading(false)
   }
 
   useEffect(() => { fetchPedidos() }, [])
 
-  const crearPedido = async (clienteId, items, total) => {
-    const { data: pedido, error: pedidoError } = await supabase.from('pedidos').insert([{ cliente_id: clienteId, total: total, estado: 'pendiente' }]).select().single()
+  const crearPedido = async (clienteId, items, total, usuarioId) => {
+    const { data: pedido, error: pedidoError } = await supabase
+      .from('pedidos')
+      .insert([{ 
+        cliente_id: clienteId, 
+        total: total, 
+        estado: 'pendiente',
+        usuario_id: usuarioId
+      }])
+      .select()
+      .single()
     if (pedidoError) throw pedidoError
 
     const itemsParaInsertar = items.map(item => ({
@@ -252,40 +276,100 @@ export function usePedidos() {
   }
 
   const cambiarEstado = async (id, nuevoEstado) => {
-    const { error } = await supabase.from('pedidos').update({ estado: nuevoEstado }).eq('id', id)
+    const updateData = { estado: nuevoEstado }
+    
+    // Si se marca como entregado, guardar la fecha
+    if (nuevoEstado === 'entregado') {
+      updateData.fecha_entrega = new Date().toISOString()
+    }
+    // Si se desmarca de entregado, limpiar la fecha
+    if (nuevoEstado !== 'entregado') {
+      updateData.fecha_entrega = null
+    }
+    
+    const { error } = await supabase.from('pedidos').update(updateData).eq('id', id)
     if (error) throw error
-    setPedidos(prev => prev.map(p => p.id === id ? { ...p, estado: nuevoEstado } : p))
+    setPedidos(prev => prev.map(p => p.id === id ? { ...p, ...updateData } : p))
+  }
+
+  const asignarTransportista = async (pedidoId, transportistaId) => {
+    const { error } = await supabase
+      .from('pedidos')
+      .update({ 
+        transportista_id: transportistaId,
+        estado: transportistaId ? 'asignado' : 'pendiente'
+      })
+      .eq('id', pedidoId)
+    if (error) throw error
+    await fetchPedidos()
   }
 
   const eliminarPedido = async (id) => {
+    // Primero eliminar los items del pedido
+    const { error: itemsError } = await supabase
+      .from('pedido_items')
+      .delete()
+      .eq('pedido_id', id)
+    if (itemsError) throw itemsError
+
+    // Luego eliminar el pedido
     const { error } = await supabase.from('pedidos').delete().eq('id', id)
     if (error) throw error
     setPedidos(prev => prev.filter(p => p.id !== id))
   }
 
-  return { pedidos, loading, crearPedido, cambiarEstado, eliminarPedido, refetch: fetchPedidos }
+  return { 
+    pedidos, 
+    loading, 
+    crearPedido, 
+    cambiarEstado, 
+    asignarTransportista,
+    eliminarPedido, 
+    refetch: fetchPedidos 
+  }
 }
 
 // ==================== USUARIOS ====================
 export function useUsuarios() {
   const [usuarios, setUsuarios] = useState([])
+  const [transportistas, setTransportistas] = useState([])
   const [loading, setLoading] = useState(true)
 
   const fetchUsuarios = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('perfiles').select('*').order('nombre')
-    if (!error) setUsuarios(data || [])
+    const { data, error } = await supabase
+      .from('perfiles')
+      .select('*')
+      .order('nombre')
+    if (error) {
+      console.error('Error fetching usuarios:', error)
+    }
+    setUsuarios(data || [])
+    // Filtrar transportistas activos para asignación
+    setTransportistas((data || []).filter(u => u.rol === 'transportista' && u.activo))
     setLoading(false)
   }
 
   useEffect(() => { fetchUsuarios() }, [])
 
   const actualizarUsuario = async (id, datos) => {
-    const { data, error } = await supabase.from('perfiles').update({ nombre: datos.nombre, rol: datos.rol, activo: datos.activo }).eq('id', id).select().single()
+    const { data, error } = await supabase.from('perfiles').update({ 
+      nombre: datos.nombre, 
+      rol: datos.rol, 
+      activo: datos.activo 
+    }).eq('id', id).select().single()
     if (error) throw error
     setUsuarios(prev => prev.map(u => u.id === id ? data : u))
+    // Actualizar lista de transportistas
+    setTransportistas(prev => {
+      const updated = prev.filter(t => t.id !== id)
+      if (data.rol === 'transportista' && data.activo) {
+        return [...updated, data].sort((a, b) => a.nombre.localeCompare(b.nombre))
+      }
+      return updated
+    })
     return data
   }
 
-  return { usuarios, loading, actualizarUsuario, refetch: fetchUsuarios }
+  return { usuarios, transportistas, loading, actualizarUsuario, refetch: fetchUsuarios }
 }
