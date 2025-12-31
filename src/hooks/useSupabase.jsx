@@ -3,6 +3,11 @@ import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext({})
 
+// Sistema de notificación de errores centralizado
+let errorNotifier = null
+export const setErrorNotifier = (notifier) => { errorNotifier = notifier }
+const notifyError = (message) => { if (errorNotifier) errorNotifier(message); else console.error(message) }
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [perfil, setPerfil] = useState(null)
@@ -48,9 +53,17 @@ export function useClientes() {
 
   const fetchClientes = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('clientes').select('*').order('nombre_fantasia')
-    if (error) console.error('Error fetching clientes:', error)
-    setClientes(data || []); setLoading(false)
+    try {
+      const { data, error } = await supabase.from('clientes').select('*').order('nombre_fantasia')
+      if (error) throw error
+      setClientes(data || [])
+    } catch (error) {
+      console.error('Error fetching clientes:', error)
+      notifyError('Error al cargar clientes: ' + error.message)
+      setClientes([])
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { fetchClientes() }, [])
 
@@ -71,7 +84,20 @@ export function useProductos() {
   const [productos, setProductos] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const fetchProductos = async () => { setLoading(true); const { data, error } = await supabase.from('productos').select('*').order('nombre'); if (error) console.error('Error fetching productos:', error); setProductos(data || []); setLoading(false) }
+  const fetchProductos = async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase.from('productos').select('*').order('nombre')
+      if (error) throw error
+      setProductos(data || [])
+    } catch (error) {
+      console.error('Error fetching productos:', error)
+      notifyError('Error al cargar productos: ' + error.message)
+      setProductos([])
+    } finally {
+      setLoading(false)
+    }
+  }
   useEffect(() => { fetchProductos() }, [])
 
   const agregarProducto = async (producto) => { const { data, error } = await supabase.from('productos').insert([{ nombre: producto.nombre, precio: producto.precio, stock: producto.stock, categoria: producto.categoria || null }]).select().single(); if (error) throw error; setProductos(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre))); return data }
@@ -121,17 +147,28 @@ export function usePedidos() {
   const fetchPedidos = async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).order('created_at', { ascending: false })
-      if (error) { console.error('Error fetching pedidos:', error); setPedidos([]); setLoading(false); return }
-      const pedidosCompletos = await Promise.all((data || []).map(async (pedido) => {
-        let usuario = null, transportista = null
-        if (pedido.usuario_id) { const { data: u } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.usuario_id).maybeSingle(); usuario = u }
-        if (pedido.transportista_id) { const { data: t } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.transportista_id).maybeSingle(); transportista = t }
-        return { ...pedido, usuario, transportista }
-      }))
-      setPedidos(pedidosCompletos)
-    } catch (err) { console.error('Error inesperado en fetchPedidos:', err); setPedidos([]) }
-    setLoading(false)
+      // Optimizado: incluir relaciones de usuario y transportista en el query inicial
+      // Esto elimina el problema N+1 queries (antes: 1 + N*2 queries, ahora: 1 query)
+      const { data, error } = await supabase
+        .from('pedidos')
+        .select(`
+          *,
+          cliente:clientes(*),
+          items:pedido_items(*, producto:productos(*)),
+          usuario:perfiles!pedidos_usuario_id_fkey(id, nombre, email),
+          transportista:perfiles!pedidos_transportista_id_fkey(id, nombre, email)
+        `)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setPedidos(data || [])
+    } catch (error) {
+      console.error('Error fetching pedidos:', error)
+      notifyError('Error al cargar pedidos: ' + error.message)
+      setPedidos([])
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { fetchPedidos() }, [])
 
@@ -144,8 +181,9 @@ export function usePedidos() {
         .order('created_at', { ascending: false })
       if (error) throw error
       return data || []
-    } catch (err) {
-      console.error('Error fetching historial:', err)
+    } catch (error) {
+      console.error('Error fetching historial:', error)
+      notifyError('Error al cargar historial del pedido: ' + error.message)
       return []
     }
   }
@@ -237,7 +275,22 @@ export function useUsuarios() {
   const [transportistas, setTransportistas] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const fetchUsuarios = async () => { setLoading(true); const { data, error } = await supabase.from('perfiles').select('*').order('nombre'); if (error) console.error('Error fetching usuarios:', error); setUsuarios(data || []); setTransportistas((data || []).filter(u => u.rol === 'transportista' && u.activo)); setLoading(false) }
+  const fetchUsuarios = async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase.from('perfiles').select('*').order('nombre')
+      if (error) throw error
+      setUsuarios(data || [])
+      setTransportistas((data || []).filter(u => u.rol === 'transportista' && u.activo))
+    } catch (error) {
+      console.error('Error fetching usuarios:', error)
+      notifyError('Error al cargar usuarios: ' + error.message)
+      setUsuarios([])
+      setTransportistas([])
+    } finally {
+      setLoading(false)
+    }
+  }
   useEffect(() => { fetchUsuarios() }, [])
 
   const actualizarUsuario = async (id, datos) => {
@@ -258,7 +311,8 @@ export function useDashboard() {
     setLoading(true)
     try {
       const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0,0,0,0)
-      const { data: pedidos } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).gte('created_at', inicioMes.toISOString())
+      const { data: pedidos, error } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).gte('created_at', inicioMes.toISOString())
+      if (error) throw error
       if (!pedidos) { setLoading(false); return }
 
       const hoy = new Date(); hoy.setHours(0,0,0,0)
@@ -289,15 +343,19 @@ export function useDashboard() {
         pedidosPorEstado: { pendiente: pedidos.filter(p => p.estado === 'pendiente').length, asignado: pedidos.filter(p => p.estado === 'asignado').length, entregado: pedidos.filter(p => p.estado === 'entregado').length },
         ventasPorDia
       })
-    } catch (err) { console.error('Error calculando métricas:', err) }
-    setLoading(false)
+    } catch (error) {
+      console.error('Error calculando métricas:', error)
+      notifyError('Error al calcular métricas: ' + error.message)
+    } finally {
+      setLoading(false)
+    }
   }
   const calcularReportePreventistas = async (fechaDesde = null, fechaHasta = null) => {
     setLoading(true)
     try {
       let query = supabase
         .from('pedidos')
-        .select(`*, usuario:perfiles(id, nombre, email), items:pedido_items(*)`)
+        .select(`*, usuario:perfiles!pedidos_usuario_id_fkey(id, nombre, email), items:pedido_items(*)`)
 
       if (fechaDesde) query = query.gte('created_at', new Date(fechaDesde).toISOString())
       if (fechaHasta) {
@@ -306,9 +364,10 @@ export function useDashboard() {
         query = query.lte('created_at', hasta.toISOString())
       }
 
-      const { data: pedidos } = await query
+      const { data: pedidos, error } = await query
+      if (error) throw error
 
-      if (!pedidos) {
+      if (!pedidos || pedidos.length === 0) {
         setReportePreventistas([])
         setLoading(false)
         return
@@ -319,6 +378,8 @@ export function useDashboard() {
       pedidos.forEach(pedido => {
         const usuarioId = pedido.usuario_id
         const usuarioNombre = pedido.usuario?.nombre || 'Usuario desconocido'
+
+        if (!usuarioId) return // Saltar pedidos sin usuario asignado
 
         if (!reportePorPreventista[usuarioId]) {
           reportePorPreventista[usuarioId] = {
@@ -348,11 +409,13 @@ export function useDashboard() {
 
       const reporteArray = Object.values(reportePorPreventista).sort((a, b) => b.totalVentas - a.totalVentas)
       setReportePreventistas(reporteArray)
-    } catch (err) {
-      console.error('Error calculando reporte de preventistas:', err)
+    } catch (error) {
+      console.error('Error calculando reporte de preventistas:', error)
+      notifyError('Error al calcular reporte de preventistas: ' + error.message)
       setReportePreventistas([])
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => { calcularMetricas() }, [])
