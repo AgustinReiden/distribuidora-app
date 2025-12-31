@@ -351,10 +351,15 @@ export function useDashboard() {
     try {
       let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
 
-      if (fechaDesde) query = query.gte('created_at', new Date(fechaDesde).toISOString())
+      if (fechaDesde) {
+        // Parsear fecha en formato local (YYYY-MM-DD viene del input date)
+        const [year, month, day] = fechaDesde.split('-').map(Number)
+        const desde = new Date(year, month - 1, day, 0, 0, 0, 0)
+        query = query.gte('created_at', desde.toISOString())
+      }
       if (fechaHasta) {
-        const hasta = new Date(fechaHasta)
-        hasta.setHours(23, 59, 59, 999)
+        const [year, month, day] = fechaHasta.split('-').map(Number)
+        const hasta = new Date(year, month - 1, day, 23, 59, 59, 999)
         query = query.lte('created_at', hasta.toISOString())
       }
 
