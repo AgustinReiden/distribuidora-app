@@ -301,6 +301,7 @@ export function useDashboard() {
   const [loading, setLoading] = useState(true)
   const [loadingReporte, setLoadingReporte] = useState(false)
   const [reportePreventistas, setReportePreventistas] = useState([])
+  const [reporteInicializado, setReporteInicializado] = useState(false)
 
   const calcularMetricas = async () => {
     setLoading(true)
@@ -362,7 +363,7 @@ export function useDashboard() {
 
       if (!pedidos || pedidos.length === 0) {
         setReportePreventistas([])
-        setLoadingReporte(false)
+        setReporteInicializado(true)
         return
       }
 
@@ -409,10 +410,12 @@ export function useDashboard() {
 
       const reporteArray = Object.values(reportePorPreventista).sort((a, b) => b.totalVentas - a.totalVentas)
       setReportePreventistas(reporteArray)
+      setReporteInicializado(true)
     } catch (error) {
       console.error('Error calculando reporte de preventistas:', error)
       notifyError('Error al calcular reporte de preventistas: ' + error.message)
       setReportePreventistas([])
+      setReporteInicializado(true)
     } finally {
       setLoadingReporte(false)
     }
@@ -424,6 +427,7 @@ export function useDashboard() {
     loading,
     loadingReporte,
     reportePreventistas,
+    reporteInicializado,
     calcularReportePreventistas,
     refetch: calcularMetricas
   }

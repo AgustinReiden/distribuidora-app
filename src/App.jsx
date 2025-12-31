@@ -61,7 +61,7 @@ function MainApp() {
   const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, loading: loadingProductos, refetch: refetchProductos } = useProductos();
   const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
-  const { metricas, reportePreventistas, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas } = useDashboard();
+  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas } = useDashboard();
   const { exportando, descargarJSON, exportarPedidosCSV } = useBackup();
 
   // Estados de modales
@@ -684,29 +684,22 @@ function MainApp() {
   const VistaReportes = () => {
     const [fechaDesde, setFechaDesde] = useState('');
     const [fechaHasta, setFechaHasta] = useState('');
-    const [cargandoReporte, setCargandoReporte] = useState(false);
-    const [reporteGenerado, setReporteGenerado] = useState(false);
 
-    // Cargar reporte automáticamente al montar el componente
+    // Cargar reporte automáticamente solo la primera vez (controlado por el hook)
     useEffect(() => {
-      if (!reporteGenerado) {
-        handleGenerarReporte();
+      if (!reporteInicializado && !loadingReporte) {
+        calcularReportePreventistas(null, null);
       }
-    }, []);
+    }, [reporteInicializado, loadingReporte]);
 
     const handleGenerarReporte = async () => {
-      setCargandoReporte(true);
       await calcularReportePreventistas(fechaDesde || null, fechaHasta || null);
-      setCargandoReporte(false);
-      setReporteGenerado(true);
     };
 
     const handleLimpiarFiltros = async () => {
       setFechaDesde('');
       setFechaHasta('');
-      setCargandoReporte(true);
       await calcularReportePreventistas(null, null);
-      setCargandoReporte(false);
     };
 
     return (
@@ -738,16 +731,16 @@ function MainApp() {
             <div className="flex gap-2">
               <button
                 onClick={handleGenerarReporte}
-                disabled={cargandoReporte}
+                disabled={loadingReporte}
                 className="flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                {cargandoReporte ? <Loader2 className="w-5 h-5 animate-spin" /> : <BarChart3 className="w-5 h-5" />}
+                {loadingReporte ? <Loader2 className="w-5 h-5 animate-spin" /> : <BarChart3 className="w-5 h-5" />}
                 <span>Generar Reporte</span>
               </button>
               {(fechaDesde || fechaHasta) && (
                 <button
                   onClick={handleLimpiarFiltros}
-                  disabled={cargandoReporte}
+                  disabled={loadingReporte}
                   className="flex items-center justify-center space-x-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50"
                 >
                   <X className="w-5 h-5" />
@@ -764,7 +757,7 @@ function MainApp() {
         </div>
 
         {/* Tabla de reportes */}
-        {cargandoReporte ? (
+        {loadingReporte ? (
           <LoadingSpinner />
         ) : reportePreventistas.length === 0 ? (
           <div className="text-center py-12 text-gray-500 bg-white border rounded-lg shadow-sm">
