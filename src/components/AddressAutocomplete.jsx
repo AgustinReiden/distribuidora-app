@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { MapPin, Loader2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
 
 export const AddressAutocomplete = ({
   value,
@@ -12,13 +12,13 @@ export const AddressAutocomplete = ({
   const inputRef = useRef(null);
   const autocompleteRef = useRef(null);
   const [loading, setLoading] = useState(false);
-  const [googleReady, setGoogleReady] = useState(false);
+  const [googleStatus, setGoogleStatus] = useState('loading'); // 'loading', 'ready', 'error'
 
   // Verificar que Google Maps esté cargado
   useEffect(() => {
     const checkGoogle = () => {
       if (window.google && window.google.maps && window.google.maps.places) {
-        setGoogleReady(true);
+        setGoogleStatus('ready');
         return true;
       }
       return false;
@@ -31,13 +31,16 @@ export const AddressAutocomplete = ({
       if (checkGoogle()) {
         clearInterval(interval);
       }
-    }, 100);
+    }, 200);
 
-    // Timeout después de 10 segundos
+    // Timeout después de 5 segundos - permitir uso manual
     const timeout = setTimeout(() => {
       clearInterval(interval);
-      console.warn('Google Maps API no se cargó correctamente');
-    }, 10000);
+      if (!window.google?.maps?.places) {
+        console.warn('Google Maps API no se cargó. Verificar que las APIs estén habilitadas en Google Cloud Console.');
+        setGoogleStatus('error');
+      }
+    }, 5000);
 
     return () => {
       clearInterval(interval);
@@ -47,12 +50,12 @@ export const AddressAutocomplete = ({
 
   // Inicializar autocomplete cuando Google esté listo
   useEffect(() => {
-    if (!googleReady || !inputRef.current || autocompleteRef.current) return;
+    if (googleStatus !== 'ready' || !inputRef.current || autocompleteRef.current) return;
 
     try {
       autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
         types: ['address'],
-        componentRestrictions: { country: 'ar' }, // Restringir a Argentina
+        componentRestrictions: { country: 'ar' },
         fields: ['formatted_address', 'geometry', 'address_components']
       });
 
@@ -67,29 +70,37 @@ export const AddressAutocomplete = ({
             longitud: place.geometry.location.lng(),
             componentes: place.address_components || []
           };
-
           onSelect(result);
         }
         setLoading(false);
       });
     } catch (error) {
       console.error('Error inicializando autocomplete:', error);
+      setGoogleStatus('error');
     }
 
     return () => {
-      if (autocompleteRef.current) {
+      if (autocompleteRef.current && window.google?.maps?.event) {
         window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
       }
     };
-  }, [googleReady, onSelect]);
+  }, [googleStatus, onSelect]);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     onChange('');
     onSelect({ direccion: '', latitud: null, longitud: null });
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  };
+  }, [onChange, onSelect]);
+
+  const handleInputChange = useCallback((e) => {
+    onChange(e.target.value);
+    // Si escriben manualmente, limpiar coordenadas
+    if (googleStatus !== 'ready') {
+      onSelect({ direccion: e.target.value, latitud: null, longitud: null });
+    }
+  }, [onChange, onSelect, googleStatus]);
 
   return (
     <div className="relative">
@@ -99,9 +110,9 @@ export const AddressAutocomplete = ({
           ref={inputRef}
           type="text"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={handleInputChange}
           placeholder={placeholder}
-          disabled={disabled || !googleReady}
+          disabled={disabled}
           className={`w-full pl-10 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
             disabled ? 'bg-gray-100 cursor-not-allowed' : ''
           } ${className}`}
@@ -119,10 +130,16 @@ export const AddressAutocomplete = ({
           </button>
         )}
       </div>
-      {!googleReady && (
+      {googleStatus === 'loading' && (
         <p className="text-xs text-gray-500 mt-1 flex items-center">
           <Loader2 className="w-3 h-3 mr-1 animate-spin" />
           Cargando autocompletado...
+        </p>
+      )}
+      {googleStatus === 'error' && (
+        <p className="text-xs text-amber-600 mt-1 flex items-center">
+          <AlertCircle className="w-3 h-3 mr-1" />
+          Autocompletado no disponible. Escribí la dirección manualmente.
         </p>
       )}
     </div>
