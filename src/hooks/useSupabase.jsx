@@ -184,8 +184,10 @@ export function usePedidos() {
 
   const pedidosFiltrados = () => pedidos.filter(p => {
     if (filtros.estado !== 'todos' && p.estado !== filtros.estado) return false
-    if (filtros.fechaDesde) { const fp = new Date(p.created_at).setHours(0,0,0,0); const fd = new Date(filtros.fechaDesde).setHours(0,0,0,0); if (fp < fd) return false }
-    if (filtros.fechaHasta) { const fp = new Date(p.created_at).setHours(23,59,59,999); const fh = new Date(filtros.fechaHasta).setHours(23,59,59,999); if (fp > fh) return false }
+    // Comparar solo la parte de fecha (YYYY-MM-DD) para evitar problemas de zona horaria
+    const fechaPedido = p.created_at ? p.created_at.split('T')[0] : null
+    if (filtros.fechaDesde && fechaPedido && fechaPedido < filtros.fechaDesde) return false
+    if (filtros.fechaHasta && fechaPedido && fechaPedido > filtros.fechaHasta) return false
     return true
   })
 
