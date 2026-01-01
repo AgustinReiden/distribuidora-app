@@ -16,33 +16,46 @@ export const AddressAutocomplete = ({
 
   // Verificar que Google Maps esté cargado
   useEffect(() => {
+    let isMounted = true;
+    let interval;
+    let timeout;
+
     const checkGoogle = () => {
-      if (window.google && window.google.maps && window.google.maps.places) {
-        setGoogleStatus('ready');
+      // Verificar que exista el objeto completo de Places
+      if (window.google &&
+          window.google.maps &&
+          window.google.maps.places &&
+          window.google.maps.places.Autocomplete) {
+        if (isMounted) {
+          setGoogleStatus('ready');
+        }
         return true;
       }
       return false;
     };
 
+    // Verificar inmediatamente
     if (checkGoogle()) return;
 
-    // Si no está listo, esperamos un poco
-    const interval = setInterval(() => {
+    // Si no está listo, verificar cada 500ms
+    interval = setInterval(() => {
       if (checkGoogle()) {
         clearInterval(interval);
+        clearTimeout(timeout);
       }
-    }, 200);
+    }, 500);
 
-    // Timeout después de 5 segundos - permitir uso manual
-    const timeout = setTimeout(() => {
+    // Timeout después de 15 segundos
+    timeout = setTimeout(() => {
       clearInterval(interval);
-      if (!window.google?.maps?.places) {
-        console.warn('Google Maps API no se cargó. Verificar que las APIs estén habilitadas en Google Cloud Console.');
+      if (isMounted && !window.google?.maps?.places?.Autocomplete) {
+        console.warn('Google Maps API no se cargó correctamente después de 15s');
         setGoogleStatus('error');
       }
-    }, 5000);
+    }, 15000);
 
     return () => {
+      isMounted = false;
       clearInterval(interval);
       clearTimeout(timeout);
     };
@@ -96,11 +109,7 @@ export const AddressAutocomplete = ({
 
   const handleInputChange = useCallback((e) => {
     onChange(e.target.value);
-    // Si escriben manualmente, limpiar coordenadas
-    if (googleStatus !== 'ready') {
-      onSelect({ direccion: e.target.value, latitud: null, longitud: null });
-    }
-  }, [onChange, onSelect, googleStatus]);
+  }, [onChange]);
 
   return (
     <div className="relative">
@@ -111,7 +120,7 @@ export const AddressAutocomplete = ({
           type="text"
           value={value}
           onChange={handleInputChange}
-          placeholder={placeholder}
+          placeholder={googleStatus === 'ready' ? placeholder : 'Escribí la dirección...'}
           disabled={disabled}
           className={`w-full pl-10 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
             disabled ? 'bg-gray-100 cursor-not-allowed' : ''
@@ -131,7 +140,7 @@ export const AddressAutocomplete = ({
         )}
       </div>
       {googleStatus === 'loading' && (
-        <p className="text-xs text-gray-500 mt-1 flex items-center">
+        <p className="text-xs text-blue-600 mt-1 flex items-center">
           <Loader2 className="w-3 h-3 mr-1 animate-spin" />
           Cargando autocompletado...
         </p>
@@ -140,6 +149,11 @@ export const AddressAutocomplete = ({
         <p className="text-xs text-amber-600 mt-1 flex items-center">
           <AlertCircle className="w-3 h-3 mr-1" />
           Autocompletado no disponible. Escribí la dirección manualmente.
+        </p>
+      )}
+      {googleStatus === 'ready' && (
+        <p className="text-xs text-green-600 mt-1">
+          Escribí para ver sugerencias de direcciones
         </p>
       )}
     </div>
