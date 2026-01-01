@@ -2,12 +2,13 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, AlertTriangle, User, BarChart3, Calendar, Download, TrendingUp, DollarSign, FileDown, RefreshCw, ChevronLeft, ChevronRight, History, FileText, CreditCard } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ToastProvider, useToast } from './components/Toast.jsx';
-import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido } from './components/Modals.jsx';
+import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF } from './components/Modals.jsx';
+import { generarOrdenPreparacion, generarHojaRuta } from './lib/pdfExport.js';
 
 const formatPrecio = (p) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
 const formatFecha = (f) => f ? new Date(f).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-const getEstadoColor = (e) => e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' : e === 'asignado' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
-const getEstadoLabel = (e) => e === 'pendiente' ? 'Pendiente' : e === 'asignado' ? 'En camino' : 'Entregado';
+const getEstadoColor = (e) => e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' : e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' : e === 'asignado' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
+const getEstadoLabel = (e) => e === 'pendiente' ? 'Pendiente' : e === 'en_preparacion' ? 'En preparación' : e === 'asignado' ? 'En camino' : 'Entregado';
 const getRolColor = (r) => r === 'admin' ? 'bg-purple-100 text-purple-700' : r === 'transportista' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700';
 const getRolLabel = (r) => r === 'admin' ? 'Admin' : r === 'transportista' ? 'Transportista' : 'Preventista';
 const LoadingSpinner = () => <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /><span className="ml-2 text-gray-600">Cargando...</span></div>;
@@ -74,6 +75,7 @@ function MainApp() {
   const [modalFiltroFecha, setModalFiltroFecha] = useState(false);
   const [modalHistorial, setModalHistorial] = useState(false);
   const [modalEditarPedido, setModalEditarPedido] = useState(false);
+  const [modalExportarPDF, setModalExportarPDF] = useState(false);
 
   const [clienteEditando, setClienteEditando] = useState(null);
   const [productoEditando, setProductoEditando] = useState(null);
@@ -336,6 +338,28 @@ function MainApp() {
     });
   };
 
+  const handleMarcarEnPreparacion = (pedido) => {
+    setModalConfirm({
+      visible: true,
+      titulo: 'Marcar en preparación',
+      mensaje: `¿Marcar pedido #${pedido.id} como "En preparación"?`,
+      tipo: 'success',
+      onConfirm: async () => {
+        setGuardando(true);
+        try {
+          await cambiarEstado(pedido.id, 'en_preparacion');
+          refetchMetricas();
+          toast.success(`Pedido #${pedido.id} marcado como en preparación`);
+        } catch (e) {
+          toast.error(e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
+        }
+      }
+    });
+  };
+
   const handleAsignarTransportista = async (transportistaId) => {
     if (!pedidoAsignando) return;
     setGuardando(true);
@@ -516,8 +540,9 @@ function MainApp() {
             <div className="bg-white rounded-xl shadow p-4"><div className="flex items-center space-x-3"><div className="p-3 bg-orange-100 rounded-lg"><ShoppingCart className="w-6 h-6 text-orange-600" /></div><div><p className="text-sm text-gray-500">Pedidos Mes</p><p className="text-xl font-bold">{metricas.pedidosMes}</p></div></div></div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4"><div className="flex items-center space-x-2"><Clock className="w-5 h-5 text-yellow-600" /><span className="text-yellow-800 font-medium">Pendientes</span></div><p className="text-3xl font-bold text-yellow-600 mt-2">{metricas.pedidosPorEstado.pendiente}</p></div>
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4"><div className="flex items-center space-x-2"><Package className="w-5 h-5 text-orange-600" /><span className="text-orange-800 font-medium">En preparación</span></div><p className="text-3xl font-bold text-orange-600 mt-2">{metricas.pedidosPorEstado.en_preparacion || 0}</p></div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4"><div className="flex items-center space-x-2"><Truck className="w-5 h-5 text-blue-600" /><span className="text-blue-800 font-medium">En camino</span></div><p className="text-3xl font-bold text-blue-600 mt-2">{metricas.pedidosPorEstado.asignado}</p></div>
             <div className="bg-green-50 border border-green-200 rounded-lg p-4"><div className="flex items-center space-x-2"><Check className="w-5 h-5 text-green-600" /><span className="text-green-800 font-medium">Entregados</span></div><p className="text-3xl font-bold text-green-600 mt-2">{metricas.pedidosPorEstado.entregado}</p></div>
           </div>
@@ -560,7 +585,8 @@ function MainApp() {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold">Pedidos</h1>
-        <div className="flex space-x-2">
+        <div className="flex flex-wrap gap-2">
+          {isAdmin && <button onClick={() => setModalExportarPDF(true)} className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"><FileDown className="w-5 h-5" /><span>Exportar PDF</span></button>}
           {isAdmin && <button onClick={() => exportarPedidosCSV(pedidosParaMostrar)} disabled={exportando} className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"><FileDown className="w-5 h-5" /><span>CSV</span></button>}
           {(isAdmin || isPreventista) && <button onClick={() => setModalPedido(true)} className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"><Plus className="w-5 h-5" /><span>Nuevo</span></button>}
         </div>
@@ -568,14 +594,15 @@ function MainApp() {
 
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1"><Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" /><input type="text" value={busqueda} onChange={e => handleBusquedaChange(e.target.value)} className="w-full pl-10 pr-3 py-2 border rounded-lg" placeholder="Buscar..." /></div>
-        <select value={filtros.estado} onChange={e => handleFiltrosChange({ estado: e.target.value })} className="px-4 py-2 border rounded-lg"><option value="todos">Todos</option><option value="pendiente">Pendientes</option><option value="asignado">En camino</option><option value="entregado">Entregados</option></select>
+        <select value={filtros.estado} onChange={e => handleFiltrosChange({ estado: e.target.value })} className="px-4 py-2 border rounded-lg"><option value="todos">Todos</option><option value="pendiente">Pendientes</option><option value="en_preparacion">En preparación</option><option value="asignado">En camino</option><option value="entregado">Entregados</option></select>
         <button onClick={() => setModalFiltroFecha(true)} className={`flex items-center space-x-2 px-4 py-2 border rounded-lg ${filtros.fechaDesde || filtros.fechaHasta ? 'bg-blue-50 border-blue-300' : ''}`}><Calendar className="w-5 h-5" /><span>Fechas</span></button>
       </div>
 
       {(filtros.fechaDesde || filtros.fechaHasta) && <div className="flex items-center space-x-2 text-sm text-blue-600"><Calendar className="w-4 h-4" /><span>Filtrado: {filtros.fechaDesde || '...'} - {filtros.fechaHasta || '...'}</span><button onClick={() => handleFiltrosChange({ fechaDesde: null, fechaHasta: null })} className="text-red-500"><X className="w-4 h-4" /></button></div>}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3"><Clock className="w-5 h-5 text-yellow-600" /><p className="text-xl font-bold text-yellow-600">{pedidos.filter(p => p.estado === 'pendiente').length}</p><p className="text-sm text-yellow-800">Pendientes</p></div>
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3"><Package className="w-5 h-5 text-orange-600" /><p className="text-xl font-bold text-orange-600">{pedidos.filter(p => p.estado === 'en_preparacion').length}</p><p className="text-sm text-orange-800">En preparación</p></div>
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3"><Truck className="w-5 h-5 text-blue-600" /><p className="text-xl font-bold text-blue-600">{pedidos.filter(p => p.estado === 'asignado').length}</p><p className="text-sm text-blue-800">En camino</p></div>
         <div className="bg-green-50 border border-green-200 rounded-lg p-3"><Check className="w-5 h-5 text-green-600" /><p className="text-xl font-bold text-green-600">{pedidos.filter(p => p.estado === 'entregado').length}</p><p className="text-sm text-green-800">Entregados</p></div>
         <div className="bg-purple-50 border border-purple-200 rounded-lg p-3"><ShoppingCart className="w-5 h-5 text-purple-600" /><p className="text-xl font-bold text-purple-600">{pedidosParaMostrar.length}</p><p className="text-sm text-purple-800">Mostrando</p></div>
@@ -629,6 +656,7 @@ function MainApp() {
                       {(isAdmin || isPreventista) && <button onClick={() => handleEditarPedido(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200">
                         <Edit2 className="w-4 h-4" /><span>Editar</span>
                       </button>}
+                      {isAdmin && pedido.estado === 'pendiente' && <button onClick={() => handleMarcarEnPreparacion(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm hover:bg-orange-200"><Package className="w-4 h-4" /><span>Preparar</span></button>}
                       {isAdmin && pedido.estado !== 'entregado' && <button onClick={() => { setPedidoAsignando(pedido); setModalAsignar(true); }} className="flex items-center space-x-1 px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm"><User className="w-4 h-4" /><span>{pedido.transportista ? 'Reasignar' : 'Asignar'}</span></button>}
                       {(isTransportista || isAdmin) && pedido.estado === 'asignado' && <button onClick={() => handleMarcarEntregado(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm"><Check className="w-4 h-4" /><span>Entregado</span></button>}
                       {isAdmin && pedido.estado === 'entregado' && <button onClick={() => handleDesmarcarEntregado(pedido)} className="flex items-center space-x-1 px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-sm"><AlertTriangle className="w-4 h-4" /><span>Revertir</span></button>}
@@ -972,6 +1000,16 @@ function MainApp() {
           onSave={handleGuardarEdicionPedido}
           onClose={() => { setModalEditarPedido(false); setPedidoEditando(null); }}
           guardando={guardando}
+        />
+      )}
+
+      {modalExportarPDF && (
+        <ModalExportarPDF
+          pedidos={pedidos}
+          transportistas={transportistas}
+          onExportarOrdenPreparacion={generarOrdenPreparacion}
+          onExportarHojaRuta={generarHojaRuta}
+          onClose={() => setModalExportarPDF(false)}
         />
       )}
     </div>
