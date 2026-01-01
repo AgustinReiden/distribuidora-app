@@ -1,5 +1,6 @@
 import React, { useState, useMemo, memo } from 'react';
-import { X, Loader2, Trash2, AlertTriangle, Check, Search, History, FileText, FileDown, Package, Truck } from 'lucide-react';
+import { X, Loader2, Trash2, AlertTriangle, Check, Search, History, FileText, FileDown, Package, Truck, MapPin } from 'lucide-react';
+import { AddressAutocomplete } from './AddressAutocomplete';
 
 const formatPrecio = (p) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
 const formatFecha = (fecha) => new Date(fecha).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -72,9 +73,20 @@ export const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClos
     nombre: cliente.nombre,
     nombreFantasia: cliente.nombre_fantasia,
     direccion: cliente.direccion,
+    latitud: cliente.latitud || null,
+    longitud: cliente.longitud || null,
     telefono: cliente.telefono || '',
     zona: cliente.zona || ''
-  } : { nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
+  } : { nombre: '', nombreFantasia: '', direccion: '', latitud: null, longitud: null, telefono: '', zona: '' });
+
+  const handleAddressSelect = (result) => {
+    setForm(prev => ({
+      ...prev,
+      direccion: result.direccion,
+      latitud: result.latitud,
+      longitud: result.longitud
+    }));
+  };
 
   const handleSubmit = () => {
     onSave({ ...form, id: cliente?.id });
@@ -85,7 +97,21 @@ export const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClos
       <div className="p-4 space-y-4">
         <div><label className="block text-sm font-medium mb-1">Nombre *</label><input type="text" value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
         <div><label className="block text-sm font-medium mb-1">Nombre Fantasía *</label><input type="text" value={form.nombreFantasia} onChange={e => setForm({ ...form, nombreFantasia: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-        <div><label className="block text-sm font-medium mb-1">Dirección *</label><input type="text" value={form.direccion} onChange={e => setForm({ ...form, direccion: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Dirección *</label>
+          <AddressAutocomplete
+            value={form.direccion}
+            onChange={(val) => setForm(prev => ({ ...prev, direccion: val }))}
+            onSelect={handleAddressSelect}
+            placeholder="Buscar dirección..."
+          />
+          {form.latitud && form.longitud && (
+            <div className="mt-2 flex items-center text-xs text-green-600 bg-green-50 px-3 py-2 rounded-lg">
+              <MapPin className="w-4 h-4 mr-2" />
+              <span>Coordenadas: {form.latitud.toFixed(6)}, {form.longitud.toFixed(6)}</span>
+            </div>
+          )}
+        </div>
         <div><label className="block text-sm font-medium mb-1">Teléfono</label><input type="text" value={form.telefono} onChange={e => setForm({ ...form, telefono: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
         <div><label className="block text-sm font-medium mb-1">Zona</label><input type="text" value={form.zona} onChange={e => setForm({ ...form, zona: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
       </div>

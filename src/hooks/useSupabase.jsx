@@ -68,12 +68,28 @@ export function useClientes() {
   useEffect(() => { fetchClientes() }, [])
 
   const agregarCliente = async (cliente) => {
-    const { data, error } = await supabase.from('clientes').insert([{ nombre: cliente.nombre, nombre_fantasia: cliente.nombreFantasia, direccion: cliente.direccion, telefono: cliente.telefono || null, zona: cliente.zona || null }]).select().single()
+    const { data, error } = await supabase.from('clientes').insert([{
+      nombre: cliente.nombre,
+      nombre_fantasia: cliente.nombreFantasia,
+      direccion: cliente.direccion,
+      latitud: cliente.latitud || null,
+      longitud: cliente.longitud || null,
+      telefono: cliente.telefono || null,
+      zona: cliente.zona || null
+    }]).select().single()
     if (error) throw error
     setClientes(prev => [...prev, data].sort((a, b) => a.nombre_fantasia.localeCompare(b.nombre_fantasia))); return data
   }
   const actualizarCliente = async (id, cliente) => {
-    const { data, error } = await supabase.from('clientes').update({ nombre: cliente.nombre, nombre_fantasia: cliente.nombreFantasia, direccion: cliente.direccion, telefono: cliente.telefono || null, zona: cliente.zona || null }).eq('id', id).select().single()
+    const { data, error } = await supabase.from('clientes').update({
+      nombre: cliente.nombre,
+      nombre_fantasia: cliente.nombreFantasia,
+      direccion: cliente.direccion,
+      latitud: cliente.latitud || null,
+      longitud: cliente.longitud || null,
+      telefono: cliente.telefono || null,
+      zona: cliente.zona || null
+    }).eq('id', id).select().single()
     if (error) throw error; setClientes(prev => prev.map(c => c.id === id ? data : c)); return data
   }
   const eliminarCliente = async (id) => { const { error } = await supabase.from('clientes').delete().eq('id', id); if (error) throw error; setClientes(prev => prev.filter(c => c.id !== id)) }
