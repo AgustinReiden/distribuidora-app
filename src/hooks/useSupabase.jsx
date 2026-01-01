@@ -349,18 +349,16 @@ export function useDashboard() {
   const calcularReportePreventistas = async (fechaDesde = null, fechaHasta = null) => {
     setLoadingReporte(true)
     try {
+      // Construir query base
       let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
 
+      // Aplicar filtros de fecha usando formato ISO directo
+      // PostgreSQL puede comparar timestamps con strings 'YYYY-MM-DD'
       if (fechaDesde) {
-        // Parsear fecha en formato local (YYYY-MM-DD viene del input date)
-        const [year, month, day] = fechaDesde.split('-').map(Number)
-        const desde = new Date(year, month - 1, day, 0, 0, 0, 0)
-        query = query.gte('created_at', desde.toISOString())
+        query = query.gte('created_at', `${fechaDesde}T00:00:00`)
       }
       if (fechaHasta) {
-        const [year, month, day] = fechaHasta.split('-').map(Number)
-        const hasta = new Date(year, month - 1, day, 23, 59, 59, 999)
-        query = query.lte('created_at', hasta.toISOString())
+        query = query.lte('created_at', `${fechaHasta}T23:59:59`)
       }
 
       const { data: pedidos, error } = await query
