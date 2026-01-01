@@ -109,7 +109,7 @@ function MainApp() {
       p.cliente?.direccion?.toLowerCase().includes(busqueda.toLowerCase()) ||
       p.id.toString().includes(busqueda)
     );
-  }, [pedidosFiltrados, busqueda]);
+  }, [pedidosFiltrados, busqueda, filtros]);
 
   // Paginación de pedidos
   const totalPaginas = Math.ceil(pedidosParaMostrar.length / ITEMS_PER_PAGE);
