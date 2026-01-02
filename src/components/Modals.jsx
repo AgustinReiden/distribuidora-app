@@ -125,11 +125,43 @@ export const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClos
   );
 });
 
-// Modal de producto - con categorías como select
+// Modal de producto - con categorías y campos de costos/precios
 export const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave, onClose, guardando }) {
-  const [form, setForm] = useState(producto || { nombre: '', precio: '', stock: '', categoria: '' });
+  const [form, setForm] = useState(producto || {
+    nombre: '',
+    codigo: '',
+    categoria: '',
+    stock: '',
+    costo_sin_iva: '',
+    costo_con_iva: '',
+    impuestos_internos: '',
+    precio_sin_iva: '',
+    precio: '' // precio_con_iva (precio final al cliente)
+  });
   const [nuevaCategoria, setNuevaCategoria] = useState('');
   const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState(false);
+
+  // Calcular automáticamente costo con IVA cuando cambia costo sin IVA
+  const handleCostoSinIvaChange = (valor) => {
+    const costoSinIva = parseFloat(valor) || 0;
+    const costoConIva = costoSinIva * 1.21; // 21% IVA
+    setForm({
+      ...form,
+      costo_sin_iva: valor,
+      costo_con_iva: costoConIva ? costoConIva.toFixed(2) : ''
+    });
+  };
+
+  // Calcular automáticamente precio con IVA cuando cambia precio sin IVA
+  const handlePrecioSinIvaChange = (valor) => {
+    const precioSinIva = parseFloat(valor) || 0;
+    const precioConIva = precioSinIva * 1.21; // 21% IVA
+    setForm({
+      ...form,
+      precio_sin_iva: valor,
+      precio: precioConIva ? precioConIva.toFixed(2) : ''
+    });
+  };
 
   const handleSubmit = () => {
     const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
@@ -139,18 +171,50 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
   };
 
   return (
-    <ModalBase title={producto ? 'Editar Producto' : 'Nuevo Producto'} onClose={onClose}>
-      <div className="p-4 space-y-4">
-        <div><label className="block text-sm font-medium mb-1">Nombre *</label><input type="text" value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+    <ModalBase title={producto ? 'Editar Producto' : 'Nuevo Producto'} onClose={onClose} maxWidth="max-w-lg">
+      <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        {/* Información básica */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2 sm:col-span-1">
+            <label className="block text-sm font-medium mb-1">Codigo</label>
+            <input
+              type="text"
+              value={form.codigo || ''}
+              onChange={e => setForm({ ...form, codigo: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg"
+              placeholder="SKU o codigo interno"
+            />
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <label className="block text-sm font-medium mb-1">Stock *</label>
+            <input
+              type="number"
+              value={form.stock}
+              onChange={e => setForm({ ...form, stock: parseInt(e.target.value) || '' })}
+              className="w-full px-3 py-2 border rounded-lg"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Nombre *</label>
+          <input
+            type="text"
+            value={form.nombre}
+            onChange={e => setForm({ ...form, nombre: e.target.value })}
+            className="w-full px-3 py-2 border rounded-lg"
+          />
+        </div>
+
         <div>
           <div className="flex justify-between items-center mb-1">
-            <label className="block text-sm font-medium">Categoría</label>
+            <label className="block text-sm font-medium">Categoria</label>
             <button
               type="button"
               onClick={() => setMostrarNuevaCategoria(!mostrarNuevaCategoria)}
               className="text-sm text-blue-600 hover:text-blue-700"
             >
-              {mostrarNuevaCategoria ? 'Elegir existente' : '+ Nueva categoría'}
+              {mostrarNuevaCategoria ? 'Elegir existente' : '+ Nueva categoria'}
             </button>
           </div>
           {mostrarNuevaCategoria ? (
@@ -159,7 +223,7 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
               value={nuevaCategoria}
               onChange={e => setNuevaCategoria(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg"
-              placeholder="Escribir nueva categoría..."
+              placeholder="Escribir nueva categoria..."
             />
           ) : (
             <select
@@ -167,16 +231,82 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
               onChange={e => setForm({ ...form, categoria: e.target.value })}
               className="w-full px-3 py-2 border rounded-lg"
             >
-              <option value="">Sin categoría</option>
+              <option value="">Sin categoria</option>
               {categorias.map(cat => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div><label className="block text-sm font-medium mb-1">Precio *</label><input type="number" value={form.precio} onChange={e => setForm({ ...form, precio: parseFloat(e.target.value) || '' })} className="w-full px-3 py-2 border rounded-lg" /></div>
-          <div><label className="block text-sm font-medium mb-1">Stock *</label><input type="number" value={form.stock} onChange={e => setForm({ ...form, stock: parseInt(e.target.value) || '' })} className="w-full px-3 py-2 border rounded-lg" /></div>
+
+        {/* Sección de Costos */}
+        <div className="border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Costos (compra)</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Costo sin IVA</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.costo_sin_iva || ''}
+                onChange={e => handleCostoSinIvaChange(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Costo con IVA</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.costo_con_iva || ''}
+                onChange={e => setForm({ ...form, costo_con_iva: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50"
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.impuestos_internos || ''}
+                onChange={e => setForm({ ...form, impuestos_internos: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Sección de Precios de Venta */}
+        <div className="border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Precios de Venta</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Precio sin IVA</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.precio_sin_iva || ''}
+                onChange={e => handlePrecioSinIvaChange(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Precio con IVA (Final) *</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.precio}
+                onChange={e => setForm({ ...form, precio: parseFloat(e.target.value) || '' })}
+                className="w-full px-3 py-2 border rounded-lg bg-green-50 border-green-300 font-semibold"
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">* El precio con IVA es el que se muestra al cliente en los pedidos</p>
         </div>
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
