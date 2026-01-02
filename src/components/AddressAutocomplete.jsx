@@ -10,9 +10,14 @@ export const AddressAutocomplete = ({
   disabled = false
 }) => {
   const inputRef = useRef(null);
-  const autocompleteRef = useRef(null);
+  const autocompleteServiceRef = useRef(null);
+  const placesServiceRef = useRef(null);
+  const sessionTokenRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [googleStatus, setGoogleStatus] = useState('loading'); // 'loading', 'ready', 'error'
+  const [predictions, setPredictions] = useState([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
 
   // Verificar que Google Maps esté cargado
   useEffect(() => {
@@ -21,11 +26,11 @@ export const AddressAutocomplete = ({
     let timeout;
 
     const checkGoogle = () => {
-      // Verificar que exista el objeto completo de Places
+      // Verificar que exista el servicio de AutocompleteService (nueva API)
       if (window.google &&
           window.google.maps &&
           window.google.maps.places &&
-          window.google.maps.places.Autocomplete) {
+          window.google.maps.places.AutocompleteService) {
         if (isMounted) {
           setGoogleStatus('ready');
         }
@@ -48,7 +53,7 @@ export const AddressAutocomplete = ({
     // Timeout después de 15 segundos
     timeout = setTimeout(() => {
       clearInterval(interval);
-      if (isMounted && !window.google?.maps?.places?.Autocomplete) {
+      if (isMounted && !window.google?.maps?.places?.AutocompleteService) {
         console.warn('Google Maps API no se cargó correctamente después de 15s');
         setGoogleStatus('error');
       }
@@ -61,55 +66,138 @@ export const AddressAutocomplete = ({
     };
   }, []);
 
-  // Inicializar autocomplete cuando Google esté listo
+  // Inicializar servicios cuando Google esté listo
   useEffect(() => {
-    if (googleStatus !== 'ready' || !inputRef.current || autocompleteRef.current) return;
+    if (googleStatus !== 'ready') return;
 
     try {
-      autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
-        types: ['address'],
+      // Crear AutocompleteService para obtener predicciones
+      autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
+
+      // Crear un div oculto para PlacesService (requerido por la API)
+      const mapDiv = document.createElement('div');
+      mapDiv.style.display = 'none';
+      document.body.appendChild(mapDiv);
+      const map = new window.google.maps.Map(mapDiv);
+      placesServiceRef.current = new window.google.maps.places.PlacesService(map);
+
+      // Crear session token para agrupar requests
+      sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+    } catch (error) {
+      console.error('Error inicializando servicios de Places:', error);
+      setGoogleStatus('error');
+    }
+  }, [googleStatus]);
+
+  // Cerrar dropdown cuando se hace click fuera
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target) &&
+          inputRef.current && !inputRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Buscar predicciones cuando cambia el valor
+  const fetchPredictions = useCallback((inputValue) => {
+    if (!autocompleteServiceRef.current || !inputValue || inputValue.length < 3) {
+      setPredictions([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    setLoading(true);
+
+    autocompleteServiceRef.current.getPlacePredictions(
+      {
+        input: inputValue,
         componentRestrictions: { country: 'ar' },
-        fields: ['formatted_address', 'geometry', 'address_components']
-      });
+        types: ['address'],
+        sessionToken: sessionTokenRef.current
+      },
+      (results, status) => {
+        setLoading(false);
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+          setPredictions(results);
+          setShowDropdown(true);
+        } else {
+          setPredictions([]);
+          setShowDropdown(false);
+        }
+      }
+    );
+  }, []);
 
-      autocompleteRef.current.addListener('place_changed', () => {
-        setLoading(true);
-        const place = autocompleteRef.current.getPlace();
+  // Obtener detalles del lugar seleccionado
+  const handleSelectPrediction = useCallback((prediction) => {
+    if (!placesServiceRef.current) return;
 
-        if (place && place.geometry) {
+    setLoading(true);
+    setShowDropdown(false);
+    onChange(prediction.description);
+
+    placesServiceRef.current.getDetails(
+      {
+        placeId: prediction.place_id,
+        fields: ['formatted_address', 'geometry', 'address_components'],
+        sessionToken: sessionTokenRef.current
+      },
+      (place, status) => {
+        setLoading(false);
+
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
           const result = {
-            direccion: place.formatted_address || '',
-            latitud: place.geometry.location.lat(),
-            longitud: place.geometry.location.lng(),
+            direccion: place.formatted_address || prediction.description,
+            latitud: place.geometry?.location?.lat() || null,
+            longitud: place.geometry?.location?.lng() || null,
             componentes: place.address_components || []
           };
           onSelect(result);
-        }
-        setLoading(false);
-      });
-    } catch (error) {
-      console.error('Error inicializando autocomplete:', error);
-      setGoogleStatus('error');
-    }
 
-    return () => {
-      if (autocompleteRef.current && window.google?.maps?.event) {
-        window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
+          // Crear nuevo session token para la próxima búsqueda
+          sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+        } else {
+          // Si falla obtener detalles, al menos guardamos la dirección
+          onSelect({
+            direccion: prediction.description,
+            latitud: null,
+            longitud: null,
+            componentes: []
+          });
+        }
       }
-    };
-  }, [googleStatus, onSelect]);
+    );
+  }, [onChange, onSelect]);
 
   const handleClear = useCallback(() => {
     onChange('');
     onSelect({ direccion: '', latitud: null, longitud: null });
+    setPredictions([]);
+    setShowDropdown(false);
     if (inputRef.current) {
       inputRef.current.focus();
     }
   }, [onChange, onSelect]);
 
   const handleInputChange = useCallback((e) => {
-    onChange(e.target.value);
-  }, [onChange]);
+    const newValue = e.target.value;
+    onChange(newValue);
+
+    // Solo buscar predicciones si Google está listo
+    if (googleStatus === 'ready') {
+      fetchPredictions(newValue);
+    }
+  }, [onChange, googleStatus, fetchPredictions]);
+
+  const handleInputFocus = useCallback(() => {
+    if (predictions.length > 0) {
+      setShowDropdown(true);
+    }
+  }, [predictions]);
 
   return (
     <div className="relative">
@@ -120,8 +208,10 @@ export const AddressAutocomplete = ({
           type="text"
           value={value}
           onChange={handleInputChange}
+          onFocus={handleInputFocus}
           placeholder={googleStatus === 'ready' ? placeholder : 'Escribí la dirección...'}
           disabled={disabled}
+          autoComplete="off"
           className={`w-full pl-10 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
             disabled ? 'bg-gray-100 cursor-not-allowed' : ''
           } ${className}`}
@@ -139,6 +229,32 @@ export const AddressAutocomplete = ({
           </button>
         )}
       </div>
+
+      {/* Dropdown de predicciones */}
+      {showDropdown && predictions.length > 0 && (
+        <div
+          ref={dropdownRef}
+          className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+        >
+          {predictions.map((prediction) => (
+            <button
+              key={prediction.place_id}
+              type="button"
+              onClick={() => handleSelectPrediction(prediction)}
+              className="w-full px-4 py-3 text-left hover:bg-blue-50 focus:bg-blue-50 focus:outline-none border-b border-gray-100 last:border-b-0 transition-colors"
+            >
+              <div className="flex items-start">
+                <MapPin className="w-4 h-4 text-gray-400 mt-0.5 mr-2 flex-shrink-0" />
+                <div>
+                  <p className="text-sm text-gray-900">{prediction.structured_formatting?.main_text || prediction.description}</p>
+                  <p className="text-xs text-gray-500">{prediction.structured_formatting?.secondary_text || ''}</p>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       {googleStatus === 'loading' && (
         <p className="text-xs text-blue-600 mt-1 flex items-center">
           <Loader2 className="w-3 h-3 mr-1 animate-spin" />
@@ -151,7 +267,7 @@ export const AddressAutocomplete = ({
           Autocompletado no disponible. Escribí la dirección manualmente.
         </p>
       )}
-      {googleStatus === 'ready' && (
+      {googleStatus === 'ready' && !showDropdown && (
         <p className="text-xs text-green-600 mt-1">
           Escribí para ver sugerencias de direcciones
         </p>
