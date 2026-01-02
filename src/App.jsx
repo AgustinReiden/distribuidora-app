@@ -363,14 +363,18 @@ function MainApp() {
     });
   };
 
-  const handleAsignarTransportista = async (transportistaId) => {
+  const handleAsignarTransportista = async (transportistaId, marcarListo = false) => {
     if (!pedidoAsignando) return;
     setGuardando(true);
     try {
-      await asignarTransportista(pedidoAsignando.id, transportistaId || null);
+      await asignarTransportista(pedidoAsignando.id, transportistaId || null, marcarListo);
       setModalAsignar(false);
       setPedidoAsignando(null);
-      toast.success(transportistaId ? 'Transportista asignado correctamente' : 'Transportista desasignado');
+      if (transportistaId) {
+        toast.success(marcarListo ? 'Transportista asignado y pedido listo para entregar' : 'Transportista asignado (el pedido mantiene su estado actual)');
+      } else {
+        toast.success('Transportista desasignado');
+      }
     } catch (e) {
       toast.error('Error: ' + e.message);
     }
@@ -1121,7 +1125,7 @@ function MainApp() {
         <ModalOptimizarRuta
           transportistas={transportistas}
           pedidos={pedidos}
-          onOptimizar={optimizarRuta}
+          onOptimizar={(transportistaId, pedidosData) => optimizarRuta(transportistaId, pedidosData)}
           onAplicarOrden={handleAplicarOrdenOptimizado}
           onClose={handleCerrarModalOptimizar}
           loading={loadingOptimizacion}
