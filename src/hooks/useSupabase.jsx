@@ -347,46 +347,121 @@ export function useUsuarios() {
 }
 
 export function useDashboard() {
-  const [metricas, setMetricas] = useState({ ventasHoy: 0, ventasSemana: 0, ventasMes: 0, pedidosHoy: 0, pedidosSemana: 0, pedidosMes: 0, productosMasVendidos: [], clientesMasActivos: [], pedidosPorEstado: { pendiente: 0, asignado: 0, entregado: 0 }, ventasPorDia: [] })
+  const [metricas, setMetricas] = useState({
+    ventasPeriodo: 0,
+    pedidosPeriodo: 0,
+    productosMasVendidos: [],
+    clientesMasActivos: [],
+    pedidosPorEstado: { pendiente: 0, en_preparacion: 0, asignado: 0, entregado: 0 },
+    ventasPorDia: []
+  })
   const [loading, setLoading] = useState(true)
   const [loadingReporte, setLoadingReporte] = useState(false)
   const [reportePreventistas, setReportePreventistas] = useState([])
   const [reporteInicializado, setReporteInicializado] = useState(false)
+  const [filtroPeriodo, setFiltroPeriodo] = useState('mes') // 'hoy', 'semana', 'mes', 'anio', 'historico', 'personalizado'
+  const [fechaDesde, setFechaDesde] = useState(null)
+  const [fechaHasta, setFechaHasta] = useState(null)
 
-  const calcularMetricas = async () => {
+  const calcularMetricas = async (periodo = filtroPeriodo, fDesde = fechaDesde, fHasta = fechaHasta) => {
     setLoading(true)
     try {
-      const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0,0,0,0)
-      const { data: pedidos, error } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).gte('created_at', inicioMes.toISOString())
-      if (error) throw error
-      if (!pedidos) { setLoading(false); return }
+      // Obtener TODOS los pedidos
+      const { data: todosPedidos, error: errorTodos } = await supabase
+        .from('pedidos')
+        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+        .order('created_at', { ascending: false })
 
-      const hoy = new Date(); hoy.setHours(0,0,0,0)
-      const hace7Dias = new Date(); hace7Dias.setDate(hace7Dias.getDate() - 7); hace7Dias.setHours(0,0,0,0)
-      const pedidosHoy = pedidos.filter(p => new Date(p.created_at) >= hoy)
-      const pedidosSemana = pedidos.filter(p => new Date(p.created_at) >= hace7Dias)
+      if (errorTodos) throw errorTodos
+      if (!todosPedidos) { setLoading(false); return }
 
+      // Calcular fechas límite según el período seleccionado
+      const hoy = new Date()
+      const hoyStr = hoy.toISOString().split('T')[0]
+      let fechaInicioStr = null
+
+      switch (periodo) {
+        case 'hoy':
+          fechaInicioStr = hoyStr
+          break
+        case 'semana':
+          const hace7Dias = new Date()
+          hace7Dias.setDate(hace7Dias.getDate() - 7)
+          fechaInicioStr = hace7Dias.toISOString().split('T')[0]
+          break
+        case 'mes':
+          const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
+          fechaInicioStr = inicioMes.toISOString().split('T')[0]
+          break
+        case 'anio':
+          const inicioAnio = new Date(hoy.getFullYear(), 0, 1)
+          fechaInicioStr = inicioAnio.toISOString().split('T')[0]
+          break
+        case 'personalizado':
+          fechaInicioStr = fDesde || null
+          break
+        case 'historico':
+        default:
+          fechaInicioStr = null
+          break
+      }
+
+      // Filtrar pedidos según el período
+      let pedidosFiltrados = todosPedidos
+      if (fechaInicioStr) {
+        pedidosFiltrados = todosPedidos.filter(p => p.created_at?.split('T')[0] >= fechaInicioStr)
+      }
+      if (periodo === 'personalizado' && fHasta) {
+        pedidosFiltrados = pedidosFiltrados.filter(p => p.created_at?.split('T')[0] <= fHasta)
+      }
+
+      // Top productos (del período filtrado)
       const productosVendidos = {}
-      pedidos.forEach(p => p.items?.forEach(i => { const id = i.producto_id; if (!productosVendidos[id]) productosVendidos[id] = { id, nombre: i.producto?.nombre || 'N/A', cantidad: 0 }; productosVendidos[id].cantidad += i.cantidad }))
+      pedidosFiltrados.forEach(p => p.items?.forEach(i => {
+        const id = i.producto_id
+        if (!productosVendidos[id]) productosVendidos[id] = { id, nombre: i.producto?.nombre || 'N/A', cantidad: 0 }
+        productosVendidos[id].cantidad += i.cantidad
+      }))
       const topProductos = Object.values(productosVendidos).sort((a, b) => b.cantidad - a.cantidad).slice(0, 5)
 
+      // Top clientes (del período filtrado)
       const clientesActivos = {}
-      pedidos.forEach(p => { const id = p.cliente_id; if (!clientesActivos[id]) clientesActivos[id] = { id, nombre: p.cliente?.nombre_fantasia || 'N/A', total: 0, pedidos: 0 }; clientesActivos[id].total += p.total || 0; clientesActivos[id].pedidos += 1 })
+      pedidosFiltrados.forEach(p => {
+        const id = p.cliente_id
+        if (!clientesActivos[id]) clientesActivos[id] = { id, nombre: p.cliente?.nombre_fantasia || 'N/A', total: 0, pedidos: 0 }
+        clientesActivos[id].total += p.total || 0
+        clientesActivos[id].pedidos += 1
+      })
       const topClientes = Object.values(clientesActivos).sort((a, b) => b.total - a.total).slice(0, 5)
 
+      // Ventas por día (últimos 7 días, siempre)
       const ventasPorDia = []
       for (let i = 6; i >= 0; i--) {
-        const fecha = new Date(); fecha.setDate(fecha.getDate() - i); fecha.setHours(0,0,0,0)
-        const finDia = new Date(fecha); finDia.setHours(23,59,59,999)
-        const pedidosDia = pedidos.filter(p => { const f = new Date(p.created_at); return f >= fecha && f <= finDia })
-        ventasPorDia.push({ dia: fecha.toLocaleDateString('es-AR', { weekday: 'short' }), ventas: pedidosDia.reduce((s, p) => s + (p.total || 0), 0), pedidos: pedidosDia.length })
+        const fecha = new Date()
+        fecha.setDate(fecha.getDate() - i)
+        const fechaStr = fecha.toISOString().split('T')[0]
+        const pedidosDia = todosPedidos.filter(p => p.created_at?.split('T')[0] === fechaStr)
+        ventasPorDia.push({
+          dia: fecha.toLocaleDateString('es-AR', { weekday: 'short' }),
+          ventas: pedidosDia.reduce((s, p) => s + (p.total || 0), 0),
+          pedidos: pedidosDia.length
+        })
+      }
+
+      // Pedidos por estado (TODOS los pedidos activos, sin filtro de fecha)
+      const pedidosPorEstado = {
+        pendiente: todosPedidos.filter(p => p.estado === 'pendiente').length,
+        en_preparacion: todosPedidos.filter(p => p.estado === 'en_preparacion').length,
+        asignado: todosPedidos.filter(p => p.estado === 'asignado').length,
+        entregado: todosPedidos.filter(p => p.estado === 'entregado').length
       }
 
       setMetricas({
-        ventasHoy: pedidosHoy.reduce((s, p) => s + (p.total || 0), 0), ventasSemana: pedidosSemana.reduce((s, p) => s + (p.total || 0), 0), ventasMes: pedidos.reduce((s, p) => s + (p.total || 0), 0),
-        pedidosHoy: pedidosHoy.length, pedidosSemana: pedidosSemana.length, pedidosMes: pedidos.length,
-        productosMasVendidos: topProductos, clientesMasActivos: topClientes,
-        pedidosPorEstado: { pendiente: pedidos.filter(p => p.estado === 'pendiente').length, asignado: pedidos.filter(p => p.estado === 'asignado').length, entregado: pedidos.filter(p => p.estado === 'entregado').length },
+        ventasPeriodo: pedidosFiltrados.reduce((s, p) => s + (p.total || 0), 0),
+        pedidosPeriodo: pedidosFiltrados.length,
+        productosMasVendidos: topProductos,
+        clientesMasActivos: topClientes,
+        pedidosPorEstado,
         ventasPorDia
       })
     } catch (error) {
@@ -395,6 +470,13 @@ export function useDashboard() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const cambiarPeriodo = (nuevoPeriodo, fDesde = null, fHasta = null) => {
+    setFiltroPeriodo(nuevoPeriodo)
+    setFechaDesde(fDesde)
+    setFechaHasta(fHasta)
+    calcularMetricas(nuevoPeriodo, fDesde, fHasta)
   }
   const calcularReportePreventistas = async (fechaDesde = null, fechaHasta = null) => {
     setLoadingReporte(true)
@@ -482,7 +564,9 @@ export function useDashboard() {
     reportePreventistas,
     reporteInicializado,
     calcularReportePreventistas,
-    refetch: calcularMetricas
+    refetch: calcularMetricas,
+    filtroPeriodo,
+    cambiarPeriodo
   }
 }
 
