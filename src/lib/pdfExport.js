@@ -5,114 +5,113 @@ const formatFecha = (fecha) => new Date(fecha || new Date()).toLocaleDateString(
 
 /**
  * Genera PDF de Orden de Preparación para el depósito
+ * Formato: Ticket comandera de 75mm de ancho
  * @param {Array} pedidos - Lista de pedidos a incluir
  * @returns {void} - Descarga el PDF
  */
 export function generarOrdenPreparacion(pedidos) {
-  const doc = new jsPDF();
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 15;
+  // Ticket comandera: 75mm de ancho, altura dinámica
+  const ticketWidth = 75; // mm
+  const margin = 3; // mm
+  const contentWidth = ticketWidth - (margin * 2);
+
+  // Calcular altura necesaria
+  let totalHeight = 25; // Encabezado inicial
+  pedidos.forEach(pedido => {
+    totalHeight += 18; // Cabecera del pedido
+    totalHeight += (pedido.items?.length || 0) * 5; // Productos
+    if (pedido.notas) totalHeight += 8;
+    totalHeight += 5; // Separador
+  });
+  totalHeight += 10; // Margen inferior
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [ticketWidth, Math.max(totalHeight, 50)]
+  });
+
   let y = margin;
 
-  // Función para agregar nueva página si es necesario
-  const checkNewPage = (requiredSpace = 30) => {
-    if (y + requiredSpace > pageHeight - margin) {
-      doc.addPage();
-      y = margin;
-      return true;
-    }
-    return false;
-  };
-
   // Título principal
-  doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
-  doc.text('ORDENES DE PREPARACION', pageWidth / 2, y, { align: 'center' });
-  y += 8;
-
   doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ORDEN DE PREPARACION', ticketWidth / 2, y + 4, { align: 'center' });
+  y += 7;
+
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text(formatFecha(new Date()), pageWidth / 2, y, { align: 'center' });
+  doc.text(formatFecha(new Date()), ticketWidth / 2, y, { align: 'center' });
+  y += 4;
+
+  doc.setFontSize(7);
+  doc.text(`Total: ${pedidos.length} pedido(s)`, ticketWidth / 2, y, { align: 'center' });
   y += 5;
 
-  doc.setFontSize(10);
-  doc.text(`Total de pedidos: ${pedidos.length}`, pageWidth / 2, y, { align: 'center' });
-  y += 12;
-
   // Línea divisora
-  doc.setLineWidth(0.5);
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 8;
+  doc.setLineWidth(0.3);
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 4;
 
   // Iterar sobre cada pedido
   pedidos.forEach((pedido, index) => {
-    // Calcular espacio necesario para este pedido
-    const itemsCount = pedido.items?.length || 0;
-    const requiredSpace = 40 + (itemsCount * 8);
-    checkNewPage(requiredSpace);
-
     // Cabecera del pedido
-    doc.setFillColor(240, 240, 240);
-    doc.rect(margin, y - 2, pageWidth - (margin * 2), 12, 'F');
-
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`PEDIDO #${pedido.id}`, margin + 3, y + 5);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const clienteNombre = pedido.cliente?.nombre_fantasia || 'Sin cliente';
-    doc.text(clienteNombre, margin + 50, y + 5);
-    y += 14;
-
-    // Dirección del cliente
     doc.setFontSize(9);
-    doc.setTextColor(100);
-    const direccion = pedido.cliente?.direccion || 'Sin dirección';
-    doc.text(`Direccion: ${direccion}`, margin + 3, y);
-    y += 6;
+    doc.setFont('helvetica', 'bold');
+    doc.text(`#${pedido.id}`, margin, y);
 
-    // Teléfono si existe
-    if (pedido.cliente?.telefono) {
-      doc.text(`Telefono: ${pedido.cliente.telefono}`, margin + 3, y);
-      y += 6;
-    }
-
-    // Notas si existen
-    if (pedido.notas) {
-      doc.setTextColor(0, 100, 200);
-      doc.text(`Notas: ${pedido.notas}`, margin + 3, y);
-      y += 6;
-    }
-
-    doc.setTextColor(0);
+    const clienteNombre = pedido.cliente?.nombre_fantasia || 'Sin cliente';
+    const nombreTruncado = clienteNombre.length > 20 ? clienteNombre.substring(0, 18) + '..' : clienteNombre;
+    doc.text(nombreTruncado, margin + 10, y);
     y += 4;
 
-    // Lista de productos con checkboxes
-    doc.setFontSize(10);
+    // Dirección
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    const direccion = pedido.cliente?.direccion || 'Sin direccion';
+    const dirTruncada = direccion.length > 35 ? direccion.substring(0, 33) + '..' : direccion;
+    doc.text(dirTruncada, margin, y);
+    y += 3;
+
+    // Teléfono
+    if (pedido.cliente?.telefono) {
+      doc.text(`Tel: ${pedido.cliente.telefono}`, margin, y);
+      y += 3;
+    }
+
+    // Notas
+    if (pedido.notas) {
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'italic');
+      const notasTruncadas = pedido.notas.length > 40 ? pedido.notas.substring(0, 38) + '..' : pedido.notas;
+      doc.text(`* ${notasTruncadas}`, margin, y);
+      y += 3;
+    }
+
+    y += 2;
+
+    // Lista de productos
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
     pedido.items?.forEach((item) => {
-      checkNewPage(10);
-
-      // Checkbox vacío
-      doc.setLineWidth(0.3);
-      doc.rect(margin + 3, y - 3, 4, 4);
-
-      // Cantidad y producto
       const cantidad = item.cantidad;
-      const producto = item.producto?.nombre || 'Producto desconocido';
-      doc.text(`${cantidad}x ${producto}`, margin + 12, y);
-      y += 7;
+      const producto = item.producto?.nombre || 'Producto';
+      const prodTruncado = producto.length > 25 ? producto.substring(0, 23) + '..' : producto;
+
+      // Checkbox pequeño
+      doc.rect(margin, y - 2.5, 2.5, 2.5);
+      doc.text(`${cantidad}x ${prodTruncado}`, margin + 4, y);
+      y += 4;
     });
 
-    y += 5;
+    y += 2;
 
     // Línea divisora entre pedidos
     doc.setLineWidth(0.2);
-    doc.setDrawColor(200);
-    doc.line(margin, y, pageWidth - margin, y);
+    doc.setDrawColor(150);
+    doc.line(margin, y, ticketWidth - margin, y);
     doc.setDrawColor(0);
-    y += 8;
+    y += 3;
   });
 
   // Descargar PDF
@@ -122,31 +121,33 @@ export function generarOrdenPreparacion(pedidos) {
 
 /**
  * Genera PDF de Hoja de Ruta para el transportista
+ * Formato: Ticket comandera de 75mm de ancho
  * @param {Object} transportista - Datos del transportista
  * @param {Array} pedidos - Lista de pedidos asignados
  * @returns {void} - Descarga el PDF
  */
 export function generarHojaRuta(transportista, pedidos) {
-  const doc = new jsPDF();
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 15;
-  let y = margin;
+  // Ticket comandera: 75mm de ancho
+  const ticketWidth = 75; // mm
+  const margin = 3; // mm
 
-  // Función para agregar nueva página si es necesario
-  const checkNewPage = (requiredSpace = 30) => {
-    if (y + requiredSpace > pageHeight - margin) {
-      doc.addPage();
-      y = margin;
-      // Repetir cabecera en nueva página
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'italic');
-      doc.text(`Hoja de Ruta - ${transportista?.nombre || 'Transportista'} (continuacion)`, margin, y);
-      y += 10;
-      return true;
-    }
-    return false;
-  };
+  // Calcular altura necesaria
+  let totalHeight = 35; // Encabezado y resumen
+  pedidos.forEach(pedido => {
+    totalHeight += 30; // Info básica del pedido
+    const itemsCount = pedido.items?.length || 0;
+    totalHeight += Math.ceil(itemsCount * 4); // Productos resumidos
+    if (pedido.notas) totalHeight += 6;
+  });
+  totalHeight += 25; // Pie de página
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [ticketWidth, Math.max(totalHeight, 80)]
+  });
+
+  let y = margin;
 
   // Calcular totales
   const totalPedidos = pedidos.length;
@@ -156,173 +157,137 @@ export function generarHojaRuta(transportista, pedidos) {
     .reduce((sum, p) => sum + (p.total || 0), 0);
 
   // Título principal
-  doc.setFontSize(18);
+  doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  doc.text('HOJA DE RUTA', pageWidth / 2, y, { align: 'center' });
-  y += 10;
-
-  // Información del transportista
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text(transportista?.nombre || 'Transportista', pageWidth / 2, y, { align: 'center' });
+  doc.text('HOJA DE RUTA', ticketWidth / 2, y + 4, { align: 'center' });
   y += 7;
 
-  doc.setFontSize(11);
+  // Nombre del transportista
+  doc.setFontSize(9);
+  doc.text(transportista?.nombre || 'Transportista', ticketWidth / 2, y, { align: 'center' });
+  y += 4;
+
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.text(formatFecha(new Date()), pageWidth / 2, y, { align: 'center' });
-  y += 10;
+  doc.text(formatFecha(new Date()), ticketWidth / 2, y, { align: 'center' });
+  y += 5;
 
   // Resumen
-  doc.setFillColor(230, 240, 250);
-  doc.rect(margin, y, pageWidth - (margin * 2), 20, 'F');
-  y += 6;
+  doc.setLineWidth(0.3);
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 3;
 
-  doc.setFontSize(10);
-  doc.text(`Total entregas: ${totalPedidos}`, margin + 5, y);
-  doc.text(`Total a cobrar: ${formatPrecio(totalACobrar)}`, pageWidth / 2, y);
-  y += 7;
-  doc.text(`Pendiente de cobro: ${formatPrecio(totalPendienteCobro)}`, margin + 5, y);
-  y += 12;
+  doc.setFontSize(7);
+  doc.text(`Entregas: ${totalPedidos}`, margin, y);
+  doc.text(`Total: ${formatPrecio(totalACobrar)}`, ticketWidth - margin, y, { align: 'right' });
+  y += 3;
+  doc.text(`Pend. cobro: ${formatPrecio(totalPendienteCobro)}`, margin, y);
+  y += 4;
 
-  // Línea divisora
-  doc.setLineWidth(0.5);
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 10;
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 4;
 
   // Iterar sobre cada pedido/entrega
   pedidos.forEach((pedido, index) => {
-    // Calcular espacio necesario
-    const itemsText = pedido.items?.map(i => `${i.producto?.nombre} x${i.cantidad}`).join(', ') || '';
-    const requiredSpace = 60;
-    checkNewPage(requiredSpace);
-
     // Número de entrega
-    doc.setFillColor(50, 100, 150);
-    doc.setTextColor(255);
-    doc.setFontSize(12);
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.circle(margin + 8, y, 6, 'F');
-    doc.text(`${index + 1}`, margin + 6, y + 3);
-    doc.setTextColor(0);
+    doc.text(`${index + 1}.`, margin, y);
 
     // Nombre del cliente
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
     const clienteNombre = pedido.cliente?.nombre_fantasia || 'Sin cliente';
-    doc.text(clienteNombre, margin + 20, y + 2);
+    const nombreTruncado = clienteNombre.length > 18 ? clienteNombre.substring(0, 16) + '..' : clienteNombre;
+    doc.text(nombreTruncado, margin + 6, y);
 
-    // Total del pedido
-    const estadoPagoColor = pedido.estado_pago === 'pagado' ? [0, 150, 0] :
-                            pedido.estado_pago === 'parcial' ? [200, 150, 0] : [200, 0, 0];
-    doc.setTextColor(...estadoPagoColor);
-    doc.text(formatPrecio(pedido.total), pageWidth - margin - 5, y + 2, { align: 'right' });
-    doc.setTextColor(0);
-    y += 10;
+    // Total con color según estado de pago
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    const estadoPagoSymbol = pedido.estado_pago === 'pagado' ? '[P]' :
+                             pedido.estado_pago === 'parcial' ? '[*]' : '[$]';
+    doc.text(`${estadoPagoSymbol} ${formatPrecio(pedido.total)}`, ticketWidth - margin, y, { align: 'right' });
+    y += 4;
 
     // Dirección
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    const direccion = pedido.cliente?.direccion || 'Sin dirección';
-    doc.text(`  ${direccion}`, margin + 20, y);
-    y += 6;
+    doc.setFontSize(7);
+    const direccion = pedido.cliente?.direccion || 'Sin direccion';
+    const dirTruncada = direccion.length > 40 ? direccion.substring(0, 38) + '..' : direccion;
+    doc.text(dirTruncada, margin, y);
+    y += 3;
 
     // Teléfono
     if (pedido.cliente?.telefono) {
-      doc.text(`  Tel: ${pedido.cliente.telefono}`, margin + 20, y);
-      y += 6;
+      doc.text(`Tel: ${pedido.cliente.telefono}`, margin, y);
+      y += 3;
     }
-
-    // Estado de pago
-    const estadoPagoTexto = pedido.estado_pago === 'pagado' ? 'PAGADO' :
-                           pedido.estado_pago === 'parcial' ? 'PAGO PARCIAL' : 'PENDIENTE DE PAGO';
-    doc.setTextColor(...estadoPagoColor);
-    doc.text(`  Estado: ${estadoPagoTexto}`, margin + 20, y);
-    doc.setTextColor(0);
-    y += 6;
 
     // Forma de pago
-    if (pedido.forma_pago) {
-      const formaPagoTexto = {
-        efectivo: 'Efectivo',
-        transferencia: 'Transferencia',
-        cheque: 'Cheque',
-        cuenta_corriente: 'Cuenta Corriente',
-        tarjeta: 'Tarjeta'
-      }[pedido.forma_pago] || pedido.forma_pago;
-      doc.text(`  Forma de pago: ${formaPagoTexto}`, margin + 20, y);
-      y += 6;
-    }
+    const formaPagoTexto = {
+      efectivo: 'Efvo',
+      transferencia: 'Transf',
+      cheque: 'Cheque',
+      cuenta_corriente: 'Cta.Cte',
+      tarjeta: 'Tarjeta'
+    }[pedido.forma_pago] || pedido.forma_pago || 'Efvo';
 
-    // Productos (resumido)
-    doc.setFontSize(9);
-    doc.setTextColor(80);
-    // Dividir productos en líneas si son muy largos
-    const maxWidth = pageWidth - margin - 30;
-    const productosLines = doc.splitTextToSize(`  Productos: ${itemsText}`, maxWidth);
-    productosLines.forEach(line => {
-      checkNewPage(8);
-      doc.text(line, margin + 20, y);
-      y += 5;
+    const estadoPagoTexto = pedido.estado_pago === 'pagado' ? 'PAGADO' :
+                           pedido.estado_pago === 'parcial' ? 'PARCIAL' : 'PEND';
+    doc.text(`${formaPagoTexto} | ${estadoPagoTexto}`, margin, y);
+    y += 3;
+
+    // Productos (formato compacto)
+    doc.setFontSize(6);
+    const productosTexto = pedido.items?.map(i => `${i.cantidad}x${i.producto?.nombre?.substring(0,12) || '?'}`).join(', ') || '';
+    const prodLines = doc.splitTextToSize(productosTexto, ticketWidth - (margin * 2));
+    prodLines.slice(0, 2).forEach(line => {
+      doc.text(line, margin, y);
+      y += 3;
     });
-    doc.setTextColor(0);
-    y += 3;
 
-    // Notas si existen
+    // Notas
     if (pedido.notas) {
-      doc.setFontSize(9);
-      doc.setTextColor(0, 100, 200);
-      const notasLines = doc.splitTextToSize(`  Notas: ${pedido.notas}`, maxWidth);
-      notasLines.forEach(line => {
-        checkNewPage(8);
-        doc.text(line, margin + 20, y);
-        y += 5;
-      });
-      doc.setTextColor(0);
-      y += 2;
+      doc.setFont('helvetica', 'italic');
+      const notasTruncadas = pedido.notas.length > 35 ? pedido.notas.substring(0, 33) + '..' : pedido.notas;
+      doc.text(`* ${notasTruncadas}`, margin, y);
+      y += 3;
+      doc.setFont('helvetica', 'normal');
     }
 
-    // Área de firma
-    y += 3;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Entregado:', margin + 20, y);
-
-    // Checkbox
-    doc.setLineWidth(0.3);
-    doc.rect(margin + 45, y - 3, 4, 4);
-    doc.text('SI', margin + 51, y);
-    doc.rect(margin + 60, y - 3, 4, 4);
-    doc.text('NO', margin + 66, y);
-
-    // Línea para firma
-    doc.text('Firma: ___________________________', margin + 90, y);
-    y += 10;
+    // Área de confirmación compacta
+    y += 1;
+    doc.setFontSize(7);
+    doc.rect(margin, y - 2, 2.5, 2.5); // Checkbox
+    doc.text('Entregado', margin + 4, y);
+    doc.text('Firma:______________', ticketWidth / 2, y);
+    y += 4;
 
     // Línea divisora
     doc.setLineWidth(0.2);
-    doc.setDrawColor(180);
-    doc.line(margin + 15, y, pageWidth - margin, y);
+    doc.setDrawColor(150);
+    doc.line(margin, y, ticketWidth - margin, y);
     doc.setDrawColor(0);
-    y += 8;
+    y += 3;
   });
 
-  // Pie de página con resumen final en la última página
-  y = pageHeight - 40;
+  // Pie de página con resumen
+  y += 2;
   doc.setLineWidth(0.5);
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 8;
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 4;
 
-  doc.setFontSize(10);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text('RESUMEN DE COBRANZA', margin, y);
-  y += 8;
+  doc.text('RESUMEN COBRANZA', ticketWidth / 2, y, { align: 'center' });
+  y += 4;
 
   doc.setFont('helvetica', 'normal');
-  doc.text(`Total cobrado: ___________________`, margin, y);
-  doc.text(`Total en efectivo: ___________________`, pageWidth / 2, y);
-  y += 7;
-  doc.text(`Total transferencia: ___________________`, margin, y);
-  doc.text(`Firma transportista: ___________________`, pageWidth / 2, y);
+  doc.setFontSize(7);
+  doc.text('Cobrado: ____________', margin, y);
+  y += 4;
+  doc.text('Efectivo: ____________', margin, y);
+  y += 4;
+  doc.text('Transf: ____________', margin, y);
+  y += 4;
+  doc.text('Firma: ______________', margin, y);
 
   // Descargar PDF
   const fecha = formatFecha(new Date()).replace(/\//g, '-');

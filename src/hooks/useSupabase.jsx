@@ -116,8 +116,40 @@ export function useProductos() {
   }
   useEffect(() => { fetchProductos() }, [])
 
-  const agregarProducto = async (producto) => { const { data, error } = await supabase.from('productos').insert([{ nombre: producto.nombre, precio: producto.precio, stock: producto.stock, categoria: producto.categoria || null }]).select().single(); if (error) throw error; setProductos(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre))); return data }
-  const actualizarProducto = async (id, producto) => { const { data, error } = await supabase.from('productos').update({ nombre: producto.nombre, precio: producto.precio, stock: producto.stock, categoria: producto.categoria || null }).eq('id', id).select().single(); if (error) throw error; setProductos(prev => prev.map(p => p.id === id ? data : p)); return data }
+  const agregarProducto = async (producto) => {
+    const { data, error } = await supabase.from('productos').insert([{
+      nombre: producto.nombre,
+      codigo: producto.codigo || null,
+      precio: producto.precio,
+      stock: producto.stock,
+      categoria: producto.categoria || null,
+      costo_sin_iva: producto.costo_sin_iva ? parseFloat(producto.costo_sin_iva) : null,
+      costo_con_iva: producto.costo_con_iva ? parseFloat(producto.costo_con_iva) : null,
+      impuestos_internos: producto.impuestos_internos ? parseFloat(producto.impuestos_internos) : null,
+      precio_sin_iva: producto.precio_sin_iva ? parseFloat(producto.precio_sin_iva) : null
+    }]).select().single()
+    if (error) throw error
+    setProductos(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    return data
+  }
+
+  const actualizarProducto = async (id, producto) => {
+    const { data, error } = await supabase.from('productos').update({
+      nombre: producto.nombre,
+      codigo: producto.codigo || null,
+      precio: producto.precio,
+      stock: producto.stock,
+      categoria: producto.categoria || null,
+      costo_sin_iva: producto.costo_sin_iva ? parseFloat(producto.costo_sin_iva) : null,
+      costo_con_iva: producto.costo_con_iva ? parseFloat(producto.costo_con_iva) : null,
+      impuestos_internos: producto.impuestos_internos ? parseFloat(producto.impuestos_internos) : null,
+      precio_sin_iva: producto.precio_sin_iva ? parseFloat(producto.precio_sin_iva) : null
+    }).eq('id', id).select().single()
+    if (error) throw error
+    setProductos(prev => prev.map(p => p.id === id ? data : p))
+    return data
+  }
+
   const eliminarProducto = async (id) => { const { error } = await supabase.from('productos').delete().eq('id', id); if (error) throw error; setProductos(prev => prev.filter(p => p.id !== id)) }
 
   const validarStock = (items) => {
