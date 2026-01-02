@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, AlertTriangle, User, BarChart3, Calendar, Download, TrendingUp, DollarSign, FileDown, RefreshCw, ChevronLeft, ChevronRight, History, FileText, CreditCard } from 'lucide-react';
+import { Package, Users, ShoppingCart, Truck, Plus, Edit2, Trash2, Check, Clock, Search, X, Menu, Loader2, LogOut, UserCog, AlertTriangle, User, BarChart3, Calendar, Download, TrendingUp, DollarSign, FileDown, RefreshCw, ChevronLeft, ChevronRight, History, FileText, CreditCard, Route } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ToastProvider, useToast } from './components/Toast.jsx';
-import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF } from './components/Modals.jsx';
+import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalOptimizarRuta } from './components/Modals.jsx';
 import { generarOrdenPreparacion, generarHojaRuta } from './lib/pdfExport.js';
+import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
 
 const formatPrecio = (p) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
 const formatFecha = (f) => f ? new Date(f).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
@@ -60,10 +61,11 @@ function MainApp() {
 
   const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
   const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, loading: loadingProductos, refetch: refetchProductos } = useProductos();
-  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
+  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
   const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo } = useDashboard();
   const { exportando, descargarJSON, exportarPedidosCSV } = useBackup();
+  const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
 
   // Estados de modales
   const [modalCliente, setModalCliente] = useState(false);
@@ -76,6 +78,7 @@ function MainApp() {
   const [modalHistorial, setModalHistorial] = useState(false);
   const [modalEditarPedido, setModalEditarPedido] = useState(false);
   const [modalExportarPDF, setModalExportarPDF] = useState(false);
+  const [modalOptimizarRuta, setModalOptimizarRuta] = useState(false);
 
   const [clienteEditando, setClienteEditando] = useState(null);
   const [productoEditando, setProductoEditando] = useState(null);
@@ -433,6 +436,25 @@ function MainApp() {
     setGuardando(false);
   };
 
+  const handleAplicarOrdenOptimizado = async (ordenOptimizado) => {
+    setGuardando(true);
+    try {
+      await actualizarOrdenEntrega(ordenOptimizado);
+      toast.success('Orden de entrega actualizado correctamente');
+      setModalOptimizarRuta(false);
+      limpiarRuta();
+      refetchPedidos();
+    } catch (e) {
+      toast.error('Error al actualizar orden: ' + e.message);
+    }
+    setGuardando(false);
+  };
+
+  const handleCerrarModalOptimizar = () => {
+    setModalOptimizarRuta(false);
+    limpiarRuta();
+  };
+
   const menuItems = [
     { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin'] },
     { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista'] },
@@ -667,6 +689,7 @@ function MainApp() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold">Pedidos</h1>
         <div className="flex flex-wrap gap-2">
+          {isAdmin && <button onClick={() => setModalOptimizarRuta(true)} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Route className="w-5 h-5" /><span>Optimizar Ruta</span></button>}
           {isAdmin && <button onClick={() => setModalExportarPDF(true)} className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"><FileDown className="w-5 h-5" /><span>Exportar PDF</span></button>}
           {isAdmin && <button onClick={() => exportarPedidosCSV(pedidosParaMostrar)} disabled={exportando} className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"><FileDown className="w-5 h-5" /><span>CSV</span></button>}
           {(isAdmin || isPreventista) && <button onClick={() => setModalPedido(true)} className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"><Plus className="w-5 h-5" /><span>Nuevo</span></button>}
@@ -1091,6 +1114,19 @@ function MainApp() {
           onExportarOrdenPreparacion={generarOrdenPreparacion}
           onExportarHojaRuta={generarHojaRuta}
           onClose={() => setModalExportarPDF(false)}
+        />
+      )}
+
+      {modalOptimizarRuta && (
+        <ModalOptimizarRuta
+          transportistas={transportistas}
+          pedidos={pedidos}
+          onOptimizar={optimizarRuta}
+          onAplicarOrden={handleAplicarOrdenOptimizado}
+          onClose={handleCerrarModalOptimizar}
+          loading={loadingOptimizacion}
+          rutaOptimizada={rutaOptimizada}
+          error={errorOptimizacion}
         />
       )}
     </div>

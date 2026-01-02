@@ -296,6 +296,43 @@ export function usePedidos() {
     setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, forma_pago: formaPago } : p))
   }
 
+  const actualizarOrdenEntrega = async (ordenOptimizado) => {
+    // ordenOptimizado es un array de { pedido_id, orden }
+    if (!ordenOptimizado || ordenOptimizado.length === 0) return
+
+    // Actualizar cada pedido con su nuevo orden
+    for (const item of ordenOptimizado) {
+      const { error } = await supabase
+        .from('pedidos')
+        .update({ orden_entrega: item.orden })
+        .eq('id', item.pedido_id)
+      if (error) throw error
+    }
+
+    // Actualizar estado local
+    setPedidos(prev => prev.map(p => {
+      const ordenItem = ordenOptimizado.find(o => o.pedido_id === p.id)
+      if (ordenItem) {
+        return { ...p, orden_entrega: ordenItem.orden }
+      }
+      return p
+    }))
+  }
+
+  const limpiarOrdenEntrega = async (transportistaId) => {
+    // Limpiar el orden de entrega de todos los pedidos de un transportista
+    const { error } = await supabase
+      .from('pedidos')
+      .update({ orden_entrega: null })
+      .eq('transportista_id', transportistaId)
+    if (error) throw error
+
+    // Actualizar estado local
+    setPedidos(prev => prev.map(p =>
+      p.transportista_id === transportistaId ? { ...p, orden_entrega: null } : p
+    ))
+  }
+
   return {
     pedidos,
     pedidosFiltrados,
@@ -307,6 +344,8 @@ export function usePedidos() {
     actualizarNotasPedido,
     actualizarEstadoPago,
     actualizarFormaPago,
+    actualizarOrdenEntrega,
+    limpiarOrdenEntrega,
     fetchHistorialPedido,
     filtros,
     setFiltros,
