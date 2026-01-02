@@ -1,6 +1,16 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
 
+/**
+ * Componente de autocompletado de direcciones usando Google Places API
+ *
+ * Features:
+ * - Autocompletado de direcciones con Google Places API
+ * - Geocodificación automática (obtiene latitud/longitud)
+ * - Location bias hacia San Miguel de Tucumán para priorizar resultados locales
+ * - Esto evita que direcciones genéricas (ej: "Chacabuco 543") se geocodifiquen
+ *   en ubicaciones incorrectas fuera de Tucumán
+ */
 export const AddressAutocomplete = ({
   value,
   onChange,
@@ -112,12 +122,20 @@ export const AddressAutocomplete = ({
 
     setLoading(true);
 
+    // Coordenadas de San Miguel de Tucumán para priorizar resultados locales
+    const sanMiguelDeTucuman = new window.google.maps.LatLng(-26.8241, -65.2226);
+
     autocompleteServiceRef.current.getPlacePredictions(
       {
         input: inputValue,
         componentRestrictions: { country: 'ar' },
         types: ['address'],
-        sessionToken: sessionTokenRef.current
+        sessionToken: sessionTokenRef.current,
+        // Priorizar resultados cerca de San Miguel de Tucumán con un radio de ~100km
+        locationBias: {
+          center: sanMiguelDeTucuman,
+          radius: 100000 // 100 km en metros
+        }
       },
       (results, status) => {
         setLoading(false);
