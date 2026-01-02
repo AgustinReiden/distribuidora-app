@@ -265,9 +265,22 @@ export function usePedidos() {
     setPedidos(prev => prev.map(p => p.id === id ? { ...p, ...updateData } : p))
   }
 
-  const asignarTransportista = async (pedidoId, transportistaId) => {
-    const { error } = await supabase.from('pedidos').update({ transportista_id: transportistaId || null, estado: transportistaId ? 'asignado' : 'pendiente' }).eq('id', pedidoId)
-    if (error) throw error; await fetchPedidos()
+  const asignarTransportista = async (pedidoId, transportistaId, cambiarEstado = false) => {
+    // Solo actualizar el transportista_id, NO cambiar el estado automáticamente
+    // Esto permite asignar un transportista a un pedido que aún está pendiente de preparar
+    const updateData = { transportista_id: transportistaId || null };
+
+    // Solo cambiar estado si se indica explícitamente o si se desasigna el transportista
+    if (cambiarEstado && transportistaId) {
+      updateData.estado = 'asignado';
+    } else if (!transportistaId) {
+      // Si se desasigna el transportista, volver a pendiente solo si estaba asignado
+      // Esto se maneja en el componente
+    }
+
+    const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoId);
+    if (error) throw error;
+    await fetchPedidos();
   }
 
   const eliminarPedido = async (id, restaurarStockFn) => {

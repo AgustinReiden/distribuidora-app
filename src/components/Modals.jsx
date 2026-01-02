@@ -1,6 +1,7 @@
-import React, { useState, useMemo, memo } from 'react';
-import { X, Loader2, Trash2, AlertTriangle, Check, Search, History, FileText, FileDown, Package, Truck, MapPin, Route, Clock, Navigation } from 'lucide-react';
+import React, { useState, useMemo, memo, useEffect } from 'react';
+import { X, Loader2, Trash2, AlertTriangle, Check, Search, History, FileText, FileDown, Package, Truck, MapPin, Route, Clock, Navigation, Settings, Save } from 'lucide-react';
 import { AddressAutocomplete } from './AddressAutocomplete';
+import { getDepositoCoords, setDepositoCoords } from '../hooks/useOptimizarRuta';
 
 const formatPrecio = (p) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
 const formatFecha = (fecha) => new Date(fecha).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -344,16 +345,73 @@ export const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClos
 // Modal asignar transportista
 export const ModalAsignarTransportista = memo(function ModalAsignarTransportista({ pedido, transportistas, onSave, onClose, guardando }) {
   const [sel, setSel] = useState(pedido?.transportista_id || '');
+  const [marcarListo, setMarcarListo] = useState(false);
+
+  // Verificar si el pedido ya está en estado 'asignado'
+  const yaEstaAsignado = pedido?.estado === 'asignado';
 
   return (
     <ModalBase title="Asignar Transportista" onClose={onClose}>
       <div className="p-4 space-y-4">
-        <div className="bg-gray-50 rounded-lg p-3"><p className="text-sm text-gray-600">Pedido #{pedido?.id}</p><p className="font-medium">{pedido?.cliente?.nombre_fantasia}</p></div>
-        <div><label className="block text-sm font-medium mb-1">Transportista</label><select value={sel} onChange={e => setSel(e.target.value)} className="w-full px-3 py-2 border rounded-lg"><option value="">Sin asignar</option>{transportistas.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select></div>
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-sm text-gray-600">Pedido #{pedido?.id}</p>
+          <p className="font-medium">{pedido?.cliente?.nombre_fantasia}</p>
+          <p className="text-sm text-gray-500">{pedido?.cliente?.direccion}</p>
+          <div className="mt-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+              pedido?.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800' :
+              pedido?.estado === 'en_preparacion' ? 'bg-orange-100 text-orange-800' :
+              pedido?.estado === 'asignado' ? 'bg-blue-100 text-blue-800' :
+              'bg-green-100 text-green-800'
+            }`}>
+              {pedido?.estado === 'pendiente' ? 'Pendiente de preparar' :
+               pedido?.estado === 'en_preparacion' ? 'En preparacion' :
+               pedido?.estado === 'asignado' ? 'Listo para entregar' : 'Entregado'}
+            </span>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Transportista</label>
+          <select value={sel} onChange={e => setSel(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+            <option value="">Sin asignar</option>
+            {transportistas.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+          </select>
+        </div>
+
+        {/* Opción para marcar como listo (solo si hay transportista y no está ya asignado) */}
+        {sel && !yaEstaAsignado && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <label className="flex items-start space-x-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={marcarListo}
+                onChange={e => setMarcarListo(e.target.checked)}
+                className="w-5 h-5 mt-0.5 rounded border-blue-300"
+              />
+              <div>
+                <span className="font-medium text-blue-800">Marcar como listo para entregar</span>
+                <p className="text-sm text-blue-600 mt-1">
+                  Si NO marcas esta opcion, el pedido mantendra su estado actual
+                  {pedido?.estado === 'pendiente' && ' (pendiente de preparar)'}.
+                  El transportista podra verlo pero sabra que aun no esta listo.
+                </p>
+              </div>
+            </label>
+          </div>
+        )}
+
+        {!sel && pedido?.transportista_id && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <p className="text-sm text-yellow-800">
+              Al desasignar el transportista, el pedido mantendra su estado actual.
+            </p>
+          </div>
+        )}
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
-        <button onClick={() => onSave(sel)} disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center">
+        <button onClick={() => onSave(sel, marcarListo)} disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center">
           {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar
         </button>
       </div>
@@ -1065,6 +1123,17 @@ export const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
   error
 }) {
   const [transportistaSeleccionado, setTransportistaSeleccionado] = useState('');
+  const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState(false);
+  const [depositoLat, setDepositoLat] = useState('');
+  const [depositoLng, setDepositoLng] = useState('');
+  const [depositoGuardado, setDepositoGuardado] = useState(false);
+
+  // Cargar coordenadas del depósito al montar
+  useEffect(() => {
+    const coords = getDepositoCoords();
+    setDepositoLat(coords.lat.toString());
+    setDepositoLng(coords.lng.toString());
+  }, []);
 
   // Obtener pedidos del transportista seleccionado
   const pedidosTransportista = useMemo(() => {
@@ -1081,7 +1150,18 @@ export const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
 
   const handleOptimizar = () => {
     if (transportistaSeleccionado) {
-      onOptimizar(transportistaSeleccionado);
+      // Pasar los pedidos completos para que el hook extraiga las coordenadas
+      onOptimizar(transportistaSeleccionado, pedidos);
+    }
+  };
+
+  const handleGuardarDeposito = () => {
+    const lat = parseFloat(depositoLat);
+    const lng = parseFloat(depositoLng);
+    if (!isNaN(lat) && !isNaN(lng)) {
+      setDepositoCoords(lat, lng);
+      setDepositoGuardado(true);
+      setTimeout(() => setDepositoGuardado(false), 2000);
     }
   };
 
@@ -1096,6 +1176,72 @@ export const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
   return (
     <ModalBase title="Optimizar Ruta de Entregas" onClose={onClose} maxWidth="max-w-2xl">
       <div className="p-4 space-y-4">
+        {/* Configuración del depósito (colapsable) */}
+        <div className="border rounded-lg">
+          <button
+            onClick={() => setMostrarConfigDeposito(!mostrarConfigDeposito)}
+            className="w-full flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg"
+          >
+            <div className="flex items-center space-x-2">
+              <Settings className="w-5 h-5 text-gray-500" />
+              <span className="font-medium">Configurar ubicacion del deposito/galpon</span>
+            </div>
+            <span className="text-gray-400">{mostrarConfigDeposito ? '▲' : '▼'}</span>
+          </button>
+          {mostrarConfigDeposito && (
+            <div className="p-3 border-t bg-gray-50 space-y-3">
+              <p className="text-sm text-gray-600">
+                Ingresa las coordenadas de tu deposito o galpon. Este sera el punto de origen para calcular las rutas.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1">Latitud</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={depositoLat}
+                    onChange={e => setDepositoLat(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    placeholder="-26.8241"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Longitud</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={depositoLng}
+                    onChange={e => setDepositoLng(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    placeholder="-65.2226"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">
+                  Tip: Busca tu direccion en Google Maps, click derecho y copia las coordenadas
+                </p>
+                <button
+                  onClick={handleGuardarDeposito}
+                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                >
+                  {depositoGuardado ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Guardado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>Guardar</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Selector de transportista */}
         <div>
           <label className="block text-sm font-medium mb-1">Seleccionar Transportista</label>
