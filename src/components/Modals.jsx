@@ -2,8 +2,8 @@ import React, { useState, useMemo, memo, useEffect } from 'react';
 import { X, Loader2, Trash2, AlertTriangle, Check, Search, History, FileText, FileDown, Package, Truck, MapPin, Route, Clock, Navigation, Settings, Save } from 'lucide-react';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { getDepositoCoords, setDepositoCoords } from '../hooks/useOptimizarRuta';
+import { formatPrecio } from '../utils/formatters';
 
-const formatPrecio = (p) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
 const formatFecha = (fecha) => new Date(fecha).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 // Modal base reutilizable
