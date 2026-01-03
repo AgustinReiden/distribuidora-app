@@ -11,5 +11,6 @@ export {
   ModalHistorialPedido,
   ModalEditarPedido,
   ModalExportarPDF,
-  ModalOptimizarRuta
+  ModalOptimizarRuta,
+  ModalGestionRutas
 } from './modals';

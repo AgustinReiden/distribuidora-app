@@ -315,13 +315,35 @@ export function usePedidos() {
     // ordenOptimizado es un array de { pedido_id, orden }
     if (!ordenOptimizado || ordenOptimizado.length === 0) return
 
-    // Actualizar cada pedido con su nuevo orden
-    for (const item of ordenOptimizado) {
-      const { error } = await supabase
-        .from('pedidos')
-        .update({ orden_entrega: item.orden })
-        .eq('id', item.pedido_id)
-      if (error) throw error
+    // Intentar usar la funcion RPC primero (mas confiable)
+    const { error: rpcError } = await supabase.rpc('actualizar_orden_entrega_batch', {
+      ordenes: ordenOptimizado.map(item => ({
+        pedido_id: item.pedido_id,
+        orden: item.orden
+      }))
+    })
+
+    if (rpcError) {
+      // Si la RPC no existe o falla, intentar update directo
+      console.warn('RPC no disponible, usando update directo:', rpcError.message)
+
+      // Usar raw SQL query a través de rpc genérico
+      for (const item of ordenOptimizado) {
+        const { error } = await supabase
+          .from('pedidos')
+          .update({ orden_entrega: item.orden })
+          .eq('id', item.pedido_id)
+
+        if (error) {
+          // Si el error es de schema cache, refrescar y reintentar
+          if (error.message.includes('schema cache') || error.message.includes('orden_entrega')) {
+            console.error('Error de schema cache. La columna orden_entrega puede no existir en la base de datos.')
+            console.error('Ejecute la migracion: migrations/004_add_orden_entrega.sql')
+            throw new Error('La columna orden_entrega no existe en la base de datos. Contacte al administrador para ejecutar la migracion pendiente.')
+          }
+          throw error
+        }
+      }
     }
 
     // Actualizar estado local
