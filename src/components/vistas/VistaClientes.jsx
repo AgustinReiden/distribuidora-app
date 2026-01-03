@@ -40,8 +40,8 @@ export default function VistaClientes({
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Clientes</h1>
-          <p className="text-sm text-gray-500">{clientes.length} clientes registrados</p>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Clientes</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{clientes.length} clientes registrados</p>
         </div>
         {(isAdmin || isPreventista) && (
           <button
@@ -62,7 +62,7 @@ export default function VistaClientes({
             type="text"
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            className="w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
             placeholder="Buscar por nombre, dirección o teléfono..."
           />
         </div>
@@ -99,14 +99,14 @@ export default function VistaClientes({
           {clientesFiltrados.map(cliente => (
             <div
               key={cliente.id}
-              className="bg-white border rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
+              className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
             >
               <div className="flex justify-between items-start">
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-lg text-gray-800 truncate">
+                  <h3 className="font-semibold text-lg text-gray-800 dark:text-white truncate">
                     {cliente.nombre_fantasia}
                   </h3>
-                  <p className="text-sm text-gray-600 truncate">{cliente.nombre}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 truncate">{cliente.nombre}</p>
                 </div>
                 {isAdmin && (
                   <div className="flex space-x-1 ml-2">
@@ -128,9 +128,9 @@ export default function VistaClientes({
                 )}
               </div>
 
-              <div className="mt-3 space-y-2 text-sm text-gray-500">
+              <div className="mt-3 space-y-2 text-sm text-gray-500 dark:text-gray-400">
                 <div className="flex items-start space-x-2">
-                  <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
+                  <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400 dark:text-gray-500" />
                   <span className="break-words">{cliente.direccion}</span>
                 </div>
                 {cliente.telefono && (
@@ -147,7 +147,7 @@ export default function VistaClientes({
                 {cliente.zona && (
                   <div className="flex items-center space-x-2">
                     <Map className="w-4 h-4 flex-shrink-0 text-gray-400" />
-                    <span className="px-2 py-0.5 bg-gray-100 rounded-full text-xs">
+                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-full text-xs">
                       {cliente.zona}
                     </span>
                   </div>

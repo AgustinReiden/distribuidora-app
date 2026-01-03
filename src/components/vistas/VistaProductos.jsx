@@ -43,10 +43,10 @@ export default function VistaProductos({
 
   const getStockColor = (producto) => {
     const stockMinimo = producto.stock_minimo || 10;
-    if (producto.stock === 0) return 'bg-red-100 text-red-700';
-    if (producto.stock < stockMinimo) return 'bg-yellow-100 text-yellow-700';
-    if (producto.stock < stockMinimo * 2) return 'bg-orange-100 text-orange-700';
-    return 'bg-green-100 text-green-700';
+    if (producto.stock === 0) return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
+    if (producto.stock < stockMinimo) return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
+    if (producto.stock < stockMinimo * 2) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400';
+    return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
   };
 
   return (
@@ -54,8 +54,8 @@ export default function VistaProductos({
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Productos</h1>
-          <p className="text-sm text-gray-500">{productos.length} productos en catálogo</p>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Productos</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{productos.length} productos en catálogo</p>
         </div>
         {isAdmin && (
           <button
@@ -70,28 +70,28 @@ export default function VistaProductos({
 
       {/* Alerta de stock bajo */}
       {productosStockBajo.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4" role="alert">
           <div className="flex items-start space-x-3">
-            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <div className="flex-1">
-              <p className="text-red-700 font-medium">
+              <p className="text-red-700 dark:text-red-300 font-medium">
                 {productosStockBajo.length} producto(s) con stock bajo
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {productosStockBajo.slice(0, 5).map(p => (
-                  <span key={p.id} className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded-full">
+                  <span key={p.id} className="text-xs px-2 py-1 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-full">
                     {p.nombre} ({p.stock})
                   </span>
                 ))}
                 {productosStockBajo.length > 5 && (
-                  <span className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded-full">
+                  <span className="text-xs px-2 py-1 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-full">
                     +{productosStockBajo.length - 5} más
                   </span>
                 )}
               </div>
               <button
                 onClick={() => setMostrarSoloStockBajo(!mostrarSoloStockBajo)}
-                className="mt-2 text-sm text-red-600 hover:underline"
+                className="mt-2 text-sm text-red-600 dark:text-red-400 hover:underline"
               >
                 {mostrarSoloStockBajo ? 'Mostrar todos' : 'Ver solo productos con stock bajo'}
               </button>
@@ -103,17 +103,18 @@ export default function VistaProductos({
       {/* Filtros */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" aria-hidden="true" />
           <input
             type="text"
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            className="w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
             placeholder="Buscar por nombre o código..."
+            aria-label="Buscar productos"
           />
         </div>
         {categorias.length > 1 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por categoría">
             {categorias.map(cat => (
               <button
                 key={cat}
@@ -121,8 +122,9 @@ export default function VistaProductos({
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   filtroCategoria === cat
                     ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
+                aria-pressed={filtroCategoria === cat}
               >
                 {cat === 'todas' ? 'Todas' : cat}
               </button>
@@ -133,45 +135,45 @@ export default function VistaProductos({
 
       {/* Contador de resultados */}
       {(busqueda || filtroCategoria !== 'todas' || mostrarSoloStockBajo) && (
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-gray-600 dark:text-gray-400" aria-live="polite">
           Mostrando {productosFiltrados.length} de {productos.length} productos
         </div>
       )}
 
       {/* Tabla de productos */}
       {loading ? <LoadingSpinner /> : productosFiltrados.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+          <Package className="w-12 h-12 mx-auto mb-3 opacity-50" aria-hidden="true" />
           <p>{busqueda || filtroCategoria !== 'todas' ? 'No se encontraron productos' : 'No hay productos'}</p>
         </div>
       ) : (
-        <div className="bg-white border rounded-lg shadow-sm overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
+        <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm overflow-x-auto">
+          <table className="w-full" role="table">
+            <thead className="bg-gray-50 dark:bg-gray-700/50">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Código</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Producto</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Categoría</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700">Precio</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700">Stock</th>
-                {isAdmin && <th className="px-4 py-3 text-right text-sm font-medium text-gray-700">Acciones</th>}
+                <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Código</th>
+                <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Producto</th>
+                <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Categoría</th>
+                <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Precio</th>
+                <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Stock</th>
+                {isAdmin && <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Acciones</th>}
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y dark:divide-gray-700">
               {productosFiltrados.map(producto => (
-                <tr key={producto.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-500 text-sm font-mono">
+                <tr key={producto.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-sm font-mono">
                     {producto.codigo || '-'}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="font-medium text-gray-800">{producto.nombre}</span>
+                    <span className="font-medium text-gray-800 dark:text-white">{producto.nombre}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={producto.categoria ? 'px-2 py-1 bg-gray-100 rounded-full text-sm text-gray-700' : 'text-gray-400'}>
+                    <span className={producto.categoria ? 'px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}>
                       {producto.categoria || 'Sin categoría'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-blue-600">
+                  <td className="px-4 py-3 text-right font-semibold text-blue-600 dark:text-blue-400">
                     {formatPrecio(producto.precio)}
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -184,17 +186,19 @@ export default function VistaProductos({
                       <div className="flex justify-end space-x-1">
                         <button
                           onClick={() => onEditarProducto(producto)}
-                          className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                           title="Editar"
+                          aria-label={`Editar ${producto.nombre}`}
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="w-4 h-4" aria-hidden="true" />
                         </button>
                         <button
                           onClick={() => onEliminarProducto(producto.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                           title="Eliminar"
+                          aria-label={`Eliminar ${producto.nombre}`}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-4 h-4" aria-hidden="true" />
                         </button>
                       </div>
                     </td>
