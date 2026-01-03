@@ -48,15 +48,6 @@ export const setDepositoCoords = (lat, lng) => {
 
 /**
  * Hook para optimizar rutas de entrega usando Google Routes API vía n8n
- *
- * El workflow de n8n:
- * 1. Recibe transportista_id y coordenadas del depósito
- * 2. Consulta los pedidos asignados al transportista
- * 3. Prepara los waypoints con las coordenadas de los clientes
- * 4. Llama a Google Routes API para optimizar el orden
- * 5. Retorna el orden optimizado de los pedidos
- *
- * @returns {Object} { loading, rutaOptimizada, error, optimizarRuta, limpiarRuta }
  */
 export function useOptimizarRuta() {
   const [loading, setLoading] = useState(false);
@@ -92,6 +83,9 @@ export function useOptimizarRuta() {
         longitud: p.cliente.longitud
       }));
 
+    // DEBUG: Log de pedidos para verificar coordenadas
+    console.log('[OptimizarRuta] Pedidos con coordenadas:', pedidosConCoordenadas);
+
     if (pedidosConCoordenadas.length === 0) {
       setRutaOptimizada({
         success: true,
@@ -107,31 +101,63 @@ export function useOptimizarRuta() {
     // Obtener coordenadas del depósito (configurables)
     const deposito = getDepositoCoords();
 
+    const requestBody = {
+      transportista_id: transportistaId,
+      deposito_lat: deposito.lat,
+      deposito_lng: deposito.lng,
+      google_api_key: GOOGLE_API_KEY,
+      pedidos: pedidosConCoordenadas
+    };
+
+    // DEBUG: Log del request
+    console.log('[OptimizarRuta] Request body:', JSON.stringify(requestBody, null, 2));
+
     try {
       const response = await fetch(N8N_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          transportista_id: transportistaId,
-          deposito_lat: deposito.lat,
-          deposito_lng: deposito.lng,
-          google_api_key: GOOGLE_API_KEY,
-          // Enviar los pedidos con coordenadas para que n8n no tenga que hacer el JOIN
-          pedidos: pedidosConCoordenadas
-        })
+        body: JSON.stringify(requestBody)
       });
 
+      // DEBUG: Log de response status
+      console.log('[OptimizarRuta] Response status:', response.status);
+      console.log('[OptimizarRuta] Response ok:', response.ok);
+
       if (!response.ok) {
-        throw new Error(`Error HTTP: ${response.status}`);
+        // Intentar obtener más detalles del error
+        let errorDetail = '';
+        try {
+          const errorText = await response.text();
+          console.log('[OptimizarRuta] Error response text:', errorText);
+          errorDetail = errorText ? ` - ${errorText}` : '';
+        } catch (e) {
+          console.log('[OptimizarRuta] No se pudo leer el cuerpo del error');
+        }
+        throw new Error(`Error HTTP: ${response.status}${errorDetail}`);
       }
 
-      const data = await response.json();
+      // Obtener respuesta como texto primero para debugging
+      const responseText = await response.text();
+      console.log('[OptimizarRuta] Response text:', responseText);
 
-      // Verificar si la respuesta indica error
+      // Parsear JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('[OptimizarRuta] Error parseando JSON:', parseError);
+        throw new Error('La respuesta no es JSON válido');
+      }
+
+      console.log('[OptimizarRuta] Response data:', data);
+
+      // Verificar si la respuesta indica error (del workflow n8n)
       if (data.error) {
-        throw new Error(data.error);
+        const errorMsg = data.mensaje || data.error;
+        console.error('[OptimizarRuta] Error del workflow:', errorMsg);
+        throw new Error(errorMsg);
       }
 
       // Verificar si no hay pedidos
@@ -145,20 +171,22 @@ export function useOptimizarRuta() {
       }
 
       // Respuesta exitosa con ruta optimizada
-      // Estructura esperada del workflow n8n:
-      // {
-      //   success: true,
-      //   total_pedidos: number,
-      //   orden_optimizado: [{ pedido_id, orden, cliente, direccion }],
-      //   duracion_total: number (segundos),
-      //   distancia_total: number (metros),
-      //   duracion_formato: "X horas Y minutos"
-      // }
       setRutaOptimizada(data);
       return data;
 
     } catch (err) {
-      const errorMessage = err.message || 'Error al optimizar la ruta';
+      console.error('[OptimizarRuta] Error completo:', err);
+
+      // Determinar mensaje de error más descriptivo
+      let errorMessage = err.message || 'Error al optimizar la ruta';
+
+      // Detectar errores específicos
+      if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+        errorMessage = 'Error de conexión: No se pudo conectar con el servidor. Verifica tu conexión a internet o intenta más tarde.';
+      } else if (err.message.includes('CORS') || err.message.includes('cross-origin')) {
+        errorMessage = 'Error de CORS: El servidor no permite esta solicitud desde el navegador.';
+      }
+
       setError(errorMessage);
       return null;
     } finally {
@@ -185,7 +213,6 @@ export function useOptimizarRuta() {
 
 /**
  * Configuración del depósito (exportada para uso en otros componentes)
- * Ahora es configurable, usar getDepositoCoords() y setDepositoCoords()
  */
 export const DEPOSITO_CONFIG = DEPOSITO_DEFAULT;
 
