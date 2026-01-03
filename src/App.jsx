@@ -1,48 +1,46 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, setErrorNotifier } from './hooks/useSupabase.jsx';
-import { ToastProvider, useToast } from './components/Toast.jsx';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalOptimizarRuta } from './components/Modals.jsx';
 import { generarOrdenPreparacion, generarHojaRuta } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
 import { ITEMS_PER_PAGE } from './utils/formatters';
 
-// Componentes
+// Componentes base
 import LoginScreen from './components/auth/LoginScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import TopNavigation from './components/layout/TopNavigation';
-import { useNotifications } from './components/layout/NotificationCenter';
-import VistaDashboard from './components/vistas/VistaDashboard';
-import VistaPedidos from './components/vistas/VistaPedidos';
-import VistaClientes from './components/vistas/VistaClientes';
-import VistaProductos from './components/vistas/VistaProductos';
-import VistaReportes from './components/vistas/VistaReportes';
-import VistaUsuarios from './components/vistas/VistaUsuarios';
+
+// Vistas con lazy loading
+const VistaDashboard = lazy(() => import('./components/vistas/VistaDashboard'));
+const VistaPedidos = lazy(() => import('./components/vistas/VistaPedidos'));
+const VistaClientes = lazy(() => import('./components/vistas/VistaClientes'));
+const VistaProductos = lazy(() => import('./components/vistas/VistaProductos'));
+const VistaReportes = lazy(() => import('./components/vistas/VistaReportes'));
+const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
+
+// Componente de carga para Suspense
+function LoadingVista() {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+    </div>
+  );
+}
 
 function MainApp() {
   const { user, perfil, logout, isAdmin, isPreventista, isTransportista } = useAuth();
-  const toast = useToast();
+  const notify = useNotification();
   const [vista, setVista] = useState(perfil?.rol === 'admin' ? 'dashboard' : 'pedidos');
-
-  // Sistema de notificaciones
-  const {
-    notifications,
-    addNotification,
-    markAsRead,
-    markAllAsRead,
-    removeNotification,
-    clearAll: clearNotifications,
-    unreadCount
-  } = useNotifications();
 
   // Configurar el notificador de errores centralizado
   useEffect(() => {
     setErrorNotifier((message) => {
-      toast.error(message);
-      addNotification({ type: 'error', title: 'Error', message });
+      notify.error(message);
     });
-  }, [toast, addNotification]);
+  }, [notify]);
 
   // Hooks de datos
   const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
@@ -130,9 +128,9 @@ function MainApp() {
       else await agregarCliente(cliente);
       setModalCliente(false);
       setClienteEditando(null);
-      toast.success(cliente.id ? 'Cliente actualizado correctamente' : 'Cliente creado correctamente');
+      notify.success(cliente.id ? 'Cliente actualizado correctamente' : 'Cliente creado correctamente');
     } catch (e) {
-      toast.error('Error: ' + e.message);
+      notify.error('Error: ' + e.message);
     }
     setGuardando(false);
   };
@@ -147,10 +145,9 @@ function MainApp() {
         setGuardando(true);
         try {
           await eliminarCliente(id);
-          toast.success('Cliente eliminado');
-          addNotification({ type: 'success', title: 'Cliente eliminado', message: 'El cliente fue eliminado correctamente' });
+          notify.success('Cliente eliminado', { persist: true });
         } catch (e) {
-          toast.error(e.message);
+          notify.error(e.message);
         } finally {
           setGuardando(false);
           setModalConfirm({ visible: false });
@@ -167,9 +164,9 @@ function MainApp() {
       else await agregarProducto(producto);
       setModalProducto(false);
       setProductoEditando(null);
-      toast.success(producto.id ? 'Producto actualizado correctamente' : 'Producto creado correctamente');
+      notify.success(producto.id ? 'Producto actualizado correctamente' : 'Producto creado correctamente');
     } catch (e) {
-      toast.error('Error: ' + e.message);
+      notify.error('Error: ' + e.message);
     }
     setGuardando(false);
   };
@@ -184,9 +181,9 @@ function MainApp() {
         setGuardando(true);
         try {
           await eliminarProducto(id);
-          toast.success('Producto eliminado');
+          notify.success('Producto eliminado');
         } catch (e) {
-          toast.error(e.message);
+          notify.error(e.message);
         } finally {
           setGuardando(false);
           setModalConfirm({ visible: false });
@@ -202,9 +199,9 @@ function MainApp() {
       await actualizarUsuario(usuario.id, usuario);
       setModalUsuario(false);
       setUsuarioEditando(null);
-      toast.success('Usuario actualizado correctamente');
+      notify.success('Usuario actualizado correctamente');
     } catch (e) {
-      toast.error('Error: ' + e.message);
+      notify.error('Error: ' + e.message);
     }
     setGuardando(false);
   };
@@ -252,18 +249,18 @@ function MainApp() {
 
   const handleCrearClienteEnPedido = useCallback(async (nuevoCliente) => {
     const cliente = await agregarCliente(nuevoCliente);
-    toast.success('Cliente creado correctamente');
+    notify.success('Cliente creado correctamente');
     return cliente;
   }, [agregarCliente, toast]);
 
   const handleGuardarPedido = async () => {
     if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
-      toast.warning('Seleccioná cliente y productos');
+      notify.warning('Seleccioná cliente y productos');
       return;
     }
     const validacion = validarStock(nuevoPedido.items);
     if (!validacion.valido) {
-      toast.error(`Stock insuficiente:\n${validacion.errores.map(e => e.mensaje).join('\n')}`, 5000);
+      notify.error(`Stock insuficiente:\n${validacion.errores.map(e => e.mensaje).join('\n')}`, 5000);
       return;
     }
     setGuardando(true);
@@ -282,10 +279,9 @@ function MainApp() {
       setModalPedido(false);
       refetchProductos();
       refetchMetricas();
-      toast.success('Pedido creado correctamente');
-      addNotification({ type: 'success', title: 'Nuevo pedido', message: 'El pedido fue creado correctamente' });
+      notify.success('Pedido creado correctamente', { persist: true });
     } catch (e) {
-      toast.error('Error al crear pedido: ' + e.message);
+      notify.error('Error al crear pedido: ' + e.message);
     }
     setGuardando(false);
   };
@@ -301,10 +297,9 @@ function MainApp() {
         try {
           await cambiarEstado(pedido.id, 'entregado');
           refetchMetricas();
-          toast.success(`Pedido #${pedido.id} marcado como entregado`);
-          addNotification({ type: 'success', title: 'Pedido entregado', message: `El pedido #${pedido.id} fue marcado como entregado` });
+          notify.success(`Pedido #${pedido.id} marcado como entregado`, { persist: true });
         } catch (e) {
-          toast.error(e.message);
+          notify.error(e.message);
         } finally {
           setGuardando(false);
           setModalConfirm({ visible: false });
@@ -324,9 +319,9 @@ function MainApp() {
         try {
           await cambiarEstado(pedido.id, pedido.transportista_id ? 'asignado' : 'pendiente');
           refetchMetricas();
-          toast.warning(`Pedido #${pedido.id} revertido`);
+          notify.warning(`Pedido #${pedido.id} revertido`);
         } catch (e) {
-          toast.error(e.message);
+          notify.error(e.message);
         } finally {
           setGuardando(false);
           setModalConfirm({ visible: false });
@@ -346,9 +341,9 @@ function MainApp() {
         try {
           await cambiarEstado(pedido.id, 'en_preparacion');
           refetchMetricas();
-          toast.success(`Pedido #${pedido.id} marcado como en preparación`);
+          notify.success(`Pedido #${pedido.id} marcado como en preparación`);
         } catch (e) {
-          toast.error(e.message);
+          notify.error(e.message);
         } finally {
           setGuardando(false);
           setModalConfirm({ visible: false });
@@ -365,12 +360,12 @@ function MainApp() {
       setModalAsignar(false);
       setPedidoAsignando(null);
       if (transportistaId) {
-        toast.success(marcarListo ? 'Transportista asignado y pedido listo para entregar' : 'Transportista asignado (el pedido mantiene su estado actual)');
+        notify.success(marcarListo ? 'Transportista asignado y pedido listo para entregar' : 'Transportista asignado (el pedido mantiene su estado actual)');
       } else {
-        toast.success('Transportista desasignado');
+        notify.success('Transportista desasignado');
       }
     } catch (e) {
-      toast.error('Error: ' + e.message);
+      notify.error('Error: ' + e.message);
     }
     setGuardando(false);
   };
@@ -387,9 +382,9 @@ function MainApp() {
           await eliminarPedido(id, restaurarStock);
           refetchProductos();
           refetchMetricas();
-          toast.success('Pedido eliminado y stock restaurado');
+          notify.success('Pedido eliminado y stock restaurado');
         } catch (e) {
-          toast.error(e.message);
+          notify.error(e.message);
         } finally {
           setGuardando(false);
           setModalConfirm({ visible: false });
@@ -406,7 +401,7 @@ function MainApp() {
       const historial = await fetchHistorialPedido(pedido.id);
       setHistorialCambios(historial);
     } catch (e) {
-      toast.error('Error al cargar historial: ' + e.message);
+      notify.error('Error al cargar historial: ' + e.message);
       setHistorialCambios([]);
     } finally {
       setCargandoHistorial(false);
@@ -427,9 +422,9 @@ function MainApp() {
       await actualizarEstadoPago(pedidoEditando.id, estadoPago);
       setModalEditarPedido(false);
       setPedidoEditando(null);
-      toast.success('Pedido actualizado correctamente');
+      notify.success('Pedido actualizado correctamente');
     } catch (e) {
-      toast.error('Error al actualizar pedido: ' + e.message);
+      notify.error('Error al actualizar pedido: ' + e.message);
     }
     setGuardando(false);
   };
@@ -438,12 +433,12 @@ function MainApp() {
     setGuardando(true);
     try {
       await actualizarOrdenEntrega(ordenOptimizado);
-      toast.success('Orden de entrega actualizado correctamente');
+      notify.success('Orden de entrega actualizado correctamente');
       setModalOptimizarRuta(false);
       limpiarRuta();
       refetchPedidos();
     } catch (e) {
-      toast.error('Error al actualizar orden: ' + e.message);
+      notify.error('Error al actualizar orden: ' + e.message);
     }
     setGuardando(false);
   };
@@ -460,16 +455,11 @@ function MainApp() {
         setVista={setVista}
         perfil={perfil}
         onLogout={handleLogout}
-        notifications={notifications}
-        onMarkAsRead={markAsRead}
-        onMarkAllAsRead={markAllAsRead}
-        onRemoveNotification={removeNotification}
-        onClearNotifications={clearNotifications}
-        unreadCount={unreadCount}
       />
 
       <main className="pt-20 pb-6 px-4">
         <div className="max-w-7xl mx-auto">
+        <Suspense fallback={<LoadingVista />}>
         {vista === 'dashboard' && isAdmin && (
           <VistaDashboard
             metricas={metricas}
@@ -553,6 +543,7 @@ function MainApp() {
             onEditarUsuario={(usuario) => { setUsuarioEditando(usuario); setModalUsuario(true); }}
           />
         )}
+        </Suspense>
         </div>
       </main>
 
@@ -678,9 +669,9 @@ export default function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <AuthProvider>
-          <ToastProvider>
+          <NotificationProvider>
             <AppContent />
-          </ToastProvider>
+          </NotificationProvider>
         </AuthProvider>
       </ThemeProvider>
     </ErrorBoundary>

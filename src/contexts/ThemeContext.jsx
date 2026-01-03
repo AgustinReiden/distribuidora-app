@@ -1,15 +1,16 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { getStorageItem, setStorageItem } from '../utils/storage';
 
 const ThemeContext = createContext();
 
 export function ThemeProvider({ children }) {
   const [darkMode, setDarkMode] = useState(() => {
     // Verificar preferencia guardada o del sistema
+    const saved = getStorageItem('darkMode', null);
+    if (saved !== null) {
+      return saved;
+    }
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('darkMode');
-      if (saved !== null) {
-        return JSON.parse(saved);
-      }
       return window.matchMedia('(prefers-color-scheme: dark)').matches;
     }
     return false;
@@ -23,7 +24,7 @@ export function ThemeProvider({ children }) {
       document.documentElement.classList.remove('dark');
     }
     // Guardar preferencia
-    localStorage.setItem('darkMode', JSON.stringify(darkMode));
+    setStorageItem('darkMode', darkMode);
   }, [darkMode]);
 
   const toggleDarkMode = () => {

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Truck, Menu, X, LogOut, Moon, Sun, BarChart3, ShoppingCart, Users, Package, TrendingUp, UserCog, ChevronDown } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
-import NotificationCenter from './NotificationCenter';
+import { NotificationCenter } from '../../contexts/NotificationContext';
 
 const menuConfig = [
   { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin'] },
@@ -17,13 +17,7 @@ export default function TopNavigation({
   vista,
   setVista,
   perfil,
-  onLogout,
-  notifications,
-  onMarkAsRead,
-  onMarkAllAsRead,
-  onRemoveNotification,
-  onClearNotifications,
-  unreadCount
+  onLogout
 }) {
   const { darkMode, toggleDarkMode } = useTheme();
   const [menuAbierto, setMenuAbierto] = useState(false);
@@ -115,14 +109,7 @@ export default function TopNavigation({
             </button>
 
             {/* Notificaciones */}
-            <NotificationCenter
-              notifications={notifications}
-              onMarkAsRead={onMarkAsRead}
-              onMarkAllAsRead={onMarkAllAsRead}
-              onRemove={onRemoveNotification}
-              onClearAll={onClearNotifications}
-              unreadCount={unreadCount}
-            />
+            <NotificationCenter />
 
             {/* Menú de usuario */}
             <div className="relative" ref={userMenuRef}>
