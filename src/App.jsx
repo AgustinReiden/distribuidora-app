@@ -10,8 +10,8 @@ import { ITEMS_PER_PAGE } from './utils/formatters';
 
 // Componentes
 import LoginScreen from './components/auth/LoginScreen';
-import Sidebar from './components/layout/Sidebar';
-import TopBar from './components/layout/TopBar';
+import ErrorBoundary from './components/ErrorBoundary';
+import TopNavigation from './components/layout/TopNavigation';
 import { useNotifications } from './components/layout/NotificationCenter';
 import VistaDashboard from './components/vistas/VistaDashboard';
 import VistaPedidos from './components/vistas/VistaPedidos';
@@ -24,7 +24,6 @@ function MainApp() {
   const { user, perfil, logout, isAdmin, isPreventista, isTransportista } = useAuth();
   const toast = useToast();
   const [vista, setVista] = useState(perfil?.rol === 'admin' ? 'dashboard' : 'pedidos');
-  const [sidebarColapsado, setSidebarColapsado] = useState(false);
 
   // Sistema de notificaciones
   const {
@@ -454,31 +453,13 @@ function MainApp() {
     limpiarRuta();
   };
 
-  // Mapa de títulos para la TopBar
-  const titulosVista = {
-    dashboard: 'Dashboard',
-    pedidos: 'Pedidos',
-    clientes: 'Clientes',
-    productos: 'Productos',
-    reportes: 'Reportes',
-    usuarios: 'Usuarios'
-  };
-
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
-      <Sidebar
+      <TopNavigation
         vista={vista}
         setVista={setVista}
         perfil={perfil}
         onLogout={handleLogout}
-        colapsado={sidebarColapsado}
-        setColapsado={setSidebarColapsado}
-      />
-
-      <TopBar
-        titulo={titulosVista[vista] || vista}
-        onToggleSidebar={() => setSidebarColapsado(!sidebarColapsado)}
-        sidebarColapsado={sidebarColapsado}
         notifications={notifications}
         onMarkAsRead={markAsRead}
         onMarkAllAsRead={markAllAsRead}
@@ -487,7 +468,7 @@ function MainApp() {
         unreadCount={unreadCount}
       />
 
-      <main className={`pt-20 pb-6 px-4 transition-all duration-300 ${sidebarColapsado ? 'ml-20' : 'ml-64'}`}>
+      <main className="pt-20 pb-6 px-4">
         <div className="max-w-7xl mx-auto">
         {vista === 'dashboard' && isAdmin && (
           <VistaDashboard
@@ -694,13 +675,15 @@ function MainApp() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <ToastProvider>
-          <AppContent />
-        </ToastProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <AppContent />
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 
