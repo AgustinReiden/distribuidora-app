@@ -297,297 +297,202 @@ export function generarHojaRuta(transportista, pedidos) {
 
 /**
  * Genera PDF profesional de Hoja de Ruta Optimizada
- * Formato: A4 horizontal para mejor visualizacion
+ * Formato: Ticket comandera de 75mm de ancho
  * @param {Object} transportista - Datos del transportista
  * @param {Array} pedidos - Lista de pedidos ordenados por ruta optimizada
  * @param {Object} infoRuta - Informacion de la ruta (duracion, distancia)
  * @returns {void} - Descarga el PDF
  */
 export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {}) {
-  // A4 vertical
+  // Ticket comandera: 75mm de ancho, altura dinamica
+  const ticketWidth = 75; // mm
+  const margin = 3; // mm
+  const contentWidth = ticketWidth - (margin * 2);
+
+  // Calcular altura necesaria
+  let totalHeight = 50; // Header + resumen
+  pedidos.forEach(pedido => {
+    totalHeight += 28; // Info basica del pedido
+    const itemsCount = pedido.items?.length || 0;
+    totalHeight += Math.ceil(itemsCount * 3.5); // Productos
+    if (pedido.notas) totalHeight += 5;
+  });
+  totalHeight += 40; // Cierre de jornada
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
-    format: 'a4'
+    format: [ticketWidth, Math.max(totalHeight, 100)]
   });
-
-  const pageWidth = 210;
-  const pageHeight = 297;
-  const margin = 15;
-  const contentWidth = pageWidth - (margin * 2);
 
   let y = margin;
 
   // === HEADER ===
   doc.setFillColor(37, 99, 235); // Azul
-  doc.rect(0, 0, pageWidth, 45, 'F');
+  doc.rect(0, 0, ticketWidth, 22, 'F');
 
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text('HOJA DE RUTA', margin, 18);
+  doc.text('HOJA DE RUTA', ticketWidth / 2, 6, { align: 'center' });
 
-  doc.setFontSize(12);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text(formatFecha(new Date()), pageWidth - margin, 18, { align: 'right' });
+  doc.text(transportista?.nombre || 'Transportista', ticketWidth / 2, 11, { align: 'center' });
 
-  // Info transportista
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Transportista: ${transportista?.nombre || 'Sin asignar'}`, margin, 32);
+  doc.setFontSize(7);
+  doc.text(formatFecha(new Date()), ticketWidth / 2, 16, { align: 'center' });
 
   // Metricas de ruta
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  const metricas = [];
-  if (infoRuta.duracion_formato) metricas.push(`Duracion: ${infoRuta.duracion_formato}`);
-  if (infoRuta.distancia_formato) metricas.push(`Distancia: ${infoRuta.distancia_formato}`);
-  metricas.push(`Entregas: ${pedidos.length}`);
-  doc.text(metricas.join('  |  '), margin, 40);
+  const metricasTexto = [];
+  if (infoRuta.duracion_formato) metricasTexto.push(infoRuta.duracion_formato);
+  if (infoRuta.distancia_formato) metricasTexto.push(infoRuta.distancia_formato);
+  metricasTexto.push(`${pedidos.length} entregas`);
+  doc.setFontSize(6);
+  doc.text(metricasTexto.join(' | '), ticketWidth / 2, 20, { align: 'center' });
 
-  y = 55;
+  y = 25;
 
   // === RESUMEN DE COBRO ===
   doc.setTextColor(0, 0, 0);
   const totalGeneral = pedidos.reduce((sum, p) => sum + (p.total || 0), 0);
   const totalPendiente = pedidos.filter(p => p.estado_pago !== 'pagado').reduce((sum, p) => sum + (p.total || 0), 0);
-  const totalCobrado = totalGeneral - totalPendiente;
 
-  doc.setFillColor(249, 250, 251);
-  doc.rect(margin, y, contentWidth, 20, 'F');
-  doc.setDrawColor(229, 231, 235);
-  doc.rect(margin, y, contentWidth, 20, 'S');
+  doc.setFillColor(245, 245, 245);
+  doc.rect(margin, y, contentWidth, 12, 'F');
 
-  doc.setFontSize(9);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.text('RESUMEN', margin + 5, y + 7);
+  doc.text('TOTAL:', margin + 2, y + 4);
+  doc.text(formatPrecio(totalGeneral), ticketWidth - margin - 2, y + 4, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
-  doc.text(`Total a cobrar: ${formatPrecio(totalGeneral)}`, margin + 5, y + 15);
-  doc.text(`Pendiente: ${formatPrecio(totalPendiente)}`, margin + 65, y + 15);
-  doc.text(`Ya pagado: ${formatPrecio(totalCobrado)}`, margin + 120, y + 15);
+  doc.setFontSize(6);
+  doc.text(`Pend. cobro: ${formatPrecio(totalPendiente)}`, margin + 2, y + 9);
 
-  y += 28;
+  y += 15;
 
-  // === TABLA DE ENTREGAS ===
-  // Header de tabla
-  doc.setFillColor(243, 244, 246);
-  doc.rect(margin, y, contentWidth, 10, 'F');
+  // Linea divisora
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.3);
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 3;
 
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(55, 65, 81);
-
-  const cols = {
-    orden: margin + 3,
-    cliente: margin + 15,
-    direccion: margin + 60,
-    telefono: margin + 120,
-    total: margin + 150,
-    estado: margin + 175
-  };
-
-  doc.text('#', cols.orden, y + 7);
-  doc.text('CLIENTE', cols.cliente, y + 7);
-  doc.text('DIRECCION', cols.direccion, y + 7);
-  doc.text('TELEFONO', cols.telefono, y + 7);
-  doc.text('TOTAL', cols.total, y + 7);
-  doc.text('CHECK', cols.estado, y + 7);
-
-  y += 12;
-
-  // Filas de pedidos
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 0, 0);
-
+  // === LISTA DE ENTREGAS ===
   pedidos.forEach((pedido, index) => {
-    // Verificar si necesitamos nueva pagina
-    if (y > pageHeight - 60) {
-      doc.addPage();
-      y = margin;
+    // Numero de orden y cliente
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
 
-      // Repetir header de tabla en nueva pagina
-      doc.setFillColor(243, 244, 246);
-      doc.rect(margin, y, contentWidth, 10, 'F');
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(55, 65, 81);
-      doc.text('#', cols.orden, y + 7);
-      doc.text('CLIENTE', cols.cliente, y + 7);
-      doc.text('DIRECCION', cols.direccion, y + 7);
-      doc.text('TELEFONO', cols.telefono, y + 7);
-      doc.text('TOTAL', cols.total, y + 7);
-      doc.text('CHECK', cols.estado, y + 7);
-      y += 12;
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(0, 0, 0);
-    }
-
-    const rowHeight = 18;
-
-    // Fondo alternado
-    if (index % 2 === 0) {
-      doc.setFillColor(255, 255, 255);
-    } else {
-      doc.setFillColor(249, 250, 251);
-    }
-    doc.rect(margin, y, contentWidth, rowHeight, 'F');
-
-    // Linea inferior
-    doc.setDrawColor(229, 231, 235);
-    doc.line(margin, y + rowHeight, margin + contentWidth, y + rowHeight);
-
-    doc.setFontSize(8);
-
-    // Numero de orden (circulo)
-    const circleX = cols.orden + 4;
-    const circleY = y + 6;
+    // Circulo con numero
+    const circleX = margin + 4;
     doc.setFillColor(37, 99, 235);
-    doc.circle(circleX, circleY, 4, 'F');
+    doc.circle(circleX, y + 2, 3.5, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.text((index + 1).toString(), circleX, circleY + 1.5, { align: 'center' });
-    doc.setTextColor(0, 0, 0);
-    doc.setFont('helvetica', 'normal');
-
-    // Cliente
-    const clienteNombre = pedido.cliente?.nombre_fantasia || 'Sin cliente';
-    const nombreTruncado = clienteNombre.length > 22 ? clienteNombre.substring(0, 20) + '..' : clienteNombre;
-    doc.setFont('helvetica', 'bold');
-    doc.text(nombreTruncado, cols.cliente, y + 6);
-    doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
-    doc.setTextColor(107, 114, 128);
-    doc.text(`Pedido #${pedido.id}`, cols.cliente, y + 11);
+    doc.text((index + 1).toString(), circleX, y + 3, { align: 'center' });
     doc.setTextColor(0, 0, 0);
+
+    // Nombre del cliente
+    const clienteNombre = pedido.cliente?.nombre_fantasia || 'Sin cliente';
+    const nombreTruncado = clienteNombre.length > 20 ? clienteNombre.substring(0, 18) + '..' : clienteNombre;
     doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text(nombreTruncado, margin + 10, y + 3);
+
+    // Total con estado de pago
+    const estadoPagoSymbol = pedido.estado_pago === 'pagado' ? '[P]' : pedido.estado_pago === 'parcial' ? '[*]' : '[$]';
+    doc.setFontSize(7);
+    doc.text(`${estadoPagoSymbol} ${formatPrecio(pedido.total)}`, ticketWidth - margin, y + 3, { align: 'right' });
+    y += 5;
 
     // Direccion
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
     const direccion = pedido.cliente?.direccion || 'Sin direccion';
-    const dirLines = doc.splitTextToSize(direccion, 55);
-    doc.text(dirLines.slice(0, 2).join('\n'), cols.direccion, y + 6);
+    const dirTruncada = direccion.length > 45 ? direccion.substring(0, 43) + '..' : direccion;
+    doc.text(dirTruncada, margin + 2, y);
+    y += 3;
 
     // Telefono
-    doc.text(pedido.cliente?.telefono || '-', cols.telefono, y + 6);
-
-    // Total y estado de pago
-    doc.setFont('helvetica', 'bold');
-    doc.text(formatPrecio(pedido.total), cols.total, y + 6);
-    doc.setFont('helvetica', 'normal');
-
-    const estadoPagoLabel = pedido.estado_pago === 'pagado' ? 'PAGADO' : pedido.estado_pago === 'parcial' ? 'PARCIAL' : 'PEND';
-    const estadoColor = pedido.estado_pago === 'pagado' ? [34, 197, 94] : pedido.estado_pago === 'parcial' ? [234, 179, 8] : [239, 68, 68];
-    doc.setTextColor(...estadoColor);
-    doc.setFontSize(7);
-    doc.text(estadoPagoLabel, cols.total, y + 11);
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(8);
+    if (pedido.cliente?.telefono) {
+      doc.text(`Tel: ${pedido.cliente.telefono}`, margin + 2, y);
+      y += 3;
+    }
 
     // Forma de pago
     const formaPagoLabels = {
-      efectivo: 'Efvo',
-      transferencia: 'Transf',
+      efectivo: 'Efectivo',
+      transferencia: 'Transferencia',
       cheque: 'Cheque',
-      cuenta_corriente: 'C.Cte',
-      tarjeta: 'Tarj'
+      cuenta_corriente: 'Cta.Cte',
+      tarjeta: 'Tarjeta'
     };
-    doc.setFontSize(6);
-    doc.setTextColor(107, 114, 128);
-    doc.text(formaPagoLabels[pedido.forma_pago] || 'Efvo', cols.total, y + 15);
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(8);
+    const estadoPagoLabel = pedido.estado_pago === 'pagado' ? 'PAGADO' : pedido.estado_pago === 'parcial' ? 'PARCIAL' : 'PENDIENTE';
+    doc.text(`${formaPagoLabels[pedido.forma_pago] || 'Efectivo'} | ${estadoPagoLabel}`, margin + 2, y);
+    y += 3;
 
-    // Checkbox de entregado
-    doc.setDrawColor(156, 163, 175);
-    doc.rect(cols.estado + 2, y + 3, 6, 6);
-
-    y += rowHeight;
-  });
-
-  // === SECCION DE PRODUCTOS (siguiente pagina si es necesario) ===
-  if (y > pageHeight - 80) {
-    doc.addPage();
-    y = margin;
-  } else {
-    y += 10;
-  }
-
-  // Detalle de productos por entrega
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('DETALLE DE PRODUCTOS POR ENTREGA', margin, y);
-  y += 8;
-
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'normal');
-
-  pedidos.forEach((pedido, index) => {
-    if (y > pageHeight - 30) {
-      doc.addPage();
-      y = margin;
-    }
-
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${index + 1}. ${pedido.cliente?.nombre_fantasia || 'Cliente'} (#${pedido.id})`, margin, y);
-    doc.setFont('helvetica', 'normal');
-
-    const productos = pedido.items?.map(i =>
-      `${i.cantidad}x ${(i.producto?.nombre || '?').substring(0, 25)}`
-    ).join(', ') || 'Sin productos';
-
-    const prodLines = doc.splitTextToSize(productos, contentWidth - 5);
-    y += 4;
+    // Productos (compacto)
+    doc.setFontSize(5);
+    const productosTexto = pedido.items?.map(i =>
+      `${i.cantidad}x${(i.producto?.nombre || '?').substring(0, 15)}`
+    ).join(', ') || '';
+    const prodLines = doc.splitTextToSize(productosTexto, contentWidth - 4);
     prodLines.slice(0, 2).forEach(line => {
-      doc.text(line, margin + 5, y);
-      y += 3.5;
+      doc.text(line, margin + 2, y);
+      y += 2.5;
     });
 
+    // Notas
     if (pedido.notas) {
       doc.setFont('helvetica', 'italic');
-      doc.setTextColor(107, 114, 128);
-      const notaTruncada = pedido.notas.length > 60 ? pedido.notas.substring(0, 58) + '..' : pedido.notas;
-      doc.text(`Nota: ${notaTruncada}`, margin + 5, y);
-      doc.setTextColor(0, 0, 0);
+      const notasTruncadas = pedido.notas.length > 40 ? pedido.notas.substring(0, 38) + '..' : pedido.notas;
+      doc.text(`* ${notasTruncadas}`, margin + 2, y);
       doc.setFont('helvetica', 'normal');
-      y += 3.5;
+      y += 3;
     }
 
+    // Checkbox entregado y firma
+    y += 1;
+    doc.setFontSize(6);
+    doc.setDrawColor(150, 150, 150);
+    doc.rect(margin + 2, y - 2, 2.5, 2.5);
+    doc.text('Entregado', margin + 6, y);
+    doc.text('Firma:_____________', margin + 25, y);
+    y += 4;
+
+    // Linea divisora entre pedidos
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.2);
+    doc.line(margin, y, ticketWidth - margin, y);
     y += 3;
   });
 
-  // === SECCION DE FIRMA ===
-  if (y > pageHeight - 50) {
-    doc.addPage();
-    y = margin;
-  } else {
-    y += 10;
-  }
+  // === CIERRE DE JORNADA ===
+  y += 2;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.5);
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 4;
 
-  doc.setDrawColor(156, 163, 175);
-  doc.line(margin, y, margin + contentWidth, y);
-  y += 10;
-
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text('CIERRE DE JORNADA', margin, y);
-  y += 8;
+  doc.text('CIERRE DE JORNADA', ticketWidth / 2, y, { align: 'center' });
+  y += 5;
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  doc.setFontSize(6);
 
-  // Campos para llenar
-  const fieldY = y;
-  doc.text('Total cobrado en efectivo: ___________________', margin, fieldY);
-  doc.text('Total cobrado transferencia: ___________________', margin, fieldY + 8);
-  doc.text('Entregas completadas: _____ de ' + pedidos.length, margin, fieldY + 16);
+  doc.text('Cobrado efectivo: ____________', margin, y);
+  y += 4;
+  doc.text('Cobrado transf: _____________', margin, y);
+  y += 4;
+  doc.text(`Entregas: _____ de ${pedidos.length}`, margin, y);
+  y += 5;
 
-  doc.text('Observaciones:', margin + 100, fieldY);
-  doc.setDrawColor(200, 200, 200);
-  doc.rect(margin + 100, fieldY + 4, 75, 20);
-
-  y = fieldY + 35;
-  doc.text('Firma transportista: _______________________', margin, y);
-  doc.text('Fecha: ' + formatFecha(new Date()), margin + 100, y);
+  doc.text('Firma: ___________________', margin, y);
+  y += 4;
+  doc.text('Fecha: ' + formatFecha(new Date()), margin, y);
 
   // Descargar PDF
   const fecha = formatFecha(new Date()).replace(/\//g, '-');
