@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ToastProvider, useToast } from './components/Toast.jsx';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalOptimizarRuta } from './components/Modals.jsx';
 import { generarOrdenPreparacion, generarHojaRuta } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
@@ -9,7 +10,9 @@ import { ITEMS_PER_PAGE } from './utils/formatters';
 
 // Componentes
 import LoginScreen from './components/auth/LoginScreen';
-import Navegacion from './components/layout/Navegacion';
+import Sidebar from './components/layout/Sidebar';
+import TopBar from './components/layout/TopBar';
+import { useNotifications } from './components/layout/NotificationCenter';
 import VistaDashboard from './components/vistas/VistaDashboard';
 import VistaPedidos from './components/vistas/VistaPedidos';
 import VistaClientes from './components/vistas/VistaClientes';
@@ -21,11 +24,26 @@ function MainApp() {
   const { user, perfil, logout, isAdmin, isPreventista, isTransportista } = useAuth();
   const toast = useToast();
   const [vista, setVista] = useState(perfil?.rol === 'admin' ? 'dashboard' : 'pedidos');
+  const [sidebarColapsado, setSidebarColapsado] = useState(false);
+
+  // Sistema de notificaciones
+  const {
+    notifications,
+    addNotification,
+    markAsRead,
+    markAllAsRead,
+    removeNotification,
+    clearAll: clearNotifications,
+    unreadCount
+  } = useNotifications();
 
   // Configurar el notificador de errores centralizado
   useEffect(() => {
-    setErrorNotifier((message) => toast.error(message));
-  }, [toast]);
+    setErrorNotifier((message) => {
+      toast.error(message);
+      addNotification({ type: 'error', title: 'Error', message });
+    });
+  }, [toast, addNotification]);
 
   // Hooks de datos
   const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
@@ -131,6 +149,7 @@ function MainApp() {
         try {
           await eliminarCliente(id);
           toast.success('Cliente eliminado');
+          addNotification({ type: 'success', title: 'Cliente eliminado', message: 'El cliente fue eliminado correctamente' });
         } catch (e) {
           toast.error(e.message);
         } finally {
@@ -265,6 +284,7 @@ function MainApp() {
       refetchProductos();
       refetchMetricas();
       toast.success('Pedido creado correctamente');
+      addNotification({ type: 'success', title: 'Nuevo pedido', message: 'El pedido fue creado correctamente' });
     } catch (e) {
       toast.error('Error al crear pedido: ' + e.message);
     }
@@ -283,6 +303,7 @@ function MainApp() {
           await cambiarEstado(pedido.id, 'entregado');
           refetchMetricas();
           toast.success(`Pedido #${pedido.id} marcado como entregado`);
+          addNotification({ type: 'success', title: 'Pedido entregado', message: `El pedido #${pedido.id} fue marcado como entregado` });
         } catch (e) {
           toast.error(e.message);
         } finally {
@@ -433,16 +454,41 @@ function MainApp() {
     limpiarRuta();
   };
 
+  // Mapa de títulos para la TopBar
+  const titulosVista = {
+    dashboard: 'Dashboard',
+    pedidos: 'Pedidos',
+    clientes: 'Clientes',
+    productos: 'Productos',
+    reportes: 'Reportes',
+    usuarios: 'Usuarios'
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <Navegacion
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
+      <Sidebar
         vista={vista}
         setVista={setVista}
         perfil={perfil}
         onLogout={handleLogout}
+        colapsado={sidebarColapsado}
+        setColapsado={setSidebarColapsado}
       />
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <TopBar
+        titulo={titulosVista[vista] || vista}
+        onToggleSidebar={() => setSidebarColapsado(!sidebarColapsado)}
+        sidebarColapsado={sidebarColapsado}
+        notifications={notifications}
+        onMarkAsRead={markAsRead}
+        onMarkAllAsRead={markAllAsRead}
+        onRemoveNotification={removeNotification}
+        onClearNotifications={clearNotifications}
+        unreadCount={unreadCount}
+      />
+
+      <main className={`pt-20 pb-6 px-4 transition-all duration-300 ${sidebarColapsado ? 'ml-20' : 'ml-64'}`}>
+        <div className="max-w-7xl mx-auto">
         {vista === 'dashboard' && isAdmin && (
           <VistaDashboard
             metricas={metricas}
@@ -526,6 +572,7 @@ function MainApp() {
             onEditarUsuario={(usuario) => { setUsuarioEditando(usuario); setModalUsuario(true); }}
           />
         )}
+        </div>
       </main>
 
       {/* Modales */}
@@ -647,11 +694,13 @@ function MainApp() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <AppContent />
-      </ToastProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
@@ -659,8 +708,8 @@ function AppContent() {
   const { user, loading } = useAuth();
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center transition-colors">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" aria-label="Cargando" />
       </div>
     );
   }

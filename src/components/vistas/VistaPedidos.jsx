@@ -66,17 +66,17 @@ function AccionesDropdown({ pedido, isAdmin, isPreventista, isTransportista, onH
         className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
         aria-label="Más acciones"
       >
-        <MoreVertical className="w-5 h-5 text-gray-600" />
+        <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-300" />
       </button>
 
       {abierto && (
-        <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border z-50 py-1">
+        <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border dark:border-gray-700 z-50 py-1">
           {acciones.map((accion, idx) => (
             <React.Fragment key={idx}>
-              {accion.divider && <div className="border-t my-1" />}
+              {accion.divider && <div className="border-t dark:border-gray-700 my-1" />}
               <button
                 onClick={() => { accion.onClick(); setAbierto(false); }}
-                className={`w-full flex items-center space-x-2 px-4 py-2 text-sm hover:bg-gray-50 ${accion.color}`}
+                className={`w-full flex items-center space-x-2 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 ${accion.color} dark:text-gray-300`}
               >
                 <accion.icon className="w-4 h-4" />
                 <span>{accion.label}</span>
@@ -158,7 +158,7 @@ export default function VistaPedidos({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">Pedidos</h1>
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Pedidos</h1>
         <div className="flex flex-wrap gap-2">
           {isAdmin && (
             <button
@@ -208,7 +208,7 @@ export default function VistaPedidos({
             type="text"
             value={busqueda}
             onChange={e => onBusquedaChange(e.target.value)}
-            className="w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
             placeholder="Buscar por cliente, dirección o ID..."
           />
         </div>
@@ -287,17 +287,17 @@ export default function VistaPedidos({
         <>
           <div className="space-y-3">
             {pedidosPaginados.map(pedido => (
-              <div key={pedido.id} className="bg-white border rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
+              <div key={pedido.id} className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
                 {/* Header del pedido */}
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="font-semibold text-lg text-gray-800">
+                        <h3 className="font-semibold text-lg text-gray-800 dark:text-white">
                           {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
                         </h3>
-                        <p className="text-sm text-gray-500">{pedido.cliente?.direccion}</p>
-                        <p className="text-sm text-gray-400 mt-1">
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{pedido.cliente?.direccion}</p>
+                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
                           #{pedido.id} • {formatFecha(pedido.created_at)}
                         </p>
                       </div>
@@ -340,15 +340,15 @@ export default function VistaPedidos({
                 <div className="mt-3 pt-3 border-t">
                   <p className="text-sm text-gray-600 mb-2">
                     {pedido.items?.map(i => (
-                      <span key={i.id} className="inline-block mr-2 mb-1 px-2 py-0.5 bg-gray-100 rounded text-xs">
+                      <span key={i.id} className="inline-block mr-2 mb-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs dark:text-gray-300">
                         {i.producto?.nombre} x{i.cantidad}
                       </span>
                     ))}
                   </p>
 
                   {pedido.notas && (
-                    <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                      <p className="text-xs text-blue-700 flex items-start">
+                    <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <p className="text-xs text-blue-700 dark:text-blue-300 flex items-start">
                         <FileText className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0" />
                         <span>{pedido.notas}</span>
                       </p>
