@@ -251,7 +251,7 @@ function MainApp() {
     const cliente = await agregarCliente(nuevoCliente);
     notify.success('Cliente creado correctamente');
     return cliente;
-  }, [agregarCliente, toast]);
+  }, [agregarCliente, notify]);
 
   const handleGuardarPedido = async () => {
     if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
