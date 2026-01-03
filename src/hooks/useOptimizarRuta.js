@@ -1,10 +1,10 @@
 import { useState, useCallback } from 'react';
 
-// URL del webhook de n8n para optimizar rutas
-const N8N_WEBHOOK_URL = 'https://n8n.shycia.com.ar/webhook/optimizar-ruta';
+// URL del webhook de n8n para optimizar rutas (desde variables de entorno)
+const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || 'https://n8n.shycia.com.ar/webhook/optimizar-ruta';
 
-// Google API Key para Google Routes API
-const GOOGLE_API_KEY = 'AIzaSyDm-whIYAYmcOPHac0q2WYpilB9oGfO_KQ';
+// Google API Key para Google Routes API (desde variables de entorno)
+const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
 
 // Coordenadas del depósito por defecto (se pueden configurar)
 const DEPOSITO_DEFAULT = {

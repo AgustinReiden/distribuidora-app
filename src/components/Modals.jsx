@@ -68,6 +68,19 @@ export const ModalFiltroFecha = memo(function ModalFiltroFecha({ filtros, onAppl
   );
 });
 
+// Helpers de validación
+const validarTelefono = (telefono) => {
+  if (!telefono) return true; // Opcional
+  const telefonoLimpio = telefono.replace(/[\s\-\(\)]/g, '');
+  return /^[0-9+]{6,15}$/.test(telefonoLimpio);
+};
+
+const validarTexto = (texto, minLength = 2, maxLength = 100) => {
+  if (!texto) return false;
+  const limpio = texto.trim();
+  return limpio.length >= minLength && limpio.length <= maxLength;
+};
+
 // Modal de cliente
 export const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando }) {
   const [form, setForm] = useState(cliente ? {
@@ -80,6 +93,9 @@ export const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClos
     zona: cliente.zona || ''
   } : { nombre: '', nombreFantasia: '', direccion: '', latitud: null, longitud: null, telefono: '', zona: '' });
 
+  const [errores, setErrores] = useState({});
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
+
   const handleAddressSelect = (result) => {
     setForm(prev => ({
       ...prev,
@@ -87,25 +103,71 @@ export const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClos
       latitud: result.latitud,
       longitud: result.longitud
     }));
+    if (errores.direccion) setErrores(prev => ({ ...prev, direccion: null }));
+  };
+
+  const validarFormulario = () => {
+    const nuevosErrores = {};
+
+    if (!validarTexto(form.nombre, 2, 100)) {
+      nuevosErrores.nombre = 'El nombre debe tener entre 2 y 100 caracteres';
+    }
+
+    if (!validarTexto(form.nombreFantasia, 2, 100)) {
+      nuevosErrores.nombreFantasia = 'El nombre fantasía debe tener entre 2 y 100 caracteres';
+    }
+
+    if (!validarTexto(form.direccion, 5, 200)) {
+      nuevosErrores.direccion = 'La dirección debe tener entre 5 y 200 caracteres';
+    }
+
+    if (form.telefono && !validarTelefono(form.telefono)) {
+      nuevosErrores.telefono = 'El teléfono no tiene un formato válido';
+    }
+
+    setErrores(nuevosErrores);
+    return Object.keys(nuevosErrores).length === 0;
   };
 
   const handleSubmit = () => {
-    onSave({ ...form, id: cliente?.id });
+    setIntentoGuardar(true);
+    if (validarFormulario()) {
+      onSave({ ...form, id: cliente?.id });
+    }
   };
+
+  const handleFieldChange = (field, value) => {
+    setForm({ ...form, [field]: value });
+    if (intentoGuardar && errores[field]) {
+      setErrores(prev => ({ ...prev, [field]: null }));
+    }
+  };
+
+  const inputClass = (field) => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
 
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
       <div className="p-4 space-y-4">
-        <div><label className="block text-sm font-medium mb-1">Nombre *</label><input type="text" value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-        <div><label className="block text-sm font-medium mb-1">Nombre Fantasía *</label><input type="text" value={form.nombreFantasia} onChange={e => setForm({ ...form, nombreFantasia: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Nombre *</label>
+          <input type="text" value={form.nombre} onChange={e => handleFieldChange('nombre', e.target.value)} className={inputClass('nombre')} />
+          {errores.nombre && <p className="text-red-500 text-xs mt-1">{errores.nombre}</p>}
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Nombre Fantasía *</label>
+          <input type="text" value={form.nombreFantasia} onChange={e => handleFieldChange('nombreFantasia', e.target.value)} className={inputClass('nombreFantasia')} />
+          {errores.nombreFantasia && <p className="text-red-500 text-xs mt-1">{errores.nombreFantasia}</p>}
+        </div>
         <div>
           <label className="block text-sm font-medium mb-1">Dirección *</label>
           <AddressAutocomplete
             value={form.direccion}
-            onChange={(val) => setForm(prev => ({ ...prev, direccion: val }))}
+            onChange={(val) => handleFieldChange('direccion', val)}
             onSelect={handleAddressSelect}
             placeholder="Buscar dirección..."
+            className={errores.direccion ? 'border-red-500' : ''}
           />
+          {errores.direccion && <p className="text-red-500 text-xs mt-1">{errores.direccion}</p>}
           {form.latitud && form.longitud && (
             <div className="mt-2 flex items-center text-xs text-green-600 bg-green-50 px-3 py-2 rounded-lg">
               <MapPin className="w-4 h-4 mr-2" />
@@ -113,12 +175,19 @@ export const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClos
             </div>
           )}
         </div>
-        <div><label className="block text-sm font-medium mb-1">Teléfono</label><input type="text" value={form.telefono} onChange={e => setForm({ ...form, telefono: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-        <div><label className="block text-sm font-medium mb-1">Zona</label><input type="text" value={form.zona} onChange={e => setForm({ ...form, zona: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Teléfono</label>
+          <input type="text" value={form.telefono} onChange={e => handleFieldChange('telefono', e.target.value)} className={inputClass('telefono')} placeholder="Ej: +54 9 381 1234567" />
+          {errores.telefono && <p className="text-red-500 text-xs mt-1">{errores.telefono}</p>}
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Zona</label>
+          <input type="text" value={form.zona} onChange={e => handleFieldChange('zona', e.target.value)} className="w-full px-3 py-2 border rounded-lg" />
+        </div>
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
-        <button onClick={handleSubmit} disabled={guardando || !form.nombre || !form.nombreFantasia || !form.direccion} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
+        <button onClick={handleSubmit} disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
           {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar
         </button>
       </div>
@@ -142,6 +211,8 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
   });
   const [nuevaCategoria, setNuevaCategoria] = useState('');
   const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState(false);
+  const [errores, setErrores] = useState({});
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
 
   // Calcular automáticamente costo con IVA cuando cambia costo sin IVA
   const handleCostoSinIvaChange = (valor) => {
@@ -163,14 +234,52 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
       precio_sin_iva: valor,
       precio: precioConIva ? precioConIva.toFixed(2) : ''
     });
+    if (intentoGuardar && errores.precio) {
+      setErrores(prev => ({ ...prev, precio: null }));
+    }
+  };
+
+  const validarFormulario = () => {
+    const nuevosErrores = {};
+
+    if (!validarTexto(form.nombre, 2, 100)) {
+      nuevosErrores.nombre = 'El nombre debe tener entre 2 y 100 caracteres';
+    }
+
+    if (form.stock === '' || form.stock === null || isNaN(parseInt(form.stock)) || parseInt(form.stock) < 0) {
+      nuevosErrores.stock = 'El stock debe ser un número mayor o igual a 0';
+    }
+
+    if (!form.precio || isNaN(parseFloat(form.precio)) || parseFloat(form.precio) <= 0) {
+      nuevosErrores.precio = 'El precio debe ser un número mayor a 0';
+    }
+
+    if (form.stock_minimo !== '' && form.stock_minimo !== null && (isNaN(parseInt(form.stock_minimo)) || parseInt(form.stock_minimo) < 0)) {
+      nuevosErrores.stock_minimo = 'El stock mínimo debe ser un número mayor o igual a 0';
+    }
+
+    setErrores(nuevosErrores);
+    return Object.keys(nuevosErrores).length === 0;
+  };
+
+  const handleFieldChange = (field, value) => {
+    setForm({ ...form, [field]: value });
+    if (intentoGuardar && errores[field]) {
+      setErrores(prev => ({ ...prev, [field]: null }));
+    }
   };
 
   const handleSubmit = () => {
-    const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
-      ? nuevaCategoria.trim()
-      : form.categoria;
-    onSave({ ...form, categoria: categoriaFinal, id: producto?.id });
+    setIntentoGuardar(true);
+    if (validarFormulario()) {
+      const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
+        ? nuevaCategoria.trim()
+        : form.categoria;
+      onSave({ ...form, categoria: categoriaFinal, id: producto?.id });
+    }
   };
+
+  const inputClass = (field) => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
 
   return (
     <ModalBase title={producto ? 'Editar Producto' : 'Nuevo Producto'} onClose={onClose} maxWidth="max-w-lg">
@@ -182,7 +291,7 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
             <input
               type="text"
               value={form.codigo || ''}
-              onChange={e => setForm({ ...form, codigo: e.target.value })}
+              onChange={e => handleFieldChange('codigo', e.target.value)}
               className="w-full px-3 py-2 border rounded-lg"
               placeholder="SKU o codigo interno"
             />
@@ -192,9 +301,10 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
             <input
               type="number"
               value={form.stock}
-              onChange={e => setForm({ ...form, stock: parseInt(e.target.value) || '' })}
-              className="w-full px-3 py-2 border rounded-lg"
+              onChange={e => handleFieldChange('stock', parseInt(e.target.value) || '')}
+              className={inputClass('stock')}
             />
+            {errores.stock && <p className="text-red-500 text-xs mt-1">{errores.stock}</p>}
           </div>
         </div>
 
@@ -203,10 +313,11 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
           <input
             type="number"
             value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
-            onChange={e => setForm({ ...form, stock_minimo: parseInt(e.target.value) || 0 })}
-            className="w-full px-3 py-2 border rounded-lg"
+            onChange={e => handleFieldChange('stock_minimo', parseInt(e.target.value) || 0)}
+            className={inputClass('stock_minimo')}
             placeholder="10"
           />
+          {errores.stock_minimo && <p className="text-red-500 text-xs mt-1">{errores.stock_minimo}</p>}
           <p className="text-xs text-gray-500 mt-1">
             Se mostrará una alerta cuando el stock esté por debajo de este valor
           </p>
@@ -217,9 +328,10 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
           <input
             type="text"
             value={form.nombre}
-            onChange={e => setForm({ ...form, nombre: e.target.value })}
-            className="w-full px-3 py-2 border rounded-lg"
+            onChange={e => handleFieldChange('nombre', e.target.value)}
+            className={inputClass('nombre')}
           />
+          {errores.nombre && <p className="text-red-500 text-xs mt-1">{errores.nombre}</p>}
         </div>
 
         <div>
@@ -316,10 +428,11 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
                 type="number"
                 step="0.01"
                 value={form.precio}
-                onChange={e => setForm({ ...form, precio: parseFloat(e.target.value) || '' })}
-                className="w-full px-3 py-2 border rounded-lg bg-green-50 border-green-300 font-semibold"
+                onChange={e => handleFieldChange('precio', parseFloat(e.target.value) || '')}
+                className={`w-full px-3 py-2 border rounded-lg font-semibold ${errores.precio ? 'border-red-500 bg-red-50' : 'bg-green-50 border-green-300'}`}
                 placeholder="0.00"
               />
+              {errores.precio && <p className="text-red-500 text-xs mt-1">{errores.precio}</p>}
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-2">* El precio con IVA es el que se muestra al cliente en los pedidos</p>
@@ -327,7 +440,7 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
-        <button onClick={handleSubmit} disabled={guardando || !form.nombre || !form.precio} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
+        <button onClick={handleSubmit} disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
           {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar
         </button>
       </div>
