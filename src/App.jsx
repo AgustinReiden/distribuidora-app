@@ -3,8 +3,8 @@ import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
-import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalOptimizarRuta } from './components/Modals.jsx';
-import { generarOrdenPreparacion, generarHojaRuta } from './lib/pdfExport.js';
+import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalGestionRutas } from './components/Modals.jsx';
+import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
 import { ITEMS_PER_PAGE } from './utils/formatters';
 
@@ -443,6 +443,15 @@ function MainApp() {
     setGuardando(false);
   };
 
+  const handleExportarHojaRutaOptimizada = (transportista, pedidosOrdenados) => {
+    try {
+      generarHojaRutaOptimizada(transportista, pedidosOrdenados, rutaOptimizada || {});
+      notify.success('PDF generado correctamente');
+    } catch (e) {
+      notify.error('Error al generar PDF: ' + e.message);
+    }
+  };
+
   const handleCerrarModalOptimizar = () => {
     setModalOptimizarRuta(false);
     limpiarRuta();
@@ -649,13 +658,15 @@ function MainApp() {
       )}
 
       {modalOptimizarRuta && (
-        <ModalOptimizarRuta
+        <ModalGestionRutas
           transportistas={transportistas}
           pedidos={pedidos}
           onOptimizar={(transportistaId, pedidosData) => optimizarRuta(transportistaId, pedidosData)}
           onAplicarOrden={handleAplicarOrdenOptimizado}
+          onExportarPDF={handleExportarHojaRutaOptimizada}
           onClose={handleCerrarModalOptimizar}
           loading={loadingOptimizacion}
+          guardando={guardando}
           rutaOptimizada={rutaOptimizada}
           error={errorOptimizacion}
         />

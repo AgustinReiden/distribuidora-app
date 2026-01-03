@@ -11,3 +11,4 @@ export { default as ModalHistorialPedido } from './ModalHistorialPedido';
 export { default as ModalEditarPedido } from './ModalEditarPedido';
 export { default as ModalExportarPDF } from './ModalExportarPDF';
 export { default as ModalOptimizarRuta } from './ModalOptimizarRuta';
+export { default as ModalGestionRutas } from './ModalGestionRutas';
