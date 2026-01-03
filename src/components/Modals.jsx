@@ -133,6 +133,7 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
     codigo: '',
     categoria: '',
     stock: '',
+    stock_minimo: 10,
     costo_sin_iva: '',
     costo_con_iva: '',
     impuestos_internos: '',
@@ -195,6 +196,20 @@ export const ModalProducto = memo(function ModalProducto({ producto, categorias,
               className="w-full px-3 py-2 border rounded-lg"
             />
           </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Stock Mínimo de Seguridad</label>
+          <input
+            type="number"
+            value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
+            onChange={e => setForm({ ...form, stock_minimo: parseInt(e.target.value) || 0 })}
+            className="w-full px-3 py-2 border rounded-lg"
+            placeholder="10"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Se mostrará una alerta cuando el stock esté por debajo de este valor
+          </p>
         </div>
 
         <div>
@@ -449,7 +464,8 @@ export const ModalPedido = memo(function ModalPedido({
     return productos.filter(p => {
       const matchNombre = p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase());
       const matchCategoria = !categoriaSeleccionada || p.categoria === categoriaSeleccionada;
-      return matchNombre && matchCategoria;
+      const tieneStock = p.stock > 0;
+      return matchNombre && matchCategoria && tieneStock;
     });
   }, [productos, busquedaProducto, categoriaSeleccionada]);
 
@@ -481,8 +497,9 @@ export const ModalPedido = memo(function ModalPedido({
     const producto = productos.find(p => p.id === productoId);
     if (!producto) return null;
     const stockDisponible = producto.stock - cantidadEnPedido;
+    const stockMinimo = producto.stock_minimo || 10;
     if (stockDisponible < 0) return { tipo: 'error', mensaje: `Sin stock! Disponible: ${producto.stock}` };
-    if (stockDisponible < 10) return { tipo: 'warning', mensaje: `Stock bajo: quedarán ${stockDisponible}` };
+    if (stockDisponible < stockMinimo) return { tipo: 'warning', mensaje: `Stock bajo: quedarán ${stockDisponible}` };
     return null;
   };
 
@@ -1175,7 +1192,7 @@ export const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
 
   return (
     <ModalBase title="Optimizar Ruta de Entregas" onClose={onClose} maxWidth="max-w-2xl">
-      <div className="p-4 space-y-4">
+      <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Configuración del depósito (colapsable) */}
         <div className="border rounded-lg">
           <button

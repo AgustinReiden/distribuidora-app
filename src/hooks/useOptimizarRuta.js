@@ -3,6 +3,9 @@ import { useState, useCallback } from 'react';
 // URL del webhook de n8n para optimizar rutas
 const N8N_WEBHOOK_URL = 'https://n8n.shycia.com.ar/webhook/optimizar-ruta';
 
+// Google API Key para Google Routes API
+const GOOGLE_API_KEY = 'AIzaSyDm-wh1YAYmcOPHacSq2WYp1IB9oGfO_KQ';
+
 // Coordenadas del depósito por defecto (se pueden configurar)
 const DEPOSITO_DEFAULT = {
   lat: -26.8241,
@@ -114,6 +117,7 @@ export function useOptimizarRuta() {
           transportista_id: transportistaId,
           deposito_lat: deposito.lat,
           deposito_lng: deposito.lng,
+          google_api_key: GOOGLE_API_KEY,
           // Enviar los pedidos con coordenadas para que n8n no tenga que hacer el JOIN
           pedidos: pedidosConCoordenadas
         })

@@ -132,7 +132,7 @@ function MainApp() {
     setPaginaActual(1);
   };
 
-  const productosStockBajo = productos.filter(p => p.stock < 10);
+  const productosStockBajo = productos.filter(p => p.stock < (p.stock_minimo || 10));
 
   const handleGuardarCliente = async (cliente) => {
     setGuardando(true);
@@ -809,7 +809,10 @@ function MainApp() {
           <table className="w-full">
             <thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-sm font-medium">Codigo</th><th className="px-4 py-3 text-left text-sm font-medium">Producto</th><th className="px-4 py-3 text-left text-sm font-medium">Categoria</th><th className="px-4 py-3 text-right text-sm font-medium">Precio</th><th className="px-4 py-3 text-right text-sm font-medium">Stock</th>{isAdmin && <th className="px-4 py-3 text-right text-sm font-medium">Acciones</th>}</tr></thead>
             <tbody className="divide-y">
-              {productos.map(p => (<tr key={p.id} className="hover:bg-gray-50"><td className="px-4 py-3 text-gray-500 text-sm font-mono">{p.codigo || '-'}</td><td className="px-4 py-3 font-medium">{p.nombre}</td><td className="px-4 py-3"><span className={p.categoria ? 'px-2 py-1 bg-gray-100 rounded-full text-sm text-gray-700' : 'text-gray-400'}>{ p.categoria || 'Sin categoria'}</span></td><td className="px-4 py-3 text-right font-semibold text-blue-600">{formatPrecio(p.precio)}</td><td className="px-4 py-3 text-right"><span className={`px-2 py-1 rounded-full text-sm ${p.stock === 0 ? 'bg-red-100 text-red-700' : p.stock < 10 ? 'bg-yellow-100 text-yellow-700' : p.stock < 20 ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>{p.stock}</span></td>{isAdmin && <td className="px-4 py-3 text-right"><div className="flex justify-end space-x-1"><button onClick={() => { setProductoEditando(p); setModalProducto(true); }} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleEliminarProducto(p.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button></div></td>}</tr>))}
+              {productos.map(p => {
+                const stockMinimo = p.stock_minimo || 10;
+                return (<tr key={p.id} className="hover:bg-gray-50"><td className="px-4 py-3 text-gray-500 text-sm font-mono">{p.codigo || '-'}</td><td className="px-4 py-3 font-medium">{p.nombre}</td><td className="px-4 py-3"><span className={p.categoria ? 'px-2 py-1 bg-gray-100 rounded-full text-sm text-gray-700' : 'text-gray-400'}>{ p.categoria || 'Sin categoria'}</span></td><td className="px-4 py-3 text-right font-semibold text-blue-600">{formatPrecio(p.precio)}</td><td className="px-4 py-3 text-right"><span className={`px-2 py-1 rounded-full text-sm ${p.stock === 0 ? 'bg-red-100 text-red-700' : p.stock < stockMinimo ? 'bg-yellow-100 text-yellow-700' : p.stock < stockMinimo * 2 ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>{p.stock}</span></td>{isAdmin && <td className="px-4 py-3 text-right"><div className="flex justify-end space-x-1"><button onClick={() => { setProductoEditando(p); setModalProducto(true); }} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleEliminarProducto(p.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button></div></td>}</tr>);
+              })}
             </tbody>
           </table>
         </div>
