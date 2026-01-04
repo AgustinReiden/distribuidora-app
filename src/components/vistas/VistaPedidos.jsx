@@ -227,22 +227,32 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado }) {
 
 // Vista de ruta para transportista
 function VistaRutaTransportista({ pedidos, onMarcarEntregado, userId, clientes, productos }) {
-  // Enriquecer pedidos con datos de clientes y productos si no están disponibles
+  // Enriquecer pedidos con datos de clientes y productos
+  // Priorizamos los datos de los arrays clientes/productos porque el RLS puede bloquear los joins
   const pedidosEnriquecidos = useMemo(() => {
     if (!pedidos) return [];
 
     return pedidos.map(pedido => {
-      // Si el pedido ya tiene datos del cliente, usarlos
-      let cliente = pedido.cliente;
-      if (!cliente && pedido.cliente_id && clientes) {
+      // Buscar cliente en el array de clientes (más confiable que el join por RLS)
+      let cliente = null;
+      if (pedido.cliente_id && clientes && clientes.length > 0) {
         cliente = clientes.find(c => c.id === pedido.cliente_id);
       }
+      // Fallback al cliente del pedido si existe y tiene datos
+      if (!cliente && pedido.cliente && pedido.cliente.nombre_fantasia) {
+        cliente = pedido.cliente;
+      }
 
-      // Enriquecer items con datos de productos si no están disponibles
+      // Enriquecer items con datos de productos
       const itemsEnriquecidos = pedido.items?.map(item => {
-        let producto = item.producto;
-        if (!producto && item.producto_id && productos) {
+        // Buscar producto en el array de productos (más confiable)
+        let producto = null;
+        if (item.producto_id && productos && productos.length > 0) {
           producto = productos.find(p => p.id === item.producto_id);
+        }
+        // Fallback al producto del item si existe y tiene datos
+        if (!producto && item.producto && item.producto.nombre) {
+          producto = item.producto;
         }
         return { ...item, producto };
       });
