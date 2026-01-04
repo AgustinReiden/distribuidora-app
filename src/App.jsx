@@ -49,7 +49,9 @@ function MainApp() {
   const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, loading: loadingProductos, refetch: refetchProductos } = useProductos();
   const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
-  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo } = useDashboard();
+  // Para preventistas, filtrar métricas por sus propios pedidos
+  const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
+  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo } = useDashboard(dashboardUsuarioId);
   const { exportando, descargarJSON, exportarPedidosCSV } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
@@ -522,7 +524,7 @@ function MainApp() {
       <main className="pt-20 pb-6 px-4">
         <div className="max-w-7xl mx-auto">
         <Suspense fallback={<LoadingVista />}>
-        {vista === 'dashboard' && isAdmin && (
+        {vista === 'dashboard' && (isAdmin || isPreventista) && (
           <VistaDashboard
             metricas={metricas}
             loading={loadingMetricas}
@@ -531,6 +533,9 @@ function MainApp() {
             onRefetch={refetchMetricas}
             onDescargarBackup={descargarJSON}
             exportando={exportando}
+            isAdmin={isAdmin}
+            isPreventista={isPreventista}
+            totalClientes={clientes.length}
           />
         )}
 
@@ -546,6 +551,9 @@ function MainApp() {
             isAdmin={isAdmin}
             isPreventista={isPreventista}
             isTransportista={isTransportista}
+            userId={user?.id}
+            clientes={clientes}
+            productos={productos}
             loading={loadingPedidos}
             exportando={exportando}
             onBusquedaChange={handleBusquedaChange}
@@ -631,6 +639,7 @@ function MainApp() {
           onSave={handleGuardarCliente}
           onClose={() => { setModalCliente(false); setClienteEditando(null); }}
           guardando={guardando}
+          isAdmin={isAdmin}
         />
       )}
 

@@ -226,11 +226,38 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado }) {
 }
 
 // Vista de ruta para transportista
-function VistaRutaTransportista({ pedidos, onMarcarEntregado }) {
-  // Ordenar pedidos por orden_entrega, luego por estado (asignados primero)
+function VistaRutaTransportista({ pedidos, onMarcarEntregado, userId, clientes, productos }) {
+  // Enriquecer pedidos con datos de clientes y productos si no están disponibles
+  const pedidosEnriquecidos = useMemo(() => {
+    if (!pedidos) return [];
+
+    return pedidos.map(pedido => {
+      // Si el pedido ya tiene datos del cliente, usarlos
+      let cliente = pedido.cliente;
+      if (!cliente && pedido.cliente_id && clientes) {
+        cliente = clientes.find(c => c.id === pedido.cliente_id);
+      }
+
+      // Enriquecer items con datos de productos si no están disponibles
+      const itemsEnriquecidos = pedido.items?.map(item => {
+        let producto = item.producto;
+        if (!producto && item.producto_id && productos) {
+          producto = productos.find(p => p.id === item.producto_id);
+        }
+        return { ...item, producto };
+      });
+
+      return { ...pedido, cliente, items: itemsEnriquecidos };
+    });
+  }, [pedidos, clientes, productos]);
+
+  // Filtrar solo pedidos asignados a este transportista y ordenar
   const pedidosOrdenados = useMemo(() => {
-    return [...pedidos]
-      .filter(p => p.estado === 'asignado' || p.estado === 'entregado')
+    return pedidosEnriquecidos
+      .filter(p =>
+        (p.estado === 'asignado' || p.estado === 'entregado') &&
+        p.transportista_id === userId
+      )
       .sort((a, b) => {
         // Primero los asignados, luego los entregados
         if (a.estado === 'asignado' && b.estado === 'entregado') return -1;
@@ -238,7 +265,7 @@ function VistaRutaTransportista({ pedidos, onMarcarEntregado }) {
         // Luego por orden_entrega
         return (a.orden_entrega || 999) - (b.orden_entrega || 999);
       });
-  }, [pedidos]);
+  }, [pedidosEnriquecidos, userId]);
 
   const entregasPendientes = pedidosOrdenados.filter(p => p.estado === 'asignado').length;
   const entregasCompletadas = pedidosOrdenados.filter(p => p.estado === 'entregado').length;
@@ -373,6 +400,9 @@ export default function VistaPedidos({
   isAdmin,
   isPreventista,
   isTransportista,
+  userId,
+  clientes,
+  productos,
   loading,
   exportando,
   onBusquedaChange,
@@ -397,6 +427,9 @@ export default function VistaPedidos({
       <VistaRutaTransportista
         pedidos={pedidos}
         onMarcarEntregado={onMarcarEntregado}
+        userId={userId}
+        clientes={clientes}
+        productos={productos}
       />
     );
   }
