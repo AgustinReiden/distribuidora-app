@@ -172,25 +172,79 @@ export function useProductos() {
   }
 
   const descontarStock = async (items) => {
-    for (const item of items) {
-      const producto = productos.find(p => p.id === item.productoId)
-      if (!producto) continue
-      const nuevoStock = producto.stock - item.cantidad
-      const { error } = await supabase.from('productos').update({ stock: nuevoStock }).eq('id', item.productoId)
-      if (error) throw error
-      setProductos(prev => prev.map(p => p.id === item.productoId ? { ...p, stock: nuevoStock } : p))
+    // Usar función atómica RPC para evitar race conditions
+    const itemsParaRPC = items.map(item => ({
+      producto_id: item.productoId || item.producto_id,
+      cantidad: item.cantidad
+    }))
+
+    const { data, error } = await supabase.rpc('descontar_stock_atomico', {
+      p_items: itemsParaRPC
+    })
+
+    if (error) {
+      // Fallback al método anterior si la función RPC no existe
+      if (error.message.includes('function') && error.message.includes('does not exist')) {
+        console.warn('RPC descontar_stock_atomico no disponible, usando método legacy')
+        for (const item of items) {
+          const producto = productos.find(p => p.id === item.productoId)
+          if (!producto) continue
+          const nuevoStock = producto.stock - item.cantidad
+          const { error: updateError } = await supabase.from('productos').update({ stock: nuevoStock }).eq('id', item.productoId)
+          if (updateError) throw updateError
+          setProductos(prev => prev.map(p => p.id === item.productoId ? { ...p, stock: nuevoStock } : p))
+        }
+        return
+      }
+      throw error
     }
+
+    if (data && !data.success) {
+      throw new Error(data.errores?.join(', ') || 'Error al descontar stock')
+    }
+
+    // Actualizar estado local
+    setProductos(prev => prev.map(p => {
+      const item = items.find(i => (i.productoId || i.producto_id) === p.id)
+      if (item) return { ...p, stock: p.stock - item.cantidad }
+      return p
+    }))
   }
 
   const restaurarStock = async (items) => {
-    for (const item of items) {
-      const producto = productos.find(p => p.id === item.producto_id || p.id === item.productoId)
-      if (!producto) continue
-      const nuevoStock = producto.stock + item.cantidad
-      const { error } = await supabase.from('productos').update({ stock: nuevoStock }).eq('id', producto.id)
-      if (error) throw error
-      setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, stock: nuevoStock } : p))
+    // Usar función atómica RPC
+    const itemsParaRPC = items.map(item => ({
+      producto_id: item.producto_id || item.productoId,
+      cantidad: item.cantidad
+    }))
+
+    const { data, error } = await supabase.rpc('restaurar_stock_atomico', {
+      p_items: itemsParaRPC
+    })
+
+    if (error) {
+      // Fallback al método anterior si la función RPC no existe
+      if (error.message.includes('function') && error.message.includes('does not exist')) {
+        console.warn('RPC restaurar_stock_atomico no disponible, usando método legacy')
+        for (const item of items) {
+          const producto = productos.find(p => p.id === item.producto_id || p.id === item.productoId)
+          if (!producto) continue
+          const nuevoStock = producto.stock + item.cantidad
+          const { error: updateError } = await supabase.from('productos').update({ stock: nuevoStock }).eq('id', producto.id)
+          if (updateError) throw updateError
+          setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, stock: nuevoStock } : p))
+        }
+        return
+      }
+      throw error
     }
+
+    // Actualizar estado local
+    setProductos(prev => prev.map(p => {
+      const item = items.find(i => (i.producto_id || i.productoId) === p.id)
+      if (item) return { ...p, stock: p.stock + item.cantidad }
+      return p
+    }))
   }
 
   return { productos, loading, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, refetch: fetchProductos }
@@ -249,22 +303,53 @@ export function usePedidos() {
   })
 
   const crearPedido = async (clienteId, items, total, usuarioId, descontarStockFn, notas = '', formaPago = 'efectivo', estadoPago = 'pendiente') => {
-    const { data: pedido, error: pedidoError } = await supabase.from('pedidos').insert([{
-      cliente_id: clienteId,
-      total,
-      estado: 'pendiente',
-      usuario_id: usuarioId,
-      stock_descontado: true,
-      notas: notas || null,
-      forma_pago: formaPago || 'efectivo',
-      estado_pago: estadoPago || 'pendiente'
-    }]).select().single()
-    if (pedidoError) throw pedidoError
-    const itemsParaInsertar = items.map(item => ({ pedido_id: pedido.id, producto_id: item.productoId, cantidad: item.cantidad, precio_unitario: item.precioUnitario, subtotal: item.cantidad * item.precioUnitario }))
-    const { error: itemsError } = await supabase.from('pedido_items').insert(itemsParaInsertar)
-    if (itemsError) throw itemsError
-    if (descontarStockFn) await descontarStockFn(items)
-    await fetchPedidos(); return pedido
+    // Usar función atómica RPC para crear pedido + items + descontar stock en una transacción
+    const itemsParaRPC = items.map(item => ({
+      producto_id: item.productoId,
+      cantidad: item.cantidad,
+      precio_unitario: item.precioUnitario
+    }))
+
+    const { data, error } = await supabase.rpc('crear_pedido_completo', {
+      p_cliente_id: clienteId,
+      p_total: total,
+      p_usuario_id: usuarioId,
+      p_notas: notas || null,
+      p_forma_pago: formaPago || 'efectivo',
+      p_estado_pago: estadoPago || 'pendiente',
+      p_items: itemsParaRPC
+    })
+
+    if (error) {
+      // Fallback al método anterior si la función RPC no existe
+      if (error.message.includes('function') && error.message.includes('does not exist')) {
+        console.warn('RPC crear_pedido_completo no disponible, usando método legacy')
+        const { data: pedido, error: pedidoError } = await supabase.from('pedidos').insert([{
+          cliente_id: clienteId,
+          total,
+          estado: 'pendiente',
+          usuario_id: usuarioId,
+          stock_descontado: true,
+          notas: notas || null,
+          forma_pago: formaPago || 'efectivo',
+          estado_pago: estadoPago || 'pendiente'
+        }]).select().single()
+        if (pedidoError) throw pedidoError
+        const itemsParaInsertar = items.map(item => ({ pedido_id: pedido.id, producto_id: item.productoId, cantidad: item.cantidad, precio_unitario: item.precioUnitario, subtotal: item.cantidad * item.precioUnitario }))
+        const { error: itemsError } = await supabase.from('pedido_items').insert(itemsParaInsertar)
+        if (itemsError) throw itemsError
+        if (descontarStockFn) await descontarStockFn(items)
+        await fetchPedidos(); return pedido
+      }
+      throw error
+    }
+
+    if (!data.success) {
+      throw new Error(data.errores?.join(', ') || 'Error al crear pedido')
+    }
+
+    await fetchPedidos()
+    return { id: data.pedido_id }
   }
 
   const cambiarEstado = async (id, nuevoEstado) => {
@@ -294,9 +379,33 @@ export function usePedidos() {
 
   const eliminarPedido = async (id, restaurarStockFn) => {
     const pedido = pedidos.find(p => p.id === id)
-    if (pedido?.stock_descontado && pedido?.items && restaurarStockFn) await restaurarStockFn(pedido.items)
-    await supabase.from('pedido_items').delete().eq('pedido_id', id)
-    const { error } = await supabase.from('pedidos').delete().eq('id', id); if (error) throw error
+    const restaurarStock = pedido?.stock_descontado ?? true
+
+    // Usar función atómica RPC para eliminar pedido + items + restaurar stock en una transacción
+    const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
+      p_pedido_id: id,
+      p_restaurar_stock: restaurarStock
+    })
+
+    if (error) {
+      // Fallback al método anterior si la función RPC no existe
+      if (error.message.includes('function') && error.message.includes('does not exist')) {
+        console.warn('RPC eliminar_pedido_completo no disponible, usando método legacy')
+        if (pedido?.stock_descontado && pedido?.items && restaurarStockFn) await restaurarStockFn(pedido.items)
+        await supabase.from('pedido_historial').delete().eq('pedido_id', id)
+        await supabase.from('pedido_items').delete().eq('pedido_id', id)
+        const { error: deleteError } = await supabase.from('pedidos').delete().eq('id', id)
+        if (deleteError) throw deleteError
+        setPedidos(prev => prev.filter(p => p.id !== id))
+        return
+      }
+      throw error
+    }
+
+    if (!data.success) {
+      throw new Error(data.error || 'Error al eliminar pedido')
+    }
+
     setPedidos(prev => prev.filter(p => p.id !== id))
   }
 
