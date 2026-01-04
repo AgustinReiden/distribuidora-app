@@ -310,12 +310,13 @@ export function usePedidos() {
       precio_unitario: item.precioUnitario
     }))
 
-    // CORRECCIÓN APLICADA: p_items movido a la 4ta posición
+    // Orden corregido: p_items DEBE estar en 4ta posición (después de p_usuario_id, antes de parámetros con DEFAULT)
+    // En PostgreSQL, parámetros sin DEFAULT deben ir antes de parámetros con DEFAULT
     const { data, error } = await supabase.rpc('crear_pedido_completo', {
       p_cliente_id: clienteId,
       p_total: total,
       p_usuario_id: usuarioId,
-      p_items: itemsParaRPC, // <--- Ahora aquí
+      p_items: itemsParaRPC,
       p_notas: notas || null,
       p_forma_pago: formaPago || 'efectivo',
       p_estado_pago: estadoPago || 'pendiente'
