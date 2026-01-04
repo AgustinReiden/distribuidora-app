@@ -5,7 +5,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { NotificationCenter } from '../../contexts/NotificationContext';
 
 const menuConfig = [
-  { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin'] },
+  { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
   { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista'] },
   { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
   { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista'] },

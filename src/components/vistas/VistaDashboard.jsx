@@ -128,7 +128,9 @@ export default function VistaDashboard({
   onDescargarBackup,
   exportando,
   productosStockBajo = [],
-  totalClientes = 0
+  totalClientes = 0,
+  isAdmin = false,
+  isPreventista = false
 }) {
   const [fechaDesdeLocal, setFechaDesdeLocal] = useState('');
   const [fechaHastaLocal, setFechaHastaLocal] = useState('');
@@ -175,9 +177,14 @@ export default function VistaDashboard({
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
+            {isPreventista && !isAdmin ? 'Mis Métricas' : 'Dashboard'}
+          </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Resumen de actividad - {periodoLabels[filtroPeriodo]}
+            {isPreventista && !isAdmin
+              ? `Resumen de mis ventas - ${periodoLabels[filtroPeriodo]}`
+              : `Resumen de actividad - ${periodoLabels[filtroPeriodo]}`
+            }
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -190,15 +197,17 @@ export default function VistaDashboard({
             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
             <span>Actualizar</span>
           </button>
-          <button
-            onClick={() => onDescargarBackup('completo')}
-            disabled={exportando}
-            className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            aria-label="Descargar backup"
-          >
-            <Download className="w-5 h-5" />
-            <span>Backup</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => onDescargarBackup('completo')}
+              disabled={exportando}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              aria-label="Descargar backup"
+            >
+              <Download className="w-5 h-5" />
+              <span>Backup</span>
+            </button>
+          )}
         </div>
       </div>
 

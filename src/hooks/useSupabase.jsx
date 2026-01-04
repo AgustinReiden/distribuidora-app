@@ -429,7 +429,8 @@ export function useUsuarios() {
   return { usuarios, transportistas, loading, actualizarUsuario, refetch: fetchUsuarios }
 }
 
-export function useDashboard() {
+export function useDashboard(usuarioFiltro = null) {
+  // usuarioFiltro: si se pasa un ID de usuario, filtra los pedidos solo por ese usuario (para preventistas)
   const [metricas, setMetricas] = useState({
     ventasPeriodo: 0,
     pedidosPeriodo: 0,
@@ -449,11 +450,17 @@ export function useDashboard() {
   const calcularMetricas = async (periodo = filtroPeriodo, fDesde = fechaDesde, fHasta = fechaHasta) => {
     setLoading(true)
     try {
-      // Obtener TODOS los pedidos
-      const { data: todosPedidos, error: errorTodos } = await supabase
+      // Construir query base
+      let query = supabase
         .from('pedidos')
         .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
-        .order('created_at', { ascending: false })
+
+      // Si hay filtro de usuario (preventista), filtrar por usuario_id
+      if (usuarioFiltro) {
+        query = query.eq('usuario_id', usuarioFiltro)
+      }
+
+      const { data: todosPedidos, error: errorTodos } = await query.order('created_at', { ascending: false })
 
       if (errorTodos) throw errorTodos
       if (!todosPedidos) { setLoading(false); return }

@@ -1,10 +1,10 @@
 import React, { useState, memo } from 'react';
-import { Loader2, MapPin } from 'lucide-react';
+import { Loader2, MapPin, CreditCard } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { validarTelefono, validarTexto } from './utils';
 
-const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando }) {
+const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false }) {
   const [form, setForm] = useState(cliente ? {
     nombre: cliente.nombre,
     nombreFantasia: cliente.nombre_fantasia,
@@ -12,8 +12,10 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     latitud: cliente.latitud || null,
     longitud: cliente.longitud || null,
     telefono: cliente.telefono || '',
-    zona: cliente.zona || ''
-  } : { nombre: '', nombreFantasia: '', direccion: '', latitud: null, longitud: null, telefono: '', zona: '' });
+    zona: cliente.zona || '',
+    limiteCredito: cliente.limite_credito || 0,
+    diasCredito: cliente.dias_credito || 30
+  } : { nombre: '', nombreFantasia: '', direccion: '', latitud: null, longitud: null, telefono: '', zona: '', limiteCredito: 0, diasCredito: 30 });
 
   const [errores, setErrores] = useState({});
   const [intentoGuardar, setIntentoGuardar] = useState(false);
@@ -106,6 +108,44 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           <label className="block text-sm font-medium mb-1">Zona</label>
           <input type="text" value={form.zona} onChange={e => handleFieldChange('zona', e.target.value)} className="w-full px-3 py-2 border rounded-lg" />
         </div>
+
+        {/* Campos de crédito - Solo visibles y editables para admin */}
+        {isAdmin && (
+          <div className="border-t pt-4 mt-4">
+            <div className="flex items-center gap-2 mb-3">
+              <CreditCard className="w-5 h-5 text-blue-600" />
+              <span className="font-medium text-gray-700">Configuración de Crédito</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Límite de Crédito ($)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  value={form.limiteCredito}
+                  onChange={e => handleFieldChange('limiteCredito', e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg"
+                  placeholder="0"
+                />
+                <p className="text-xs text-gray-500 mt-1">0 = sin límite</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Días de Crédito</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="365"
+                  value={form.diasCredito}
+                  onChange={e => handleFieldChange('diasCredito', e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg"
+                  placeholder="30"
+                />
+                <p className="text-xs text-gray-500 mt-1">Plazo de pago en días</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
