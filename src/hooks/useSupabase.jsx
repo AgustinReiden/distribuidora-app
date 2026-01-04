@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext } from 'react'
 import { supabase } from '../lib/supabase'
+import * as XLSX from 'xlsx'
 
 const AuthContext = createContext({})
 
@@ -792,17 +793,127 @@ export function useBackup() {
     a.download = `backup_${tipo}_${new Date().toISOString().split('T')[0]}.json`; a.click(); URL.revokeObjectURL(url)
   }
 
-  const exportarPedidosCSV = async (pedidos) => {
+  const exportarPedidosExcel = async (pedidos) => {
     setExportando(true)
     try {
-      const headers = ['ID', 'Fecha', 'Cliente', 'Dirección', 'Estado', 'Total', 'Productos']
-      const rows = pedidos.map(p => [p.id, new Date(p.created_at).toLocaleDateString('es-AR'), p.cliente?.nombre_fantasia || '', p.cliente?.direccion || '', p.estado, p.total, p.items?.map(i => `${i.producto?.nombre} x${i.cantidad}`).join('; ') || ''])
-      const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${c}"`).join(','))].join('\n')
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = `pedidos_${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(url)
-    } finally { setExportando(false) }
+      // Mapeo de estados para mejor legibilidad
+      const estadoLabels = {
+        pendiente: 'Pendiente',
+        en_preparacion: 'En Preparación',
+        asignado: 'En Camino',
+        entregado: 'Entregado'
+      }
+      const estadoPagoLabels = {
+        pendiente: 'Pendiente',
+        parcial: 'Parcial',
+        pagado: 'Pagado'
+      }
+      const formaPagoLabels = {
+        efectivo: 'Efectivo',
+        transferencia: 'Transferencia',
+        cheque: 'Cheque',
+        cuenta_corriente: 'Cuenta Corriente',
+        tarjeta: 'Tarjeta'
+      }
+
+      // Hoja principal de pedidos
+      const datosPedidos = pedidos.map(p => ({
+        'ID Pedido': p.id,
+        'Fecha': new Date(p.created_at).toLocaleDateString('es-AR'),
+        'Hora': new Date(p.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+        'Cliente': p.cliente?.nombre_fantasia || 'Sin cliente',
+        'Teléfono': p.cliente?.telefono || '-',
+        'Dirección': p.cliente?.direccion || '-',
+        'Zona': p.cliente?.zona || '-',
+        'Estado Pedido': estadoLabels[p.estado] || p.estado,
+        'Estado Pago': estadoPagoLabels[p.estado_pago] || p.estado_pago || 'Pendiente',
+        'Forma de Pago': formaPagoLabels[p.forma_pago] || p.forma_pago || 'Efectivo',
+        'Transportista': p.transportista?.nombre || 'Sin asignar',
+        'Preventista': p.usuario?.nombre || '-',
+        'Productos': p.items?.map(i => `${i.producto?.nombre || 'Producto'} x${i.cantidad}`).join(', ') || '-',
+        'Cantidad Items': p.items?.reduce((sum, i) => sum + i.cantidad, 0) || 0,
+        'Total': p.total || 0,
+        'Notas': p.notas || '-',
+        'Fecha Entrega': p.fecha_entrega ? new Date(p.fecha_entrega).toLocaleDateString('es-AR') : '-'
+      }))
+
+      // Hoja de detalle de items
+      const datosItems = []
+      pedidos.forEach(p => {
+        p.items?.forEach(item => {
+          datosItems.push({
+            'ID Pedido': p.id,
+            'Fecha Pedido': new Date(p.created_at).toLocaleDateString('es-AR'),
+            'Cliente': p.cliente?.nombre_fantasia || 'Sin cliente',
+            'Producto': item.producto?.nombre || 'Producto sin nombre',
+            'Código': item.producto?.codigo || '-',
+            'Categoría': item.producto?.categoria || '-',
+            'Cantidad': item.cantidad,
+            'Precio Unitario': item.precio_unitario || 0,
+            'Subtotal': item.subtotal || (item.cantidad * item.precio_unitario) || 0
+          })
+        })
+      })
+
+      // Hoja de resumen por estado
+      const resumenEstados = [
+        { 'Estado': 'Pendiente', 'Cantidad': pedidos.filter(p => p.estado === 'pendiente').length, 'Total': pedidos.filter(p => p.estado === 'pendiente').reduce((s, p) => s + (p.total || 0), 0) },
+        { 'Estado': 'En Preparación', 'Cantidad': pedidos.filter(p => p.estado === 'en_preparacion').length, 'Total': pedidos.filter(p => p.estado === 'en_preparacion').reduce((s, p) => s + (p.total || 0), 0) },
+        { 'Estado': 'En Camino', 'Cantidad': pedidos.filter(p => p.estado === 'asignado').length, 'Total': pedidos.filter(p => p.estado === 'asignado').reduce((s, p) => s + (p.total || 0), 0) },
+        { 'Estado': 'Entregado', 'Cantidad': pedidos.filter(p => p.estado === 'entregado').length, 'Total': pedidos.filter(p => p.estado === 'entregado').reduce((s, p) => s + (p.total || 0), 0) },
+        { 'Estado': 'TOTAL', 'Cantidad': pedidos.length, 'Total': pedidos.reduce((s, p) => s + (p.total || 0), 0) }
+      ]
+
+      // Hoja de resumen por estado de pago
+      const resumenPagos = [
+        { 'Estado Pago': 'Pendiente', 'Cantidad': pedidos.filter(p => p.estado_pago === 'pendiente' || !p.estado_pago).length, 'Total': pedidos.filter(p => p.estado_pago === 'pendiente' || !p.estado_pago).reduce((s, p) => s + (p.total || 0), 0) },
+        { 'Estado Pago': 'Parcial', 'Cantidad': pedidos.filter(p => p.estado_pago === 'parcial').length, 'Total': pedidos.filter(p => p.estado_pago === 'parcial').reduce((s, p) => s + (p.total || 0), 0) },
+        { 'Estado Pago': 'Pagado', 'Cantidad': pedidos.filter(p => p.estado_pago === 'pagado').length, 'Total': pedidos.filter(p => p.estado_pago === 'pagado').reduce((s, p) => s + (p.total || 0), 0) }
+      ]
+
+      // Crear workbook
+      const wb = XLSX.utils.book_new()
+
+      // Agregar hojas
+      const wsPedidos = XLSX.utils.json_to_sheet(datosPedidos)
+      const wsItems = XLSX.utils.json_to_sheet(datosItems)
+      const wsResumenEstados = XLSX.utils.json_to_sheet(resumenEstados)
+      const wsResumenPagos = XLSX.utils.json_to_sheet(resumenPagos)
+
+      // Ajustar anchos de columna para la hoja de pedidos
+      wsPedidos['!cols'] = [
+        { wch: 10 }, // ID
+        { wch: 12 }, // Fecha
+        { wch: 8 },  // Hora
+        { wch: 25 }, // Cliente
+        { wch: 15 }, // Teléfono
+        { wch: 35 }, // Dirección
+        { wch: 12 }, // Zona
+        { wch: 14 }, // Estado Pedido
+        { wch: 12 }, // Estado Pago
+        { wch: 16 }, // Forma Pago
+        { wch: 20 }, // Transportista
+        { wch: 20 }, // Preventista
+        { wch: 50 }, // Productos
+        { wch: 12 }, // Cantidad Items
+        { wch: 12 }, // Total
+        { wch: 30 }, // Notas
+        { wch: 14 }  // Fecha Entrega
+      ]
+
+      XLSX.utils.book_append_sheet(wb, wsPedidos, 'Pedidos')
+      XLSX.utils.book_append_sheet(wb, wsItems, 'Detalle Items')
+      XLSX.utils.book_append_sheet(wb, wsResumenEstados, 'Resumen Estados')
+      XLSX.utils.book_append_sheet(wb, wsResumenPagos, 'Resumen Pagos')
+
+      // Generar archivo y descargar
+      const fecha = new Date().toISOString().split('T')[0]
+      XLSX.writeFile(wb, `pedidos_${fecha}.xlsx`)
+    } finally {
+      setExportando(false)
+    }
   }
-  return { exportando, exportarDatos, descargarJSON, exportarPedidosCSV }
+  return { exportando, exportarDatos, descargarJSON, exportarPedidosExcel }
 }
 
 export function usePagos() {
