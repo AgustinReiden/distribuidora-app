@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map, FileText } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 
 export default function VistaClientes({
@@ -9,7 +9,8 @@ export default function VistaClientes({
   isPreventista,
   onNuevoCliente,
   onEditarCliente,
-  onEliminarCliente
+  onEliminarCliente,
+  onVerFichaCliente
 }) {
   const [busqueda, setBusqueda] = useState('');
   const [filtroZona, setFiltroZona] = useState('todas');
@@ -156,12 +157,23 @@ export default function VistaClientes({
 
               {/* Indicador de coordenadas */}
               {cliente.latitud && cliente.longitud && (
-                <div className="mt-3 pt-2 border-t">
+                <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-700">
                   <span className="text-xs text-green-600 flex items-center">
                     <MapPin className="w-3 h-3 mr-1" />
                     Ubicación geocodificada
                   </span>
                 </div>
+              )}
+
+              {/* Ver Ficha Button */}
+              {onVerFichaCliente && (
+                <button
+                  onClick={() => onVerFichaCliente(cliente)}
+                  className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-sm font-medium"
+                >
+                  <FileText className="w-4 h-4" />
+                  Ver Ficha de Cliente
+                </button>
               )}
             </div>
           ))}

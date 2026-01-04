@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, setErrorNotifier } from './hooks/useSupabase.jsx';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalGestionRutas } from './components/Modals.jsx';
-import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada } from './lib/pdfExport.js';
+import ModalFichaCliente from './components/modals/ModalFichaCliente.jsx';
+import ModalRegistrarPago from './components/modals/ModalRegistrarPago.jsx';
+import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada, generarReciboPago } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
 import { ITEMS_PER_PAGE } from './utils/formatters';
 
@@ -50,6 +52,7 @@ function MainApp() {
   const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo } = useDashboard();
   const { exportando, descargarJSON, exportarPedidosCSV } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
+  const { registrarPago, obtenerResumenCuenta } = usePagos();
 
   // Estados de modales
   const [modalCliente, setModalCliente] = useState(false);
@@ -63,6 +66,8 @@ function MainApp() {
   const [modalEditarPedido, setModalEditarPedido] = useState(false);
   const [modalExportarPDF, setModalExportarPDF] = useState(false);
   const [modalOptimizarRuta, setModalOptimizarRuta] = useState(false);
+  const [modalFichaCliente, setModalFichaCliente] = useState(false);
+  const [modalRegistrarPago, setModalRegistrarPago] = useState(false);
 
   // Estados de edición
   const [clienteEditando, setClienteEditando] = useState(null);
@@ -72,6 +77,9 @@ function MainApp() {
   const [pedidoHistorial, setPedidoHistorial] = useState(null);
   const [historialCambios, setHistorialCambios] = useState([]);
   const [pedidoEditando, setPedidoEditando] = useState(null);
+  const [clienteFicha, setClienteFicha] = useState(null);
+  const [clientePago, setClientePago] = useState(null);
+  const [saldoPendienteCliente, setSaldoPendienteCliente] = useState(0);
 
   // Estados del formulario de pedido
   const [nuevoPedido, setNuevoPedido] = useState({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
@@ -457,6 +465,51 @@ function MainApp() {
     limpiarRuta();
   };
 
+  // Handlers para ficha de cliente y pagos
+  const handleVerFichaCliente = async (cliente) => {
+    setClienteFicha(cliente);
+    setModalFichaCliente(true);
+    // Obtener saldo pendiente
+    const resumen = await obtenerResumenCuenta(cliente.id);
+    if (resumen) {
+      setSaldoPendienteCliente(resumen.saldo_actual || 0);
+    }
+  };
+
+  const handleAbrirRegistrarPago = async (cliente) => {
+    setClientePago(cliente);
+    // Obtener saldo pendiente
+    const resumen = await obtenerResumenCuenta(cliente.id);
+    if (resumen) {
+      setSaldoPendienteCliente(resumen.saldo_actual || 0);
+    }
+    setModalRegistrarPago(true);
+    setModalFichaCliente(false);
+  };
+
+  const handleRegistrarPago = async (datosPago) => {
+    try {
+      const pago = await registrarPago({
+        ...datosPago,
+        usuarioId: user.id
+      });
+      notify.success('Pago registrado correctamente');
+      return pago;
+    } catch (e) {
+      notify.error('Error al registrar pago: ' + e.message);
+      throw e;
+    }
+  };
+
+  const handleGenerarReciboPago = (pago, cliente) => {
+    try {
+      generarReciboPago(pago, cliente);
+      notify.success('Recibo generado correctamente');
+    } catch (e) {
+      notify.error('Error al generar recibo: ' + e.message);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
       <TopNavigation
@@ -522,6 +575,7 @@ function MainApp() {
             onNuevoCliente={() => setModalCliente(true)}
             onEditarCliente={(cliente) => { setClienteEditando(cliente); setModalCliente(true); }}
             onEliminarCliente={handleEliminarCliente}
+            onVerFichaCliente={handleVerFichaCliente}
           />
         )}
 
@@ -542,6 +596,7 @@ function MainApp() {
             reporteInicializado={reporteInicializado}
             loading={loadingReporte}
             onCalcularReporte={calcularReportePreventistas}
+            onVerFichaCliente={handleVerFichaCliente}
           />
         )}
 
@@ -669,6 +724,25 @@ function MainApp() {
           guardando={guardando}
           rutaOptimizada={rutaOptimizada}
           error={errorOptimizacion}
+        />
+      )}
+
+      {modalFichaCliente && clienteFicha && (
+        <ModalFichaCliente
+          cliente={clienteFicha}
+          onClose={() => { setModalFichaCliente(false); setClienteFicha(null); }}
+          onRegistrarPago={handleAbrirRegistrarPago}
+        />
+      )}
+
+      {modalRegistrarPago && clientePago && (
+        <ModalRegistrarPago
+          cliente={clientePago}
+          saldoPendiente={saldoPendienteCliente}
+          pedidos={pedidos}
+          onClose={() => { setModalRegistrarPago(false); setClientePago(null); }}
+          onConfirmar={handleRegistrarPago}
+          onGenerarRecibo={handleGenerarReciboPago}
         />
       )}
     </div>
