@@ -310,14 +310,15 @@ export function usePedidos() {
       precio_unitario: item.precioUnitario
     }))
 
+    // CORRECCIÓN APLICADA: p_items movido a la 4ta posición
     const { data, error } = await supabase.rpc('crear_pedido_completo', {
       p_cliente_id: clienteId,
       p_total: total,
       p_usuario_id: usuarioId,
+      p_items: itemsParaRPC, // <--- Ahora aquí
       p_notas: notas || null,
       p_forma_pago: formaPago || 'efectivo',
-      p_estado_pago: estadoPago || 'pendiente',
-      p_items: itemsParaRPC
+      p_estado_pago: estadoPago || 'pendiente'
     })
 
     if (error) {
