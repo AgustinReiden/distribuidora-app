@@ -80,14 +80,15 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 3. FUNCIÓN: Crear pedido completo (pedido + items + descuento stock) en una transacción
+-- IMPORTANTE: p_items debe estar ANTES de parámetros con DEFAULT en PostgreSQL
 CREATE OR REPLACE FUNCTION crear_pedido_completo(
   p_cliente_id INT,
   p_total DECIMAL,
   p_usuario_id UUID,
+  p_items JSONB, -- Array de {producto_id, cantidad, precio_unitario} - MOVIDO AQUÍ
   p_notas TEXT DEFAULT NULL,
   p_forma_pago TEXT DEFAULT 'efectivo',
-  p_estado_pago TEXT DEFAULT 'pendiente',
-  p_items JSONB -- Array de {producto_id, cantidad, precio_unitario}
+  p_estado_pago TEXT DEFAULT 'pendiente'
 )
 RETURNS JSONB AS $$
 DECLARE
