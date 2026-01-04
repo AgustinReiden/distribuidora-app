@@ -322,20 +322,23 @@ export function usePedidos() {
     // ordenOptimizado es un array de { pedido_id, orden }
     if (!ordenOptimizado || ordenOptimizado.length === 0) return
 
+    // Normalizar los IDs a numeros para evitar problemas de tipo (string vs number)
+    const ordenNormalizado = ordenOptimizado.map(item => ({
+      pedido_id: Number(item.pedido_id),
+      orden: Number(item.orden)
+    }))
+
     // Intentar usar la funcion RPC primero (mas confiable)
     const { error: rpcError } = await supabase.rpc('actualizar_orden_entrega_batch', {
-      ordenes: ordenOptimizado.map(item => ({
-        pedido_id: item.pedido_id,
-        orden: item.orden
-      }))
+      ordenes: ordenNormalizado
     })
 
     if (rpcError) {
       // Si la RPC no existe o falla, intentar update directo
       console.warn('RPC no disponible, usando update directo:', rpcError.message)
 
-      // Usar raw SQL query a través de rpc genérico
-      for (const item of ordenOptimizado) {
+      // Usar update directo para cada pedido
+      for (const item of ordenNormalizado) {
         const { error } = await supabase
           .from('pedidos')
           .update({ orden_entrega: item.orden })
@@ -353,9 +356,9 @@ export function usePedidos() {
       }
     }
 
-    // Actualizar estado local
+    // Actualizar estado local (usando IDs normalizados)
     setPedidos(prev => prev.map(p => {
-      const ordenItem = ordenOptimizado.find(o => o.pedido_id === p.id)
+      const ordenItem = ordenNormalizado.find(o => o.pedido_id === Number(p.id))
       if (ordenItem) {
         return { ...p, orden_entrega: ordenItem.orden }
       }

@@ -139,8 +139,9 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const pedidosOrdenados = useMemo(() => {
     if (!rutaOptimizada?.orden_optimizado) return [];
     return rutaOptimizada.orden_optimizado.map(item => {
-      const pedido = pedidos.find(p => p.id === item.pedido_id);
-      return { ...pedido, orden_optimizado: item.orden };
+      // Convertir a Number para evitar problemas de tipo (string vs number)
+      const pedido = pedidos.find(p => Number(p.id) === Number(item.pedido_id));
+      return pedido ? { ...pedido, orden_optimizado: item.orden } : null;
     }).filter(Boolean);
   }, [rutaOptimizada, pedidos]);
 
