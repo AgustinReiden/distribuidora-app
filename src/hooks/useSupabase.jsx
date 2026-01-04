@@ -75,13 +75,15 @@ export function useClientes() {
       latitud: cliente.latitud || null,
       longitud: cliente.longitud || null,
       telefono: cliente.telefono || null,
-      zona: cliente.zona || null
+      zona: cliente.zona || null,
+      limite_credito: cliente.limiteCredito ? parseFloat(cliente.limiteCredito) : 0,
+      dias_credito: cliente.diasCredito ? parseInt(cliente.diasCredito) : 30
     }]).select().single()
     if (error) throw error
     setClientes(prev => [...prev, data].sort((a, b) => a.nombre_fantasia.localeCompare(b.nombre_fantasia))); return data
   }
   const actualizarCliente = async (id, cliente) => {
-    const { data, error } = await supabase.from('clientes').update({
+    const updateData = {
       nombre: cliente.nombre,
       nombre_fantasia: cliente.nombreFantasia,
       direccion: cliente.direccion,
@@ -89,7 +91,12 @@ export function useClientes() {
       longitud: cliente.longitud || null,
       telefono: cliente.telefono || null,
       zona: cliente.zona || null
-    }).eq('id', id).select().single()
+    }
+    // Only update credit fields if provided (to avoid overwriting with undefined)
+    if (cliente.limiteCredito !== undefined) updateData.limite_credito = parseFloat(cliente.limiteCredito) || 0
+    if (cliente.diasCredito !== undefined) updateData.dias_credito = parseInt(cliente.diasCredito) || 30
+
+    const { data, error } = await supabase.from('clientes').update(updateData).eq('id', id).select().single()
     if (error) throw error; setClientes(prev => prev.map(c => c.id === id ? data : c)); return data
   }
   const eliminarCliente = async (id) => { const { error } = await supabase.from('clientes').delete().eq('id', id); if (error) throw error; setClientes(prev => prev.filter(c => c.id !== id)) }
@@ -678,4 +685,393 @@ export function useBackup() {
     } finally { setExportando(false) }
   }
   return { exportando, exportarDatos, descargarJSON, exportarPedidosCSV }
+}
+
+export function usePagos() {
+  const [pagos, setPagos] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  const fetchPagosCliente = async (clienteId) => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('pagos')
+        .select('*, usuario:perfiles(id, nombre)')
+        .eq('cliente_id', clienteId)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setPagos(data || [])
+      return data || []
+    } catch (error) {
+      console.error('Error fetching pagos:', error)
+      notifyError('Error al cargar pagos: ' + error.message)
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const registrarPago = async (pago) => {
+    try {
+      const { data, error } = await supabase.from('pagos').insert([{
+        cliente_id: pago.clienteId,
+        pedido_id: pago.pedidoId || null,
+        monto: parseFloat(pago.monto),
+        forma_pago: pago.formaPago || 'efectivo',
+        referencia: pago.referencia || null,
+        notas: pago.notas || null,
+        usuario_id: pago.usuarioId || null
+      }]).select('*, usuario:perfiles(id, nombre)').single()
+      if (error) throw error
+      setPagos(prev => [data, ...prev])
+      return data
+    } catch (error) {
+      console.error('Error registrando pago:', error)
+      notifyError('Error al registrar pago: ' + error.message)
+      throw error
+    }
+  }
+
+  const eliminarPago = async (pagoId) => {
+    try {
+      const { error } = await supabase.from('pagos').delete().eq('id', pagoId)
+      if (error) throw error
+      setPagos(prev => prev.filter(p => p.id !== pagoId))
+    } catch (error) {
+      console.error('Error eliminando pago:', error)
+      notifyError('Error al eliminar pago: ' + error.message)
+      throw error
+    }
+  }
+
+  const obtenerResumenCuenta = async (clienteId) => {
+    try {
+      const { data, error } = await supabase.rpc('obtener_resumen_cuenta_cliente', { p_cliente_id: clienteId })
+      if (error) {
+        // Fallback: calculate manually if RPC doesn't exist
+        console.warn('RPC no disponible, calculando manualmente:', error.message)
+        const { data: cliente } = await supabase.from('clientes').select('*').eq('id', clienteId).single()
+        const { data: pedidosCliente } = await supabase.from('pedidos').select('*').eq('cliente_id', clienteId)
+        const { data: pagosCliente } = await supabase.from('pagos').select('*').eq('cliente_id', clienteId)
+
+        const totalCompras = (pedidosCliente || []).reduce((s, p) => s + (p.total || 0), 0)
+        const totalPagos = (pagosCliente || []).reduce((s, p) => s + (p.monto || 0), 0)
+
+        return {
+          saldo_actual: totalCompras - totalPagos,
+          limite_credito: cliente?.limite_credito || 0,
+          credito_disponible: (cliente?.limite_credito || 0) - (totalCompras - totalPagos),
+          total_pedidos: (pedidosCliente || []).length,
+          total_compras: totalCompras,
+          total_pagos: totalPagos,
+          pedidos_pendientes_pago: (pedidosCliente || []).filter(p => p.estado_pago !== 'pagado').length,
+          ultimo_pedido: pedidosCliente?.length ? Math.max(...pedidosCliente.map(p => new Date(p.created_at))) : null,
+          ultimo_pago: pagosCliente?.length ? Math.max(...pagosCliente.map(p => new Date(p.created_at))) : null
+        }
+      }
+      return data
+    } catch (error) {
+      console.error('Error obteniendo resumen:', error)
+      return null
+    }
+  }
+
+  return { pagos, loading, fetchPagosCliente, registrarPago, eliminarPago, obtenerResumenCuenta }
+}
+
+export function useFichaCliente(clienteId) {
+  const [pedidosCliente, setPedidosCliente] = useState([])
+  const [estadisticas, setEstadisticas] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const fetchDatosCliente = async () => {
+    if (!clienteId) return
+    setLoading(true)
+    try {
+      // Fetch orders with items
+      const { data: pedidos, error: errorPedidos } = await supabase
+        .from('pedidos')
+        .select(`*, items:pedido_items(*, producto:productos(*))`)
+        .eq('cliente_id', clienteId)
+        .order('created_at', { ascending: false })
+      if (errorPedidos) throw errorPedidos
+      setPedidosCliente(pedidos || [])
+
+      // Calculate statistics
+      const pedidosData = pedidos || []
+      const totalCompras = pedidosData.reduce((s, p) => s + (p.total || 0), 0)
+      const pedidosPagados = pedidosData.filter(p => p.estado_pago === 'pagado')
+      const pedidosPendientes = pedidosData.filter(p => p.estado_pago !== 'pagado')
+
+      // Product frequency
+      const productosFrecuencia = {}
+      pedidosData.forEach(p => {
+        p.items?.forEach(item => {
+          const nombre = item.producto?.nombre || 'Desconocido'
+          if (!productosFrecuencia[nombre]) productosFrecuencia[nombre] = { nombre, cantidad: 0, veces: 0 }
+          productosFrecuencia[nombre].cantidad += item.cantidad
+          productosFrecuencia[nombre].veces += 1
+        })
+      })
+      const productosFavoritos = Object.values(productosFrecuencia).sort((a, b) => b.cantidad - a.cantidad).slice(0, 5)
+
+      // Days since last order
+      const ultimoPedido = pedidosData[0]?.created_at
+      const diasDesdeUltimoP = ultimoPedido
+        ? Math.floor((new Date() - new Date(ultimoPedido)) / (1000 * 60 * 60 * 24))
+        : null
+
+      // Average ticket
+      const ticketPromedio = pedidosData.length > 0 ? totalCompras / pedidosData.length : 0
+
+      // Purchase frequency (orders per month)
+      let frecuenciaCompra = 0
+      if (pedidosData.length > 1) {
+        const primerPedido = new Date(pedidosData[pedidosData.length - 1].created_at)
+        const ultimoPedidoDate = new Date(pedidosData[0].created_at)
+        const meses = Math.max(1, (ultimoPedidoDate - primerPedido) / (1000 * 60 * 60 * 24 * 30))
+        frecuenciaCompra = pedidosData.length / meses
+      }
+
+      setEstadisticas({
+        totalPedidos: pedidosData.length,
+        totalCompras,
+        pedidosPagados: pedidosPagados.length,
+        montoPagado: pedidosPagados.reduce((s, p) => s + (p.total || 0), 0),
+        pedidosPendientes: pedidosPendientes.length,
+        montoPendiente: pedidosPendientes.reduce((s, p) => s + (p.total || 0), 0),
+        ticketPromedio,
+        frecuenciaCompra,
+        diasDesdeUltimoPedido: diasDesdeUltimoP,
+        productosFavoritos
+      })
+    } catch (error) {
+      console.error('Error fetching datos cliente:', error)
+      notifyError('Error al cargar datos del cliente: ' + error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (clienteId) fetchDatosCliente()
+  }, [clienteId])
+
+  return { pedidosCliente, estadisticas, loading, refetch: fetchDatosCliente }
+}
+
+export function useReportesFinancieros() {
+  const [loading, setLoading] = useState(false)
+
+  const generarReporteCuentasPorCobrar = async () => {
+    setLoading(true)
+    try {
+      const { data: clientes, error: errorClientes } = await supabase
+        .from('clientes')
+        .select('*')
+        .order('nombre_fantasia')
+      if (errorClientes) throw errorClientes
+
+      const { data: pedidos, error: errorPedidos } = await supabase
+        .from('pedidos')
+        .select('*')
+        .neq('estado_pago', 'pagado')
+      if (errorPedidos) throw errorPedidos
+
+      const { data: pagos, error: errorPagos } = await supabase
+        .from('pagos')
+        .select('*')
+      if (errorPagos && !errorPagos.message.includes('does not exist')) throw errorPagos
+
+      const hoy = new Date()
+      const reporte = (clientes || []).map(cliente => {
+        const pedidosCliente = (pedidos || []).filter(p => p.cliente_id === cliente.id)
+        const pagosCliente = (pagos || []).filter(p => p.cliente_id === cliente.id)
+
+        const totalDeuda = pedidosCliente.reduce((s, p) => s + (p.total || 0), 0)
+        const totalPagado = pagosCliente.reduce((s, p) => s + (p.monto || 0), 0)
+        const saldoPendiente = totalDeuda - totalPagado
+
+        // Aging analysis
+        let corriente = 0, vencido30 = 0, vencido60 = 0, vencido90 = 0
+        pedidosCliente.forEach(p => {
+          const fechaPedido = new Date(p.created_at)
+          const diasCredito = cliente.dias_credito || 30
+          const fechaVencimiento = new Date(fechaPedido)
+          fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito)
+          const diasVencido = Math.floor((hoy - fechaVencimiento) / (1000 * 60 * 60 * 24))
+
+          if (diasVencido <= 0) corriente += p.total || 0
+          else if (diasVencido <= 30) vencido30 += p.total || 0
+          else if (diasVencido <= 60) vencido60 += p.total || 0
+          else vencido90 += p.total || 0
+        })
+
+        return {
+          cliente,
+          totalDeuda,
+          totalPagado,
+          saldoPendiente,
+          limiteCredito: cliente.limite_credito || 0,
+          creditoDisponible: (cliente.limite_credito || 0) - saldoPendiente,
+          aging: { corriente, vencido30, vencido60, vencido90 },
+          pedidosPendientes: pedidosCliente.length
+        }
+      }).filter(r => r.saldoPendiente > 0).sort((a, b) => b.saldoPendiente - a.saldoPendiente)
+
+      return reporte
+    } catch (error) {
+      console.error('Error generando reporte:', error)
+      notifyError('Error al generar reporte: ' + error.message)
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const generarReporteRentabilidad = async (fechaDesde = null, fechaHasta = null) => {
+    setLoading(true)
+    try {
+      let query = supabase.from('pedidos').select(`*, items:pedido_items(*, producto:productos(*))`)
+      if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
+      if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
+
+      const { data: pedidos, error } = await query
+      if (error) throw error
+
+      // Por producto
+      const productoStats = {}
+      ;(pedidos || []).forEach(p => {
+        p.items?.forEach(item => {
+          const prod = item.producto
+          if (!prod) return
+          const id = prod.id
+          if (!productoStats[id]) {
+            productoStats[id] = {
+              id,
+              nombre: prod.nombre,
+              codigo: prod.codigo,
+              cantidadVendida: 0,
+              ingresos: 0,
+              costos: 0,
+              margen: 0
+            }
+          }
+          productoStats[id].cantidadVendida += item.cantidad
+          productoStats[id].ingresos += item.subtotal || (item.cantidad * item.precio_unitario)
+          const costoUnitario = prod.costo_con_iva || prod.costo_sin_iva || 0
+          productoStats[id].costos += costoUnitario * item.cantidad
+        })
+      })
+
+      const reporteProductos = Object.values(productoStats).map(p => ({
+        ...p,
+        margen: p.ingresos - p.costos,
+        margenPorcentaje: p.ingresos > 0 ? ((p.ingresos - p.costos) / p.ingresos * 100) : 0
+      })).sort((a, b) => b.margen - a.margen)
+
+      // Totals
+      const totales = {
+        ingresosTotales: reporteProductos.reduce((s, p) => s + p.ingresos, 0),
+        costosTotales: reporteProductos.reduce((s, p) => s + p.costos, 0),
+        margenTotal: reporteProductos.reduce((s, p) => s + p.margen, 0),
+        cantidadPedidos: (pedidos || []).length
+      }
+      totales.margenPorcentaje = totales.ingresosTotales > 0
+        ? (totales.margenTotal / totales.ingresosTotales * 100)
+        : 0
+
+      return { productos: reporteProductos, totales }
+    } catch (error) {
+      console.error('Error generando reporte rentabilidad:', error)
+      notifyError('Error al generar reporte: ' + error.message)
+      return { productos: [], totales: {} }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const generarReporteVentasPorCliente = async (fechaDesde = null, fechaHasta = null) => {
+    setLoading(true)
+    try {
+      let query = supabase.from('pedidos').select(`*, cliente:clientes(*)`)
+      if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
+      if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
+
+      const { data: pedidos, error } = await query
+      if (error) throw error
+
+      const clienteStats = {}
+      ;(pedidos || []).forEach(p => {
+        const clienteId = p.cliente_id
+        if (!clienteStats[clienteId]) {
+          clienteStats[clienteId] = {
+            cliente: p.cliente,
+            cantidadPedidos: 0,
+            totalVentas: 0,
+            pedidosPagados: 0,
+            pedidosPendientes: 0
+          }
+        }
+        clienteStats[clienteId].cantidadPedidos += 1
+        clienteStats[clienteId].totalVentas += p.total || 0
+        if (p.estado_pago === 'pagado') clienteStats[clienteId].pedidosPagados += 1
+        else clienteStats[clienteId].pedidosPendientes += 1
+      })
+
+      return Object.values(clienteStats).sort((a, b) => b.totalVentas - a.totalVentas)
+    } catch (error) {
+      console.error('Error generando reporte:', error)
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const generarReporteVentasPorZona = async (fechaDesde = null, fechaHasta = null) => {
+    setLoading(true)
+    try {
+      let query = supabase.from('pedidos').select(`*, cliente:clientes(*)`)
+      if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
+      if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
+
+      const { data: pedidos, error } = await query
+      if (error) throw error
+
+      const zonaStats = {}
+      ;(pedidos || []).forEach(p => {
+        const zona = p.cliente?.zona || 'Sin zona'
+        if (!zonaStats[zona]) {
+          zonaStats[zona] = {
+            zona,
+            cantidadPedidos: 0,
+            totalVentas: 0,
+            clientes: new Set()
+          }
+        }
+        zonaStats[zona].cantidadPedidos += 1
+        zonaStats[zona].totalVentas += p.total || 0
+        zonaStats[zona].clientes.add(p.cliente_id)
+      })
+
+      return Object.values(zonaStats).map(z => ({
+        ...z,
+        cantidadClientes: z.clientes.size,
+        ticketPromedio: z.cantidadPedidos > 0 ? z.totalVentas / z.cantidadPedidos : 0
+      })).sort((a, b) => b.totalVentas - a.totalVentas)
+    } catch (error) {
+      console.error('Error generando reporte:', error)
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return {
+    loading,
+    generarReporteCuentasPorCobrar,
+    generarReporteRentabilidad,
+    generarReporteVentasPorCliente,
+    generarReporteVentasPorZona
+  }
 }

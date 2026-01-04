@@ -473,3 +473,325 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
   const nombreTransportista = (transportista?.nombre || 'transportista').replace(/\s+/g, '-').toLowerCase();
   doc.save(`ruta-${nombreTransportista}-${fecha}.pdf`);
 }
+
+/**
+ * Genera PDF de Recibo de Pago
+ * Formato: Ticket comandera de 75mm de ancho
+ * @param {Object} pago - Datos del pago registrado
+ * @param {Object} cliente - Datos del cliente
+ * @param {Object} empresa - Datos de la empresa (opcional)
+ * @returns {void} - Descarga el PDF
+ */
+export function generarReciboPago(pago, cliente, empresa = {}) {
+  const ticketWidth = 75; // mm
+  const margin = 3; // mm
+  const contentWidth = ticketWidth - (margin * 2);
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [ticketWidth, 120] // Altura fija para recibo
+  });
+
+  let y = margin;
+
+  // === HEADER ===
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('RECIBO DE PAGO', ticketWidth / 2, y + 4, { align: 'center' });
+  y += 8;
+
+  // Nombre empresa (opcional)
+  if (empresa.nombre) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(empresa.nombre, ticketWidth / 2, y, { align: 'center' });
+    y += 4;
+  }
+
+  // Numero de recibo
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`N° ${pago.id || '---'}`, ticketWidth / 2, y, { align: 'center' });
+  y += 5;
+
+  // Fecha y hora
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  const fechaHora = new Date(pago.created_at || new Date()).toLocaleString('es-AR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+  doc.text(fechaHora, ticketWidth / 2, y, { align: 'center' });
+  y += 5;
+
+  // Linea divisora
+  doc.setLineWidth(0.3);
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 5;
+
+  // === DATOS DEL CLIENTE ===
+  doc.setFontSize(7);
+  doc.text('RECIBIDO DE:', margin, y);
+  y += 3;
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text(cliente?.nombre_fantasia || cliente?.nombre || 'Cliente', margin, y);
+  y += 4;
+
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  if (cliente?.direccion) {
+    doc.text(cliente.direccion, margin, y);
+    y += 3;
+  }
+  if (cliente?.telefono) {
+    doc.text(`Tel: ${cliente.telefono}`, margin, y);
+    y += 3;
+  }
+  y += 2;
+
+  // Linea divisora
+  doc.setLineWidth(0.2);
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 5;
+
+  // === DETALLE DEL PAGO ===
+  doc.setFontSize(7);
+  doc.text('LA SUMA DE:', margin, y);
+  y += 5;
+
+  // Monto grande
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(formatPrecio(pago.monto), ticketWidth / 2, y, { align: 'center' });
+  y += 7;
+
+  // Forma de pago
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  const formasPagoLabels = {
+    efectivo: 'EFECTIVO',
+    transferencia: 'TRANSFERENCIA BANCARIA',
+    cheque: 'CHEQUE',
+    tarjeta: 'TARJETA',
+    cuenta_corriente: 'CUENTA CORRIENTE'
+  };
+  doc.text(`Forma de pago: ${formasPagoLabels[pago.forma_pago] || pago.forma_pago || 'EFECTIVO'}`, margin, y);
+  y += 4;
+
+  // Referencia si existe
+  if (pago.referencia) {
+    doc.text(`Referencia: ${pago.referencia}`, margin, y);
+    y += 4;
+  }
+
+  // Pedido asociado si existe
+  if (pago.pedido_id) {
+    doc.text(`Aplicado a Pedido #${pago.pedido_id}`, margin, y);
+    y += 4;
+  }
+
+  // Concepto/Notas
+  y += 2;
+  doc.text('CONCEPTO:', margin, y);
+  y += 3;
+  doc.setFontSize(7);
+  const concepto = pago.notas || 'Pago a cuenta';
+  const conceptoLines = doc.splitTextToSize(concepto, contentWidth);
+  conceptoLines.slice(0, 2).forEach(line => {
+    doc.text(line, margin, y);
+    y += 3;
+  });
+  y += 3;
+
+  // Linea divisora
+  doc.setLineWidth(0.3);
+  doc.line(margin, y, ticketWidth - margin, y);
+  y += 5;
+
+  // === FIRMA ===
+  doc.setFontSize(7);
+  doc.text('Recibido por: ________________', margin, y);
+  y += 6;
+  doc.text('Firma: ______________________', margin, y);
+  y += 8;
+
+  // === PIE ===
+  doc.setFontSize(6);
+  doc.setFont('helvetica', 'italic');
+  doc.text('Este recibo es comprobante de pago valido', ticketWidth / 2, y, { align: 'center' });
+  y += 3;
+  doc.text('Conserve este documento', ticketWidth / 2, y, { align: 'center' });
+
+  // Descargar PDF
+  const fecha = formatFecha(new Date()).replace(/\//g, '-');
+  doc.save(`recibo-${pago.id || 'pago'}-${fecha}.pdf`);
+}
+
+/**
+ * Genera PDF de Estado de Cuenta del Cliente
+ * Formato: A4 para impresion profesional
+ * @param {Object} cliente - Datos del cliente
+ * @param {Array} pedidos - Lista de pedidos del cliente
+ * @param {Array} pagos - Lista de pagos del cliente
+ * @param {Object} resumen - Resumen de cuenta
+ * @returns {void} - Descarga el PDF
+ */
+export function generarEstadoCuenta(cliente, pedidos, pagos, resumen) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = 210;
+  const margin = 15;
+  const contentWidth = pageWidth - (margin * 2);
+  let y = margin;
+
+  // === HEADER ===
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ESTADO DE CUENTA', pageWidth / 2, y, { align: 'center' });
+  y += 10;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Fecha: ${formatFecha(new Date())}`, pageWidth - margin, y, { align: 'right' });
+  y += 10;
+
+  // === DATOS DEL CLIENTE ===
+  doc.setFillColor(240, 240, 240);
+  doc.rect(margin, y, contentWidth, 25, 'F');
+  y += 5;
+
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text(cliente?.nombre_fantasia || cliente?.nombre || 'Cliente', margin + 5, y + 3);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  y += 7;
+  if (cliente?.direccion) doc.text(`Direccion: ${cliente.direccion}`, margin + 5, y + 3);
+  y += 5;
+  if (cliente?.telefono) doc.text(`Telefono: ${cliente.telefono}`, margin + 5, y + 3);
+  if (cliente?.zona) doc.text(`Zona: ${cliente.zona}`, margin + 100, y + 3);
+  y += 15;
+
+  // === RESUMEN ===
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('RESUMEN DE CUENTA', margin, y);
+  y += 6;
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+
+  // Grid de resumen
+  const col1 = margin;
+  const col2 = margin + 60;
+  const col3 = margin + 120;
+
+  doc.text('Total Compras:', col1, y);
+  doc.text(formatPrecio(resumen?.total_compras || 0), col1 + 35, y);
+
+  doc.text('Total Pagos:', col2, y);
+  doc.text(formatPrecio(resumen?.total_pagos || 0), col2 + 35, y);
+  y += 5;
+
+  doc.text('Limite Credito:', col1, y);
+  doc.text(formatPrecio(cliente?.limite_credito || 0), col1 + 35, y);
+
+  doc.text('Dias Credito:', col2, y);
+  doc.text(`${cliente?.dias_credito || 30} dias`, col2 + 35, y);
+  y += 8;
+
+  // Saldo destacado
+  doc.setFillColor(resumen?.saldo_actual > 0 ? 255 : 220, resumen?.saldo_actual > 0 ? 240 : 255, 240);
+  doc.rect(col3 - 5, y - 12, 65, 18, 'F');
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SALDO ACTUAL:', col3, y - 5);
+  doc.setFontSize(14);
+  doc.setTextColor(resumen?.saldo_actual > 0 ? 200 : 0, resumen?.saldo_actual > 0 ? 0 : 150, 0);
+  doc.text(formatPrecio(resumen?.saldo_actual || 0), col3, y + 2);
+  doc.setTextColor(0, 0, 0);
+  y += 15;
+
+  // === MOVIMIENTOS ===
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ULTIMOS MOVIMIENTOS', margin, y);
+  y += 6;
+
+  // Combinar y ordenar pedidos y pagos
+  const movimientos = [
+    ...(pedidos || []).map(p => ({
+      fecha: p.created_at,
+      tipo: 'PEDIDO',
+      detalle: `Pedido #${p.id}`,
+      debe: p.total,
+      haber: 0,
+      estado: p.estado_pago
+    })),
+    ...(pagos || []).map(p => ({
+      fecha: p.created_at,
+      tipo: 'PAGO',
+      detalle: `${p.forma_pago}${p.referencia ? ` - ${p.referencia}` : ''}`,
+      debe: 0,
+      haber: p.monto
+    }))
+  ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 20);
+
+  // Encabezados de tabla
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setFillColor(50, 50, 50);
+  doc.setTextColor(255, 255, 255);
+  doc.rect(margin, y, contentWidth, 6, 'F');
+  y += 4;
+  doc.text('FECHA', margin + 2, y);
+  doc.text('TIPO', margin + 25, y);
+  doc.text('DETALLE', margin + 50, y);
+  doc.text('DEBE', margin + 120, y);
+  doc.text('HABER', margin + 145, y);
+  doc.text('ESTADO', margin + 170, y);
+  y += 5;
+  doc.setTextColor(0, 0, 0);
+
+  // Filas
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  let saldoAcumulado = 0;
+
+  movimientos.reverse().forEach((mov, index) => {
+    saldoAcumulado += mov.debe - mov.haber;
+
+    if (y > 270) {
+      doc.addPage();
+      y = margin;
+    }
+
+    // Alternar color de fila
+    if (index % 2 === 0) {
+      doc.setFillColor(248, 248, 248);
+      doc.rect(margin, y - 3, contentWidth, 5, 'F');
+    }
+
+    doc.text(formatFecha(mov.fecha), margin + 2, y);
+    doc.text(mov.tipo, margin + 25, y);
+    doc.text(mov.detalle.substring(0, 30), margin + 50, y);
+    doc.text(mov.debe > 0 ? formatPrecio(mov.debe) : '-', margin + 120, y);
+    doc.text(mov.haber > 0 ? formatPrecio(mov.haber) : '-', margin + 145, y);
+    doc.text(mov.estado || '-', margin + 170, y);
+    y += 5;
+  });
+
+  // Descargar PDF
+  const fecha = formatFecha(new Date()).replace(/\//g, '-');
+  const nombreCliente = (cliente?.nombre_fantasia || 'cliente').replace(/\s+/g, '-').toLowerCase().substring(0, 20);
+  doc.save(`estado-cuenta-${nombreCliente}-${fecha}.pdf`);
+}
