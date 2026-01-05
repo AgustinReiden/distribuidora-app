@@ -554,6 +554,7 @@ function MainApp() {
             userId={user?.id}
             clientes={clientes}
             productos={productos}
+            transportistas={transportistas}
             loading={loadingPedidos}
             exportando={exportando}
             onBusquedaChange={handleBusquedaChange}
