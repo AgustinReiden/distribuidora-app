@@ -1,8 +1,35 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ShoppingCart, Search, Calendar, Plus, Route, FileDown, Clock, Package, Truck, Check, X, MoreVertical, History, Edit2, User, AlertTriangle, Trash2, FileText, CreditCard, MapPin, Phone, Navigation, DollarSign, ChevronDown, ChevronUp } from 'lucide-react';
+import { ShoppingCart, Search, Calendar, Plus, Route, FileDown, Clock, Package, Truck, Check, X, MoreVertical, History, Edit2, User, AlertTriangle, Trash2, FileText, CreditCard, MapPin, Phone, Navigation, DollarSign, ChevronDown, ChevronUp, Timer } from 'lucide-react';
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoLabel, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
+
+// Función para calcular días de antigüedad de un pedido
+function calcularDiasAntiguedad(fechaCreacion) {
+  if (!fechaCreacion) return 0;
+  const fecha = new Date(fechaCreacion);
+  const hoy = new Date();
+  const diffTime = hoy - fecha;
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+}
+
+// Componente de badge de antigüedad
+function BadgeAntiguedad({ dias, estado }) {
+  // Solo mostrar para pedidos no entregados
+  if (estado === 'entregado' || dias < 2) return null;
+
+  const esUrgente = dias >= 3;
+  const colorClass = esUrgente
+    ? 'bg-red-100 text-red-700 border-red-300'
+    : 'bg-amber-100 text-amber-700 border-amber-300';
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${colorClass}`}>
+      <Timer className="w-3 h-3" />
+      {dias}d
+    </span>
+  );
+}
 
 // Componente de dropdown de acciones
 function AccionesDropdown({ pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onAsignar, onEntregado, onRevertir, onEliminar }) {
@@ -413,6 +440,7 @@ export default function VistaPedidos({
   userId,
   clientes,
   productos,
+  transportistas = [],
   loading,
   exportando,
   onBusquedaChange,
@@ -491,37 +519,71 @@ export default function VistaPedidos({
       </div>
 
       {/* Filtros */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-          <input
-            type="text"
-            value={busqueda}
-            onChange={e => onBusquedaChange(e.target.value)}
-            className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-            placeholder="Buscar por cliente, dirección o ID..."
-          />
+      <div className="flex flex-col gap-4">
+        {/* Primera fila: Búsqueda y filtros principales */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <input
+              type="text"
+              value={busqueda}
+              onChange={e => onBusquedaChange(e.target.value)}
+              className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+              placeholder="Buscar por cliente, dirección o ID..."
+            />
+          </div>
+          <select
+            value={filtros.estado}
+            onChange={e => onFiltrosChange({ estado: e.target.value })}
+            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          >
+            <option value="todos">Todos los estados</option>
+            <option value="pendiente">Pendientes</option>
+            <option value="en_preparacion">En preparación</option>
+            <option value="asignado">En camino</option>
+            <option value="entregado">Entregados</option>
+          </select>
+          <button
+            onClick={onModalFiltroFecha}
+            className={`flex items-center space-x-2 px-4 py-2 border rounded-lg transition-colors ${
+              filtros.fechaDesde || filtros.fechaHasta ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/30 dark:border-blue-600' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+            } dark:border-gray-600`}
+          >
+            <Calendar className="w-5 h-5" />
+            <span>Fechas</span>
+          </button>
         </div>
-        <select
-          value={filtros.estado}
-          onChange={e => onFiltrosChange({ estado: e.target.value })}
-          className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="todos">Todos los estados</option>
-          <option value="pendiente">Pendientes</option>
-          <option value="en_preparacion">En preparación</option>
-          <option value="asignado">En camino</option>
-          <option value="entregado">Entregados</option>
-        </select>
-        <button
-          onClick={onModalFiltroFecha}
-          className={`flex items-center space-x-2 px-4 py-2 border rounded-lg transition-colors ${
-            filtros.fechaDesde || filtros.fechaHasta ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50'
-          }`}
-        >
-          <Calendar className="w-5 h-5" />
-          <span>Fechas</span>
-        </button>
+
+        {/* Segunda fila: Filtros adicionales para admin */}
+        {isAdmin && (
+          <div className="flex flex-wrap gap-4">
+            <select
+              value={filtros.estadoPago || 'todos'}
+              onChange={e => onFiltrosChange({ estadoPago: e.target.value })}
+              className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+                filtros.estadoPago && filtros.estadoPago !== 'todos' ? 'bg-red-50 border-red-300 dark:bg-red-900/30 dark:border-red-600' : ''
+              }`}
+            >
+              <option value="todos">Todos los pagos</option>
+              <option value="pendiente">💰 Pago Pendiente</option>
+              <option value="parcial">⚠️ Pago Parcial</option>
+              <option value="pagado">✅ Pagado</option>
+            </select>
+            <select
+              value={filtros.transportistaId || 'todos'}
+              onChange={e => onFiltrosChange({ transportistaId: e.target.value })}
+              className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+                filtros.transportistaId && filtros.transportistaId !== 'todos' ? 'bg-orange-50 border-orange-300 dark:bg-orange-900/30 dark:border-orange-600' : ''
+              }`}
+            >
+              <option value="todos">Todos los transportistas</option>
+              <option value="sin_asignar">🚫 Sin asignar</option>
+              {transportistas.map(t => (
+                <option key={t.id} value={t.id}>🚚 {t.nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Filtro de fechas activo */}
@@ -538,32 +600,55 @@ export default function VistaPedidos({
         </div>
       )}
 
-      {/* Resumen de estados */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-          <Clock className="w-5 h-5 text-yellow-600" />
-          <p className="text-xl font-bold text-yellow-600">{pedidos.filter(p => p.estado === 'pendiente').length}</p>
-          <p className="text-sm text-yellow-800">Pendientes</p>
+      {/* Resumen de estados - Usa pedidosParaMostrar para reflejar los filtros aplicados */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Clock className="w-5 h-5 text-yellow-600" />
+            <span className="text-xs text-yellow-600">{formatPrecio(pedidosParaMostrar.filter(p => p.estado === 'pendiente').reduce((s, p) => s + (p.total || 0), 0))}</span>
+          </div>
+          <p className="text-xl font-bold text-yellow-600">{pedidosParaMostrar.filter(p => p.estado === 'pendiente').length}</p>
+          <p className="text-sm text-yellow-800 dark:text-yellow-400">Pendientes</p>
         </div>
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-          <Package className="w-5 h-5 text-orange-600" />
-          <p className="text-xl font-bold text-orange-600">{pedidos.filter(p => p.estado === 'en_preparacion').length}</p>
-          <p className="text-sm text-orange-800">En preparación</p>
+        <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Package className="w-5 h-5 text-orange-600" />
+            <span className="text-xs text-orange-600">{formatPrecio(pedidosParaMostrar.filter(p => p.estado === 'en_preparacion').reduce((s, p) => s + (p.total || 0), 0))}</span>
+          </div>
+          <p className="text-xl font-bold text-orange-600">{pedidosParaMostrar.filter(p => p.estado === 'en_preparacion').length}</p>
+          <p className="text-sm text-orange-800 dark:text-orange-400">En preparación</p>
         </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-          <Truck className="w-5 h-5 text-blue-600" />
-          <p className="text-xl font-bold text-blue-600">{pedidos.filter(p => p.estado === 'asignado').length}</p>
-          <p className="text-sm text-blue-800">En camino</p>
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Truck className="w-5 h-5 text-blue-600" />
+            <span className="text-xs text-blue-600">{formatPrecio(pedidosParaMostrar.filter(p => p.estado === 'asignado').reduce((s, p) => s + (p.total || 0), 0))}</span>
+          </div>
+          <p className="text-xl font-bold text-blue-600">{pedidosParaMostrar.filter(p => p.estado === 'asignado').length}</p>
+          <p className="text-sm text-blue-800 dark:text-blue-400">En camino</p>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-          <Check className="w-5 h-5 text-green-600" />
-          <p className="text-xl font-bold text-green-600">{pedidos.filter(p => p.estado === 'entregado').length}</p>
-          <p className="text-sm text-green-800">Entregados</p>
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Check className="w-5 h-5 text-green-600" />
+            <span className="text-xs text-green-600">{formatPrecio(pedidosParaMostrar.filter(p => p.estado === 'entregado').reduce((s, p) => s + (p.total || 0), 0))}</span>
+          </div>
+          <p className="text-xl font-bold text-green-600">{pedidosParaMostrar.filter(p => p.estado === 'entregado').length}</p>
+          <p className="text-sm text-green-800 dark:text-green-400">Entregados</p>
         </div>
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-          <ShoppingCart className="w-5 h-5 text-purple-600" />
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <DollarSign className="w-5 h-5 text-red-600" />
+            <span className="text-xs text-red-600">{formatPrecio(pedidosParaMostrar.filter(p => p.estado_pago !== 'pagado').reduce((s, p) => s + (p.total || 0), 0))}</span>
+          </div>
+          <p className="text-xl font-bold text-red-600">{pedidosParaMostrar.filter(p => p.estado_pago !== 'pagado').length}</p>
+          <p className="text-sm text-red-800 dark:text-red-400">Impagos</p>
+        </div>
+        <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <ShoppingCart className="w-5 h-5 text-purple-600" />
+            <span className="text-xs text-purple-600">{formatPrecio(pedidosParaMostrar.reduce((s, p) => s + (p.total || 0), 0))}</span>
+          </div>
           <p className="text-xl font-bold text-purple-600">{pedidosParaMostrar.length}</p>
-          <p className="text-sm text-purple-800">Mostrando</p>
+          <p className="text-sm text-purple-800 dark:text-purple-400">Total Filtrado</p>
         </div>
       </div>
 
@@ -587,8 +672,9 @@ export default function VistaPedidos({
                           {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
                         </h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">{pedido.cliente?.direccion}</p>
-                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                          #{pedido.id} • {formatFecha(pedido.created_at)}
+                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-2">
+                          <span>#{pedido.id} • {formatFecha(pedido.created_at)}</span>
+                          <BadgeAntiguedad dias={calcularDiasAntiguedad(pedido.created_at)} estado={pedido.estado} />
                         </p>
                       </div>
                     </div>

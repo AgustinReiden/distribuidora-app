@@ -254,7 +254,7 @@ export function useProductos() {
 export function usePedidos() {
   const [pedidos, setPedidos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filtros, setFiltros] = useState({ fechaDesde: null, fechaHasta: null, estado: 'todos', busqueda: '' })
+  const [filtros, setFiltros] = useState({ fechaDesde: null, fechaHasta: null, estado: 'todos', estadoPago: 'todos', transportistaId: 'todos', busqueda: '' })
 
   const fetchPedidos = async () => {
     setLoading(true)
@@ -295,7 +295,21 @@ export function usePedidos() {
   }
 
   const pedidosFiltrados = () => pedidos.filter(p => {
+    // Filtro por estado del pedido
     if (filtros.estado !== 'todos' && p.estado !== filtros.estado) return false
+    // Filtro por estado de pago
+    if (filtros.estadoPago && filtros.estadoPago !== 'todos') {
+      const estadoPagoActual = p.estado_pago || 'pendiente'
+      if (estadoPagoActual !== filtros.estadoPago) return false
+    }
+    // Filtro por transportista
+    if (filtros.transportistaId && filtros.transportistaId !== 'todos') {
+      if (filtros.transportistaId === 'sin_asignar') {
+        if (p.transportista_id) return false
+      } else {
+        if (p.transportista_id !== filtros.transportistaId) return false
+      }
+    }
     // Comparar solo la parte de fecha (YYYY-MM-DD) para evitar problemas de zona horaria
     const fechaPedido = p.created_at ? p.created_at.split('T')[0] : null
     if (filtros.fechaDesde && fechaPedido && fechaPedido < filtros.fechaDesde) return false
