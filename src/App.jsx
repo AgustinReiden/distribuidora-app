@@ -1,13 +1,17 @@
 import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, setErrorNotifier } from './hooks/useSupabase.jsx';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalGestionRutas } from './components/Modals.jsx';
 import ModalFichaCliente from './components/modals/ModalFichaCliente.jsx';
 import ModalRegistrarPago from './components/modals/ModalRegistrarPago.jsx';
+import ModalMermaStock from './components/modals/ModalMermaStock.jsx';
+import ModalHistorialMermas from './components/modals/ModalHistorialMermas.jsx';
+import OfflineIndicator from './components/layout/OfflineIndicator.jsx';
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada, generarReciboPago } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
+import { useOfflineSync } from './hooks/useOfflineSync.js';
 import { ITEMS_PER_PAGE } from './utils/formatters';
 
 // Componentes base
@@ -55,6 +59,8 @@ function MainApp() {
   const { exportando, descargarJSON, exportarPedidosExcel } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
+  const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
+  const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
 
   // Estados de modales
   const [modalCliente, setModalCliente] = useState(false);
@@ -70,6 +76,9 @@ function MainApp() {
   const [modalOptimizarRuta, setModalOptimizarRuta] = useState(false);
   const [modalFichaCliente, setModalFichaCliente] = useState(false);
   const [modalRegistrarPago, setModalRegistrarPago] = useState(false);
+  const [modalMermaStock, setModalMermaStock] = useState(false);
+  const [modalHistorialMermas, setModalHistorialMermas] = useState(false);
+  const [productoMerma, setProductoMerma] = useState(null);
 
   // Estados de edición
   const [clienteEditando, setClienteEditando] = useState(null);
@@ -512,6 +521,133 @@ function MainApp() {
     }
   };
 
+  // Handlers de Mermas
+  const handleAbrirMerma = (producto) => {
+    setProductoMerma(producto);
+    setModalMermaStock(true);
+  };
+
+  const handleRegistrarMerma = async (mermaData) => {
+    try {
+      if (!isOnline) {
+        // Guardar offline
+        guardarMermaOffline({
+          ...mermaData,
+          usuarioId: user?.id
+        });
+        // Actualizar stock localmente
+        await actualizarProducto(mermaData.productoId, { stock: mermaData.stockNuevo });
+        notify.warning('Merma guardada localmente. Se sincronizará cuando vuelva la conexión.');
+        refetchProductos();
+        return;
+      }
+
+      await registrarMerma({
+        ...mermaData,
+        usuarioId: user?.id
+      });
+      notify.success('Merma registrada correctamente');
+      refetchProductos();
+      refetchMermas();
+    } catch (e) {
+      notify.error('Error al registrar merma: ' + e.message);
+      throw e;
+    }
+  };
+
+  const handleVerHistorialMermas = () => {
+    setModalHistorialMermas(true);
+  };
+
+  // Sincronización offline
+  const handleSincronizar = async () => {
+    try {
+      // Sincronizar pedidos
+      if (pedidosPendientes.length > 0) {
+        const resultadoPedidos = await sincronizarPedidos(crearPedido, descontarStock);
+        if (resultadoPedidos.sincronizados > 0) {
+          notify.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`);
+          refetchPedidos();
+          refetchProductos();
+        }
+        if (resultadoPedidos.errores.length > 0) {
+          notify.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`);
+        }
+      }
+
+      // Sincronizar mermas
+      if (mermasPendientes.length > 0) {
+        const resultadoMermas = await sincronizarMermas(registrarMerma);
+        if (resultadoMermas.sincronizados > 0) {
+          notify.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`);
+          refetchMermas();
+        }
+      }
+    } catch (e) {
+      notify.error('Error durante la sincronización: ' + e.message);
+    }
+  };
+
+  // Auto-sincronizar cuando vuelve la conexión
+  useEffect(() => {
+    if (isOnline && (pedidosPendientes.length > 0 || mermasPendientes.length > 0)) {
+      handleSincronizar();
+    }
+  }, [isOnline]);
+
+  // Handler para crear pedido con soporte offline
+  const handleGuardarPedidoConOffline = async () => {
+    if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
+      notify.warning('Seleccioná cliente y productos');
+      return;
+    }
+    const validacion = validarStock(nuevoPedido.items);
+    if (!validacion.valido) {
+      notify.error(`Stock insuficiente:\n${validacion.errores.map(e => e.mensaje).join('\n')}`, 5000);
+      return;
+    }
+
+    if (!isOnline) {
+      // Guardar pedido offline
+      guardarPedidoOffline({
+        clienteId: parseInt(nuevoPedido.clienteId),
+        items: nuevoPedido.items,
+        total: calcularTotalPedido(nuevoPedido.items),
+        usuarioId: user.id,
+        notas: nuevoPedido.notas,
+        formaPago: nuevoPedido.formaPago,
+        estadoPago: nuevoPedido.estadoPago
+      });
+      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
+      setModalPedido(false);
+      notify.warning('Sin conexión. Pedido guardado localmente y se sincronizará automáticamente.');
+      return;
+    }
+
+    // Crear pedido normal (online)
+    setGuardando(true);
+    try {
+      await crearPedido(
+        parseInt(nuevoPedido.clienteId),
+        nuevoPedido.items,
+        calcularTotalPedido(nuevoPedido.items),
+        user.id,
+        descontarStock,
+        nuevoPedido.notas,
+        nuevoPedido.formaPago,
+        nuevoPedido.estadoPago
+      );
+      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
+      setModalPedido(false);
+      refetchProductos();
+      refetchMetricas();
+      notify.success('Pedido creado correctamente', { persist: true });
+    } catch (e) {
+      notify.error('Error al crear pedido: ' + e.message);
+    }
+    setGuardando(false);
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
       <TopNavigation
@@ -563,7 +699,7 @@ function MainApp() {
             onNuevoPedido={() => setModalPedido(true)}
             onOptimizarRuta={() => setModalOptimizarRuta(true)}
             onExportarPDF={() => setModalExportarPDF(true)}
-            onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar)}
+            onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar, { ...filtros, busqueda }, transportistas)}
             onModalFiltroFecha={() => setModalFiltroFecha(true)}
             onVerHistorial={handleVerHistorial}
             onEditarPedido={handleEditarPedido}
@@ -596,6 +732,8 @@ function MainApp() {
             onNuevoProducto={() => setModalProducto(true)}
             onEditarProducto={(producto) => { setProductoEditando(producto); setModalProducto(true); }}
             onEliminarProducto={handleEliminarProducto}
+            onBajaStock={handleAbrirMerma}
+            onVerHistorialMermas={handleVerHistorialMermas}
           />
         )}
 
@@ -665,7 +803,8 @@ function MainApp() {
           onAgregarItem={agregarItemPedido}
           onActualizarCantidad={actualizarCantidadItem}
           onCrearCliente={handleCrearClienteEnPedido}
-          onGuardar={handleGuardarPedido}
+          onGuardar={handleGuardarPedidoConOffline}
+          isOffline={!isOnline}
           onNotasChange={handleNotasChange}
           onFormaPagoChange={handleFormaPagoChange}
           onEstadoPagoChange={handleEstadoPagoChange}
@@ -755,6 +894,34 @@ function MainApp() {
           onGenerarRecibo={handleGenerarReciboPago}
         />
       )}
+
+      {modalMermaStock && productoMerma && (
+        <ModalMermaStock
+          producto={productoMerma}
+          onSave={handleRegistrarMerma}
+          onClose={() => { setModalMermaStock(false); setProductoMerma(null); }}
+          isOffline={!isOnline}
+        />
+      )}
+
+      {modalHistorialMermas && (
+        <ModalHistorialMermas
+          mermas={mermas}
+          productos={productos}
+          usuarios={usuarios}
+          onClose={() => setModalHistorialMermas(false)}
+        />
+      )}
+
+      {/* Indicador de estado offline */}
+      <OfflineIndicator
+        isOnline={isOnline}
+        pedidosPendientes={pedidosPendientes}
+        mermasPendientes={mermasPendientes}
+        sincronizando={sincronizando}
+        onSincronizar={handleSincronizar}
+        clientes={clientes}
+      />
     </div>
   );
 }
