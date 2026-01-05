@@ -52,7 +52,7 @@ function MainApp() {
   // Para preventistas, filtrar métricas por sus propios pedidos
   const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
   const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo } = useDashboard(dashboardUsuarioId);
-  const { exportando, descargarJSON, exportarPedidosCSV } = useBackup();
+  const { exportando, descargarJSON, exportarPedidosExcel } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
 
@@ -562,7 +562,7 @@ function MainApp() {
             onNuevoPedido={() => setModalPedido(true)}
             onOptimizarRuta={() => setModalOptimizarRuta(true)}
             onExportarPDF={() => setModalExportarPDF(true)}
-            onExportarCSV={() => exportarPedidosCSV(pedidosParaMostrar)}
+            onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar)}
             onModalFiltroFecha={() => setModalFiltroFecha(true)}
             onVerHistorial={handleVerHistorial}
             onEditarPedido={handleEditarPedido}

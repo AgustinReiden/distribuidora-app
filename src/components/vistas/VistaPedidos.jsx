@@ -421,7 +421,7 @@ export default function VistaPedidos({
   onNuevoPedido,
   onOptimizarRuta,
   onExportarPDF,
-  onExportarCSV,
+  onExportarExcel,
   onModalFiltroFecha,
   onVerHistorial,
   onEditarPedido,
@@ -470,12 +470,12 @@ export default function VistaPedidos({
           )}
           {isAdmin && (
             <button
-              onClick={onExportarCSV}
+              onClick={onExportarExcel}
               disabled={exportando}
-              className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              className="flex items-center space-x-2 px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors"
             >
               <FileDown className="w-5 h-5" />
-              <span>CSV</span>
+              <span>Excel</span>
             </button>
           )}
           {(isAdmin || isPreventista) && (
