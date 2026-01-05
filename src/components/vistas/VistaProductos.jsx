@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Package, Plus, Edit2, Trash2, Search, AlertTriangle } from 'lucide-react';
+import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 
@@ -9,7 +9,9 @@ export default function VistaProductos({
   isAdmin,
   onNuevoProducto,
   onEditarProducto,
-  onEliminarProducto
+  onEliminarProducto,
+  onBajaStock,
+  onVerHistorialMermas
 }) {
   const [busqueda, setBusqueda] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
@@ -58,13 +60,24 @@ export default function VistaProductos({
           <p className="text-sm text-gray-500 dark:text-gray-400">{productos.length} productos en catálogo</p>
         </div>
         {isAdmin && (
-          <button
-            onClick={onNuevoProducto}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Nuevo Producto</span>
-          </button>
+          <div className="flex gap-2">
+            {onVerHistorialMermas && (
+              <button
+                onClick={onVerHistorialMermas}
+                className="flex items-center space-x-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+              >
+                <TrendingDown className="w-5 h-5" />
+                <span>Historial Mermas</span>
+              </button>
+            )}
+            <button
+              onClick={onNuevoProducto}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Nuevo Producto</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -184,6 +197,16 @@ export default function VistaProductos({
                   {isAdmin && (
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end space-x-1">
+                        {onBajaStock && producto.stock > 0 && (
+                          <button
+                            onClick={() => onBajaStock(producto)}
+                            className="p-2 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors"
+                            title="Baja de stock"
+                            aria-label={`Baja de stock ${producto.nombre}`}
+                          >
+                            <Minus className="w-4 h-4" aria-hidden="true" />
+                          </button>
+                        )}
                         <button
                           onClick={() => onEditarProducto(producto)}
                           className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"

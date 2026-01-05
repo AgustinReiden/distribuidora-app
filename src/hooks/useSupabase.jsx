@@ -807,7 +807,7 @@ export function useBackup() {
     a.download = `backup_${tipo}_${new Date().toISOString().split('T')[0]}.json`; a.click(); URL.revokeObjectURL(url)
   }
 
-  const exportarPedidosExcel = async (pedidos) => {
+  const exportarPedidosExcel = async (pedidos, filtrosActivos = {}, transportistas = []) => {
     setExportando(true)
     try {
       // Mapeo de estados para mejor legibilidad
@@ -828,6 +828,50 @@ export function useBackup() {
         cheque: 'Cheque',
         cuenta_corriente: 'Cuenta Corriente',
         tarjeta: 'Tarjeta'
+      }
+
+      // Obtener nombre del transportista si hay filtro
+      const getTransportistaNombre = (id) => {
+        if (!id || id === 'todos') return null
+        if (id === 'sin_asignar') return 'Sin asignar'
+        const t = transportistas.find(tr => tr.id === id)
+        return t?.nombre || id
+      }
+
+      // Construir información de filtros aplicados
+      const infoFiltros = []
+      infoFiltros.push({ 'Campo': 'Fecha de Exportación', 'Valor': new Date().toLocaleString('es-AR') })
+      infoFiltros.push({ 'Campo': 'Total de Registros', 'Valor': pedidos.length })
+      infoFiltros.push({ 'Campo': '', 'Valor': '' }) // Línea en blanco
+      infoFiltros.push({ 'Campo': '--- FILTROS APLICADOS ---', 'Valor': '' })
+
+      if (filtrosActivos.estado && filtrosActivos.estado !== 'todos') {
+        infoFiltros.push({ 'Campo': 'Estado del Pedido', 'Valor': estadoLabels[filtrosActivos.estado] || filtrosActivos.estado })
+      }
+      if (filtrosActivos.estadoPago && filtrosActivos.estadoPago !== 'todos') {
+        infoFiltros.push({ 'Campo': 'Estado de Pago', 'Valor': estadoPagoLabels[filtrosActivos.estadoPago] || filtrosActivos.estadoPago })
+      }
+      if (filtrosActivos.transportistaId && filtrosActivos.transportistaId !== 'todos') {
+        infoFiltros.push({ 'Campo': 'Transportista', 'Valor': getTransportistaNombre(filtrosActivos.transportistaId) })
+      }
+      if (filtrosActivos.fechaDesde) {
+        infoFiltros.push({ 'Campo': 'Fecha Desde', 'Valor': filtrosActivos.fechaDesde })
+      }
+      if (filtrosActivos.fechaHasta) {
+        infoFiltros.push({ 'Campo': 'Fecha Hasta', 'Valor': filtrosActivos.fechaHasta })
+      }
+      if (filtrosActivos.busqueda) {
+        infoFiltros.push({ 'Campo': 'Búsqueda', 'Valor': filtrosActivos.busqueda })
+      }
+
+      // Si no hay filtros activos
+      const hayFiltrosActivos = (filtrosActivos.estado && filtrosActivos.estado !== 'todos') ||
+        (filtrosActivos.estadoPago && filtrosActivos.estadoPago !== 'todos') ||
+        (filtrosActivos.transportistaId && filtrosActivos.transportistaId !== 'todos') ||
+        filtrosActivos.fechaDesde || filtrosActivos.fechaHasta || filtrosActivos.busqueda
+
+      if (!hayFiltrosActivos) {
+        infoFiltros.push({ 'Campo': '(Sin filtros - Todos los pedidos)', 'Valor': '' })
       }
 
       // Hoja principal de pedidos
@@ -915,6 +959,11 @@ export function useBackup() {
         { wch: 14 }  // Fecha Entrega
       ]
 
+      // Hoja de información de filtros (primera hoja)
+      const wsInfoFiltros = XLSX.utils.json_to_sheet(infoFiltros)
+      wsInfoFiltros['!cols'] = [{ wch: 25 }, { wch: 40 }]
+
+      XLSX.utils.book_append_sheet(wb, wsInfoFiltros, 'Info Exportación')
       XLSX.utils.book_append_sheet(wb, wsPedidos, 'Pedidos')
       XLSX.utils.book_append_sheet(wb, wsItems, 'Detalle Items')
       XLSX.utils.book_append_sheet(wb, wsResumenEstados, 'Resumen Estados')
@@ -1316,5 +1365,118 @@ export function useReportesFinancieros() {
     generarReporteRentabilidad,
     generarReporteVentasPorCliente,
     generarReporteVentasPorZona
+  }
+}
+
+export function useMermas() {
+  const [mermas, setMermas] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  const fetchMermas = async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('mermas_stock')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (error) {
+        // Si la tabla no existe, retornar array vacío
+        if (error.message.includes('does not exist')) {
+          console.warn('Tabla mermas_stock no existe. Ejecute la migración correspondiente.')
+          setMermas([])
+          return
+        }
+        throw error
+      }
+      setMermas(data || [])
+    } catch (error) {
+      console.error('Error fetching mermas:', error)
+      setMermas([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchMermas() }, [])
+
+  const registrarMerma = async (mermaData) => {
+    try {
+      // Primero actualizar el stock del producto
+      const { error: stockError } = await supabase
+        .from('productos')
+        .update({ stock: mermaData.stockNuevo })
+        .eq('id', mermaData.productoId)
+
+      if (stockError) throw stockError
+
+      // Luego registrar la merma
+      const { data, error } = await supabase
+        .from('mermas_stock')
+        .insert([{
+          producto_id: mermaData.productoId,
+          cantidad: mermaData.cantidad,
+          motivo: mermaData.motivo,
+          observaciones: mermaData.observaciones || null,
+          stock_anterior: mermaData.stockAnterior,
+          stock_nuevo: mermaData.stockNuevo,
+          usuario_id: mermaData.usuarioId || null
+        }])
+        .select()
+        .single()
+
+      if (error) {
+        // Si la tabla no existe, solo actualizamos el stock (fallback)
+        if (error.message.includes('does not exist')) {
+          console.warn('Tabla mermas_stock no existe. Solo se actualizó el stock.')
+          return { success: true, merma: null, soloStock: true }
+        }
+        throw error
+      }
+
+      setMermas(prev => [data, ...prev])
+      return { success: true, merma: data }
+    } catch (error) {
+      console.error('Error registrando merma:', error)
+      throw error
+    }
+  }
+
+  const getMermasPorProducto = (productoId) => {
+    return mermas.filter(m => m.producto_id === productoId)
+  }
+
+  const getResumenMermas = (fechaDesde = null, fechaHasta = null) => {
+    let mermasFiltradas = [...mermas]
+
+    if (fechaDesde) {
+      mermasFiltradas = mermasFiltradas.filter(m => m.created_at >= fechaDesde)
+    }
+    if (fechaHasta) {
+      mermasFiltradas = mermasFiltradas.filter(m => m.created_at <= fechaHasta + 'T23:59:59')
+    }
+
+    const porMotivo = {}
+    mermasFiltradas.forEach(m => {
+      if (!porMotivo[m.motivo]) {
+        porMotivo[m.motivo] = { cantidad: 0, registros: 0 }
+      }
+      porMotivo[m.motivo].cantidad += m.cantidad
+      porMotivo[m.motivo].registros += 1
+    })
+
+    return {
+      totalUnidades: mermasFiltradas.reduce((sum, m) => sum + m.cantidad, 0),
+      totalRegistros: mermasFiltradas.length,
+      porMotivo
+    }
+  }
+
+  return {
+    mermas,
+    loading,
+    registrarMerma,
+    getMermasPorProducto,
+    getResumenMermas,
+    refetch: fetchMermas
   }
 }
