@@ -3,8 +3,8 @@
 
 -- Crear tabla de mermas de stock
 CREATE TABLE IF NOT EXISTS mermas_stock (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  producto_id UUID NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+  id BIGSERIAL PRIMARY KEY,
+  producto_id BIGINT NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
   cantidad INTEGER NOT NULL CHECK (cantidad > 0),
   motivo VARCHAR(50) NOT NULL CHECK (motivo IN ('rotura', 'vencimiento', 'robo', 'decomiso', 'devolucion', 'error_inventario', 'muestra', 'otro')),
   observaciones TEXT,
