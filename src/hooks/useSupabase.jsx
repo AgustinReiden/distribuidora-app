@@ -43,7 +43,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => { const { data, error } = await supabase.auth.signInWithPassword({ email, password }); if (error) throw error; return data }
   const logout = async () => { const { error } = await supabase.auth.signOut(); if (error) throw error; setUser(null); setPerfil(null) }
 
-  return <AuthContext.Provider value={{ user, perfil, loading, login, logout, isAdmin: perfil?.rol === 'admin', isPreventista: perfil?.rol === 'preventista', isTransportista: perfil?.rol === 'transportista' }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, perfil, loading, login, logout, isAdmin: perfil?.rol === 'admin', isPreventista: perfil?.rol === 'preventista', isTransportista: perfil?.rol === 'transportista', zonaUsuario: perfil?.zona }}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => useContext(AuthContext)
@@ -442,10 +442,18 @@ export function usePedidos() {
     setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, notas } : p))
   }
 
-  const actualizarEstadoPago = async (pedidoId, estadoPago) => {
-    const { error } = await supabase.from('pedidos').update({ estado_pago: estadoPago }).eq('id', pedidoId)
+  const actualizarEstadoPago = async (pedidoId, estadoPago, montoPagado = null) => {
+    const updateData = { estado_pago: estadoPago }
+    if (montoPagado !== null) {
+      updateData.monto_pagado = montoPagado
+    }
+    const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoId)
     if (error) throw error
-    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, estado_pago: estadoPago } : p))
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? {
+      ...p,
+      estado_pago: estadoPago,
+      ...(montoPagado !== null && { monto_pagado: montoPagado })
+    } : p))
   }
 
   const actualizarFormaPago = async (pedidoId, formaPago) => {
@@ -557,7 +565,13 @@ export function useUsuarios() {
   useEffect(() => { fetchUsuarios() }, [])
 
   const actualizarUsuario = async (id, datos) => {
-    const { data, error } = await supabase.from('perfiles').update({ nombre: datos.nombre, rol: datos.rol, activo: datos.activo }).eq('id', id).select().single()
+    const updateData = {
+      nombre: datos.nombre,
+      rol: datos.rol,
+      activo: datos.activo,
+      zona: datos.rol === 'preventista' ? (datos.zona || null) : null
+    }
+    const { data, error } = await supabase.from('perfiles').update(updateData).eq('id', id).select().single()
     if (error) throw error; setUsuarios(prev => prev.map(u => u.id === id ? data : u))
     setTransportistas(prev => { const updated = prev.filter(t => t.id !== id); if (data.rol === 'transportista' && data.activo) return [...updated, data].sort((a, b) => a.nombre.localeCompare(b.nombre)); return updated })
     return data
@@ -1488,5 +1502,233 @@ export function useMermas() {
     getMermasPorProducto,
     getResumenMermas,
     refetch: fetchMermas
+  }
+}
+
+// Hook para gestión de recorridos de transportistas
+export function useRecorridos() {
+  const [recorridos, setRecorridos] = useState([])
+  const [recorridoActual, setRecorridoActual] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  // Obtener recorridos del día
+  const fetchRecorridosHoy = async () => {
+    setLoading(true)
+    try {
+      const hoy = new Date().toISOString().split('T')[0]
+      const { data, error } = await supabase
+        .from('recorridos')
+        .select(`
+          *,
+          transportista:perfiles!transportista_id(id, nombre),
+          pedidos:recorrido_pedidos(
+            *,
+            pedido:pedidos(
+              *,
+              cliente:clientes(nombre_fantasia, direccion, telefono)
+            )
+          )
+        `)
+        .eq('fecha', hoy)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        if (error.message.includes('does not exist')) {
+          console.warn('Tabla recorridos no existe aún')
+          setRecorridos([])
+          return []
+        }
+        throw error
+      }
+      setRecorridos(data || [])
+      return data || []
+    } catch (error) {
+      console.error('Error fetching recorridos:', error)
+      setRecorridos([])
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Obtener recorridos por fecha
+  const fetchRecorridosPorFecha = async (fecha) => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('recorridos')
+        .select(`
+          *,
+          transportista:perfiles!transportista_id(id, nombre),
+          pedidos:recorrido_pedidos(
+            *,
+            pedido:pedidos(
+              *,
+              cliente:clientes(nombre_fantasia, direccion, telefono)
+            )
+          )
+        `)
+        .eq('fecha', fecha)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      return data || []
+    } catch (error) {
+      console.error('Error fetching recorridos:', error)
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Crear un nuevo recorrido cuando se aplica una ruta optimizada
+  const crearRecorrido = async (transportistaId, pedidosOrdenados, distancia = null, duracion = null) => {
+    try {
+      const pedidosJson = pedidosOrdenados.map((p, idx) => ({
+        pedido_id: p.pedido_id || p.id,
+        orden_entrega: p.orden || idx + 1
+      }))
+
+      // Intentar usar la función RPC
+      const { data, error } = await supabase.rpc('crear_recorrido', {
+        p_transportista_id: transportistaId,
+        p_pedidos: pedidosJson,
+        p_distancia: distancia,
+        p_duracion: duracion
+      })
+
+      if (error) {
+        // Fallback si la función no existe
+        if (error.message.includes('does not exist')) {
+          console.warn('Función crear_recorrido no existe. Insertando manualmente.')
+
+          // Calcular total facturado
+          const pedidoIds = pedidosJson.map(p => p.pedido_id)
+          const { data: pedidosData } = await supabase
+            .from('pedidos')
+            .select('total')
+            .in('id', pedidoIds)
+
+          const totalFacturado = (pedidosData || []).reduce((s, p) => s + (p.total || 0), 0)
+
+          // Insertar recorrido
+          const { data: recorrido, error: errRecorrido } = await supabase
+            .from('recorridos')
+            .insert([{
+              transportista_id: transportistaId,
+              fecha: new Date().toISOString().split('T')[0],
+              distancia_total: distancia,
+              duracion_total: duracion,
+              total_pedidos: pedidosJson.length,
+              total_facturado: totalFacturado,
+              estado: 'en_curso'
+            }])
+            .select()
+            .single()
+
+          if (errRecorrido) throw errRecorrido
+
+          // Insertar pedidos del recorrido
+          const pedidosRecorrido = pedidosJson.map(p => ({
+            recorrido_id: recorrido.id,
+            pedido_id: p.pedido_id,
+            orden_entrega: p.orden_entrega
+          }))
+
+          const { error: errPedidos } = await supabase
+            .from('recorrido_pedidos')
+            .insert(pedidosRecorrido)
+
+          if (errPedidos) console.error('Error insertando pedidos del recorrido:', errPedidos)
+
+          setRecorridoActual(recorrido)
+          await fetchRecorridosHoy()
+          return recorrido.id
+        }
+        throw error
+      }
+
+      setRecorridoActual({ id: data })
+      await fetchRecorridosHoy()
+      return data
+    } catch (error) {
+      console.error('Error creando recorrido:', error)
+      throw error
+    }
+  }
+
+  // Completar un recorrido
+  const completarRecorrido = async (recorridoId) => {
+    try {
+      const { error } = await supabase
+        .from('recorridos')
+        .update({ estado: 'completado', completed_at: new Date().toISOString() })
+        .eq('id', recorridoId)
+
+      if (error) throw error
+      await fetchRecorridosHoy()
+    } catch (error) {
+      console.error('Error completando recorrido:', error)
+      throw error
+    }
+  }
+
+  // Obtener resumen de recorridos para estadísticas
+  const getEstadisticasRecorridos = async (fechaDesde, fechaHasta) => {
+    try {
+      let query = supabase
+        .from('recorridos')
+        .select(`
+          *,
+          transportista:perfiles!transportista_id(id, nombre)
+        `)
+        .gte('fecha', fechaDesde)
+        .lte('fecha', fechaHasta)
+
+      const { data, error } = await query
+      if (error) throw error
+
+      // Agrupar por transportista
+      const porTransportista = {}
+      ;(data || []).forEach(r => {
+        const tid = r.transportista_id
+        if (!porTransportista[tid]) {
+          porTransportista[tid] = {
+            transportista: r.transportista,
+            recorridos: 0,
+            pedidosTotales: 0,
+            pedidosEntregados: 0,
+            totalFacturado: 0,
+            totalCobrado: 0,
+            distanciaTotal: 0
+          }
+        }
+        porTransportista[tid].recorridos += 1
+        porTransportista[tid].pedidosTotales += r.total_pedidos || 0
+        porTransportista[tid].pedidosEntregados += r.pedidos_entregados || 0
+        porTransportista[tid].totalFacturado += r.total_facturado || 0
+        porTransportista[tid].totalCobrado += r.total_cobrado || 0
+        porTransportista[tid].distanciaTotal += r.distancia_total || 0
+      })
+
+      return {
+        total: data?.length || 0,
+        porTransportista: Object.values(porTransportista)
+      }
+    } catch (error) {
+      console.error('Error obteniendo estadísticas:', error)
+      return { total: 0, porTransportista: [] }
+    }
+  }
+
+  return {
+    recorridos,
+    recorridoActual,
+    loading,
+    fetchRecorridosHoy,
+    fetchRecorridosPorFecha,
+    crearRecorrido,
+    completarRecorrido,
+    getEstadisticasRecorridos
   }
 }

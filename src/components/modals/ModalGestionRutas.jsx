@@ -178,7 +178,12 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   const handleAplicar = () => {
     if (rutaOptimizada?.orden_optimizado) {
-      onAplicarOrden(rutaOptimizada.orden_optimizado);
+      onAplicarOrden({
+        ordenOptimizado: rutaOptimizada.orden_optimizado,
+        transportistaId: transportistaSeleccionado,
+        distancia: rutaOptimizada.distancia_total || null,
+        duracion: rutaOptimizada.duracion_total || null
+      });
     }
   };
 
