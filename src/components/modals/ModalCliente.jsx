@@ -135,7 +135,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
 
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
-      <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+      <div className="p-4 space-y-4">
         {/* CUIT y Razón Social */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
