@@ -70,13 +70,18 @@ export function useClientes() {
 
   const agregarCliente = async (cliente) => {
     const { data, error } = await supabase.from('clientes').insert([{
-      nombre: cliente.nombre,
+      cuit: cliente.cuit || null,
+      razon_social: cliente.razonSocial,
       nombre_fantasia: cliente.nombreFantasia,
       direccion: cliente.direccion,
       latitud: cliente.latitud || null,
       longitud: cliente.longitud || null,
       telefono: cliente.telefono || null,
+      contacto: cliente.contacto || null,
       zona: cliente.zona || null,
+      horarios_atencion: cliente.horarios_atencion || null,
+      rubro: cliente.rubro || null,
+      notas: cliente.notas || null,
       limite_credito: cliente.limiteCredito ? parseFloat(cliente.limiteCredito) : 0,
       dias_credito: cliente.diasCredito ? parseInt(cliente.diasCredito) : 30
     }]).select().single()
@@ -85,13 +90,18 @@ export function useClientes() {
   }
   const actualizarCliente = async (id, cliente) => {
     const updateData = {
-      nombre: cliente.nombre,
+      cuit: cliente.cuit || null,
+      razon_social: cliente.razonSocial,
       nombre_fantasia: cliente.nombreFantasia,
       direccion: cliente.direccion,
       latitud: cliente.latitud || null,
       longitud: cliente.longitud || null,
       telefono: cliente.telefono || null,
-      zona: cliente.zona || null
+      contacto: cliente.contacto || null,
+      zona: cliente.zona || null,
+      horarios_atencion: cliente.horarios_atencion || null,
+      rubro: cliente.rubro || null,
+      notas: cliente.notas || null
     }
     // Only update credit fields if provided (to avoid overwriting with undefined)
     if (cliente.limiteCredito !== undefined) updateData.limite_credito = parseFloat(cliente.limiteCredito) || 0
