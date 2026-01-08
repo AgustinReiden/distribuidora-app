@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map, FileText } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map, FileText, Tag, Building2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 
 export default function VistaClientes({
@@ -21,20 +21,30 @@ export default function VistaClientes({
     return ['todas', ...Array.from(zonasSet).sort()];
   }, [clientes]);
 
+  // Obtener rubros únicos
+  const rubros = useMemo(() => {
+    const rubrosSet = new Set(clientes.map(c => c.rubro).filter(Boolean));
+    return ['todos', ...Array.from(rubrosSet).sort()];
+  }, [clientes]);
+
+  const [filtroRubro, setFiltroRubro] = useState('todos');
+
   // Filtrar clientes
   const clientesFiltrados = useMemo(() => {
     return clientes.filter(c => {
       const matchBusqueda = !busqueda ||
         c.nombre_fantasia?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
+        c.razon_social?.toLowerCase().includes(busqueda.toLowerCase()) ||
         c.direccion?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.telefono?.includes(busqueda);
+        c.telefono?.includes(busqueda) ||
+        c.cuit?.includes(busqueda.replace(/-/g, ''));
 
       const matchZona = filtroZona === 'todas' || c.zona === filtroZona;
+      const matchRubro = filtroRubro === 'todos' || c.rubro === filtroRubro;
 
-      return matchBusqueda && matchZona;
+      return matchBusqueda && matchZona && matchRubro;
     });
-  }, [clientes, busqueda, filtroZona]);
+  }, [clientes, busqueda, filtroZona, filtroRubro]);
 
   return (
     <div className="space-y-4">
@@ -64,14 +74,14 @@ export default function VistaClientes({
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-            placeholder="Buscar por nombre, dirección o teléfono..."
+            placeholder="Buscar por nombre, CUIT, dirección o teléfono..."
           />
         </div>
         {zonas.length > 1 && (
           <select
             value={filtroZona}
             onChange={e => setFiltroZona(e.target.value)}
-            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           >
             {zonas.map(zona => (
               <option key={zona} value={zona}>
@@ -80,11 +90,24 @@ export default function VistaClientes({
             ))}
           </select>
         )}
+        {rubros.length > 1 && (
+          <select
+            value={filtroRubro}
+            onChange={e => setFiltroRubro(e.target.value)}
+            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          >
+            {rubros.map(rubro => (
+              <option key={rubro} value={rubro}>
+                {rubro === 'todos' ? 'Todos los rubros' : rubro}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Contador de resultados */}
-      {(busqueda || filtroZona !== 'todas') && (
-        <div className="text-sm text-gray-600">
+      {(busqueda || filtroZona !== 'todas' || filtroRubro !== 'todos') && (
+        <div className="text-sm text-gray-600 dark:text-gray-400">
           Mostrando {clientesFiltrados.length} de {clientes.length} clientes
         </div>
       )}
@@ -104,10 +127,24 @@ export default function VistaClientes({
             >
               <div className="flex justify-between items-start">
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-lg text-gray-800 dark:text-white truncate">
-                    {cliente.nombre_fantasia}
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 truncate">{cliente.nombre}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold text-lg text-gray-800 dark:text-white truncate">
+                      {cliente.nombre_fantasia}
+                    </h3>
+                    {cliente.rubro && (
+                      <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-xs flex items-center gap-1">
+                        <Tag className="w-3 h-3" />
+                        {cliente.rubro}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 truncate flex items-center gap-1">
+                    <Building2 className="w-3 h-3 flex-shrink-0" />
+                    {cliente.razon_social}
+                  </p>
+                  {cliente.cuit && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">{cliente.cuit}</p>
+                  )}
                 </div>
                 {isAdmin && (
                   <div className="flex space-x-1 ml-2">

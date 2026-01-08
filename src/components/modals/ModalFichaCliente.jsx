@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { X, User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, Calendar, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle } from 'lucide-react'
+import { X, User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, Calendar, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, UserCheck, Building2 } from 'lucide-react'
 import { useFichaCliente, usePagos } from '../../hooks/useSupabase'
 import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
 
@@ -40,10 +40,26 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
                 <User className="w-8 h-8 text-white" />
               </div>
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{cliente.nombre_fantasia}</h2>
-                <p className="text-gray-600 dark:text-gray-400">{cliente.nombre}</p>
-                <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{cliente.nombre_fantasia}</h2>
+                  {cliente.rubro && (
+                    <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-xs font-medium flex items-center gap-1">
+                      <Tag className="w-3 h-3" />
+                      {cliente.rubro}
+                    </span>
+                  )}
+                </div>
+                <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                  <Building2 className="w-4 h-4" />
+                  {cliente.razon_social}
+                </p>
+                {cliente.cuit && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    CUIT: <span className="font-mono">{cliente.cuit}</span>
+                  </p>
+                )}
+                <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
                   {cliente.direccion && (
                     <span className="flex items-center gap-1">
                       <MapPin className="w-4 h-4" />
@@ -54,6 +70,9 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                     <span className="flex items-center gap-1">
                       <Phone className="w-4 h-4" />
                       {cliente.telefono}
+                      {cliente.contacto && (
+                        <span className="text-gray-400">({cliente.contacto})</span>
+                      )}
                     </span>
                   )}
                   {cliente.zona && (
@@ -62,6 +81,12 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                     </span>
                   )}
                 </div>
+                {cliente.horarios_atencion && (
+                  <div className="flex items-center gap-1 mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    <Clock className="w-4 h-4" />
+                    <span>{cliente.horarios_atencion}</span>
+                  </div>
+                )}
               </div>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
@@ -243,6 +268,17 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   </div>
                 </div>
               </div>
+
+              {/* Notas del cliente */}
+              {cliente.notas && (
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-yellow-600" />
+                    Notas
+                  </h3>
+                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{cliente.notas}</p>
+                </div>
+              )}
             </div>
           ) : activeTab === 'pedidos' ? (
             <div className="space-y-3">
