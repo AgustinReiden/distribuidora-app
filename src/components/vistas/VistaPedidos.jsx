@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ShoppingCart, Search, Calendar, Plus, Route, FileDown, Clock, Package, Truck, Check, X, MoreVertical, History, Edit2, User, AlertTriangle, Trash2, FileText, CreditCard, MapPin, Phone, Navigation, DollarSign, ChevronDown, ChevronUp, Timer } from 'lucide-react';
+import { ShoppingCart, Search, Calendar, Plus, Route, FileDown, Clock, Package, Truck, Check, X, MoreVertical, History, Edit2, User, AlertTriangle, Trash2, FileText, CreditCard, MapPin, Phone, Navigation, DollarSign, ChevronDown, ChevronUp, Timer, Eye, Building2 } from 'lucide-react';
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoLabel, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
@@ -459,6 +459,9 @@ export default function VistaPedidos({
   onDesmarcarEntregado,
   onEliminarPedido
 }) {
+  // Estado para pedido expandido
+  const [pedidoExpandido, setPedidoExpandido] = useState(null);
+
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
     return (
@@ -712,24 +715,18 @@ export default function VistaPedidos({
                   </div>
                 </div>
 
-                {/* Contenido del pedido */}
-                <div className="mt-3 pt-3 border-t">
-                  <p className="text-sm text-gray-600 mb-2">
-                    {pedido.items?.map(i => (
-                      <span key={i.id} className="inline-block mr-2 mb-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs dark:text-gray-300">
+                {/* Resumen del pedido */}
+                <div className="mt-3 pt-3 border-t dark:border-gray-700">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    {pedido.items?.slice(0, 3).map(i => (
+                      <span key={i.id} className="inline-block px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs dark:text-gray-300">
                         {i.producto?.nombre} x{i.cantidad}
                       </span>
                     ))}
-                  </p>
-
-                  {pedido.notas && (
-                    <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <p className="text-xs text-blue-700 dark:text-blue-300 flex items-start">
-                        <FileText className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0" />
-                        <span>{pedido.notas}</span>
-                      </p>
-                    </div>
-                  )}
+                    {pedido.items?.length > 3 && (
+                      <span className="text-xs text-gray-500">+{pedido.items.length - 3} más</span>
+                    )}
+                  </div>
 
                   <div className="flex flex-wrap justify-between items-center gap-2">
                     <div className="flex flex-col">
@@ -741,8 +738,109 @@ export default function VistaPedidos({
                         </p>
                       )}
                     </div>
+                    <button
+                      onClick={() => setPedidoExpandido(pedidoExpandido === pedido.id ? null : pedido.id)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                    >
+                      <Eye className="w-4 h-4" />
+                      {pedidoExpandido === pedido.id ? 'Ocultar' : 'Ver detalle'}
+                      {pedidoExpandido === pedido.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
+
+                {/* Contenido expandido del pedido */}
+                {pedidoExpandido === pedido.id && (
+                  <div className="mt-4 pt-4 border-t dark:border-gray-700 space-y-4 animate-fadeIn">
+                    {/* Información del cliente */}
+                    <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                        <User className="w-4 h-4" />
+                        Información del Cliente
+                      </h4>
+                      <div className="space-y-1 text-sm">
+                        <p className="font-medium text-gray-900 dark:text-white">{pedido.cliente?.nombre_fantasia}</p>
+                        {pedido.cliente?.razon_social && (
+                          <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                            <Building2 className="w-3 h-3" />
+                            {pedido.cliente.razon_social}
+                          </p>
+                        )}
+                        {pedido.cliente?.cuit && (
+                          <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">CUIT: {pedido.cliente.cuit}</p>
+                        )}
+                        <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {pedido.cliente?.direccion}
+                        </p>
+                        {pedido.cliente?.telefono && (
+                          <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                            <Phone className="w-3 h-3" />
+                            <a href={`tel:${pedido.cliente.telefono}`} className="text-blue-600 hover:underline">
+                              {pedido.cliente.telefono}
+                            </a>
+                            {pedido.cliente?.contacto && <span className="text-gray-400">({pedido.cliente.contacto})</span>}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Lista detallada de productos */}
+                    <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                        <Package className="w-4 h-4" />
+                        Productos ({pedido.items?.length || 0})
+                      </h4>
+                      <div className="space-y-2">
+                        {pedido.items?.map(item => (
+                          <div key={item.id} className="flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0">
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900 dark:text-white">{item.producto?.nombre || 'Producto'}</p>
+                              <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-gray-700 dark:text-gray-300">x{item.cantidad}</p>
+                              <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex justify-between items-center pt-2 border-t-2 dark:border-gray-600">
+                          <p className="font-bold text-gray-900 dark:text-white">Total</p>
+                          <p className="text-xl font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Notas */}
+                    {pedido.notas && (
+                      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                        <h4 className="text-sm font-semibold text-yellow-700 dark:text-yellow-300 mb-1 flex items-center gap-2">
+                          <FileText className="w-4 h-4" />
+                          Notas
+                        </h4>
+                        <p className="text-sm text-yellow-800 dark:text-yellow-200 whitespace-pre-wrap">{pedido.notas}</p>
+                      </div>
+                    )}
+
+                    {/* Info de pago y transporte */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Forma de pago</p>
+                        <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1">
+                          <CreditCard className="w-4 h-4" />
+                          {getFormaPagoLabel(pedido.forma_pago)}
+                        </p>
+                      </div>
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Transportista</p>
+                        <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1">
+                          <Truck className="w-4 h-4" />
+                          {pedido.transportista?.nombre || 'Sin asignar'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

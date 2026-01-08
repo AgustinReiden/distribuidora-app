@@ -38,9 +38,12 @@ const ModalPedido = memo(function ModalPedido({
 
   const clientesFiltrados = useMemo(() => {
     if (busquedaCliente.length < 2) return [];
+    const busquedaLower = busquedaCliente.toLowerCase();
     return clientes.filter(c =>
-      c.nombre_fantasia.toLowerCase().includes(busquedaCliente.toLowerCase()) ||
-      c.direccion.toLowerCase().includes(busquedaCliente.toLowerCase())
+      c.nombre_fantasia?.toLowerCase().includes(busquedaLower) ||
+      c.razon_social?.toLowerCase().includes(busquedaLower) ||
+      c.direccion?.toLowerCase().includes(busquedaLower) ||
+      c.cuit?.includes(busquedaCliente.replace(/-/g, ''))
     ).slice(0, 8);
   }, [clientes, busquedaCliente]);
 
@@ -110,14 +113,17 @@ const ModalPedido = memo(function ModalPedido({
               <div>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input type="text" value={busquedaCliente} onChange={e => setBusquedaCliente(e.target.value)} className="w-full pl-10 pr-3 py-2 border rounded-lg" placeholder="Buscar cliente (min. 2 letras)..." />
+                  <input type="text" value={busquedaCliente} onChange={e => setBusquedaCliente(e.target.value)} className="w-full pl-10 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Buscar por nombre, razón social o CUIT..." />
                 </div>
                 {clientesFiltrados.length > 0 && (
-                  <div className="border rounded-lg max-h-40 overflow-y-auto mt-2">
+                  <div className="border dark:border-gray-600 rounded-lg max-h-40 overflow-y-auto mt-2">
                     {clientesFiltrados.map(c => (
-                      <div key={c.id} className="p-3 hover:bg-blue-50 border-b cursor-pointer" onClick={() => { onClienteChange(c.id.toString()); setBusquedaCliente(''); }}>
-                        <p className="font-medium">{c.nombre_fantasia}</p>
-                        <p className="text-sm text-gray-500">{c.direccion}</p>
+                      <div key={c.id} className="p-3 hover:bg-blue-50 dark:hover:bg-blue-900/30 border-b dark:border-gray-600 cursor-pointer" onClick={() => { onClienteChange(c.id.toString()); setBusquedaCliente(''); }}>
+                        <p className="font-medium dark:text-white">{c.nombre_fantasia}</p>
+                        {c.razon_social && c.razon_social !== c.nombre_fantasia && (
+                          <p className="text-xs text-gray-400">{c.razon_social}</p>
+                        )}
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{c.direccion}</p>
                       </div>
                     ))}
                   </div>
