@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Truck, Menu, X, LogOut, Moon, Sun, BarChart3, ShoppingCart, Users, Package, TrendingUp, UserCog, ChevronDown } from 'lucide-react';
+import { Truck, Menu, X, LogOut, Moon, Sun, BarChart3, ShoppingCart, Users, Package, TrendingUp, UserCog, ChevronDown, Route } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { NotificationCenter } from '../../contexts/NotificationContext';
@@ -9,6 +9,7 @@ const menuConfig = [
   { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista'] },
   { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
   { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista'] },
+  { id: 'recorridos', icon: Route, label: 'Recorridos', roles: ['admin'] },
   { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
   { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
 ];

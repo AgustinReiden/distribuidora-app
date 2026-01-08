@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, setErrorNotifier } from './hooks/useSupabase.jsx';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useRecorridos, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalGestionRutas } from './components/Modals.jsx';
@@ -26,6 +26,7 @@ const VistaClientes = lazy(() => import('./components/vistas/VistaClientes'));
 const VistaProductos = lazy(() => import('./components/vistas/VistaProductos'));
 const VistaReportes = lazy(() => import('./components/vistas/VistaReportes'));
 const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
+const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
 
 // Componente de carga para Suspense
 function LoadingVista() {
@@ -60,7 +61,24 @@ function MainApp() {
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
   const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
+  const { recorridos, loading: loadingRecorridos, fetchRecorridosHoy, fetchRecorridosPorFecha, crearRecorrido, getEstadisticasRecorridos } = useRecorridos();
   const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
+
+  // Estado para recorridos
+  const [fechaRecorridos, setFechaRecorridos] = useState(() => new Date().toISOString().split('T')[0]);
+  const [estadisticasRecorridos, setEstadisticasRecorridos] = useState(null);
+
+  // Cargar recorridos cuando se cambia a la vista de recorridos
+  useEffect(() => {
+    if (vista === 'recorridos' && isAdmin) {
+      const hoy = new Date().toISOString().split('T')[0];
+      if (fechaRecorridos === hoy) {
+        fetchRecorridosHoy();
+      } else {
+        fetchRecorridosPorFecha(fechaRecorridos);
+      }
+    }
+  }, [vista, fechaRecorridos, isAdmin, fetchRecorridosHoy, fetchRecorridosPorFecha]);
 
   // Estados de modales
   const [modalCliente, setModalCliente] = useState(false);
@@ -432,13 +450,13 @@ function MainApp() {
     setModalEditarPedido(true);
   };
 
-  const handleGuardarEdicionPedido = async ({ notas, formaPago, estadoPago }) => {
+  const handleGuardarEdicionPedido = async ({ notas, formaPago, estadoPago, montoPagado }) => {
     if (!pedidoEditando) return;
     setGuardando(true);
     try {
       await actualizarNotasPedido(pedidoEditando.id, notas);
       await actualizarFormaPago(pedidoEditando.id, formaPago);
-      await actualizarEstadoPago(pedidoEditando.id, estadoPago);
+      await actualizarEstadoPago(pedidoEditando.id, estadoPago, montoPagado);
       setModalEditarPedido(false);
       setPedidoEditando(null);
       notify.success('Pedido actualizado correctamente');
@@ -448,11 +466,30 @@ function MainApp() {
     setGuardando(false);
   };
 
-  const handleAplicarOrdenOptimizado = async (ordenOptimizado) => {
+  const handleAplicarOrdenOptimizado = async (data) => {
     setGuardando(true);
     try {
+      // Soportar tanto el formato nuevo (objeto) como el antiguo (array)
+      const ordenOptimizado = Array.isArray(data) ? data : data.ordenOptimizado;
+      const transportistaId = data.transportistaId || null;
+      const distancia = data.distancia || null;
+      const duracion = data.duracion || null;
+
       await actualizarOrdenEntrega(ordenOptimizado);
-      notify.success('Orden de entrega actualizado correctamente');
+
+      // Crear recorrido si tenemos transportista
+      if (transportistaId && ordenOptimizado?.length > 0) {
+        try {
+          await crearRecorrido(transportistaId, ordenOptimizado, distancia, duracion);
+          notify.success('Ruta optimizada y recorrido creado correctamente');
+        } catch (recorridoError) {
+          console.warn('No se pudo crear el recorrido:', recorridoError);
+          notify.success('Orden de entrega actualizado (sin registro de recorrido)');
+        }
+      } else {
+        notify.success('Orden de entrega actualizado correctamente');
+      }
+
       setModalOptimizarRuta(false);
       limpiarRuta();
       refetchPedidos();
@@ -752,6 +789,32 @@ function MainApp() {
             usuarios={usuarios}
             loading={loadingUsuarios}
             onEditarUsuario={(usuario) => { setUsuarioEditando(usuario); setModalUsuario(true); }}
+          />
+        )}
+
+        {vista === 'recorridos' && isAdmin && (
+          <VistaRecorridos
+            recorridos={recorridos}
+            loading={loadingRecorridos}
+            fechaSeleccionada={fechaRecorridos}
+            estadisticas={estadisticasRecorridos}
+            onRefresh={async () => {
+              const hoy = new Date().toISOString().split('T')[0];
+              if (fechaRecorridos === hoy) {
+                await fetchRecorridosHoy();
+              } else {
+                await fetchRecorridosPorFecha(fechaRecorridos);
+              }
+            }}
+            onFechaChange={async (fecha) => {
+              setFechaRecorridos(fecha);
+              const hoy = new Date().toISOString().split('T')[0];
+              if (fecha === hoy) {
+                await fetchRecorridosHoy();
+              } else {
+                await fetchRecorridosPorFecha(fecha);
+              }
+            }}
           />
         )}
         </Suspense>
