@@ -18,7 +18,8 @@ const ModalPedido = memo(function ModalPedido({
   isPreventista,
   onNotasChange,
   onFormaPagoChange,
-  onEstadoPagoChange
+  onEstadoPagoChange,
+  onMontoPagadoChange
 }) {
   const [busquedaProducto, setBusquedaProducto] = useState('');
   const [busquedaCliente, setBusquedaCliente] = useState('');
@@ -173,6 +174,31 @@ const ModalPedido = memo(function ModalPedido({
               </select>
             </div>
           </div>
+
+          {/* Monto pagado si es pago parcial */}
+          {nuevoPedido.estadoPago === 'parcial' && (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <label className="block text-sm font-medium mb-1 text-yellow-800">Monto del pago parcial *</label>
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-semibold text-yellow-700">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  max={calcularTotal()}
+                  value={nuevoPedido.montoPagado || ''}
+                  onChange={e => onMontoPagadoChange && onMontoPagadoChange(parseFloat(e.target.value) || 0)}
+                  className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white"
+                  placeholder="Ingrese el monto pagado"
+                />
+              </div>
+              {nuevoPedido.montoPagado > 0 && (
+                <p className="text-sm text-yellow-700 mt-2">
+                  Resta por pagar: {formatPrecio(calcularTotal() - nuevoPedido.montoPagado)}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Seccion Productos con filtro por categoria */}
           <div>

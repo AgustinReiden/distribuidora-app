@@ -123,7 +123,7 @@ function MainApp() {
   const [saldoPendienteCliente, setSaldoPendienteCliente] = useState(0);
 
   // Estados del formulario de pedido
-  const [nuevoPedido, setNuevoPedido] = useState({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
+  const [nuevoPedido, setNuevoPedido] = useState({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0 });
   const [busqueda, setBusqueda] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
@@ -293,7 +293,11 @@ function MainApp() {
   }, []);
 
   const handleEstadoPagoChange = useCallback((estadoPago) => {
-    setNuevoPedido(prev => ({ ...prev, estadoPago }));
+    setNuevoPedido(prev => ({ ...prev, estadoPago, montoPagado: estadoPago === 'parcial' ? prev.montoPagado : 0 }));
+  }, []);
+
+  const handleMontoPagadoChange = useCallback((montoPagado) => {
+    setNuevoPedido(prev => ({ ...prev, montoPagado }));
   }, []);
 
   const handleCrearClienteEnPedido = useCallback(async (nuevoCliente) => {
@@ -324,7 +328,7 @@ function MainApp() {
         nuevoPedido.formaPago,
         nuevoPedido.estadoPago
       );
-      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
+      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0 });
       setModalPedido(false);
       refetchProductos();
       refetchMetricas();
@@ -783,18 +787,25 @@ function MainApp() {
         usuarioId: user.id,
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
-        estadoPago: nuevoPedido.estadoPago
+        estadoPago: nuevoPedido.estadoPago,
+        montoPagado: nuevoPedido.montoPagado
       });
-      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
+      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0 });
       setModalPedido(false);
       notify.warning('Sin conexión. Pedido guardado localmente y se sincronizará automáticamente.');
+      return;
+    }
+
+    // Validar monto pagado si es pago parcial
+    if (nuevoPedido.estadoPago === 'parcial' && (!nuevoPedido.montoPagado || nuevoPedido.montoPagado <= 0)) {
+      notify.warning('Ingresá el monto del pago parcial');
       return;
     }
 
     // Crear pedido normal (online)
     setGuardando(true);
     try {
-      await crearPedido(
+      const pedidoCreado = await crearPedido(
         parseInt(nuevoPedido.clienteId),
         nuevoPedido.items,
         calcularTotalPedido(nuevoPedido.items),
@@ -804,7 +815,20 @@ function MainApp() {
         nuevoPedido.formaPago,
         nuevoPedido.estadoPago
       );
-      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' });
+
+      // Registrar pago si es parcial
+      if (nuevoPedido.estadoPago === 'parcial' && nuevoPedido.montoPagado > 0 && pedidoCreado?.id) {
+        await registrarPago({
+          clienteId: parseInt(nuevoPedido.clienteId),
+          pedidoId: pedidoCreado.id,
+          monto: nuevoPedido.montoPagado,
+          formaPago: nuevoPedido.formaPago,
+          notas: 'Pago parcial al crear pedido',
+          usuarioId: user.id
+        });
+      }
+
+      setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0 });
       setModalPedido(false);
       refetchProductos();
       refetchMetricas();
@@ -1017,7 +1041,7 @@ function MainApp() {
           clientes={clientes}
           categorias={categorias}
           nuevoPedido={nuevoPedido}
-          onClose={() => { setModalPedido(false); setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente' }); }}
+          onClose={() => { setModalPedido(false); setNuevoPedido({ clienteId: '', items: [], notas: '', formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0 }); }}
           onClienteChange={handleClienteChange}
           onAgregarItem={agregarItemPedido}
           onActualizarCantidad={actualizarCantidadItem}
@@ -1027,6 +1051,7 @@ function MainApp() {
           onNotasChange={handleNotasChange}
           onFormaPagoChange={handleFormaPagoChange}
           onEstadoPagoChange={handleEstadoPagoChange}
+          onMontoPagadoChange={handleMontoPagadoChange}
           guardando={guardando}
           isAdmin={isAdmin}
           isPreventista={isPreventista}
