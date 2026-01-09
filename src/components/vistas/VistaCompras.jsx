@@ -152,26 +152,27 @@ export default function VistaCompras({
 
       {/* Filtros */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 space-y-4">
-        <div className="flex flex-col md:flex-row gap-4">
-          {/* Búsqueda */}
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" />
-            <input
-              type="text"
-              value={busqueda}
-              onChange={e => setBusqueda(e.target.value)}
-              className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500"
-              placeholder="Buscar por factura o proveedor..."
-            />
-          </div>
+        {/* Búsqueda */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" />
+          <input
+            type="text"
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500"
+            placeholder="Buscar por factura o proveedor..."
+          />
+        </div>
 
+        {/* Filtros en grid responsive */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {/* Filtro por estado */}
           <select
             value={filtroEstado}
             onChange={e => setFiltroEstado(e.target.value)}
-            className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500"
+            className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
           >
-            <option value="todos">Todos los estados</option>
+            <option value="todos">Todos estados</option>
             {Object.entries(ESTADOS_COMPRA).map(([key, { label }]) => (
               <option key={key} value={key}>{label}</option>
             ))}
@@ -181,45 +182,47 @@ export default function VistaCompras({
           <select
             value={filtroProveedor}
             onChange={e => setFiltroProveedor(e.target.value)}
-            className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500"
+            className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
           >
-            <option value="">Todos los proveedores</option>
+            <option value="">Todos proveedores</option>
             {proveedores.map(p => (
               <option key={p.id} value={p.id}>{p.nombre}</option>
             ))}
           </select>
-        </div>
 
-        {/* Filtros de fecha */}
-        <div className="flex flex-col md:flex-row gap-4 items-end">
-          <div className="flex-1">
+          {/* Fecha desde */}
+          <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Desde</label>
             <input
               type="date"
               value={filtroFechaDesde}
               onChange={e => setFiltroFechaDesde(e.target.value)}
-              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500"
+              className="w-full px-2 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
             />
           </div>
-          <div className="flex-1">
+
+          {/* Fecha hasta */}
+          <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Hasta</label>
             <input
               type="date"
               value={filtroFechaHasta}
               onChange={e => setFiltroFechaHasta(e.target.value)}
-              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500"
+              className="w-full px-2 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
             />
           </div>
-          {hayFiltrosActivos && (
-            <button
-              onClick={limpiarFiltros}
-              className="px-4 py-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
-            >
-              <XCircle className="w-4 h-4" />
-              Limpiar
-            </button>
-          )}
         </div>
+
+        {/* Boton limpiar */}
+        {hayFiltrosActivos && (
+          <button
+            onClick={limpiarFiltros}
+            className="w-full md:w-auto px-4 py-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center gap-1 border dark:border-gray-600 rounded-lg"
+          >
+            <XCircle className="w-4 h-4" />
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       {/* Contador de resultados */}
