@@ -1,18 +1,54 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Truck, Menu, X, LogOut, Moon, Sun, BarChart3, ShoppingCart, Users, Package, TrendingUp, UserCog, ChevronDown, Route, ShoppingBag } from 'lucide-react';
+import {
+  Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
+  BarChart3, ShoppingCart, Users, Package, TrendingUp,
+  UserCog, Route, ShoppingBag, Building2, Layers
+} from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { NotificationCenter } from '../../contexts/NotificationContext';
 
-const menuConfig = [
-  { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
-  { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista'] },
-  { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
-  { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista'] },
-  { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin'] },
-  { id: 'recorridos', icon: Route, label: 'Recorridos', roles: ['admin'] },
-  { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
-  { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
+// Configuración del menú con grupos
+const menuGroups = [
+  {
+    id: 'principal',
+    label: null, // Items sin grupo (se muestran directo)
+    items: [
+      { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
+      { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista'] },
+    ]
+  },
+  {
+    id: 'comercial',
+    label: 'Comercial',
+    icon: Users,
+    roles: ['admin', 'preventista'],
+    items: [
+      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
+      { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
+    ]
+  },
+  {
+    id: 'inventario',
+    label: 'Inventario',
+    icon: Package,
+    roles: ['admin', 'preventista'],
+    items: [
+      { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista'] },
+      { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin'] },
+      { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
+    ]
+  },
+  {
+    id: 'operaciones',
+    label: 'Operaciones',
+    icon: Route,
+    roles: ['admin'],
+    items: [
+      { id: 'recorridos', icon: Route, label: 'Recorridos', roles: ['admin'] },
+      { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
+    ]
+  }
 ];
 
 export default function TopNavigation({
@@ -24,10 +60,34 @@ export default function TopNavigation({
   const { darkMode, toggleDarkMode } = useTheme();
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [userMenuAbierto, setUserMenuAbierto] = useState(false);
+  const [dropdownAbierto, setDropdownAbierto] = useState(null);
   const menuRef = useRef(null);
   const userMenuRef = useRef(null);
+  const dropdownRefs = useRef({});
 
-  const menuItems = menuConfig.filter(item => item.roles.includes(perfil?.rol));
+  // Filtrar grupos y items por rol
+  const getMenuFiltrado = () => {
+    return menuGroups.map(group => ({
+      ...group,
+      items: group.items.filter(item => item.roles.includes(perfil?.rol))
+    })).filter(group => {
+      // Filtrar grupos vacíos o sin permiso
+      if (group.items.length === 0) return false;
+      if (group.roles && !group.roles.some(r => r === perfil?.rol)) return false;
+      return true;
+    });
+  };
+
+  const menuFiltrado = getMenuFiltrado();
+
+  // Obtener la vista activa y su grupo
+  const getVistaActiva = () => {
+    for (const group of menuFiltrado) {
+      const item = group.items.find(i => i.id === vista);
+      if (item) return { group, item };
+    }
+    return null;
+  };
 
   // Cerrar menús al hacer click fuera
   useEffect(() => {
@@ -38,16 +98,32 @@ export default function TopNavigation({
       if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
         setUserMenuAbierto(false);
       }
+      // Cerrar dropdowns
+      const clickedInsideDropdown = Object.values(dropdownRefs.current).some(
+        ref => ref && ref.contains(event.target)
+      );
+      if (!clickedInsideDropdown) {
+        setDropdownAbierto(null);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Cerrar menú móvil al cambiar de vista
   const handleVistaChange = (vistaId) => {
     setVista(vistaId);
     setMenuAbierto(false);
+    setDropdownAbierto(null);
+  };
+
+  const toggleDropdown = (groupId) => {
+    setDropdownAbierto(dropdownAbierto === groupId ? null : groupId);
+  };
+
+  // Verificar si un grupo tiene la vista activa
+  const grupoTieneVistaActiva = (group) => {
+    return group.items.some(item => item.id === vista);
   };
 
   return (
@@ -82,20 +158,71 @@ export default function TopNavigation({
 
             {/* Menú horizontal - visible en desktop */}
             <nav className="hidden lg:flex items-center space-x-1 ml-8">
-              {menuItems.map(item => (
-                <button
-                  key={item.id}
-                  onClick={() => handleVistaChange(item.id)}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
-                    vista === item.id
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  <item.icon className="w-4 h-4" />
-                  <span className="font-medium text-sm">{item.label}</span>
-                </button>
-              ))}
+              {menuFiltrado.map(group => {
+                // Items sin grupo (se muestran directo)
+                if (!group.label) {
+                  return group.items.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => handleVistaChange(item.id)}
+                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                        vista === item.id
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <item.icon className="w-4 h-4" />
+                      <span className="font-medium text-sm">{item.label}</span>
+                    </button>
+                  ));
+                }
+
+                // Grupos con dropdown
+                const GroupIcon = group.icon;
+                const isActive = grupoTieneVistaActiva(group);
+                const isOpen = dropdownAbierto === group.id;
+
+                return (
+                  <div
+                    key={group.id}
+                    className="relative"
+                    ref={el => dropdownRefs.current[group.id] = el}
+                  >
+                    <button
+                      onClick={() => toggleDropdown(group.id)}
+                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                        isActive
+                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <GroupIcon className="w-4 h-4" />
+                      <span className="font-medium text-sm">{group.label}</span>
+                      <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {/* Dropdown */}
+                    {isOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 z-50">
+                        {group.items.map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => handleVistaChange(item.id)}
+                            className={`w-full flex items-center space-x-3 px-4 py-2.5 transition-colors ${
+                              vista === item.id
+                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            <item.icon className="w-4 h-4" />
+                            <span className="font-medium text-sm">{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </nav>
           </div>
 
@@ -163,23 +290,38 @@ export default function TopNavigation({
             : 'opacity-0 -translate-y-4 pointer-events-none'
         }`}
       >
-        <nav className="max-w-7xl mx-auto p-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {menuItems.map(item => (
-              <button
-                key={item.id}
-                onClick={() => handleVistaChange(item.id)}
-                className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
-                  vista === item.id
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 bg-gray-50 dark:bg-gray-700/50'
-                }`}
-              >
-                <item.icon className="w-5 h-5" />
-                <span className="font-medium">{item.label}</span>
-              </button>
-            ))}
-          </div>
+        <nav className="max-w-7xl mx-auto p-4 space-y-4">
+          {menuFiltrado.map(group => (
+            <div key={group.id}>
+              {/* Título del grupo */}
+              {group.label && (
+                <div className="flex items-center gap-2 px-2 mb-2">
+                  <group.icon className="w-4 h-4 text-gray-400" />
+                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    {group.label}
+                  </span>
+                </div>
+              )}
+
+              {/* Items del grupo */}
+              <div className="grid grid-cols-2 gap-2">
+                {group.items.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleVistaChange(item.id)}
+                    className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
+                      vista === item.id
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 bg-gray-50 dark:bg-gray-700/50'
+                    }`}
+                  >
+                    <item.icon className="w-5 h-5" />
+                    <span className="font-medium">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </nav>
       </div>
 
