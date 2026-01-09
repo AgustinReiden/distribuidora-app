@@ -3,6 +3,13 @@ import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { validarTexto } from './utils';
 
+// Opciones de IVA disponibles
+const OPCIONES_IVA = [
+  { valor: 21, label: '21%' },
+  { valor: 10.5, label: '10.5%' },
+  { valor: 0, label: '0% (Exento)' }
+];
+
 const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave, onClose, guardando }) {
   const [form, setForm] = useState(producto || {
     nombre: '',
@@ -10,6 +17,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
     categoria: '',
     stock: '',
     stock_minimo: 10,
+    porcentaje_iva: 21,
     costo_sin_iva: '',
     costo_con_iva: '',
     impuestos_internos: '',
@@ -21,26 +29,55 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
   const [errores, setErrores] = useState({});
   const [intentoGuardar, setIntentoGuardar] = useState(false);
 
-  // Calcular automaticamente costo con IVA cuando cambia costo sin IVA
-  const handleCostoSinIvaChange = (valor) => {
-    const costoSinIva = parseFloat(valor) || 0;
-    const costoConIva = costoSinIva * 1.21; // 21% IVA
-    setForm({
-      ...form,
-      costo_sin_iva: valor,
-      costo_con_iva: costoConIva ? costoConIva.toFixed(2) : ''
-    });
+  // Calcular costo total: neto + IVA(solo sobre neto) + impuestos internos
+  const calcularCostoTotal = (costoNeto, porcentajeIva, impInternos) => {
+    const neto = parseFloat(costoNeto) || 0;
+    const iva = neto * (parseFloat(porcentajeIva) || 0) / 100;
+    const internos = parseFloat(impInternos) || 0;
+    return neto + iva + internos;
   };
 
-  // Calcular automaticamente precio con IVA cuando cambia precio sin IVA
+  // Calcular precio total: neto + IVA(solo sobre neto) + impuestos internos
+  const calcularPrecioTotal = (precioNeto, porcentajeIva, impInternos) => {
+    const neto = parseFloat(precioNeto) || 0;
+    const iva = neto * (parseFloat(porcentajeIva) || 0) / 100;
+    const internos = parseFloat(impInternos) || 0;
+    return neto + iva + internos;
+  };
+
+  // Recalcular totales cuando cambian los valores
+  const recalcularTotales = (nuevoForm) => {
+    const costoTotal = calcularCostoTotal(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
+    const precioTotal = calcularPrecioTotal(nuevoForm.precio_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
+    return {
+      ...nuevoForm,
+      costo_con_iva: costoTotal ? costoTotal.toFixed(2) : '',
+      precio: precioTotal ? precioTotal.toFixed(2) : ''
+    };
+  };
+
+  // Manejar cambio de costo neto
+  const handleCostoSinIvaChange = (valor) => {
+    const nuevoForm = { ...form, costo_sin_iva: valor };
+    setForm(recalcularTotales(nuevoForm));
+  };
+
+  // Manejar cambio de impuestos internos
+  const handleImpuestosInternosChange = (valor) => {
+    const nuevoForm = { ...form, impuestos_internos: valor };
+    setForm(recalcularTotales(nuevoForm));
+  };
+
+  // Manejar cambio de porcentaje IVA
+  const handlePorcentajeIvaChange = (valor) => {
+    const nuevoForm = { ...form, porcentaje_iva: parseFloat(valor) };
+    setForm(recalcularTotales(nuevoForm));
+  };
+
+  // Manejar cambio de precio neto
   const handlePrecioSinIvaChange = (valor) => {
-    const precioSinIva = parseFloat(valor) || 0;
-    const precioConIva = precioSinIva * 1.21; // 21% IVA
-    setForm({
-      ...form,
-      precio_sin_iva: valor,
-      precio: precioConIva ? precioConIva.toFixed(2) : ''
-    });
+    const nuevoForm = { ...form, precio_sin_iva: valor };
+    setForm(recalcularTotales(nuevoForm));
     if (intentoGuardar && errores.precio) {
       setErrores(prev => ({ ...prev, precio: null }));
     }
@@ -174,12 +211,44 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
           )}
         </div>
 
+        {/* Seccion de IVA */}
+        <div className="border-t pt-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Configuracion Impositiva</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">% IVA</label>
+              <select
+                value={form.porcentaje_iva ?? 21}
+                onChange={e => handlePorcentajeIvaChange(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+              >
+                {OPCIONES_IVA.map(opt => (
+                  <option key={opt.valor} value={opt.valor}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Se aplica solo sobre el neto</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos ($)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.impuestos_internos || ''}
+                onChange={e => handleImpuestosInternosChange(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="0.00"
+              />
+              <p className="text-xs text-gray-500 mt-1">No gravado con IVA</p>
+            </div>
+          </div>
+        </div>
+
         {/* Seccion de Costos */}
         <div className="border-t pt-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Costos (compra)</h3>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Costo sin IVA</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Costo Neto</label>
               <input
                 type="number"
                 step="0.01"
@@ -190,28 +259,20 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Costo con IVA</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Costo Total (Neto + IVA + Imp.Int.)</label>
               <input
                 type="number"
                 step="0.01"
                 value={form.costo_con_iva || ''}
-                onChange={e => setForm({ ...form, costo_con_iva: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50"
-                placeholder="0.00"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.impuestos_internos || ''}
-                onChange={e => setForm({ ...form, impuestos_internos: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
+                readOnly
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 font-semibold"
                 placeholder="0.00"
               />
             </div>
           </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Costo real = Neto + Imp. Internos (sin IVA) = ${((parseFloat(form.costo_sin_iva) || 0) + (parseFloat(form.impuestos_internos) || 0)).toFixed(2)}
+          </p>
         </div>
 
         {/* Seccion de Precios de Venta */}
@@ -219,7 +280,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Precios de Venta</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Precio sin IVA</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Precio Neto</label>
               <input
                 type="number"
                 step="0.01"
@@ -230,19 +291,32 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Precio con IVA (Final) *</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Precio Final (Neto + IVA + Imp.Int.) *</label>
               <input
                 type="number"
                 step="0.01"
                 value={form.precio}
-                onChange={e => handleFieldChange('precio', parseFloat(e.target.value) || '')}
-                className={`w-full px-3 py-2 border rounded-lg font-semibold ${errores.precio ? 'border-red-500 bg-red-50' : 'bg-green-50 border-green-300'}`}
+                readOnly
+                className={`w-full px-3 py-2 border rounded-lg font-semibold ${errores.precio ? 'border-red-500 bg-red-50' : 'bg-green-100 border-green-300'}`}
                 placeholder="0.00"
               />
               {errores.precio && <p className="text-red-500 text-xs mt-1">{errores.precio}</p>}
             </div>
           </div>
-          <p className="text-xs text-gray-500 mt-2">* El precio con IVA es el que se muestra al cliente en los pedidos</p>
+          <p className="text-xs text-gray-500 mt-2">
+            * El precio final incluye IVA ({form.porcentaje_iva || 21}% sobre neto) + Imp. Internos
+          </p>
+          {(parseFloat(form.costo_sin_iva) > 0 && parseFloat(form.precio_sin_iva) > 0) && (
+            <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+              <p className="text-xs font-medium text-blue-800">
+                Rentabilidad neta: ${((parseFloat(form.precio_sin_iva) || 0) - (parseFloat(form.costo_sin_iva) || 0)).toFixed(2)}
+                {' '}({(((parseFloat(form.precio_sin_iva) - parseFloat(form.costo_sin_iva)) / parseFloat(form.costo_sin_iva)) * 100).toFixed(1)}%)
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                Margen sobre costo neto (sin IVA ni imp. internos)
+              </p>
+            </div>
+          )}
         </div>
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
