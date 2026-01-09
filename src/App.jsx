@@ -10,6 +10,7 @@ import ModalMermaStock from './components/modals/ModalMermaStock.jsx';
 import ModalHistorialMermas from './components/modals/ModalHistorialMermas.jsx';
 import ModalCompra from './components/modals/ModalCompra.jsx';
 import ModalDetalleCompra from './components/modals/ModalDetalleCompra.jsx';
+import ModalProveedor from './components/modals/ModalProveedor.jsx';
 import OfflineIndicator from './components/layout/OfflineIndicator.jsx';
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada, generarReciboPago } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
@@ -30,6 +31,7 @@ const VistaReportes = lazy(() => import('./components/vistas/VistaReportes'));
 const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
 const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
 const VistaCompras = lazy(() => import('./components/vistas/VistaCompras'));
+const VistaProveedores = lazy(() => import('./components/vistas/VistaProveedores'));
 
 // Componente de carga para Suspense
 function LoadingVista() {
@@ -64,7 +66,7 @@ function MainApp() {
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
   const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
-  const { compras, proveedores, registrarCompra, anularCompra, loading: loadingCompras, refetch: refetchCompras } = useCompras();
+  const { compras, proveedores, registrarCompra, anularCompra, agregarProveedor, actualizarProveedor, loading: loadingCompras, refetch: refetchCompras, refetchProveedores } = useCompras();
   const { recorridos, loading: loadingRecorridos, fetchRecorridosHoy, fetchRecorridosPorFecha, crearRecorrido, getEstadisticasRecorridos } = useRecorridos();
   const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
 
@@ -105,6 +107,8 @@ function MainApp() {
   const [modalCompra, setModalCompra] = useState(false);
   const [modalDetalleCompra, setModalDetalleCompra] = useState(false);
   const [compraDetalle, setCompraDetalle] = useState(null);
+  const [modalProveedor, setModalProveedor] = useState(false);
+  const [proveedorEditando, setProveedorEditando] = useState(null);
 
   // Estados de edición
   const [clienteEditando, setClienteEditando] = useState(null);
@@ -654,6 +658,74 @@ function MainApp() {
     });
   };
 
+  // Handlers de Proveedores
+  const handleNuevoProveedor = () => {
+    setProveedorEditando(null);
+    setModalProveedor(true);
+  };
+
+  const handleEditarProveedor = (proveedor) => {
+    setProveedorEditando(proveedor);
+    setModalProveedor(true);
+  };
+
+  const handleGuardarProveedor = async (proveedor) => {
+    setGuardando(true);
+    try {
+      if (proveedor.id) {
+        await actualizarProveedor(proveedor.id, proveedor);
+        notify.success('Proveedor actualizado correctamente');
+      } else {
+        await agregarProveedor(proveedor);
+        notify.success('Proveedor creado correctamente');
+      }
+      setModalProveedor(false);
+      setProveedorEditando(null);
+      refetchProveedores();
+    } catch (e) {
+      notify.error('Error: ' + e.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const handleToggleActivoProveedor = async (proveedor) => {
+    const nuevoEstado = proveedor.activo === false;
+    try {
+      await actualizarProveedor(proveedor.id, { ...proveedor, activo: nuevoEstado });
+      notify.success(nuevoEstado ? 'Proveedor activado' : 'Proveedor desactivado');
+      refetchProveedores();
+    } catch (e) {
+      notify.error('Error: ' + e.message);
+    }
+  };
+
+  const handleEliminarProveedor = (id) => {
+    setModalConfirm({
+      visible: true,
+      titulo: 'Eliminar proveedor',
+      mensaje: '¿Eliminar este proveedor? Esta acción no se puede deshacer.',
+      tipo: 'danger',
+      onConfirm: async () => {
+        setGuardando(true);
+        try {
+          // Por ahora solo desactivamos (soft delete)
+          const proveedor = proveedores.find(p => p.id === id);
+          if (proveedor) {
+            await actualizarProveedor(id, { ...proveedor, activo: false });
+            notify.success('Proveedor eliminado');
+            refetchProveedores();
+          }
+        } catch (e) {
+          notify.error('Error: ' + e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
+        }
+      }
+    });
+  };
+
   // Sincronización offline
   const handleSincronizar = async () => {
     try {
@@ -887,6 +959,19 @@ function MainApp() {
             onAnularCompra={handleAnularCompra}
           />
         )}
+
+        {vista === 'proveedores' && isAdmin && (
+          <VistaProveedores
+            proveedores={proveedores}
+            compras={compras}
+            loading={loadingCompras}
+            isAdmin={isAdmin}
+            onNuevoProveedor={handleNuevoProveedor}
+            onEditarProveedor={handleEditarProveedor}
+            onEliminarProveedor={handleEliminarProveedor}
+            onToggleActivo={handleToggleActivoProveedor}
+          />
+        )}
         </Suspense>
         </div>
       </main>
@@ -1060,6 +1145,15 @@ function MainApp() {
           compra={compraDetalle}
           onClose={() => { setModalDetalleCompra(false); setCompraDetalle(null); }}
           onAnular={handleAnularCompra}
+        />
+      )}
+
+      {modalProveedor && (
+        <ModalProveedor
+          proveedor={proveedorEditando}
+          onSave={handleGuardarProveedor}
+          onClose={() => { setModalProveedor(false); setProveedorEditando(null); }}
+          guardando={guardando}
         />
       )}
 
