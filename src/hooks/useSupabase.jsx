@@ -1512,7 +1512,7 @@ export function useRecorridos() {
   const [loading, setLoading] = useState(false)
 
   // Obtener recorridos del día
-  const fetchRecorridosHoy = async () => {
+  const fetchRecorridosHoy = useCallback(async () => {
     setLoading(true)
     try {
       const hoy = new Date().toISOString().split('T')[0]
@@ -1549,10 +1549,10 @@ export function useRecorridos() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   // Obtener recorridos por fecha
-  const fetchRecorridosPorFecha = async (fecha) => {
+  const fetchRecorridosPorFecha = useCallback(async (fecha) => {
     setLoading(true)
     try {
       const { data, error } = await supabase
@@ -1571,15 +1571,24 @@ export function useRecorridos() {
         .eq('fecha', fecha)
         .order('created_at', { ascending: false })
 
-      if (error) throw error
+      if (error) {
+        if (error.message.includes('does not exist')) {
+          console.warn('Tabla recorridos no existe aún')
+          setRecorridos([])
+          return []
+        }
+        throw error
+      }
+      setRecorridos(data || [])
       return data || []
     } catch (error) {
       console.error('Error fetching recorridos:', error)
+      setRecorridos([])
       return []
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   // Crear un nuevo recorrido cuando se aplica una ruta optimizada
   const crearRecorrido = async (transportistaId, pedidosOrdenados, distancia = null, duracion = null) => {
