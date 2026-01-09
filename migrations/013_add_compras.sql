@@ -63,34 +63,40 @@ ALTER TABLE compras ENABLE ROW LEVEL SECURITY;
 ALTER TABLE compra_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proveedores ENABLE ROW LEVEL SECURITY;
 
--- Políticas de seguridad para compras
+-- Políticas de seguridad para compras (idempotente)
+DROP POLICY IF EXISTS "Admin full access compras" ON compras;
 CREATE POLICY "Admin full access compras" ON compras
   FOR ALL USING (
     EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND rol = 'admin')
   );
 
+DROP POLICY IF EXISTS "Users can view compras" ON compras;
 CREATE POLICY "Users can view compras" ON compras
   FOR SELECT USING (
     EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND activo = true)
   );
 
--- Políticas de seguridad para compra_items
+-- Políticas de seguridad para compra_items (idempotente)
+DROP POLICY IF EXISTS "Admin full access compra_items" ON compra_items;
 CREATE POLICY "Admin full access compra_items" ON compra_items
   FOR ALL USING (
     EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND rol = 'admin')
   );
 
+DROP POLICY IF EXISTS "Users can view compra_items" ON compra_items;
 CREATE POLICY "Users can view compra_items" ON compra_items
   FOR SELECT USING (
     EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND activo = true)
   );
 
--- Políticas de seguridad para proveedores
+-- Políticas de seguridad para proveedores (idempotente)
+DROP POLICY IF EXISTS "Admin full access proveedores" ON proveedores;
 CREATE POLICY "Admin full access proveedores" ON proveedores
   FOR ALL USING (
     EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND rol = 'admin')
   );
 
+DROP POLICY IF EXISTS "Users can view proveedores" ON proveedores;
 CREATE POLICY "Users can view proveedores" ON proveedores
   FOR SELECT USING (
     EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND activo = true)
@@ -222,11 +228,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_update_compras_timestamp ON compras;
 CREATE TRIGGER trigger_update_compras_timestamp
   BEFORE UPDATE ON compras
   FOR EACH ROW
   EXECUTE FUNCTION update_compras_updated_at();
 
+DROP TRIGGER IF EXISTS trigger_update_proveedores_timestamp ON proveedores;
 CREATE TRIGGER trigger_update_proveedores_timestamp
   BEFORE UPDATE ON proveedores
   FOR EACH ROW
