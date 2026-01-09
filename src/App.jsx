@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useRecorridos, setErrorNotifier } from './hooks/useSupabase.jsx';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, setErrorNotifier } from './hooks/useSupabase.jsx';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalGestionRutas } from './components/Modals.jsx';
@@ -8,6 +8,8 @@ import ModalFichaCliente from './components/modals/ModalFichaCliente.jsx';
 import ModalRegistrarPago from './components/modals/ModalRegistrarPago.jsx';
 import ModalMermaStock from './components/modals/ModalMermaStock.jsx';
 import ModalHistorialMermas from './components/modals/ModalHistorialMermas.jsx';
+import ModalCompra from './components/modals/ModalCompra.jsx';
+import ModalDetalleCompra from './components/modals/ModalDetalleCompra.jsx';
 import OfflineIndicator from './components/layout/OfflineIndicator.jsx';
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada, generarReciboPago } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
@@ -27,6 +29,7 @@ const VistaProductos = lazy(() => import('./components/vistas/VistaProductos'));
 const VistaReportes = lazy(() => import('./components/vistas/VistaReportes'));
 const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
 const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
+const VistaCompras = lazy(() => import('./components/vistas/VistaCompras'));
 
 // Componente de carga para Suspense
 function LoadingVista() {
@@ -61,6 +64,7 @@ function MainApp() {
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
   const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
+  const { compras, proveedores, registrarCompra, anularCompra, loading: loadingCompras, refetch: refetchCompras } = useCompras();
   const { recorridos, loading: loadingRecorridos, fetchRecorridosHoy, fetchRecorridosPorFecha, crearRecorrido, getEstadisticasRecorridos } = useRecorridos();
   const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
 
@@ -98,6 +102,9 @@ function MainApp() {
   const [modalMermaStock, setModalMermaStock] = useState(false);
   const [modalHistorialMermas, setModalHistorialMermas] = useState(false);
   const [productoMerma, setProductoMerma] = useState(null);
+  const [modalCompra, setModalCompra] = useState(false);
+  const [modalDetalleCompra, setModalDetalleCompra] = useState(false);
+  const [compraDetalle, setCompraDetalle] = useState(null);
 
   // Estados de edición
   const [clienteEditando, setClienteEditando] = useState(null);
@@ -597,6 +604,56 @@ function MainApp() {
     setModalHistorialMermas(true);
   };
 
+  // Handlers de Compras
+  const handleNuevaCompra = () => {
+    setModalCompra(true);
+  };
+
+  const handleRegistrarCompra = async (compraData) => {
+    try {
+      await registrarCompra({
+        ...compraData,
+        usuarioId: user?.id
+      });
+      notify.success('Compra registrada correctamente. Stock actualizado.');
+      refetchProductos();
+      refetchCompras();
+    } catch (e) {
+      notify.error('Error al registrar compra: ' + e.message);
+      throw e;
+    }
+  };
+
+  const handleVerDetalleCompra = (compra) => {
+    setCompraDetalle(compra);
+    setModalDetalleCompra(true);
+  };
+
+  const handleAnularCompra = (compraId) => {
+    setModalConfirm({
+      visible: true,
+      titulo: 'Anular compra',
+      mensaje: '¿Anular esta compra? El stock será revertido.',
+      tipo: 'danger',
+      onConfirm: async () => {
+        setGuardando(true);
+        try {
+          await anularCompra(compraId);
+          notify.success('Compra anulada y stock revertido');
+          refetchProductos();
+          refetchCompras();
+          setModalDetalleCompra(false);
+          setCompraDetalle(null);
+        } catch (e) {
+          notify.error('Error al anular compra: ' + e.message);
+        } finally {
+          setGuardando(false);
+          setModalConfirm({ visible: false });
+        }
+      }
+    });
+  };
+
   // Sincronización offline
   const handleSincronizar = async () => {
     try {
@@ -818,6 +875,18 @@ function MainApp() {
             }}
           />
         )}
+
+        {vista === 'compras' && isAdmin && (
+          <VistaCompras
+            compras={compras}
+            proveedores={proveedores}
+            loading={loadingCompras}
+            isAdmin={isAdmin}
+            onNuevaCompra={handleNuevaCompra}
+            onVerDetalle={handleVerDetalleCompra}
+            onAnularCompra={handleAnularCompra}
+          />
+        )}
         </Suspense>
         </div>
       </main>
@@ -974,6 +1043,23 @@ function MainApp() {
           productos={productos}
           usuarios={usuarios}
           onClose={() => setModalHistorialMermas(false)}
+        />
+      )}
+
+      {modalCompra && (
+        <ModalCompra
+          productos={productos}
+          proveedores={proveedores}
+          onSave={handleRegistrarCompra}
+          onClose={() => setModalCompra(false)}
+        />
+      )}
+
+      {modalDetalleCompra && compraDetalle && (
+        <ModalDetalleCompra
+          compra={compraDetalle}
+          onClose={() => { setModalDetalleCompra(false); setCompraDetalle(null); }}
+          onAnular={handleAnularCompra}
         />
       )}
 
