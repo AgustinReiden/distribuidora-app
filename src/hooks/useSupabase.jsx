@@ -1511,39 +1511,65 @@ export function useRecorridos() {
   const [recorridoActual, setRecorridoActual] = useState(null)
   const [loading, setLoading] = useState(false)
 
-  // Obtener recorridos del día
+  // Función auxiliar para fetch con timeout
+  const fetchConTimeout = async (queryPromise, timeoutMs = 10000) => {
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout')), timeoutMs)
+    )
+    return Promise.race([queryPromise, timeoutPromise])
+  }
+
+  // Obtener recorridos del día - versión simplificada
   const fetchRecorridosHoy = useCallback(async () => {
     setLoading(true)
+    const hoy = new Date().toISOString().split('T')[0]
+    console.log('[Recorridos] Buscando recorridos para fecha:', hoy)
+
     try {
-      const hoy = new Date().toISOString().split('T')[0]
-      const { data, error } = await supabase
+      const query = supabase
         .from('recorridos')
-        .select(`
-          *,
-          transportista:perfiles!transportista_id(id, nombre),
-          pedidos:recorrido_pedidos(
-            *,
-            pedido:pedidos(
-              *,
-              cliente:clientes(nombre_fantasia, direccion, telefono)
-            )
-          )
-        `)
+        .select('*')
         .eq('fecha', hoy)
         .order('created_at', { ascending: false })
 
+      const { data, error } = await fetchConTimeout(query, 8000)
+
+      console.log('[Recorridos] Resultado:', { data, error })
+
       if (error) {
-        if (error.message.includes('does not exist')) {
-          console.warn('Tabla recorridos no existe aún')
-          setRecorridos([])
-          return []
-        }
-        throw error
+        console.error('[Recorridos] Error en query:', error)
+        setRecorridos([])
+        return []
       }
+
+      // Si hay recorridos, enriquecer con datos del transportista
+      if (data && data.length > 0) {
+        const recorridosEnriquecidos = await Promise.all(
+          data.map(async (recorrido) => {
+            let transportista = null
+            if (recorrido.transportista_id) {
+              try {
+                const { data: perfil } = await supabase
+                  .from('perfiles')
+                  .select('id, nombre')
+                  .eq('id', recorrido.transportista_id)
+                  .single()
+                transportista = perfil
+              } catch (e) {
+                console.warn('[Recorridos] No se pudo obtener transportista:', e)
+              }
+            }
+            return { ...recorrido, transportista }
+          })
+        )
+        setRecorridos(recorridosEnriquecidos)
+        return recorridosEnriquecidos
+      }
+
       setRecorridos(data || [])
       return data || []
     } catch (error) {
-      console.error('Error fetching recorridos:', error)
+      console.error('[Recorridos] Error catch:', error)
       setRecorridos([])
       return []
     } finally {
@@ -1551,38 +1577,56 @@ export function useRecorridos() {
     }
   }, [])
 
-  // Obtener recorridos por fecha
+  // Obtener recorridos por fecha - versión simplificada
   const fetchRecorridosPorFecha = useCallback(async (fecha) => {
     setLoading(true)
+    console.log('[Recorridos] Buscando recorridos para fecha:', fecha)
+
     try {
-      const { data, error } = await supabase
+      const query = supabase
         .from('recorridos')
-        .select(`
-          *,
-          transportista:perfiles!transportista_id(id, nombre),
-          pedidos:recorrido_pedidos(
-            *,
-            pedido:pedidos(
-              *,
-              cliente:clientes(nombre_fantasia, direccion, telefono)
-            )
-          )
-        `)
+        .select('*')
         .eq('fecha', fecha)
         .order('created_at', { ascending: false })
 
+      const { data, error } = await fetchConTimeout(query, 8000)
+
+      console.log('[Recorridos] Resultado:', { data, error })
+
       if (error) {
-        if (error.message.includes('does not exist')) {
-          console.warn('Tabla recorridos no existe aún')
-          setRecorridos([])
-          return []
-        }
-        throw error
+        console.error('[Recorridos] Error en query:', error)
+        setRecorridos([])
+        return []
       }
+
+      // Si hay recorridos, enriquecer con datos del transportista
+      if (data && data.length > 0) {
+        const recorridosEnriquecidos = await Promise.all(
+          data.map(async (recorrido) => {
+            let transportista = null
+            if (recorrido.transportista_id) {
+              try {
+                const { data: perfil } = await supabase
+                  .from('perfiles')
+                  .select('id, nombre')
+                  .eq('id', recorrido.transportista_id)
+                  .single()
+                transportista = perfil
+              } catch (e) {
+                console.warn('[Recorridos] No se pudo obtener transportista:', e)
+              }
+            }
+            return { ...recorrido, transportista }
+          })
+        )
+        setRecorridos(recorridosEnriquecidos)
+        return recorridosEnriquecidos
+      }
+
       setRecorridos(data || [])
       return data || []
     } catch (error) {
-      console.error('Error fetching recorridos:', error)
+      console.error('[Recorridos] Error catch:', error)
       setRecorridos([])
       return []
     } finally {
