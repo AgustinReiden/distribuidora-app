@@ -26,10 +26,6 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const [busquedaProducto, setBusquedaProducto] = useState('')
   const [mostrarBuscador, setMostrarBuscador] = useState(false)
 
-  // IVA configurable
-  const [aplicarIva, setAplicarIva] = useState(true)
-  const tasaIva = 21
-
   // Productos filtrados
   const productosFiltrados = useMemo(() => {
     if (!busquedaProducto.trim()) return productos.slice(0, 10)
@@ -40,16 +36,27 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
     ).slice(0, 10)
   }, [productos, busquedaProducto])
 
-  // Cálculos
+  // Cálculos con impuestos internos separados
+  // Subtotal = suma de (cantidad * costo neto)
   const subtotal = useMemo(() => {
     return items.reduce((sum, item) => sum + (item.cantidad * item.costoUnitario), 0)
   }, [items])
 
+  // IVA se calcula SOLO sobre el subtotal (neto), NO sobre impuestos internos
   const iva = useMemo(() => {
-    return aplicarIva ? subtotal * (tasaIva / 100) : 0
-  }, [subtotal, aplicarIva])
+    return items.reduce((sum, item) => {
+      const porcentajeIva = item.porcentajeIva ?? 21
+      return sum + (item.cantidad * item.costoUnitario * porcentajeIva / 100)
+    }, 0)
+  }, [items])
 
-  const total = useMemo(() => subtotal + iva, [subtotal, iva])
+  // Impuestos internos totales (no gravados con IVA)
+  const impuestosInternos = useMemo(() => {
+    return items.reduce((sum, item) => sum + (item.cantidad * (item.impuestosInternos || 0)), 0)
+  }, [items])
+
+  // Total = subtotal + IVA (sobre neto) + impuestos internos
+  const total = useMemo(() => subtotal + iva + impuestosInternos, [subtotal, iva, impuestosInternos])
 
   const agregarItem = (producto) => {
     // Verificar si ya existe
@@ -66,7 +73,9 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         productoNombre: producto.nombre,
         productoCodigo: producto.codigo,
         cantidad: 1,
-        costoUnitario: producto.costo_sin_iva || producto.costo_con_iva || 0,
+        costoUnitario: producto.costo_sin_iva || 0, // Costo neto
+        impuestosInternos: producto.impuestos_internos || 0, // Imp internos por unidad
+        porcentajeIva: producto.porcentaje_iva ?? 21, // % IVA del producto
         stockActual: producto.stock
       }])
     }
@@ -115,7 +124,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         fechaCompra,
         subtotal,
         iva,
-        otrosImpuestos: 0,
+        otrosImpuestos: impuestosInternos, // Impuestos internos van en otrosImpuestos
         total,
         formaPago,
         notas,
@@ -123,6 +132,8 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
           productoId: item.productoId,
           cantidad: parseInt(item.cantidad),
           costoUnitario: parseFloat(item.costoUnitario) || 0,
+          impuestosInternos: parseFloat(item.impuestosInternos) || 0,
+          porcentajeIva: item.porcentajeIva ?? 21,
           subtotal: item.cantidad * item.costoUnitario
         }))
       })
@@ -314,25 +325,28 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             {items.length > 0 ? (
               <div className="space-y-2">
                 <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
-                  <div className="col-span-5">Producto</div>
-                  <div className="col-span-2 text-center">Cantidad</div>
-                  <div className="col-span-2 text-center">Costo Unit.</div>
+                  <div className="col-span-4">Producto</div>
+                  <div className="col-span-1 text-center">Cant.</div>
+                  <div className="col-span-2 text-center">Neto</div>
+                  <div className="col-span-2 text-center">Imp.Int.</div>
                   <div className="col-span-2 text-right">Subtotal</div>
                   <div className="col-span-1"></div>
                 </div>
                 {items.map((item, index) => (
                   <div key={index} className="grid grid-cols-12 gap-2 items-center bg-white dark:bg-gray-800 p-2 rounded-lg border dark:border-gray-600">
-                    <div className="col-span-5">
+                    <div className="col-span-4">
                       <p className="font-medium text-gray-800 dark:text-white text-sm">{item.productoNombre}</p>
-                      <p className="text-xs text-gray-500">Stock actual: {item.stockActual}</p>
+                      <p className="text-xs text-gray-500">
+                        Stock: {item.stockActual} | IVA: {item.porcentajeIva}%
+                      </p>
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1">
                       <input
                         type="number"
                         min="1"
                         value={item.cantidad}
                         onChange={e => actualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
-                        className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                        className="w-full px-1 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
                       />
                     </div>
                     <div className="col-span-2">
@@ -342,7 +356,19 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
                         step="0.01"
                         value={item.costoUnitario}
                         onChange={e => actualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
-                        className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                        className="w-full px-1 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                        title="Costo neto (sin IVA)"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={item.impuestosInternos || 0}
+                        onChange={e => actualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
+                        className="w-full px-1 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                        title="Impuestos internos (no gravados)"
                       />
                     </div>
                     <div className="col-span-2 text-right font-medium text-gray-800 dark:text-white text-sm">
@@ -379,28 +405,26 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
+                  <span className="text-gray-600 dark:text-gray-400">Subtotal Neto:</span>
                   <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(subtotal)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-600 dark:text-gray-400">IVA ({tasaIva}%):</span>
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={aplicarIva}
-                        onChange={e => setAplicarIva(e.target.checked)}
-                        className="rounded text-green-600"
-                      />
-                      <span className="text-xs text-gray-500">Aplicar</span>
-                    </label>
-                  </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">IVA (sobre neto):</span>
                   <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(iva)}</span>
                 </div>
+                {impuestosInternos > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">Impuestos Internos:</span>
+                    <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(impuestosInternos)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-lg font-bold pt-2 border-t dark:border-gray-600">
                   <span className="text-gray-800 dark:text-white">Total:</span>
                   <span className="text-green-600">{formatPrecio(total)}</span>
                 </div>
+                <p className="text-xs text-gray-500 pt-1">
+                  Costo real (neto + imp.int. sin IVA): {formatPrecio(subtotal + impuestosInternos)}
+                </p>
               </div>
             </div>
           )}

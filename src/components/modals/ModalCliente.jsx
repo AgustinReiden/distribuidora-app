@@ -22,12 +22,18 @@ const RUBROS_OPCIONES = [
 // Validar formato de CUIT (XX-XXXXXXXX-X)
 const validarCuit = (cuit) => {
   if (!cuit) return false;
-  // Acepta formato con o sin guiones
   const cuitLimpio = cuit.replace(/-/g, '');
   return /^\d{11}$/.test(cuitLimpio);
 };
 
-// Formatear CUIT mientras se escribe
+// Validar formato de DNI (7-8 digitos)
+const validarDni = (dni) => {
+  if (!dni) return false;
+  const dniLimpio = dni.replace(/\D/g, '');
+  return /^\d{7,8}$/.test(dniLimpio);
+};
+
+// Formatear CUIT mientras se escribe (XX-XXXXXXXX-X)
 const formatearCuit = (valor) => {
   const numeros = valor.replace(/\D/g, '').slice(0, 11);
   if (numeros.length <= 2) return numeros;
@@ -35,9 +41,44 @@ const formatearCuit = (valor) => {
   return `${numeros.slice(0, 2)}-${numeros.slice(2, 10)}-${numeros.slice(10)}`;
 };
 
+// Formatear DNI mientras se escribe (solo numeros, max 8)
+const formatearDni = (valor) => {
+  return valor.replace(/\D/g, '').slice(0, 8);
+};
+
+// Convertir DNI a formato estandarizado para almacenar (00-XXXXXXXX-0)
+const dniAFormatoAlmacenamiento = (dni) => {
+  const dniLimpio = dni.replace(/\D/g, '').padStart(8, '0');
+  return `00-${dniLimpio}-0`;
+};
+
+// Extraer DNI del formato de almacenamiento
+const extraerDniDeFormato = (codigo) => {
+  if (!codigo) return '';
+  // Si tiene formato 00-XXXXXXXX-0, extraer el DNI
+  const match = codigo.match(/^00-(\d{8})-0$/);
+  if (match) {
+    // Quitar ceros iniciales del DNI
+    return match[1].replace(/^0+/, '') || '0';
+  }
+  return codigo;
+};
+
+// Detectar tipo de documento por el formato almacenado
+const detectarTipoDocumento = (codigo) => {
+  if (!codigo) return 'CUIT';
+  if (/^00-\d{8}-0$/.test(codigo)) return 'DNI';
+  return 'CUIT';
+};
+
 const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false }) {
+  // Detectar tipo de documento y extraer numero si es edicion
+  const tipoDocInicial = cliente ? (cliente.tipo_documento || detectarTipoDocumento(cliente.cuit)) : 'CUIT';
+  const numeroDocInicial = cliente ? (tipoDocInicial === 'DNI' ? extraerDniDeFormato(cliente.cuit) : cliente.cuit) : '';
+
   const [form, setForm] = useState(cliente ? {
-    cuit: cliente.cuit || '',
+    tipo_documento: tipoDocInicial,
+    numero_documento: numeroDocInicial || '',
     razonSocial: cliente.razon_social || '',
     nombreFantasia: cliente.nombre_fantasia || '',
     direccion: cliente.direccion || '',
@@ -52,7 +93,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     limiteCredito: cliente.limite_credito || 0,
     diasCredito: cliente.dias_credito || 30
   } : {
-    cuit: '',
+    tipo_documento: 'CUIT',
+    numero_documento: '',
     razonSocial: '',
     nombreFantasia: '',
     direccion: '',
@@ -84,9 +126,15 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const validarFormulario = () => {
     const nuevosErrores = {};
 
-    // CUIT obligatorio
-    if (!validarCuit(form.cuit)) {
-      nuevosErrores.cuit = 'El CUIT debe tener 11 dígitos (formato: XX-XXXXXXXX-X)';
+    // Validar documento segun tipo
+    if (form.tipo_documento === 'CUIT') {
+      if (!validarCuit(form.numero_documento)) {
+        nuevosErrores.numero_documento = 'El CUIT debe tener 11 digitos (formato: XX-XXXXXXXX-X)';
+      }
+    } else {
+      if (!validarDni(form.numero_documento)) {
+        nuevosErrores.numero_documento = 'El DNI debe tener 7 u 8 digitos';
+      }
     }
 
     // Razón Social obligatoria
@@ -116,14 +164,39 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const handleSubmit = () => {
     setIntentoGuardar(true);
     if (validarFormulario()) {
-      onSave({ ...form, id: cliente?.id });
+      // Convertir documento al formato de almacenamiento
+      let cuitFinal;
+      if (form.tipo_documento === 'DNI') {
+        cuitFinal = dniAFormatoAlmacenamiento(form.numero_documento);
+      } else {
+        cuitFinal = form.numero_documento;
+      }
+
+      onSave({
+        ...form,
+        cuit: cuitFinal,
+        tipo_documento: form.tipo_documento,
+        id: cliente?.id
+      });
+    }
+  };
+
+  const handleTipoDocumentoChange = (nuevoTipo) => {
+    // Limpiar el numero al cambiar de tipo
+    setForm({ ...form, tipo_documento: nuevoTipo, numero_documento: '' });
+    if (intentoGuardar && errores.numero_documento) {
+      setErrores(prev => ({ ...prev, numero_documento: null }));
     }
   };
 
   const handleFieldChange = (field, value) => {
-    // Formatear CUIT automáticamente
-    if (field === 'cuit') {
-      value = formatearCuit(value);
+    // Formatear documento segun tipo
+    if (field === 'numero_documento') {
+      if (form.tipo_documento === 'CUIT') {
+        value = formatearCuit(value);
+      } else {
+        value = formatearDni(value);
+      }
     }
     setForm({ ...form, [field]: value });
     if (intentoGuardar && errores[field]) {
@@ -136,19 +209,32 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
       <div className="p-4 space-y-4">
-        {/* CUIT y Razón Social */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Tipo Documento, Numero y Razón Social */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200">CUIT *</label>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">Tipo Doc. *</label>
+            <select
+              value={form.tipo_documento}
+              onChange={e => handleTipoDocumentoChange(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="CUIT">CUIT</option>
+              <option value="DNI">DNI</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">
+              {form.tipo_documento === 'CUIT' ? 'CUIT' : 'DNI'} *
+            </label>
             <input
               type="text"
-              value={form.cuit}
-              onChange={e => handleFieldChange('cuit', e.target.value)}
-              className={inputClass('cuit')}
-              placeholder="XX-XXXXXXXX-X"
-              maxLength={13}
+              value={form.numero_documento}
+              onChange={e => handleFieldChange('numero_documento', e.target.value)}
+              className={inputClass('numero_documento')}
+              placeholder={form.tipo_documento === 'CUIT' ? 'XX-XXXXXXXX-X' : '12345678'}
+              maxLength={form.tipo_documento === 'CUIT' ? 13 : 8}
             />
-            {errores.cuit && <p className="text-red-500 text-xs mt-1">{errores.cuit}</p>}
+            {errores.numero_documento && <p className="text-red-500 text-xs mt-1">{errores.numero_documento}</p>}
           </div>
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Razón Social *</label>
@@ -157,7 +243,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               value={form.razonSocial}
               onChange={e => handleFieldChange('razonSocial', e.target.value)}
               className={inputClass('razonSocial')}
-              placeholder="Nombre legal de la empresa"
+              placeholder="Nombre legal"
             />
             {errores.razonSocial && <p className="text-red-500 text-xs mt-1">{errores.razonSocial}</p>}
           </div>
