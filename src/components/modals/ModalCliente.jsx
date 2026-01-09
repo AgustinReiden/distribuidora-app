@@ -1,8 +1,22 @@
-import React, { useState, memo } from 'react';
-import { Loader2, MapPin, CreditCard, Clock, Tag, FileText } from 'lucide-react';
+import React, { useState, memo, useRef, useEffect } from 'react';
+import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, MapPinned } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { validarTelefono, validarTexto } from './utils';
+
+// Opciones predefinidas de zonas
+const ZONAS_PREDEFINIDAS = [
+  'Centro',
+  'Norte',
+  'Sur',
+  'Este',
+  'Oeste',
+  'Yerba Buena',
+  'San Miguel de Tucumán',
+  'Banda del Río Salí',
+  'Las Talitas',
+  'Alderetes'
+];
 
 // Opciones predefinidas de rubros
 const RUBROS_OPCIONES = [
@@ -71,10 +85,21 @@ const detectarTipoDocumento = (codigo) => {
   return 'CUIT';
 };
 
-const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false }) {
+const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }) {
+  // Ref para scroll a errores
+  const formRef = useRef(null);
+  const errorRef = useRef(null);
+
   // Detectar tipo de documento y extraer numero si es edicion
   const tipoDocInicial = cliente ? (cliente.tipo_documento || detectarTipoDocumento(cliente.cuit)) : 'CUIT';
   const numeroDocInicial = cliente ? (tipoDocInicial === 'DNI' ? extraerDniDeFormato(cliente.cuit) : cliente.cuit) : '';
+
+  // Combinar zonas predefinidas con las existentes de la base de datos
+  const zonasUnicas = [...new Set([...ZONAS_PREDEFINIDAS, ...zonasExistentes.filter(Boolean)])].sort();
+
+  // Estado para nueva zona
+  const [mostrarNuevaZona, setMostrarNuevaZona] = useState(false);
+  const [nuevaZona, setNuevaZona] = useState('');
 
   const [form, setForm] = useState(cliente ? {
     tipo_documento: tipoDocInicial,
@@ -163,22 +188,37 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
 
   const handleSubmit = () => {
     setIntentoGuardar(true);
-    if (validarFormulario()) {
-      // Convertir documento al formato de almacenamiento
-      let cuitFinal;
-      if (form.tipo_documento === 'DNI') {
-        cuitFinal = dniAFormatoAlmacenamiento(form.numero_documento);
-      } else {
-        cuitFinal = form.numero_documento;
-      }
+    const esValido = validarFormulario();
 
-      onSave({
-        ...form,
-        cuit: cuitFinal,
-        tipo_documento: form.tipo_documento,
-        id: cliente?.id
-      });
+    if (!esValido) {
+      // Scroll al primer error
+      setTimeout(() => {
+        const primerError = formRef.current?.querySelector('.border-red-500');
+        if (primerError) {
+          primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+      return;
     }
+
+    // Convertir documento al formato de almacenamiento
+    let cuitFinal;
+    if (form.tipo_documento === 'DNI') {
+      cuitFinal = dniAFormatoAlmacenamiento(form.numero_documento);
+    } else {
+      cuitFinal = form.numero_documento;
+    }
+
+    // Usar zona nueva si corresponde
+    const zonaFinal = mostrarNuevaZona && nuevaZona.trim() ? nuevaZona.trim() : form.zona;
+
+    onSave({
+      ...form,
+      zona: zonaFinal,
+      cuit: cuitFinal,
+      tipo_documento: form.tipo_documento,
+      id: cliente?.id
+    });
   };
 
   const handleTipoDocumentoChange = (nuevoTipo) => {
@@ -208,7 +248,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
 
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
-      <div className="p-4 space-y-4">
+      <div ref={formRef} className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Tipo Documento, Numero y Razón Social */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
@@ -309,14 +349,42 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
         {/* Zona y Rubro */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200">Zona</label>
-            <input
-              type="text"
-              value={form.zona}
-              onChange={e => handleFieldChange('zona', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="Ej: Centro, Norte, etc."
-            />
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-sm font-medium dark:text-gray-200 flex items-center gap-1">
+                <MapPinned className="w-4 h-4" />
+                Zona
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setMostrarNuevaZona(!mostrarNuevaZona);
+                  if (!mostrarNuevaZona) setNuevaZona('');
+                }}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                {mostrarNuevaZona ? 'Elegir existente' : '+ Nueva zona'}
+              </button>
+            </div>
+            {mostrarNuevaZona ? (
+              <input
+                type="text"
+                value={nuevaZona}
+                onChange={e => setNuevaZona(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                placeholder="Escribir nueva zona..."
+              />
+            ) : (
+              <select
+                value={form.zona}
+                onChange={e => handleFieldChange('zona', e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              >
+                <option value="">Seleccionar zona...</option>
+                {zonasUnicas.map(zona => (
+                  <option key={zona} value={zona}>{zona}</option>
+                ))}
+              </select>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">

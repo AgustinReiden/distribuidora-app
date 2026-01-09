@@ -324,64 +324,119 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             {/* Lista de items */}
             {items.length > 0 ? (
               <div className="space-y-2">
-                <div className="grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
+                {/* Header solo en desktop */}
+                <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
                   <div className="col-span-4">Producto</div>
-                  <div className="col-span-1 text-center">Cant.</div>
+                  <div className="col-span-2 text-center">Cant.</div>
                   <div className="col-span-2 text-center">Neto</div>
                   <div className="col-span-2 text-center">Imp.Int.</div>
-                  <div className="col-span-2 text-right">Subtotal</div>
+                  <div className="col-span-1 text-right">Subtot.</div>
                   <div className="col-span-1"></div>
                 </div>
                 {items.map((item, index) => (
-                  <div key={index} className="grid grid-cols-12 gap-2 items-center bg-white dark:bg-gray-800 p-2 rounded-lg border dark:border-gray-600">
-                    <div className="col-span-4">
-                      <p className="font-medium text-gray-800 dark:text-white text-sm">{item.productoNombre}</p>
-                      <p className="text-xs text-gray-500">
-                        Stock: {item.stockActual} | IVA: {item.porcentajeIva}%
-                      </p>
+                  <div key={index} className="bg-white dark:bg-gray-800 p-3 rounded-lg border dark:border-gray-600">
+                    {/* Mobile: Layout en cards */}
+                    <div className="md:hidden space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-800 dark:text-white">{item.productoNombre}</p>
+                          <p className="text-xs text-gray-500">Stock: {item.stockActual} | IVA: {item.porcentajeIva}%</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => eliminarItem(index)}
+                          className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Cant.</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.cantidad}
+                            onChange={e => actualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+                            className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Neto</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.costoUnitario}
+                            onChange={e => actualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
+                            className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Imp.Int.</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.impuestosInternos || 0}
+                            onChange={e => actualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
+                            className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center pt-2 border-t dark:border-gray-600">
+                        <span className="text-sm text-gray-500">Subtotal:</span>
+                        <span className="font-semibold text-gray-800 dark:text-white">{formatPrecio(item.cantidad * item.costoUnitario)}</span>
+                      </div>
                     </div>
-                    <div className="col-span-1">
-                      <input
-                        type="number"
-                        min="1"
-                        value={item.cantidad}
-                        onChange={e => actualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
-                        className="w-full px-1 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.costoUnitario}
-                        onChange={e => actualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
-                        className="w-full px-1 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
-                        title="Costo neto (sin IVA)"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.impuestosInternos || 0}
-                        onChange={e => actualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
-                        className="w-full px-1 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
-                        title="Impuestos internos (no gravados)"
-                      />
-                    </div>
-                    <div className="col-span-2 text-right font-medium text-gray-800 dark:text-white text-sm">
-                      {formatPrecio(item.cantidad * item.costoUnitario)}
-                    </div>
-                    <div className="col-span-1 text-right">
-                      <button
-                        type="button"
-                        onClick={() => eliminarItem(index)}
-                        className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+
+                    {/* Desktop: Layout en grid */}
+                    <div className="hidden md:grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-4">
+                        <p className="font-medium text-gray-800 dark:text-white text-sm">{item.productoNombre}</p>
+                        <p className="text-xs text-gray-500">Stock: {item.stockActual} | IVA: {item.porcentajeIva}%</p>
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.cantidad}
+                          onChange={e => actualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+                          className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.costoUnitario}
+                          onChange={e => actualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
+                          className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.impuestosInternos || 0}
+                          onChange={e => actualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
+                          className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+                        />
+                      </div>
+                      <div className="col-span-1 text-right font-medium text-gray-800 dark:text-white text-sm">
+                        {formatPrecio(item.cantidad * item.costoUnitario)}
+                      </div>
+                      <div className="col-span-1 text-right">
+                        <button
+                          type="button"
+                          onClick={() => eliminarItem(index)}
+                          className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

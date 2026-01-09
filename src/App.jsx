@@ -997,6 +997,7 @@ function MainApp() {
           onClose={() => { setModalCliente(false); setClienteEditando(null); }}
           guardando={guardando}
           isAdmin={isAdmin}
+          zonasExistentes={[...new Set(clientes.map(c => c.zona).filter(Boolean))]}
         />
       )}
 
