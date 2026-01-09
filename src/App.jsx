@@ -78,7 +78,8 @@ function MainApp() {
         fetchRecorridosPorFecha(fechaRecorridos);
       }
     }
-  }, [vista, fechaRecorridos, isAdmin, fetchRecorridosHoy, fetchRecorridosPorFecha]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, fechaRecorridos]);
 
   // Estados de modales
   const [modalCliente, setModalCliente] = useState(false);
