@@ -27,7 +27,6 @@ function encode(str) {
     // Convertir a base64 para almacenamiento seguro
     return btoa(unescape(encodeURIComponent(encoded)))
   } catch (e) {
-    console.error('[SecureStorage] Error encoding:', e)
     return ''
   }
 }
@@ -51,7 +50,6 @@ function decode(encodedStr) {
     }
     return original
   } catch (e) {
-    console.error('[SecureStorage] Error decoding:', e)
     return ''
   }
 }
@@ -69,7 +67,6 @@ export function setSecureItem(key, value) {
     localStorage.setItem(STORAGE_PREFIX + key, encoded)
     return true
   } catch (e) {
-    console.error('[SecureStorage] Error saving:', e)
     return false
   }
 }
@@ -90,7 +87,6 @@ export function getSecureItem(key, defaultValue = null) {
 
     return JSON.parse(decoded)
   } catch (e) {
-    console.error('[SecureStorage] Error reading:', e)
     return defaultValue
   }
 }
@@ -103,7 +99,7 @@ export function removeSecureItem(key) {
   try {
     localStorage.removeItem(STORAGE_PREFIX + key)
   } catch (e) {
-    console.error('[SecureStorage] Error removing:', e)
+    // Error silenciado
   }
 }
 
@@ -128,7 +124,7 @@ export function clearSecureStorage() {
       }
     })
   } catch (e) {
-    console.error('[SecureStorage] Error clearing:', e)
+    // Error silenciado
   }
 }
 
@@ -149,7 +145,6 @@ export function migrateToSecure(oldKey, newKey) {
     }
     return false
   } catch (e) {
-    console.error('[SecureStorage] Error migrating:', e)
     return false
   }
 }
