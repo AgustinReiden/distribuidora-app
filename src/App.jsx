@@ -138,7 +138,7 @@ function MainApp() {
   }, [productos]);
 
   const handleLogout = async () => {
-    try { await logout(); } catch (e) { console.error(e); }
+    try { await logout(); } catch (e) { /* error silenciado */ }
   };
 
   const calcularTotalPedido = (items) => items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
@@ -499,7 +499,6 @@ function MainApp() {
           await crearRecorrido(transportistaId, ordenOptimizado, distancia, duracion);
           notify.success('Ruta optimizada y recorrido creado correctamente');
         } catch (recorridoError) {
-          console.warn('No se pudo crear el recorrido:', recorridoError);
           notify.success('Orden de entrega actualizado (sin registro de recorrido)');
         }
       } else {

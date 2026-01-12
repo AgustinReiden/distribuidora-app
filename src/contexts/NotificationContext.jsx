@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Check, X, AlertTriangle, Info, Bell, CheckCircle, Trash2 } from 'lucide-react';
 import { getStorageItem, setStorageItem } from '../utils/storage';
+import { formatTimeAgo } from '../utils/formatters';
 
 const NotificationContext = createContext({});
 
@@ -233,17 +234,6 @@ const colorMap = {
   warning: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30',
   info: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30'
 };
-
-function formatTimeAgo(timestamp) {
-  const now = new Date();
-  const date = new Date(timestamp);
-  const seconds = Math.floor((now - date) / 1000);
-
-  if (seconds < 60) return 'Hace un momento';
-  if (seconds < 3600) return `Hace ${Math.floor(seconds / 60)} min`;
-  if (seconds < 86400) return `Hace ${Math.floor(seconds / 3600)} h`;
-  return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
-}
 
 export function NotificationCenter() {
   const {

@@ -7,7 +7,7 @@ const AuthContext = createContext({})
 // Sistema de notificación de errores centralizado
 let errorNotifier = null
 export const setErrorNotifier = (notifier) => { errorNotifier = notifier }
-const notifyError = (message) => { if (errorNotifier) errorNotifier(message); else console.error(message) }
+const notifyError = (message) => { if (errorNotifier) errorNotifier(message) }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
@@ -17,16 +17,15 @@ export function AuthProvider({ children }) {
   const fetchPerfil = async (userId) => {
     try {
       const { data, error } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle()
-      if (error) console.error('Error al cargar perfil:', error.message)
       if (data) setPerfil(data)
-    } catch (err) { console.error('Error inesperado fetchPerfil:', err) }
+    } catch (err) { /* error silenciado */ }
   }
 
   useEffect(() => {
     let mounted = true
     supabase.auth.getSession().then(({ data }) => {
       if (mounted && data?.session?.user) { setUser(data.session.user); fetchPerfil(data.session.user.id) }
-    }).catch(err => console.error("Error en getSession:", err))
+    }).catch(err => { /* error silenciado */ })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
@@ -36,7 +35,7 @@ export function AuthProvider({ children }) {
       } else if (event === 'SIGNED_OUT') { setUser(null); setPerfil(null); setLoading(false) }
       else if (event === 'INITIAL_SESSION') setLoading(false)
     })
-    const safetyTimer = setTimeout(() => { if (mounted && loading) { console.warn("Watchdog: Forzando apertura."); setLoading(false) } }, 2000)
+    const safetyTimer = setTimeout(() => { if (mounted && loading) { setLoading(false) } }, 2000)
     return () => { mounted = false; clearTimeout(safetyTimer); subscription.unsubscribe() }
   }, [])
 
@@ -59,7 +58,6 @@ export function useClientes() {
       if (error) throw error
       setClientes(data || [])
     } catch (error) {
-      console.error('Error fetching clientes:', error)
       notifyError('Error al cargar clientes: ' + error.message)
       setClientes([])
     } finally {
@@ -125,7 +123,6 @@ export function useProductos() {
       if (error) throw error
       setProductos(data || [])
     } catch (error) {
-      console.error('Error fetching productos:', error)
       notifyError('Error al cargar productos: ' + error.message)
       setProductos([])
     } finally {
@@ -194,19 +191,6 @@ export function useProductos() {
     })
 
     if (error) {
-      // Fallback al método anterior si la función RPC no existe
-      if (error.message.includes('function') && error.message.includes('does not exist')) {
-        console.warn('RPC descontar_stock_atomico no disponible, usando método legacy')
-        for (const item of items) {
-          const producto = productos.find(p => p.id === item.productoId)
-          if (!producto) continue
-          const nuevoStock = producto.stock - item.cantidad
-          const { error: updateError } = await supabase.from('productos').update({ stock: nuevoStock }).eq('id', item.productoId)
-          if (updateError) throw updateError
-          setProductos(prev => prev.map(p => p.id === item.productoId ? { ...p, stock: nuevoStock } : p))
-        }
-        return
-      }
       throw error
     }
 
@@ -234,19 +218,6 @@ export function useProductos() {
     })
 
     if (error) {
-      // Fallback al método anterior si la función RPC no existe
-      if (error.message.includes('function') && error.message.includes('does not exist')) {
-        console.warn('RPC restaurar_stock_atomico no disponible, usando método legacy')
-        for (const item of items) {
-          const producto = productos.find(p => p.id === item.producto_id || p.id === item.productoId)
-          if (!producto) continue
-          const nuevoStock = producto.stock + item.cantidad
-          const { error: updateError } = await supabase.from('productos').update({ stock: nuevoStock }).eq('id', producto.id)
-          if (updateError) throw updateError
-          setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, stock: nuevoStock } : p))
-        }
-        return
-      }
       throw error
     }
 
@@ -270,7 +241,7 @@ export function usePedidos() {
     setLoading(true)
     try {
       const { data, error } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`).order('created_at', { ascending: false })
-      if (error) { console.error('Error fetching pedidos:', error); setPedidos([]); setLoading(false); return }
+      if (error) { setPedidos([]); setLoading(false); return }
       const pedidosCompletos = await Promise.all((data || []).map(async (pedido) => {
         let usuario = null, transportista = null
         if (pedido.usuario_id) { const { data: u } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.usuario_id).maybeSingle(); usuario = u }
@@ -279,7 +250,6 @@ export function usePedidos() {
       }))
       setPedidos(pedidosCompletos)
     } catch (error) {
-      console.error('Error fetching pedidos:', error)
       notifyError('Error al cargar pedidos: ' + error.message)
       setPedidos([])
     } finally {
@@ -298,7 +268,6 @@ export function usePedidos() {
       if (error) throw error
       return data || []
     } catch (error) {
-      console.error('Error fetching historial:', error)
       notifyError('Error al cargar historial del pedido: ' + error.message)
       return []
     }
@@ -348,26 +317,6 @@ export function usePedidos() {
     })
 
     if (error) {
-      // Fallback al método anterior si la función RPC no existe
-      if (error.message.includes('function') && error.message.includes('does not exist')) {
-        console.warn('RPC crear_pedido_completo no disponible, usando método legacy')
-        const { data: pedido, error: pedidoError } = await supabase.from('pedidos').insert([{
-          cliente_id: clienteId,
-          total,
-          estado: 'pendiente',
-          usuario_id: usuarioId,
-          stock_descontado: true,
-          notas: notas || null,
-          forma_pago: formaPago || 'efectivo',
-          estado_pago: estadoPago || 'pendiente'
-        }]).select().single()
-        if (pedidoError) throw pedidoError
-        const itemsParaInsertar = items.map(item => ({ pedido_id: pedido.id, producto_id: item.productoId, cantidad: item.cantidad, precio_unitario: item.precioUnitario, subtotal: item.cantidad * item.precioUnitario }))
-        const { error: itemsError } = await supabase.from('pedido_items').insert(itemsParaInsertar)
-        if (itemsError) throw itemsError
-        if (descontarStockFn) await descontarStockFn(items)
-        await fetchPedidos(); return pedido
-      }
       throw error
     }
 
@@ -415,17 +364,6 @@ export function usePedidos() {
     })
 
     if (error) {
-      // Fallback al método anterior si la función RPC no existe
-      if (error.message.includes('function') && error.message.includes('does not exist')) {
-        console.warn('RPC eliminar_pedido_completo no disponible, usando método legacy')
-        if (pedido?.stock_descontado && pedido?.items && restaurarStockFn) await restaurarStockFn(pedido.items)
-        await supabase.from('pedido_historial').delete().eq('pedido_id', id)
-        await supabase.from('pedido_items').delete().eq('pedido_id', id)
-        const { error: deleteError } = await supabase.from('pedidos').delete().eq('id', id)
-        if (deleteError) throw deleteError
-        setPedidos(prev => prev.filter(p => p.id !== id))
-        return
-      }
       throw error
     }
 
@@ -476,8 +414,6 @@ export function usePedidos() {
 
     if (rpcError) {
       // Si la RPC no existe o falla, intentar update directo
-      console.warn('RPC no disponible, usando update directo:', rpcError.message)
-
       // Usar raw SQL query a través de rpc genérico
       for (const item of ordenOptimizado) {
         const { error } = await supabase
@@ -488,8 +424,6 @@ export function usePedidos() {
         if (error) {
           // Si el error es de schema cache, refrescar y reintentar
           if (error.message.includes('schema cache') || error.message.includes('orden_entrega')) {
-            console.error('Error de schema cache. La columna orden_entrega puede no existir en la base de datos.')
-            console.error('Ejecute la migracion: migrations/004_add_orden_entrega.sql')
             throw new Error('La columna orden_entrega no existe en la base de datos. Contacte al administrador para ejecutar la migracion pendiente.')
           }
           throw error
@@ -554,7 +488,6 @@ export function useUsuarios() {
       setUsuarios(data || [])
       setTransportistas((data || []).filter(u => u.rol === 'transportista' && u.activo))
     } catch (error) {
-      console.error('Error fetching usuarios:', error)
       notifyError('Error al cargar usuarios: ' + error.message)
       setUsuarios([])
       setTransportistas([])
@@ -705,7 +638,6 @@ export function useDashboard(usuarioFiltro = null) {
         ventasPorDia
       })
     } catch (error) {
-      console.error('Error calculando métricas:', error)
       notifyError('Error al calcular métricas: ' + error.message)
     } finally {
       setLoading(false)
@@ -787,7 +719,6 @@ export function useDashboard(usuarioFiltro = null) {
       setReportePreventistas(reporteArray)
       setReporteInicializado(true)
     } catch (error) {
-      console.error('Error calculando reporte de preventistas:', error)
       notifyError('Error al calcular reporte de preventistas: ' + error.message)
       setReportePreventistas([])
       setReporteInicializado(true)
@@ -1019,7 +950,6 @@ export function usePagos() {
       setPagos(data || [])
       return data || []
     } catch (error) {
-      console.error('Error fetching pagos:', error)
       notifyError('Error al cargar pagos: ' + error.message)
       return []
     } finally {
@@ -1042,7 +972,6 @@ export function usePagos() {
       setPagos(prev => [data, ...prev])
       return data
     } catch (error) {
-      console.error('Error registrando pago:', error)
       notifyError('Error al registrar pago: ' + error.message)
       throw error
     }
@@ -1054,7 +983,6 @@ export function usePagos() {
       if (error) throw error
       setPagos(prev => prev.filter(p => p.id !== pagoId))
     } catch (error) {
-      console.error('Error eliminando pago:', error)
       notifyError('Error al eliminar pago: ' + error.message)
       throw error
     }
@@ -1065,7 +993,6 @@ export function usePagos() {
       const { data, error } = await supabase.rpc('obtener_resumen_cuenta_cliente', { p_cliente_id: clienteId })
       if (error) {
         // Fallback: calculate manually if RPC doesn't exist
-        console.warn('RPC no disponible, calculando manualmente:', error.message)
         const { data: cliente } = await supabase.from('clientes').select('*').eq('id', clienteId).single()
         const { data: pedidosCliente } = await supabase.from('pedidos').select('*').eq('cliente_id', clienteId)
         const { data: pagosCliente } = await supabase.from('pagos').select('*').eq('cliente_id', clienteId)
@@ -1087,7 +1014,6 @@ export function usePagos() {
       }
       return data
     } catch (error) {
-      console.error('Error obteniendo resumen:', error)
       return null
     }
   }
@@ -1162,7 +1088,6 @@ export function useFichaCliente(clienteId) {
         productosFavoritos
       })
     } catch (error) {
-      console.error('Error fetching datos cliente:', error)
       notifyError('Error al cargar datos del cliente: ' + error.message)
     } finally {
       setLoading(false)
@@ -1237,7 +1162,6 @@ export function useReportesFinancieros() {
 
       return reporte
     } catch (error) {
-      console.error('Error generando reporte:', error)
       notifyError('Error al generar reporte: ' + error.message)
       return []
     } finally {
@@ -1299,7 +1223,6 @@ export function useReportesFinancieros() {
 
       return { productos: reporteProductos, totales }
     } catch (error) {
-      console.error('Error generando reporte rentabilidad:', error)
       notifyError('Error al generar reporte: ' + error.message)
       return { productos: [], totales: {} }
     } finally {
@@ -1337,7 +1260,6 @@ export function useReportesFinancieros() {
 
       return Object.values(clienteStats).sort((a, b) => b.totalVentas - a.totalVentas)
     } catch (error) {
-      console.error('Error generando reporte:', error)
       return []
     } finally {
       setLoading(false)
@@ -1376,7 +1298,6 @@ export function useReportesFinancieros() {
         ticketPromedio: z.cantidadPedidos > 0 ? z.totalVentas / z.cantidadPedidos : 0
       })).sort((a, b) => b.totalVentas - a.totalVentas)
     } catch (error) {
-      console.error('Error generando reporte:', error)
       return []
     } finally {
       setLoading(false)
@@ -1406,7 +1327,6 @@ export function useMermas() {
       if (error) {
         // Si la tabla no existe, retornar array vacío
         if (error.message.includes('does not exist')) {
-          console.warn('Tabla mermas_stock no existe. Ejecute la migración correspondiente.')
           setMermas([])
           return
         }
@@ -1414,7 +1334,6 @@ export function useMermas() {
       }
       setMermas(data || [])
     } catch (error) {
-      console.error('Error fetching mermas:', error)
       setMermas([])
     } finally {
       setLoading(false)
@@ -1451,7 +1370,6 @@ export function useMermas() {
       if (error) {
         // Si la tabla no existe, solo actualizamos el stock (fallback)
         if (error.message.includes('does not exist')) {
-          console.warn('Tabla mermas_stock no existe. Solo se actualizó el stock.')
           return { success: true, merma: null, soloStock: true }
         }
         throw error
@@ -1460,7 +1378,6 @@ export function useMermas() {
       setMermas(prev => [data, ...prev])
       return { success: true, merma: data }
     } catch (error) {
-      console.error('Error registrando merma:', error)
       throw error
     }
   }
@@ -1526,7 +1443,6 @@ export function useCompras() {
 
       if (error) {
         if (error.message.includes('does not exist')) {
-          console.warn('Tabla compras no existe. Ejecute la migración 013_add_compras.sql')
           setCompras([])
           return
         }
@@ -1534,7 +1450,6 @@ export function useCompras() {
       }
       setCompras(data || [])
     } catch (error) {
-      console.error('Error fetching compras:', error)
       notifyError('Error al cargar compras: ' + error.message)
       setCompras([])
     } finally {
@@ -1552,7 +1467,6 @@ export function useCompras() {
 
       if (error) {
         if (error.message.includes('does not exist')) {
-          console.warn('Tabla proveedores no existe.')
           setProveedores([])
           return
         }
@@ -1560,7 +1474,6 @@ export function useCompras() {
       }
       setProveedores(data || [])
     } catch (error) {
-      console.error('Error fetching proveedores:', error)
       setProveedores([])
     }
   }
@@ -1597,11 +1510,6 @@ export function useCompras() {
       })
 
       if (error) {
-        // Fallback si la función RPC no existe
-        if (error.message.includes('does not exist')) {
-          console.warn('RPC registrar_compra_completa no disponible, usando método manual')
-          return await registrarCompraManual(compraData)
-        }
         throw error
       }
 
@@ -1612,7 +1520,6 @@ export function useCompras() {
       await fetchCompras()
       return { success: true, compraId: data.compra_id }
     } catch (error) {
-      console.error('Error registrando compra:', error)
       throw error
     }
   }
@@ -1695,7 +1602,6 @@ export function useCompras() {
       setProveedores(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
       return data
     } catch (error) {
-      console.error('Error agregando proveedor:', error)
       throw error
     }
   }
@@ -1722,7 +1628,6 @@ export function useCompras() {
       setProveedores(prev => prev.map(p => p.id === id ? data : p))
       return data
     } catch (error) {
-      console.error('Error actualizando proveedor:', error)
       throw error
     }
   }
@@ -1793,7 +1698,6 @@ export function useCompras() {
       if (error) throw error
       await fetchCompras()
     } catch (error) {
-      console.error('Error anulando compra:', error)
       throw error
     }
   }
@@ -1831,7 +1735,6 @@ export function useRecorridos() {
   const fetchRecorridosHoy = useCallback(async () => {
     setLoading(true)
     const hoy = new Date().toISOString().split('T')[0]
-    console.log('[Recorridos] Buscando recorridos para fecha:', hoy)
 
     try {
       const query = supabase
@@ -1842,10 +1745,7 @@ export function useRecorridos() {
 
       const { data, error } = await fetchConTimeout(query, 8000)
 
-      console.log('[Recorridos] Resultado:', { data, error })
-
       if (error) {
-        console.error('[Recorridos] Error en query:', error)
         setRecorridos([])
         return []
       }
@@ -1864,7 +1764,7 @@ export function useRecorridos() {
                   .single()
                 transportista = perfil
               } catch (e) {
-                console.warn('[Recorridos] No se pudo obtener transportista:', e)
+                // Error silenciado
               }
             }
             return { ...recorrido, transportista }
@@ -1877,7 +1777,6 @@ export function useRecorridos() {
       setRecorridos(data || [])
       return data || []
     } catch (error) {
-      console.error('[Recorridos] Error catch:', error)
       setRecorridos([])
       return []
     } finally {
@@ -1888,7 +1787,6 @@ export function useRecorridos() {
   // Obtener recorridos por fecha - versión simplificada
   const fetchRecorridosPorFecha = useCallback(async (fecha) => {
     setLoading(true)
-    console.log('[Recorridos] Buscando recorridos para fecha:', fecha)
 
     try {
       const query = supabase
@@ -1899,10 +1797,7 @@ export function useRecorridos() {
 
       const { data, error } = await fetchConTimeout(query, 8000)
 
-      console.log('[Recorridos] Resultado:', { data, error })
-
       if (error) {
-        console.error('[Recorridos] Error en query:', error)
         setRecorridos([])
         return []
       }
@@ -1921,7 +1816,7 @@ export function useRecorridos() {
                   .single()
                 transportista = perfil
               } catch (e) {
-                console.warn('[Recorridos] No se pudo obtener transportista:', e)
+                // Error silenciado
               }
             }
             return { ...recorrido, transportista }
@@ -1934,7 +1829,6 @@ export function useRecorridos() {
       setRecorridos(data || [])
       return data || []
     } catch (error) {
-      console.error('[Recorridos] Error catch:', error)
       setRecorridos([])
       return []
     } finally {
@@ -1959,53 +1853,6 @@ export function useRecorridos() {
       })
 
       if (error) {
-        // Fallback si la función no existe
-        if (error.message.includes('does not exist')) {
-          console.warn('Función crear_recorrido no existe. Insertando manualmente.')
-
-          // Calcular total facturado
-          const pedidoIds = pedidosJson.map(p => p.pedido_id)
-          const { data: pedidosData } = await supabase
-            .from('pedidos')
-            .select('total')
-            .in('id', pedidoIds)
-
-          const totalFacturado = (pedidosData || []).reduce((s, p) => s + (p.total || 0), 0)
-
-          // Insertar recorrido
-          const { data: recorrido, error: errRecorrido } = await supabase
-            .from('recorridos')
-            .insert([{
-              transportista_id: transportistaId,
-              fecha: new Date().toISOString().split('T')[0],
-              distancia_total: distancia,
-              duracion_total: duracion,
-              total_pedidos: pedidosJson.length,
-              total_facturado: totalFacturado,
-              estado: 'en_curso'
-            }])
-            .select()
-            .single()
-
-          if (errRecorrido) throw errRecorrido
-
-          // Insertar pedidos del recorrido
-          const pedidosRecorrido = pedidosJson.map(p => ({
-            recorrido_id: recorrido.id,
-            pedido_id: p.pedido_id,
-            orden_entrega: p.orden_entrega
-          }))
-
-          const { error: errPedidos } = await supabase
-            .from('recorrido_pedidos')
-            .insert(pedidosRecorrido)
-
-          if (errPedidos) console.error('Error insertando pedidos del recorrido:', errPedidos)
-
-          setRecorridoActual(recorrido)
-          await fetchRecorridosHoy()
-          return recorrido.id
-        }
         throw error
       }
 
@@ -2013,7 +1860,6 @@ export function useRecorridos() {
       await fetchRecorridosHoy()
       return data
     } catch (error) {
-      console.error('Error creando recorrido:', error)
       throw error
     }
   }
@@ -2029,7 +1875,6 @@ export function useRecorridos() {
       if (error) throw error
       await fetchRecorridosHoy()
     } catch (error) {
-      console.error('Error completando recorrido:', error)
       throw error
     }
   }
@@ -2077,7 +1922,6 @@ export function useRecorridos() {
         porTransportista: Object.values(porTransportista)
       }
     } catch (error) {
-      console.error('Error obteniendo estadísticas:', error)
       return { total: 0, porTransportista: [] }
     }
   }

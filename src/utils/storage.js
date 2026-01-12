@@ -18,7 +18,6 @@ export function getStorageItem(key, defaultValue = null) {
 
     return JSON.parse(item);
   } catch (error) {
-    console.warn(`Error leyendo localStorage key "${key}":`, error);
     // Intentar limpiar el valor corrupto
     try {
       localStorage.removeItem(key);
@@ -42,11 +41,8 @@ export function setStorageItem(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
     return true;
   } catch (error) {
-    console.warn(`Error guardando localStorage key "${key}":`, error);
-
     // Si es error de cuota, intentar liberar espacio
     if (error.name === 'QuotaExceededError') {
-      console.warn('localStorage lleno. Intentando liberar espacio...');
       try {
         // Limpiar notificaciones antiguas si existen
         const notifications = getStorageItem('notifications', []);
@@ -73,7 +69,6 @@ export function removeStorageItem(key) {
     localStorage.removeItem(key);
     return true;
   } catch (error) {
-    console.warn(`Error eliminando localStorage key "${key}":`, error);
     return false;
   }
 }

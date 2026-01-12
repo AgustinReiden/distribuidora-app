@@ -64,7 +64,6 @@ export const AddressAutocomplete = ({
     timeout = setTimeout(() => {
       clearInterval(interval);
       if (isMounted && !window.google?.maps?.places?.AutocompleteService) {
-        console.warn('Google Maps API no se cargó correctamente después de 15s');
         setGoogleStatus('error');
       }
     }, 15000);
@@ -94,7 +93,6 @@ export const AddressAutocomplete = ({
       // Crear session token para agrupar requests
       sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
     } catch (error) {
-      console.error('Error inicializando servicios de Places:', error);
       setGoogleStatus('error');
     }
   }, [googleStatus]);
