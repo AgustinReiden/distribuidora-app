@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, Package, MapPin, AlertTriangle, FileText } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
-import { useReportesFinancieros } from '../../hooks/useSupabase';
+import { useReportesFinancieros } from '../../hooks/supabase';
 
 export default function VistaReportes({
   reportePreventistas,
