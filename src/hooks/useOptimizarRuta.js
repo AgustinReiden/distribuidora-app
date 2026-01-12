@@ -1,10 +1,10 @@
 import { useState, useCallback } from 'react';
 
 // URL del webhook de n8n para optimizar rutas (desde variables de entorno)
-const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || 'https://n8n.shycia.com.ar/webhook/optimizar-ruta';
+const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
 
-// Google API Key para Google Routes API (desde variables de entorno)
-const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
+// NOTA: La Google API Key ahora debe estar configurada en el servidor n8n
+// No se envia desde el cliente por razones de seguridad
 
 // Coordenadas del depósito por defecto (se pueden configurar)
 const DEPOSITO_DEFAULT = {
@@ -27,8 +27,8 @@ export const getDepositoCoords = () => {
         return parsed;
       }
     }
-  } catch (e) {
-    console.error('Error leyendo coordenadas del depósito:', e);
+  } catch {
+    // Error leyendo coordenadas, usar default
   }
   return DEPOSITO_DEFAULT;
 };
@@ -40,8 +40,7 @@ export const setDepositoCoords = (lat, lng) => {
   try {
     localStorage.setItem(DEPOSITO_STORAGE_KEY, JSON.stringify({ lat, lng }));
     return true;
-  } catch (e) {
-    console.error('Error guardando coordenadas del depósito:', e);
+  } catch {
     return false;
   }
 };
@@ -83,9 +82,6 @@ export function useOptimizarRuta() {
         longitud: p.cliente.longitud
       }));
 
-    // DEBUG: Log de pedidos para verificar coordenadas
-    console.log('[OptimizarRuta] Pedidos con coordenadas:', pedidosConCoordenadas);
-
     if (pedidosConCoordenadas.length === 0) {
       setRutaOptimizada({
         success: true,
@@ -105,12 +101,8 @@ export function useOptimizarRuta() {
       transportista_id: transportistaId,
       deposito_lat: deposito.lat,
       deposito_lng: deposito.lng,
-      google_api_key: GOOGLE_API_KEY,
       pedidos: pedidosConCoordenadas
     };
-
-    // DEBUG: Log del request
-    console.log('[OptimizarRuta] Request body:', JSON.stringify(requestBody, null, 2));
 
     try {
       const response = await fetch(N8N_WEBHOOK_URL, {
@@ -121,43 +113,30 @@ export function useOptimizarRuta() {
         body: JSON.stringify(requestBody)
       });
 
-      // DEBUG: Log de response status
-      console.log('[OptimizarRuta] Response status:', response.status);
-      console.log('[OptimizarRuta] Response ok:', response.ok);
-
       if (!response.ok) {
         // Intentar obtener más detalles del error
         let errorDetail = '';
         try {
           const errorText = await response.text();
-          console.log('[OptimizarRuta] Error response text:', errorText);
           errorDetail = errorText ? ` - ${errorText}` : '';
-        } catch (e) {
-          console.log('[OptimizarRuta] No se pudo leer el cuerpo del error');
+        } catch {
+          // No se pudo leer el cuerpo del error
         }
         throw new Error(`Error HTTP: ${response.status}${errorDetail}`);
       }
 
-      // Obtener respuesta como texto primero para debugging
-      const responseText = await response.text();
-      console.log('[OptimizarRuta] Response text:', responseText);
-
       // Parsear JSON
       let data;
       try {
+        const responseText = await response.text();
         data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('[OptimizarRuta] Error parseando JSON:', parseError);
+      } catch {
         throw new Error('La respuesta no es JSON válido');
       }
 
-      console.log('[OptimizarRuta] Response data:', data);
-
       // Verificar si la respuesta indica error (del workflow n8n)
       if (data.error) {
-        const errorMsg = data.mensaje || data.error;
-        console.error('[OptimizarRuta] Error del workflow:', errorMsg);
-        throw new Error(errorMsg);
+        throw new Error(data.mensaje || data.error);
       }
 
       // Verificar si no hay pedidos
@@ -175,9 +154,7 @@ export function useOptimizarRuta() {
       return data;
 
     } catch (err) {
-      console.error('[OptimizarRuta] Error completo:', err);
-
-      // Determinar mensaje de error más descriptivo
+      // Determinar mensaje de error descriptivo
       let errorMessage = err.message || 'Error al optimizar la ruta';
 
       // Detectar errores específicos

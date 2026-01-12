@@ -1,7 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
+import {
+  getSecureItem,
+  setSecureItem,
+  removeSecureItem,
+  migrateToSecure
+} from '../utils/secureStorage'
 
-const OFFLINE_PEDIDOS_KEY = 'offline_pedidos'
-const OFFLINE_MERMAS_KEY = 'offline_mermas'
+const OFFLINE_PEDIDOS_KEY = 'pedidos'
+const OFFLINE_MERMAS_KEY = 'mermas'
+
+// Claves legacy para migracion
+const LEGACY_PEDIDOS_KEY = 'offline_pedidos'
+const LEGACY_MERMAS_KEY = 'offline_mermas'
 
 // Hook para manejar sincronización offline
 export function useOfflineSync() {
@@ -10,23 +20,22 @@ export function useOfflineSync() {
   const [mermasPendientes, setMermasPendientes] = useState([])
   const [sincronizando, setSincronizando] = useState(false)
 
-  // Cargar pedidos pendientes del localStorage
+  // Cargar pedidos pendientes del secureStorage (con migracion de datos legacy)
   useEffect(() => {
-    const stored = localStorage.getItem(OFFLINE_PEDIDOS_KEY)
-    if (stored) {
-      try {
-        setPedidosPendientes(JSON.parse(stored))
-      } catch (e) {
-        console.error('Error parsing offline pedidos:', e)
-      }
+    // Migrar datos legacy si existen
+    migrateToSecure(LEGACY_PEDIDOS_KEY, OFFLINE_PEDIDOS_KEY)
+    migrateToSecure(LEGACY_MERMAS_KEY, OFFLINE_MERMAS_KEY)
+
+    // Cargar pedidos desde almacenamiento seguro
+    const storedPedidos = getSecureItem(OFFLINE_PEDIDOS_KEY, [])
+    if (Array.isArray(storedPedidos)) {
+      setPedidosPendientes(storedPedidos)
     }
-    const storedMermas = localStorage.getItem(OFFLINE_MERMAS_KEY)
-    if (storedMermas) {
-      try {
-        setMermasPendientes(JSON.parse(storedMermas))
-      } catch (e) {
-        console.error('Error parsing offline mermas:', e)
-      }
+
+    // Cargar mermas desde almacenamiento seguro
+    const storedMermas = getSecureItem(OFFLINE_MERMAS_KEY, [])
+    if (Array.isArray(storedMermas)) {
+      setMermasPendientes(storedMermas)
     }
   }, [])
 
@@ -55,7 +64,7 @@ export function useOfflineSync() {
 
     setPedidosPendientes(prev => {
       const updated = [...prev, nuevoPedido]
-      localStorage.setItem(OFFLINE_PEDIDOS_KEY, JSON.stringify(updated))
+      setSecureItem(OFFLINE_PEDIDOS_KEY, updated)
       return updated
     })
 
@@ -73,27 +82,27 @@ export function useOfflineSync() {
 
     setMermasPendientes(prev => {
       const updated = [...prev, nuevaMerma]
-      localStorage.setItem(OFFLINE_MERMAS_KEY, JSON.stringify(updated))
+      setSecureItem(OFFLINE_MERMAS_KEY, updated)
       return updated
     })
 
     return nuevaMerma
   }, [])
 
-  // Eliminar pedido offline (después de sincronizar)
+  // Eliminar pedido offline (despues de sincronizar)
   const eliminarPedidoOffline = useCallback((offlineId) => {
     setPedidosPendientes(prev => {
       const updated = prev.filter(p => p.offlineId !== offlineId)
-      localStorage.setItem(OFFLINE_PEDIDOS_KEY, JSON.stringify(updated))
+      setSecureItem(OFFLINE_PEDIDOS_KEY, updated)
       return updated
     })
   }, [])
 
-  // Eliminar merma offline (después de sincronizar)
+  // Eliminar merma offline (despues de sincronizar)
   const eliminarMermaOffline = useCallback((offlineId) => {
     setMermasPendientes(prev => {
       const updated = prev.filter(m => m.offlineId !== offlineId)
-      localStorage.setItem(OFFLINE_MERMAS_KEY, JSON.stringify(updated))
+      setSecureItem(OFFLINE_MERMAS_KEY, updated)
       return updated
     })
   }, [])
@@ -121,7 +130,6 @@ export function useOfflineSync() {
         eliminarPedidoOffline(pedido.offlineId)
         sincronizados++
       } catch (error) {
-        console.error('Error sincronizando pedido:', error)
         errores.push({ pedido, error: error.message })
       }
     }
@@ -144,7 +152,6 @@ export function useOfflineSync() {
         eliminarMermaOffline(merma.offlineId)
         sincronizados++
       } catch (error) {
-        console.error('Error sincronizando merma:', error)
         errores.push({ merma, error: error.message })
       }
     }
@@ -156,7 +163,7 @@ export function useOfflineSync() {
   // Limpiar todos los pedidos offline
   const limpiarPedidosOffline = useCallback(() => {
     setPedidosPendientes([])
-    localStorage.removeItem(OFFLINE_PEDIDOS_KEY)
+    removeSecureItem(OFFLINE_PEDIDOS_KEY)
   }, [])
 
   return {
