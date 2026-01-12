@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, setErrorNotifier } from './hooks/useSupabase.jsx';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, setErrorNotifier } from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalGestionRutas } from './components/Modals.jsx';

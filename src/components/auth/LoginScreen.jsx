@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Truck, Loader2 } from 'lucide-react';
-import { useAuth } from '../../hooks/useSupabase.jsx';
+import { useAuth } from '../../hooks/supabase';
 
 export default function LoginScreen() {
   const { login } = useAuth();

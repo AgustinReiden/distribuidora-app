@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { X, User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, Calendar, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, UserCheck, Building2 } from 'lucide-react'
-import { useFichaCliente, usePagos } from '../../hooks/useSupabase'
+import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
 
 export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido }) {
