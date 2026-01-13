@@ -176,7 +176,32 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
-        {/* Sección de productos (solo admin y pedido no entregado) */}
+        {/* Sección de productos - Vista de solo lectura para no-admin o pedido entregado */}
+        {(!isAdmin || pedidoEntregado) && pedido?.items?.length > 0 && (
+          <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
+            <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-blue-600" />
+              <span className="font-medium dark:text-white">Productos del Pedido</span>
+              <span className="text-xs text-gray-500">(solo lectura)</span>
+            </div>
+            <div className="divide-y dark:divide-gray-600">
+              {pedido.items.map(item => (
+                <div key={item.producto_id} className="p-3 flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="font-medium text-sm dark:text-white">{item.producto?.nombre || 'Producto'}</p>
+                    <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm dark:text-white">x{item.cantidad}</span>
+                    <span className="font-semibold text-blue-600">{formatPrecio(item.cantidad * item.precio_unitario)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sección de productos editable (solo admin y pedido no entregado) */}
         {isAdmin && !pedidoEntregado && (
           <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 flex items-center justify-between">
@@ -468,7 +493,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </button>
         <button
           onClick={handleGuardar}
-          disabled={guardando || items.length === 0}
+          disabled={guardando || (isAdmin && !pedidoEntregado && items.length === 0)}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
           {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
