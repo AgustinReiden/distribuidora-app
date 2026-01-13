@@ -139,22 +139,105 @@ export function usePedidos() {
     const pedido = pedidos.find(p => p.id === id)
     const restaurarStock = pedido?.stock_descontado ?? true
 
-    const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
-      p_pedido_id: id,
-      p_restaurar_stock: restaurarStock,
-      p_usuario_id: usuarioId,
-      p_motivo: motivo
-    })
+    // Intentar usar la función RPC primero
+    try {
+      const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
+        p_pedido_id: id,
+        p_restaurar_stock: restaurarStock,
+        p_usuario_id: usuarioId,
+        p_motivo: motivo
+      })
 
-    if (error) {
-      throw error
+      if (error) {
+        // Si hay error en la función RPC, usar método alternativo
+        if (error.message.includes('v_transportista') || error.message.includes('not assigned')) {
+          console.warn('Función RPC con error, usando método alternativo')
+          await eliminarPedidoManual(id, pedido, restaurarStock, usuarioId, motivo)
+          setPedidos(prev => prev.filter(p => p.id !== id))
+          return
+        }
+        throw error
+      }
+
+      if (!data.success) {
+        throw new Error(data.error || 'Error al eliminar pedido')
+      }
+
+      setPedidos(prev => prev.filter(p => p.id !== id))
+    } catch (rpcError) {
+      // Fallback: eliminar manualmente si la función RPC falla
+      if (rpcError.message.includes('v_transportista') || rpcError.message.includes('not assigned')) {
+        console.warn('Función RPC con error, usando método alternativo')
+        await eliminarPedidoManual(id, pedido, restaurarStock, usuarioId, motivo)
+        setPedidos(prev => prev.filter(p => p.id !== id))
+        return
+      }
+      throw rpcError
+    }
+  }
+
+  // Método alternativo para eliminar pedido sin usar RPC
+  const eliminarPedidoManual = async (pedidoId, pedido, restaurarStock, usuarioId, motivo) => {
+    // 1. Guardar datos para trazabilidad
+    const datosEliminado = {
+      pedido_id_original: pedidoId,
+      cliente_id: pedido?.cliente_id,
+      cliente_nombre: pedido?.cliente?.nombre_fantasia || 'Desconocido',
+      total: pedido?.total || 0,
+      estado: pedido?.estado,
+      estado_pago: pedido?.estado_pago,
+      forma_pago: pedido?.forma_pago,
+      items: pedido?.items?.map(i => ({
+        producto_id: i.producto_id,
+        producto_nombre: i.producto?.nombre,
+        cantidad: i.cantidad,
+        precio_unitario: i.precio_unitario
+      })) || [],
+      eliminado_por: usuarioId,
+      motivo: motivo || 'Sin especificar',
+      eliminado_at: new Date().toISOString()
     }
 
-    if (!data.success) {
-      throw new Error(data.error || 'Error al eliminar pedido')
+    // 2. Intentar guardar en tabla de eliminados (si existe)
+    try {
+      await supabase.from('pedidos_eliminados').insert(datosEliminado)
+    } catch (e) {
+      console.warn('No se pudo guardar en pedidos_eliminados:', e.message)
     }
 
-    setPedidos(prev => prev.filter(p => p.id !== id))
+    // 3. Restaurar stock si corresponde
+    if (restaurarStock && pedido?.items) {
+      for (const item of pedido.items) {
+        if (item.producto_id && item.cantidad) {
+          const { data: producto } = await supabase
+            .from('productos')
+            .select('stock')
+            .eq('id', item.producto_id)
+            .single()
+
+          if (producto) {
+            await supabase
+              .from('productos')
+              .update({ stock: (producto.stock || 0) + item.cantidad })
+              .eq('id', item.producto_id)
+          }
+        }
+      }
+    }
+
+    // 4. Eliminar items del pedido
+    await supabase.from('pedido_items').delete().eq('pedido_id', pedidoId)
+
+    // 5. Eliminar historial del pedido
+    try {
+      await supabase.from('pedido_historial').delete().eq('pedido_id', pedidoId)
+    } catch (e) {
+      console.warn('No se pudo eliminar historial:', e.message)
+    }
+
+    // 6. Eliminar el pedido
+    const { error } = await supabase.from('pedidos').delete().eq('id', pedidoId)
+    if (error) throw error
   }
 
   const fetchPedidosEliminados = async () => {
