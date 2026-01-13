@@ -11,6 +11,7 @@ import ModalHistorialMermas from './components/modals/ModalHistorialMermas.jsx';
 import ModalCompra from './components/modals/ModalCompra.jsx';
 import ModalDetalleCompra from './components/modals/ModalDetalleCompra.jsx';
 import ModalProveedor from './components/modals/ModalProveedor.jsx';
+import ModalImportarPrecios from './components/modals/ModalImportarPrecios.jsx';
 import OfflineIndicator from './components/layout/OfflineIndicator.jsx';
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada, generarReciboPago } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
@@ -56,8 +57,8 @@ function MainApp() {
 
   // Hooks de datos
   const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
-  const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, loading: loadingProductos, refetch: refetchProductos } = useProductos();
-  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
+  const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, actualizarPreciosMasivo, loading: loadingProductos, refetch: refetchProductos } = useProductos();
+  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, actualizarItemsPedido, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
   // Para preventistas, filtrar métricas por sus propios pedidos
   const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
@@ -109,6 +110,7 @@ function MainApp() {
   const [compraDetalle, setCompraDetalle] = useState(null);
   const [modalProveedor, setModalProveedor] = useState(false);
   const [proveedorEditando, setProveedorEditando] = useState(null);
+  const [modalImportarPrecios, setModalImportarPrecios] = useState(false);
 
   // Estados de edición
   const [clienteEditando, setClienteEditando] = useState(null);
@@ -924,6 +926,7 @@ function MainApp() {
             onEliminarProducto={handleEliminarProducto}
             onBajaStock={handleAbrirMerma}
             onVerHistorialMermas={handleVerHistorialMermas}
+            onImportarPrecios={() => setModalImportarPrecios(true)}
           />
         )}
 
@@ -1088,7 +1091,14 @@ function MainApp() {
       {modalEditarPedido && (
         <ModalEditarPedido
           pedido={pedidoEditando}
+          productos={productos}
+          isAdmin={isAdmin}
           onSave={handleGuardarEdicionPedido}
+          onSaveItems={async (items) => {
+            await actualizarItemsPedido(pedidoEditando.id, items, user?.id);
+            refetchProductos();
+            notify.success('Productos del pedido actualizados');
+          }}
           onClose={() => { setModalEditarPedido(false); setPedidoEditando(null); }}
           guardando={guardando}
         />
@@ -1179,6 +1189,14 @@ function MainApp() {
           onSave={handleGuardarProveedor}
           onClose={() => { setModalProveedor(false); setProveedorEditando(null); }}
           guardando={guardando}
+        />
+      )}
+
+      {modalImportarPrecios && (
+        <ModalImportarPrecios
+          productos={productos}
+          onActualizarPrecios={actualizarPreciosMasivo}
+          onClose={() => setModalImportarPrecios(false)}
         />
       )}
 

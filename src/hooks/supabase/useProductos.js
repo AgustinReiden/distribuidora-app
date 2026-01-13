@@ -127,6 +127,26 @@ export function useProductos() {
     }))
   }
 
+  const actualizarPreciosMasivo = async (productosData) => {
+    const productosParaRPC = productosData.map(p => ({
+      producto_id: p.productoId,
+      precio_neto: p.precioNeto,
+      imp_internos: p.impInternos,
+      precio_final: p.precioFinal
+    }))
+
+    const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
+      p_productos: productosParaRPC
+    })
+
+    if (error) throw error
+
+    // Refrescar productos después de actualizar
+    await fetchProductos()
+
+    return data
+  }
+
   return {
     productos,
     loading,
@@ -136,6 +156,7 @@ export function useProductos() {
     validarStock,
     descontarStock,
     restaurarStock,
+    actualizarPreciosMasivo,
     refetch: fetchProductos
   }
 }

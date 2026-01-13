@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown } from 'lucide-react';
+import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 
@@ -11,7 +11,8 @@ export default function VistaProductos({
   onEditarProducto,
   onEliminarProducto,
   onBajaStock,
-  onVerHistorialMermas
+  onVerHistorialMermas,
+  onImportarPrecios
 }) {
   const [busqueda, setBusqueda] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
@@ -68,6 +69,15 @@ export default function VistaProductos({
               >
                 <TrendingDown className="w-5 h-5" />
                 <span>Historial Mermas</span>
+              </button>
+            )}
+            {onImportarPrecios && (
+              <button
+                onClick={onImportarPrecios}
+                className="flex items-center space-x-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
+              >
+                <FileSpreadsheet className="w-5 h-5" />
+                <span>Importar Precios</span>
               </button>
             )}
             <button
