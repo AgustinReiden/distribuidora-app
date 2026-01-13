@@ -178,64 +178,101 @@ export function usePedidos() {
 
   // Método alternativo para eliminar pedido sin usar RPC
   const eliminarPedidoManual = async (pedidoId, pedido, restaurarStock, usuarioId, motivo) => {
-    // 1. Guardar datos para trazabilidad
+    // Obtener nombre del usuario que elimina
+    let eliminadoPorNombre = 'Sistema'
+    if (usuarioId) {
+      const { data: perfil } = await supabase
+        .from('perfiles')
+        .select('nombre')
+        .eq('id', usuarioId)
+        .single()
+      if (perfil) eliminadoPorNombre = perfil.nombre
+    }
+
+    // 1. Guardar datos para trazabilidad con estructura correcta
     const datosEliminado = {
-      pedido_id_original: pedidoId,
+      pedido_id: pedidoId,
       cliente_id: pedido?.cliente_id,
       cliente_nombre: pedido?.cliente?.nombre_fantasia || 'Desconocido',
+      cliente_direccion: pedido?.cliente?.direccion || '',
       total: pedido?.total || 0,
       estado: pedido?.estado,
       estado_pago: pedido?.estado_pago,
       forma_pago: pedido?.forma_pago,
+      monto_pagado: pedido?.monto_pagado || 0,
+      notas: pedido?.notas || null,
       items: pedido?.items?.map(i => ({
         producto_id: i.producto_id,
         producto_nombre: i.producto?.nombre,
         cantidad: i.cantidad,
-        precio_unitario: i.precio_unitario
+        precio_unitario: i.precio_unitario,
+        subtotal: i.subtotal || (i.cantidad * i.precio_unitario)
       })) || [],
-      eliminado_por: usuarioId,
-      motivo: motivo || 'Sin especificar',
-      eliminado_at: new Date().toISOString()
+      usuario_creador_id: pedido?.usuario_id || null,
+      usuario_creador_nombre: pedido?.usuario?.nombre || null,
+      transportista_id: pedido?.transportista_id || null,
+      transportista_nombre: pedido?.transportista?.nombre || null,
+      fecha_pedido: pedido?.created_at || null,
+      fecha_entrega: pedido?.fecha_entrega || null,
+      eliminado_por_id: usuarioId,
+      eliminado_por_nombre: eliminadoPorNombre,
+      motivo_eliminacion: motivo || 'Sin especificar',
+      stock_restaurado: restaurarStock
     }
 
-    // 2. Intentar guardar en tabla de eliminados (si existe)
-    try {
-      await supabase.from('pedidos_eliminados').insert(datosEliminado)
-    } catch (e) {
-      console.warn('No se pudo guardar en pedidos_eliminados:', e.message)
-    }
+    // Ejecutar operaciones en paralelo para mayor velocidad
+    const operaciones = []
 
-    // 3. Restaurar stock si corresponde
-    if (restaurarStock && pedido?.items) {
-      for (const item of pedido.items) {
-        if (item.producto_id && item.cantidad) {
-          const { data: producto } = await supabase
-            .from('productos')
-            .select('stock')
-            .eq('id', item.producto_id)
-            .single()
+    // 2. Guardar en tabla de eliminados
+    operaciones.push(
+      supabase.from('pedidos_eliminados').insert(datosEliminado)
+        .then(({ error }) => {
+          if (error) console.warn('No se pudo guardar en pedidos_eliminados:', error.message)
+        })
+    )
 
-          if (producto) {
-            await supabase
-              .from('productos')
-              .update({ stock: (producto.stock || 0) + item.cantidad })
-              .eq('id', item.producto_id)
-          }
+    // 3. Restaurar stock en paralelo si corresponde
+    if (restaurarStock && pedido?.items?.length > 0) {
+      // Obtener todos los productos de una vez
+      const productIds = pedido.items.map(i => i.producto_id).filter(Boolean)
+      if (productIds.length > 0) {
+        const { data: productosActuales } = await supabase
+          .from('productos')
+          .select('id, stock')
+          .in('id', productIds)
+
+        if (productosActuales) {
+          const actualizaciones = pedido.items.map(item => {
+            const prod = productosActuales.find(p => p.id === item.producto_id)
+            if (prod && item.cantidad) {
+              return supabase
+                .from('productos')
+                .update({ stock: (prod.stock || 0) + item.cantidad })
+                .eq('id', item.producto_id)
+            }
+            return Promise.resolve()
+          })
+          operaciones.push(...actualizaciones)
         }
       }
     }
 
     // 4. Eliminar items del pedido
-    await supabase.from('pedido_items').delete().eq('pedido_id', pedidoId)
+    operaciones.push(
+      supabase.from('pedido_items').delete().eq('pedido_id', pedidoId)
+    )
 
     // 5. Eliminar historial del pedido
-    try {
-      await supabase.from('pedido_historial').delete().eq('pedido_id', pedidoId)
-    } catch (e) {
-      console.warn('No se pudo eliminar historial:', e.message)
-    }
+    operaciones.push(
+      supabase.from('pedido_historial').delete().eq('pedido_id', pedidoId)
+        .then(() => {})
+        .catch(() => {}) // Ignorar errores si no existe historial
+    )
 
-    // 6. Eliminar el pedido
+    // Ejecutar todas las operaciones en paralelo
+    await Promise.all(operaciones)
+
+    // 6. Finalmente eliminar el pedido
     const { error } = await supabase.from('pedidos').delete().eq('id', pedidoId)
     if (error) throw error
   }
