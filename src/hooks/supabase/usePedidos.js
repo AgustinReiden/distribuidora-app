@@ -228,6 +228,31 @@ export function usePedidos() {
     ))
   }
 
+  const actualizarItemsPedido = async (pedidoId, items, usuarioId = null) => {
+    const itemsParaRPC = items.map(item => ({
+      producto_id: item.productoId || item.producto_id,
+      cantidad: item.cantidad,
+      precio_unitario: item.precioUnitario || item.precio_unitario
+    }))
+
+    const { data, error } = await supabase.rpc('actualizar_pedido_items', {
+      p_pedido_id: pedidoId,
+      p_items_nuevos: itemsParaRPC,
+      p_usuario_id: usuarioId
+    })
+
+    if (error) throw error
+
+    if (!data.success) {
+      throw new Error(data.errores?.join(', ') || 'Error al actualizar items del pedido')
+    }
+
+    // Refrescar pedidos para obtener los cambios
+    await fetchPedidos()
+
+    return data
+  }
+
   return {
     pedidos,
     pedidosFiltrados,
@@ -241,6 +266,7 @@ export function usePedidos() {
     actualizarFormaPago,
     actualizarOrdenEntrega,
     limpiarOrdenEntrega,
+    actualizarItemsPedido,
     fetchHistorialPedido,
     filtros,
     setFiltros,

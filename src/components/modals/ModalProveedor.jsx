@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, Building2, Phone, Mail, MapPin, FileText, User, Hash } from 'lucide-react';
+import { X, Building2, Phone, Mail, MapPin, FileText, User, Hash, CheckCircle } from 'lucide-react';
+import { AddressAutocomplete } from '../AddressAutocomplete';
 
 export default function ModalProveedor({ proveedor, onSave, onClose, guardando }) {
   const [formData, setFormData] = useState({
     nombre: '',
     cuit: '',
     direccion: '',
+    latitud: null,
+    longitud: null,
     telefono: '',
     email: '',
     contacto: '',
@@ -19,6 +22,8 @@ export default function ModalProveedor({ proveedor, onSave, onClose, guardando }
         nombre: proveedor.nombre || '',
         cuit: proveedor.cuit || '',
         direccion: proveedor.direccion || '',
+        latitud: proveedor.latitud || null,
+        longitud: proveedor.longitud || null,
         telefono: proveedor.telefono || '',
         email: proveedor.email || '',
         contacto: proveedor.contacto || '',
@@ -26,6 +31,15 @@ export default function ModalProveedor({ proveedor, onSave, onClose, guardando }
       });
     }
   }, [proveedor]);
+
+  const handleAddressSelect = (result) => {
+    setFormData(prev => ({
+      ...prev,
+      direccion: result.direccion,
+      latitud: result.latitud,
+      longitud: result.longitud
+    }));
+  };
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -187,19 +201,25 @@ export default function ModalProveedor({ proveedor, onSave, onClose, guardando }
             </div>
           </div>
 
-          {/* Dirección */}
+          {/* Dirección con Autocompletado */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               <MapPin className="w-4 h-4 inline mr-1" />
               Dirección
             </label>
-            <input
-              type="text"
+            <AddressAutocomplete
               value={formData.direccion}
-              onChange={e => handleChange('direccion', e.target.value)}
-              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-              placeholder="Dirección completa"
+              onChange={(val) => handleChange('direccion', val)}
+              onSelect={handleAddressSelect}
+              placeholder="Buscar dirección del proveedor..."
+              className="dark:bg-gray-700 dark:text-white dark:border-gray-600"
             />
+            {formData.latitud && formData.longitud && (
+              <div className="mt-2 flex items-center text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
+                <CheckCircle className="w-4 h-4 mr-2" />
+                <span>Ubicación capturada: {formData.latitud.toFixed(6)}, {formData.longitud.toFixed(6)}</span>
+              </div>
+            )}
           </div>
 
           {/* Notas */}
