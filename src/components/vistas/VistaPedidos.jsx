@@ -457,7 +457,8 @@ export default function VistaPedidos({
   onAsignarTransportista,
   onMarcarEntregado,
   onDesmarcarEntregado,
-  onEliminarPedido
+  onEliminarPedido,
+  onVerPedidosEliminados
 }) {
   // Estado para pedido expandido
   const [pedidoExpandido, setPedidoExpandido] = useState(null);
@@ -507,6 +508,16 @@ export default function VistaPedidos({
             >
               <FileDown className="w-5 h-5" />
               <span>Excel</span>
+            </button>
+          )}
+          {isAdmin && onVerPedidosEliminados && (
+            <button
+              onClick={onVerPedidosEliminados}
+              className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              title="Ver historial de pedidos eliminados"
+            >
+              <Trash2 className="w-5 h-5" />
+              <span className="hidden sm:inline">Eliminados</span>
             </button>
           )}
           {(isAdmin || isPreventista) && (

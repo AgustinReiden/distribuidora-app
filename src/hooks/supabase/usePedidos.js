@@ -135,13 +135,15 @@ export function usePedidos() {
     await fetchPedidos()
   }
 
-  const eliminarPedido = async (id, restaurarStockFn) => {
+  const eliminarPedido = async (id, restaurarStockFn, usuarioId = null, motivo = null) => {
     const pedido = pedidos.find(p => p.id === id)
     const restaurarStock = pedido?.stock_descontado ?? true
 
     const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
       p_pedido_id: id,
-      p_restaurar_stock: restaurarStock
+      p_restaurar_stock: restaurarStock,
+      p_usuario_id: usuarioId,
+      p_motivo: motivo
     })
 
     if (error) {
@@ -153,6 +155,19 @@ export function usePedidos() {
     }
 
     setPedidos(prev => prev.filter(p => p.id !== id))
+  }
+
+  const fetchPedidosEliminados = async () => {
+    const { data, error } = await supabase
+      .from('pedidos_eliminados')
+      .select('*')
+      .order('eliminado_at', { ascending: false })
+
+    if (error) {
+      throw error
+    }
+
+    return data || []
   }
 
   const actualizarNotasPedido = async (pedidoId, notas) => {
@@ -268,6 +283,7 @@ export function usePedidos() {
     limpiarOrdenEntrega,
     actualizarItemsPedido,
     fetchHistorialPedido,
+    fetchPedidosEliminados,
     filtros,
     setFiltros,
     refetch: fetchPedidos

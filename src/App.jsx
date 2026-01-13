@@ -12,6 +12,7 @@ import ModalCompra from './components/modals/ModalCompra.jsx';
 import ModalDetalleCompra from './components/modals/ModalDetalleCompra.jsx';
 import ModalProveedor from './components/modals/ModalProveedor.jsx';
 import ModalImportarPrecios from './components/modals/ModalImportarPrecios.jsx';
+import ModalPedidosEliminados from './components/modals/ModalPedidosEliminados.jsx';
 import OfflineIndicator from './components/layout/OfflineIndicator.jsx';
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada, generarReciboPago } from './lib/pdfExport.js';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
@@ -58,7 +59,7 @@ function MainApp() {
   // Hooks de datos
   const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
   const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, actualizarPreciosMasivo, loading: loadingProductos, refetch: refetchProductos } = useProductos();
-  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, actualizarItemsPedido, fetchHistorialPedido, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
+  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, actualizarItemsPedido, fetchHistorialPedido, fetchPedidosEliminados, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
   // Para preventistas, filtrar métricas por sus propios pedidos
   const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
@@ -111,6 +112,7 @@ function MainApp() {
   const [modalProveedor, setModalProveedor] = useState(false);
   const [proveedorEditando, setProveedorEditando] = useState(null);
   const [modalImportarPrecios, setModalImportarPrecios] = useState(false);
+  const [modalPedidosEliminados, setModalPedidosEliminados] = useState(false);
 
   // Estados de edición
   const [clienteEditando, setClienteEditando] = useState(null);
@@ -429,15 +431,15 @@ function MainApp() {
     setModalConfirm({
       visible: true,
       titulo: 'Eliminar pedido',
-      mensaje: '¿Eliminar este pedido? El stock será restaurado.',
+      mensaje: '¿Eliminar este pedido? El stock será restaurado y quedará registrado en el historial.',
       tipo: 'danger',
       onConfirm: async () => {
         setGuardando(true);
         try {
-          await eliminarPedido(id, restaurarStock);
+          await eliminarPedido(id, restaurarStock, user?.id);
           refetchProductos();
           refetchMetricas();
-          notify.success('Pedido eliminado y stock restaurado');
+          notify.success('Pedido eliminado y registrado en historial');
         } catch (e) {
           notify.error(e.message);
         } finally {
@@ -900,6 +902,7 @@ function MainApp() {
             onMarcarEntregado={handleMarcarEntregado}
             onDesmarcarEntregado={handleDesmarcarEntregado}
             onEliminarPedido={handleEliminarPedido}
+            onVerPedidosEliminados={() => setModalPedidosEliminados(true)}
           />
         )}
 
@@ -1197,6 +1200,13 @@ function MainApp() {
           productos={productos}
           onActualizarPrecios={actualizarPreciosMasivo}
           onClose={() => setModalImportarPrecios(false)}
+        />
+      )}
+
+      {modalPedidosEliminados && (
+        <ModalPedidosEliminados
+          onFetch={fetchPedidosEliminados}
+          onClose={() => setModalPedidosEliminados(false)}
         />
       )}
 
