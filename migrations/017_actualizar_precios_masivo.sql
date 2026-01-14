@@ -20,8 +20,7 @@ BEGIN
       SET
         precio_sin_iva = COALESCE((v_item->>'precio_neto')::DECIMAL, precio_sin_iva),
         impuestos_internos = COALESCE((v_item->>'imp_internos')::DECIMAL, impuestos_internos),
-        precio = COALESCE((v_item->>'precio_final')::DECIMAL, precio),
-        updated_at = NOW()
+        precio = COALESCE((v_item->>'precio_final')::DECIMAL, precio)
       WHERE id = v_producto_id;
 
       IF FOUND THEN
