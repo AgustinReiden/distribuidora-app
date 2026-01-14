@@ -2,7 +2,8 @@
  * Componente de tarjeta individual de pedido
  */
 import React, { useState, memo } from 'react';
-import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer } from 'lucide-react';
+import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown } from 'lucide-react';
+import { generarReciboPedido } from '../../lib/pdfExport';
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
 import AccionesDropdown from './PedidoActions';
 
@@ -157,14 +158,26 @@ function PedidoCard({
               </p>
             )}
           </div>
-          <button
-            onClick={() => setExpandido(!expandido)}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-          >
-            <Eye className="w-4 h-4" />
-            {expandido ? 'Ocultar' : 'Ver detalle'}
-            {expandido ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
+          <div className="flex items-center gap-2">
+            {pedido.estado_pago === 'pagado' && (
+              <button
+                onClick={() => generarReciboPedido(pedido)}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
+                title="Descargar recibo PDF"
+              >
+                <FileDown className="w-4 h-4" />
+                <span className="hidden sm:inline">Recibo PDF</span>
+              </button>
+            )}
+            <button
+              onClick={() => setExpandido(!expandido)}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              {expandido ? 'Ocultar' : 'Ver detalle'}
+              {expandido ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
       </div>
 

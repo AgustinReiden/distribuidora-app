@@ -795,3 +795,251 @@ export function generarEstadoCuenta(cliente, pedidos, pagos, resumen) {
   const nombreCliente = (cliente?.nombre_fantasia || 'cliente').replace(/\s+/g, '-').toLowerCase().substring(0, 20);
   doc.save(`estado-cuenta-${nombreCliente}-${fecha}.pdf`);
 }
+
+/**
+ * Genera PDF de Recibo de Pedido Pagado
+ * Formato: A4 profesional con detalle completo de productos
+ * @param {Object} pedido - Datos del pedido completo (con items y cliente)
+ * @param {Object} empresa - Datos de la empresa (opcional)
+ * @returns {void} - Descarga el PDF
+ */
+export function generarReciboPedido(pedido, empresa = {}) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = 210;
+  const margin = 15;
+  const contentWidth = pageWidth - (margin * 2);
+  let y = margin;
+
+  // === HEADER DE LA EMPRESA ===
+  doc.setFillColor(33, 37, 41); // Fondo oscuro profesional
+  doc.rect(0, 0, pageWidth, 40, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(22);
+  doc.setFont('helvetica', 'bold');
+  doc.text(empresa.nombre || 'DISTRIBUIDORA', margin, 18);
+
+  if (empresa.direccion || empresa.telefono || empresa.email) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    let infoY = 25;
+    if (empresa.direccion) {
+      doc.text(empresa.direccion, margin, infoY);
+      infoY += 4;
+    }
+    const contactoTexto = [empresa.telefono, empresa.email].filter(Boolean).join(' | ');
+    if (contactoTexto) doc.text(contactoTexto, margin, infoY);
+  }
+
+  // Número de recibo y fecha (derecha)
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('RECIBO', pageWidth - margin, 15, { align: 'right' });
+  doc.setFontSize(16);
+  doc.text(`#${pedido.id}`, pageWidth - margin, 23, { align: 'right' });
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(formatFecha(pedido.created_at || new Date()), pageWidth - margin, 30, { align: 'right' });
+
+  y = 50;
+  doc.setTextColor(0, 0, 0);
+
+  // === ESTADO PAGADO - Badge destacado ===
+  doc.setFillColor(34, 197, 94); // Verde
+  doc.roundedRect(pageWidth - margin - 35, y - 5, 35, 10, 2, 2, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text('PAGADO', pageWidth - margin - 17.5, y + 1, { align: 'center' });
+  doc.setTextColor(0, 0, 0);
+
+  // === DATOS DEL CLIENTE ===
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 100, 100);
+  doc.text('CLIENTE', margin, y);
+  y += 6;
+
+  doc.setFillColor(248, 249, 250);
+  doc.roundedRect(margin, y - 3, contentWidth, 28, 2, 2, 'F');
+
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text(pedido.cliente?.nombre_fantasia || 'Cliente', margin + 5, y + 4);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 80, 80);
+
+  if (pedido.cliente?.razon_social) {
+    doc.text(pedido.cliente.razon_social, margin + 5, y + 10);
+  }
+  if (pedido.cliente?.cuit) {
+    doc.text(`CUIT: ${pedido.cliente.cuit}`, margin + 5, y + 15);
+  }
+  if (pedido.cliente?.direccion) {
+    doc.text(pedido.cliente.direccion, margin + 5, y + 20);
+  }
+  if (pedido.cliente?.telefono) {
+    doc.text(`Tel: ${pedido.cliente.telefono}`, margin + 100, y + 15);
+  }
+
+  y += 35;
+
+  // === TABLA DE PRODUCTOS ===
+  doc.setTextColor(100, 100, 100);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('DETALLE DE PRODUCTOS', margin, y);
+  y += 5;
+
+  // Encabezados de tabla
+  doc.setFillColor(33, 37, 41);
+  doc.rect(margin, y, contentWidth, 8, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  y += 5.5;
+  doc.text('PRODUCTO', margin + 3, y);
+  doc.text('CANTIDAD', margin + 100, y, { align: 'center' });
+  doc.text('P. UNIT.', margin + 125, y, { align: 'center' });
+  doc.text('SUBTOTAL', margin + 165, y, { align: 'right' });
+  y += 5;
+
+  // Filas de productos
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+
+  const items = pedido.items || [];
+  items.forEach((item, index) => {
+    // Alternar color de fila
+    if (index % 2 === 0) {
+      doc.setFillColor(248, 249, 250);
+      doc.rect(margin, y - 4, contentWidth, 8, 'F');
+    }
+
+    const productoNombre = item.producto?.nombre || 'Producto';
+    const nombreTruncado = productoNombre.length > 45 ? productoNombre.substring(0, 43) + '..' : productoNombre;
+
+    doc.text(nombreTruncado, margin + 3, y);
+    doc.text(String(item.cantidad), margin + 100, y, { align: 'center' });
+    doc.text(formatPrecio(item.precio_unitario), margin + 125, y, { align: 'center' });
+    doc.text(formatPrecio(item.subtotal || item.precio_unitario * item.cantidad), margin + 165, y, { align: 'right' });
+    y += 8;
+
+    // Verificar si necesita nueva página
+    if (y > 250) {
+      doc.addPage();
+      y = margin;
+    }
+  });
+
+  // Línea divisora
+  y += 2;
+  doc.setDrawColor(200, 200, 200);
+  doc.setLineWidth(0.5);
+  doc.line(margin + 80, y, margin + contentWidth, y);
+  y += 8;
+
+  // === TOTALES ===
+  // Total
+  doc.setFillColor(33, 37, 41);
+  doc.roundedRect(margin + 100, y - 5, 80, 14, 2, 2, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('TOTAL:', margin + 105, y + 3);
+  doc.setFontSize(14);
+  doc.text(formatPrecio(pedido.total), margin + 175, y + 3, { align: 'right' });
+  doc.setTextColor(0, 0, 0);
+
+  y += 20;
+
+  // === INFORMACIÓN DE PAGO ===
+  doc.setFillColor(240, 253, 244); // Verde claro
+  doc.roundedRect(margin, y, contentWidth, 20, 2, 2, 'F');
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(34, 197, 94);
+  doc.text('INFORMACION DE PAGO', margin + 5, y + 6);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(60, 60, 60);
+  doc.setFontSize(9);
+
+  const formasPagoLabels = {
+    efectivo: 'Efectivo',
+    transferencia: 'Transferencia Bancaria',
+    cheque: 'Cheque',
+    tarjeta: 'Tarjeta',
+    cuenta_corriente: 'Cuenta Corriente'
+  };
+  doc.text(`Forma de pago: ${formasPagoLabels[pedido.forma_pago] || pedido.forma_pago || 'Efectivo'}`, margin + 5, y + 13);
+  doc.text(`Monto pagado: ${formatPrecio(pedido.monto_pagado || pedido.total)}`, margin + 80, y + 13);
+
+  if (pedido.fecha_entrega) {
+    doc.text(`Fecha entrega: ${formatFecha(pedido.fecha_entrega)}`, margin + 140, y + 13);
+  }
+
+  y += 30;
+
+  // === NOTAS DEL PEDIDO ===
+  if (pedido.notas) {
+    doc.setFillColor(255, 251, 235); // Amarillo claro
+    doc.roundedRect(margin, y, contentWidth, 18, 2, 2, 'F');
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(161, 98, 7);
+    doc.text('NOTAS:', margin + 5, y + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80, 80, 80);
+    const notasLines = doc.splitTextToSize(pedido.notas, contentWidth - 10);
+    doc.text(notasLines.slice(0, 2), margin + 5, y + 12);
+    y += 25;
+  }
+
+  // === TRANSPORTISTA ===
+  if (pedido.transportista?.nombre) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Entregado por: ${pedido.transportista.nombre}`, margin, y);
+    y += 8;
+  }
+
+  // === PIE DE PÁGINA ===
+  // Línea divisora
+  y = 265;
+  doc.setDrawColor(200, 200, 200);
+  doc.setLineWidth(0.3);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 5;
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(130, 130, 130);
+  doc.text('Este documento es comprobante valido de la operacion realizada.', pageWidth / 2, y, { align: 'center' });
+  y += 4;
+  doc.text('Conserve este recibo para cualquier reclamo o consulta.', pageWidth / 2, y, { align: 'center' });
+
+  // Fecha de generación
+  y += 6;
+  doc.setFontSize(7);
+  const fechaGeneracion = new Date().toLocaleString('es-AR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+  doc.text(`Generado: ${fechaGeneracion}`, pageWidth / 2, y, { align: 'center' });
+
+  // Descargar PDF
+  const fecha = formatFecha(new Date()).replace(/\//g, '-');
+  doc.save(`recibo-pedido-${pedido.id}-${fecha}.pdf`);
+}
