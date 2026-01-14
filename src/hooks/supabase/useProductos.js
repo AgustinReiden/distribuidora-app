@@ -128,23 +128,74 @@ export function useProductos() {
   }
 
   const actualizarPreciosMasivo = async (productosData) => {
-    const productosParaRPC = productosData.map(p => ({
+    // Filtrar productos sin ID válido
+    const productosValidos = productosData.filter(p => p.productoId != null)
+
+    if (productosValidos.length === 0) {
+      throw new Error('No hay productos válidos para actualizar')
+    }
+
+    const productosParaRPC = productosValidos.map(p => ({
       producto_id: p.productoId,
-      precio_neto: p.precioNeto,
-      imp_internos: p.impInternos,
-      precio_final: p.precioFinal
+      precio_neto: p.precioNeto || 0,
+      imp_internos: p.impInternos || 0,
+      precio_final: p.precioFinal || 0
     }))
 
+    // Intentar usar la función RPC primero
     const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
       p_productos: productosParaRPC
     })
 
-    if (error) throw error
+    // Si la función RPC no existe o falla, usar fallback con updates individuales
+    if (error) {
+      console.warn('RPC actualizar_precios_masivo falló, usando fallback:', error.message)
+
+      let actualizados = 0
+      const errores = []
+
+      for (const p of productosValidos) {
+        const updateData = {
+          precio: p.precioFinal || 0
+        }
+        // Solo incluir campos si tienen valor
+        if (p.precioNeto) updateData.precio_sin_iva = p.precioNeto
+        if (p.impInternos) updateData.impuestos_internos = p.impInternos
+
+        const { error: updateError } = await supabase
+          .from('productos')
+          .update(updateData)
+          .eq('id', p.productoId)
+
+        if (updateError) {
+          errores.push(`Error en producto ${p.productoId}: ${updateError.message}`)
+        } else {
+          actualizados++
+        }
+      }
+
+      // Refrescar productos después de actualizar
+      await fetchProductos()
+
+      if (errores.length > 0 && actualizados === 0) {
+        throw new Error(errores.join(', '))
+      }
+
+      return { success: true, actualizados, errores }
+    }
+
+    // Verificar si la función RPC retornó éxito
+    if (data && data.success === false) {
+      const erroresMsg = data.errores?.length > 0
+        ? data.errores.join(', ')
+        : 'Error en la actualización'
+      throw new Error(erroresMsg)
+    }
 
     // Refrescar productos después de actualizar
     await fetchProductos()
 
-    return data
+    return data || { success: true, actualizados: productosValidos.length, errores: [] }
   }
 
   return {
