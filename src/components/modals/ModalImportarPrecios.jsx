@@ -97,15 +97,21 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
   }, [parsearExcel]);
 
   const handleImportar = async () => {
-    const productosAActualizar = preview.filter(p => p.estado === 'encontrado');
-    if (productosAActualizar.length === 0) return;
+    const productosAActualizar = preview.filter(p => p.estado === 'encontrado' && p.productoId != null);
+    if (productosAActualizar.length === 0) {
+      setResultado({ success: false, error: 'No hay productos válidos para actualizar' });
+      return;
+    }
 
     setProcesando(true);
     try {
       const res = await onActualizarPrecios(productosAActualizar);
       setResultado(res);
     } catch (err) {
-      setResultado({ success: false, error: err.message });
+      // Capturar mejor el error
+      const errorMsg = err?.message || err?.toString?.() || 'Error desconocido al actualizar precios';
+      console.error('Error en importación de precios:', err);
+      setResultado({ success: false, error: errorMsg });
     } finally {
       setProcesando(false);
     }
