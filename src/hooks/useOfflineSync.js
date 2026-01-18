@@ -22,21 +22,25 @@ export function useOfflineSync() {
 
   // Cargar pedidos pendientes del secureStorage (con migracion de datos legacy)
   useEffect(() => {
-    // Migrar datos legacy si existen
-    migrateToSecure(LEGACY_PEDIDOS_KEY, OFFLINE_PEDIDOS_KEY)
-    migrateToSecure(LEGACY_MERMAS_KEY, OFFLINE_MERMAS_KEY)
+    const loadOfflineData = async () => {
+      // Migrar datos legacy si existen
+      await migrateToSecure(LEGACY_PEDIDOS_KEY, OFFLINE_PEDIDOS_KEY)
+      await migrateToSecure(LEGACY_MERMAS_KEY, OFFLINE_MERMAS_KEY)
 
-    // Cargar pedidos desde almacenamiento seguro
-    const storedPedidos = getSecureItem(OFFLINE_PEDIDOS_KEY, [])
-    if (Array.isArray(storedPedidos)) {
-      setPedidosPendientes(storedPedidos)
+      // Cargar pedidos desde almacenamiento seguro
+      const storedPedidos = await getSecureItem(OFFLINE_PEDIDOS_KEY, [])
+      if (Array.isArray(storedPedidos)) {
+        setPedidosPendientes(storedPedidos)
+      }
+
+      // Cargar mermas desde almacenamiento seguro
+      const storedMermas = await getSecureItem(OFFLINE_MERMAS_KEY, [])
+      if (Array.isArray(storedMermas)) {
+        setMermasPendientes(storedMermas)
+      }
     }
 
-    // Cargar mermas desde almacenamiento seguro
-    const storedMermas = getSecureItem(OFFLINE_MERMAS_KEY, [])
-    if (Array.isArray(storedMermas)) {
-      setMermasPendientes(storedMermas)
-    }
+    loadOfflineData()
   }, [])
 
   // Escuchar cambios de conexión
@@ -64,7 +68,8 @@ export function useOfflineSync() {
 
     setPedidosPendientes(prev => {
       const updated = [...prev, nuevoPedido]
-      setSecureItem(OFFLINE_PEDIDOS_KEY, updated)
+      // Guardar async sin bloquear
+      setSecureItem(OFFLINE_PEDIDOS_KEY, updated).catch(() => {})
       return updated
     })
 
@@ -82,7 +87,8 @@ export function useOfflineSync() {
 
     setMermasPendientes(prev => {
       const updated = [...prev, nuevaMerma]
-      setSecureItem(OFFLINE_MERMAS_KEY, updated)
+      // Guardar async sin bloquear
+      setSecureItem(OFFLINE_MERMAS_KEY, updated).catch(() => {})
       return updated
     })
 
@@ -93,7 +99,8 @@ export function useOfflineSync() {
   const eliminarPedidoOffline = useCallback((offlineId) => {
     setPedidosPendientes(prev => {
       const updated = prev.filter(p => p.offlineId !== offlineId)
-      setSecureItem(OFFLINE_PEDIDOS_KEY, updated)
+      // Guardar async sin bloquear
+      setSecureItem(OFFLINE_PEDIDOS_KEY, updated).catch(() => {})
       return updated
     })
   }, [])
@@ -102,7 +109,8 @@ export function useOfflineSync() {
   const eliminarMermaOffline = useCallback((offlineId) => {
     setMermasPendientes(prev => {
       const updated = prev.filter(m => m.offlineId !== offlineId)
-      setSecureItem(OFFLINE_MERMAS_KEY, updated)
+      // Guardar async sin bloquear
+      setSecureItem(OFFLINE_MERMAS_KEY, updated).catch(() => {})
       return updated
     })
   }, [])
