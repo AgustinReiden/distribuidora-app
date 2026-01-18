@@ -1,9 +1,22 @@
 /**
  * Componente AccionesDropdown para pedidos
- * Menú desplegable con acciones disponibles para un pedido
+ * Menú desplegable accesible con acciones disponibles para un pedido
+ *
+ * Características de accesibilidad:
+ * - Navegación por teclado (flechas arriba/abajo, Enter, Escape)
+ * - role="menu" y role="menuitem" automáticos
+ * - aria-expanded en el trigger
+ * - Focus visible en items
  */
-import React, { useState, useRef, useEffect, memo } from 'react';
+import React, { memo, useMemo } from 'react';
 import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator
+} from '../ui/DropdownMenu';
 
 function AccionesDropdown({
   pedido,
@@ -18,117 +31,108 @@ function AccionesDropdown({
   onRevertir,
   onEliminar
 }) {
-  const [abierto, setAbierto] = useState(false);
-  const dropdownRef = useRef(null);
+  // Memoizar acciones para evitar recálculos innecesarios
+  const acciones = useMemo(() => {
+    const items = [];
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setAbierto(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const acciones = [];
-
-  // Siempre visible
-  acciones.push({
-    label: 'Ver Historial',
-    icon: History,
-    onClick: () => onHistorial(pedido),
-    color: 'text-gray-700'
-  });
-
-  // Admin o preventista pueden editar
-  if (isAdmin || isPreventista) {
-    acciones.push({
-      label: 'Editar',
-      icon: Edit2,
-      onClick: () => onEditar(pedido),
-      color: 'text-blue-700'
+    // Siempre visible
+    items.push({
+      label: 'Ver Historial',
+      icon: History,
+      onClick: () => onHistorial(pedido),
+      className: 'text-gray-700 dark:text-gray-300'
     });
-  }
 
-  // Admin puede preparar si está pendiente
-  if (isAdmin && pedido.estado === 'pendiente') {
-    acciones.push({
-      label: 'Marcar en Preparación',
-      icon: Package,
-      onClick: () => onPreparar(pedido),
-      color: 'text-orange-700'
-    });
-  }
+    // Admin o preventista pueden editar
+    if (isAdmin || isPreventista) {
+      items.push({
+        label: 'Editar',
+        icon: Edit2,
+        onClick: () => onEditar(pedido),
+        className: 'text-blue-700 dark:text-blue-400'
+      });
+    }
 
-  // Admin puede asignar si no está entregado
-  if (isAdmin && pedido.estado !== 'entregado') {
-    acciones.push({
-      label: pedido.transportista ? 'Reasignar Transportista' : 'Asignar Transportista',
-      icon: User,
-      onClick: () => onAsignar(pedido),
-      color: 'text-orange-700'
-    });
-  }
+    // Admin puede preparar si está pendiente
+    if (isAdmin && pedido.estado === 'pendiente') {
+      items.push({
+        label: 'Marcar en Preparación',
+        icon: Package,
+        onClick: () => onPreparar(pedido),
+        className: 'text-orange-700 dark:text-orange-400'
+      });
+    }
 
-  // Transportista o admin pueden marcar entregado
-  if ((isTransportista || isAdmin) && pedido.estado === 'asignado') {
-    acciones.push({
-      label: 'Marcar Entregado',
-      icon: Check,
-      onClick: () => onEntregado(pedido),
-      color: 'text-green-700'
-    });
-  }
+    // Admin puede asignar si no está entregado
+    if (isAdmin && pedido.estado !== 'entregado') {
+      items.push({
+        label: pedido.transportista ? 'Reasignar Transportista' : 'Asignar Transportista',
+        icon: User,
+        onClick: () => onAsignar(pedido),
+        className: 'text-orange-700 dark:text-orange-400'
+      });
+    }
 
-  // Admin puede revertir si está entregado
-  if (isAdmin && pedido.estado === 'entregado') {
-    acciones.push({
-      label: 'Revertir Entrega',
-      icon: AlertTriangle,
-      onClick: () => onRevertir(pedido),
-      color: 'text-yellow-700'
-    });
-  }
+    // Transportista o admin pueden marcar entregado
+    if ((isTransportista || isAdmin) && pedido.estado === 'asignado') {
+      items.push({
+        label: 'Marcar Entregado',
+        icon: Check,
+        onClick: () => onEntregado(pedido),
+        className: 'text-green-700 dark:text-green-400'
+      });
+    }
 
-  // Admin puede eliminar
-  if (isAdmin) {
-    acciones.push({
-      label: 'Eliminar',
-      icon: Trash2,
-      onClick: () => onEliminar(pedido.id),
-      color: 'text-red-600',
-      divider: true
-    });
-  }
+    // Admin puede revertir si está entregado
+    if (isAdmin && pedido.estado === 'entregado') {
+      items.push({
+        label: 'Revertir Entrega',
+        icon: AlertTriangle,
+        onClick: () => onRevertir(pedido),
+        className: 'text-yellow-700 dark:text-yellow-400'
+      });
+    }
+
+    // Admin puede eliminar (con separador)
+    if (isAdmin) {
+      items.push({
+        label: 'Eliminar',
+        icon: Trash2,
+        onClick: () => onEliminar(pedido.id),
+        className: 'text-red-600 dark:text-red-400',
+        divider: true
+      });
+    }
+
+    return items;
+  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onAsignar, onEntregado, onRevertir, onEliminar]);
 
   return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={() => setAbierto(!abierto)}
-        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-        aria-label="Más acciones"
-      >
-        <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-      </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+          aria-label="Más acciones"
+        >
+          <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+        </button>
+      </DropdownMenuTrigger>
 
-      {abierto && (
-        <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border dark:border-gray-700 z-50 py-1">
-          {acciones.map((accion, idx) => (
-            <React.Fragment key={idx}>
-              {accion.divider && <div className="border-t dark:border-gray-700 my-1" />}
-              <button
-                onClick={() => { accion.onClick(); setAbierto(false); }}
-                className={`w-full flex items-center space-x-2 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 ${accion.color} dark:text-gray-300`}
-              >
-                <accion.icon className="w-4 h-4" />
-                <span>{accion.label}</span>
-              </button>
-            </React.Fragment>
-          ))}
-        </div>
-      )}
-    </div>
+      <DropdownMenuContent align="end" className="w-56">
+        {acciones.map((accion, idx) => (
+          <React.Fragment key={idx}>
+            {accion.divider && <DropdownMenuSeparator />}
+            <DropdownMenuItem
+              onClick={accion.onClick}
+              className={accion.className}
+            >
+              <accion.icon className="w-4 h-4" />
+              <span>{accion.label}</span>
+            </DropdownMenuItem>
+          </React.Fragment>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
