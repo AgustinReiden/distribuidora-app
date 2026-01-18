@@ -1,42 +1,56 @@
-import React, { memo, useEffect } from 'react';
-import { X } from 'lucide-react';
+/**
+ * Modal base reutilizable con accesibilidad completa
+ *
+ * Usa Radix UI Dialog internamente para:
+ * - role="dialog" y aria-modal="true" automáticos
+ * - Focus trapping (el foco no sale del modal)
+ * - Cierre con tecla Escape
+ * - aria-labelledby vinculado al título
+ * - Devuelve el foco al elemento que abrió el modal
+ */
+import React, { memo } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogBody
+} from '../ui/Dialog';
+import { cn } from '../../lib/utils';
 
-// Modal base reutilizable
-const ModalBase = memo(function ModalBase({ children, onClose, title, maxWidth = 'max-w-md' }) {
-  // Bloquear scroll del body cuando el modal está abierto
-  useEffect(() => {
-    const originalStyle = window.getComputedStyle(document.body).overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = originalStyle;
-    };
-  }, []);
+const MAX_WIDTH_MAP = {
+  'max-w-sm': 'max-w-sm',
+  'max-w-md': 'max-w-md',
+  'max-w-lg': 'max-w-lg',
+  'max-w-xl': 'max-w-xl',
+  'max-w-2xl': 'max-w-2xl',
+  'max-w-3xl': 'max-w-3xl',
+  'max-w-4xl': 'max-w-4xl',
+  'max-w-5xl': 'max-w-5xl',
+};
 
-  // Prevenir scroll del fondo en móviles
-  const handleTouchMove = (e) => {
-    e.stopPropagation();
-  };
-
+const ModalBase = memo(function ModalBase({
+  children,
+  onClose,
+  title,
+  maxWidth = 'max-w-md',
+  className
+}) {
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-hidden"
-      onTouchMove={handleTouchMove}
-    >
-      <div
-        className={`bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden`}
-        style={{ overscrollBehavior: 'contain' }}
+    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className={cn(MAX_WIDTH_MAP[maxWidth] || maxWidth, className)}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
       >
-        <div className="flex justify-between items-center p-4 border-b dark:border-gray-700 flex-shrink-0">
-          <h2 className="text-xl font-semibold dark:text-white">{title}</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-            <X className="w-6 h-6 text-gray-500 dark:text-gray-400" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain">
+        <DialogHeader onClose={onClose}>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
           {children}
-        </div>
-      </div>
-    </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 });
 
