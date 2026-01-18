@@ -145,8 +145,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
             <input
               type="number"
               value={form.stock}
-              onChange={e => handleFieldChange('stock', parseInt(e.target.value) || '')}
+              onChange={e => {
+                const val = e.target.value;
+                // Permitir campo vacío temporalmente mientras escribe, pero validar como número
+                handleFieldChange('stock', val === '' ? '' : (parseInt(val, 10) || 0));
+              }}
               className={inputClass('stock')}
+              min="0"
             />
             {errores.stock && <p className="text-red-500 text-xs mt-1">{errores.stock}</p>}
           </div>

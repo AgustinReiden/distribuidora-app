@@ -30,8 +30,14 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
     setError('')
 
     const montoNum = parseFloat(monto)
-    if (!montoNum || montoNum <= 0) {
-      setError('Ingrese un monto válido')
+    if (Number.isNaN(montoNum) || montoNum <= 0) {
+      setError('Ingrese un monto válido mayor a $0')
+      return
+    }
+
+    // Validar número de cheque obligatorio para pagos con cheque
+    if (formaPago === 'cheque' && !referencia.trim()) {
+      setError('El número de cheque es obligatorio')
       return
     }
 
@@ -224,15 +230,23 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
           {(formaPago === 'transferencia' || formaPago === 'cheque') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {formaPago === 'cheque' ? 'Número de Cheque' : 'Referencia/Comprobante'}
+                {formaPago === 'cheque' ? 'Número de Cheque *' : 'Referencia/Comprobante'}
               </label>
               <input
                 type="text"
                 value={referencia}
                 onChange={(e) => setReferencia(e.target.value)}
                 placeholder={formaPago === 'cheque' ? 'Ej: 12345678' : 'Ej: TRF-001234'}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className={`w-full px-4 py-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                  formaPago === 'cheque' && !referencia.trim()
+                    ? 'border-yellow-400 dark:border-yellow-600'
+                    : 'border-gray-300 dark:border-gray-600'
+                }`}
+                required={formaPago === 'cheque'}
               />
+              {formaPago === 'cheque' && !referencia.trim() && (
+                <p className="text-xs text-yellow-600 mt-1">Campo obligatorio para pagos con cheque</p>
+              )}
             </div>
           )}
 
