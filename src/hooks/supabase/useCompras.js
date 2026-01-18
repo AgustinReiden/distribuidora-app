@@ -187,13 +187,25 @@ export function useCompras() {
     const compra = compras.find(c => c.id === compraId)
     if (!compra) throw new Error('Compra no encontrada')
 
-    // Revertir stock de cada item
-    for (const item of (compra.items || [])) {
-      const nuevoStock = (item.stock_nuevo || 0) - item.cantidad
-      await supabase
+    // Obtener stock ACTUAL de todos los productos afectados
+    const productIds = (compra.items || []).map(i => i.producto_id).filter(Boolean)
+    if (productIds.length > 0) {
+      const { data: productosActuales } = await supabase
         .from('productos')
-        .update({ stock: Math.max(0, nuevoStock) })
-        .eq('id', item.producto_id)
+        .select('id, stock')
+        .in('id', productIds)
+
+      const stockMap = Object.fromEntries((productosActuales || []).map(p => [p.id, p.stock || 0]))
+
+      // Revertir stock de cada item (restar del stock ACTUAL, no del guardado)
+      for (const item of (compra.items || [])) {
+        const stockActual = stockMap[item.producto_id] || 0
+        const nuevoStock = stockActual - item.cantidad
+        await supabase
+          .from('productos')
+          .update({ stock: Math.max(0, nuevoStock) })
+          .eq('id', item.producto_id)
+      }
     }
 
     // Marcar compra como cancelada

@@ -23,6 +23,10 @@ export function useFichaCliente(clienteId) {
       const pedidosPagados = pedidosData.filter(p => p.estado_pago === 'pagado')
       const pedidosPendientes = pedidosData.filter(p => p.estado_pago !== 'pagado')
 
+      // Calcular montos considerando monto_pagado (pagos parciales y directos)
+      const totalPagadoEnPedidos = pedidosData.reduce((s, p) => s + (p.monto_pagado || 0), 0)
+      const totalPendienteReal = pedidosData.reduce((s, p) => s + ((p.total || 0) - (p.monto_pagado || 0)), 0)
+
       const productosFrecuencia = {}
       pedidosData.forEach(p => {
         p.items?.forEach(item => {
@@ -53,9 +57,9 @@ export function useFichaCliente(clienteId) {
         totalPedidos: pedidosData.length,
         totalCompras,
         pedidosPagados: pedidosPagados.length,
-        montoPagado: pedidosPagados.reduce((s, p) => s + (p.total || 0), 0),
+        montoPagado: totalPagadoEnPedidos,
         pedidosPendientes: pedidosPendientes.length,
-        montoPendiente: pedidosPendientes.reduce((s, p) => s + (p.total || 0), 0),
+        montoPendiente: totalPendienteReal,
         ticketPromedio,
         frecuenciaCompra,
         diasDesdeUltimoPedido: diasDesdeUltimoP,

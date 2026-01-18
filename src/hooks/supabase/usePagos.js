@@ -64,18 +64,31 @@ export function usePagos() {
         const { data: pagosCliente } = await supabase.from('pagos').select('*').eq('cliente_id', clienteId)
 
         const totalCompras = (pedidosCliente || []).reduce((s, p) => s + (p.total || 0), 0)
-        const totalPagos = (pagosCliente || []).reduce((s, p) => s + (p.monto || 0), 0)
+        const totalPagadoEnPedidos = (pedidosCliente || []).reduce((s, p) => s + (p.monto_pagado || 0), 0)
+        const totalPagosRegistrados = (pagosCliente || []).reduce((s, p) => s + (p.monto || 0), 0)
+        const saldoActual = totalCompras - totalPagadoEnPedidos - totalPagosRegistrados
+
+        // Obtener última fecha correctamente (Math.max no funciona con Date)
+        const ultimoPedidoFecha = (pedidosCliente || []).reduce((max, p) => {
+          const fecha = new Date(p.created_at)
+          return fecha > max ? fecha : max
+        }, new Date(0))
+
+        const ultimoPagoFecha = (pagosCliente || []).reduce((max, p) => {
+          const fecha = new Date(p.created_at)
+          return fecha > max ? fecha : max
+        }, new Date(0))
 
         return {
-          saldo_actual: totalCompras - totalPagos,
+          saldo_actual: saldoActual,
           limite_credito: cliente?.limite_credito || 0,
-          credito_disponible: (cliente?.limite_credito || 0) - (totalCompras - totalPagos),
+          credito_disponible: (cliente?.limite_credito || 0) - saldoActual,
           total_pedidos: (pedidosCliente || []).length,
           total_compras: totalCompras,
-          total_pagos: totalPagos,
+          total_pagos: totalPagadoEnPedidos + totalPagosRegistrados,
           pedidos_pendientes_pago: (pedidosCliente || []).filter(p => p.estado_pago !== 'pagado').length,
-          ultimo_pedido: pedidosCliente?.length ? Math.max(...pedidosCliente.map(p => new Date(p.created_at))) : null,
-          ultimo_pago: pagosCliente?.length ? Math.max(...pagosCliente.map(p => new Date(p.created_at))) : null
+          ultimo_pedido: pedidosCliente?.length ? ultimoPedidoFecha.toISOString() : null,
+          ultimo_pago: pagosCliente?.length ? ultimoPagoFecha.toISOString() : null
         }
       }
       return data

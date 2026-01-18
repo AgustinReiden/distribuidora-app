@@ -30,13 +30,7 @@ export function useMermas() {
   useEffect(() => { fetchMermas() }, [])
 
   const registrarMerma = async (mermaData) => {
-    const { error: stockError } = await supabase
-      .from('productos')
-      .update({ stock: mermaData.stockNuevo })
-      .eq('id', mermaData.productoId)
-
-    if (stockError) throw stockError
-
+    // Primero intentar insertar la merma (para fallar antes de modificar stock)
     const { data, error } = await supabase
       .from('mermas_stock')
       .insert([{
@@ -52,10 +46,28 @@ export function useMermas() {
       .single()
 
     if (error) {
+      // Si la tabla no existe, solo actualizar stock (modo fallback)
       if (error.message.includes('does not exist')) {
+        const { error: stockError } = await supabase
+          .from('productos')
+          .update({ stock: mermaData.stockNuevo })
+          .eq('id', mermaData.productoId)
+        if (stockError) throw stockError
         return { success: true, merma: null, soloStock: true }
       }
       throw error
+    }
+
+    // La merma se insertó correctamente, ahora actualizar stock
+    const { error: stockError } = await supabase
+      .from('productos')
+      .update({ stock: mermaData.stockNuevo })
+      .eq('id', mermaData.productoId)
+
+    if (stockError) {
+      // Revertir: eliminar la merma si el stock falla
+      await supabase.from('mermas_stock').delete().eq('id', data.id)
+      throw stockError
     }
 
     setMermas(prev => [data, ...prev])
@@ -70,10 +82,14 @@ export function useMermas() {
     let mermasFiltradas = [...mermas]
 
     if (fechaDesde) {
-      mermasFiltradas = mermasFiltradas.filter(m => m.created_at >= fechaDesde)
+      // Normalizar fecha desde (inicio del día)
+      const desde = fechaDesde.includes('T') ? fechaDesde.split('T')[0] : fechaDesde
+      mermasFiltradas = mermasFiltradas.filter(m => m.created_at >= desde)
     }
     if (fechaHasta) {
-      mermasFiltradas = mermasFiltradas.filter(m => m.created_at <= fechaHasta + 'T23:59:59')
+      // Normalizar fecha hasta (fin del día)
+      const hasta = fechaHasta.includes('T') ? fechaHasta.split('T')[0] : fechaHasta
+      mermasFiltradas = mermasFiltradas.filter(m => m.created_at <= hasta + 'T23:59:59')
     }
 
     const porMotivo = {}
