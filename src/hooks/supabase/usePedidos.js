@@ -27,18 +27,33 @@ export function usePedidos() {
         return
       }
 
-      const pedidosCompletos = await Promise.all((data || []).map(async (pedido) => {
-        let usuario = null, transportista = null
-        if (pedido.usuario_id) {
-          const { data: u } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.usuario_id).maybeSingle()
-          usuario = u
+      // Obtener IDs únicos de usuarios y transportistas para hacer UNA sola query
+      const perfilIds = new Set()
+      for (const pedido of (data || [])) {
+        if (pedido.usuario_id) perfilIds.add(pedido.usuario_id)
+        if (pedido.transportista_id) perfilIds.add(pedido.transportista_id)
+      }
+
+      // Obtener todos los perfiles necesarios en una sola query
+      let perfilesMap = {}
+      if (perfilIds.size > 0) {
+        const { data: perfiles } = await supabase
+          .from('perfiles')
+          .select('id, nombre, email')
+          .in('id', Array.from(perfilIds))
+
+        if (perfiles) {
+          perfilesMap = Object.fromEntries(perfiles.map(p => [p.id, p]))
         }
-        if (pedido.transportista_id) {
-          const { data: t } = await supabase.from('perfiles').select('id, nombre, email').eq('id', pedido.transportista_id).maybeSingle()
-          transportista = t
-        }
-        return { ...pedido, usuario, transportista }
+      }
+
+      // Mapear perfiles a pedidos
+      const pedidosCompletos = (data || []).map(pedido => ({
+        ...pedido,
+        usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] || null : null,
+        transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] || null : null
       }))
+
       setPedidos(pedidosCompletos)
     } catch (error) {
       notifyError('Error al cargar pedidos: ' + error.message)
