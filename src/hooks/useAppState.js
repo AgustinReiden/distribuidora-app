@@ -1,9 +1,79 @@
 /**
  * Hook consolidado para el estado de la aplicación
- * Extrae todos los useState de App.jsx para mejor organización
+ * Usa useReducer para modales y estados de edición para evitar re-renders innecesarios
  */
-import { useState, useMemo } from 'react';
+import { useState, useReducer, useMemo, useCallback } from 'react';
 import { ITEMS_PER_PAGE } from '../utils/formatters';
+
+// ============================================================================
+// REDUCER PARA MODALES
+// Un solo estado para todos los modales reduce re-renders significativamente
+// ============================================================================
+
+const MODAL_NAMES = [
+  'cliente', 'producto', 'pedido', 'usuario', 'asignar', 'filtroFecha',
+  'historial', 'editarPedido', 'exportarPDF', 'optimizarRuta', 'fichaCliente',
+  'registrarPago', 'mermaStock', 'historialMermas', 'compra', 'detalleCompra',
+  'proveedor', 'importarPrecios', 'pedidosEliminados'
+];
+
+const initialModalsState = {
+  ...Object.fromEntries(MODAL_NAMES.map(name => [name, false])),
+  confirm: { visible: false }
+};
+
+function modalsReducer(state, action) {
+  switch (action.type) {
+    case 'OPEN_MODAL':
+      return { ...state, [action.modal]: true };
+    case 'CLOSE_MODAL':
+      return { ...state, [action.modal]: false };
+    case 'SET_CONFIRM':
+      return { ...state, confirm: action.config };
+    case 'CLOSE_ALL':
+      return initialModalsState;
+    default:
+      return state;
+  }
+}
+
+// ============================================================================
+// REDUCER PARA ENTIDADES EN EDICIÓN
+// Consolida todos los estados de "editando" en un solo objeto
+// ============================================================================
+
+const initialEditingState = {
+  cliente: null,
+  producto: null,
+  usuario: null,
+  pedidoAsignando: null,
+  pedidoHistorial: null,
+  historialCambios: [],
+  pedidoEditando: null,
+  clienteFicha: null,
+  clientePago: null,
+  saldoPendienteCliente: 0,
+  productoMerma: null,
+  compraDetalle: null,
+  proveedor: null
+};
+
+function editingReducer(state, action) {
+  switch (action.type) {
+    case 'SET_EDITING':
+      return { ...state, [action.entity]: action.data };
+    case 'CLEAR_EDITING':
+      return { ...state, [action.entity]: action.entity === 'historialCambios' ? [] : null };
+    case 'CLEAR_ALL':
+      return initialEditingState;
+    default:
+      return state;
+  }
+}
+
+// ============================================================================
+// HOOK PRINCIPAL
+// ============================================================================
 
 export function useAppState(perfil) {
   // Vista activa
@@ -13,42 +83,11 @@ export function useAppState(perfil) {
   const [fechaRecorridos, setFechaRecorridos] = useState(() => new Date().toISOString().split('T')[0]);
   const [estadisticasRecorridos, setEstadisticasRecorridos] = useState(null);
 
-  // Estados de modales
-  const [modalCliente, setModalCliente] = useState(false);
-  const [modalProducto, setModalProducto] = useState(false);
-  const [modalPedido, setModalPedido] = useState(false);
-  const [modalUsuario, setModalUsuario] = useState(false);
-  const [modalAsignar, setModalAsignar] = useState(false);
-  const [modalConfirm, setModalConfirm] = useState({ visible: false });
-  const [modalFiltroFecha, setModalFiltroFecha] = useState(false);
-  const [modalHistorial, setModalHistorial] = useState(false);
-  const [modalEditarPedido, setModalEditarPedido] = useState(false);
-  const [modalExportarPDF, setModalExportarPDF] = useState(false);
-  const [modalOptimizarRuta, setModalOptimizarRuta] = useState(false);
-  const [modalFichaCliente, setModalFichaCliente] = useState(false);
-  const [modalRegistrarPago, setModalRegistrarPago] = useState(false);
-  const [modalMermaStock, setModalMermaStock] = useState(false);
-  const [modalHistorialMermas, setModalHistorialMermas] = useState(false);
-  const [productoMerma, setProductoMerma] = useState(null);
-  const [modalCompra, setModalCompra] = useState(false);
-  const [modalDetalleCompra, setModalDetalleCompra] = useState(false);
-  const [compraDetalle, setCompraDetalle] = useState(null);
-  const [modalProveedor, setModalProveedor] = useState(false);
-  const [proveedorEditando, setProveedorEditando] = useState(null);
-  const [modalImportarPrecios, setModalImportarPrecios] = useState(false);
-  const [modalPedidosEliminados, setModalPedidosEliminados] = useState(false);
+  // Reducer para modales (un solo dispatch para todos)
+  const [modalsState, dispatchModals] = useReducer(modalsReducer, initialModalsState);
 
-  // Estados de edición
-  const [clienteEditando, setClienteEditando] = useState(null);
-  const [productoEditando, setProductoEditando] = useState(null);
-  const [usuarioEditando, setUsuarioEditando] = useState(null);
-  const [pedidoAsignando, setPedidoAsignando] = useState(null);
-  const [pedidoHistorial, setPedidoHistorial] = useState(null);
-  const [historialCambios, setHistorialCambios] = useState([]);
-  const [pedidoEditando, setPedidoEditando] = useState(null);
-  const [clienteFicha, setClienteFicha] = useState(null);
-  const [clientePago, setClientePago] = useState(null);
-  const [saldoPendienteCliente, setSaldoPendienteCliente] = useState(0);
+  // Reducer para entidades en edición
+  const [editingState, dispatchEditing] = useReducer(editingReducer, initialEditingState);
 
   // Estados del formulario de pedido
   const [nuevoPedido, setNuevoPedido] = useState({
@@ -59,15 +98,15 @@ export function useAppState(perfil) {
     estadoPago: 'pendiente',
     montoPagado: 0
   });
+
+  // Estados de UI
   const [busqueda, setBusqueda] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
-
-  // Paginación
   const [paginaActual, setPaginaActual] = useState(1);
 
   // Reset de nuevo pedido
-  const resetNuevoPedido = () => {
+  const resetNuevoPedido = useCallback(() => {
     setNuevoPedido({
       clienteId: '',
       items: [],
@@ -76,7 +115,78 @@ export function useAppState(perfil) {
       estadoPago: 'pendiente',
       montoPagado: 0
     });
-  };
+  }, []);
+
+  // ============================================================================
+  // API DE MODALES (mantiene compatibilidad con código existente)
+  // ============================================================================
+
+  const modales = useMemo(() => {
+    const createModalApi = (name) => ({
+      open: modalsState[name],
+      setOpen: (value) => {
+        if (value) {
+          dispatchModals({ type: 'OPEN_MODAL', modal: name });
+        } else {
+          dispatchModals({ type: 'CLOSE_MODAL', modal: name });
+        }
+      }
+    });
+
+    return {
+      cliente: createModalApi('cliente'),
+      producto: createModalApi('producto'),
+      pedido: createModalApi('pedido'),
+      usuario: createModalApi('usuario'),
+      asignar: createModalApi('asignar'),
+      filtroFecha: createModalApi('filtroFecha'),
+      historial: createModalApi('historial'),
+      editarPedido: createModalApi('editarPedido'),
+      exportarPDF: createModalApi('exportarPDF'),
+      optimizarRuta: createModalApi('optimizarRuta'),
+      fichaCliente: createModalApi('fichaCliente'),
+      registrarPago: createModalApi('registrarPago'),
+      mermaStock: createModalApi('mermaStock'),
+      historialMermas: createModalApi('historialMermas'),
+      compra: createModalApi('compra'),
+      detalleCompra: createModalApi('detalleCompra'),
+      proveedor: createModalApi('proveedor'),
+      importarPrecios: createModalApi('importarPrecios'),
+      pedidosEliminados: createModalApi('pedidosEliminados'),
+      confirm: {
+        config: modalsState.confirm,
+        setConfig: (config) => dispatchModals({ type: 'SET_CONFIRM', config })
+      }
+    };
+  }, [modalsState]);
+
+  // ============================================================================
+  // API DE EDICIÓN (mantiene compatibilidad con código existente)
+  // ============================================================================
+
+  // Helpers para crear setters
+  const createSetter = useCallback((entity) => (data) => {
+    dispatchEditing({ type: 'SET_EDITING', entity, data });
+  }, []);
+
+  const createClearer = useCallback((entity) => () => {
+    dispatchEditing({ type: 'CLEAR_EDITING', entity });
+  }, []);
+
+  // Setters memoizados para evitar re-renders
+  const setClienteEditando = useMemo(() => createSetter('cliente'), [createSetter]);
+  const setProductoEditando = useMemo(() => createSetter('producto'), [createSetter]);
+  const setUsuarioEditando = useMemo(() => createSetter('usuario'), [createSetter]);
+  const setPedidoAsignando = useMemo(() => createSetter('pedidoAsignando'), [createSetter]);
+  const setPedidoHistorial = useMemo(() => createSetter('pedidoHistorial'), [createSetter]);
+  const setHistorialCambios = useMemo(() => createSetter('historialCambios'), [createSetter]);
+  const setPedidoEditando = useMemo(() => createSetter('pedidoEditando'), [createSetter]);
+  const setClienteFicha = useMemo(() => createSetter('clienteFicha'), [createSetter]);
+  const setClientePago = useMemo(() => createSetter('clientePago'), [createSetter]);
+  const setSaldoPendienteCliente = useMemo(() => createSetter('saldoPendienteCliente'), [createSetter]);
+  const setProductoMerma = useMemo(() => createSetter('productoMerma'), [createSetter]);
+  const setCompraDetalle = useMemo(() => createSetter('compraDetalle'), [createSetter]);
+  const setProveedorEditando = useMemo(() => createSetter('proveedor'), [createSetter]);
 
   return {
     // Vista
@@ -89,56 +199,35 @@ export function useAppState(perfil) {
     estadisticasRecorridos,
     setEstadisticasRecorridos,
 
-    // Modales
-    modales: {
-      cliente: { open: modalCliente, setOpen: setModalCliente },
-      producto: { open: modalProducto, setOpen: setModalProducto },
-      pedido: { open: modalPedido, setOpen: setModalPedido },
-      usuario: { open: modalUsuario, setOpen: setModalUsuario },
-      asignar: { open: modalAsignar, setOpen: setModalAsignar },
-      confirm: { config: modalConfirm, setConfig: setModalConfirm },
-      filtroFecha: { open: modalFiltroFecha, setOpen: setModalFiltroFecha },
-      historial: { open: modalHistorial, setOpen: setModalHistorial },
-      editarPedido: { open: modalEditarPedido, setOpen: setModalEditarPedido },
-      exportarPDF: { open: modalExportarPDF, setOpen: setModalExportarPDF },
-      optimizarRuta: { open: modalOptimizarRuta, setOpen: setModalOptimizarRuta },
-      fichaCliente: { open: modalFichaCliente, setOpen: setModalFichaCliente },
-      registrarPago: { open: modalRegistrarPago, setOpen: setModalRegistrarPago },
-      mermaStock: { open: modalMermaStock, setOpen: setModalMermaStock },
-      historialMermas: { open: modalHistorialMermas, setOpen: setModalHistorialMermas },
-      compra: { open: modalCompra, setOpen: setModalCompra },
-      detalleCompra: { open: modalDetalleCompra, setOpen: setModalDetalleCompra },
-      proveedor: { open: modalProveedor, setOpen: setModalProveedor },
-      importarPrecios: { open: modalImportarPrecios, setOpen: setModalImportarPrecios },
-      pedidosEliminados: { open: modalPedidosEliminados, setOpen: setModalPedidosEliminados }
-    },
+    // Modales (API compatible con código existente)
+    modales,
 
-    // Estados de edición
-    clienteEditando,
+    // Estados de edición (valores del reducer)
+    clienteEditando: editingState.cliente,
     setClienteEditando,
-    productoEditando,
+    productoEditando: editingState.producto,
     setProductoEditando,
-    usuarioEditando,
+    usuarioEditando: editingState.usuario,
     setUsuarioEditando,
-    pedidoAsignando,
+    pedidoAsignando: editingState.pedidoAsignando,
     setPedidoAsignando,
-    pedidoHistorial,
+    pedidoHistorial: editingState.pedidoHistorial,
     setPedidoHistorial,
-    historialCambios,
+    historialCambios: editingState.historialCambios,
     setHistorialCambios,
-    pedidoEditando,
+    pedidoEditando: editingState.pedidoEditando,
     setPedidoEditando,
-    clienteFicha,
+    clienteFicha: editingState.clienteFicha,
     setClienteFicha,
-    clientePago,
+    clientePago: editingState.clientePago,
     setClientePago,
-    saldoPendienteCliente,
+    saldoPendienteCliente: editingState.saldoPendienteCliente,
     setSaldoPendienteCliente,
-    productoMerma,
+    productoMerma: editingState.productoMerma,
     setProductoMerma,
-    compraDetalle,
+    compraDetalle: editingState.compraDetalle,
     setCompraDetalle,
-    proveedorEditando,
+    proveedorEditando: editingState.proveedor,
     setProveedorEditando,
 
     // Formulario de pedido
