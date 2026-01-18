@@ -102,9 +102,17 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
       return
     }
 
-    if (!usarProveedorNuevo && !proveedorId && !proveedorNombre.trim()) {
-      setError('Debe seleccionar o ingresar un proveedor')
-      return
+    // Validar proveedor según el modo seleccionado
+    if (usarProveedorNuevo) {
+      if (!proveedorNombre.trim()) {
+        setError('Debe ingresar el nombre del proveedor')
+        return
+      }
+    } else {
+      if (!proveedorId) {
+        setError('Debe seleccionar un proveedor')
+        return
+      }
     }
 
     // Validar items

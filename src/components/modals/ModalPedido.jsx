@@ -48,10 +48,19 @@ const ModalPedido = memo(function ModalPedido({
     ).slice(0, 8);
   }, [clientes, busquedaCliente]);
 
-  const clienteSeleccionado = clientes.find(c => c.id === parseInt(nuevoPedido.clienteId));
+  const clienteSeleccionado = useMemo(() => {
+    if (!nuevoPedido.clienteId) return null;
+    const id = typeof nuevoPedido.clienteId === 'number'
+      ? nuevoPedido.clienteId
+      : parseInt(nuevoPedido.clienteId, 10);
+    return Number.isNaN(id) ? null : clientes.find(c => c.id === id);
+  }, [clientes, nuevoPedido.clienteId]);
 
   const handleCrearClienteRapido = async () => {
-    if (!nuevoCliente.nombre || !nuevoCliente.nombreFantasia || !nuevoCliente.direccion) return;
+    const nombre = nuevoCliente.nombre?.trim();
+    const nombreFantasia = nuevoCliente.nombreFantasia?.trim();
+    const direccion = nuevoCliente.direccion?.trim();
+    if (!nombre || !nombreFantasia || !direccion) return;
     setGuardandoCliente(true);
     try {
       const cliente = await onCrearCliente(nuevoCliente);
