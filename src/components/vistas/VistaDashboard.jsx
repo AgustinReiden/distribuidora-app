@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, memo } from 'react';
 import { RefreshCw, Download, DollarSign, ShoppingCart, Clock, Package, Truck, Check, TrendingUp, TrendingDown, Minus, Target, Users, AlertTriangle } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
@@ -13,7 +13,7 @@ const periodoLabels = {
 };
 
 // Componente de indicador de tendencia
-function TendenciaIndicator({ valor, comparacion, invertido = false }) {
+const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion, invertido = false }) {
   if (!comparacion || comparacion === 0) {
     return (
       <span className="flex items-center text-xs text-gray-500">
@@ -42,10 +42,10 @@ function TendenciaIndicator({ valor, comparacion, invertido = false }) {
       {Math.abs(porcentaje).toFixed(1)}% vs período anterior
     </span>
   );
-}
+});
 
 // Componente de tarjeta de métrica grande
-function MetricaCard({ icono: Icono, titulo, valor, subtitulo, colorClase, tendencia }) {
+const MetricaCard = memo(function MetricaCard({ icono: Icono, titulo, valor, subtitulo, colorClase, tendencia }) {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow">
       <div className="flex items-start justify-between">
@@ -65,10 +65,10 @@ function MetricaCard({ icono: Icono, titulo, valor, subtitulo, colorClase, tende
       </div>
     </div>
   );
-}
+});
 
 // Componente de tarjeta de estado pequeña
-function EstadoCard({ icono: Icono, titulo, valor, colorClase, onClick }) {
+const EstadoCard = memo(function EstadoCard({ icono: Icono, titulo, valor, colorClase, onClick }) {
   return (
     <button
       onClick={onClick}
@@ -83,10 +83,10 @@ function EstadoCard({ icono: Icono, titulo, valor, colorClase, onClick }) {
       <p className={`text-3xl font-bold ${colorClase.icon} mt-2`}>{valor}</p>
     </button>
   );
-}
+});
 
 // Componente de barra de progreso animada
-function BarraProgreso({ dia, ventas, maxVenta, index }) {
+const BarraProgreso = memo(function BarraProgreso({ dia, ventas, maxVenta, index }) {
   const porcentaje = maxVenta > 0 ? (ventas / maxVenta) * 100 : 0;
   const esHoy = index === 6; // Último día es hoy
 
@@ -117,7 +117,7 @@ function BarraProgreso({ dia, ventas, maxVenta, index }) {
       </div>
     </div>
   );
-}
+});
 
 export default function VistaDashboard({
   metricas,
