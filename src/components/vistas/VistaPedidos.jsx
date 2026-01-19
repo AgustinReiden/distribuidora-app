@@ -1,11 +1,18 @@
 /**
  * Vista principal de pedidos (refactorizada)
+ *
+ * Soporta dos modos de renderizado:
+ * - Paginación tradicional: para conjuntos pequeños de datos
+ * - Virtual scrolling: para listas grandes (>50 items), mejor rendimiento
  */
 import React from 'react';
 import { ShoppingCart, Plus, Route, FileDown, Trash2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
-import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
+import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista, VirtualizedPedidoList } from '../pedidos';
+
+// Umbral para activar virtual scrolling automáticamente
+const VIRTUAL_SCROLLING_THRESHOLD = 50;
 
 export default function VistaPedidos({
   pedidos,
@@ -24,6 +31,7 @@ export default function VistaPedidos({
   transportistas = [],
   loading,
   exportando,
+  useVirtualScrolling = 'auto', // 'auto' | true | false
   onBusquedaChange,
   onFiltrosChange,
   onPageChange,
@@ -41,6 +49,10 @@ export default function VistaPedidos({
   onEliminarPedido,
   onVerPedidosEliminados
 }) {
+  // Determinar si usar virtual scrolling
+  const shouldUseVirtualScrolling = useVirtualScrolling === true ||
+    (useVirtualScrolling === 'auto' && pedidosParaMostrar.length > VIRTUAL_SCROLLING_THRESHOLD);
+
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
     return (
@@ -132,7 +144,28 @@ export default function VistaPedidos({
           <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>No hay pedidos</p>
         </div>
+      ) : shouldUseVirtualScrolling ? (
+        /* Virtual scrolling para listas grandes - mejor rendimiento */
+        <>
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+            Mostrando {pedidosParaMostrar.length} pedidos
+          </div>
+          <VirtualizedPedidoList
+            pedidos={pedidosParaMostrar}
+            isAdmin={isAdmin}
+            isPreventista={isPreventista}
+            isTransportista={isTransportista}
+            onVerHistorial={onVerHistorial}
+            onEditarPedido={onEditarPedido}
+            onMarcarEnPreparacion={onMarcarEnPreparacion}
+            onAsignarTransportista={onAsignarTransportista}
+            onMarcarEntregado={onMarcarEntregado}
+            onDesmarcarEntregado={onDesmarcarEntregado}
+            onEliminarPedido={onEliminarPedido}
+          />
+        </>
       ) : (
+        /* Paginación tradicional para listas pequeñas */
         <>
           <div className="space-y-3">
             {pedidosPaginados.map(pedido => (

@@ -6,3 +6,4 @@ export { default as PedidoActions } from './PedidoActions';
 export { default as PedidoFilters } from './PedidoFilters';
 export { default as PedidoStats } from './PedidoStats';
 export { default as VistaRutaTransportista } from './VistaRutaTransportista';
+export { default as VirtualizedPedidoList } from './VirtualizedPedidoList';
