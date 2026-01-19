@@ -2,9 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import { initSentry } from './lib/sentry'
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Inicializar Sentry antes de renderizar la app
+initSentry()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

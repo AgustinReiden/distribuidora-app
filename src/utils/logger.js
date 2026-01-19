@@ -3,7 +3,10 @@
  *
  * Solo muestra logs en desarrollo, nunca en produccion.
  * No loguea datos sensibles (API keys, credenciales, coordenadas exactas, etc.)
+ * Errores en produccion se envian a Sentry automaticamente.
  */
+
+import { captureException, captureMessage, addBreadcrumb } from '../lib/sentry'
 
 const isDevelopment = import.meta.env.DEV || import.meta.env.MODE === 'development'
 
@@ -72,14 +75,27 @@ const logger = {
   },
 
   /**
-   * Log de error (solo en desarrollo)
-   * En produccion, podria enviarse a un servicio de monitoreo
+   * Log de error
+   * En desarrollo muestra en consola, en produccion envia a Sentry
    */
   error: (...args) => {
+    const sanitizedArgs = formatArgs(args)
+
     if (isDevelopment) {
-      console.error('[ERROR]', ...formatArgs(args))
+      console.error('[ERROR]', ...sanitizedArgs)
     }
-    // TODO: En produccion, enviar a servicio de monitoreo (Sentry, etc.)
+
+    // En produccion, enviar a Sentry
+    if (!isDevelopment) {
+      const firstArg = args[0]
+      if (firstArg instanceof Error) {
+        captureException(firstArg, {
+          extra: { additionalInfo: sanitizedArgs.slice(1) }
+        })
+      } else {
+        captureMessage(String(firstArg), 'error')
+      }
+    }
   },
 
   /**
