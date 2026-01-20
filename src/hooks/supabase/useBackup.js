@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import * as XLSX from 'xlsx'
+import { createMultiSheetExcel } from '../../utils/excel'
 import { supabase } from './base'
 
 export function useBackup() {
@@ -152,31 +152,32 @@ export function useBackup() {
         { 'Estado Pago': 'Pagado', 'Cantidad': pedidos.filter(p => p.estado_pago === 'pagado').length, 'Total': pedidos.filter(p => p.estado_pago === 'pagado').reduce((s, p) => s + (p.total || 0), 0) }
       ]
 
-      const wb = XLSX.utils.book_new()
-
-      const wsPedidos = XLSX.utils.json_to_sheet(datosPedidos)
-      const wsItems = XLSX.utils.json_to_sheet(datosItems)
-      const wsResumenEstados = XLSX.utils.json_to_sheet(resumenEstados)
-      const wsResumenPagos = XLSX.utils.json_to_sheet(resumenPagos)
-
-      wsPedidos['!cols'] = [
-        { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 25 }, { wch: 15 },
-        { wch: 35 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 },
-        { wch: 20 }, { wch: 20 }, { wch: 50 }, { wch: 12 }, { wch: 12 },
-        { wch: 30 }, { wch: 14 }
-      ]
-
-      const wsInfoFiltros = XLSX.utils.json_to_sheet(infoFiltros)
-      wsInfoFiltros['!cols'] = [{ wch: 25 }, { wch: 40 }]
-
-      XLSX.utils.book_append_sheet(wb, wsInfoFiltros, 'Info Exportación')
-      XLSX.utils.book_append_sheet(wb, wsPedidos, 'Pedidos')
-      XLSX.utils.book_append_sheet(wb, wsItems, 'Detalle Items')
-      XLSX.utils.book_append_sheet(wb, wsResumenEstados, 'Resumen Estados')
-      XLSX.utils.book_append_sheet(wb, wsResumenPagos, 'Resumen Pagos')
-
       const fecha = new Date().toISOString().split('T')[0]
-      XLSX.writeFile(wb, `pedidos_${fecha}.xlsx`)
+
+      await createMultiSheetExcel([
+        {
+          name: 'Info Exportación',
+          data: infoFiltros,
+          columnWidths: [25, 40]
+        },
+        {
+          name: 'Pedidos',
+          data: datosPedidos,
+          columnWidths: [10, 12, 8, 25, 15, 35, 12, 14, 12, 16, 20, 20, 50, 12, 12, 30, 14]
+        },
+        {
+          name: 'Detalle Items',
+          data: datosItems
+        },
+        {
+          name: 'Resumen Estados',
+          data: resumenEstados
+        },
+        {
+          name: 'Resumen Pagos',
+          data: resumenPagos
+        }
+      ], `pedidos_${fecha}`)
     } finally {
       setExportando(false)
     }

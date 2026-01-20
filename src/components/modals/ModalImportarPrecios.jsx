@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { readExcelFile, createTemplate } from '../../utils/excel';
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 
 /**
@@ -68,33 +68,26 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     return null;
   };
 
-  const parsearExcel = useCallback((file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(sheet);
+  const parsearExcel = useCallback(async (file) => {
+    try {
+      const jsonData = await readExcelFile(file);
 
-        // Validar y sanitizar datos
-        const validation = validateAndSanitizeExcelData(jsonData);
-        if (!validation.valid) {
-          setErroresParseo([validation.error]);
-          return;
-        }
-
-        // Mostrar advertencias si las hay
-        if (validation.warnings) {
-          setErroresParseo(validation.warnings);
-        }
-
-        procesarDatos(validation.data || jsonData);
-      } catch (err) {
-        setErroresParseo(['Error al leer el archivo: ' + err.message]);
+      // Validar y sanitizar datos
+      const validation = validateAndSanitizeExcelData(jsonData);
+      if (!validation.valid) {
+        setErroresParseo([validation.error]);
+        return;
       }
-    };
-    reader.readAsArrayBuffer(file);
+
+      // Mostrar advertencias si las hay
+      if (validation.warnings) {
+        setErroresParseo(validation.warnings);
+      }
+
+      procesarDatos(validation.data || jsonData);
+    } catch (err) {
+      setErroresParseo(['Error al leer el archivo: ' + err.message]);
+    }
   }, [productos]);
 
   const procesarDatos = (datos) => {
@@ -189,15 +182,12 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     }
   };
 
-  const descargarPlantilla = () => {
+  const descargarPlantilla = async () => {
     const plantilla = [
       { Codigo: 'EJEMPLO001', 'Precio Neto': 1000, 'Imp Internos': 50, 'Precio Final': 1200 },
       { Codigo: 'EJEMPLO002', 'Precio Neto': 500, 'Imp Internos': 0, 'Precio Final': 600 }
     ];
-    const ws = XLSX.utils.json_to_sheet(plantilla);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Precios');
-    XLSX.writeFile(wb, 'plantilla_precios.xlsx');
+    await createTemplate(plantilla, 'plantilla_precios', 'Precios');
   };
 
   const productosEncontrados = preview.filter(p => p.estado === 'encontrado');
