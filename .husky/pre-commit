@@ -1,0 +1,7 @@
+# Pre-commit hook: Verifica secretos y ejecuta lint
+
+# Verificar secretos antes del commit
+./scripts/check-secrets.sh
+
+# Ejecutar lint en archivos staged
+npx lint-staged
