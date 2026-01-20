@@ -2,6 +2,48 @@ import React, { useState, useCallback } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+/**
+ * Normaliza un valor numérico desde diferentes formatos regionales
+ * Maneja formatos como:
+ * - "1.500,50" (europeo/argentino) → 1500.50
+ * - "1,500.50" (americano) → 1500.50
+ * - "1500.50" (sin separador de miles) → 1500.50
+ * - "1500,50" (europeo simple) → 1500.50
+ * @param {string|number} valor - Valor a normalizar
+ * @returns {number} Número normalizado o 0 si es inválido
+ */
+const normalizarNumero = (valor) => {
+  if (valor === null || valor === undefined || valor === '') return 0;
+
+  // Si ya es número, devolverlo directamente
+  if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
+
+  // Convertir a string y limpiar espacios
+  let str = String(valor).trim();
+
+  // Remover símbolos de moneda comunes
+  str = str.replace(/[$€£¥]/g, '').trim();
+
+  // Detectar formato regional basado en posición de punto y coma
+  const ultimoPunto = str.lastIndexOf('.');
+  const ultimaComa = str.lastIndexOf(',');
+
+  if (ultimaComa > ultimoPunto) {
+    // Formato europeo: "1.500,50" → coma es decimal
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else if (ultimoPunto > ultimaComa && ultimaComa !== -1) {
+    // Formato americano: "1,500.50" → punto es decimal
+    str = str.replace(/,/g, '');
+  } else if (ultimaComa !== -1 && ultimoPunto === -1) {
+    // Solo coma, sin punto: "1500,50" → coma es decimal
+    str = str.replace(',', '.');
+  }
+  // Si solo tiene punto, ya está en formato correcto
+
+  const resultado = parseFloat(str);
+  return isNaN(resultado) ? 0 : resultado;
+};
+
 export default function ModalImportarPrecios({ productos, onActualizarPrecios, onClose }) {
   const [archivo, setArchivo] = useState(null);
   const [preview, setPreview] = useState([]);
@@ -57,9 +99,9 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
         p => p.codigo?.toLowerCase().trim() === codigo.toString().toLowerCase().trim()
       );
 
-      const precioNeto = parseFloat(encontrarValor(fila, COLUMNAS.precioNeto)) || 0;
-      const impInternos = parseFloat(encontrarValor(fila, COLUMNAS.impInternos)) || 0;
-      const precioFinal = parseFloat(encontrarValor(fila, COLUMNAS.precioFinal)) || 0;
+      const precioNeto = normalizarNumero(encontrarValor(fila, COLUMNAS.precioNeto));
+      const impInternos = normalizarNumero(encontrarValor(fila, COLUMNAS.impInternos));
+      const precioFinal = normalizarNumero(encontrarValor(fila, COLUMNAS.precioFinal));
 
       resultados.push({
         fila: index + 2,
