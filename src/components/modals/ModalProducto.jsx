@@ -1,7 +1,8 @@
 import React, { useState, memo } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
-import { validarTexto } from './utils';
+import { useZodValidation } from '../../hooks/useZodValidation';
+import { modalProductoSchema } from '../../lib/schemas';
 
 // Opciones de IVA disponibles
 const OPCIONES_IVA = [
@@ -11,6 +12,9 @@ const OPCIONES_IVA = [
 ];
 
 const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave, onClose, guardando }) {
+  // Zod validation hook
+  const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
+
   const [form, setForm] = useState(producto || {
     nombre: '',
     codigo: '',
@@ -26,8 +30,6 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
   });
   const [nuevaCategoria, setNuevaCategoria] = useState('');
   const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState(false);
-  const [errores, setErrores] = useState({});
-  const [intentoGuardar, setIntentoGuardar] = useState(false);
 
   // Calcular costo total: neto + IVA(solo sobre neto) + impuestos internos
   const calcularCostoTotal = (costoNeto, porcentajeIva, impInternos) => {
@@ -79,43 +81,20 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
     const nuevoForm = { ...form, precio_sin_iva: valor };
     setForm(recalcularTotales(nuevoForm));
     if (intentoGuardar && errores.precio) {
-      setErrores(prev => ({ ...prev, precio: null }));
+      clearFieldError('precio');
     }
-  };
-
-  const validarFormulario = () => {
-    const nuevosErrores = {};
-
-    if (!validarTexto(form.nombre, 2, 100)) {
-      nuevosErrores.nombre = 'El nombre debe tener entre 2 y 100 caracteres';
-    }
-
-    if (form.stock === '' || form.stock === null || isNaN(parseInt(form.stock)) || parseInt(form.stock) < 0) {
-      nuevosErrores.stock = 'El stock debe ser un numero mayor o igual a 0';
-    }
-
-    if (!form.precio || isNaN(parseFloat(form.precio)) || parseFloat(form.precio) <= 0) {
-      nuevosErrores.precio = 'El precio debe ser un numero mayor a 0';
-    }
-
-    if (form.stock_minimo !== '' && form.stock_minimo !== null && (isNaN(parseInt(form.stock_minimo)) || parseInt(form.stock_minimo) < 0)) {
-      nuevosErrores.stock_minimo = 'El stock minimo debe ser un numero mayor o igual a 0';
-    }
-
-    setErrores(nuevosErrores);
-    return Object.keys(nuevosErrores).length === 0;
   };
 
   const handleFieldChange = (field, value) => {
     setForm({ ...form, [field]: value });
     if (intentoGuardar && errores[field]) {
-      setErrores(prev => ({ ...prev, [field]: null }));
+      clearFieldError(field);
     }
   };
 
   const handleSubmit = () => {
-    setIntentoGuardar(true);
-    if (validarFormulario()) {
+    const result = validate(form);
+    if (result.success) {
       const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
         ? nuevaCategoria.trim()
         : form.categoria;

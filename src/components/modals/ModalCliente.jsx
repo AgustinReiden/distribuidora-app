@@ -1,8 +1,9 @@
-import React, { useState, memo, useRef, useEffect } from 'react';
+import React, { useState, memo, useRef } from 'react';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, MapPinned } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
-import { validarTelefono, validarTexto } from './utils';
+import { useZodValidation } from '../../hooks/useZodValidation';
+import { modalClienteSchema } from '../../lib/schemas';
 
 // Opciones predefinidas de zonas
 const ZONAS_PREDEFINIDAS = [
@@ -88,7 +89,9 @@ const detectarTipoDocumento = (codigo) => {
 const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }) {
   // Ref para scroll a errores
   const formRef = useRef(null);
-  const errorRef = useRef(null);
+
+  // Zod validation hook
+  const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalClienteSchema);
 
   // Detectar tipo de documento y extraer numero si es edicion
   const tipoDocInicial = cliente ? (cliente.tipo_documento || detectarTipoDocumento(cliente.cuit)) : 'CUIT';
@@ -135,9 +138,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     diasCredito: 30
   });
 
-  const [errores, setErrores] = useState({});
-  const [intentoGuardar, setIntentoGuardar] = useState(false);
-
   const handleAddressSelect = (result) => {
     setForm(prev => ({
       ...prev,
@@ -145,52 +145,34 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       latitud: result.latitud,
       longitud: result.longitud
     }));
-    if (errores.direccion) setErrores(prev => ({ ...prev, direccion: null }));
-  };
-
-  const validarFormulario = () => {
-    const nuevosErrores = {};
-
-    // Validar documento segun tipo
-    if (form.tipo_documento === 'CUIT') {
-      if (!validarCuit(form.numero_documento)) {
-        nuevosErrores.numero_documento = 'El CUIT debe tener 11 digitos (formato: XX-XXXXXXXX-X)';
-      }
-    } else {
-      if (!validarDni(form.numero_documento)) {
-        nuevosErrores.numero_documento = 'El DNI debe tener 7 u 8 digitos';
-      }
-    }
-
-    // Razón Social obligatoria
-    if (!validarTexto(form.razonSocial, 2, 100)) {
-      nuevosErrores.razonSocial = 'La razón social debe tener entre 2 y 100 caracteres';
-    }
-
-    // Nombre Fantasía obligatorio
-    if (!validarTexto(form.nombreFantasia, 2, 100)) {
-      nuevosErrores.nombreFantasia = 'El nombre fantasía debe tener entre 2 y 100 caracteres';
-    }
-
-    // Dirección obligatoria
-    if (!validarTexto(form.direccion, 5, 200)) {
-      nuevosErrores.direccion = 'La dirección debe tener entre 5 y 200 caracteres';
-    }
-
-    // Teléfono opcional pero si se ingresa debe ser válido
-    if (form.telefono && !validarTelefono(form.telefono)) {
-      nuevosErrores.telefono = 'El teléfono no tiene un formato válido';
-    }
-
-    setErrores(nuevosErrores);
-    return Object.keys(nuevosErrores).length === 0;
+    if (errores.direccion) clearFieldError('direccion');
   };
 
   const handleSubmit = () => {
-    setIntentoGuardar(true);
-    const esValido = validarFormulario();
+    // Validar con Zod
+    const result = validate(form);
 
-    if (!esValido) {
+    // Validación adicional específica de documento según tipo
+    if (result.success) {
+      const docLimpio = form.numero_documento.replace(/\D/g, '');
+      if (form.tipo_documento === 'CUIT' && docLimpio.length !== 11) {
+        // Error específico de CUIT
+        setTimeout(() => {
+          const primerError = formRef.current?.querySelector('.border-red-500');
+          if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+        return;
+      }
+      if (form.tipo_documento === 'DNI' && (docLimpio.length < 7 || docLimpio.length > 8)) {
+        setTimeout(() => {
+          const primerError = formRef.current?.querySelector('.border-red-500');
+          if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+        return;
+      }
+    }
+
+    if (!result.success) {
       // Scroll al primer error
       setTimeout(() => {
         const primerError = formRef.current?.querySelector('.border-red-500');
@@ -225,7 +207,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     // Limpiar el numero al cambiar de tipo
     setForm({ ...form, tipo_documento: nuevoTipo, numero_documento: '' });
     if (intentoGuardar && errores.numero_documento) {
-      setErrores(prev => ({ ...prev, numero_documento: null }));
+      clearFieldError('numero_documento');
     }
   };
 
@@ -240,7 +222,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     }
     setForm({ ...form, [field]: value });
     if (intentoGuardar && errores[field]) {
-      setErrores(prev => ({ ...prev, [field]: null }));
+      clearFieldError(field);
     }
   };
 
