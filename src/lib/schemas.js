@@ -428,6 +428,173 @@ export function createFormValidator(schema) {
 }
 
 // ============================================
+// SCHEMAS PARA MODALES (adaptados a nombres de formularios)
+// ============================================
+
+/**
+ * Schema para ModalCliente - usa nombres de campos del formulario
+ */
+export const modalClienteSchema = z.object({
+  tipo_documento: z.enum(['CUIT', 'DNI']).default('CUIT'),
+
+  numero_documento: z
+    .string()
+    .transform(val => val.replace(/\D/g, ''))
+    .refine(
+      (val, ctx) => {
+        // La validación depende del tipo_documento que no está disponible aquí
+        // Se valida por longitud: 11 para CUIT, 7-8 para DNI
+        return val.length === 0 || val.length === 11 || (val.length >= 7 && val.length <= 8)
+      },
+      { message: 'Documento inválido' }
+    ),
+
+  razonSocial: z
+    .string()
+    .min(1, { message: 'La razón social es obligatoria' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'La razón social debe tener al menos 2 caracteres' }),
+
+  nombreFantasia: z
+    .string()
+    .min(1, { message: 'El nombre de fantasía es obligatorio' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'El nombre de fantasía debe tener al menos 2 caracteres' }),
+
+  direccion: z
+    .string()
+    .min(1, { message: 'La dirección es obligatoria' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 5, { message: 'La dirección debe tener al menos 5 caracteres' }),
+
+  telefono: z
+    .string()
+    .refine(val => !val || val.replace(/\D/g, '').length >= 8, {
+      message: 'El teléfono debe tener al menos 8 dígitos'
+    })
+    .optional(),
+
+  latitud: z.number().nullable().optional(),
+  longitud: z.number().nullable().optional(),
+  contacto: z.string().optional(),
+  zona: z.string().optional(),
+  horarios_atencion: z.string().optional(),
+  rubro: z.string().optional(),
+  notas: z.string().optional(),
+  limiteCredito: z.coerce.number().nonnegative().default(0),
+  diasCredito: z.coerce.number().int().nonnegative().default(30)
+})
+
+/**
+ * Schema para ModalProducto - usa nombres de campos del formulario
+ */
+export const modalProductoSchema = z.object({
+  nombre: z
+    .string()
+    .min(1, { message: 'El nombre es obligatorio' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
+
+  codigo: z.string().optional(),
+  categoria: z.string().optional(),
+
+  stock: z.coerce
+    .number({ invalid_type_error: 'El stock debe ser un número' })
+    .int({ message: 'El stock debe ser un número entero' })
+    .nonnegative({ message: 'El stock no puede ser negativo' }),
+
+  stock_minimo: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(10),
+
+  porcentaje_iva: z.coerce.number().min(0).max(100).default(21),
+  costo_sin_iva: z.coerce.number().nonnegative().optional(),
+  costo_con_iva: z.coerce.number().nonnegative().optional(),
+  impuestos_internos: z.coerce.number().nonnegative().optional(),
+  precio_sin_iva: z.coerce.number().nonnegative().optional(),
+
+  precio: z.coerce
+    .number({ invalid_type_error: 'El precio debe ser un número' })
+    .positive({ message: 'El precio debe ser mayor a 0' })
+})
+
+/**
+ * Schema para ModalRegistrarPago
+ */
+export const modalPagoSchema = z.object({
+  monto: z.coerce
+    .number({ invalid_type_error: 'El monto debe ser un número' })
+    .positive({ message: 'El monto debe ser mayor a $0' }),
+
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente'], {
+    errorMap: () => ({ message: 'Forma de pago inválida' })
+  }),
+
+  referencia: z.string().optional(),
+  notas: z.string().optional(),
+  pedidoSeleccionado: z.string().optional()
+}).refine(
+  (data) => {
+    if (data.formaPago === 'cheque') {
+      return data.referencia && data.referencia.trim().length > 0
+    }
+    return true
+  },
+  { message: 'El número de cheque es obligatorio', path: ['referencia'] }
+)
+
+/**
+ * Schema para ModalMermaStock
+ */
+export const modalMermaSchema = z.object({
+  cantidad: z.coerce
+    .number({ invalid_type_error: 'La cantidad debe ser un número' })
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+
+  motivo: z
+    .string()
+    .min(1, { message: 'Debe seleccionar un motivo' }),
+
+  observaciones: z.string().optional()
+})
+
+/**
+ * Schema para ModalProveedor
+ */
+export const modalProveedorSchema = z.object({
+  nombre: z
+    .string()
+    .min(1, { message: 'El nombre es obligatorio' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
+
+  cuit: z
+    .string()
+    .transform(val => val.replace(/\D/g, ''))
+    .refine(val => val.length === 0 || val.length === 11, {
+      message: 'El CUIT debe tener 11 dígitos'
+    })
+    .optional(),
+
+  direccion: z.string().optional(),
+  latitud: z.number().nullable().optional(),
+  longitud: z.number().nullable().optional(),
+  telefono: z.string().optional(),
+
+  email: z
+    .string()
+    .email({ message: 'El email no es válido' })
+    .or(z.literal(''))
+    .optional(),
+
+  contacto: z.string().optional(),
+  notas: z.string().optional()
+})
+
+// ============================================
 // EXPORTS NOMBRADOS PARA TESTS
 // ============================================
 
@@ -442,7 +609,13 @@ export const schemas = {
   itemCompra: itemCompraSchema,
   merma: mermaSchema,
   usuario: usuarioSchema,
-  proveedor: proveedorSchema
+  proveedor: proveedorSchema,
+  // Schemas para modales
+  modalCliente: modalClienteSchema,
+  modalProducto: modalProductoSchema,
+  modalPago: modalPagoSchema,
+  modalMerma: modalMermaSchema,
+  modalProveedor: modalProveedorSchema
 }
 
 export default schemas

@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react'
-import { X, DollarSign, CreditCard, FileText, AlertCircle, Check } from 'lucide-react'
+import { useState } from 'react'
+import { X, DollarSign, FileText, AlertCircle, Check } from 'lucide-react'
 import { formatPrecio as formatCurrency } from '../../utils/formatters'
+import { useZodValidation } from '../../hooks/useZodValidation'
+import { modalPagoSchema } from '../../lib/schemas'
 
 const FORMAS_PAGO = [
   { value: 'efectivo', label: 'Efectivo' },
@@ -11,6 +13,9 @@ const FORMAS_PAGO = [
 ]
 
 export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, onClose, onConfirmar, onGenerarRecibo }) {
+  // Zod validation hook
+  const { validate, getFirstError } = useZodValidation(modalPagoSchema)
+
   const [monto, setMonto] = useState('')
   const [formaPago, setFormaPago] = useState('efectivo')
   const [referencia, setReferencia] = useState('')
@@ -29,15 +34,10 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
     e.preventDefault()
     setError('')
 
-    const montoNum = parseFloat(monto)
-    if (Number.isNaN(montoNum) || montoNum <= 0) {
-      setError('Ingrese un monto válido mayor a $0')
-      return
-    }
-
-    // Validar número de cheque obligatorio para pagos con cheque
-    if (formaPago === 'cheque' && !referencia.trim()) {
-      setError('El número de cheque es obligatorio')
+    // Validar con Zod
+    const result = validate({ monto: parseFloat(monto) || 0, formaPago, referencia, notas, pedidoSeleccionado })
+    if (!result.success) {
+      setError(getFirstError() || 'Error de validación')
       return
     }
 
@@ -46,7 +46,7 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
       const pago = await onConfirmar({
         clienteId: cliente.id,
         pedidoId: pedidoSeleccionado || null,
-        monto: montoNum,
+        monto: result.data.monto,
         formaPago,
         referencia,
         notas

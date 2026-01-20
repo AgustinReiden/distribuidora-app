@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
 import { X, AlertTriangle, Package, Minus, FileText } from 'lucide-react'
+import { useZodValidation } from '../../hooks/useZodValidation'
+import { modalMermaSchema } from '../../lib/schemas'
 
 const MOTIVOS_MERMA = [
   { value: 'rotura', label: 'Rotura', icon: '💔' },
@@ -13,6 +15,9 @@ const MOTIVOS_MERMA = [
 ]
 
 export default function ModalMermaStock({ producto, onSave, onClose, isOffline = false }) {
+  // Zod validation hook
+  const { validate, getFirstError } = useZodValidation(modalMermaSchema)
+
   const [cantidad, setCantidad] = useState(1)
   const [motivo, setMotivo] = useState('')
   const [observaciones, setObservaciones] = useState('')
@@ -25,18 +30,16 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
     e.preventDefault()
     setError('')
 
-    if (cantidad <= 0) {
-      setError('La cantidad debe ser mayor a 0')
+    // Validar con Zod
+    const result = validate({ cantidad: parseInt(cantidad) || 0, motivo, observaciones })
+    if (!result.success) {
+      setError(getFirstError() || 'Error de validación')
       return
     }
 
-    if (cantidad > producto.stock) {
+    // Validación adicional: no exceder stock
+    if (result.data.cantidad > producto.stock) {
       setError(`No puede dar de baja más de ${producto.stock} unidades (stock actual)`)
-      return
-    }
-
-    if (!motivo) {
-      setError('Debe seleccionar un motivo')
       return
     }
 
@@ -46,12 +49,12 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
         productoId: producto.id,
         productoNombre: producto.nombre,
         productoCodigo: producto.codigo,
-        cantidad: parseInt(cantidad),
-        motivo,
-        motivoLabel: MOTIVOS_MERMA.find(m => m.value === motivo)?.label || motivo,
-        observaciones,
+        cantidad: result.data.cantidad,
+        motivo: result.data.motivo,
+        motivoLabel: MOTIVOS_MERMA.find(m => m.value === result.data.motivo)?.label || result.data.motivo,
+        observaciones: result.data.observaciones,
         stockAnterior: producto.stock,
-        stockNuevo: producto.stock - cantidad
+        stockNuevo: producto.stock - result.data.cantidad
       })
       onClose()
     } catch (err) {

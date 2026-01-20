@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { X, Building2, Phone, Mail, MapPin, FileText, User, Hash, CheckCircle } from 'lucide-react';
 import { AddressAutocomplete } from '../AddressAutocomplete';
+import { useZodValidation } from '../../hooks/useZodValidation';
+import { modalProveedorSchema } from '../../lib/schemas';
 
 export default function ModalProveedor({ proveedor, onSave, onClose, guardando }) {
+  // Zod validation hook
+  const { validate, getFirstError } = useZodValidation(modalProveedorSchema);
+
   const [formData, setFormData] = useState({
     nombre: '',
     cuit: '',
@@ -66,30 +71,17 @@ export default function ModalProveedor({ proveedor, onSave, onClose, guardando }
     e.preventDefault();
     setError('');
 
-    if (!formData.nombre.trim()) {
-      setError('El nombre es obligatorio');
+    // Validar con Zod
+    const result = validate(formData);
+    if (!result.success) {
+      setError(getFirstError() || 'Error de validación');
       return;
-    }
-
-    // Validar email si se proporciona
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      setError('El email no es válido');
-      return;
-    }
-
-    // Validar CUIT si se proporciona (debe tener 11 dígitos)
-    if (formData.cuit) {
-      const cuitNumbers = formData.cuit.replace(/\D/g, '');
-      if (cuitNumbers.length !== 11) {
-        setError('El CUIT debe tener 11 dígitos');
-        return;
-      }
     }
 
     try {
       await onSave({
         id: proveedor?.id,
-        ...formData,
+        ...result.data,
         activo: proveedor?.activo !== false
       });
     } catch (err) {
