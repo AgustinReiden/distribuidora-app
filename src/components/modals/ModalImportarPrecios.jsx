@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 
 /**
  * Normaliza un valor numérico desde diferentes formatos regionales
@@ -76,7 +77,19 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const jsonData = XLSX.utils.sheet_to_json(sheet);
 
-        procesarDatos(jsonData);
+        // Validar y sanitizar datos
+        const validation = validateAndSanitizeExcelData(jsonData);
+        if (!validation.valid) {
+          setErroresParseo([validation.error]);
+          return;
+        }
+
+        // Mostrar advertencias si las hay
+        if (validation.warnings) {
+          setErroresParseo(validation.warnings);
+        }
+
+        procesarDatos(validation.data || jsonData);
       } catch (err) {
         setErroresParseo(['Error al leer el archivo: ' + err.message]);
       }
@@ -123,19 +136,36 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    // Validar archivo antes de procesar
+    const validation = validateExcelFile(file);
+    if (!validation.valid) {
+      setErroresParseo([validation.error]);
+      return;
+    }
+
     setArchivo(file);
     setResultado(null);
+    setErroresParseo([]);
     parsearExcel(file);
   };
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
-      setArchivo(file);
-      setResultado(null);
-      parsearExcel(file);
+    if (!file) return;
+
+    // Validar archivo antes de procesar
+    const validation = validateExcelFile(file);
+    if (!validation.valid) {
+      setErroresParseo([validation.error]);
+      return;
     }
+
+    setArchivo(file);
+    setResultado(null);
+    setErroresParseo([]);
+    parsearExcel(file);
   }, [parsearExcel]);
 
   const handleImportar = async () => {
@@ -225,6 +255,9 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
               </label>
               <p className="text-xs text-gray-500 mt-4">
                 Formato esperado: Codigo | Precio Neto | Imp Internos | Precio Final
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Máximo {FILE_LIMITS.maxSizeMB}MB por archivo
               </p>
             </div>
           )}

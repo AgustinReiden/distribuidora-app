@@ -155,7 +155,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   };
 
   return (
-    <ModalBase title={`Editar Pedido #${pedido?.id}`} onClose={onClose} maxWidth="max-w-2xl">
+    <ModalBase
+      title={`Editar Pedido #${pedido?.id}`}
+      description="Editar notas, forma de pago, estado de pago y productos del pedido"
+      onClose={onClose}
+      maxWidth="max-w-2xl"
+    >
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Info del cliente */}
         <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3 border dark:border-gray-600">
