@@ -57,8 +57,66 @@ export function useOfflineSync() {
     }
   }, [])
 
-  // Guardar pedido offline
-  const guardarPedidoOffline = useCallback((pedidoData) => {
+  /**
+   * Guarda un pedido en modo offline con validación de stock
+   * @param {Object} pedidoData - Datos del pedido
+   * @param {Object} options - Opciones de validación
+   * @param {Array} options.productos - Lista de productos para validar stock
+   * @param {boolean} options.validarStock - Si se debe validar el stock (default: true)
+   * @returns {{ success: boolean, pedido?: Object, error?: string, itemsSinStock?: Array }}
+   */
+  const guardarPedidoOffline = useCallback((pedidoData, options = {}) => {
+    const { productos = [], validarStock = true } = options
+
+    // Validar stock si se proporciona lista de productos
+    if (validarStock && productos.length > 0 && pedidoData.items?.length > 0) {
+      const itemsSinStock = []
+      const stockSnapshot = {}
+
+      // Calcular stock considerando pedidos offline pendientes
+      const stockReservado = {}
+      pedidosPendientes.forEach(pedido => {
+        pedido.items?.forEach(item => {
+          stockReservado[item.productoId] = (stockReservado[item.productoId] || 0) + item.cantidad
+        })
+      })
+
+      for (const item of pedidoData.items) {
+        const producto = productos.find(p => p.id === item.productoId)
+        if (producto) {
+          const stockActual = producto.stock || 0
+          const reservado = stockReservado[item.productoId] || 0
+          const stockDisponible = stockActual - reservado
+
+          stockSnapshot[item.productoId] = {
+            stockAlMomento: stockActual,
+            reservadoOffline: reservado,
+            disponible: stockDisponible
+          }
+
+          if (item.cantidad > stockDisponible) {
+            itemsSinStock.push({
+              productoId: item.productoId,
+              nombre: producto.nombre || item.nombre,
+              solicitado: item.cantidad,
+              disponible: Math.max(0, stockDisponible)
+            })
+          }
+        }
+      }
+
+      if (itemsSinStock.length > 0) {
+        return {
+          success: false,
+          error: 'Stock insuficiente para algunos productos',
+          itemsSinStock
+        }
+      }
+
+      // Agregar snapshot de stock al pedido para detección de conflictos
+      pedidoData = { ...pedidoData, stockSnapshot }
+    }
+
     const nuevoPedido = {
       ...pedidoData,
       offlineId: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -73,8 +131,8 @@ export function useOfflineSync() {
       return updated
     })
 
-    return nuevoPedido
-  }, [])
+    return { success: true, pedido: nuevoPedido }
+  }, [pedidosPendientes])
 
   // Guardar merma offline
   const guardarMermaOffline = useCallback((mermaData) => {
