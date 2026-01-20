@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
+import { useGoogleMaps } from '../hooks/useGoogleMaps';
 
 /**
  * Componente de autocompletado de direcciones usando Google Places API
@@ -10,6 +11,7 @@ import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
  * - Location bias hacia San Miguel de Tucumán para priorizar resultados locales
  * - Esto evita que direcciones genéricas (ej: "Chacabuco 543") se geocodifiquen
  *   en ubicaciones incorrectas fuera de Tucumán
+ * - Carga dinámica de Google Maps API (API key segura en variable de entorno)
  */
 export const AddressAutocomplete = ({
   value,
@@ -24,56 +26,15 @@ export const AddressAutocomplete = ({
   const placesServiceRef = useRef(null);
   const sessionTokenRef = useRef(null);
   const [loading, setLoading] = useState(false);
-  const [googleStatus, setGoogleStatus] = useState('loading'); // 'loading', 'ready', 'error'
   const [predictions, setPredictions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef(null);
 
-  // Verificar que Google Maps esté cargado
-  useEffect(() => {
-    let isMounted = true;
-    let interval;
-    let timeout;
+  // Usar hook para cargar Google Maps dinámicamente
+  const { isLoaded: googleReady, isLoading: googleLoading, error: googleError } = useGoogleMaps();
 
-    const checkGoogle = () => {
-      // Verificar que exista el servicio de AutocompleteService (nueva API)
-      if (window.google &&
-          window.google.maps &&
-          window.google.maps.places &&
-          window.google.maps.places.AutocompleteService) {
-        if (isMounted) {
-          setGoogleStatus('ready');
-        }
-        return true;
-      }
-      return false;
-    };
-
-    // Verificar inmediatamente
-    if (checkGoogle()) return;
-
-    // Si no está listo, verificar cada 500ms
-    interval = setInterval(() => {
-      if (checkGoogle()) {
-        clearInterval(interval);
-        clearTimeout(timeout);
-      }
-    }, 500);
-
-    // Timeout después de 15 segundos
-    timeout = setTimeout(() => {
-      clearInterval(interval);
-      if (isMounted && !window.google?.maps?.places?.AutocompleteService) {
-        setGoogleStatus('error');
-      }
-    }, 15000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, []);
+  // Mapear estados del hook a googleStatus para compatibilidad
+  const googleStatus = googleError ? 'error' : googleReady ? 'ready' : 'loading';
 
   // Inicializar servicios cuando Google esté listo
   useEffect(() => {

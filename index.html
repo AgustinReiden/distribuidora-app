@@ -1,13 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
 
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://maps.googleapis.com https://n8n.shycia.com.ar;">
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta http-equiv="X-Frame-Options" content="DENY" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <!-- Content Security Policy - Fortalecido -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://maps.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://maps.googleapis.com https://n8n.shycia.com.ar; frame-ancestors 'none'; base-uri 'self'; form-action 'self';">
+
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>distribuidora-app</title>
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDm-whIYAYmcOPHac0q2WYpilB9oGfO_KQ&libraries=places&loading=async" async defer></script>
+    <!-- Google Maps API ahora se carga dinámicamente desde useGoogleMaps.js usando VITE_GOOGLE_API_KEY -->
   </head>
   <body>
     <div id="root"></div>

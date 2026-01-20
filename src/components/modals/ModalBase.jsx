@@ -6,6 +6,7 @@
  * - Focus trapping (el foco no sale del modal)
  * - Cierre con tecla Escape
  * - aria-labelledby vinculado al título
+ * - aria-describedby vinculado a la descripción (accesibilidad)
  * - Devuelve el foco al elemento que abrió el modal
  */
 import React, { memo } from 'react';
@@ -14,6 +15,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogBody
 } from '../ui/Dialog';
 import { cn } from '../../lib/utils';
@@ -33,6 +35,7 @@ const ModalBase = memo(function ModalBase({
   children,
   onClose,
   title,
+  description,
   maxWidth = 'max-w-md',
   className
 }) {
@@ -46,6 +49,10 @@ const ModalBase = memo(function ModalBase({
         <DialogHeader onClose={onClose}>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
+        {/* DialogDescription para accesibilidad (aria-describedby) - visualmente oculto si no se pasa description */}
+        <DialogDescription className={description ? 'px-4 -mt-2 mb-2' : 'sr-only'}>
+          {description || `Modal de ${title}`}
+        </DialogDescription>
         <DialogBody>
           {children}
         </DialogBody>
