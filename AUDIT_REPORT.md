@@ -336,8 +336,8 @@ src/
 
 ### Corto plazo (1-2 semanas)
 - [x] ~~Implementar aria-describedby en modales~~ - **COMPLETADO**
-- [ ] Configurar pre-commit hooks para prevenir commits de secretos
-- [ ] Agregar tests e2e básicos
+- [x] ~~Configurar pre-commit hooks para prevenir commits de secretos~~ - **COMPLETADO**: husky + check-secrets.sh
+- [x] ~~Agregar tests e2e básicos~~ - **COMPLETADO**: Playwright con tests de login, accesibilidad y seguridad
 
 ### Mediano plazo (1-2 meses)
 - [ ] Migrar xlsx a alternativa segura (mitigado con validación de archivos)
@@ -397,14 +397,21 @@ frame-ancestors 'none'; base-uri 'self'; form-action 'self';
 |---------|-----------|
 | `src/hooks/useGoogleMaps.js` | Carga dinámica y segura de Google Maps API |
 | `src/utils/fileValidation.js` | Validación de archivos Excel (tipo, tamaño, contenido) |
+| `scripts/check-secrets.sh` | Script pre-commit para detectar secretos accidentales |
+| `.husky/pre-commit` | Hook de git para verificar secretos y lint |
+| `playwright.config.js` | Configuración de Playwright para tests e2e |
+| `e2e/login.spec.js` | Tests e2e de la funcionalidad de login |
+| `e2e/accessibility.spec.js` | Tests e2e de accesibilidad básica |
+| `e2e/security.spec.js` | Tests e2e de configuraciones de seguridad |
 
 ### Puntuación Actualizada
 
 | Categoría | Antes | Después | Cambio |
 |-----------|-------|---------|--------|
-| **Seguridad** | 7.8/10 | **9.0/10** | +1.2 |
+| **Seguridad** | 7.8/10 | **9.2/10** | +1.4 |
 | **Accesibilidad** | 8.1/10 | **8.5/10** | +0.4 |
-| **TOTAL** | 8.2/10 | **8.7/10** | +0.5 |
+| **Testing** | 8.0/10 | **8.8/10** | +0.8 |
+| **TOTAL** | 8.2/10 | **8.9/10** | +0.7 |
 
 ### Vulnerabilidades npm Actuales
 
@@ -414,7 +421,15 @@ npm audit:
 Total: 1 vulnerabilidad alta (vs 2 anteriores)
 ```
 
+### Scripts Nuevos Disponibles
+
+```bash
+npm run test:e2e        # Ejecutar tests e2e con Playwright
+npm run test:e2e:ui     # UI interactiva de Playwright
+npm run check-secrets   # Verificar secretos manualmente
+```
+
 ---
 
 *Reporte generado el 2026-01-20*
-*Última actualización: 2026-01-20*
+*Última actualización: 2026-01-20 (segunda actualización)*
