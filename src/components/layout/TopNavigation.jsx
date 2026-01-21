@@ -148,7 +148,7 @@ export default function TopNavigation({
             </div>
 
             {/* Menú horizontal - visible en desktop */}
-            <nav className="hidden lg:flex items-center space-x-1 ml-8">
+            <nav id="main-navigation" className="hidden lg:flex items-center space-x-1 ml-8" aria-label="Navegación principal">
               {menuFiltrado.map(group => {
                 // Items sin grupo (se muestran directo)
                 if (!group.label) {

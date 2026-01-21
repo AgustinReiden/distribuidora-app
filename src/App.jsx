@@ -14,6 +14,8 @@ import ErrorBoundary from './components/ErrorBoundary';
 import TopNavigation from './components/layout/TopNavigation';
 import OfflineIndicator from './components/layout/OfflineIndicator.jsx';
 import AppModals from './components/AppModals.jsx';
+import PWAPrompt from './components/PWAPrompt.jsx';
+import SkipLinks from './components/a11y/SkipLinks.jsx';
 
 // Vistas con lazy loading
 const VistaDashboard = lazy(() => import('./components/vistas/VistaDashboard'));
@@ -150,9 +152,10 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
+      <SkipLinks />
       <TopNavigation vista={vista} setVista={setVista} perfil={perfil} onLogout={handleLogout} />
 
-      <main className="pt-20 pb-6 px-4">
+      <main id="main-content" className="pt-20 pb-6 px-4" role="main">
         <div className="max-w-7xl mx-auto">
           <Suspense fallback={<LoadingVista />}>
             {vista === 'dashboard' && (isAdmin || isPreventista) && (
@@ -246,6 +249,9 @@ function MainApp() {
 
       {/* Indicador de estado offline */}
       <OfflineIndicator isOnline={isOnline} pedidosPendientes={pedidosPendientes} mermasPendientes={mermasPendientes} sincronizando={sincronizando} onSincronizar={handleSincronizar} clientes={clientes} />
+
+      {/* PWA Prompt */}
+      <PWAPrompt />
     </div>
   );
 }
