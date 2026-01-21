@@ -166,6 +166,7 @@ export function getVitalsSummary() {
 
 /**
  * Componente para mostrar Web Vitals en desarrollo
+ * Usa DOM manipulation en lugar de innerHTML por seguridad
  */
 export function WebVitalsDebugger() {
   if (!import.meta.env.DEV) return null
@@ -190,14 +191,24 @@ export function WebVitalsDebugger() {
         max-width: 200px;
       `
 
-      let html = '<strong>Web Vitals</strong><br>'
+      // Título usando DOM seguro
+      const title = document.createElement('strong')
+      title.textContent = 'Web Vitals'
+      container.appendChild(title)
+      container.appendChild(document.createElement('br'))
+
+      // Métricas usando DOM seguro
       for (const [name, metric] of Object.entries(vitals)) {
         const color = metric.rating === 'good' ? '#4ade80' :
                      metric.rating === 'needs-improvement' ? '#facc15' : '#ef4444'
-        html += `<span style="color:${color}">${name}: ${metric.value.toFixed(name === 'CLS' ? 3 : 0)}</span><br>`
+
+        const span = document.createElement('span')
+        span.style.color = color
+        span.textContent = `${name}: ${metric.value.toFixed(name === 'CLS' ? 3 : 0)}`
+        container.appendChild(span)
+        container.appendChild(document.createElement('br'))
       }
 
-      container.innerHTML = html
       document.body.appendChild(container)
     }
   }

@@ -92,8 +92,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   // Ref para scroll a errores
   const formRef = useRef(null);
 
-  // Zod validation hook
-  const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalClienteSchema);
+  // Zod validation hook with accessibility helpers
+  const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
 
   // Detectar tipo de documento y extraer numero si es edicion
   const tipoDocInicial = cliente ? (cliente.tipo_documento || detectarTipoDocumento(cliente.cuit)) : 'CUIT';
@@ -247,56 +247,66 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200">
+            <label htmlFor="numero_documento" className="block text-sm font-medium mb-1 dark:text-gray-200">
               {form.tipo_documento === 'CUIT' ? 'CUIT' : 'DNI'} *
             </label>
             <input
+              id="numero_documento"
               type="text"
               value={form.numero_documento}
               onChange={e => handleFieldChange('numero_documento', e.target.value)}
               className={inputClass('numero_documento')}
               placeholder={form.tipo_documento === 'CUIT' ? 'XX-XXXXXXXX-X' : '12345678'}
               maxLength={form.tipo_documento === 'CUIT' ? 13 : 8}
+              {...getAriaProps('numero_documento', true)}
             />
-            {errores.numero_documento && <p className="text-red-500 text-xs mt-1">{errores.numero_documento}</p>}
+            {errores.numero_documento && <p {...getErrorMessageProps('numero_documento')} className="text-red-500 text-xs mt-1">{errores.numero_documento}</p>}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200">Razón Social *</label>
+            <label htmlFor="razonSocial" className="block text-sm font-medium mb-1 dark:text-gray-200">Razón Social *</label>
             <input
+              id="razonSocial"
               type="text"
               value={form.razonSocial}
               onChange={e => handleFieldChange('razonSocial', e.target.value)}
               className={inputClass('razonSocial')}
               placeholder="Nombre legal"
+              {...getAriaProps('razonSocial', true)}
             />
-            {errores.razonSocial && <p className="text-red-500 text-xs mt-1">{errores.razonSocial}</p>}
+            {errores.razonSocial && <p {...getErrorMessageProps('razonSocial')} className="text-red-500 text-xs mt-1">{errores.razonSocial}</p>}
           </div>
         </div>
 
         {/* Nombre Fantasía */}
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200">Nombre Fantasía *</label>
+          <label htmlFor="nombreFantasia" className="block text-sm font-medium mb-1 dark:text-gray-200">Nombre Fantasía *</label>
           <input
+            id="nombreFantasia"
             type="text"
             value={form.nombreFantasia}
             onChange={e => handleFieldChange('nombreFantasia', e.target.value)}
             className={inputClass('nombreFantasia')}
             placeholder="Nombre comercial"
+            {...getAriaProps('nombreFantasia', true)}
           />
-          {errores.nombreFantasia && <p className="text-red-500 text-xs mt-1">{errores.nombreFantasia}</p>}
+          {errores.nombreFantasia && <p {...getErrorMessageProps('nombreFantasia')} className="text-red-500 text-xs mt-1">{errores.nombreFantasia}</p>}
         </div>
 
         {/* Dirección */}
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200">Dirección *</label>
+          <label htmlFor="direccion" className="block text-sm font-medium mb-1 dark:text-gray-200">Dirección *</label>
           <AddressAutocomplete
+            id="direccion"
             value={form.direccion}
             onChange={(val) => handleFieldChange('direccion', val)}
             onSelect={handleAddressSelect}
             placeholder="Buscar dirección..."
             className={errores.direccion ? 'border-red-500' : ''}
+            aria-invalid={errores.direccion ? 'true' : undefined}
+            aria-required="true"
+            aria-describedby={errores.direccion ? 'error-direccion' : undefined}
           />
-          {errores.direccion && <p className="text-red-500 text-xs mt-1">{errores.direccion}</p>}
+          {errores.direccion && <p {...getErrorMessageProps('direccion')} className="text-red-500 text-xs mt-1">{errores.direccion}</p>}
           {form.latitud && form.longitud && (
             <div className="mt-2 flex items-center text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
               <MapPin className="w-4 h-4 mr-2" />
@@ -308,15 +318,17 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
         {/* Teléfono y Contacto */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200">Teléfono</label>
+            <label htmlFor="telefono" className="block text-sm font-medium mb-1 dark:text-gray-200">Teléfono</label>
             <input
+              id="telefono"
               type="text"
               value={form.telefono}
               onChange={e => handleFieldChange('telefono', e.target.value)}
               className={inputClass('telefono')}
               placeholder="Ej: +54 9 381 1234567"
+              {...getAriaProps('telefono')}
             />
-            {errores.telefono && <p className="text-red-500 text-xs mt-1">{errores.telefono}</p>}
+            {errores.telefono && <p {...getErrorMessageProps('telefono')} className="text-red-500 text-xs mt-1">{errores.telefono}</p>}
           </div>
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Contacto (quien atiende)</label>

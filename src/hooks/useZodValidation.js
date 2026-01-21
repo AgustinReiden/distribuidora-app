@@ -93,6 +93,36 @@ export function useZodValidation(schema) {
     return firstKey ? errors[firstKey] : null
   }, [errors])
 
+  /**
+   * Genera props de accesibilidad ARIA para un campo
+   * @param {string} field - Nombre del campo
+   * @param {boolean} required - Si el campo es requerido
+   * @returns {object} Props ARIA para el input
+   */
+  const getAriaProps = useCallback((field, required = false) => {
+    const error = errors[field]
+    const errorId = `error-${field}`
+
+    return {
+      'aria-invalid': error ? 'true' : undefined,
+      'aria-required': required ? 'true' : undefined,
+      'aria-describedby': error ? errorId : undefined
+    }
+  }, [errors])
+
+  /**
+   * Genera props para el mensaje de error
+   * @param {string} field - Nombre del campo
+   * @returns {object} Props para el elemento de error
+   */
+  const getErrorMessageProps = useCallback((field) => {
+    return {
+      id: `error-${field}`,
+      role: 'alert',
+      'aria-live': 'polite'
+    }
+  }, [])
+
   return {
     errors,
     hasAttemptedSubmit,
@@ -101,7 +131,10 @@ export function useZodValidation(schema) {
     clearFieldError,
     clearErrors,
     getFirstError,
-    hasErrors: Object.keys(errors).length > 0
+    hasErrors: Object.keys(errors).length > 0,
+    // Helpers de accesibilidad
+    getAriaProps,
+    getErrorMessageProps
   }
 }
 
