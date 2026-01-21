@@ -8,24 +8,37 @@
 const SYNC_TAG_PEDIDOS = 'sync-pedidos'
 const SYNC_TAG_MERMAS = 'sync-mermas'
 
+interface SyncManager {
+  register(tag: string): Promise<void>;
+}
+
+interface PeriodicSyncManager {
+  register(tag: string, options?: { minInterval: number }): Promise<void>;
+}
+
+interface ServiceWorkerRegistrationWithSync extends ServiceWorkerRegistration {
+  sync: SyncManager;
+  periodicSync?: PeriodicSyncManager;
+}
+
 /**
  * Verifica si Background Sync está soportado
  */
-export function isBackgroundSyncSupported() {
+export function isBackgroundSyncSupported(): boolean {
   return 'serviceWorker' in navigator && 'SyncManager' in window
 }
 
 /**
  * Registra una sincronización de pedidos en background
  */
-export async function registerPedidosSync() {
+export async function registerPedidosSync(): Promise<boolean> {
   if (!isBackgroundSyncSupported()) {
     console.log('Background Sync no soportado, usando fallback')
     return false
   }
 
   try {
-    const registration = await navigator.serviceWorker.ready
+    const registration = await navigator.serviceWorker.ready as ServiceWorkerRegistrationWithSync
     await registration.sync.register(SYNC_TAG_PEDIDOS)
     console.log('Background sync registrado para pedidos')
     return true
@@ -38,13 +51,13 @@ export async function registerPedidosSync() {
 /**
  * Registra una sincronización de mermas en background
  */
-export async function registerMermasSync() {
+export async function registerMermasSync(): Promise<boolean> {
   if (!isBackgroundSyncSupported()) {
     return false
   }
 
   try {
-    const registration = await navigator.serviceWorker.ready
+    const registration = await navigator.serviceWorker.ready as ServiceWorkerRegistrationWithSync
     await registration.sync.register(SYNC_TAG_MERMAS)
     console.log('Background sync registrado para mermas')
     return true
@@ -58,18 +71,18 @@ export async function registerMermasSync() {
  * Registra sincronización periódica (si está soportada)
  * Nota: Solo funciona en Chrome con permisos especiales
  */
-export async function registerPeriodicSync(tag = 'periodic-sync', minInterval = 60 * 60 * 1000) {
+export async function registerPeriodicSync(tag = 'periodic-sync', minInterval = 60 * 60 * 1000): Promise<boolean> {
   if (!('periodicSync' in navigator.serviceWorker)) {
     return false
   }
 
   try {
-    const registration = await navigator.serviceWorker.ready
+    const registration = await navigator.serviceWorker.ready as ServiceWorkerRegistrationWithSync
     const status = await navigator.permissions.query({
-      name: 'periodic-background-sync'
+      name: 'periodic-background-sync' as PermissionName
     })
 
-    if (status.state === 'granted') {
+    if (status.state === 'granted' && registration.periodicSync) {
       await registration.periodicSync.register(tag, {
         minInterval
       })
@@ -82,18 +95,23 @@ export async function registerPeriodicSync(tag = 'periodic-sync', minInterval = 
   return false
 }
 
+export interface SWMessage {
+  type: string;
+  payload?: unknown;
+}
+
 /**
  * Envía mensaje al Service Worker
  */
-export async function sendMessageToSW(message) {
+export async function sendMessageToSW<T = unknown>(message: SWMessage): Promise<T | null> {
   if (!navigator.serviceWorker.controller) {
     return null
   }
 
   return new Promise((resolve) => {
     const messageChannel = new MessageChannel()
-    messageChannel.port1.onmessage = (event) => {
-      resolve(event.data)
+    messageChannel.port1.onmessage = (event: MessageEvent) => {
+      resolve(event.data as T)
     }
     navigator.serviceWorker.controller.postMessage(message, [messageChannel.port2])
   })
@@ -102,8 +120,8 @@ export async function sendMessageToSW(message) {
 /**
  * Notifica al SW que hay datos pendientes para sincronizar
  */
-export async function notifyPendingData(type, count) {
-  return sendMessageToSW({
+export async function notifyPendingData<T = unknown>(type: string, count: number): Promise<T | null> {
+  return sendMessageToSW<T>({
     type: 'PENDING_DATA',
     payload: { dataType: type, count }
   })
@@ -112,8 +130,8 @@ export async function notifyPendingData(type, count) {
 /**
  * Escucha mensajes del Service Worker
  */
-export function onSWMessage(callback) {
-  navigator.serviceWorker.addEventListener('message', (event) => {
+export function onSWMessage(callback: (data: unknown) => void): void {
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
     callback(event.data)
   })
 }
@@ -121,7 +139,7 @@ export function onSWMessage(callback) {
 /**
  * Verifica el estado de la conexión con retry
  */
-export async function checkConnection(url = '/api/health', retries = 3) {
+export async function checkConnection(url = '/api/health', retries = 3): Promise<boolean> {
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url, {
@@ -138,14 +156,20 @@ export async function checkConnection(url = '/api/health', retries = 3) {
   return false
 }
 
+export type ConnectionCallback = () => void;
+
 /**
  * Hook para escuchar cambios de conexión con debounce
  */
-export function createConnectionListener(onOnline, onOffline, debounceMs = 1000) {
-  let timeoutId = null
+export function createConnectionListener(
+  onOnline?: ConnectionCallback,
+  onOffline?: ConnectionCallback,
+  debounceMs = 1000
+): () => void {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
   let lastState = navigator.onLine
 
-  const handler = () => {
+  const handler = (): void => {
     if (timeoutId) clearTimeout(timeoutId)
 
     timeoutId = setTimeout(() => {

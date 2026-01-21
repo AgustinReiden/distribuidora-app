@@ -11,7 +11,7 @@
 import DOMPurify from 'dompurify'
 
 // Configuración por defecto de DOMPurify
-const DEFAULT_CONFIG = {
+const DEFAULT_CONFIG: DOMPurify.Config = {
   // Permitir solo etiquetas de texto básicas
   ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'u', 'br', 'p', 'span'],
   // Permitir solo atributos de estilo básicos
@@ -24,13 +24,13 @@ const DEFAULT_CONFIG = {
 }
 
 // Configuración para texto plano (sin HTML)
-const TEXT_ONLY_CONFIG = {
+const TEXT_ONLY_CONFIG: DOMPurify.Config = {
   ALLOWED_TAGS: [],
   ALLOWED_ATTR: []
 }
 
 // Configuración para contenido rico (más etiquetas permitidas)
-const RICH_CONFIG = {
+const RICH_CONFIG: DOMPurify.Config = {
   ALLOWED_TAGS: [
     'b', 'i', 'em', 'strong', 'u', 'br', 'p', 'span',
     'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -43,40 +43,32 @@ const RICH_CONFIG = {
 
 /**
  * Sanitiza HTML permitiendo solo etiquetas básicas
- * @param {string} dirty - HTML potencialmente peligroso
- * @returns {string} HTML sanitizado
  */
-export function sanitizeHTML(dirty) {
+export function sanitizeHTML(dirty: string | null | undefined): string {
   if (dirty == null) return ''
   return DOMPurify.sanitize(String(dirty), DEFAULT_CONFIG)
 }
 
 /**
  * Sanitiza texto removiendo todo HTML
- * @param {string} dirty - Texto con posible HTML
- * @returns {string} Texto plano sin HTML
  */
-export function sanitizeText(dirty) {
+export function sanitizeText(dirty: string | null | undefined): string {
   if (dirty == null) return ''
   return DOMPurify.sanitize(String(dirty), TEXT_ONLY_CONFIG)
 }
 
 /**
  * Sanitiza contenido rico (para editores WYSIWYG)
- * @param {string} dirty - HTML rico potencialmente peligroso
- * @returns {string} HTML sanitizado con etiquetas permitidas
  */
-export function sanitizeRichContent(dirty) {
+export function sanitizeRichContent(dirty: string | null | undefined): string {
   if (dirty == null) return ''
   return DOMPurify.sanitize(String(dirty), RICH_CONFIG)
 }
 
 /**
  * Sanitiza un valor para uso seguro en URLs
- * @param {string} value - Valor a usar en URL
- * @returns {string} Valor codificado para URL
  */
-export function sanitizeURLParam(value) {
+export function sanitizeURLParam(value: string | null | undefined): string {
   if (value == null) return ''
   // Primero limpiar cualquier HTML, luego codificar
   const cleaned = sanitizeText(String(value))
@@ -85,11 +77,8 @@ export function sanitizeURLParam(value) {
 
 /**
  * Valida y sanitiza una URL completa
- * @param {string} url - URL a validar
- * @param {string[]} allowedProtocols - Protocolos permitidos
- * @returns {string|null} URL sanitizada o null si es inválida
  */
-export function sanitizeURL(url, allowedProtocols = ['http:', 'https:', 'mailto:']) {
+export function sanitizeURL(url: string | null | undefined, allowedProtocols = ['http:', 'https:', 'mailto:']): string | null {
   if (url == null || url === '') return null
 
   try {
@@ -109,16 +98,17 @@ export function sanitizeURL(url, allowedProtocols = ['http:', 'https:', 'mailto:
   }
 }
 
+type SanitizedValue = string | number | boolean | null | undefined | SanitizedObject | SanitizedArray;
+interface SanitizedObject { [key: string]: SanitizedValue }
+type SanitizedArray = SanitizedValue[];
+
 /**
  * Sanitiza un objeto, limpiando todos los valores string
- * @param {object} obj - Objeto a sanitizar
- * @param {string[]} excludeKeys - Keys a excluir de la sanitización
- * @returns {object} Objeto con valores sanitizados
  */
-export function sanitizeObject(obj, excludeKeys = []) {
-  if (obj == null || typeof obj !== 'object') return obj
+export function sanitizeObject<T extends Record<string, unknown>>(obj: T | null | undefined, excludeKeys: string[] = []): T {
+  if (obj == null || typeof obj !== 'object') return obj as T
 
-  const sanitized = Array.isArray(obj) ? [] : {}
+  const sanitized: Record<string, unknown> = Array.isArray(obj) ? [] : {}
 
   for (const [key, value] of Object.entries(obj)) {
     if (excludeKeys.includes(key)) {
@@ -126,30 +116,30 @@ export function sanitizeObject(obj, excludeKeys = []) {
     } else if (typeof value === 'string') {
       sanitized[key] = sanitizeText(value)
     } else if (typeof value === 'object' && value !== null) {
-      sanitized[key] = sanitizeObject(value, excludeKeys)
+      sanitized[key] = sanitizeObject(value as Record<string, unknown>, excludeKeys)
     } else {
       sanitized[key] = value
     }
   }
 
-  return sanitized
+  return sanitized as T
+}
+
+export interface SanitizeFormDataOptions {
+  htmlFields?: string[];
+  richFields?: string[];
+  skipFields?: string[];
 }
 
 /**
  * Sanitiza datos de formulario antes de enviar
- * @param {object} formData - Datos del formulario
- * @param {object} options - Opciones de sanitización
- * @param {string[]} options.htmlFields - Campos que permiten HTML básico
- * @param {string[]} options.richFields - Campos que permiten HTML rico
- * @param {string[]} options.skipFields - Campos a no sanitizar (ej: passwords)
- * @returns {object} Datos sanitizados
  */
-export function sanitizeFormData(formData, options = {}) {
+export function sanitizeFormData<T extends Record<string, unknown>>(formData: T | null | undefined, options: SanitizeFormDataOptions = {}): T {
   const { htmlFields = [], richFields = [], skipFields = [] } = options
 
-  if (formData == null || typeof formData !== 'object') return formData
+  if (formData == null || typeof formData !== 'object') return formData as T
 
-  const sanitized = {}
+  const sanitized: Record<string, unknown> = {}
 
   for (const [key, value] of Object.entries(formData)) {
     if (skipFields.includes(key)) {
@@ -168,16 +158,13 @@ export function sanitizeFormData(formData, options = {}) {
     }
   }
 
-  return sanitized
+  return sanitized as T
 }
 
 /**
  * Hook para crear una versión sanitizada de un valor
- * @param {string} value - Valor a sanitizar
- * @param {'text'|'html'|'rich'} type - Tipo de sanitización
- * @returns {string} Valor sanitizado
  */
-export function useSanitizedValue(value, type = 'text') {
+export function useSanitizedValue(value: string | null | undefined, type: 'text' | 'html' | 'rich' = 'text'): string {
   switch (type) {
     case 'html':
       return sanitizeHTML(value)
@@ -190,22 +177,16 @@ export function useSanitizedValue(value, type = 'text') {
 
 /**
  * Escapa caracteres especiales para regex
- * @param {string} string - String a escapar
- * @returns {string} String con caracteres regex escapados
  */
-export function escapeRegex(string) {
+export function escapeRegex(string: string | null | undefined): string {
   if (string == null) return ''
   return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**
  * Trunca texto de forma segura (sin cortar entidades HTML)
- * @param {string} text - Texto a truncar
- * @param {number} maxLength - Longitud máxima
- * @param {string} suffix - Sufijo a agregar si se trunca
- * @returns {string} Texto truncado
  */
-export function truncateText(text, maxLength, suffix = '...') {
+export function truncateText(text: string | null | undefined, maxLength: number, suffix = '...'): string {
   if (text == null) return ''
   const cleaned = sanitizeText(String(text))
   if (cleaned.length <= maxLength) return cleaned

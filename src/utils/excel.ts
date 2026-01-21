@@ -6,16 +6,31 @@
  */
 import ExcelJS from 'exceljs'
 
+export interface ExcelOptions {
+  columnWidth?: number;
+}
+
+export interface ReportConfig {
+  titulo?: string;
+  datos: Record<string, unknown>[];
+  columnas: { header: string; key: string; width?: number }[];
+  filename: string;
+}
+
+export interface SheetConfig {
+  name: string;
+  data: Record<string, unknown>[];
+  columnWidths?: number[];
+}
+
 /**
  * Lee un archivo Excel y retorna los datos como array de objetos
- * @param {File|ArrayBuffer} file - Archivo Excel a leer
- * @returns {Promise<Array<Object>>} - Array de objetos con los datos
  */
-export async function readExcelFile(file) {
+export async function readExcelFile(file: File | ArrayBuffer): Promise<Record<string, unknown>[]> {
   const workbook = new ExcelJS.Workbook()
 
   // Si es un File, convertir a ArrayBuffer
-  let arrayBuffer
+  let arrayBuffer: ArrayBuffer
   if (file instanceof File) {
     arrayBuffer = await file.arrayBuffer()
   } else {
@@ -29,8 +44,8 @@ export async function readExcelFile(file) {
     throw new Error('El archivo no contiene hojas de cálculo')
   }
 
-  const jsonData = []
-  const headers = []
+  const jsonData: Record<string, unknown>[] = []
+  const headers: string[] = []
 
   worksheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) {
@@ -40,18 +55,19 @@ export async function readExcelFile(file) {
       })
     } else {
       // Filas de datos
-      const rowData = {}
+      const rowData: Record<string, unknown> = {}
       row.eachCell((cell, colNumber) => {
         const header = headers[colNumber]
         if (header) {
           // Manejar diferentes tipos de valores de celda
-          let value = cell.value
+          let value: unknown = cell.value
           if (value && typeof value === 'object') {
             // ExcelJS puede retornar objetos para fórmulas, fechas, etc.
-            if (value.result !== undefined) {
-              value = value.result // Resultado de fórmula
-            } else if (value.text !== undefined) {
-              value = value.text // Rich text
+            const cellValue = value as { result?: unknown; text?: string }
+            if (cellValue.result !== undefined) {
+              value = cellValue.result // Resultado de fórmula
+            } else if (cellValue.text !== undefined) {
+              value = cellValue.text // Rich text
             } else if (value instanceof Date) {
               value = value.toISOString()
             }
@@ -70,13 +86,29 @@ export async function readExcelFile(file) {
 }
 
 /**
- * Crea un archivo Excel a partir de datos y lo descarga
- * @param {Array<Object>} data - Array de objetos con los datos
- * @param {string} filename - Nombre del archivo (sin extensión)
- * @param {string} sheetName - Nombre de la hoja (default: 'Datos')
- * @param {Object} options - Opciones adicionales
+ * Helper para descargar un buffer como archivo
  */
-export async function createAndDownloadExcel(data, filename, sheetName = 'Datos', options = {}) {
+function downloadBuffer(buffer: ArrayBuffer, filename: string, mimeType: string): void {
+  const blob = new Blob([buffer], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Crea un archivo Excel a partir de datos y lo descarga
+ */
+export async function createAndDownloadExcel(
+  data: Record<string, unknown>[],
+  filename: string,
+  sheetName = 'Datos',
+  options: ExcelOptions = {}
+): Promise<void> {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Distribuidora App'
   workbook.created = new Date()
@@ -113,46 +145,24 @@ export async function createAndDownloadExcel(data, filename, sheetName = 'Datos'
 
   // Generar buffer y descargar
   const buffer = await workbook.xlsx.writeBuffer()
-  downloadBuffer(buffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  downloadBuffer(buffer as ArrayBuffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 }
 
 /**
  * Crea una plantilla Excel con estructura predefinida
- * @param {Array<Object>} templateData - Datos de ejemplo para la plantilla
- * @param {string} filename - Nombre del archivo
- * @param {string} sheetName - Nombre de la hoja
  */
-export async function createTemplate(templateData, filename, sheetName = 'Plantilla') {
+export async function createTemplate(
+  templateData: Record<string, unknown>[],
+  filename: string,
+  sheetName = 'Plantilla'
+): Promise<void> {
   await createAndDownloadExcel(templateData, filename, sheetName, { columnWidth: 20 })
 }
 
 /**
- * Helper para descargar un buffer como archivo
- * @param {ArrayBuffer} buffer - Buffer del archivo
- * @param {string} filename - Nombre del archivo
- * @param {string} mimeType - Tipo MIME
- */
-function downloadBuffer(buffer, filename, mimeType) {
-  const blob = new Blob([buffer], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
-
-/**
  * Exporta datos a Excel con formato de reporte
- * @param {Object} config - Configuración del reporte
- * @param {string} config.titulo - Título del reporte
- * @param {Array<Object>} config.datos - Datos a exportar
- * @param {Array<{header: string, key: string, width?: number}>} config.columnas - Definición de columnas
- * @param {string} config.filename - Nombre del archivo
  */
-export async function exportReport(config) {
+export async function exportReport(config: ReportConfig): Promise<void> {
   const { titulo, datos, columnas, filename } = config
 
   const workbook = new ExcelJS.Workbook()
@@ -191,7 +201,6 @@ export async function exportReport(config) {
   columnas.forEach((col, idx) => {
     headerRow.getCell(idx + 1).value = col.header
   })
-  headerRow.font = { bold: true }
   headerRow.fill = {
     type: 'pattern',
     pattern: 'solid',
@@ -203,21 +212,19 @@ export async function exportReport(config) {
   datos.forEach((row, idx) => {
     const dataRow = worksheet.getRow(dataStartRow + 1 + idx)
     columnas.forEach((col, colIdx) => {
-      dataRow.getCell(colIdx + 1).value = row[col.key]
+      dataRow.getCell(colIdx + 1).value = row[col.key] as ExcelJS.CellValue
     })
   })
 
   // Generar y descargar
   const buffer = await workbook.xlsx.writeBuffer()
-  downloadBuffer(buffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  downloadBuffer(buffer as ArrayBuffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 }
 
 /**
  * Crea un archivo Excel con múltiples hojas
- * @param {Array<{name: string, data: Array<Object>, columnWidths?: number[]}>} sheets - Array de hojas
- * @param {string} filename - Nombre del archivo (sin extensión)
  */
-export async function createMultiSheetExcel(sheets, filename) {
+export async function createMultiSheetExcel(sheets: SheetConfig[], filename: string): Promise<void> {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Distribuidora App'
   workbook.created = new Date()
@@ -258,7 +265,7 @@ export async function createMultiSheetExcel(sheets, filename) {
 
   // Generar buffer y descargar
   const buffer = await workbook.xlsx.writeBuffer()
-  downloadBuffer(buffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  downloadBuffer(buffer as ArrayBuffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 }
 
 export default {
