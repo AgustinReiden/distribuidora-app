@@ -80,15 +80,6 @@ export default function TopNavigation({
 
   const menuFiltrado = getMenuFiltrado();
 
-  // Obtener la vista activa y su grupo
-  const getVistaActiva = () => {
-    for (const group of menuFiltrado) {
-      const item = group.items.find(i => i.id === vista);
-      if (item) return { group, item };
-    }
-    return null;
-  };
-
   // Cerrar menús al hacer click fuera
   useEffect(() => {
     const handleClickOutside = (event) => {

@@ -45,7 +45,8 @@ const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion
 });
 
 // Componente de tarjeta de métrica grande
-const MetricaCard = memo(function MetricaCard({ icono: Icono, titulo, valor, subtitulo, colorClase, tendencia }) {
+const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo, colorClase, tendencia }) {
+  const Icono = icono;
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow">
       <div className="flex items-start justify-between">
@@ -68,7 +69,8 @@ const MetricaCard = memo(function MetricaCard({ icono: Icono, titulo, valor, sub
 });
 
 // Componente de tarjeta de estado pequeña
-const EstadoCard = memo(function EstadoCard({ icono: Icono, titulo, valor, colorClase, onClick }) {
+const EstadoCard = memo(function EstadoCard({ icono, titulo, valor, colorClase, onClick }) {
+  const Icono = icono;
   return (
     <button
       onClick={onClick}

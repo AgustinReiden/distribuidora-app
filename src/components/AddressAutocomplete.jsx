@@ -31,14 +31,15 @@ export const AddressAutocomplete = ({
   const dropdownRef = useRef(null);
 
   // Usar hook para cargar Google Maps dinámicamente
-  const { isLoaded: googleReady, isLoading: googleLoading, error: googleError } = useGoogleMaps();
+  const { isLoaded: googleReady, error: googleError } = useGoogleMaps();
+  const [initError, setInitError] = useState(false);
 
   // Mapear estados del hook a googleStatus para compatibilidad
-  const googleStatus = googleError ? 'error' : googleReady ? 'ready' : 'loading';
+  const googleStatus = googleError || initError ? 'error' : googleReady ? 'ready' : 'loading';
 
   // Inicializar servicios cuando Google esté listo
   useEffect(() => {
-    if (googleStatus !== 'ready') return;
+    if (!googleReady || googleError) return;
 
     try {
       // Crear AutocompleteService para obtener predicciones
@@ -53,10 +54,10 @@ export const AddressAutocomplete = ({
 
       // Crear session token para agrupar requests
       sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
-    } catch (error) {
-      setGoogleStatus('error');
+    } catch {
+      setInitError(true);
     }
-  }, [googleStatus]);
+  }, [googleReady, googleError]);
 
   // Cerrar dropdown cuando se hace click fuera
   useEffect(() => {

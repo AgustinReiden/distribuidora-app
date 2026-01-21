@@ -7,7 +7,7 @@
  * - Submit con Ctrl+Enter o Cmd+Enter
  * - Gestión de foco en errores
  */
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 
 /**
  * Selectores de elementos focalizables

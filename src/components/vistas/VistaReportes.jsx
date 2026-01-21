@@ -48,22 +48,26 @@ export default function VistaReportes({
 
   const handleCargarReporteFinanciero = async (tipo) => {
     switch (tipo) {
-      case 'cuentas':
+      case 'cuentas': {
         const cuentas = await generarReporteCuentasPorCobrar();
         setReporteCuentas(cuentas);
         break;
-      case 'rentabilidad':
+      }
+      case 'rentabilidad': {
         const rent = await generarReporteRentabilidad(fechaDesde || null, fechaHasta || null);
         setReporteRentabilidad(rent);
         break;
-      case 'clientes':
+      }
+      case 'clientes': {
         const clientes = await generarReporteVentasPorCliente(fechaDesde || null, fechaHasta || null);
         setReporteClientes(clientes);
         break;
-      case 'zonas':
+      }
+      case 'zonas': {
         const zonas = await generarReporteVentasPorZona(fechaDesde || null, fechaHasta || null);
         setReporteZonas(zonas);
         break;
+      }
     }
   };
 

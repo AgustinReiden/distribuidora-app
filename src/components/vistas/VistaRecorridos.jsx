@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Route, Truck, Calendar, Clock, Package, Check, MapPin, Phone, DollarSign, ChevronDown, ChevronUp, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
 import { formatPrecio, formatFecha } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';

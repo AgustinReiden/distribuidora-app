@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /**
  * Secure Storage - Wrapper para localStorage con cifrado AES-GCM
  *

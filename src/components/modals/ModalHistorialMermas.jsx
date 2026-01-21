@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { X, Package, Calendar, User, FileText, TrendingDown, Filter } from 'lucide-react'
-import { formatPrecio } from '../../utils/formatters'
 
 export default function ModalHistorialMermas({ mermas = [], productos = [], usuarios = [], onClose }) {
   const [filtroProducto, setFiltroProducto] = useState('')

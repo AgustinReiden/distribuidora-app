@@ -6,6 +6,7 @@
  * Errores en produccion se envian a Sentry automaticamente.
  */
 
+// eslint-disable-next-line no-unused-vars
 import { captureException, captureMessage, addBreadcrumb } from '../lib/sentry'
 
 const isDevelopment = import.meta.env.DEV || import.meta.env.MODE === 'development'

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * Componente de lista virtualizada genérico
  *
@@ -36,15 +37,7 @@ export const VirtualFixedList = memo(function VirtualFixedList({
     }
   }, [items.length])
 
-  if (items.length === 0) {
-    if (EmptyComponent) return <EmptyComponent />
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <p>{emptyMessage}</p>
-      </div>
-    )
-  }
-
+  // useCallback debe estar antes de cualquier return condicional
   const Row = useCallback(({ index, style }) => {
     const item = items[index]
     return (
@@ -53,6 +46,15 @@ export const VirtualFixedList = memo(function VirtualFixedList({
       </div>
     )
   }, [items, renderItem])
+
+  if (items.length === 0) {
+    if (EmptyComponent) return <EmptyComponent />
+    return (
+      <div className="text-center py-12 text-gray-500">
+        <p>{emptyMessage}</p>
+      </div>
+    )
+  }
 
   return (
     <FixedSizeList
@@ -110,15 +112,7 @@ export const VirtualVariableList = memo(function VirtualVariableList({
     }
   }, [items])
 
-  if (items.length === 0) {
-    if (EmptyComponent) return <EmptyComponent />
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <p>{emptyMessage}</p>
-      </div>
-    )
-  }
-
+  // useCallback debe estar antes de cualquier return condicional
   const Row = useCallback(({ index, style }) => {
     const item = items[index]
     return (
@@ -127,6 +121,15 @@ export const VirtualVariableList = memo(function VirtualVariableList({
       </div>
     )
   }, [items, renderItem])
+
+  if (items.length === 0) {
+    if (EmptyComponent) return <EmptyComponent />
+    return (
+      <div className="text-center py-12 text-gray-500">
+        <p>{emptyMessage}</p>
+      </div>
+    )
+  }
 
   return (
     <VariableSizeList

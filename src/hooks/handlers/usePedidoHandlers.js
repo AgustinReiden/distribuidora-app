@@ -15,7 +15,7 @@ export function usePedidoHandlers({
   actualizarEstadoPago,
   actualizarFormaPago,
   actualizarOrdenEntrega,
-  actualizarItemsPedido,
+  actualizarItemsPedido: _actualizarItemsPedido, // Passed for potential future use
   fetchHistorialPedido,
   validarStock,
   descontarStock,

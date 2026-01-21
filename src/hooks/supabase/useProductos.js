@@ -112,7 +112,7 @@ export function useProductos() {
       cantidad: item.cantidad
     }))
 
-    const { data, error } = await supabase.rpc('restaurar_stock_atomico', {
+    const { error } = await supabase.rpc('restaurar_stock_atomico', {
       p_items: itemsParaRPC
     })
 

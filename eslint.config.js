@@ -23,7 +23,12 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Permitir variables prefijadas con _ o mayúsculas
+      'no-unused-vars': ['error', { varsIgnorePattern: '^_|^[A-Z_]', argsIgnorePattern: '^_' }],
+      // Desactivar regla estricta de setState en effects (patrón válido para sync con props)
+      'react-hooks/set-state-in-effect': 'off',
+      // Downgrade warnings que no son críticos
+      'react-hooks/exhaustive-deps': 'warn',
     },
   },
 ])

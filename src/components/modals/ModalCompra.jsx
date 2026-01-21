@@ -164,7 +164,7 @@ function useCalculosImpuestos(items) {
   return { subtotal, iva, impuestosInternos, total }
 }
 
-export default function ModalCompra({ productos, proveedores, onSave, onClose, onAgregarProveedor }) {
+export default function ModalCompra({ productos, proveedores, onSave, onClose, onAgregarProveedor: _onAgregarProveedor }) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const { subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
 
