@@ -67,7 +67,7 @@ const ModalPedido = memo(function ModalPedido({
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
       setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
-    } catch (e) {
+    } catch {
       // Error handled by parent
     }
     setGuardandoCliente(false);

@@ -31,7 +31,7 @@ export const formatFecha = (fecha) => new Date(fecha).toLocaleString('es-AR', {
  */
 export const validarTelefono = (telefono) => {
   if (!telefono) return true; // Opcional
-  const telefonoLimpio = telefono.replace(/[\s\-\(\)]/g, '');
+  const telefonoLimpio = telefono.replace(/[\s\-()]/g, '');
   return /^[0-9+]{6,15}$/.test(telefonoLimpio);
 };
 

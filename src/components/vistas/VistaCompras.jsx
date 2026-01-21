@@ -26,7 +26,7 @@ export default function VistaCompras({
   onNuevaCompra,
   onVerDetalle,
   onAnularCompra,
-  resumen
+  resumen: _resumen
 }) {
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('todos');

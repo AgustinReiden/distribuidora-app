@@ -55,7 +55,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     if (itemsOriginales.length === 0) return;
 
     const cambios = items.length !== itemsOriginales.length ||
-      items.some((item, idx) => {
+      items.some((item) => {
         const original = itemsOriginales.find(o => o.productoId === item.productoId);
         return !original || original.cantidad !== item.cantidad;
       }) ||

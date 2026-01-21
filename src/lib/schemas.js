@@ -441,7 +441,7 @@ export const modalClienteSchema = z.object({
     .string()
     .transform(val => val.replace(/\D/g, ''))
     .refine(
-      (val, ctx) => {
+      (val) => {
         // La validación depende del tipo_documento que no está disponible aquí
         // Se valida por longitud: 11 para CUIT, 7-8 para DNI
         return val.length === 0 || val.length === 11 || (val.length >= 7 && val.length <= 8)

@@ -4,7 +4,7 @@
  * Renderiza eficientemente listas grandes de pedidos usando react-window v2.
  * Recomendado para más de 50 pedidos.
  */
-import React, { memo, useRef, useEffect, useState, useMemo } from 'react'
+import React, { memo, useRef, useEffect, useState } from 'react'
 import { List, useDynamicRowHeight, useListRef } from 'react-window'
 import { ShoppingCart } from 'lucide-react'
 import PedidoCard from './PedidoCard'

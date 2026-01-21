@@ -42,19 +42,22 @@ export function useDashboard(usuarioFiltro = null) {
         case 'hoy':
           fechaInicioStr = hoyStr
           break
-        case 'semana':
+        case 'semana': {
           const hace7Dias = new Date()
           hace7Dias.setDate(hace7Dias.getDate() - 7)
           fechaInicioStr = hace7Dias.toISOString().split('T')[0]
           break
-        case 'mes':
+        }
+        case 'mes': {
           const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
           fechaInicioStr = inicioMes.toISOString().split('T')[0]
           break
-        case 'anio':
+        }
+        case 'anio': {
           const inicioAnio = new Date(hoy.getFullYear(), 0, 1)
           fechaInicioStr = inicioAnio.toISOString().split('T')[0]
           break
+        }
         case 'personalizado':
           fechaInicioStr = fDesde || null
           break

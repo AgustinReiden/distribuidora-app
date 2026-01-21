@@ -87,15 +87,42 @@ function MainApp() {
 
   // Auto-sincronizar cuando vuelve la conexión
   useEffect(() => {
+    const sincronizar = async () => {
+      try {
+        if (pedidosPendientes.length > 0) {
+          const resultadoPedidos = await sincronizarPedidos(crearPedido, descontarStock);
+          if (resultadoPedidos.sincronizados > 0) {
+            notify.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`);
+            refetchPedidos();
+            refetchProductos();
+          }
+          if (resultadoPedidos.errores.length > 0) {
+            notify.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`);
+          }
+        }
+        if (mermasPendientes.length > 0) {
+          const resultadoMermas = await sincronizarMermas(registrarMerma);
+          if (resultadoMermas.sincronizados > 0) {
+            notify.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`);
+            refetchMermas();
+          }
+        }
+      } catch (err) {
+        notify.error('Error durante la sincronización: ' + err.message);
+      }
+    };
+
     if (isOnline && (pedidosPendientes.length > 0 || mermasPendientes.length > 0)) {
-      handleSincronizar();
+      sincronizar();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
 
   const handleLogout = async () => {
-    try { await logout(); } catch (e) { /* error silenciado */ }
+    try { await logout(); } catch { /* error silenciado */ }
   };
 
+  // Handler para sincronización manual
   const handleSincronizar = async () => {
     try {
       if (pedidosPendientes.length > 0) {
@@ -116,8 +143,8 @@ function MainApp() {
           refetchMermas();
         }
       }
-    } catch (e) {
-      notify.error('Error durante la sincronización: ' + e.message);
+    } catch (err) {
+      notify.error('Error durante la sincronización: ' + err.message);
     }
   };
 

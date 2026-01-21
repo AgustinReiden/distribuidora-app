@@ -135,7 +135,8 @@ export function sanitizeExcelValue(value) {
 
   // Si es string, sanitizar
   if (typeof value === 'string') {
-    // Remover caracteres de control
+    // Remover caracteres de control (excluye tab, newline, carriage return)
+    // eslint-disable-next-line no-control-regex
     let sanitized = value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
 
     // Truncar strings muy largos (prevención de memoria)

@@ -1,19 +1,45 @@
 /**
  * Componente consolidado para todos los modales de la aplicación
- * Extrae el renderizado de modales de App.jsx para mejor organización
+ * Implementa lazy loading para optimización de bundle
  */
-import React from 'react';
-import { ModalConfirmacion, ModalFiltroFecha, ModalCliente, ModalProducto, ModalUsuario, ModalAsignarTransportista, ModalPedido, ModalHistorialPedido, ModalEditarPedido, ModalExportarPDF, ModalGestionRutas } from './Modals.jsx';
-import ModalFichaCliente from './modals/ModalFichaCliente.jsx';
-import ModalRegistrarPago from './modals/ModalRegistrarPago.jsx';
-import ModalMermaStock from './modals/ModalMermaStock.jsx';
-import ModalHistorialMermas from './modals/ModalHistorialMermas.jsx';
-import ModalCompra from './modals/ModalCompra.jsx';
-import ModalDetalleCompra from './modals/ModalDetalleCompra.jsx';
-import ModalProveedor from './modals/ModalProveedor.jsx';
-import ModalImportarPrecios from './modals/ModalImportarPrecios.jsx';
-import ModalPedidosEliminados from './modals/ModalPedidosEliminados.jsx';
-import { generarOrdenPreparacion, generarHojaRuta } from '../lib/pdfExport.js';
+import React, { Suspense, lazy } from 'react';
+import LoadingSpinner from './layout/LoadingSpinner';
+
+// Modales cargados de forma lazy
+const ModalConfirmacion = lazy(() => import('./modals/ModalConfirmacion'));
+const ModalFiltroFecha = lazy(() => import('./modals/ModalFiltroFecha'));
+const ModalCliente = lazy(() => import('./modals/ModalCliente'));
+const ModalProducto = lazy(() => import('./modals/ModalProducto'));
+const ModalUsuario = lazy(() => import('./modals/ModalUsuario'));
+const ModalAsignarTransportista = lazy(() => import('./modals/ModalAsignarTransportista'));
+const ModalPedido = lazy(() => import('./modals/ModalPedido'));
+const ModalHistorialPedido = lazy(() => import('./modals/ModalHistorialPedido'));
+const ModalEditarPedido = lazy(() => import('./modals/ModalEditarPedido'));
+const ModalExportarPDF = lazy(() => import('./modals/ModalExportarPDF'));
+const ModalGestionRutas = lazy(() => import('./modals/ModalGestionRutas'));
+const ModalFichaCliente = lazy(() => import('./modals/ModalFichaCliente'));
+const ModalRegistrarPago = lazy(() => import('./modals/ModalRegistrarPago'));
+const ModalMermaStock = lazy(() => import('./modals/ModalMermaStock'));
+const ModalHistorialMermas = lazy(() => import('./modals/ModalHistorialMermas'));
+const ModalCompra = lazy(() => import('./modals/ModalCompra'));
+const ModalDetalleCompra = lazy(() => import('./modals/ModalDetalleCompra'));
+const ModalProveedor = lazy(() => import('./modals/ModalProveedor'));
+const ModalImportarPrecios = lazy(() => import('./modals/ModalImportarPrecios'));
+const ModalPedidosEliminados = lazy(() => import('./modals/ModalPedidosEliminados'));
+
+// Lazy load de utilidades PDF (solo cuando se necesiten)
+const loadPdfUtils = () => import('../lib/pdfExport.js');
+
+// Fallback para loading de modales
+function ModalFallback() {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6">
+        <LoadingSpinner />
+      </div>
+    </div>
+  );
+}
 
 export default function AppModals({
   // Estado de la app
@@ -84,230 +110,283 @@ export default function AppModals({
 
   const zonasExistentes = [...new Set(clientes.map(c => c.zona).filter(Boolean))];
 
+  // Handlers para PDF con lazy loading
+  const handleExportarOrdenPreparacion = async (...args) => {
+    const { generarOrdenPreparacion } = await loadPdfUtils();
+    return generarOrdenPreparacion(...args);
+  };
+
+  const handleExportarHojaRuta = async (...args) => {
+    const { generarHojaRuta } = await loadPdfUtils();
+    return generarHojaRuta(...args);
+  };
+
   return (
-    <>
-      {/* Modal de Confirmación */}
-      <ModalConfirmacion
-        config={modales.confirm.config}
-        onClose={() => modales.confirm.setConfig({ visible: false })}
-      />
+    <Suspense fallback={null}>
+      {/* Modal de Confirmación - siempre visible si hay config */}
+      {modales.confirm.config?.visible && (
+        <Suspense fallback={<ModalFallback />}>
+          <ModalConfirmacion
+            config={modales.confirm.config}
+            onClose={() => modales.confirm.setConfig({ visible: false })}
+          />
+        </Suspense>
+      )}
 
       {/* Modal de Filtro de Fecha */}
       {modales.filtroFecha.open && (
-        <ModalFiltroFecha
-          filtros={filtros}
-          onApply={(nuevosFiltros) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
-          onClose={() => modales.filtroFecha.setOpen(false)}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalFiltroFecha
+            filtros={filtros}
+            onApply={(nuevosFiltros) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
+            onClose={() => modales.filtroFecha.setOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Cliente */}
       {modales.cliente.open && (
-        <ModalCliente
-          cliente={clienteEditando}
-          onSave={handlers.handleGuardarCliente}
-          onClose={() => { modales.cliente.setOpen(false); setClienteEditando(null); }}
-          guardando={guardando}
-          isAdmin={isAdmin}
-          zonasExistentes={zonasExistentes}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalCliente
+            cliente={clienteEditando}
+            onSave={handlers.handleGuardarCliente}
+            onClose={() => { modales.cliente.setOpen(false); setClienteEditando(null); }}
+            guardando={guardando}
+            isAdmin={isAdmin}
+            zonasExistentes={zonasExistentes}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Producto */}
       {modales.producto.open && (
-        <ModalProducto
-          producto={productoEditando}
-          categorias={categorias}
-          onSave={handlers.handleGuardarProducto}
-          onClose={() => { modales.producto.setOpen(false); setProductoEditando(null); }}
-          guardando={guardando}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalProducto
+            producto={productoEditando}
+            categorias={categorias}
+            onSave={handlers.handleGuardarProducto}
+            onClose={() => { modales.producto.setOpen(false); setProductoEditando(null); }}
+            guardando={guardando}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Pedido */}
       {modales.pedido.open && (
-        <ModalPedido
-          productos={productos}
-          clientes={clientes}
-          categorias={categorias}
-          nuevoPedido={nuevoPedido}
-          onClose={() => { modales.pedido.setOpen(false); appState.resetNuevoPedido(); }}
-          onClienteChange={handlers.handleClienteChange}
-          onAgregarItem={handlers.agregarItemPedido}
-          onActualizarCantidad={handlers.actualizarCantidadItem}
-          onCrearCliente={handlers.handleCrearClienteEnPedido}
-          onGuardar={handlers.handleGuardarPedidoConOffline}
-          isOffline={!isOnline}
-          onNotasChange={handlers.handleNotasChange}
-          onFormaPagoChange={handlers.handleFormaPagoChange}
-          onEstadoPagoChange={handlers.handleEstadoPagoChange}
-          onMontoPagadoChange={handlers.handleMontoPagadoChange}
-          guardando={guardando}
-          isAdmin={isAdmin}
-          isPreventista={isPreventista}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalPedido
+            productos={productos}
+            clientes={clientes}
+            categorias={categorias}
+            nuevoPedido={nuevoPedido}
+            onClose={() => { modales.pedido.setOpen(false); appState.resetNuevoPedido(); }}
+            onClienteChange={handlers.handleClienteChange}
+            onAgregarItem={handlers.agregarItemPedido}
+            onActualizarCantidad={handlers.actualizarCantidadItem}
+            onCrearCliente={handlers.handleCrearClienteEnPedido}
+            onGuardar={handlers.handleGuardarPedidoConOffline}
+            isOffline={!isOnline}
+            onNotasChange={handlers.handleNotasChange}
+            onFormaPagoChange={handlers.handleFormaPagoChange}
+            onEstadoPagoChange={handlers.handleEstadoPagoChange}
+            onMontoPagadoChange={handlers.handleMontoPagadoChange}
+            guardando={guardando}
+            isAdmin={isAdmin}
+            isPreventista={isPreventista}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Usuario */}
       {modales.usuario.open && (
-        <ModalUsuario
-          usuario={usuarioEditando}
-          onSave={handlers.handleGuardarUsuario}
-          onClose={() => { modales.usuario.setOpen(false); setUsuarioEditando(null); }}
-          guardando={guardando}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalUsuario
+            usuario={usuarioEditando}
+            onSave={handlers.handleGuardarUsuario}
+            onClose={() => { modales.usuario.setOpen(false); setUsuarioEditando(null); }}
+            guardando={guardando}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Asignar Transportista */}
       {modales.asignar.open && (
-        <ModalAsignarTransportista
-          pedido={pedidoAsignando}
-          transportistas={transportistas}
-          onSave={handlers.handleAsignarTransportista}
-          onClose={() => { modales.asignar.setOpen(false); setPedidoAsignando(null); }}
-          guardando={guardando}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalAsignarTransportista
+            pedido={pedidoAsignando}
+            transportistas={transportistas}
+            onSave={handlers.handleAsignarTransportista}
+            onClose={() => { modales.asignar.setOpen(false); setPedidoAsignando(null); }}
+            guardando={guardando}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Historial de Pedido */}
       {modales.historial.open && (
-        <ModalHistorialPedido
-          pedido={pedidoHistorial}
-          historial={historialCambios}
-          onClose={() => { modales.historial.setOpen(false); setPedidoHistorial(null); setHistorialCambios([]); setCargandoHistorial(false); }}
-          loading={cargandoHistorial}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalHistorialPedido
+            pedido={pedidoHistorial}
+            historial={historialCambios}
+            onClose={() => { modales.historial.setOpen(false); setPedidoHistorial(null); setHistorialCambios([]); setCargandoHistorial(false); }}
+            loading={cargandoHistorial}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Editar Pedido */}
       {modales.editarPedido.open && (
-        <ModalEditarPedido
-          pedido={pedidoEditando}
-          productos={productos}
-          isAdmin={isAdmin}
-          onSave={handlers.handleGuardarEdicionPedido}
-          onSaveItems={async (items) => {
-            await actualizarItemsPedido(pedidoEditando.id, items, user?.id);
-            handlers.refetchProductos?.();
-          }}
-          onClose={() => { modales.editarPedido.setOpen(false); setPedidoEditando(null); }}
-          guardando={guardando}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalEditarPedido
+            pedido={pedidoEditando}
+            productos={productos}
+            isAdmin={isAdmin}
+            onSave={handlers.handleGuardarEdicionPedido}
+            onSaveItems={async (items) => {
+              await actualizarItemsPedido(pedidoEditando.id, items, user?.id);
+              handlers.refetchProductos?.();
+            }}
+            onClose={() => { modales.editarPedido.setOpen(false); setPedidoEditando(null); }}
+            guardando={guardando}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Exportar PDF */}
       {modales.exportarPDF.open && (
-        <ModalExportarPDF
-          pedidos={pedidos}
-          transportistas={transportistas}
-          onExportarOrdenPreparacion={generarOrdenPreparacion}
-          onExportarHojaRuta={generarHojaRuta}
-          onClose={() => modales.exportarPDF.setOpen(false)}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalExportarPDF
+            pedidos={pedidos}
+            transportistas={transportistas}
+            onExportarOrdenPreparacion={handleExportarOrdenPreparacion}
+            onExportarHojaRuta={handleExportarHojaRuta}
+            onClose={() => modales.exportarPDF.setOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Gestión de Rutas */}
       {modales.optimizarRuta.open && (
-        <ModalGestionRutas
-          transportistas={transportistas}
-          pedidos={pedidos}
-          onOptimizar={(transportistaId, pedidosData) => optimizarRuta(transportistaId, pedidosData)}
-          onAplicarOrden={handlers.handleAplicarOrdenOptimizado}
-          onExportarPDF={handlers.handleExportarHojaRutaOptimizada}
-          onClose={handlers.handleCerrarModalOptimizar}
-          loading={loadingOptimizacion}
-          guardando={guardando}
-          rutaOptimizada={rutaOptimizada}
-          error={errorOptimizacion}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalGestionRutas
+            transportistas={transportistas}
+            pedidos={pedidos}
+            onOptimizar={(transportistaId, pedidosData) => optimizarRuta(transportistaId, pedidosData)}
+            onAplicarOrden={handlers.handleAplicarOrdenOptimizado}
+            onExportarPDF={handlers.handleExportarHojaRutaOptimizada}
+            onClose={handlers.handleCerrarModalOptimizar}
+            loading={loadingOptimizacion}
+            guardando={guardando}
+            rutaOptimizada={rutaOptimizada}
+            error={errorOptimizacion}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Ficha de Cliente */}
       {modales.fichaCliente.open && clienteFicha && (
-        <ModalFichaCliente
-          cliente={clienteFicha}
-          onClose={() => { modales.fichaCliente.setOpen(false); setClienteFicha(null); }}
-          onRegistrarPago={handlers.handleAbrirRegistrarPago}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalFichaCliente
+            cliente={clienteFicha}
+            onClose={() => { modales.fichaCliente.setOpen(false); setClienteFicha(null); }}
+            onRegistrarPago={handlers.handleAbrirRegistrarPago}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Registrar Pago */}
       {modales.registrarPago.open && clientePago && (
-        <ModalRegistrarPago
-          cliente={clientePago}
-          saldoPendiente={saldoPendienteCliente}
-          pedidos={pedidos}
-          onClose={() => { modales.registrarPago.setOpen(false); setClientePago(null); }}
-          onConfirmar={handlers.handleRegistrarPago}
-          onGenerarRecibo={handlers.handleGenerarReciboPago}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalRegistrarPago
+            cliente={clientePago}
+            saldoPendiente={saldoPendienteCliente}
+            pedidos={pedidos}
+            onClose={() => { modales.registrarPago.setOpen(false); setClientePago(null); }}
+            onConfirmar={handlers.handleRegistrarPago}
+            onGenerarRecibo={handlers.handleGenerarReciboPago}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Merma de Stock */}
       {modales.mermaStock.open && productoMerma && (
-        <ModalMermaStock
-          producto={productoMerma}
-          onSave={handlers.handleRegistrarMerma}
-          onClose={() => { modales.mermaStock.setOpen(false); setProductoMerma(null); }}
-          isOffline={!isOnline}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalMermaStock
+            producto={productoMerma}
+            onSave={handlers.handleRegistrarMerma}
+            onClose={() => { modales.mermaStock.setOpen(false); setProductoMerma(null); }}
+            isOffline={!isOnline}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Historial de Mermas */}
       {modales.historialMermas.open && (
-        <ModalHistorialMermas
-          mermas={mermas}
-          productos={productos}
-          usuarios={usuarios}
-          onClose={() => modales.historialMermas.setOpen(false)}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalHistorialMermas
+            mermas={mermas}
+            productos={productos}
+            usuarios={usuarios}
+            onClose={() => modales.historialMermas.setOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Compra */}
       {modales.compra.open && (
-        <ModalCompra
-          productos={productos}
-          proveedores={proveedores}
-          onSave={handlers.handleRegistrarCompra}
-          onClose={() => modales.compra.setOpen(false)}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalCompra
+            productos={productos}
+            proveedores={proveedores}
+            onSave={handlers.handleRegistrarCompra}
+            onClose={() => modales.compra.setOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Detalle de Compra */}
       {modales.detalleCompra.open && compraDetalle && (
-        <ModalDetalleCompra
-          compra={compraDetalle}
-          onClose={() => { modales.detalleCompra.setOpen(false); setCompraDetalle(null); }}
-          onAnular={handlers.handleAnularCompra}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalDetalleCompra
+            compra={compraDetalle}
+            onClose={() => { modales.detalleCompra.setOpen(false); setCompraDetalle(null); }}
+            onAnular={handlers.handleAnularCompra}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Proveedor */}
       {modales.proveedor.open && (
-        <ModalProveedor
-          proveedor={proveedorEditando}
-          onSave={handlers.handleGuardarProveedor}
-          onClose={() => { modales.proveedor.setOpen(false); setProveedorEditando(null); }}
-          guardando={guardando}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalProveedor
+            proveedor={proveedorEditando}
+            onSave={handlers.handleGuardarProveedor}
+            onClose={() => { modales.proveedor.setOpen(false); setProveedorEditando(null); }}
+            guardando={guardando}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Importar Precios */}
       {modales.importarPrecios.open && (
-        <ModalImportarPrecios
-          productos={productos}
-          onActualizarPrecios={actualizarPreciosMasivo}
-          onClose={() => modales.importarPrecios.setOpen(false)}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalImportarPrecios
+            productos={productos}
+            onActualizarPrecios={actualizarPreciosMasivo}
+            onClose={() => modales.importarPrecios.setOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Modal de Pedidos Eliminados */}
       {modales.pedidosEliminados.open && (
-        <ModalPedidosEliminados
-          onFetch={fetchPedidosEliminados}
-          onClose={() => modales.pedidosEliminados.setOpen(false)}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <ModalPedidosEliminados
+            onFetch={fetchPedidosEliminados}
+            onClose={() => modales.pedidosEliminados.setOpen(false)}
+          />
+        </Suspense>
       )}
-    </>
+    </Suspense>
   );
 }

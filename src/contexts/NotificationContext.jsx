@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Check, X, AlertTriangle, Info, Bell, CheckCircle, Trash2 } from 'lucide-react';
 import { getStorageItem, setStorageItem } from '../utils/storage';

@@ -390,11 +390,9 @@ describe('useProductos', () => {
         error: null
       })
 
-      let fetchCount = 0
       const productosChain = {
         select: vi.fn().mockReturnThis(),
         order: vi.fn().mockImplementation(() => {
-          fetchCount++
           return Promise.resolve({ data: [mockProducto1, mockProducto2], error: null })
         })
       }
@@ -428,11 +426,9 @@ describe('useProductos', () => {
         error: { message: 'Function does not exist' }
       })
 
-      let fetchCount = 0
       const productosChain = {
         select: vi.fn().mockReturnThis(),
         order: vi.fn().mockImplementation(() => {
-          fetchCount++
           return Promise.resolve({ data: [mockProducto1], error: null })
         }),
         update: vi.fn().mockReturnThis(),

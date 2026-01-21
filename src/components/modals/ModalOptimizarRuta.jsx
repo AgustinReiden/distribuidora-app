@@ -194,7 +194,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
               <div>
                 <h3 className="text-sm font-medium mb-2">Pedidos del transportista:</h3>
                 <div className="border rounded-lg max-h-48 overflow-y-auto">
-                  {pedidosTransportista.map((pedido, index) => (
+                  {pedidosTransportista.map((pedido, _index) => (
                     <div key={pedido.id} className="flex items-center p-3 border-b last:border-b-0 hover:bg-gray-50">
                       <div className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 mr-3">
                         {pedido.orden_entrega ? (
@@ -255,7 +255,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
               Nuevo orden de entrega sugerido:
             </p>
             <div className="border border-green-300 rounded-lg bg-white max-h-40 overflow-y-auto">
-              {rutaOptimizada.orden_optimizado?.map((item, index) => (
+              {rutaOptimizada.orden_optimizado?.map((item, _index) => (
                 <div key={item.pedido_id} className="flex items-center p-2 border-b last:border-b-0">
                   <div className="flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold mr-3">
                     {item.orden}

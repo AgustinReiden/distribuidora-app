@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /**
  * Utilidades para acceso seguro a localStorage
  * Con manejo de errores y validación de datos
