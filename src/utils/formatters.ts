@@ -4,20 +4,19 @@
  * Centraliza el formateo de: CUIT/DNI, moneda, fechas, tiempo relativo, etc.
  */
 
+import type { EstadoPedido, EstadoPago, FormaPago, RolUsuario } from '@/types';
+
 // ============================================
 // FORMATEO DE MONEDA
 // ============================================
 
-export const formatPrecio = (p) =>
+export const formatPrecio = (p: number | null | undefined): string =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
 
 /**
  * Formatea un monto como moneda argentina
- * @param {number} amount - Monto a formatear
- * @param {boolean} showSymbol - Mostrar simbolo $ (default: true)
- * @returns {string} - Monto formateado
  */
-export function formatCurrency(amount, showSymbol = true) {
+export function formatCurrency(amount: number | null | undefined, showSymbol = true): string {
   if (amount === null || amount === undefined || isNaN(amount)) {
     return showSymbol ? '$0,00' : '0,00'
   }
@@ -32,10 +31,8 @@ export function formatCurrency(amount, showSymbol = true) {
 
 /**
  * Formatea un monto de forma compacta (1.5K, 2.3M, etc.)
- * @param {number} amount - Monto a formatear
- * @returns {string}
  */
-export function formatCurrencyCompact(amount) {
+export function formatCurrencyCompact(amount: number | null | undefined): string {
   if (amount === null || amount === undefined || isNaN(amount)) {
     return '$0'
   }
@@ -53,7 +50,7 @@ export function formatCurrencyCompact(amount) {
 // FORMATEO DE FECHAS
 // ============================================
 
-export const formatFecha = (f) =>
+export const formatFecha = (f: string | Date | null | undefined): string =>
   f ? new Date(f).toLocaleDateString('es-AR', {
     day: '2-digit',
     month: '2-digit',
@@ -63,18 +60,15 @@ export const formatFecha = (f) =>
 
 /**
  * Formatea una fecha en formato local
- * @param {string|Date} date - Fecha a formatear
- * @param {object} options - Opciones de formato
- * @returns {string}
  */
-export function formatDate(date, options = {}) {
+export function formatDate(date: string | Date | null | undefined, options: Intl.DateTimeFormatOptions = {}): string {
   if (!date) return ''
 
   const dateObj = typeof date === 'string' ? new Date(date) : date
 
   if (isNaN(dateObj.getTime())) return ''
 
-  const defaultOptions = {
+  const defaultOptions: Intl.DateTimeFormatOptions = {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -86,10 +80,8 @@ export function formatDate(date, options = {}) {
 
 /**
  * Formatea fecha y hora
- * @param {string|Date} date - Fecha a formatear
- * @returns {string}
  */
-export function formatDateTime(date) {
+export function formatDateTime(date: string | Date | null | undefined): string {
   if (!date) return ''
 
   const dateObj = typeof date === 'string' ? new Date(date) : date
@@ -107,10 +99,8 @@ export function formatDateTime(date) {
 
 /**
  * Formatea tiempo relativo ("hace 5 minutos", "hace 2 horas", etc.)
- * @param {string|Date} date - Fecha a formatear
- * @returns {string}
  */
-export function formatTimeAgo(date) {
+export function formatTimeAgo(date: string | Date | null | undefined): string {
   if (!date) return ''
 
   const dateObj = typeof date === 'string' ? new Date(date) : date
@@ -118,7 +108,7 @@ export function formatTimeAgo(date) {
   if (isNaN(dateObj.getTime())) return ''
 
   const now = new Date()
-  const diffMs = now - dateObj
+  const diffMs = now.getTime() - dateObj.getTime()
   const diffSecs = Math.floor(diffMs / 1000)
   const diffMins = Math.floor(diffSecs / 60)
   const diffHours = Math.floor(diffMins / 60)
@@ -143,10 +133,8 @@ export function formatTimeAgo(date) {
 
 /**
  * Formatea un CUIT con guiones (XX-XXXXXXXX-X)
- * @param {string} value - CUIT sin formato
- * @returns {string} - CUIT formateado
  */
-export function formatCuit(value) {
+export function formatCuit(value: string | number | null | undefined): string {
   if (!value) return ''
 
   // Remover todo excepto numeros
@@ -164,30 +152,24 @@ export function formatCuit(value) {
 
 /**
  * Remueve formato de CUIT (solo numeros)
- * @param {string} value - CUIT con o sin formato
- * @returns {string} - Solo numeros
  */
-export function unformatCuit(value) {
+export function unformatCuit(value: string | null | undefined): string {
   if (!value) return ''
   return String(value).replace(/\D/g, '')
 }
 
 /**
  * Valida formato de CUIT (11 digitos)
- * @param {string} cuit - CUIT a validar
- * @returns {boolean}
  */
-export function isValidCuit(cuit) {
+export function isValidCuit(cuit: string | null | undefined): boolean {
   const numbers = unformatCuit(cuit)
   return numbers.length === 11
 }
 
 /**
  * Formatea un DNI con puntos (XX.XXX.XXX)
- * @param {string} value - DNI sin formato
- * @returns {string} - DNI formateado
  */
-export function formatDni(value) {
+export function formatDni(value: string | number | null | undefined): string {
   if (!value) return ''
 
   const numbers = String(value).replace(/\D/g, '')
@@ -203,10 +185,8 @@ export function formatDni(value) {
 
 /**
  * Formatea un numero de telefono
- * @param {string} value - Telefono sin formato
- * @returns {string} - Telefono formateado
  */
-export function formatTelefono(value) {
+export function formatTelefono(value: string | number | null | undefined): string {
   if (!value) return ''
 
   const numbers = String(value).replace(/\D/g, '')
@@ -225,7 +205,7 @@ export function formatTelefono(value) {
 // ESTADOS Y LABELS
 // ============================================
 
-export const getEstadoColor = (e) =>
+export const getEstadoColor = (e: EstadoPedido | string | null | undefined): string =>
   e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' :
   e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' :
   e === 'asignado' ? 'bg-blue-100 text-blue-800' :
@@ -234,42 +214,42 @@ export const getEstadoColor = (e) =>
   e === 'cancelado' ? 'bg-red-100 text-red-800' :
   'bg-gray-100 text-gray-800';
 
-export const getEstadoLabel = (e) =>
+export const getEstadoLabel = (e: EstadoPedido | string | null | undefined): string =>
   e === 'pendiente' ? 'Pendiente' :
   e === 'en_preparacion' ? 'En preparación' :
   e === 'asignado' ? 'Asignado' :
   e === 'en_camino' ? 'En camino' :
   e === 'entregado' ? 'Entregado' :
   e === 'cancelado' ? 'Cancelado' :
-  e;
+  e || '';
 
-export const getRolColor = (r) =>
+export const getRolColor = (r: RolUsuario | string | null | undefined): string =>
   r === 'admin' ? 'bg-purple-100 text-purple-700' :
   r === 'transportista' ? 'bg-orange-100 text-orange-700' :
   'bg-blue-100 text-blue-700';
 
-export const getRolLabel = (r) =>
+export const getRolLabel = (r: RolUsuario | string | null | undefined): string =>
   r === 'admin' ? 'Admin' :
   r === 'transportista' ? 'Transportista' :
   'Preventista';
 
-export const getEstadoPagoColor = (estado) =>
+export const getEstadoPagoColor = (estado: EstadoPago | string | null | undefined): string =>
   estado === 'pagado' ? 'bg-green-100 text-green-800' :
   estado === 'parcial' ? 'bg-yellow-100 text-yellow-800' :
   'bg-red-100 text-red-800';
 
-export const getEstadoPagoLabel = (estado) =>
+export const getEstadoPagoLabel = (estado: EstadoPago | string | null | undefined): string =>
   estado === 'pagado' ? 'Pagado' :
   estado === 'parcial' ? 'Pago Parcial' :
   'Pago Pendiente';
 
-export const getFormaPagoLabel = (forma) =>
+export const getFormaPagoLabel = (forma: FormaPago | string | null | undefined): string =>
   forma === 'efectivo' ? 'Efectivo' :
   forma === 'transferencia' ? 'Transferencia' :
   forma === 'cheque' ? 'Cheque' :
   forma === 'cuenta_corriente' ? 'Cta. Cte.' :
   forma === 'tarjeta' ? 'Tarjeta' :
-  forma;
+  forma || '';
 
 // ============================================
 // UTILIDADES GENERALES
@@ -277,12 +257,8 @@ export const getFormaPagoLabel = (forma) =>
 
 /**
  * Trunca un string a una longitud maxima
- * @param {string} str - String a truncar
- * @param {number} maxLength - Longitud maxima
- * @param {string} suffix - Sufijo a agregar (default: '...')
- * @returns {string}
  */
-export function truncate(str, maxLength, suffix = '...') {
+export function truncate(str: string | null | undefined, maxLength: number, suffix = '...'): string {
   if (!str) return ''
   if (str.length <= maxLength) return str
   return str.slice(0, maxLength - suffix.length) + suffix
@@ -290,41 +266,32 @@ export function truncate(str, maxLength, suffix = '...') {
 
 /**
  * Capitaliza la primera letra de un string
- * @param {string} str - String a capitalizar
- * @returns {string}
  */
-export function capitalize(str) {
+export function capitalize(str: string | null | undefined): string {
   if (!str) return ''
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
 }
 
 /**
  * Formatea un porcentaje
- * @param {number} value - Valor decimal (0.15 = 15%)
- * @param {number} decimals - Cantidad de decimales
- * @returns {string}
  */
-export function formatPercent(value, decimals = 1) {
+export function formatPercent(value: number | null | undefined, decimals = 1): string {
   if (value === null || value === undefined || isNaN(value)) return '0%'
   return `${(value * 100).toFixed(decimals)}%`
 }
 
 /**
  * Formatea un numero con separador de miles
- * @param {number} value - Numero a formatear
- * @returns {string}
  */
-export function formatNumber(value) {
+export function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined || isNaN(value)) return '0'
   return new Intl.NumberFormat('es-AR').format(value)
 }
 
 /**
  * Valida un email
- * @param {string} email - Email a validar
- * @returns {boolean}
  */
-export function isValidEmail(email) {
+export function isValidEmail(email: string | null | undefined): boolean {
   if (!email) return false
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   return emailRegex.test(email)

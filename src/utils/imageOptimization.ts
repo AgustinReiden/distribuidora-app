@@ -7,15 +7,13 @@
 
 /**
  * Cache del resultado de soporte WebP
- * @type {boolean|null}
  */
-let webpSupportCache = null
+let webpSupportCache: boolean | null = null
 
 /**
  * Detecta si el navegador soporta WebP
- * @returns {Promise<boolean>}
  */
-export async function supportsWebP() {
+export async function supportsWebP(): Promise<boolean> {
   if (webpSupportCache !== null) {
     return webpSupportCache
   }
@@ -38,9 +36,8 @@ export async function supportsWebP() {
 
 /**
  * Detecta soporte WebP de forma síncrona (puede no ser preciso en primer llamado)
- * @returns {boolean}
  */
-export function supportsWebPSync() {
+export function supportsWebPSync(): boolean {
   if (webpSupportCache !== null) {
     return webpSupportCache
   }
@@ -57,18 +54,36 @@ export function supportsWebPSync() {
   return false
 }
 
+export interface OptimizeImageOptions {
+  forceWebP?: boolean;
+  fallbackFormat?: string | null;
+}
+
+/**
+ * Reemplaza la extensión de un archivo
+ */
+function replaceExtension(url: string, newExtension: string): string {
+  const lastDot = url.lastIndexOf('.')
+  const queryStart = url.indexOf('?')
+
+  if (lastDot === -1) {
+    // No tiene extensión, agregar
+    if (queryStart === -1) {
+      return `${url}.${newExtension}`
+    }
+    return `${url.slice(0, queryStart)}.${newExtension}${url.slice(queryStart)}`
+  }
+
+  const extensionEnd = queryStart === -1 ? url.length : queryStart
+  return `${url.slice(0, lastDot)}.${newExtension}${url.slice(extensionEnd)}`
+}
+
 /**
  * Obtiene la URL optimizada de una imagen
  * Usa WebP si está soportado, de lo contrario usa la original
- *
- * @param {string} originalUrl - URL de la imagen original
- * @param {object} options - Opciones de optimización
- * @param {boolean} options.forceWebP - Forzar WebP si está disponible
- * @param {string} options.fallbackFormat - Formato de fallback ('jpg', 'png')
- * @returns {string} URL optimizada
  */
-export function getOptimizedImageUrl(originalUrl, options = {}) {
-  if (!originalUrl) return originalUrl
+export function getOptimizedImageUrl(originalUrl: string | null | undefined, options: OptimizeImageOptions = {}): string {
+  if (!originalUrl) return originalUrl || ''
 
   const { forceWebP = true, fallbackFormat = null } = options
 
@@ -86,56 +101,15 @@ export function getOptimizedImageUrl(originalUrl, options = {}) {
   return webpUrl
 }
 
-/**
- * Reemplaza la extensión de un archivo
- * @param {string} url - URL original
- * @param {string} newExtension - Nueva extensión
- * @returns {string}
- */
-function replaceExtension(url, newExtension) {
-  const lastDot = url.lastIndexOf('.')
-  const queryStart = url.indexOf('?')
-
-  if (lastDot === -1) {
-    // No tiene extensión, agregar
-    if (queryStart === -1) {
-      return `${url}.${newExtension}`
-    }
-    return `${url.slice(0, queryStart)}.${newExtension}${url.slice(queryStart)}`
-  }
-
-  const extensionEnd = queryStart === -1 ? url.length : queryStart
-  return `${url.slice(0, lastDot)}.${newExtension}${url.slice(extensionEnd)}`
-}
-
-/**
- * Genera un srcset para imágenes responsivas
- * @param {string} baseUrl - URL base de la imagen
- * @param {number[]} widths - Anchos deseados
- * @param {object} options - Opciones
- * @returns {string} srcset string
- */
-export function generateSrcSet(baseUrl, widths = [320, 640, 1024, 1280], options = {}) {
-  const { useWebP = supportsWebPSync() } = options
-
-  return widths
-    .map(width => {
-      const url = getResizedImageUrl(baseUrl, width, useWebP)
-      return `${url} ${width}w`
-    })
-    .join(', ')
+export interface SrcSetOptions {
+  useWebP?: boolean;
 }
 
 /**
  * Obtiene la URL de una imagen redimensionada
  * (Asume un servicio de transformación de imágenes o CDN)
- *
- * @param {string} baseUrl - URL base
- * @param {number} width - Ancho deseado
- * @param {boolean} useWebP - Usar WebP
- * @returns {string}
  */
-export function getResizedImageUrl(baseUrl, width, useWebP = true) {
+export function getResizedImageUrl(baseUrl: string, width: number, useWebP = true): string {
   // Para Supabase Storage
   if (baseUrl.includes('supabase.co/storage')) {
     const separator = baseUrl.includes('?') ? '&' : '?'
@@ -152,11 +126,23 @@ export function getResizedImageUrl(baseUrl, width, useWebP = true) {
 }
 
 /**
- * Precarga una imagen
- * @param {string} url - URL de la imagen
- * @returns {Promise<void>}
+ * Genera un srcset para imágenes responsivas
  */
-export function preloadImage(url) {
+export function generateSrcSet(baseUrl: string, widths: number[] = [320, 640, 1024, 1280], options: SrcSetOptions = {}): string {
+  const { useWebP = supportsWebPSync() } = options
+
+  return widths
+    .map(width => {
+      const url = getResizedImageUrl(baseUrl, width, useWebP)
+      return `${url} ${width}w`
+    })
+    .join(', ')
+}
+
+/**
+ * Precarga una imagen
+ */
+export function preloadImage(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => resolve()
@@ -167,32 +153,36 @@ export function preloadImage(url) {
 
 /**
  * Precarga múltiples imágenes
- * @param {string[]} urls - URLs de las imágenes
- * @returns {Promise<void[]>}
  */
-export function preloadImages(urls) {
+export function preloadImages(urls: string[]): Promise<void[]> {
   return Promise.all(urls.map(preloadImage))
 }
 
-/**
- * Componente de imagen con lazy loading y WebP fallback
- * Uso: importar y usar como <OptimizedImage src="..." alt="..." />
- *
- * @typedef {object} OptimizedImageProps
- * @property {string} src - URL de la imagen
- * @property {string} alt - Texto alternativo
- * @property {string} [fallbackSrc] - URL de fallback si falla la carga
- * @property {string} [className] - Clases CSS
- * @property {boolean} [lazy] - Usar lazy loading (default: true)
- * @property {number[]} [widths] - Anchos para srcset
- */
+export interface OptimizedImageProps {
+  src: string;
+  alt: string;
+  fallbackSrc?: string;
+  className?: string;
+  lazy?: boolean;
+  widths?: number[];
+  [key: string]: unknown;
+}
+
+export interface OptimizedImageResult {
+  src: string;
+  alt: string;
+  loading: 'lazy' | 'eager';
+  decoding: 'async' | 'sync' | 'auto';
+  srcSet?: string;
+  sizes?: string;
+  onError?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
+  [key: string]: unknown;
+}
 
 /**
  * Props para imagen optimizada (para usar con componente React)
- * @param {OptimizedImageProps} props
- * @returns {object} Props para elemento img
  */
-export function getOptimizedImageProps(props) {
+export function getOptimizedImageProps(props: OptimizedImageProps): OptimizedImageResult {
   const {
     src,
     alt,
@@ -212,18 +202,19 @@ export function getOptimizedImageProps(props) {
     decoding: 'async',
     srcSet: widths ? generateSrcSet(src, widths) : undefined,
     sizes: widths ? '(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw' : undefined,
-    onError: fallbackSrc ? (e) => { e.target.src = fallbackSrc } : undefined,
+    onError: fallbackSrc ? (e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).src = fallbackSrc } : undefined,
     ...rest
   }
 }
 
+export interface BackgroundStyleOptions {
+  forceWebP?: boolean;
+}
+
 /**
  * Genera estilos CSS para background image optimizada
- * @param {string} src - URL de la imagen
- * @param {object} options - Opciones
- * @returns {object} Objeto de estilos CSS
  */
-export function getOptimizedBackgroundStyle(src, options = {}) {
+export function getOptimizedBackgroundStyle(src: string, options: BackgroundStyleOptions = {}): React.CSSProperties {
   const { forceWebP = true } = options
   const supportsWebp = supportsWebPSync()
 
@@ -242,7 +233,7 @@ export function getOptimizedBackgroundStyle(src, options = {}) {
  * Inicializa la detección de WebP de forma asíncrona
  * Llamar al inicio de la aplicación para precargar el resultado
  */
-export async function initImageOptimization() {
+export async function initImageOptimization(): Promise<void> {
   await supportsWebP()
   console.log(`[ImageOptimization] WebP support: ${webpSupportCache}`)
 }

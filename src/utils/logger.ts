@@ -6,8 +6,7 @@
  * Errores en produccion se envian a Sentry automaticamente.
  */
 
-// eslint-disable-next-line no-unused-vars
-import { captureException, captureMessage, addBreadcrumb } from '../lib/sentry'
+import { captureException, captureMessage } from '../lib/sentry'
 
 const isDevelopment = import.meta.env.DEV || import.meta.env.MODE === 'development'
 
@@ -19,16 +18,14 @@ const SENSITIVE_FIELDS = [
 
 /**
  * Sanitiza un objeto removiendo campos sensibles
- * @param {any} data - Datos a sanitizar
- * @returns {any} - Datos sanitizados
  */
-function sanitize(data) {
+function sanitize<T>(data: T): T {
   if (data === null || data === undefined) return data
   if (typeof data !== 'object') return data
-  if (Array.isArray(data)) return data.map(sanitize)
+  if (Array.isArray(data)) return data.map(sanitize) as T
 
-  const sanitized = {}
-  for (const [key, value] of Object.entries(data)) {
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
     const lowerKey = key.toLowerCase()
     if (SENSITIVE_FIELDS.some(field => lowerKey.includes(field))) {
       sanitized[key] = '[REDACTED]'
@@ -38,13 +35,13 @@ function sanitize(data) {
       sanitized[key] = value
     }
   }
-  return sanitized
+  return sanitized as T
 }
 
 /**
  * Formatea argumentos para logging seguro
  */
-function formatArgs(args) {
+function formatArgs(args: unknown[]): unknown[] {
   return args.map(arg => {
     if (typeof arg === 'object' && arg !== null) {
       return sanitize(arg)
@@ -60,7 +57,7 @@ const logger = {
   /**
    * Log informativo (solo en desarrollo)
    */
-  info: (...args) => {
+  info: (...args: unknown[]): void => {
     if (isDevelopment) {
       console.log('[INFO]', ...formatArgs(args))
     }
@@ -69,7 +66,7 @@ const logger = {
   /**
    * Log de warning (solo en desarrollo)
    */
-  warn: (...args) => {
+  warn: (...args: unknown[]): void => {
     if (isDevelopment) {
       console.warn('[WARN]', ...formatArgs(args))
     }
@@ -79,7 +76,7 @@ const logger = {
    * Log de error
    * En desarrollo muestra en consola, en produccion envia a Sentry
    */
-  error: (...args) => {
+  error: (...args: unknown[]): void => {
     const sanitizedArgs = formatArgs(args)
 
     if (isDevelopment) {
@@ -102,7 +99,7 @@ const logger = {
   /**
    * Log de debug (solo en desarrollo, mas verbose)
    */
-  debug: (...args) => {
+  debug: (...args: unknown[]): void => {
     if (isDevelopment && import.meta.env.VITE_DEBUG === 'true') {
       console.log('[DEBUG]', ...formatArgs(args))
     }
@@ -111,13 +108,13 @@ const logger = {
   /**
    * Log de performance/timing
    */
-  time: (label) => {
+  time: (label: string): void => {
     if (isDevelopment) {
       console.time(label)
     }
   },
 
-  timeEnd: (label) => {
+  timeEnd: (label: string): void => {
     if (isDevelopment) {
       console.timeEnd(label)
     }
@@ -126,13 +123,13 @@ const logger = {
   /**
    * Agrupa logs relacionados
    */
-  group: (label) => {
+  group: (label: string): void => {
     if (isDevelopment) {
       console.group(label)
     }
   },
 
-  groupEnd: () => {
+  groupEnd: (): void => {
     if (isDevelopment) {
       console.groupEnd()
     }

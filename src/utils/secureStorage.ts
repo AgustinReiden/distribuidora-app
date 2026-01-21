@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 /**
  * Secure Storage - Wrapper para localStorage con cifrado AES-GCM
  *
@@ -20,9 +19,8 @@ const cryptoAvailable = typeof window !== 'undefined' &&
 
 /**
  * Genera o recupera la clave de cifrado única del dispositivo
- * @returns {Promise<CryptoKey|null>}
  */
-async function getCryptoKey() {
+async function getCryptoKey(): Promise<CryptoKey | null> {
   if (!cryptoAvailable) return null
 
   try {
@@ -30,7 +28,7 @@ async function getCryptoKey() {
     const storedKey = localStorage.getItem(KEY_STORAGE_NAME)
 
     if (storedKey) {
-      const keyData = JSON.parse(storedKey)
+      const keyData = JSON.parse(storedKey) as JsonWebKey
       return await window.crypto.subtle.importKey(
         'jwk',
         keyData,
@@ -59,8 +57,8 @@ async function getCryptoKey() {
 }
 
 // Cache de la clave para evitar regenerarla
-let cachedKey = null
-async function getKey() {
+let cachedKey: CryptoKey | null = null
+async function getKey(): Promise<CryptoKey | null> {
   if (cachedKey) return cachedKey
   cachedKey = await getCryptoKey()
   return cachedKey
@@ -68,10 +66,8 @@ async function getKey() {
 
 /**
  * Cifra datos usando AES-GCM
- * @param {string} plaintext - Texto a cifrar
- * @returns {Promise<string>} - Datos cifrados en base64
  */
-async function encryptAES(plaintext) {
+async function encryptAES(plaintext: string): Promise<string | null> {
   const key = await getKey()
   if (!key) return null
 
@@ -99,10 +95,8 @@ async function encryptAES(plaintext) {
 
 /**
  * Descifra datos usando AES-GCM
- * @param {string} ciphertext - Texto cifrado en base64
- * @returns {Promise<string|null>} - Texto descifrado o null si falla
  */
-async function decryptAES(ciphertext) {
+async function decryptAES(ciphertext: string): Promise<string | null> {
   const key = await getKey()
   if (!key) return null
 
@@ -120,7 +114,7 @@ async function decryptAES(ciphertext) {
     )
 
     return new TextDecoder().decode(decrypted)
-  } catch (e) {
+  } catch {
     // Fallo silencioso - puede ser datos legacy
     return null
   }
@@ -128,10 +122,8 @@ async function decryptAES(ciphertext) {
 
 /**
  * Codifica un string usando XOR (método legacy para compatibilidad)
- * @param {string} str - String a codificar
- * @returns {string} - String codificado en base64
  */
-function encodeLegacy(str) {
+function encodeLegacy(str: string): string {
   if (!str) return ''
 
   try {
@@ -141,17 +133,15 @@ function encodeLegacy(str) {
       encoded += String.fromCharCode(charCode)
     }
     return btoa(unescape(encodeURIComponent(encoded)))
-  } catch (e) {
+  } catch {
     return ''
   }
 }
 
 /**
  * Decodifica un string codificado con XOR (método legacy)
- * @param {string} encodedStr - String codificado en base64
- * @returns {string} - String original
  */
-function decodeLegacy(encodedStr) {
+function decodeLegacy(encodedStr: string): string {
   if (!encodedStr) return ''
 
   try {
@@ -163,18 +153,15 @@ function decodeLegacy(encodedStr) {
       original += String.fromCharCode(charCode)
     }
     return original
-  } catch (e) {
+  } catch {
     return ''
   }
 }
 
 /**
  * Guarda un valor en localStorage de forma segura
- * @param {string} key - Clave de almacenamiento
- * @param {any} value - Valor a guardar (sera serializado a JSON)
- * @returns {Promise<boolean>} - true si se guardo correctamente
  */
-export async function setSecureItem(key, value) {
+export async function setSecureItem<T>(key: string, value: T): Promise<boolean> {
   try {
     const jsonStr = JSON.stringify(value)
 
@@ -192,23 +179,20 @@ export async function setSecureItem(key, value) {
     const encoded = encodeLegacy(jsonStr)
     localStorage.setItem(STORAGE_PREFIX + key, encoded)
     return true
-  } catch (e) {
+  } catch {
     return false
   }
 }
 
 /**
  * Obtiene un valor de localStorage de forma segura
- * @param {string} key - Clave de almacenamiento
- * @param {any} defaultValue - Valor por defecto si no existe
- * @returns {Promise<any>} - Valor deserializado o defaultValue
  */
-export async function getSecureItem(key, defaultValue = null) {
+export async function getSecureItem<T>(key: string, defaultValue: T): Promise<T> {
   try {
     const stored = localStorage.getItem(STORAGE_PREFIX + key)
     if (!stored) return defaultValue
 
-    let decrypted = null
+    let decrypted: string | null = null
 
     // Detectar formato de cifrado
     if (stored.startsWith('v2:')) {
@@ -224,7 +208,7 @@ export async function getSecureItem(key, defaultValue = null) {
 
         // Migrar datos legacy a formato nuevo si es posible
         if (decrypted && cryptoAvailable) {
-          const parsed = JSON.parse(decrypted)
+          const parsed = JSON.parse(decrypted) as T
           await setSecureItem(key, parsed) // Re-guardar con AES
         }
       }
@@ -232,37 +216,34 @@ export async function getSecureItem(key, defaultValue = null) {
 
     if (!decrypted) return defaultValue
 
-    return JSON.parse(decrypted)
-  } catch (e) {
+    return JSON.parse(decrypted) as T
+  } catch {
     return defaultValue
   }
 }
 
 /**
  * Elimina un valor de localStorage seguro
- * @param {string} key - Clave de almacenamiento
  */
-export function removeSecureItem(key) {
+export function removeSecureItem(key: string): void {
   try {
     localStorage.removeItem(STORAGE_PREFIX + key)
-  } catch (e) {
+  } catch {
     // Error silenciado
   }
 }
 
 /**
  * Verifica si existe un valor en localStorage seguro
- * @param {string} key - Clave de almacenamiento
- * @returns {boolean}
  */
-export function hasSecureItem(key) {
+export function hasSecureItem(key: string): boolean {
   return localStorage.getItem(STORAGE_PREFIX + key) !== null
 }
 
 /**
  * Limpia todos los items seguros de localStorage
  */
-export function clearSecureStorage() {
+export function clearSecureStorage(): void {
   try {
     const keys = Object.keys(localStorage)
     keys.forEach(key => {
@@ -270,28 +251,25 @@ export function clearSecureStorage() {
         localStorage.removeItem(key)
       }
     })
-  } catch (e) {
+  } catch {
     // Error silenciado
   }
 }
 
 /**
  * Migra datos existentes de localStorage normal a secureStorage
- * @param {string} oldKey - Clave original en localStorage
- * @param {string} newKey - Nueva clave para secureStorage
- * @returns {Promise<boolean>} - true si se migro correctamente
  */
-export async function migrateToSecure(oldKey, newKey) {
+export async function migrateToSecure<T>(oldKey: string, newKey: string): Promise<boolean> {
   try {
     const oldData = localStorage.getItem(oldKey)
     if (oldData) {
-      const parsed = JSON.parse(oldData)
+      const parsed = JSON.parse(oldData) as T
       await setSecureItem(newKey, parsed)
       localStorage.removeItem(oldKey)
       return true
     }
     return false
-  } catch (e) {
+  } catch {
     return false
   }
 }

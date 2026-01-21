@@ -367,13 +367,24 @@ export const proveedorSchema = z.object({
 // HELPERS DE VALIDACIÓN
 // ============================================
 
+export interface ValidationSuccess<T> {
+  success: true;
+  data: T;
+  errors?: undefined;
+}
+
+export interface ValidationError {
+  success: false;
+  data?: undefined;
+  errors: Record<string, string>;
+}
+
+export type ValidationResult<T> = ValidationSuccess<T> | ValidationError;
+
 /**
  * Valida datos contra un schema y retorna resultado estructurado
- * @param {z.ZodSchema} schema - Schema de Zod
- * @param {object} data - Datos a validar
- * @returns {{ success: boolean, data?: object, errors?: object }}
  */
-export function validateForm(schema, data) {
+export function validateForm<T>(schema: z.ZodSchema<T>, data: unknown): ValidationResult<T> {
   const result = schema.safeParse(data)
 
   if (result.success) {
@@ -382,8 +393,8 @@ export function validateForm(schema, data) {
 
   // Convertir errores a un objeto con paths como keys
   // Zod v4 usa 'issues' en lugar de 'errors'
-  const errors = {}
-  const issues = result.error.issues || result.error.errors || []
+  const errors: Record<string, string> = {}
+  const issues = result.error.issues || []
   for (const issue of issues) {
     const path = issue.path.join('.')
     if (!errors[path]) {
@@ -396,18 +407,20 @@ export function validateForm(schema, data) {
 
 /**
  * Obtiene el primer mensaje de error de una validación fallida
- * @param {z.ZodSchema} schema - Schema de Zod
- * @param {object} data - Datos a validar
- * @returns {string|null} - Mensaje de error o null si es válido
  */
-export function getFirstError(schema, data) {
+export function getFirstError<T>(schema: z.ZodSchema<T>, data: unknown): string | null {
   const result = schema.safeParse(data)
 
   if (result.success) return null
 
   // Zod v4 usa 'issues' en lugar de 'errors'
-  const issues = result.error.issues || result.error.errors || []
+  const issues = result.error.issues || []
   return issues[0]?.message || 'Error de validación'
+}
+
+export interface FormValidator<T> {
+  validate: (data: unknown) => ValidationResult<T>;
+  validateField: (field: string, value: unknown) => string | null;
 }
 
 /**
@@ -415,14 +428,14 @@ export function getFirstError(schema, data) {
  * Ejemplo de uso:
  * const { validate, errors, clearErrors } = useFormValidation(clienteSchema)
  */
-export function createFormValidator(schema) {
+export function createFormValidator<T>(schema: z.ZodObject<z.ZodRawShape>): FormValidator<T> {
   return {
-    validate: (data) => validateForm(schema, data),
-    validateField: (field, value) => {
+    validate: (data: unknown) => validateForm(schema as z.ZodSchema<T>, data),
+    validateField: (field: string, value: unknown) => {
       const fieldSchema = schema.shape[field]
       if (!fieldSchema) return null
       const result = fieldSchema.safeParse(value)
-      return result.success ? null : result.error.errors[0]?.message
+      return result.success ? null : (result.error.issues[0]?.message ?? null)
     }
   }
 }

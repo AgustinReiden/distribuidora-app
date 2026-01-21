@@ -11,7 +11,7 @@
 export const FILE_LIMITS = {
   maxSizeBytes: 10 * 1024 * 1024, // 10MB máximo
   maxSizeMB: 10
-}
+} as const;
 
 // Tipos de archivo permitidos para Excel
 export const EXCEL_CONFIG = {
@@ -22,14 +22,22 @@ export const EXCEL_CONFIG = {
     'application/octet-stream' // Algunos navegadores reportan esto
   ],
   maxRows: 10000 // Límite de filas para prevenir DoS
+} as const;
+
+export interface ValidationResult {
+  valid: boolean;
+  error?: string;
+  warnings?: string[];
+}
+
+export interface SanitizedDataResult extends ValidationResult {
+  data?: Record<string, unknown>[];
 }
 
 /**
  * Valida un archivo Excel antes de procesarlo
- * @param {File} file - Archivo a validar
- * @returns {{ valid: boolean, error?: string }}
  */
-export function validateExcelFile(file) {
+export function validateExcelFile(file: File | null | undefined): ValidationResult {
   if (!file) {
     return { valid: false, error: 'No se proporcionó ningún archivo' }
   }
@@ -74,11 +82,9 @@ export function validateExcelFile(file) {
 
 /**
  * Valida datos parseados de Excel
- * @param {Array} data - Datos parseados
- * @returns {{ valid: boolean, error?: string, warnings?: string[] }}
  */
-export function validateExcelData(data) {
-  const warnings = []
+export function validateExcelData(data: unknown): ValidationResult {
+  const warnings: string[] = []
 
   if (!Array.isArray(data)) {
     return { valid: false, error: 'El archivo no contiene datos válidos' }
@@ -102,7 +108,7 @@ export function validateExcelData(data) {
   }
 
   // Verificar que las filas tengan datos
-  const filasVacias = data.filter(row =>
+  const filasVacias = (data as Record<string, unknown>[]).filter(row =>
     !row || Object.keys(row).length === 0 ||
     Object.values(row).every(v => v === null || v === undefined || v === '')
   ).length
@@ -120,10 +126,8 @@ export function validateExcelData(data) {
 
 /**
  * Sanitiza un valor de celda Excel
- * @param {any} value - Valor de celda
- * @returns {string|number|null}
  */
-export function sanitizeExcelValue(value) {
+export function sanitizeExcelValue(value: unknown): string | number | null {
   if (value === null || value === undefined) {
     return null
   }
@@ -159,10 +163,8 @@ export function sanitizeExcelValue(value) {
 
 /**
  * Valida y sanitiza datos de un archivo Excel completo
- * @param {Array} data - Datos parseados del Excel
- * @returns {{ valid: boolean, data?: Array, error?: string, warnings?: string[] }}
  */
-export function validateAndSanitizeExcelData(data) {
+export function validateAndSanitizeExcelData(data: unknown): SanitizedDataResult {
   // Primero validar estructura
   const validation = validateExcelData(data)
   if (!validation.valid) {
@@ -170,19 +172,19 @@ export function validateAndSanitizeExcelData(data) {
   }
 
   // Sanitizar cada celda
-  const sanitizedData = data.map(row => {
+  const sanitizedData = (data as Record<string, unknown>[]).map(row => {
     if (!row || typeof row !== 'object') return null
 
-    const sanitizedRow = {}
+    const sanitizedRow: Record<string, string | number | null> = {}
     for (const [key, value] of Object.entries(row)) {
       // Sanitizar nombre de columna
       const sanitizedKey = sanitizeExcelValue(key)
-      if (sanitizedKey) {
+      if (sanitizedKey && typeof sanitizedKey === 'string') {
         sanitizedRow[sanitizedKey] = sanitizeExcelValue(value)
       }
     }
     return Object.keys(sanitizedRow).length > 0 ? sanitizedRow : null
-  }).filter(row => row !== null)
+  }).filter((row): row is Record<string, unknown> => row !== null)
 
   return {
     valid: true,
