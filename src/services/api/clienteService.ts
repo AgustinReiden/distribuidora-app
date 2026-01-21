@@ -3,8 +3,29 @@
  */
 
 import { BaseService } from './baseService'
+import type { Cliente } from '../../types'
 
-class ClienteService extends BaseService {
+export interface ClienteWithPedidos extends Cliente {
+  pedidos?: Array<{
+    id: string;
+    estado: string;
+    total: number;
+    fecha_creacion: string;
+  }>;
+}
+
+export interface ResumenCuenta {
+  total_pedidos: number;
+  total_pagos: number;
+  saldo: number;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+class ClienteService extends BaseService<Cliente> {
   constructor() {
     super('clientes', {
       orderBy: 'nombre_fantasia',
@@ -14,23 +35,20 @@ class ClienteService extends BaseService {
 
   /**
    * Obtiene clientes con sus pedidos pendientes
-   * @returns {Promise<Array>}
    */
-  async getWithPendingOrders() {
+  async getWithPendingOrders(): Promise<ClienteWithPedidos[]> {
     return this.getAll({
       selectQuery: `
         *,
         pedidos:pedidos(id, estado, total, fecha_creacion)
       `
-    })
+    }) as Promise<ClienteWithPedidos[]>
   }
 
   /**
    * Obtiene clientes por zona
-   * @param {string} zona
-   * @returns {Promise<Array>}
    */
-  async getByZona(zona) {
+  async getByZona(zona: string): Promise<Cliente[]> {
     return this.getAll({
       filters: { zona }
     })
@@ -38,10 +56,8 @@ class ClienteService extends BaseService {
 
   /**
    * Obtiene clientes activos (con pedidos en los últimos N días)
-   * @param {number} dias
-   * @returns {Promise<Array>}
    */
-  async getActivos(dias = 30) {
+  async getActivos(dias = 30): Promise<ClienteWithPedidos[]> {
     const fechaLimite = new Date()
     fechaLimite.setDate(fechaLimite.getDate() - dias)
 
@@ -53,30 +69,26 @@ class ClienteService extends BaseService {
         `)
         .gte('pedidos.fecha_creacion', fechaLimite.toISOString())
         .order('nombre_fantasia')
-    })
+    }) as Promise<ClienteWithPedidos[]>
   }
 
   /**
    * Busca clientes por nombre o razón social
-   * @param {string} termino
-   * @returns {Promise<Array>}
    */
-  async buscar(termino) {
+  async buscar(termino: string): Promise<Cliente[]> {
     return this.query(async (query) => {
       return query
         .select('*')
         .or(`nombre_fantasia.ilike.%${termino}%,razon_social.ilike.%${termino}%`)
         .order('nombre_fantasia')
-    })
+    }) as Promise<Cliente[]>
   }
 
   /**
    * Obtiene resumen de cuenta del cliente
-   * @param {string} clienteId
-   * @returns {Promise<Object>}
    */
-  async getResumenCuenta(clienteId) {
-    return this.rpc(
+  async getResumenCuenta(clienteId: string): Promise<ResumenCuenta> {
+    return this.rpc<ResumenCuenta>(
       'obtener_resumen_cuenta_cliente',
       { p_cliente_id: clienteId },
       async () => {
@@ -106,11 +118,9 @@ class ClienteService extends BaseService {
 
   /**
    * Valida datos del cliente antes de guardar
-   * @param {Object} data
-   * @returns {{ valid: boolean, errors: string[] }}
    */
-  validate(data) {
-    const errors = []
+  validate(data: Partial<Cliente> & { nombre_fantasia?: string; direccion?: string }): ValidationResult {
+    const errors: string[] = []
 
     if (!data.nombre_fantasia?.trim()) {
       errors.push('El nombre de fantasía es requerido')

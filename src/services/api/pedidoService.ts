@@ -10,8 +10,57 @@
 
 import { BaseService } from './baseService'
 import { productoService } from './productoService'
+import type { Pedido, PedidoItem, EstadoPedido } from '../../types'
 
-class PedidoService extends BaseService {
+export interface PedidoFiltros {
+  estado?: string;
+  clienteId?: string;
+  preventistaId?: string;
+  transportistaId?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  metodoPago?: string;
+  zona?: string;
+}
+
+export interface PedidoData {
+  cliente_id: string;
+  preventista_id?: string;
+  transportista_id?: string | null;
+  metodo_pago?: string;
+  notas?: string;
+  descuento?: number;
+}
+
+export interface PedidoItemInput {
+  producto_id: string;
+  cantidad: number;
+  precio_unitario: number;
+}
+
+export interface PedidoEstadisticas {
+  total: number;
+  porEstado: Record<string, number>;
+  totalVentas: number;
+  promedioTicket: number;
+  pendientes: number;
+  entregados: number;
+}
+
+export interface PedidoHistorialEntry {
+  id: string;
+  pedido_id: string;
+  accion: string;
+  descripcion: string;
+  fecha: string;
+}
+
+export interface OrdenEntrega {
+  pedido_id: string;
+  orden_entrega: number;
+}
+
+class PedidoService extends BaseService<Pedido> {
   constructor() {
     super('pedidos', {
       orderBy: 'fecha_creacion',
@@ -35,10 +84,8 @@ class PedidoService extends BaseService {
 
   /**
    * Obtiene pedidos con filtros avanzados
-   * @param {Object} filtros
-   * @returns {Promise<Array>}
    */
-  async getPedidosFiltrados(filtros = {}) {
+  async getPedidosFiltrados(filtros: PedidoFiltros = {}): Promise<Pedido[]> {
     const {
       estado,
       clienteId,
@@ -87,19 +134,15 @@ class PedidoService extends BaseService {
       }
 
       return q.order('fecha_creacion', { ascending: false })
-    })
+    }) as Promise<Pedido[]>
   }
 
   /**
    * Crea un pedido completo con items
-   * @param {Object} pedidoData - Datos del pedido
-   * @param {Array} items - Items del pedido
-   * @param {boolean} descontarStock - Si debe descontar stock
-   * @returns {Promise<Object>}
    */
-  async crearPedidoCompleto(pedidoData, items, descontarStock = true) {
+  async crearPedidoCompleto(pedidoData: PedidoData, items: PedidoItemInput[], descontarStock = true): Promise<Pedido> {
     // Intentar con RPC primero
-    return this.rpc(
+    return this.rpc<Pedido>(
       'crear_pedido_completo',
       {
         p_cliente_id: pedidoData.cliente_id,
@@ -119,7 +162,7 @@ class PedidoService extends BaseService {
   /**
    * Crea pedido manualmente (fallback)
    */
-  async crearPedidoManual(pedidoData, items, descontarStock) {
+  private async crearPedidoManual(pedidoData: PedidoData, items: PedidoItemInput[], descontarStock: boolean): Promise<Pedido> {
     // Calcular total
     const total = items.reduce((sum, item) => {
       return sum + (item.cantidad * item.precio_unitario)
@@ -132,13 +175,13 @@ class PedidoService extends BaseService {
       cliente_id: pedidoData.cliente_id,
       preventista_id: pedidoData.preventista_id,
       transportista_id: pedidoData.transportista_id || null,
-      estado: 'pendiente',
+      estado: 'pendiente' as EstadoPedido,
       metodo_pago: pedidoData.metodo_pago || 'efectivo',
       notas: pedidoData.notas || '',
       descuento: pedidoData.descuento || 0,
       total: totalConDescuento,
       fecha_creacion: new Date().toISOString()
-    })
+    } as Partial<Pedido>) as Pedido
 
     // Crear items
     const itemsConPedidoId = items.map(item => ({
@@ -169,12 +212,9 @@ class PedidoService extends BaseService {
 
   /**
    * Actualiza items de un pedido existente
-   * @param {string} pedidoId
-   * @param {Array} nuevosItems
-   * @returns {Promise<Object>}
    */
-  async actualizarItems(pedidoId, nuevosItems) {
-    return this.rpc(
+  async actualizarItems(pedidoId: string, nuevosItems: PedidoItemInput[]): Promise<Pedido | null> {
+    return this.rpc<Pedido | null>(
       'actualizar_pedido_items',
       {
         p_pedido_id: pedidoId,
@@ -190,7 +230,7 @@ class PedidoService extends BaseService {
 
         // 2. Restaurar stock de items actuales
         if (itemsActuales?.length) {
-          await productoService.restaurarStock(itemsActuales)
+          await productoService.restaurarStock(itemsActuales as { producto_id: string; cantidad: number }[])
         }
 
         // 3. Eliminar items actuales
@@ -228,19 +268,15 @@ class PedidoService extends BaseService {
 
   /**
    * Cambia el estado de un pedido
-   * @param {string} pedidoId
-   * @param {string} nuevoEstado
-   * @param {string} notas
-   * @returns {Promise<Object>}
    */
-  async cambiarEstado(pedidoId, nuevoEstado, notas = '') {
-    const estadosValidos = ['pendiente', 'en_preparacion', 'en_camino', 'entregado', 'cancelado']
+  async cambiarEstado(pedidoId: string, nuevoEstado: EstadoPedido, notas = ''): Promise<Pedido | null> {
+    const estadosValidos: EstadoPedido[] = ['pendiente', 'en_preparacion', 'en_reparto', 'entregado', 'cancelado']
 
     if (!estadosValidos.includes(nuevoEstado)) {
       throw new Error(`Estado inválido: ${nuevoEstado}`)
     }
 
-    const updates = { estado: nuevoEstado }
+    const updates: Partial<Pedido> = { estado: nuevoEstado }
 
     // Agregar timestamp según estado
     if (nuevoEstado === 'entregado') {
@@ -257,14 +293,11 @@ class PedidoService extends BaseService {
 
   /**
    * Asigna transportista a un pedido
-   * @param {string} pedidoId
-   * @param {string} transportistaId
-   * @returns {Promise<Object>}
    */
-  async asignarTransportista(pedidoId, transportistaId) {
+  async asignarTransportista(pedidoId: string, transportistaId: string): Promise<Pedido | null> {
     const pedido = await this.update(pedidoId, {
       transportista_id: transportistaId,
-      estado: 'en_camino'
+      estado: 'en_reparto' as EstadoPedido
     })
 
     await this.registrarHistorial(
@@ -278,13 +311,9 @@ class PedidoService extends BaseService {
 
   /**
    * Elimina un pedido con rollback de stock
-   * @param {string} pedidoId
-   * @param {boolean} restaurarStock
-   * @param {string} motivo
-   * @returns {Promise<boolean>}
    */
-  async eliminarPedido(pedidoId, restaurarStock = true, motivo = '') {
-    return this.rpc(
+  async eliminarPedido(pedidoId: string, restaurarStock = true, motivo = ''): Promise<boolean> {
+    return this.rpc<boolean>(
       'eliminar_pedido_completo',
       {
         p_pedido_id: pedidoId,
@@ -322,7 +351,7 @@ class PedidoService extends BaseService {
 
         // 6. Restaurar stock si es necesario
         if (restaurarStock && items?.length) {
-          await productoService.restaurarStock(items)
+          await productoService.restaurarStock(items as { producto_id: string; cantidad: number }[])
         }
 
         return true
@@ -332,11 +361,9 @@ class PedidoService extends BaseService {
 
   /**
    * Actualiza orden de entrega para ruta optimizada
-   * @param {Array<{pedido_id: string, orden_entrega: number}>} ordenes
-   * @returns {Promise<boolean>}
    */
-  async actualizarOrdenEntrega(ordenes) {
-    return this.rpc(
+  async actualizarOrdenEntrega(ordenes: OrdenEntrega[]): Promise<boolean> {
+    return this.rpc<boolean>(
       'actualizar_orden_entrega_batch',
       { ordenes: JSON.stringify(ordenes) },
       async () => {
@@ -353,11 +380,8 @@ class PedidoService extends BaseService {
 
   /**
    * Registra evento en historial del pedido
-   * @param {string} pedidoId
-   * @param {string} accion
-   * @param {string} descripcion
    */
-  async registrarHistorial(pedidoId, accion, descripcion = '') {
+  async registrarHistorial(pedidoId: string, accion: string, descripcion = ''): Promise<void> {
     try {
       await this.db.from('pedido_historial').insert({
         pedido_id: pedidoId,
@@ -373,10 +397,8 @@ class PedidoService extends BaseService {
 
   /**
    * Obtiene historial de un pedido
-   * @param {string} pedidoId
-   * @returns {Promise<Array>}
    */
-  async getHistorial(pedidoId) {
+  async getHistorial(pedidoId: string): Promise<PedidoHistorialEntry[]> {
     const { data, error } = await this.db
       .from('pedido_historial')
       .select('*')
@@ -388,14 +410,13 @@ class PedidoService extends BaseService {
       return []
     }
 
-    return data || []
+    return (data || []) as PedidoHistorialEntry[]
   }
 
   /**
    * Obtiene pedidos eliminados para auditoría
-   * @returns {Promise<Array>}
    */
-  async getPedidosEliminados() {
+  async getPedidosEliminados(): Promise<unknown[]> {
     const { data, error } = await this.db
       .from('pedidos_eliminados')
       .select('*')
@@ -411,11 +432,8 @@ class PedidoService extends BaseService {
 
   /**
    * Obtiene estadísticas de pedidos
-   * @param {Date} desde
-   * @param {Date} hasta
-   * @returns {Promise<Object>}
    */
-  async getEstadisticas(desde = null, hasta = null) {
+  async getEstadisticas(desde: Date | null = null, hasta: Date | null = null): Promise<PedidoEstadisticas> {
     let query = this.db.from(this.table).select('*')
 
     if (desde) {
@@ -429,23 +447,29 @@ class PedidoService extends BaseService {
 
     if (error) {
       this.handleError('obtener estadísticas', error)
-      return {}
+      return {
+        total: 0,
+        porEstado: {},
+        totalVentas: 0,
+        promedioTicket: 0,
+        pendientes: 0,
+        entregados: 0
+      }
     }
 
-    const pedidos = data || []
+    const pedidos = (data || []) as Pedido[]
 
     // Calcular estadísticas
-    const porEstado = pedidos.reduce((acc, p) => {
+    const porEstado = pedidos.reduce((acc: Record<string, number>, p) => {
       acc[p.estado] = (acc[p.estado] || 0) + 1
       return acc
     }, {})
 
-    const totalVentas = pedidos
-      .filter(p => p.estado === 'entregado')
-      .reduce((sum, p) => sum + (p.total || 0), 0)
+    const pedidosEntregados = pedidos.filter(p => p.estado === 'entregado')
+    const totalVentas = pedidosEntregados.reduce((sum, p) => sum + (p.total || 0), 0)
 
-    const promedioTicket = pedidos.length > 0
-      ? totalVentas / pedidos.filter(p => p.estado === 'entregado').length
+    const promedioTicket = pedidosEntregados.length > 0
+      ? totalVentas / pedidosEntregados.length
       : 0
 
     return {

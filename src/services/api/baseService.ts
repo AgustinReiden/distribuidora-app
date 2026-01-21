@@ -6,16 +6,38 @@
  */
 
 import { supabase, notifyError } from '../../hooks/supabase/base'
+import type { SupabaseClient, PostgrestFilterBuilder } from '@supabase/supabase-js'
 
-export class BaseService {
-  /**
-   * @param {string} tableName - Nombre de la tabla en Supabase
-   * @param {Object} options - Opciones de configuración
-   * @param {string} options.orderBy - Campo para ordenar por defecto
-   * @param {boolean} options.ascending - Orden ascendente (default: true)
-   * @param {string} options.selectQuery - Query SELECT personalizada
-   */
-  constructor(tableName, options = {}) {
+export interface FilterWithOperator {
+  operator: string;
+  value: unknown;
+}
+
+export interface BaseServiceOptions {
+  orderBy?: string;
+  ascending?: boolean;
+  selectQuery?: string;
+}
+
+export interface GetAllOptions {
+  orderBy?: string;
+  ascending?: boolean;
+  selectQuery?: string;
+  filters?: Record<string, unknown | FilterWithOperator>;
+}
+
+export interface CreateOptions {
+  returnData?: boolean;
+}
+
+export class BaseService<T = Record<string, unknown>> {
+  protected table: string;
+  protected db: SupabaseClient;
+  protected orderBy: string;
+  protected ascending: boolean;
+  protected selectQuery: string;
+
+  constructor(tableName: string, options: BaseServiceOptions = {}) {
     this.table = tableName
     this.db = supabase
     this.orderBy = options.orderBy || 'id'
@@ -25,10 +47,8 @@ export class BaseService {
 
   /**
    * Obtiene todos los registros de la tabla
-   * @param {Object} options - Opciones de query
-   * @returns {Promise<Array>}
    */
-  async getAll(options = {}) {
+  async getAll(options: GetAllOptions = {}): Promise<T[]> {
     const {
       orderBy = this.orderBy,
       ascending = this.ascending,
@@ -42,9 +62,10 @@ export class BaseService {
       // Aplicar filtros
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') {
-          if (typeof value === 'object' && value.operator) {
+          if (typeof value === 'object' && value !== null && 'operator' in value) {
             // Filtro con operador personalizado: { operator: 'gte', value: 10 }
-            query = query[value.operator](key, value.value)
+            const filterValue = value as FilterWithOperator
+            query = (query as PostgrestFilterBuilder<unknown, unknown, unknown>)[filterValue.operator as keyof PostgrestFilterBuilder<unknown, unknown, unknown>](key, filterValue.value)
           } else {
             query = query.eq(key, value)
           }
@@ -57,19 +78,17 @@ export class BaseService {
       const { data, error } = await query
 
       if (error) throw error
-      return data || []
+      return (data || []) as T[]
     } catch (error) {
-      this.handleError('obtener registros', error)
+      this.handleError('obtener registros', error as Error)
       return []
     }
   }
 
   /**
    * Obtiene un registro por ID
-   * @param {string|number} id
-   * @returns {Promise<Object|null>}
    */
-  async getById(id) {
+  async getById(id: string | number): Promise<T | null> {
     try {
       const { data, error } = await this.db
         .from(this.table)
@@ -78,20 +97,17 @@ export class BaseService {
         .single()
 
       if (error) throw error
-      return data
+      return data as T
     } catch (error) {
-      this.handleError('obtener registro', error)
+      this.handleError('obtener registro', error as Error)
       return null
     }
   }
 
   /**
    * Crea un nuevo registro
-   * @param {Object} data - Datos del registro
-   * @param {Object} options - Opciones
-   * @returns {Promise<Object|null>}
    */
-  async create(data, options = {}) {
+  async create(data: Partial<T>, options: CreateOptions = {}): Promise<T | boolean> {
     const { returnData = true } = options
 
     try {
@@ -104,19 +120,17 @@ export class BaseService {
       const { data: result, error } = await query
 
       if (error) throw error
-      return returnData ? result : true
+      return returnData ? (result as T) : true
     } catch (error) {
-      this.handleError('crear registro', error)
+      this.handleError('crear registro', error as Error)
       throw error // Re-throw para que el llamador pueda manejar el error
     }
   }
 
   /**
    * Crea múltiples registros
-   * @param {Array<Object>} items - Array de datos
-   * @returns {Promise<Array>}
    */
-  async createMany(items) {
+  async createMany(items: Partial<T>[]): Promise<T[]> {
     try {
       const { data, error } = await this.db
         .from(this.table)
@@ -124,20 +138,17 @@ export class BaseService {
         .select()
 
       if (error) throw error
-      return data || []
+      return (data || []) as T[]
     } catch (error) {
-      this.handleError('crear registros', error)
+      this.handleError('crear registros', error as Error)
       throw error
     }
   }
 
   /**
    * Actualiza un registro por ID
-   * @param {string|number} id
-   * @param {Object} data - Datos a actualizar
-   * @returns {Promise<Object|null>}
    */
-  async update(id, data) {
+  async update(id: string | number, data: Partial<T>): Promise<T | null> {
     try {
       const { data: result, error } = await this.db
         .from(this.table)
@@ -147,20 +158,17 @@ export class BaseService {
         .single()
 
       if (error) throw error
-      return result
+      return result as T
     } catch (error) {
-      this.handleError('actualizar registro', error)
+      this.handleError('actualizar registro', error as Error)
       throw error
     }
   }
 
   /**
    * Actualiza múltiples registros con un filtro
-   * @param {Object} filters - Filtros para seleccionar registros
-   * @param {Object} data - Datos a actualizar
-   * @returns {Promise<Array>}
    */
-  async updateWhere(filters, data) {
+  async updateWhere(filters: Record<string, unknown>, data: Partial<T>): Promise<T[]> {
     try {
       let query = this.db.from(this.table).update(data)
 
@@ -171,19 +179,17 @@ export class BaseService {
       const { data: result, error } = await query.select()
 
       if (error) throw error
-      return result || []
+      return (result || []) as T[]
     } catch (error) {
-      this.handleError('actualizar registros', error)
+      this.handleError('actualizar registros', error as Error)
       throw error
     }
   }
 
   /**
    * Elimina un registro por ID
-   * @param {string|number} id
-   * @returns {Promise<boolean>}
    */
-  async delete(id) {
+  async delete(id: string | number): Promise<boolean> {
     try {
       const { error } = await this.db
         .from(this.table)
@@ -193,17 +199,15 @@ export class BaseService {
       if (error) throw error
       return true
     } catch (error) {
-      this.handleError('eliminar registro', error)
+      this.handleError('eliminar registro', error as Error)
       throw error
     }
   }
 
   /**
    * Elimina múltiples registros con un filtro
-   * @param {Object} filters
-   * @returns {Promise<boolean>}
    */
-  async deleteWhere(filters) {
+  async deleteWhere(filters: Record<string, unknown>): Promise<boolean> {
     try {
       let query = this.db.from(this.table).delete()
 
@@ -216,19 +220,15 @@ export class BaseService {
       if (error) throw error
       return true
     } catch (error) {
-      this.handleError('eliminar registros', error)
+      this.handleError('eliminar registros', error as Error)
       throw error
     }
   }
 
   /**
    * Ejecuta una función RPC de Supabase con fallback
-   * @param {string} functionName - Nombre de la función RPC
-   * @param {Object} params - Parámetros
-   * @param {Function} fallback - Función fallback si RPC falla
-   * @returns {Promise<any>}
    */
-  async rpc(functionName, params = {}, fallback = null) {
+  async rpc<R>(functionName: string, params: Record<string, unknown> = {}, fallback: (() => Promise<R>) | null = null): Promise<R> {
     try {
       const { data, error } = await this.db.rpc(functionName, params)
 
@@ -240,23 +240,21 @@ export class BaseService {
         throw error
       }
 
-      return data
+      return data as R
     } catch (error) {
       if (fallback) {
-        console.warn(`RPC ${functionName} error, usando fallback:`, error.message)
+        console.warn(`RPC ${functionName} error, usando fallback:`, (error as Error).message)
         return await fallback()
       }
-      this.handleError(`ejecutar ${functionName}`, error)
+      this.handleError(`ejecutar ${functionName}`, error as Error)
       throw error
     }
   }
 
   /**
    * Cuenta registros con filtros opcionales
-   * @param {Object} filters
-   * @returns {Promise<number>}
    */
-  async count(filters = {}) {
+  async count(filters: Record<string, unknown> = {}): Promise<number> {
     try {
       let query = this.db
         .from(this.table)
@@ -273,27 +271,23 @@ export class BaseService {
       if (error) throw error
       return count || 0
     } catch (error) {
-      this.handleError('contar registros', error)
+      this.handleError('contar registros', error as Error)
       return 0
     }
   }
 
   /**
    * Verifica si existe un registro
-   * @param {Object} filters
-   * @returns {Promise<boolean>}
    */
-  async exists(filters) {
+  async exists(filters: Record<string, unknown>): Promise<boolean> {
     const count = await this.count(filters)
     return count > 0
   }
 
   /**
    * Query personalizada
-   * @param {Function} queryBuilder - Función que recibe query base
-   * @returns {Promise<any>}
    */
-  async query(queryBuilder) {
+  async query<R>(queryBuilder: (query: ReturnType<typeof this.db.from>) => Promise<{ data: R | null; error: Error | null }>): Promise<R | null> {
     try {
       const baseQuery = this.db.from(this.table)
       const { data, error } = await queryBuilder(baseQuery)
@@ -301,17 +295,15 @@ export class BaseService {
       if (error) throw error
       return data
     } catch (error) {
-      this.handleError('ejecutar query', error)
+      this.handleError('ejecutar query', error as Error)
       throw error
     }
   }
 
   /**
    * Maneja errores de forma consistente
-   * @param {string} operation
-   * @param {Error} error
    */
-  handleError(operation, error) {
+  protected handleError(operation: string, error: Error): void {
     const message = `Error al ${operation} en ${this.table}: ${error.message}`
     console.error(message, error)
     notifyError(message)

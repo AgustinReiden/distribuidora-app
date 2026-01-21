@@ -10,19 +10,88 @@
 
 import { productoService } from '../api/productoService'
 import { supabase } from '../../hooks/supabase/base'
+import type { Producto } from '../../types'
+
+export interface StockItem {
+  producto_id: string;
+  cantidad: number;
+}
+
+export interface StockFaltante {
+  producto_id: string;
+  nombre: string;
+  codigo?: string;
+  solicitado: number;
+  disponible: number;
+}
+
+export interface DisponibilidadResult {
+  disponible: boolean;
+  faltantes: StockFaltante[];
+}
+
+export interface StockOperationResult {
+  success: boolean;
+  error?: string;
+  faltantes?: StockFaltante[];
+}
+
+export interface MermaInput {
+  producto_id: string;
+  cantidad: number;
+  motivo?: string;
+  fecha?: string;
+}
+
+export interface MermaFiltros {
+  producto_id?: string;
+  desde?: string;
+  hasta?: string;
+}
+
+export interface Merma {
+  id: string;
+  producto_id: string;
+  cantidad: number;
+  motivo: string;
+  fecha: string;
+  producto?: {
+    id: string;
+    nombre: string;
+    codigo: string;
+  };
+}
+
+export interface ResumenMovimientos {
+  producto: {
+    id: string;
+    nombre: string;
+    codigo?: string;
+  };
+  stockActual: number;
+  totalVendido: number;
+  totalMermas: number;
+  stockBajo: boolean;
+}
+
+interface StockAjuste {
+  producto_id: string;
+  cantidad: number;
+  tipo: 'restaurar' | 'descontar';
+}
 
 class StockManager {
+  private umbralStockBajo: number;
+
   constructor() {
     this.umbralStockBajo = 10
   }
 
   /**
    * Verifica si hay stock suficiente para los items
-   * @param {Array<{producto_id: string, cantidad: number}>} items
-   * @returns {Promise<{disponible: boolean, faltantes: Array}>}
    */
-  async verificarDisponibilidad(items) {
-    const faltantes = []
+  async verificarDisponibilidad(items: StockItem[]): Promise<DisponibilidadResult> {
+    const faltantes: StockFaltante[] = []
 
     for (const item of items) {
       const producto = await productoService.getById(item.producto_id)
@@ -56,11 +125,8 @@ class StockManager {
 
   /**
    * Reserva stock para un pedido (descuenta)
-   * @param {Array<{producto_id: string, cantidad: number}>} items
-   * @param {Object} options
-   * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async reservarStock(items, options = {}) {
+  async reservarStock(items: StockItem[], options: { validar?: boolean } = {}): Promise<StockOperationResult> {
     const { validar = true } = options
 
     try {
@@ -87,35 +153,30 @@ class StockManager {
     } catch (error) {
       return {
         success: false,
-        error: error.message
+        error: (error as Error).message
       }
     }
   }
 
   /**
    * Libera stock reservado (restaura)
-   * @param {Array<{producto_id: string, cantidad: number}>} items
-   * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async liberarStock(items) {
+  async liberarStock(items: StockItem[]): Promise<StockOperationResult> {
     try {
       await productoService.restaurarStock(items)
       return { success: true }
     } catch (error) {
       return {
         success: false,
-        error: error.message
+        error: (error as Error).message
       }
     }
   }
 
   /**
    * Ajusta diferencias de stock entre items originales y nuevos
-   * @param {Array} itemsOriginales
-   * @param {Array} itemsNuevos
-   * @returns {Promise<{success: boolean}>}
    */
-  async ajustarDiferencia(itemsOriginales, itemsNuevos) {
+  async ajustarDiferencia(itemsOriginales: StockItem[], itemsNuevos: StockItem[]): Promise<StockOperationResult> {
     // Crear mapa de items originales
     const mapaOriginal = new Map(
       itemsOriginales.map(i => [i.producto_id, i.cantidad])
@@ -126,7 +187,7 @@ class StockManager {
       itemsNuevos.map(i => [i.producto_id, i.cantidad])
     )
 
-    const ajustes = []
+    const ajustes: StockAjuste[] = []
 
     // Calcular diferencias
     // 1. Items que se quitaron o redujeron -> restaurar stock
@@ -186,19 +247,15 @@ class StockManager {
 
   /**
    * Obtiene productos con stock bajo
-   * @param {number} umbral
-   * @returns {Promise<Array>}
    */
-  async getProductosStockBajo(umbral = this.umbralStockBajo) {
+  async getProductosStockBajo(umbral = this.umbralStockBajo): Promise<Producto[]> {
     return productoService.getStockBajo(umbral)
   }
 
   /**
    * Registra una merma de stock
-   * @param {Object} merma
-   * @returns {Promise<Object>}
    */
-  async registrarMerma(merma) {
+  async registrarMerma(merma: MermaInput): Promise<Merma> {
     const { producto_id, cantidad, motivo, fecha } = merma
 
     try {
@@ -219,7 +276,7 @@ class StockManager {
       // Descontar del stock
       await productoService.actualizarStock(producto_id, -cantidad)
 
-      return data
+      return data as Merma
     } catch (error) {
       console.error('Error registrando merma:', error)
       throw error
@@ -228,10 +285,8 @@ class StockManager {
 
   /**
    * Obtiene historial de mermas
-   * @param {Object} filtros
-   * @returns {Promise<Array>}
    */
-  async getMermas(filtros = {}) {
+  async getMermas(filtros: MermaFiltros = {}): Promise<Merma[]> {
     let query = supabase
       .from('mermas_stock')
       .select(`
@@ -259,17 +314,13 @@ class StockManager {
       return []
     }
 
-    return data || []
+    return (data || []) as Merma[]
   }
 
   /**
    * Obtiene resumen de movimientos de stock
-   * @param {string} productoId
-   * @param {Date} desde
-   * @param {Date} hasta
-   * @returns {Promise<Object>}
    */
-  async getResumenMovimientos(productoId, desde = null, hasta = null) {
+  async getResumenMovimientos(productoId: string, desde: Date | null = null, hasta: Date | null = null): Promise<ResumenMovimientos | null> {
     // Obtener producto actual
     const producto = await productoService.getById(productoId)
     if (!producto) {
@@ -307,11 +358,11 @@ class StockManager {
     ])
 
     const ventas = (ventasResult.data || [])
-      .filter(v => v.pedido?.estado === 'entregado')
-      .reduce((sum, v) => sum + v.cantidad, 0)
+      .filter((v: { pedido?: { estado?: string } }) => v.pedido?.estado === 'entregado')
+      .reduce((sum: number, v: { cantidad: number }) => sum + v.cantidad, 0)
 
     const mermas = (mermasResult.data || [])
-      .reduce((sum, m) => sum + m.cantidad, 0)
+      .reduce((sum: number, m: { cantidad: number }) => sum + m.cantidad, 0)
 
     return {
       producto: {
@@ -328,9 +379,8 @@ class StockManager {
 
   /**
    * Configura el umbral de stock bajo
-   * @param {number} umbral
    */
-  setUmbralStockBajo(umbral) {
+  setUmbralStockBajo(umbral: number): void {
     this.umbralStockBajo = umbral
   }
 }
