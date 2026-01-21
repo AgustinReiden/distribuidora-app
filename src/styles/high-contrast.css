@@ -1,0 +1,380 @@
+/**
+ * High Contrast Mode Styles
+ *
+ * WCAG AA compliant high contrast styles
+ * Activated via .high-contrast class on html element
+ */
+
+/* =============================================================================
+   HIGH CONTRAST BASE STYLES
+   ============================================================================= */
+
+.high-contrast {
+  /* Override all colors for maximum contrast */
+  --color-text-primary: #000000;
+  --color-text-secondary: #1a1a1a;
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f0f0f0;
+  --color-border: #000000;
+  --color-focus: #0000ff;
+  --color-link: #0000ee;
+  --color-link-visited: #551a8b;
+}
+
+.high-contrast.dark {
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #e0e0e0;
+  --color-bg-primary: #000000;
+  --color-bg-secondary: #1a1a1a;
+  --color-border: #ffffff;
+  --color-focus: #ffff00;
+  --color-link: #00ffff;
+  --color-link-visited: #ff00ff;
+}
+
+/* =============================================================================
+   TEXT AND TYPOGRAPHY
+   ============================================================================= */
+
+.high-contrast body,
+.high-contrast p,
+.high-contrast span,
+.high-contrast div {
+  color: var(--color-text-primary) !important;
+}
+
+.high-contrast h1,
+.high-contrast h2,
+.high-contrast h3,
+.high-contrast h4,
+.high-contrast h5,
+.high-contrast h6 {
+  color: var(--color-text-primary) !important;
+  text-shadow: none !important;
+}
+
+/* =============================================================================
+   BACKGROUNDS
+   ============================================================================= */
+
+.high-contrast .bg-white,
+.high-contrast .bg-gray-50,
+.high-contrast .bg-gray-100 {
+  background-color: var(--color-bg-primary) !important;
+}
+
+.high-contrast .bg-gray-200,
+.high-contrast .bg-gray-300 {
+  background-color: var(--color-bg-secondary) !important;
+}
+
+.high-contrast.dark .dark\:bg-gray-800,
+.high-contrast.dark .dark\:bg-gray-900 {
+  background-color: var(--color-bg-primary) !important;
+}
+
+/* =============================================================================
+   BORDERS
+   ============================================================================= */
+
+.high-contrast [class*="border"] {
+  border-color: var(--color-border) !important;
+}
+
+.high-contrast input,
+.high-contrast select,
+.high-contrast textarea,
+.high-contrast button {
+  border: 2px solid var(--color-border) !important;
+}
+
+/* =============================================================================
+   FOCUS STATES
+   ============================================================================= */
+
+.high-contrast *:focus {
+  outline: 3px solid var(--color-focus) !important;
+  outline-offset: 2px !important;
+  box-shadow: none !important;
+}
+
+.high-contrast *:focus-visible {
+  outline: 3px solid var(--color-focus) !important;
+  outline-offset: 2px !important;
+}
+
+/* =============================================================================
+   LINKS
+   ============================================================================= */
+
+.high-contrast a {
+  color: var(--color-link) !important;
+  text-decoration: underline !important;
+}
+
+.high-contrast a:visited {
+  color: var(--color-link-visited) !important;
+}
+
+.high-contrast a:hover,
+.high-contrast a:focus {
+  text-decoration: underline double !important;
+}
+
+/* =============================================================================
+   BUTTONS
+   ============================================================================= */
+
+.high-contrast button,
+.high-contrast [role="button"],
+.high-contrast .btn {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+  border: 2px solid var(--color-text-primary) !important;
+}
+
+.high-contrast button:hover,
+.high-contrast [role="button"]:hover,
+.high-contrast .btn:hover {
+  background-color: var(--color-text-primary) !important;
+  color: var(--color-bg-primary) !important;
+}
+
+/* Primary buttons */
+.high-contrast .bg-blue-600,
+.high-contrast .bg-blue-500,
+.high-contrast [class*="btn-primary"] {
+  background-color: var(--color-text-primary) !important;
+  color: var(--color-bg-primary) !important;
+}
+
+.high-contrast .bg-blue-600:hover,
+.high-contrast .bg-blue-500:hover {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+}
+
+/* Danger buttons */
+.high-contrast .bg-red-600,
+.high-contrast .bg-red-500 {
+  background-color: #8b0000 !important;
+  color: #ffffff !important;
+  border-color: #8b0000 !important;
+}
+
+.high-contrast.dark .bg-red-600,
+.high-contrast.dark .bg-red-500 {
+  background-color: #ff4444 !important;
+  color: #000000 !important;
+}
+
+/* Success buttons */
+.high-contrast .bg-green-600,
+.high-contrast .bg-green-500 {
+  background-color: #006400 !important;
+  color: #ffffff !important;
+  border-color: #006400 !important;
+}
+
+.high-contrast.dark .bg-green-600,
+.high-contrast.dark .bg-green-500 {
+  background-color: #00ff00 !important;
+  color: #000000 !important;
+}
+
+/* =============================================================================
+   FORM ELEMENTS
+   ============================================================================= */
+
+.high-contrast input,
+.high-contrast select,
+.high-contrast textarea {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.high-contrast input::placeholder,
+.high-contrast textarea::placeholder {
+  color: var(--color-text-secondary) !important;
+  opacity: 1 !important;
+}
+
+.high-contrast input:disabled,
+.high-contrast select:disabled,
+.high-contrast textarea:disabled,
+.high-contrast button:disabled {
+  opacity: 0.7 !important;
+  cursor: not-allowed !important;
+  background-color: var(--color-bg-secondary) !important;
+}
+
+/* Checkboxes and radios */
+.high-contrast input[type="checkbox"],
+.high-contrast input[type="radio"] {
+  width: 20px !important;
+  height: 20px !important;
+  accent-color: var(--color-text-primary) !important;
+}
+
+/* =============================================================================
+   TABLES
+   ============================================================================= */
+
+.high-contrast table {
+  border-collapse: collapse !important;
+}
+
+.high-contrast th,
+.high-contrast td {
+  border: 2px solid var(--color-border) !important;
+  padding: 8px !important;
+}
+
+.high-contrast th {
+  background-color: var(--color-text-primary) !important;
+  color: var(--color-bg-primary) !important;
+}
+
+.high-contrast tr:nth-child(even) {
+  background-color: var(--color-bg-secondary) !important;
+}
+
+/* =============================================================================
+   CARDS AND PANELS
+   ============================================================================= */
+
+.high-contrast .rounded-lg,
+.high-contrast .rounded-xl,
+.high-contrast .card,
+.high-contrast [class*="shadow"] {
+  border: 2px solid var(--color-border) !important;
+  box-shadow: none !important;
+}
+
+/* =============================================================================
+   MODALS AND OVERLAYS
+   ============================================================================= */
+
+.high-contrast [class*="modal"],
+.high-contrast [role="dialog"] {
+  border: 3px solid var(--color-border) !important;
+  box-shadow: none !important;
+}
+
+.high-contrast .bg-black\/50,
+.high-contrast [class*="overlay"] {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+}
+
+.high-contrast.dark .bg-black\/50,
+.high-contrast.dark [class*="overlay"] {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* =============================================================================
+   BADGES AND TAGS
+   ============================================================================= */
+
+.high-contrast .badge,
+.high-contrast [class*="tag"],
+.high-contrast .rounded-full[class*="bg-"] {
+  border: 2px solid var(--color-border) !important;
+}
+
+/* =============================================================================
+   ICONS
+   ============================================================================= */
+
+.high-contrast svg {
+  stroke: currentColor !important;
+}
+
+.high-contrast svg[class*="text-"] {
+  color: var(--color-text-primary) !important;
+}
+
+/* =============================================================================
+   ALERTS AND NOTIFICATIONS
+   ============================================================================= */
+
+.high-contrast [class*="alert"],
+.high-contrast [role="alert"] {
+  border: 3px solid var(--color-border) !important;
+  background-color: var(--color-bg-primary) !important;
+}
+
+/* Error states */
+.high-contrast .text-red-500,
+.high-contrast .text-red-600,
+.high-contrast [class*="error"] {
+  color: #8b0000 !important;
+}
+
+.high-contrast.dark .text-red-500,
+.high-contrast.dark .text-red-600 {
+  color: #ff6666 !important;
+}
+
+/* Success states */
+.high-contrast .text-green-500,
+.high-contrast .text-green-600,
+.high-contrast [class*="success"] {
+  color: #006400 !important;
+}
+
+.high-contrast.dark .text-green-500,
+.high-contrast.dark .text-green-600 {
+  color: #66ff66 !important;
+}
+
+/* Warning states */
+.high-contrast .text-yellow-500,
+.high-contrast .text-yellow-600,
+.high-contrast [class*="warning"] {
+  color: #8b8b00 !important;
+}
+
+.high-contrast.dark .text-yellow-500,
+.high-contrast.dark .text-yellow-600 {
+  color: #ffff66 !important;
+}
+
+/* =============================================================================
+   REDUCED MOTION
+   ============================================================================= */
+
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* =============================================================================
+   SCREEN READER ONLY
+   ============================================================================= */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sr-only-focusable:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: inherit;
+  margin: inherit;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}

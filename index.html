@@ -9,15 +9,100 @@
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
     <!-- Content Security Policy - Fortalecido -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://maps.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://maps.googleapis.com https://n8n.shycia.com.ar; frame-ancestors 'none'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://maps.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://maps.googleapis.com https://n8n.shycia.com.ar https://*.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self';">
 
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Distribuidora" />
+    <meta name="application-name" content="Distribuidora App" />
+    <meta name="msapplication-TileColor" content="#2563eb" />
+    <meta name="msapplication-config" content="/browserconfig.xml" />
+
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="Sistema de gestión para distribuidora de alimentos. Pedidos, clientes, productos, inventario y reportes." />
+    <meta name="keywords" content="distribuidora, alimentos, pedidos, gestión, inventario" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Distribuidora App" />
+    <meta property="og:description" content="Sistema de gestión para distribuidora de alimentos" />
+    <meta property="og:site_name" content="Distribuidora App" />
+
+    <!-- Icons -->
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>distribuidora-app</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="mask-icon" href="/mask-icon.svg" color="#2563eb" />
+
+    <!-- Preconnect to external domains -->
+    <link rel="preconnect" href="https://maps.googleapis.com" />
+    <link rel="preconnect" href="https://maps.gstatic.com" crossorigin />
+
+    <!-- Viewport -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+
+    <!-- Color Scheme Support -->
+    <meta name="color-scheme" content="light dark" />
+
+    <title>Distribuidora App</title>
+
     <!-- Google Maps API ahora se carga dinámicamente desde useGoogleMaps.js usando VITE_GOOGLE_API_KEY -->
   </head>
   <body>
+    <!-- Skip Links (for accessibility) -->
+    <a href="#main-content" class="sr-only sr-only-focusable skip-link">
+      Ir al contenido principal
+    </a>
+
     <div id="root"></div>
+
+    <!-- Noscript fallback -->
+    <noscript>
+      <div style="padding: 20px; text-align: center; font-family: system-ui, sans-serif;">
+        <h1>JavaScript Requerido</h1>
+        <p>Esta aplicación requiere JavaScript para funcionar correctamente.</p>
+        <p>Por favor, habilita JavaScript en tu navegador.</p>
+      </div>
+    </noscript>
+
     <script type="module" src="/src/main.jsx"></script>
+
+    <style>
+      /* Screen reader only utility - available before CSS loads */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .sr-only-focusable:focus {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 10000;
+        width: auto;
+        height: auto;
+        padding: 16px 24px;
+        margin: 4px;
+        overflow: visible;
+        clip: auto;
+        white-space: normal;
+        background: #1e40af;
+        color: white;
+        font-weight: 600;
+        text-decoration: none;
+        border-radius: 4px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      }
+    </style>
   </body>
 </html>
