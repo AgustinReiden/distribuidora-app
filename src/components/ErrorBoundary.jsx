@@ -5,10 +5,28 @@
  * - ErrorBoundary: Boundary completo para la app
  * - CompactErrorBoundary: Boundary inline para modales y secciones
  * - withErrorBoundary: HOC para envolver componentes fácilmente
+ * - useErrorHandler: Hook para manejar errores asíncronos
  */
 import React from 'react';
-import { AlertTriangle, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, RefreshCw, X, WifiOff, Lock, Database, Bug } from 'lucide-react';
 import { captureException, addBreadcrumb } from '../lib/sentry';
+import { categorizeError, getRecoveryInfo, ErrorCategory } from '../utils/errorUtils';
+
+// Mapa de iconos por nombre
+const iconMap = {
+  WifiOff,
+  Lock,
+  AlertTriangle,
+  Database,
+  Bug
+};
+
+/**
+ * Obtiene el componente de icono basado en el nombre
+ */
+function getIconComponent(iconName) {
+  return iconMap[iconName] || Bug;
+}
 
 /**
  * Error Boundary completo (pantalla completa)
@@ -17,42 +35,98 @@ import { captureException, addBreadcrumb } from '../lib/sentry';
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = {
+      hasError: false,
+      error: null,
+      errorInfo: null,
+      errorCategory: null,
+      retryCount: 0,
+      isRetrying: false
+    };
   }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true };
+    return {
+      hasError: true,
+      errorCategory: categorizeError(error)
+    };
   }
 
   componentDidCatch(error, errorInfo) {
-    this.setState({ error, errorInfo });
+    const category = categorizeError(error);
+
+    this.setState({ error, errorInfo, errorCategory: category });
 
     // Reportar a Sentry
     captureException(error, {
       tags: {
         component: this.props.componentName || 'unknown',
-        boundary: 'full'
+        boundary: 'full',
+        errorCategory: category
       },
       extra: {
-        componentStack: errorInfo?.componentStack
+        componentStack: errorInfo?.componentStack,
+        retryCount: this.state.retryCount
       }
     });
 
     // Callback opcional
-    this.props.onError?.(error, errorInfo);
+    this.props.onError?.(error, errorInfo, category);
   }
 
   handleReload = () => {
     window.location.reload();
   };
 
-  handleRetry = () => {
+  handleRelogin = () => {
+    // Limpiar sesión y redirigir al login
+    localStorage.removeItem('supabase.auth.token');
+    window.location.href = '/login';
+  };
+
+  handleRetry = async () => {
+    const { errorCategory, retryCount } = this.state;
+    const recoveryInfo = getRecoveryInfo(errorCategory);
+
+    if (!recoveryInfo.canRetry) {
+      return;
+    }
+
+    if (recoveryInfo.maxRetries && retryCount >= recoveryInfo.maxRetries) {
+      return;
+    }
+
     addBreadcrumb({
       category: 'error-boundary',
-      message: 'User clicked retry',
+      message: `User clicked retry (attempt ${retryCount + 1})`,
       level: 'info'
     });
-    this.setState({ hasError: false, error: null, errorInfo: null });
+
+    this.setState({ isRetrying: true });
+
+    // Esperar antes de reintentar (backoff exponencial)
+    const delay = recoveryInfo.retryDelay * Math.pow(2, retryCount);
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    this.setState({
+      hasError: false,
+      error: null,
+      errorInfo: null,
+      errorCategory: null,
+      retryCount: retryCount + 1,
+      isRetrying: false
+    });
+  };
+
+  resetError = () => {
+    this.setState({
+      hasError: false,
+      error: null,
+      errorInfo: null,
+      errorCategory: null,
+      retryCount: 0,
+      isRetrying: false
+    });
   };
 
   render() {
@@ -62,24 +136,33 @@ class ErrorBoundary extends React.Component {
         return this.props.fallback({
           error: this.state.error,
           errorInfo: this.state.errorInfo,
+          errorCategory: this.state.errorCategory,
           onRetry: this.handleRetry,
-          onReload: this.handleReload
+          onReload: this.handleReload,
+          onReset: this.resetError,
+          isRetrying: this.state.isRetrying,
+          retryCount: this.state.retryCount
         });
       }
+
+      const recoveryInfo = getRecoveryInfo(this.state.errorCategory);
+      const IconComponent = getIconComponent(recoveryInfo.iconName);
+      const canRetryNow = recoveryInfo.canRetry &&
+        (!recoveryInfo.maxRetries || this.state.retryCount < recoveryInfo.maxRetries);
 
       return (
         <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6 text-center">
             <div className="flex items-center justify-center w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/30">
-              <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
+              <IconComponent className="w-8 h-8 text-red-600 dark:text-red-400" />
             </div>
 
             <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-              ¡Ups! Algo salió mal
+              {recoveryInfo.title}
             </h1>
 
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              Ha ocurrido un error inesperado. Por favor, intentá recargar la página.
+              {recoveryInfo.message}
             </p>
 
             {import.meta.env.DEV && this.state.error && (
@@ -95,20 +178,41 @@ class ErrorBoundary extends React.Component {
               </div>
             )}
 
+            {this.state.retryCount > 0 && (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Intento {this.state.retryCount} de {recoveryInfo.maxRetries || '∞'}
+              </p>
+            )}
+
             <div className="flex space-x-3 justify-center">
-              <button
-                onClick={this.handleRetry}
-                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-              >
-                Reintentar
-              </button>
-              <button
-                onClick={this.handleReload}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Recargar página</span>
-              </button>
+              {canRetryNow && (
+                <button
+                  onClick={this.handleRetry}
+                  disabled={this.state.isRetrying}
+                  className="flex items-center space-x-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${this.state.isRetrying ? 'animate-spin' : ''}`} />
+                  <span>{this.state.isRetrying ? 'Reintentando...' : 'Reintentar'}</span>
+                </button>
+              )}
+
+              {recoveryInfo.action === 'relogin' ? (
+                <button
+                  onClick={this.handleRelogin}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Iniciar sesión</span>
+                </button>
+              ) : (
+                <button
+                  onClick={this.handleReload}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Recargar página</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -126,19 +230,33 @@ class ErrorBoundary extends React.Component {
 class CompactErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = {
+      hasError: false,
+      error: null,
+      errorCategory: null,
+      retryCount: 0,
+      isRetrying: false
+    };
   }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true, error };
+    return {
+      hasError: true,
+      errorCategory: categorizeError(error)
+    };
   }
 
   componentDidCatch(error, errorInfo) {
+    const category = categorizeError(error);
+
+    this.setState({ error, errorCategory: category });
+
     // Reportar a Sentry
     captureException(error, {
       tags: {
         component: this.props.componentName || 'unknown',
-        boundary: 'compact'
+        boundary: 'compact',
+        errorCategory: category
       },
       extra: {
         componentStack: errorInfo?.componentStack
@@ -146,16 +264,35 @@ class CompactErrorBoundary extends React.Component {
     });
 
     // Callback opcional
-    this.props.onError?.(error, errorInfo);
+    this.props.onError?.(error, errorInfo, category);
   }
 
-  handleRetry = () => {
+  handleRetry = async () => {
+    const { errorCategory, retryCount } = this.state;
+    const recoveryInfo = getRecoveryInfo(errorCategory);
+
+    if (!recoveryInfo.canRetry) {
+      return;
+    }
+
     addBreadcrumb({
       category: 'error-boundary',
       message: 'User clicked retry (compact)',
       level: 'info'
     });
-    this.setState({ hasError: false, error: null });
+
+    this.setState({ isRetrying: true });
+
+    const delay = recoveryInfo.retryDelay * Math.pow(2, retryCount);
+    await new Promise(resolve => setTimeout(resolve, Math.min(delay, 5000)));
+
+    this.setState({
+      hasError: false,
+      error: null,
+      errorCategory: null,
+      retryCount: retryCount + 1,
+      isRetrying: false
+    });
   };
 
   handleClose = () => {
@@ -168,23 +305,28 @@ class CompactErrorBoundary extends React.Component {
       if (this.props.fallback) {
         return this.props.fallback({
           error: this.state.error,
+          errorCategory: this.state.errorCategory,
           onRetry: this.handleRetry,
-          onClose: this.handleClose
+          onClose: this.handleClose,
+          isRetrying: this.state.isRetrying
         });
       }
+
+      const recoveryInfo = getRecoveryInfo(this.state.errorCategory);
+      const IconComponent = getIconComponent(recoveryInfo.iconName);
 
       return (
         <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
           <div className="flex items-start space-x-3">
             <div className="flex-shrink-0">
-              <AlertTriangle className="w-5 h-5 text-red-500 dark:text-red-400" />
+              <IconComponent className="w-5 h-5 text-red-500 dark:text-red-400" />
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
-                Error al cargar el componente
+                {recoveryInfo.title}
               </h3>
               <p className="mt-1 text-sm text-red-600 dark:text-red-300">
-                {this.props.errorMessage || 'Ha ocurrido un error inesperado.'}
+                {this.props.errorMessage || recoveryInfo.message}
               </p>
 
               {import.meta.env.DEV && this.state.error && (
@@ -194,13 +336,16 @@ class CompactErrorBoundary extends React.Component {
               )}
 
               <div className="mt-3 flex space-x-2">
-                <button
-                  onClick={this.handleRetry}
-                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-200 bg-red-100 dark:bg-red-900/40 rounded hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors"
-                >
-                  <RefreshCw className="w-3 h-3 mr-1" />
-                  Reintentar
-                </button>
+                {recoveryInfo.canRetry && (
+                  <button
+                    onClick={this.handleRetry}
+                    disabled={this.state.isRetrying}
+                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-200 bg-red-100 dark:bg-red-900/40 rounded hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 mr-1 ${this.state.isRetrying ? 'animate-spin' : ''}`} />
+                    {this.state.isRetrying ? 'Reintentando...' : 'Reintentar'}
+                  </button>
+                )}
                 {this.props.onClose && (
                   <button
                     onClick={this.handleClose}
@@ -221,79 +366,7 @@ class CompactErrorBoundary extends React.Component {
   }
 }
 
-/**
- * HOC para envolver componentes con Error Boundary
- *
- * @param {React.Component} WrappedComponent - Componente a envolver
- * @param {object} options - Opciones de configuración
- * @param {string} options.componentName - Nombre del componente para logging
- * @param {boolean} options.compact - Usar boundary compacto
- * @param {string} options.errorMessage - Mensaje de error personalizado
- * @param {function} options.fallback - Componente de fallback personalizado
- * @param {function} options.onError - Callback cuando ocurre un error
- *
- * @example
- * // Uso básico
- * export default withErrorBoundary(MiComponente);
- *
- * // Con opciones
- * export default withErrorBoundary(MiModal, {
- *   componentName: 'MiModal',
- *   compact: true,
- *   errorMessage: 'Error al cargar el modal'
- * });
- */
-function withErrorBoundary(WrappedComponent, options = {}) {
-  const {
-    componentName = WrappedComponent.displayName || WrappedComponent.name || 'Component',
-    compact = false,
-    errorMessage,
-    fallback,
-    onError
-  } = options;
-
-  const Boundary = compact ? CompactErrorBoundary : ErrorBoundary;
-
-  function WithErrorBoundary(props) {
-    return (
-      <Boundary
-        componentName={componentName}
-        errorMessage={errorMessage}
-        fallback={fallback}
-        onError={onError}
-        onClose={props.onClose}
-      >
-        <WrappedComponent {...props} />
-      </Boundary>
-    );
-  }
-
-  WithErrorBoundary.displayName = `withErrorBoundary(${componentName})`;
-
-  return WithErrorBoundary;
-}
-
-/**
- * Hook para lanzar errores que serán capturados por el boundary más cercano
- * Útil para errores asíncronos que no se capturan automáticamente
- */
-function useErrorHandler() {
-  const [error, setError] = React.useState(null);
-
-  if (error) {
-    throw error;
-  }
-
-  const handleError = React.useCallback((err) => {
-    setError(err);
-  }, []);
-
-  const resetError = React.useCallback(() => {
-    setError(null);
-  }, []);
-
-  return { handleError, resetError };
-}
-
 export default ErrorBoundary;
-export { ErrorBoundary, CompactErrorBoundary, withErrorBoundary, useErrorHandler };
+export { ErrorBoundary, CompactErrorBoundary };
+
+// withErrorBoundary HOC está disponible en './withErrorBoundary'
