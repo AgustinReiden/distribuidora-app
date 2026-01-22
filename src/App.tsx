@@ -1,21 +1,21 @@
-import React, { useEffect, lazy, Suspense } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, setErrorNotifier } from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
-import { useOptimizarRuta } from './hooks/useOptimizarRuta.js';
-import { useOfflineSync } from './hooks/useOfflineSync.js';
-import { useAppState, useAppDerivedState } from './hooks/useAppState.js';
-import { useAppHandlers } from './hooks/useAppHandlers.js';
+import { useOptimizarRuta } from './hooks/useOptimizarRuta';
+import { useOfflineSync } from './hooks/useOfflineSync';
+import { useAppState, useAppDerivedState } from './hooks/useAppState';
+import { useAppHandlers } from './hooks/useAppHandlers';
 
 // Componentes base
 import LoginScreen from './components/auth/LoginScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import TopNavigation from './components/layout/TopNavigation';
-import OfflineIndicator from './components/layout/OfflineIndicator.jsx';
-import AppModals from './components/AppModals.jsx';
-import PWAPrompt from './components/PWAPrompt.jsx';
-import SkipLinks from './components/a11y/SkipLinks.jsx';
+import OfflineIndicator from './components/layout/OfflineIndicator';
+import AppModals from './components/AppModals';
+import PWAPrompt from './components/PWAPrompt';
+import SkipLinks from './components/a11y/SkipLinks';
 
 // Vistas con lazy loading
 const VistaDashboard = lazy(() => import('./components/vistas/VistaDashboard'));
