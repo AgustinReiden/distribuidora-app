@@ -402,7 +402,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   )
 }
 
-function StatCard({ icon: _Icon, label, value, color }) {
+function StatCard({ icon: Icon, label, value, color }) {
   const colorClasses = {
     blue: 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400',
     green: 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400',

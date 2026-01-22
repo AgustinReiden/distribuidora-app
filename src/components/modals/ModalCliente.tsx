@@ -35,7 +35,7 @@ const RUBROS_OPCIONES = [
 ];
 
 // Validar formato de CUIT (XX-XXXXXXXX-X)
-// eslint-disable-next-line no-unused-vars
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const validarCuit = (cuit) => {
   if (!cuit) return false;
   const cuitLimpio = cuit.replace(/-/g, '');
@@ -43,7 +43,7 @@ const validarCuit = (cuit) => {
 };
 
 // Validar formato de DNI (7-8 digitos)
-// eslint-disable-next-line no-unused-vars
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const validarDni = (dni) => {
   if (!dni) return false;
   const dniLimpio = dni.replace(/\D/g, '');
