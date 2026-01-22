@@ -169,7 +169,7 @@ export function useAppState(perfil) {
     dispatchEditing({ type: 'SET_EDITING', entity, data });
   }, []);
 
-  // eslint-disable-next-line no-unused-vars
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const createClearer = useCallback((entity) => () => {
     dispatchEditing({ type: 'CLEAR_EDITING', entity });
   }, []);
