@@ -1,66 +1,111 @@
 import React, { useState, useCallback } from 'react';
+import type { ChangeEvent, DragEvent } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
 import { readExcelFile, createTemplate } from '../../utils/excel';
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
+import type { ProductoDB } from '../../types';
+
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+/** Item de preview de precio */
+export interface PrecioPreviewItem {
+  fila: number;
+  codigo: string;
+  precioNeto: number;
+  impInternos: number;
+  precioFinal: number;
+  productoId: string | null;
+  productoNombre: string | null;
+  precioActual: number | null;
+  estado: 'encontrado' | 'no_encontrado';
+}
+
+/** Resultado de actualizacion de precios */
+export interface ActualizarPreciosResult {
+  success: boolean;
+  actualizados?: number;
+  errores?: string[];
+  error?: string;
+}
+
+/** Props del componente principal */
+export interface ModalImportarPreciosProps {
+  productos: ProductoDB[];
+  onActualizarPrecios: (productos: PrecioPreviewItem[]) => Promise<ActualizarPreciosResult>;
+  onClose: () => void;
+}
+
+/** Fila de datos de Excel */
+interface ExcelRow {
+  [key: string]: string | number | null | undefined;
+}
+
+/** Mapa de columnas posibles */
+interface ColumnasMap {
+  codigo: string[];
+  precioNeto: string[];
+  impInternos: string[];
+  precioFinal: string[];
+}
 
 /**
- * Normaliza un valor numérico desde diferentes formatos regionales
+ * Normaliza un valor numerico desde diferentes formatos regionales
  * Maneja formatos como:
- * - "1.500,50" (europeo/argentino) → 1500.50
- * - "1,500.50" (americano) → 1500.50
- * - "1500.50" (sin separador de miles) → 1500.50
- * - "1500,50" (europeo simple) → 1500.50
- * @param {string|number} valor - Valor a normalizar
- * @returns {number} Número normalizado o 0 si es inválido
+ * - "1.500,50" (europeo/argentino) -> 1500.50
+ * - "1,500.50" (americano) -> 1500.50
+ * - "1500.50" (sin separador de miles) -> 1500.50
+ * - "1500,50" (europeo simple) -> 1500.50
  */
-const normalizarNumero = (valor) => {
+const normalizarNumero = (valor: string | number | null | undefined): number => {
   if (valor === null || valor === undefined || valor === '') return 0;
 
-  // Si ya es número, devolverlo directamente
+  // Si ya es numero, devolverlo directamente
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
 
   // Convertir a string y limpiar espacios
   let str = String(valor).trim();
 
-  // Remover símbolos de moneda comunes
+  // Remover simbolos de moneda comunes
   str = str.replace(/[$€£¥]/g, '').trim();
 
-  // Detectar formato regional basado en posición de punto y coma
+  // Detectar formato regional basado en posicion de punto y coma
   const ultimoPunto = str.lastIndexOf('.');
   const ultimaComa = str.lastIndexOf(',');
 
   if (ultimaComa > ultimoPunto) {
-    // Formato europeo: "1.500,50" → coma es decimal
+    // Formato europeo: "1.500,50" -> coma es decimal
     str = str.replace(/\./g, '').replace(',', '.');
   } else if (ultimoPunto > ultimaComa && ultimaComa !== -1) {
-    // Formato americano: "1,500.50" → punto es decimal
+    // Formato americano: "1,500.50" -> punto es decimal
     str = str.replace(/,/g, '');
   } else if (ultimaComa !== -1 && ultimoPunto === -1) {
-    // Solo coma, sin punto: "1500,50" → coma es decimal
+    // Solo coma, sin punto: "1500,50" -> coma es decimal
     str = str.replace(',', '.');
   }
-  // Si solo tiene punto, ya está en formato correcto
+  // Si solo tiene punto, ya esta en formato correcto
 
   const resultado = parseFloat(str);
   return isNaN(resultado) ? 0 : resultado;
 };
 
-export default function ModalImportarPrecios({ productos, onActualizarPrecios, onClose }) {
-  const [archivo, setArchivo] = useState(null);
-  const [preview, setPreview] = useState([]);
-  const [resultado, setResultado] = useState(null);
-  const [procesando, setProcesando] = useState(false);
-  const [erroresParseo, setErroresParseo] = useState([]);
+export default function ModalImportarPrecios({ productos, onActualizarPrecios, onClose }: ModalImportarPreciosProps) {
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [preview, setPreview] = useState<PrecioPreviewItem[]>([]);
+  const [resultado, setResultado] = useState<ActualizarPreciosResult | null>(null);
+  const [procesando, setProcesando] = useState<boolean>(false);
+  const [erroresParseo, setErroresParseo] = useState<string[]>([]);
 
   // Mapeo de posibles nombres de columnas
-  const COLUMNAS = {
-    codigo: ['codigo', 'code', 'sku', 'cod', 'código'],
+  const COLUMNAS: ColumnasMap = {
+    codigo: ['codigo', 'code', 'sku', 'cod', 'codigo'],
     precioNeto: ['precio neto', 'precio_neto', 'neto', 'costo', 'precio sin iva', 'precio_sin_iva'],
     impInternos: ['imp internos', 'impuestos internos', 'imp_internos', 'internos', 'impuestos'],
     precioFinal: ['precio final', 'precio', 'final', 'pvp', 'precio venta']
   };
 
-  const encontrarValor = (fila, posiblesNombres) => {
+  const encontrarValor = (fila: ExcelRow, posiblesNombres: string[]): string | number | null | undefined => {
     for (const nombre of posiblesNombres) {
       const key = Object.keys(fila).find(k => k.toLowerCase().trim().includes(nombre));
       if (key && fila[key] !== undefined && fila[key] !== '') return fila[key];
@@ -68,14 +113,14 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     return null;
   };
 
-  const parsearExcel = useCallback(async (file) => {
+  const parsearExcel = useCallback(async (file: File): Promise<void> => {
     try {
-      const jsonData = await readExcelFile(file);
+      const jsonData = await readExcelFile(file) as ExcelRow[];
 
       // Validar y sanitizar datos
       const validation = validateAndSanitizeExcelData(jsonData);
       if (!validation.valid) {
-        setErroresParseo([validation.error]);
+        setErroresParseo([validation.error || 'Error de validacion']);
         return;
       }
 
@@ -84,20 +129,21 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
         setErroresParseo(validation.warnings);
       }
 
-      procesarDatos(validation.data || jsonData);
+      procesarDatos((validation.data || jsonData) as ExcelRow[]);
     } catch (err) {
-      setErroresParseo(['Error al leer el archivo: ' + err.message]);
+      const error = err as Error;
+      setErroresParseo(['Error al leer el archivo: ' + error.message]);
     }
   }, [productos]);
 
-  const procesarDatos = (datos) => {
-    const resultados = [];
-    const erroresTemp = [];
+  const procesarDatos = (datos: ExcelRow[]): void => {
+    const resultados: PrecioPreviewItem[] = [];
+    const erroresTemp: string[] = [];
 
     datos.forEach((fila, index) => {
       const codigo = encontrarValor(fila, COLUMNAS.codigo);
       if (!codigo) {
-        erroresTemp.push(`Fila ${index + 2}: Código no encontrado`);
+        erroresTemp.push(`Fila ${index + 2}: Codigo no encontrado`);
         return;
       }
 
@@ -126,14 +172,14 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     setErroresParseo(erroresTemp);
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     // Validar archivo antes de procesar
     const validation = validateExcelFile(file);
     if (!validation.valid) {
-      setErroresParseo([validation.error]);
+      setErroresParseo([validation.error || 'Error de validacion']);
       return;
     }
 
@@ -143,7 +189,7 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     parsearExcel(file);
   };
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>): void => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (!file) return;
@@ -151,7 +197,7 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     // Validar archivo antes de procesar
     const validation = validateExcelFile(file);
     if (!validation.valid) {
-      setErroresParseo([validation.error]);
+      setErroresParseo([validation.error || 'Error de validacion']);
       return;
     }
 
@@ -161,10 +207,10 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     parsearExcel(file);
   }, [parsearExcel]);
 
-  const handleImportar = async () => {
+  const handleImportar = async (): Promise<void> => {
     const productosAActualizar = preview.filter(p => p.estado === 'encontrado' && p.productoId != null);
     if (productosAActualizar.length === 0) {
-      setResultado({ success: false, error: 'No hay productos válidos para actualizar' });
+      setResultado({ success: false, error: 'No hay productos validos para actualizar' });
       return;
     }
 
@@ -174,15 +220,16 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
       setResultado(res);
     } catch (err) {
       // Capturar mejor el error
-      const errorMsg = err?.message || err?.toString?.() || 'Error desconocido al actualizar precios';
-      console.error('Error en importación de precios:', err);
+      const error = err as Error;
+      const errorMsg = error?.message || error?.toString?.() || 'Error desconocido al actualizar precios';
+      console.error('Error en importacion de precios:', err);
       setResultado({ success: false, error: errorMsg });
     } finally {
       setProcesando(false);
     }
   };
 
-  const descargarPlantilla = async () => {
+  const descargarPlantilla = async (): Promise<void> => {
     const plantilla = [
       { Codigo: 'EJEMPLO001', 'Precio Neto': 1000, 'Imp Internos': 50, 'Precio Final': 1200 },
       { Codigo: 'EJEMPLO002', 'Precio Neto': 500, 'Imp Internos': 0, 'Precio Final': 600 }
@@ -190,8 +237,8 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
     await createTemplate(plantilla, 'plantilla_precios', 'Precios');
   };
 
-  const productosEncontrados = preview.filter(p => p.estado === 'encontrado');
-  const productosNoEncontrados = preview.filter(p => p.estado === 'no_encontrado');
+  const productosEncontrados: PrecioPreviewItem[] = preview.filter(p => p.estado === 'encontrado');
+  const productosNoEncontrados: PrecioPreviewItem[] = preview.filter(p => p.estado === 'no_encontrado');
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

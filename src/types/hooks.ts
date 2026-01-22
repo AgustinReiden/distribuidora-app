@@ -582,6 +582,8 @@ export interface PagoDBWithUsuario extends PagoDB {
     id: string;
     nombre: string;
   } | null;
+  referencia?: string | null;
+  pedido_id?: string | null;
 }
 
 export interface PagoFormInput {

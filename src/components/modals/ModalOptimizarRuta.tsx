@@ -1,7 +1,43 @@
 import React, { useState, useMemo, memo, useEffect } from 'react';
+import type { ChangeEvent } from 'react';
 import { Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation, Settings, Save } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { getDepositoCoords, setDepositoCoords } from '../../hooks/useOptimizarRuta';
+import type { PedidoDB, PerfilDB } from '../../types';
+
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+/** Orden optimizado para un pedido */
+export interface OrdenOptimizadoItem {
+  pedido_id: string;
+  orden: number;
+  cliente?: string;
+  direccion?: string;
+}
+
+/** Resultado de la optimizacion de ruta */
+export interface RutaOptimizadaResult {
+  orden_optimizado?: OrdenOptimizadoItem[];
+  distancia_total?: number;
+  duracion_total?: number;
+  distancia_formato?: string;
+  duracion_formato?: string;
+  total_pedidos?: number;
+}
+
+/** Props del componente principal */
+export interface ModalOptimizarRutaProps {
+  transportistas: PerfilDB[];
+  pedidos: PedidoDB[];
+  onOptimizar: (transportistaId: string, pedidos: PedidoDB[]) => void;
+  onAplicarOrden: (ordenOptimizado: OrdenOptimizadoItem[]) => void;
+  onClose: () => void;
+  loading: boolean;
+  rutaOptimizada: RutaOptimizadaResult | null;
+  error: string | null;
+}
 
 const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
   transportistas,
@@ -12,12 +48,12 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
   loading,
   rutaOptimizada,
   error
-}) {
-  const [transportistaSeleccionado, setTransportistaSeleccionado] = useState('');
-  const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState(false);
-  const [depositoLat, setDepositoLat] = useState('');
-  const [depositoLng, setDepositoLng] = useState('');
-  const [depositoGuardado, setDepositoGuardado] = useState(false);
+}: ModalOptimizarRutaProps) {
+  const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
+  const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState<boolean>(false);
+  const [depositoLat, setDepositoLat] = useState<string>('');
+  const [depositoLng, setDepositoLng] = useState<string>('');
+  const [depositoGuardado, setDepositoGuardado] = useState<boolean>(false);
 
   // Cargar coordenadas del deposito al montar
   useEffect(() => {
@@ -27,7 +63,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
   }, []);
 
   // Obtener pedidos del transportista seleccionado
-  const pedidosTransportista = useMemo(() => {
+  const pedidosTransportista = useMemo((): PedidoDB[] => {
     if (!transportistaSeleccionado) return [];
     return pedidos
       .filter(p => p.transportista_id === transportistaSeleccionado && p.estado === 'asignado')
@@ -35,18 +71,18 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
   }, [pedidos, transportistaSeleccionado]);
 
   // Verificar si hay pedidos sin coordenadas
-  const pedidosSinCoordenadas = useMemo(() => {
+  const pedidosSinCoordenadas = useMemo((): PedidoDB[] => {
     return pedidosTransportista.filter(p => !p.cliente?.latitud || !p.cliente?.longitud);
   }, [pedidosTransportista]);
 
-  const handleOptimizar = () => {
+  const handleOptimizar = (): void => {
     if (transportistaSeleccionado) {
       // Pasar los pedidos completos para que el hook extraiga las coordenadas
       onOptimizar(transportistaSeleccionado, pedidos);
     }
   };
 
-  const handleGuardarDeposito = () => {
+  const handleGuardarDeposito = (): void => {
     const lat = parseFloat(depositoLat);
     const lng = parseFloat(depositoLng);
     if (!isNaN(lat) && !isNaN(lng)) {
@@ -56,7 +92,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
     }
   };
 
-  const handleAplicar = () => {
+  const handleAplicar = (): void => {
     if (rutaOptimizada?.orden_optimizado) {
       onAplicarOrden(rutaOptimizada.orden_optimizado);
     }
@@ -91,7 +127,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
                     type="number"
                     step="0.000001"
                     value={depositoLat}
-                    onChange={e => setDepositoLat(e.target.value)}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLat(e.target.value)}
                     className="w-full px-3 py-2 border rounded-lg text-sm"
                     placeholder="-26.8241"
                   />
@@ -102,7 +138,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
                     type="number"
                     step="0.000001"
                     value={depositoLng}
-                    onChange={e => setDepositoLng(e.target.value)}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLng(e.target.value)}
                     className="w-full px-3 py-2 border rounded-lg text-sm"
                     placeholder="-65.2226"
                   />
@@ -138,7 +174,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
           <label className="block text-sm font-medium mb-1">Seleccionar Transportista</label>
           <select
             value={transportistaSeleccionado}
-            onChange={e => setTransportistaSeleccionado(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => setTransportistaSeleccionado(e.target.value)}
             className="w-full px-3 py-2 border rounded-lg"
             disabled={loading}
           >
@@ -208,9 +244,9 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
                         <p className="text-sm text-gray-500">{pedido.cliente?.direccion}</p>
                       </div>
                       {pedido.cliente?.latitud && pedido.cliente?.longitud ? (
-                        <MapPin className="w-4 h-4 text-green-500" title="Con coordenadas" />
+                        <span title="Con coordenadas"><MapPin className="w-4 h-4 text-green-500" /></span>
                       ) : (
-                        <MapPin className="w-4 h-4 text-gray-300" title="Sin coordenadas" />
+                        <span title="Sin coordenadas"><MapPin className="w-4 h-4 text-gray-300" /></span>
                       )}
                     </div>
                   ))}

@@ -3,10 +3,38 @@ import { Loader2, History } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatFecha } from './utils';
 import { formatPrecio } from '../../utils/formatters';
+import type { PedidoDB } from '../../types';
 
-const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading }) {
-  const formatearCampo = (campo) => {
-    const mapeo = {
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+/** Registro de cambio en historial */
+export interface HistorialCambio {
+  id?: string;
+  campo_modificado: string;
+  valor_anterior: string;
+  valor_nuevo: string;
+  created_at?: string;
+  usuario?: {
+    nombre: string;
+  } | null;
+}
+
+/** Props del componente principal */
+export interface ModalHistorialPedidoProps {
+  pedido: PedidoDB | null;
+  historial: HistorialCambio[];
+  onClose: () => void;
+  loading: boolean;
+}
+
+/** Mapa de campos a etiquetas */
+type CampoMapeo = Record<string, string>;
+
+const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading }: ModalHistorialPedidoProps) {
+  const formatearCampo = (campo: string): string => {
+    const mapeo: CampoMapeo = {
       estado: "Estado",
       transportista_id: "Transportista",
       notas: "Notas",
@@ -18,18 +46,18 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
     return mapeo[campo] || campo;
   };
 
-  const formatearValor = (campo, valor) => {
+  const formatearValor = (campo: string, valor: string): string => {
     if (campo === "total") return formatPrecio(parseFloat(valor));
     if (campo === "estado") {
-      const estados = { pendiente: "Pendiente", en_preparacion: "En preparacion", asignado: "En camino", entregado: "Entregado" };
+      const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparacion", asignado: "En camino", entregado: "Entregado" };
       return estados[valor] || valor;
     }
     if (campo === "estado_pago") {
-      const estados = { pendiente: "Pendiente", pagado: "Pagado", parcial: "Parcial" };
+      const estados: Record<string, string> = { pendiente: "Pendiente", pagado: "Pagado", parcial: "Parcial" };
       return estados[valor] || valor;
     }
     if (campo === "forma_pago") {
-      const formas = {
+      const formas: Record<string, string> = {
         efectivo: "Efectivo",
         transferencia: "Transferencia",
         cheque: "Cheque",

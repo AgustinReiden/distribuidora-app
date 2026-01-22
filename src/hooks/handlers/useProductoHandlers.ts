@@ -2,6 +2,107 @@
  * Handlers para operaciones con productos y mermas
  */
 import { useCallback } from 'react'
+import type { User } from '@supabase/supabase-js'
+import type {
+  ProductoDB,
+  ProductoFormInput,
+  MermaFormInputExtended,
+  MermaRegistroResult
+} from '../../types'
+
+// =============================================================================
+// TIPOS PARA MODALES
+// =============================================================================
+
+export interface ModalControl {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}
+
+export interface ConfirmModalConfig {
+  visible: boolean;
+  titulo?: string;
+  mensaje?: string;
+  tipo?: 'success' | 'warning' | 'danger' | 'info';
+  onConfirm?: () => Promise<void> | void;
+}
+
+export interface ConfirmModal {
+  setConfig: (config: ConfirmModalConfig) => void;
+}
+
+export interface ProductoModales {
+  producto: ModalControl;
+  mermaStock: ModalControl;
+  historialMermas: ModalControl;
+  confirm: ConfirmModal;
+}
+
+// =============================================================================
+// TIPOS PARA NOTIFICACIONES
+// =============================================================================
+
+export interface NotifyOptions {
+  persist?: boolean;
+}
+
+export interface NotifyService {
+  success: (message: string, options?: NotifyOptions) => void;
+  error: (message: string, duration?: number) => void;
+  warning: (message: string) => void;
+  info: (message: string) => void;
+}
+
+// =============================================================================
+// TIPOS PARA MERMA
+// =============================================================================
+
+export interface MermaDataInput {
+  productoId: string;
+  cantidad: number;
+  motivo: string;
+  observaciones?: string | null;
+  stockAnterior: number;
+  stockNuevo: number;
+  usuarioId?: string | null;
+}
+
+export interface MermaOfflineData extends MermaDataInput {
+  usuarioId?: string;
+}
+
+// =============================================================================
+// PROPS DEL HOOK
+// =============================================================================
+
+export interface UseProductoHandlersProps {
+  agregarProducto: (producto: ProductoFormInput) => Promise<ProductoDB>;
+  actualizarProducto: (id: string, producto: Partial<ProductoFormInput>) => Promise<ProductoDB>;
+  eliminarProducto: (id: string) => Promise<void>;
+  registrarMerma: (merma: MermaFormInputExtended) => Promise<MermaRegistroResult>;
+  modales: ProductoModales;
+  setGuardando: (guardando: boolean) => void;
+  setProductoEditando: (producto: ProductoDB | null) => void;
+  setProductoMerma: (producto: ProductoDB | null) => void;
+  refetchProductos: () => Promise<void>;
+  refetchMermas: () => Promise<void>;
+  notify: NotifyService;
+  user: User | null;
+  isOnline: boolean;
+  guardarMermaOffline: (merma: MermaOfflineData) => void;
+}
+
+// =============================================================================
+// RETURN TYPE DEL HOOK
+// =============================================================================
+
+export interface UseProductoHandlersReturn {
+  handleGuardarProducto: (producto: ProductoFormInput & { id?: string }) => Promise<void>;
+  handleEliminarProducto: (id: string) => void;
+  handleAbrirMerma: (producto: ProductoDB) => void;
+  handleRegistrarMerma: (mermaData: MermaDataInput) => Promise<void>;
+  handleVerHistorialMermas: () => void;
+}
 
 export function useProductoHandlers({
   agregarProducto,
@@ -18,8 +119,8 @@ export function useProductoHandlers({
   user,
   isOnline,
   guardarMermaOffline
-}) {
-  const handleGuardarProducto = useCallback(async (producto) => {
+}: UseProductoHandlersProps): UseProductoHandlersReturn {
+  const handleGuardarProducto = useCallback(async (producto: ProductoFormInput & { id?: string }): Promise<void> => {
     setGuardando(true)
     try {
       if (producto.id) await actualizarProducto(producto.id, producto)
@@ -28,12 +129,13 @@ export function useProductoHandlers({
       setProductoEditando(null)
       notify.success(producto.id ? 'Producto actualizado correctamente' : 'Producto creado correctamente')
     } catch (e) {
-      notify.error('Error: ' + e.message)
+      const error = e as Error
+      notify.error('Error: ' + error.message)
     }
     setGuardando(false)
   }, [agregarProducto, actualizarProducto, notify, modales.producto, setProductoEditando, setGuardando])
 
-  const handleEliminarProducto = useCallback((id) => {
+  const handleEliminarProducto = useCallback((id: string): void => {
     modales.confirm.setConfig({
       visible: true,
       titulo: 'Eliminar producto',
@@ -45,7 +147,8 @@ export function useProductoHandlers({
           await eliminarProducto(id)
           notify.success('Producto eliminado')
         } catch (e) {
-          notify.error(e.message)
+          const error = e as Error
+          notify.error(error.message)
         } finally {
           setGuardando(false)
           modales.confirm.setConfig({ visible: false })
@@ -54,12 +157,12 @@ export function useProductoHandlers({
     })
   }, [eliminarProducto, notify, modales.confirm, setGuardando])
 
-  const handleAbrirMerma = useCallback((producto) => {
+  const handleAbrirMerma = useCallback((producto: ProductoDB): void => {
     setProductoMerma(producto)
     modales.mermaStock.setOpen(true)
   }, [setProductoMerma, modales.mermaStock])
 
-  const handleRegistrarMerma = useCallback(async (mermaData) => {
+  const handleRegistrarMerma = useCallback(async (mermaData: MermaDataInput): Promise<void> => {
     try {
       if (!isOnline) {
         guardarMermaOffline({
@@ -80,12 +183,13 @@ export function useProductoHandlers({
       refetchProductos()
       refetchMermas()
     } catch (e) {
-      notify.error('Error al registrar merma: ' + e.message)
+      const error = e as Error
+      notify.error('Error al registrar merma: ' + error.message)
       throw e
     }
   }, [isOnline, guardarMermaOffline, actualizarProducto, registrarMerma, user, refetchProductos, refetchMermas, notify])
 
-  const handleVerHistorialMermas = useCallback(() => {
+  const handleVerHistorialMermas = useCallback((): void => {
     modales.historialMermas.setOpen(true)
   }, [modales.historialMermas])
 

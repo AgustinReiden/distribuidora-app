@@ -2,27 +2,67 @@
  * OptimizedImage - Componente de imagen optimizada con WebP y fallback
  *
  * Features:
- * - Detección automática de soporte WebP
+ * - Deteccion automatica de soporte WebP
  * - Lazy loading nativo
  * - Fallback en caso de error
  * - Placeholder durante carga
  * - srcset responsivo
  */
-import { useState, useEffect, memo } from 'react'
+import React, { useState, useEffect, memo, SyntheticEvent, ImgHTMLAttributes } from 'react'
 import { supportsWebPSync, getOptimizedImageUrl, generateSrcSet } from '../../utils/imageOptimization'
 
+// =============================================================================
+// PROPS INTERFACES
+// =============================================================================
+
+export interface OptimizedImageProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'onLoad' | 'onError'> {
+  /** URL de la imagen */
+  src: string;
+  /** Texto alternativo (requerido para accesibilidad) */
+  alt: string;
+  /** URL de imagen de fallback */
+  fallbackSrc?: string;
+  /** URL de placeholder (blur, LQIP) */
+  placeholderSrc?: string;
+  /** Usar lazy loading */
+  lazy?: boolean;
+  /** Anchos para srcset responsivo */
+  widths?: number[];
+  /** Atributo sizes para srcset */
+  sizes?: string;
+  /** Clases CSS */
+  className?: string;
+  /** Callback cuando carga */
+  onLoad?: (e: SyntheticEvent<HTMLImageElement>) => void;
+  /** Callback en error */
+  onError?: (e: SyntheticEvent<HTMLImageElement>) => void;
+}
+
+export interface OptimizedPictureProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'onLoad' | 'onError'> {
+  /** URL de la imagen */
+  src: string;
+  /** Texto alternativo (requerido para accesibilidad) */
+  alt: string;
+  /** URL de imagen de fallback */
+  fallbackSrc?: string;
+  /** Clases CSS del contenedor picture */
+  className?: string;
+  /** Clases CSS de la imagen */
+  imgClassName?: string;
+  /** Usar lazy loading */
+  lazy?: boolean;
+  /** Anchos para srcset responsivo */
+  widths?: number[];
+  /** Atributo sizes para srcset */
+  sizes?: string;
+}
+
+// =============================================================================
+// COMPONENTS
+// =============================================================================
+
 /**
- * @param {object} props
- * @param {string} props.src - URL de la imagen
- * @param {string} props.alt - Texto alternativo (requerido para accesibilidad)
- * @param {string} [props.fallbackSrc] - URL de imagen de fallback
- * @param {string} [props.placeholderSrc] - URL de placeholder (blur, LQIP)
- * @param {boolean} [props.lazy=true] - Usar lazy loading
- * @param {number[]} [props.widths] - Anchos para srcset responsivo
- * @param {string} [props.sizes] - Atributo sizes para srcset
- * @param {string} [props.className] - Clases CSS
- * @param {Function} [props.onLoad] - Callback cuando carga
- * @param {Function} [props.onError] - Callback en error
+ * Componente de imagen optimizada con WebP y fallback
  */
 export const OptimizedImage = memo(function OptimizedImage({
   src,
@@ -36,10 +76,10 @@ export const OptimizedImage = memo(function OptimizedImage({
   onLoad,
   onError,
   ...props
-}) {
-  const [currentSrc, setCurrentSrc] = useState(placeholderSrc || src)
-  const [isLoaded, setIsLoaded] = useState(false)
-  const [hasError, setHasError] = useState(false)
+}: OptimizedImageProps): React.ReactElement {
+  const [currentSrc, setCurrentSrc] = useState<string>(placeholderSrc || src)
+  const [isLoaded, setIsLoaded] = useState<boolean>(false)
+  const [hasError, setHasError] = useState<boolean>(false)
 
   // Obtener URL optimizada
   const supportsWebp = supportsWebPSync()
@@ -52,11 +92,11 @@ export const OptimizedImage = memo(function OptimizedImage({
     // Si hay placeholder, cargar la imagen real
     if (placeholderSrc && src) {
       const img = new Image()
-      img.onload = () => {
+      img.onload = (): void => {
         setCurrentSrc(optimizedSrc)
         setIsLoaded(true)
       }
-      img.onerror = () => {
+      img.onerror = (): void => {
         setCurrentSrc(fallbackSrc)
         setHasError(true)
       }
@@ -64,12 +104,12 @@ export const OptimizedImage = memo(function OptimizedImage({
     }
   }, [src, optimizedSrc, placeholderSrc, fallbackSrc])
 
-  const handleLoad = (e) => {
+  const handleLoad = (e: SyntheticEvent<HTMLImageElement>): void => {
     setIsLoaded(true)
     onLoad?.(e)
   }
 
-  const handleError = (e) => {
+  const handleError = (e: SyntheticEvent<HTMLImageElement>): void => {
     if (!hasError) {
       setHasError(true)
       setCurrentSrc(fallbackSrc)
@@ -111,14 +151,14 @@ export const OptimizedPicture = memo(function OptimizedPicture({
   widths,
   sizes = '(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw',
   ...props
-}) {
-  const [hasError, setHasError] = useState(false)
+}: OptimizedPictureProps): React.ReactElement {
+  const [hasError, setHasError] = useState<boolean>(false)
 
   // Generar URLs para diferentes formatos
   const webpSrc = getOptimizedImageUrl(src, { forceWebP: true })
   const originalSrc = src
 
-  const handleError = () => {
+  const handleError = (): void => {
     setHasError(true)
   }
 

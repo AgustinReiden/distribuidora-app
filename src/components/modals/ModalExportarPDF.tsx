@@ -1,7 +1,25 @@
 import React, { useState, useMemo, memo } from 'react';
+import type { ChangeEvent } from 'react';
 import { FileDown, Package, Truck } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
+import type { PedidoDB, PerfilDB } from '../../types';
+
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+/** Tipo de exportacion */
+type TipoExport = 'preparacion' | 'ruta';
+
+/** Props del componente principal */
+export interface ModalExportarPDFProps {
+  pedidos: PedidoDB[];
+  transportistas: PerfilDB[];
+  onExportarOrdenPreparacion: (pedidos: PedidoDB[]) => void;
+  onExportarHojaRuta: (transportista: PerfilDB | undefined, pedidos: PedidoDB[]) => void;
+  onClose: () => void;
+}
 
 const ModalExportarPDF = memo(function ModalExportarPDF({
   pedidos,
@@ -9,14 +27,14 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   onExportarOrdenPreparacion,
   onExportarHojaRuta,
   onClose
-}) {
-  const [tipoExport, setTipoExport] = useState('preparacion'); // 'preparacion' o 'ruta'
-  const [transportistaSeleccionado, setTransportistaSeleccionado] = useState('');
-  const [pedidosSeleccionados, setPedidosSeleccionados] = useState([]);
-  const [seleccionarTodos, setSeleccionarTodos] = useState(false);
+}: ModalExportarPDFProps) {
+  const [tipoExport, setTipoExport] = useState<TipoExport>('preparacion');
+  const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
+  const [pedidosSeleccionados, setPedidosSeleccionados] = useState<string[]>([]);
+  const [seleccionarTodos, setSeleccionarTodos] = useState<boolean>(false);
 
   // Filtrar pedidos segun el tipo de exportacion
-  const pedidosFiltrados = useMemo(() => {
+  const pedidosFiltrados = useMemo((): PedidoDB[] => {
     if (tipoExport === 'preparacion') {
       // Para orden de preparacion: pedidos pendientes o en preparacion (no entregados ni en camino)
       return pedidos.filter(p => p.estado === 'pendiente' || p.estado === 'en_preparacion');
@@ -31,7 +49,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   }, [pedidos, tipoExport, transportistaSeleccionado]);
 
   // Manejar seleccion de todos
-  const handleSeleccionarTodos = (checked) => {
+  const handleSeleccionarTodos = (checked: boolean): void => {
     setSeleccionarTodos(checked);
     if (checked) {
       setPedidosSeleccionados(pedidosFiltrados.map(p => p.id));
@@ -41,7 +59,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   };
 
   // Manejar seleccion individual
-  const handleTogglePedido = (pedidoId) => {
+  const handleTogglePedido = (pedidoId: string): void => {
     setPedidosSeleccionados(prev => {
       if (prev.includes(pedidoId)) {
         const nuevo = prev.filter(id => id !== pedidoId);
@@ -58,7 +76,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   };
 
   // Resetear seleccion cuando cambia el tipo o transportista
-  const handleTipoChange = (tipo) => {
+  const handleTipoChange = (tipo: TipoExport): void => {
     setTipoExport(tipo);
     setPedidosSeleccionados([]);
     setSeleccionarTodos(false);
@@ -67,14 +85,14 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     }
   };
 
-  const handleTransportistaChange = (id) => {
+  const handleTransportistaChange = (id: string): void => {
     setTransportistaSeleccionado(id);
     setPedidosSeleccionados([]);
     setSeleccionarTodos(false);
   };
 
   // Exportar
-  const handleExportar = () => {
+  const handleExportar = (): void => {
     const pedidosAExportar = pedidos.filter(p => pedidosSeleccionados.includes(p.id));
     if (pedidosAExportar.length === 0) return;
 
@@ -87,8 +105,8 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     onClose();
   };
 
-  const getEstadoLabel = (e) => e === 'pendiente' ? 'Pendiente' : e === 'en_preparacion' ? 'En preparacion' : e === 'asignado' ? 'En camino' : 'Entregado';
-  const getEstadoColor = (e) => e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' : e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' : e === 'asignado' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
+  const getEstadoLabel = (e: string): string => e === 'pendiente' ? 'Pendiente' : e === 'en_preparacion' ? 'En preparacion' : e === 'asignado' ? 'En camino' : 'Entregado';
+  const getEstadoColor = (e: string): string => e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' : e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' : e === 'asignado' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
 
   return (
     <ModalBase title="Exportar Pedidos a PDF" onClose={onClose} maxWidth="max-w-2xl">
@@ -134,7 +152,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
             <label className="block text-sm font-medium mb-1">Transportista</label>
             <select
               value={transportistaSeleccionado}
-              onChange={e => handleTransportistaChange(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => handleTransportistaChange(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg"
             >
               <option value="">Seleccionar transportista...</option>
@@ -164,7 +182,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 <input
                   type="checkbox"
                   checked={seleccionarTodos}
-                  onChange={e => handleSeleccionarTodos(e.target.checked)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleSeleccionarTodos(e.target.checked)}
                   className="w-4 h-4 rounded"
                 />
                 <span>Seleccionar todos</span>

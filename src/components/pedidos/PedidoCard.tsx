@@ -2,22 +2,64 @@
  * Componente de tarjeta individual de pedido
  */
 import React, { useState, memo } from 'react';
-import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown } from 'lucide-react';
+import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon } from 'lucide-react';
 import { generarReciboPedido } from '../../lib/pdfExport';
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
 import AccionesDropdown from './PedidoActions';
+import type { PedidoDB } from '../../types';
 
-// Función para calcular días de antigüedad de un pedido
-function calcularDiasAntiguedad(fechaCreacion) {
+// =============================================================================
+// PROPS INTERFACES
+// =============================================================================
+
+export interface BadgeAntiguedadProps {
+  dias: number;
+  estado: PedidoDB['estado'];
+}
+
+export interface EstadoStepperProps {
+  estado: PedidoDB['estado'];
+}
+
+export interface PedidoCardProps {
+  pedido: PedidoDB;
+  isAdmin?: boolean;
+  isPreventista?: boolean;
+  isTransportista?: boolean;
+  onVerHistorial?: (pedido: PedidoDB) => void;
+  onEditarPedido?: (pedido: PedidoDB) => void;
+  onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
+  onAsignarTransportista?: (pedido: PedidoDB) => void;
+  onMarcarEntregado?: (pedido: PedidoDB) => void;
+  onDesmarcarEntregado?: (pedido: PedidoDB) => void;
+  onEliminarPedido?: (pedidoId: string) => void;
+}
+
+interface EstadoConfig {
+  key: PedidoDB['estado'];
+  label: string;
+  icon: LucideIcon;
+}
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+// Funcion para calcular dias de antiguedad de un pedido
+function calcularDiasAntiguedad(fechaCreacion: string | undefined): number {
   if (!fechaCreacion) return 0;
   const fecha = new Date(fechaCreacion);
   const hoy = new Date();
-  const diffTime = hoy - fecha;
+  const diffTime = hoy.getTime() - fecha.getTime();
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 }
 
-// Componente de badge de antigüedad
-function BadgeAntiguedad({ dias, estado }) {
+// =============================================================================
+// SUB-COMPONENTS
+// =============================================================================
+
+// Componente de badge de antiguedad
+function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactElement | null {
   if (estado === 'entregado' || dias < 2) return null;
 
   const esUrgente = dias >= 3;
@@ -34,8 +76,8 @@ function BadgeAntiguedad({ dias, estado }) {
 }
 
 // Componente de stepper de estado
-function EstadoStepper({ estado }) {
-  const estados = [
+function EstadoStepper({ estado }: EstadoStepperProps): React.ReactElement {
+  const estados: EstadoConfig[] = [
     { key: 'pendiente', label: 'Pendiente', icon: Clock },
     { key: 'en_preparacion', label: 'Preparando', icon: Package },
     { key: 'asignado', label: 'En camino', icon: Truck },
@@ -49,6 +91,7 @@ function EstadoStepper({ estado }) {
       {estados.map((e, idx) => {
         const isCompleted = idx <= estadoIndex;
         const isCurrent = idx === estadoIndex;
+        const IconComponent = e.icon;
         return (
           <React.Fragment key={e.key}>
             <div className={`flex items-center space-x-1 px-2 py-1 rounded ${
@@ -56,7 +99,7 @@ function EstadoStepper({ estado }) {
               isCompleted ? 'bg-gray-200 text-gray-600' :
               'bg-gray-100 text-gray-400'
             }`}>
-              <e.icon className="w-3 h-3" />
+              <IconComponent className="w-3 h-3" />
               <span className="hidden sm:inline">{e.label}</span>
             </div>
             {idx < estados.length - 1 && (
@@ -68,6 +111,10 @@ function EstadoStepper({ estado }) {
     </div>
   );
 }
+
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
 
 function PedidoCard({
   pedido,
@@ -81,8 +128,8 @@ function PedidoCard({
   onMarcarEntregado,
   onDesmarcarEntregado,
   onEliminarPedido
-}) {
-  const [expandido, setExpandido] = useState(false);
+}: PedidoCardProps): React.ReactElement {
+  const [expandido, setExpandido] = useState<boolean>(false);
 
   return (
     <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
@@ -96,7 +143,7 @@ function PedidoCard({
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">{pedido.cliente?.direccion}</p>
               <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-2">
-                <span>#{pedido.id} • {formatFecha(pedido.created_at)}</span>
+                <span>#{pedido.id} - {formatFecha(pedido.created_at)}</span>
                 <BadgeAntiguedad dias={calcularDiasAntiguedad(pedido.created_at)} estado={pedido.estado} />
               </p>
             </div>
@@ -143,8 +190,8 @@ function PedidoCard({
               {i.producto?.nombre} x{i.cantidad}
             </span>
           ))}
-          {pedido.items?.length > 3 && (
-            <span className="text-xs text-gray-500">+{pedido.items.length - 3} más</span>
+          {pedido.items && pedido.items.length > 3 && (
+            <span className="text-xs text-gray-500">+{pedido.items.length - 3} mas</span>
           )}
         </div>
 
@@ -184,11 +231,11 @@ function PedidoCard({
       {/* Contenido expandido del pedido */}
       {expandido && (
         <div className="mt-4 pt-4 border-t dark:border-gray-700 space-y-4 animate-fadeIn">
-          {/* Información del cliente */}
+          {/* Informacion del cliente */}
           <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
               <User className="w-4 h-4" />
-              Información del Cliente
+              Informacion del Cliente
             </h4>
             <div className="space-y-1 text-sm">
               <p className="font-medium text-gray-900 dark:text-white">{pedido.cliente?.nombre_fantasia}</p>

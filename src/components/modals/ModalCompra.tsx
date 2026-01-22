@@ -4,8 +4,123 @@
  * Refactorizado con useReducer para mejor gestión de estado
  */
 import React, { useReducer, useMemo, useCallback } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended } from '../../types'
+
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+/** Item de compra en el formulario */
+export interface CompraItemForm {
+  productoId: string;
+  productoNombre: string;
+  productoCodigo?: string | null;
+  cantidad: number;
+  costoUnitario: number;
+  impuestosInternos: number;
+  porcentajeIva: number;
+  stockActual: number;
+}
+
+/** Estado del reducer de compra */
+export interface CompraState {
+  proveedorId: string;
+  proveedorNombre: string;
+  usarProveedorNuevo: boolean;
+  numeroFactura: string;
+  fechaCompra: string;
+  formaPago: string;
+  notas: string;
+  items: CompraItemForm[];
+  busquedaProducto: string;
+  mostrarBuscador: boolean;
+  guardando: boolean;
+  error: string;
+}
+
+/** Tipos de acciones del reducer */
+type CompraActionType =
+  | { type: 'SET_PROVEEDOR_ID'; payload: string }
+  | { type: 'SET_PROVEEDOR_NOMBRE'; payload: string }
+  | { type: 'SET_USAR_PROVEEDOR_NUEVO'; payload: boolean }
+  | { type: 'SET_NUMERO_FACTURA'; payload: string }
+  | { type: 'SET_FECHA_COMPRA'; payload: string }
+  | { type: 'SET_FORMA_PAGO'; payload: string }
+  | { type: 'SET_NOTAS'; payload: string }
+  | { type: 'SET_BUSQUEDA'; payload: string }
+  | { type: 'SET_MOSTRAR_BUSCADOR'; payload: boolean }
+  | { type: 'SET_GUARDANDO'; payload: boolean }
+  | { type: 'SET_ERROR'; payload: string }
+  | { type: 'AGREGAR_ITEM'; payload: ProductoDB & { porcentaje_iva?: number } }
+  | { type: 'ACTUALIZAR_ITEM'; payload: { index: number; campo: keyof CompraItemForm; valor: number | string } }
+  | { type: 'ELIMINAR_ITEM'; payload: number }
+  | { type: 'LIMPIAR_BUSQUEDA' };
+
+/** Props del componente principal */
+export interface ModalCompraProps {
+  productos: ProductoDB[];
+  proveedores: ProveedorDBExtended[];
+  onSave: (compra: CompraFormInputExtended) => Promise<void>;
+  onClose: () => void;
+  onAgregarProveedor?: (proveedor: ProveedorDBExtended) => Promise<void>;
+}
+
+/** Props de ProveedorSection */
+interface ProveedorSectionProps {
+  state: CompraState;
+  dispatch: React.Dispatch<CompraActionType>;
+  proveedores: ProveedorDBExtended[];
+}
+
+/** Props de DatosCompraSection */
+interface DatosCompraSectionProps {
+  state: CompraState;
+  dispatch: React.Dispatch<CompraActionType>;
+}
+
+/** Props de ProductosSection */
+interface ProductosSectionProps {
+  state: CompraState;
+  dispatch: React.Dispatch<CompraActionType>;
+  productosFiltrados: ProductoDB[];
+  onAgregarItem: (producto: ProductoDB) => void;
+  onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
+  onEliminarItem: (index: number) => void;
+}
+
+/** Props de ItemsList */
+interface ItemsListProps {
+  items: CompraItemForm[];
+  onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
+  onEliminarItem: (index: number) => void;
+}
+
+/** Props de ItemRow */
+interface ItemRowProps {
+  item: CompraItemForm;
+  index: number;
+  onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
+  onEliminarItem: (index: number) => void;
+}
+
+/** Props de ResumenSection */
+interface ResumenSectionProps {
+  subtotal: number;
+  iva: number;
+  impuestosInternos: number;
+  total: number;
+}
+
+/** Return type del hook de cálculos */
+interface CalculosImpuestos {
+  subtotal: number;
+  iva: number;
+  impuestosInternos: number;
+  total: number;
+}
 
 // Constantes
 const FORMAS_PAGO = [
@@ -17,7 +132,7 @@ const FORMAS_PAGO = [
 ]
 
 // Estado inicial
-const initialState = {
+const initialState: CompraState = {
   // Proveedor
   proveedorId: '',
   proveedorNombre: '',
@@ -56,32 +171,32 @@ const ACTIONS = {
 }
 
 // Reducer
-function compraReducer(state, action) {
+function compraReducer(state: CompraState, action: CompraActionType): CompraState {
   switch (action.type) {
-    case ACTIONS.SET_PROVEEDOR_ID:
+    case 'SET_PROVEEDOR_ID':
       return { ...state, proveedorId: action.payload }
-    case ACTIONS.SET_PROVEEDOR_NOMBRE:
+    case 'SET_PROVEEDOR_NOMBRE':
       return { ...state, proveedorNombre: action.payload }
-    case ACTIONS.SET_USAR_PROVEEDOR_NUEVO:
+    case 'SET_USAR_PROVEEDOR_NUEVO':
       return { ...state, usarProveedorNuevo: action.payload }
-    case ACTIONS.SET_NUMERO_FACTURA:
+    case 'SET_NUMERO_FACTURA':
       return { ...state, numeroFactura: action.payload }
-    case ACTIONS.SET_FECHA_COMPRA:
+    case 'SET_FECHA_COMPRA':
       return { ...state, fechaCompra: action.payload }
-    case ACTIONS.SET_FORMA_PAGO:
+    case 'SET_FORMA_PAGO':
       return { ...state, formaPago: action.payload }
-    case ACTIONS.SET_NOTAS:
+    case 'SET_NOTAS':
       return { ...state, notas: action.payload }
-    case ACTIONS.SET_BUSQUEDA:
+    case 'SET_BUSQUEDA':
       return { ...state, busquedaProducto: action.payload, mostrarBuscador: true }
-    case ACTIONS.SET_MOSTRAR_BUSCADOR:
+    case 'SET_MOSTRAR_BUSCADOR':
       return { ...state, mostrarBuscador: action.payload }
-    case ACTIONS.SET_GUARDANDO:
+    case 'SET_GUARDANDO':
       return { ...state, guardando: action.payload }
-    case ACTIONS.SET_ERROR:
+    case 'SET_ERROR':
       return { ...state, error: action.payload }
 
-    case ACTIONS.AGREGAR_ITEM: {
+    case 'AGREGAR_ITEM': {
       const producto = action.payload
       const existente = state.items.find(i => i.productoId === producto.id)
 
@@ -115,7 +230,7 @@ function compraReducer(state, action) {
       }
     }
 
-    case ACTIONS.ACTUALIZAR_ITEM:
+    case 'ACTUALIZAR_ITEM':
       return {
         ...state,
         items: state.items.map((item, i) =>
@@ -125,13 +240,13 @@ function compraReducer(state, action) {
         )
       }
 
-    case ACTIONS.ELIMINAR_ITEM:
+    case 'ELIMINAR_ITEM':
       return {
         ...state,
         items: state.items.filter((_, i) => i !== action.payload)
       }
 
-    case ACTIONS.LIMPIAR_BUSQUEDA:
+    case 'LIMPIAR_BUSQUEDA':
       return { ...state, busquedaProducto: '', mostrarBuscador: false }
 
     default:
@@ -140,7 +255,7 @@ function compraReducer(state, action) {
 }
 
 // Hook para cálculos de impuestos
-function useCalculosImpuestos(items) {
+function useCalculosImpuestos(items: CompraItemForm[]): CalculosImpuestos {
   const subtotal = useMemo(() =>
     items.reduce((sum, item) => sum + (item.cantidad * item.costoUnitario), 0),
     [items]
@@ -164,7 +279,7 @@ function useCalculosImpuestos(items) {
   return { subtotal, iva, impuestosInternos, total }
 }
 
-export default function ModalCompra({ productos, proveedores, onSave, onClose, onAgregarProveedor: _onAgregarProveedor }) {
+export default function ModalCompra({ productos, proveedores, onSave, onClose, onAgregarProveedor: _onAgregarProveedor }: ModalCompraProps) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const { subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
 
@@ -179,48 +294,48 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   }, [productos, state.busquedaProducto])
 
   // Handlers con useCallback para evitar re-renders
-  const handleAgregarItem = useCallback((producto) => {
-    dispatch({ type: ACTIONS.AGREGAR_ITEM, payload: producto })
+  const handleAgregarItem = useCallback((producto: ProductoDB) => {
+    dispatch({ type: 'AGREGAR_ITEM', payload: producto })
   }, [])
 
-  const handleActualizarItem = useCallback((index, campo, valor) => {
-    dispatch({ type: ACTIONS.ACTUALIZAR_ITEM, payload: { index, campo, valor } })
+  const handleActualizarItem = useCallback((index: number, campo: keyof CompraItemForm, valor: number | string) => {
+    dispatch({ type: 'ACTUALIZAR_ITEM', payload: { index, campo, valor } })
   }, [])
 
-  const handleEliminarItem = useCallback((index) => {
-    dispatch({ type: ACTIONS.ELIMINAR_ITEM, payload: index })
+  const handleEliminarItem = useCallback((index: number) => {
+    dispatch({ type: 'ELIMINAR_ITEM', payload: index })
   }, [])
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
-    dispatch({ type: ACTIONS.SET_ERROR, payload: '' })
+    dispatch({ type: 'SET_ERROR', payload: '' })
 
     // Validaciones
     if (state.items.length === 0) {
-      dispatch({ type: ACTIONS.SET_ERROR, payload: 'Debe agregar al menos un producto' })
+      dispatch({ type: 'SET_ERROR', payload: 'Debe agregar al menos un producto' })
       return
     }
 
     if (state.usarProveedorNuevo) {
       if (!state.proveedorNombre.trim()) {
-        dispatch({ type: ACTIONS.SET_ERROR, payload: 'Debe ingresar el nombre del proveedor' })
+        dispatch({ type: 'SET_ERROR', payload: 'Debe ingresar el nombre del proveedor' })
         return
       }
     } else {
       if (!state.proveedorId) {
-        dispatch({ type: ACTIONS.SET_ERROR, payload: 'Debe seleccionar un proveedor' })
+        dispatch({ type: 'SET_ERROR', payload: 'Debe seleccionar un proveedor' })
         return
       }
     }
 
     for (const item of state.items) {
       if (item.cantidad <= 0) {
-        dispatch({ type: ACTIONS.SET_ERROR, payload: `La cantidad de "${item.productoNombre}" debe ser mayor a 0` })
+        dispatch({ type: 'SET_ERROR', payload: `La cantidad de "${item.productoNombre}" debe ser mayor a 0` })
         return
       }
     }
 
-    dispatch({ type: ACTIONS.SET_GUARDANDO, payload: true })
+    dispatch({ type: 'SET_GUARDANDO', payload: true })
     try {
       await onSave({
         proveedorId: state.usarProveedorNuevo ? null : (state.proveedorId || null),
@@ -235,18 +350,17 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         notas: state.notas,
         items: state.items.map(item => ({
           productoId: item.productoId,
-          cantidad: parseInt(item.cantidad),
-          costoUnitario: parseFloat(item.costoUnitario) || 0,
-          impuestosInternos: parseFloat(item.impuestosInternos) || 0,
-          porcentajeIva: item.porcentajeIva ?? 21,
+          cantidad: item.cantidad,
+          costoUnitario: item.costoUnitario || 0,
           subtotal: item.cantidad * item.costoUnitario
         }))
       })
       onClose()
     } catch (err) {
-      dispatch({ type: ACTIONS.SET_ERROR, payload: err.message || 'Error al registrar la compra' })
+      const error = err as Error
+      dispatch({ type: 'SET_ERROR', payload: error.message || 'Error al registrar la compra' })
     } finally {
-      dispatch({ type: ACTIONS.SET_GUARDANDO, payload: false })
+      dispatch({ type: 'SET_GUARDANDO', payload: false })
     }
   }
 
@@ -309,7 +423,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             </label>
             <textarea
               value={state.notas}
-              onChange={e => dispatch({ type: ACTIONS.SET_NOTAS, payload: e.target.value })}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => dispatch({ type: 'SET_NOTAS', payload: e.target.value })}
               placeholder="Observaciones adicionales..."
               rows={2}
               className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
@@ -358,7 +472,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
 // Subcomponentes para mejor organización
 
-function ProveedorSection({ state, dispatch, proveedores }) {
+function ProveedorSection({ state, dispatch, proveedores }: ProveedorSectionProps) {
   return (
     <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 space-y-3">
       <div className="flex items-center gap-2 mb-2">
@@ -371,7 +485,7 @@ function ProveedorSection({ state, dispatch, proveedores }) {
           <input
             type="radio"
             checked={!state.usarProveedorNuevo}
-            onChange={() => dispatch({ type: ACTIONS.SET_USAR_PROVEEDOR_NUEVO, payload: false })}
+            onChange={() => dispatch({ type: 'SET_USAR_PROVEEDOR_NUEVO', payload: false })}
             className="text-green-600"
           />
           <span className="text-sm">Seleccionar existente</span>
@@ -380,7 +494,7 @@ function ProveedorSection({ state, dispatch, proveedores }) {
           <input
             type="radio"
             checked={state.usarProveedorNuevo}
-            onChange={() => dispatch({ type: ACTIONS.SET_USAR_PROVEEDOR_NUEVO, payload: true })}
+            onChange={() => dispatch({ type: 'SET_USAR_PROVEEDOR_NUEVO', payload: true })}
             className="text-green-600"
           />
           <span className="text-sm">Ingresar nombre</span>
@@ -390,7 +504,7 @@ function ProveedorSection({ state, dispatch, proveedores }) {
       {!state.usarProveedorNuevo ? (
         <select
           value={state.proveedorId}
-          onChange={e => dispatch({ type: ACTIONS.SET_PROVEEDOR_ID, payload: e.target.value })}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_PROVEEDOR_ID', payload: e.target.value })}
           className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
         >
           <option value="">Seleccionar proveedor...</option>
@@ -402,7 +516,7 @@ function ProveedorSection({ state, dispatch, proveedores }) {
         <input
           type="text"
           value={state.proveedorNombre}
-          onChange={e => dispatch({ type: ACTIONS.SET_PROVEEDOR_NOMBRE, payload: e.target.value })}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_PROVEEDOR_NOMBRE', payload: e.target.value })}
           placeholder="Nombre del proveedor"
           className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
         />
@@ -411,17 +525,17 @@ function ProveedorSection({ state, dispatch, proveedores }) {
   )
 }
 
-function DatosCompraSection({ state, dispatch }) {
+function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-          N° Factura / Remito
+          N Factura / Remito
         </label>
         <input
           type="text"
           value={state.numeroFactura}
-          onChange={e => dispatch({ type: ACTIONS.SET_NUMERO_FACTURA, payload: e.target.value })}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_NUMERO_FACTURA', payload: e.target.value })}
           placeholder="Ej: 0001-00012345"
           className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
         />
@@ -433,7 +547,7 @@ function DatosCompraSection({ state, dispatch }) {
         <input
           type="date"
           value={state.fechaCompra}
-          onChange={e => dispatch({ type: ACTIONS.SET_FECHA_COMPRA, payload: e.target.value })}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_FECHA_COMPRA', payload: e.target.value })}
           className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
           required
         />
@@ -444,7 +558,7 @@ function DatosCompraSection({ state, dispatch }) {
         </label>
         <select
           value={state.formaPago}
-          onChange={e => dispatch({ type: ACTIONS.SET_FORMA_PAGO, payload: e.target.value })}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_FORMA_PAGO', payload: e.target.value })}
           className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
         >
           {FORMAS_PAGO.map(fp => (
@@ -456,7 +570,7 @@ function DatosCompraSection({ state, dispatch }) {
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, onActualizarItem, onEliminarItem }) {
+function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, onActualizarItem, onEliminarItem }: ProductosSectionProps) {
   return (
     <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -474,9 +588,9 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
             <input
               type="text"
               value={state.busquedaProducto}
-              onChange={e => dispatch({ type: ACTIONS.SET_BUSQUEDA, payload: e.target.value })}
-              onFocus={() => dispatch({ type: ACTIONS.SET_MOSTRAR_BUSCADOR, payload: true })}
-              placeholder="Buscar producto por nombre o código..."
+              onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_BUSQUEDA', payload: e.target.value })}
+              onFocus={() => dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: true })}
+              placeholder="Buscar producto por nombre o codigo..."
               className="w-full pl-10 pr-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
             />
           </div>
@@ -496,7 +610,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
                   <div>
                     <p className="font-medium text-gray-800 dark:text-white">{p.nombre}</p>
                     <p className="text-xs text-gray-500">
-                      {p.codigo && `Código: ${p.codigo} • `}
+                      {p.codigo && `Codigo: ${p.codigo} - `}
                       Stock: {p.stock}
                     </p>
                   </div>
@@ -508,7 +622,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
             )}
             <button
               type="button"
-              onClick={() => dispatch({ type: ACTIONS.SET_MOSTRAR_BUSCADOR, payload: false })}
+              onClick={() => dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })}
               className="w-full px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 border-t dark:border-gray-600"
             >
               Cerrar
@@ -531,7 +645,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
   )
 }
 
-function ItemsList({ items, onActualizarItem, onEliminarItem }) {
+function ItemsList({ items, onActualizarItem, onEliminarItem }: ItemsListProps) {
   return (
     <div className="space-y-2">
       {/* Header solo en desktop */}
@@ -556,7 +670,7 @@ function ItemsList({ items, onActualizarItem, onEliminarItem }) {
   )
 }
 
-function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
+function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps) {
   return (
     <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border dark:border-gray-600">
       {/* Mobile: Layout en cards */}
@@ -581,7 +695,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
               type="number"
               min="1"
               value={item.cantidad}
-              onChange={e => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -592,7 +706,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
               min="0"
               step="0.01"
               value={item.costoUnitario}
-              onChange={e => onActualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -603,7 +717,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
               min="0"
               step="0.01"
               value={item.impuestosInternos || 0}
-              onChange={e => onActualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -625,7 +739,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
             type="number"
             min="1"
             value={item.cantidad}
-            onChange={e => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
@@ -635,7 +749,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
             min="0"
             step="0.01"
             value={item.costoUnitario}
-            onChange={e => onActualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
@@ -645,7 +759,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
             min="0"
             step="0.01"
             value={item.impuestosInternos || 0}
-            onChange={e => onActualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
@@ -666,7 +780,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }) {
   )
 }
 
-function ResumenSection({ subtotal, iva, impuestosInternos, total }) {
+function ResumenSection({ subtotal, iva, impuestosInternos, total }: ResumenSectionProps) {
   return (
     <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
       <div className="flex items-center gap-2 mb-3">

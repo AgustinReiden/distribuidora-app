@@ -1,32 +1,67 @@
 import { useState, useEffect, useMemo } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { X, User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, Calendar, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, UserCheck, Building2 } from 'lucide-react'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
+import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
 
-export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido }) {
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+/** Tipo de tab activa */
+type ActiveTab = 'resumen' | 'pedidos' | 'pagos';
+
+/** Props del componente principal */
+export interface ModalFichaClienteProps {
+  cliente: ClienteDB | null;
+  onClose: () => void;
+  onRegistrarPago?: (cliente: ClienteDB) => void;
+  onVerPedido?: (pedido: PedidoDB) => void;
+}
+
+/** Colores de tarjeta estadistica */
+type StatCardColor = 'blue' | 'green' | 'purple' | 'red' | 'gray';
+
+/** Props del componente StatCard */
+interface StatCardProps {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+  color: StatCardColor;
+}
+
+/** Tab de navegacion */
+interface TabItem {
+  id: ActiveTab;
+  label: string;
+  icon: LucideIcon;
+}
+
+export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido }: ModalFichaClienteProps) {
   const { pedidosCliente, estadisticas, loading } = useFichaCliente(cliente?.id)
   const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta } = usePagos()
-  const [resumenCuenta, setResumenCuenta] = useState(null)
-  const [activeTab, setActiveTab] = useState('resumen')
-  const [expandedPedido, setExpandedPedido] = useState(null)
+  const [resumenCuenta, setResumenCuenta] = useState<ResumenCuenta | null>(null)
+  const [activeTab, setActiveTab] = useState<ActiveTab>('resumen')
+  const [expandedPedido, setExpandedPedido] = useState<string | null>(null)
 
   useEffect(() => {
     if (cliente?.id) {
       fetchPagosCliente(cliente.id)
-      obtenerResumenCuenta(cliente.id).then(setResumenCuenta)
+      obtenerResumenCuenta(cliente.id).then((res: ResumenCuenta | null) => setResumenCuenta(res))
     }
   }, [cliente?.id])
 
-  const saldoActual = useMemo(() => {
+  const saldoActual = useMemo((): number => {
     if (resumenCuenta?.saldo_actual !== undefined) return resumenCuenta.saldo_actual
     if (!estadisticas) return 0
     return estadisticas.montoPendiente
   }, [resumenCuenta, estadisticas])
 
-  const limiteCredito = cliente?.limite_credito || 0
-  const creditoDisponible = limiteCredito - saldoActual
-  const porcentajeUsado = limiteCredito > 0 ? (saldoActual / limiteCredito * 100) : 0
-  const excedido = saldoActual > limiteCredito && limiteCredito > 0
+  const limiteCredito: number = cliente?.limite_credito || 0
+  const creditoDisponible: number = limiteCredito - saldoActual
+  const porcentajeUsado: number = limiteCredito > 0 ? (saldoActual / limiteCredito * 100) : 0
+  const excedido: boolean = saldoActual > limiteCredito && limiteCredito > 0
 
   if (!cliente) return null
 
@@ -146,11 +181,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
 
         {/* Tabs */}
         <div className="flex border-b border-gray-200 dark:border-gray-700">
-          {[
+          {([
             { id: 'resumen', label: 'Resumen', icon: TrendingUp },
             { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag },
             { id: 'pagos', label: 'Pagos', icon: DollarSign }
-          ].map(tab => (
+          ] as TabItem[]).map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -402,8 +437,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   )
 }
 
-function StatCard({ icon: Icon, label, value, color }) {
-  const colorClasses = {
+function StatCard({ icon: Icon, label, value, color }: StatCardProps) {
+  const colorClasses: Record<StatCardColor, string> = {
     blue: 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400',
     green: 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400',
     purple: 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
