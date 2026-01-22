@@ -78,9 +78,8 @@ export async function registerPeriodicSync(tag = 'periodic-sync', minInterval = 
 
   try {
     const registration = await navigator.serviceWorker.ready as ServiceWorkerRegistrationWithSync
-    const status = await navigator.permissions.query({
-      name: 'periodic-background-sync' as PermissionName
-    })
+    // @ts-expect-error - periodic-background-sync is a valid permission name in some browsers
+    const status = await navigator.permissions.query({ name: 'periodic-background-sync' })
 
     if (status.state === 'granted' && registration.periodicSync) {
       await registration.periodicSync.register(tag, {
