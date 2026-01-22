@@ -52,8 +52,5 @@
     "build",
     "**/*.spec.ts",
     "**/*.test.ts"
-  ],
-  "references": [
-    { "path": "./tsconfig.node.json" }
   ]
 }

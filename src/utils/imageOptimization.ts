@@ -5,6 +5,8 @@
  * lazy loading y optimización de imágenes.
  */
 
+import type React from 'react'
+
 /**
  * Cache del resultado de soporte WebP
  */

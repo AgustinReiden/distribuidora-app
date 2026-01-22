@@ -28,7 +28,7 @@ async function getCryptoKey(): Promise<CryptoKey | null> {
     const storedKey = localStorage.getItem(KEY_STORAGE_NAME)
 
     if (storedKey) {
-      const keyData = JSON.parse(storedKey) as JsonWebKey
+      const keyData = JSON.parse(storedKey) as globalThis.JsonWebKey
       return await window.crypto.subtle.importKey(
         'jwk',
         keyData,
