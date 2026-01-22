@@ -250,7 +250,7 @@ export default function VistaReportes({
           reporte={reporteClientes}
           loading={loadingFinanciero}
           formatPrecio={formatPrecio}
-          onVerCliente={onVerFichaCliente}
+          onVerCliente={onVerFichaCliente as any}
         />
       )}
 

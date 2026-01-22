@@ -126,7 +126,7 @@ function MainApp(): ReactElement {
           }
         }
         if (mermasPendientes.length > 0) {
-          const resultadoMermas = await sincronizarMermas(registrarMerma);
+          const resultadoMermas = await sincronizarMermas(registrarMerma as any);
           if (resultadoMermas.sincronizados > 0) {
             notify.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`);
             refetchMermas();
@@ -163,7 +163,7 @@ function MainApp(): ReactElement {
         }
       }
       if (mermasPendientes.length > 0) {
-        const resultadoMermas = await sincronizarMermas(registrarMerma);
+        const resultadoMermas = await sincronizarMermas(registrarMerma as any);
         if (resultadoMermas.sincronizados > 0) {
           notify.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`);
           refetchMermas();
