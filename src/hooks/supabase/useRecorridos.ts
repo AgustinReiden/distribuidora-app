@@ -1,21 +1,58 @@
 import { useState, useCallback } from 'react'
 import { supabase } from './base'
+import type {
+  RecorridoDBExtended,
+  PedidoOrdenado,
+  EstadisticasRecorridos,
+  EstadisticaTransportista,
+  TransportistaBasic,
+  UseRecorridosReturnExtended
+} from '../../types'
 
-export function useRecorridos() {
-  const [recorridos, setRecorridos] = useState([])
-  const [recorridoActual, setRecorridoActual] = useState(null)
-  const [loading, setLoading] = useState(false)
+interface RecorridoActual {
+  id: string;
+}
 
-  // Función auxiliar para fetch con timeout
-  const fetchConTimeout = async (queryPromise, timeoutMs = 10000) => {
-    const timeoutPromise = new Promise((_, reject) =>
+interface RecorridoRaw {
+  id: string;
+  transportista_id: string;
+  fecha: string;
+  pedidos_json?: Array<{ pedido_id: string; orden_entrega: number }>;
+  estado?: string;
+  total_pedidos?: number;
+  pedidos_entregados?: number;
+  total_facturado?: number;
+  total_cobrado?: number;
+  distancia_total?: number;
+  duracion_total?: number;
+  completed_at?: string | null;
+  created_at?: string;
+  transportista?: TransportistaBasic | null;
+}
+
+interface PedidoJson {
+  pedido_id: string;
+  orden_entrega: number;
+}
+
+export function useRecorridos(): UseRecorridosReturnExtended {
+  const [recorridos, setRecorridos] = useState<RecorridoDBExtended[]>([])
+  const [recorridoActual, setRecorridoActual] = useState<RecorridoActual | null>(null)
+  const [loading, setLoading] = useState<boolean>(false)
+
+  // Funcion auxiliar para fetch con timeout
+  const fetchConTimeout = async <T>(
+    queryPromise: PromiseLike<T>,
+    timeoutMs: number = 10000
+  ): Promise<T> => {
+    const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Timeout')), timeoutMs)
     )
     return Promise.race([queryPromise, timeoutPromise])
   }
 
-  // Obtener recorridos del día
-  const fetchRecorridosHoy = useCallback(async () => {
+  // Obtener recorridos del dia
+  const fetchRecorridosHoy = useCallback(async (): Promise<RecorridoDBExtended[]> => {
     setLoading(true)
     const hoy = new Date().toISOString().split('T')[0]
 
@@ -33,11 +70,13 @@ export function useRecorridos() {
         return []
       }
 
+      const dataTyped = (data || []) as RecorridoRaw[]
+
       // Si hay recorridos, enriquecer con datos del transportista
-      if (data && data.length > 0) {
+      if (dataTyped.length > 0) {
         const recorridosEnriquecidos = await Promise.all(
-          data.map(async (recorrido) => {
-            let transportista = null
+          dataTyped.map(async (recorrido): Promise<RecorridoDBExtended> => {
+            let transportista: TransportistaBasic | null = null
             if (recorrido.transportista_id) {
               try {
                 const { data: perfil } = await supabase
@@ -45,7 +84,7 @@ export function useRecorridos() {
                   .select('id, nombre')
                   .eq('id', recorrido.transportista_id)
                   .single()
-                transportista = perfil
+                transportista = perfil as TransportistaBasic | null
               } catch {
                 // Error silenciado
               }
@@ -57,8 +96,8 @@ export function useRecorridos() {
         return recorridosEnriquecidos
       }
 
-      setRecorridos(data || [])
-      return data || []
+      setRecorridos(dataTyped)
+      return dataTyped
     } catch {
       setRecorridos([])
       return []
@@ -68,7 +107,7 @@ export function useRecorridos() {
   }, [])
 
   // Obtener recorridos por fecha
-  const fetchRecorridosPorFecha = useCallback(async (fecha) => {
+  const fetchRecorridosPorFecha = useCallback(async (fecha: string): Promise<RecorridoDBExtended[]> => {
     setLoading(true)
 
     try {
@@ -85,11 +124,13 @@ export function useRecorridos() {
         return []
       }
 
+      const dataTyped = (data || []) as RecorridoRaw[]
+
       // Si hay recorridos, enriquecer con datos del transportista
-      if (data && data.length > 0) {
+      if (dataTyped.length > 0) {
         const recorridosEnriquecidos = await Promise.all(
-          data.map(async (recorrido) => {
-            let transportista = null
+          dataTyped.map(async (recorrido): Promise<RecorridoDBExtended> => {
+            let transportista: TransportistaBasic | null = null
             if (recorrido.transportista_id) {
               try {
                 const { data: perfil } = await supabase
@@ -97,7 +138,7 @@ export function useRecorridos() {
                   .select('id, nombre')
                   .eq('id', recorrido.transportista_id)
                   .single()
-                transportista = perfil
+                transportista = perfil as TransportistaBasic | null
               } catch {
                 // Error silenciado
               }
@@ -109,8 +150,8 @@ export function useRecorridos() {
         return recorridosEnriquecidos
       }
 
-      setRecorridos(data || [])
-      return data || []
+      setRecorridos(dataTyped)
+      return dataTyped
     } catch {
       setRecorridos([])
       return []
@@ -120,9 +161,14 @@ export function useRecorridos() {
   }, [])
 
   // Crear un nuevo recorrido cuando se aplica una ruta optimizada
-  const crearRecorrido = async (transportistaId, pedidosOrdenados, distancia = null, duracion = null) => {
-    const pedidosJson = pedidosOrdenados.map((p, idx) => ({
-      pedido_id: p.pedido_id || p.id,
+  const crearRecorrido = async (
+    transportistaId: string,
+    pedidosOrdenados: PedidoOrdenado[],
+    distancia: number | null = null,
+    duracion: number | null = null
+  ): Promise<string> => {
+    const pedidosJson: PedidoJson[] = pedidosOrdenados.map((p, idx) => ({
+      pedido_id: p.pedido_id || p.id || '',
       orden_entrega: p.orden || idx + 1
     }))
 
@@ -135,13 +181,14 @@ export function useRecorridos() {
 
     if (error) throw error
 
-    setRecorridoActual({ id: data })
+    const recorridoId = data as string
+    setRecorridoActual({ id: recorridoId })
     await fetchRecorridosHoy()
-    return data
+    return recorridoId
   }
 
   // Completar un recorrido
-  const completarRecorrido = async (recorridoId) => {
+  const completarRecorrido = async (recorridoId: string): Promise<void> => {
     const { error } = await supabase
       .from('recorridos')
       .update({ estado: 'completado', completed_at: new Date().toISOString() })
@@ -151,10 +198,13 @@ export function useRecorridos() {
     await fetchRecorridosHoy()
   }
 
-  // Obtener resumen de recorridos para estadísticas
-  const getEstadisticasRecorridos = async (fechaDesde, fechaHasta) => {
+  // Obtener resumen de recorridos para estadisticas
+  const getEstadisticasRecorridos = async (
+    fechaDesde: string,
+    fechaHasta: string
+  ): Promise<EstadisticasRecorridos> => {
     try {
-      let query = supabase
+      const query = supabase
         .from('recorridos')
         .select(`
           *,
@@ -166,13 +216,15 @@ export function useRecorridos() {
       const { data, error } = await query
       if (error) throw error
 
+      const dataTyped = (data || []) as RecorridoRaw[]
+
       // Agrupar por transportista
-      const porTransportista = {}
-      ;(data || []).forEach(r => {
+      const porTransportista: Record<string, EstadisticaTransportista> = {}
+      dataTyped.forEach(r => {
         const tid = r.transportista_id
         if (!porTransportista[tid]) {
           porTransportista[tid] = {
-            transportista: r.transportista,
+            transportista: r.transportista || null,
             recorridos: 0,
             pedidosTotales: 0,
             pedidosEntregados: 0,
@@ -190,7 +242,7 @@ export function useRecorridos() {
       })
 
       return {
-        total: data?.length || 0,
+        total: dataTyped.length,
         porTransportista: Object.values(porTransportista)
       }
     } catch {

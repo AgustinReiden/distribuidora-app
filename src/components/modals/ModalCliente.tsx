@@ -1,9 +1,61 @@
-import React, { useState, memo, useRef } from 'react';
+import React, { useState, memo, useRef, ChangeEvent } from 'react';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, MapPinned } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
+import type { ClienteDB } from '../../types';
+
+/** Tipo de documento del cliente */
+export type TipoDocumento = 'CUIT' | 'DNI';
+
+/** Datos del formulario de cliente */
+export interface ClienteFormData {
+  tipo_documento: TipoDocumento;
+  numero_documento: string;
+  razonSocial: string;
+  nombreFantasia: string;
+  direccion: string;
+  latitud: number | null;
+  longitud: number | null;
+  telefono: string;
+  contacto: string;
+  zona: string;
+  horarios_atencion: string;
+  rubro: string;
+  notas: string;
+  limiteCredito: number;
+  diasCredito: number;
+}
+
+/** Datos para guardar cliente */
+export interface ClienteSaveData extends ClienteFormData {
+  id?: string;
+  cuit: string;
+}
+
+/** Resultado de selección de dirección */
+export interface AddressSelectResult {
+  direccion: string;
+  latitud: number;
+  longitud: number;
+}
+
+/** Props del componente ModalCliente */
+export interface ModalClienteProps {
+  /** Cliente a editar (null para nuevo) */
+  cliente: (ClienteDB & { tipo_documento?: TipoDocumento }) | null;
+  /** Callback al guardar */
+  onSave: (data: ClienteSaveData) => void | Promise<void>;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Indica si está guardando */
+  guardando: boolean;
+  /** Si el usuario es admin (puede editar crédito) */
+  isAdmin?: boolean;
+  /** Zonas existentes para sugerencias */
+  zonasExistentes?: string[];
+}
 
 // Opciones predefinidas de zonas
 const ZONAS_PREDEFINIDAS = [
@@ -36,7 +88,7 @@ const RUBROS_OPCIONES = [
 
 // Validar formato de CUIT (XX-XXXXXXXX-X)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const validarCuit = (cuit) => {
+const validarCuit = (cuit: string): boolean => {
   if (!cuit) return false;
   const cuitLimpio = cuit.replace(/-/g, '');
   return /^\d{11}$/.test(cuitLimpio);
@@ -44,14 +96,14 @@ const validarCuit = (cuit) => {
 
 // Validar formato de DNI (7-8 digitos)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const validarDni = (dni) => {
+const validarDni = (dni: string): boolean => {
   if (!dni) return false;
   const dniLimpio = dni.replace(/\D/g, '');
   return /^\d{7,8}$/.test(dniLimpio);
 };
 
 // Formatear CUIT mientras se escribe (XX-XXXXXXXX-X)
-const formatearCuit = (valor) => {
+const formatearCuit = (valor: string): string => {
   const numeros = valor.replace(/\D/g, '').slice(0, 11);
   if (numeros.length <= 2) return numeros;
   if (numeros.length <= 10) return `${numeros.slice(0, 2)}-${numeros.slice(2)}`;
@@ -59,18 +111,18 @@ const formatearCuit = (valor) => {
 };
 
 // Formatear DNI mientras se escribe (solo numeros, max 8)
-const formatearDni = (valor) => {
+const formatearDni = (valor: string): string => {
   return valor.replace(/\D/g, '').slice(0, 8);
 };
 
 // Convertir DNI a formato estandarizado para almacenar (00-XXXXXXXX-0)
-const dniAFormatoAlmacenamiento = (dni) => {
+const dniAFormatoAlmacenamiento = (dni: string): string => {
   const dniLimpio = dni.replace(/\D/g, '').padStart(8, '0');
   return `00-${dniLimpio}-0`;
 };
 
 // Extraer DNI del formato de almacenamiento
-const extraerDniDeFormato = (codigo) => {
+const extraerDniDeFormato = (codigo: string | null | undefined): string => {
   if (!codigo) return '';
   // Si tiene formato 00-XXXXXXXX-0, extraer el DNI
   const match = codigo.match(/^00-(\d{8})-0$/);
@@ -82,15 +134,15 @@ const extraerDniDeFormato = (codigo) => {
 };
 
 // Detectar tipo de documento por el formato almacenado
-const detectarTipoDocumento = (codigo) => {
+const detectarTipoDocumento = (codigo: string | null | undefined): TipoDocumento => {
   if (!codigo) return 'CUIT';
   if (/^00-\d{8}-0$/.test(codigo)) return 'DNI';
   return 'CUIT';
 };
 
-const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }) {
+const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }: ModalClienteProps) {
   // Ref para scroll a errores
-  const formRef = useRef(null);
+  const formRef = useRef<HTMLDivElement>(null);
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -103,10 +155,10 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const zonasUnicas = [...new Set([...ZONAS_PREDEFINIDAS, ...zonasExistentes.filter(Boolean)])].sort();
 
   // Estado para nueva zona
-  const [mostrarNuevaZona, setMostrarNuevaZona] = useState(false);
-  const [nuevaZona, setNuevaZona] = useState('');
+  const [mostrarNuevaZona, setMostrarNuevaZona] = useState<boolean>(false);
+  const [nuevaZona, setNuevaZona] = useState<string>('');
 
-  const [form, setForm] = useState(cliente ? {
+  const [form, setForm] = useState<ClienteFormData>(cliente ? {
     tipo_documento: tipoDocInicial,
     numero_documento: numeroDocInicial || '',
     razonSocial: cliente.razon_social || '',
@@ -140,7 +192,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     diasCredito: 30
   });
 
-  const handleAddressSelect = (result) => {
+  const handleAddressSelect = (result: AddressSelectResult): void => {
     setForm(prev => ({
       ...prev,
       direccion: result.direccion,
@@ -150,7 +202,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     if (errores.direccion) clearFieldError('direccion');
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = (): void => {
     // Validar con Zod
     const result = validate(form);
 
@@ -205,30 +257,31 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     });
   };
 
-  const handleTipoDocumentoChange = (nuevoTipo) => {
+  const handleTipoDocumentoChange = (nuevoTipo: string): void => {
     // Limpiar el numero al cambiar de tipo
-    setForm({ ...form, tipo_documento: nuevoTipo, numero_documento: '' });
+    setForm({ ...form, tipo_documento: nuevoTipo as TipoDocumento, numero_documento: '' });
     if (intentoGuardar && errores.numero_documento) {
       clearFieldError('numero_documento');
     }
   };
 
-  const handleFieldChange = (field, value) => {
+  const handleFieldChange = (field: keyof ClienteFormData, value: string | number): void => {
     // Formatear documento segun tipo
+    let processedValue = value;
     if (field === 'numero_documento') {
       if (form.tipo_documento === 'CUIT') {
-        value = formatearCuit(value);
+        processedValue = formatearCuit(String(value));
       } else {
-        value = formatearDni(value);
+        processedValue = formatearDni(String(value));
       }
     }
-    setForm({ ...form, [field]: value });
+    setForm({ ...form, [field]: processedValue });
     if (intentoGuardar && errores[field]) {
       clearFieldError(field);
     }
   };
 
-  const inputClass = (field) => `w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${errores[field] ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''}`;
+  const inputClass = (field: keyof ClienteFormData): string => `w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${errores[field] ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''}`;
 
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
@@ -296,15 +349,11 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
         <div>
           <label htmlFor="direccion" className="block text-sm font-medium mb-1 dark:text-gray-200">Dirección *</label>
           <AddressAutocomplete
-            id="direccion"
             value={form.direccion}
-            onChange={(val) => handleFieldChange('direccion', val)}
+            onChange={(val: string) => handleFieldChange('direccion', val)}
             onSelect={handleAddressSelect}
             placeholder="Buscar dirección..."
             className={errores.direccion ? 'border-red-500' : ''}
-            aria-invalid={errores.direccion ? 'true' : undefined}
-            aria-required="true"
-            aria-describedby={errores.direccion ? 'error-direccion' : undefined}
           />
           {errores.direccion && <p {...getErrorMessageProps('direccion')} className="text-red-500 text-xs mt-1">{errores.direccion}</p>}
           {form.latitud && form.longitud && (

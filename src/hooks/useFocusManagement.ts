@@ -7,7 +7,7 @@
  * - Submit con Ctrl+Enter o Cmd+Enter
  * - Gestión de foco en errores
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 
 /**
  * Selectores de elementos focalizables
@@ -22,13 +22,32 @@ const FOCUSABLE_SELECTORS = [
 ].join(', ')
 
 /**
+ * Elemento focusable del DOM
+ */
+type FocusableElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement | HTMLAnchorElement
+
+/**
+ * Elemento de formulario que puede ser enfocado
+ */
+type FormElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+
+/**
+ * Opciones para useAutoFocus
+ */
+export interface UseAutoFocusOptions {
+  /** Si está habilitado (default: true) */
+  enabled?: boolean
+  /** Delay antes de hacer focus (default: 100ms) */
+  delay?: number
+  /** Selector CSS del elemento a enfocar */
+  selector?: string
+}
+
+/**
  * Hook para auto-focus en el primer campo de un formulario
  *
- * @param {object} options - Opciones
- * @param {boolean} options.enabled - Si está habilitado (default: true)
- * @param {number} options.delay - Delay antes de hacer focus (default: 100ms)
- * @param {string} options.selector - Selector CSS del elemento a enfocar
- * @returns {React.RefObject} Ref para el contenedor del formulario
+ * @param options - Opciones
+ * @returns Ref para el contenedor del formulario
  *
  * @example
  * function MyModal() {
@@ -36,8 +55,11 @@ const FOCUSABLE_SELECTORS = [
  *   return <form ref={formRef}>...</form>;
  * }
  */
-export function useAutoFocus({ enabled = true, delay = 100, selector } = {}) {
-  const containerRef = useRef(null)
+export function useAutoFocus<T extends HTMLElement = HTMLDivElement>(
+  options: UseAutoFocusOptions = {}
+): RefObject<T> {
+  const { enabled = true, delay = 100, selector } = options
+  const containerRef = useRef<T>(null)
 
   useEffect(() => {
     if (!enabled || !containerRef.current) return
@@ -48,14 +70,17 @@ export function useAutoFocus({ enabled = true, delay = 100, selector } = {}) {
 
       // Buscar elemento específico o primer campo focusable
       const target = selector
-        ? container.querySelector(selector)
-        : container.querySelector('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])')
+        ? container.querySelector<FocusableElement>(selector)
+        : container.querySelector<FormElement>('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])')
 
       if (target && typeof target.focus === 'function') {
         target.focus()
         // Si es input de texto, seleccionar contenido
-        if (target.tagName === 'INPUT' && target.type !== 'checkbox' && target.type !== 'radio') {
-          target.select?.()
+        if (target.tagName === 'INPUT') {
+          const input = target as HTMLInputElement
+          if (input.type !== 'checkbox' && input.type !== 'radio') {
+            input.select?.()
+          }
         }
       }
     }, delay)
@@ -67,13 +92,22 @@ export function useAutoFocus({ enabled = true, delay = 100, selector } = {}) {
 }
 
 /**
+ * Opciones para useEnterNavigation
+ */
+export interface UseEnterNavigationOptions {
+  /** Si está habilitado (default: true) */
+  enabled?: boolean
+  /** Callback al llegar al último campo */
+  onSubmit?: (e: KeyboardEvent) => void
+  /** Si hacer submit al presionar Enter en último campo */
+  submitOnLastField?: boolean
+}
+
+/**
  * Hook para navegar entre campos con Enter
  *
- * @param {object} options - Opciones
- * @param {boolean} options.enabled - Si está habilitado (default: true)
- * @param {function} options.onSubmit - Callback al llegar al último campo
- * @param {boolean} options.submitOnLastField - Si hacer submit al presionar Enter en último campo
- * @returns {React.RefObject} Ref para el contenedor del formulario
+ * @param options - Opciones
+ * @returns Ref para el contenedor del formulario
  *
  * @example
  * function MyForm({ onSubmit }) {
@@ -83,30 +117,34 @@ export function useAutoFocus({ enabled = true, delay = 100, selector } = {}) {
  *   return <form ref={formRef}>...</form>;
  * }
  */
-export function useEnterNavigation({ enabled = true, onSubmit, submitOnLastField = true } = {}) {
-  const containerRef = useRef(null)
+export function useEnterNavigation<T extends HTMLElement = HTMLDivElement>(
+  options: UseEnterNavigationOptions = {}
+): RefObject<T> {
+  const { enabled = true, onSubmit, submitOnLastField = true } = options
+  const containerRef = useRef<T>(null)
 
   useEffect(() => {
     if (!enabled || !containerRef.current) return
 
     const container = containerRef.current
 
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       // Solo manejar Enter (no en textareas donde Enter es válido)
-      if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA') return
+      const target = e.target as HTMLElement
+      if (e.key !== 'Enter' || target.tagName === 'TEXTAREA') return
 
       // No interceptar si es un botón (deja que haga su acción)
-      if (e.target.tagName === 'BUTTON') return
+      if (target.tagName === 'BUTTON') return
 
       // Prevenir submit por defecto del form
       e.preventDefault()
 
       // Obtener todos los campos focalizables
       const focusableElements = Array.from(
-        container.querySelectorAll('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])')
+        container.querySelectorAll<FormElement>('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])')
       )
 
-      const currentIndex = focusableElements.indexOf(e.target)
+      const currentIndex = focusableElements.indexOf(target as FormElement)
 
       if (currentIndex === -1) return
 
@@ -122,8 +160,11 @@ export function useEnterNavigation({ enabled = true, onSubmit, submitOnLastField
       const nextElement = focusableElements[currentIndex + 1]
       if (nextElement) {
         nextElement.focus()
-        if (nextElement.tagName === 'INPUT' && nextElement.type !== 'checkbox' && nextElement.type !== 'radio') {
-          nextElement.select?.()
+        if (nextElement.tagName === 'INPUT') {
+          const input = nextElement as HTMLInputElement
+          if (input.type !== 'checkbox' && input.type !== 'radio') {
+            input.select?.()
+          }
         }
       }
     }
@@ -136,22 +177,33 @@ export function useEnterNavigation({ enabled = true, onSubmit, submitOnLastField
 }
 
 /**
+ * Opciones para useKeyboardSubmit
+ */
+export interface UseKeyboardSubmitOptions {
+  /** Si está habilitado (default: true) */
+  enabled?: boolean
+}
+
+/**
  * Hook para submit con Ctrl/Cmd + Enter
  *
- * @param {function} onSubmit - Callback al hacer submit
- * @param {object} options - Opciones
- * @param {boolean} options.enabled - Si está habilitado (default: true)
- * @returns {React.RefObject} Ref para el contenedor del formulario
+ * @param onSubmit - Callback al hacer submit
+ * @param options - Opciones
+ * @returns Ref para el contenedor del formulario
  */
-export function useKeyboardSubmit(onSubmit, { enabled = true } = {}) {
-  const containerRef = useRef(null)
+export function useKeyboardSubmit<T extends HTMLElement = HTMLDivElement>(
+  onSubmit: ((e: KeyboardEvent) => void) | undefined,
+  options: UseKeyboardSubmitOptions = {}
+): RefObject<T> {
+  const { enabled = true } = options
+  const containerRef = useRef<T>(null)
 
   useEffect(() => {
     if (!enabled || !containerRef.current || !onSubmit) return
 
     const container = containerRef.current
 
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       // Ctrl+Enter o Cmd+Enter
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
@@ -167,14 +219,24 @@ export function useKeyboardSubmit(onSubmit, { enabled = true } = {}) {
 }
 
 /**
+ * Opciones para useFormKeyboard
+ */
+export interface UseFormKeyboardOptions {
+  /** Callback de submit */
+  onSubmit?: (e: KeyboardEvent) => void
+  /** Hacer auto-focus (default: true) */
+  autoFocus?: boolean
+  /** Navegar con Enter (default: true) */
+  enterNavigation?: boolean
+  /** Submit con Ctrl+Enter (default: true) */
+  keyboardSubmit?: boolean
+}
+
+/**
  * Hook combinado para formularios con todas las funcionalidades
  *
- * @param {object} options - Opciones
- * @param {function} options.onSubmit - Callback de submit
- * @param {boolean} options.autoFocus - Hacer auto-focus (default: true)
- * @param {boolean} options.enterNavigation - Navegar con Enter (default: true)
- * @param {boolean} options.keyboardSubmit - Submit con Ctrl+Enter (default: true)
- * @returns {React.RefObject} Ref para el formulario
+ * @param options - Opciones
+ * @returns Ref para el formulario
  *
  * @example
  * function MyForm({ onSubmit }) {
@@ -182,13 +244,17 @@ export function useKeyboardSubmit(onSubmit, { enabled = true } = {}) {
  *   return <form ref={formRef}>...</form>;
  * }
  */
-export function useFormKeyboard({
-  onSubmit,
-  autoFocus = true,
-  enterNavigation = true,
-  keyboardSubmit = true
-} = {}) {
-  const containerRef = useRef(null)
+export function useFormKeyboard<T extends HTMLElement = HTMLDivElement>(
+  options: UseFormKeyboardOptions = {}
+): RefObject<T> {
+  const {
+    onSubmit,
+    autoFocus = true,
+    enterNavigation = true,
+    keyboardSubmit = true
+  } = options
+
+  const containerRef = useRef<T>(null)
 
   // Auto-focus
   useEffect(() => {
@@ -198,14 +264,17 @@ export function useFormKeyboard({
       const container = containerRef.current
       if (!container) return
 
-      const target = container.querySelector(
+      const target = container.querySelector<FormElement>(
         'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])'
       )
 
       if (target && typeof target.focus === 'function') {
         target.focus()
-        if (target.tagName === 'INPUT' && target.type !== 'checkbox' && target.type !== 'radio') {
-          target.select?.()
+        if (target.tagName === 'INPUT') {
+          const input = target as HTMLInputElement
+          if (input.type !== 'checkbox' && input.type !== 'radio') {
+            input.select?.()
+          }
         }
       }
     }, 100)
@@ -220,7 +289,9 @@ export function useFormKeyboard({
 
     const container = containerRef.current
 
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement
+
       // Ctrl/Cmd + Enter para submit
       if (keyboardSubmit && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
@@ -230,15 +301,15 @@ export function useFormKeyboard({
 
       // Enter navigation
       if (enterNavigation && e.key === 'Enter') {
-        if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'BUTTON') return
+        if (target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return
 
         e.preventDefault()
 
         const focusableElements = Array.from(
-          container.querySelectorAll('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])')
+          container.querySelectorAll<FormElement>('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])')
         )
 
-        const currentIndex = focusableElements.indexOf(e.target)
+        const currentIndex = focusableElements.indexOf(target as FormElement)
         if (currentIndex === -1) return
 
         if (currentIndex === focusableElements.length - 1) {
@@ -249,8 +320,11 @@ export function useFormKeyboard({
         const nextElement = focusableElements[currentIndex + 1]
         if (nextElement) {
           nextElement.focus()
-          if (nextElement.tagName === 'INPUT' && nextElement.type !== 'checkbox' && nextElement.type !== 'radio') {
-            nextElement.select?.()
+          if (nextElement.tagName === 'INPUT') {
+            const input = nextElement as HTMLInputElement
+            if (input.type !== 'checkbox' && input.type !== 'radio') {
+              input.select?.()
+            }
           }
         }
       }
@@ -264,12 +338,24 @@ export function useFormKeyboard({
 }
 
 /**
+ * Objeto de errores de formulario
+ */
+export type FormErrors = Record<string, string | undefined>
+
+/**
+ * Opciones para useFocusOnError
+ */
+export interface UseFocusOnErrorOptions {
+  /** Si está habilitado (default: true) */
+  enabled?: boolean
+}
+
+/**
  * Hook para enfocar el primer campo con error
  *
- * @param {object} errors - Objeto de errores del formulario
- * @param {object} options - Opciones
- * @param {boolean} options.enabled - Si está habilitado (default: true)
- * @returns {React.RefObject} Ref para el contenedor del formulario
+ * @param errors - Objeto de errores del formulario
+ * @param options - Opciones
+ * @returns Ref para el contenedor del formulario
  *
  * @example
  * function MyForm({ errors }) {
@@ -277,9 +363,13 @@ export function useFormKeyboard({
  *   return <form ref={formRef}>...</form>;
  * }
  */
-export function useFocusOnError(errors, { enabled = true } = {}) {
-  const containerRef = useRef(null)
-  const prevErrorsRef = useRef(errors)
+export function useFocusOnError<T extends HTMLElement = HTMLDivElement>(
+  errors: FormErrors | null | undefined,
+  options: UseFocusOnErrorOptions = {}
+): RefObject<T> {
+  const { enabled = true } = options
+  const containerRef = useRef<T>(null)
+  const prevErrorsRef = useRef<FormErrors | null | undefined>(errors)
 
   useEffect(() => {
     if (!enabled || !containerRef.current || !errors) return
@@ -297,7 +387,7 @@ export function useFocusOnError(errors, { enabled = true } = {}) {
     if (!firstErrorKey) return
 
     const container = containerRef.current
-    const errorField = container.querySelector(
+    const errorField = container.querySelector<FocusableElement>(
       `[name="${firstErrorKey}"], #${firstErrorKey}, [data-field="${firstErrorKey}"]`
     )
 
@@ -313,28 +403,28 @@ export function useFocusOnError(errors, { enabled = true } = {}) {
 /**
  * Función utilitaria para obtener elementos focalizables
  *
- * @param {HTMLElement} container - Contenedor donde buscar
- * @returns {HTMLElement[]} Array de elementos focalizables
+ * @param container - Contenedor donde buscar
+ * @returns Array de elementos focalizables
  */
-export function getFocusableElements(container) {
+export function getFocusableElements(container: HTMLElement | null): FocusableElement[] {
   if (!container) return []
-  return Array.from(container.querySelectorAll(FOCUSABLE_SELECTORS))
+  return Array.from(container.querySelectorAll<FocusableElement>(FOCUSABLE_SELECTORS))
 }
 
 /**
  * Función utilitaria para trap focus dentro de un contenedor
  *
- * @param {HTMLElement} container - Contenedor donde atrapar el foco
- * @returns {function} Función para remover el trap
+ * @param container - Contenedor donde atrapar el foco
+ * @returns Función para remover el trap
  */
-export function trapFocus(container) {
+export function trapFocus(container: HTMLElement | null): () => void {
   if (!container) return () => {}
 
   const focusableElements = getFocusableElements(container)
   const firstElement = focusableElements[0]
   const lastElement = focusableElements[focusableElements.length - 1]
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (e: KeyboardEvent): void => {
     if (e.key !== 'Tab') return
 
     if (e.shiftKey) {
@@ -360,6 +450,9 @@ export function trapFocus(container) {
   return () => container.removeEventListener('keydown', handleKeyDown)
 }
 
+/**
+ * Exportación por defecto con todos los hooks y utilidades
+ */
 export default {
   useAutoFocus,
   useEnterNavigation,

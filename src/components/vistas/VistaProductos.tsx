@@ -1,7 +1,24 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, ChangeEvent } from 'react';
 import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import type { ProductoDB } from '../../types';
+
+// =============================================================================
+// INTERFACES DE PROPS
+// =============================================================================
+
+export interface VistaProductosProps {
+  productos: ProductoDB[];
+  loading: boolean;
+  isAdmin: boolean;
+  onNuevoProducto: () => void;
+  onEditarProducto: (producto: ProductoDB) => void;
+  onEliminarProducto: (id: string) => void;
+  onBajaStock?: (producto: ProductoDB) => void;
+  onVerHistorialMermas?: () => void;
+  onImportarPrecios?: () => void;
+}
 
 export default function VistaProductos({
   productos,
@@ -13,25 +30,25 @@ export default function VistaProductos({
   onBajaStock,
   onVerHistorialMermas,
   onImportarPrecios
-}) {
-  const [busqueda, setBusqueda] = useState('');
-  const [filtroCategoria, setFiltroCategoria] = useState('todas');
-  const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState(false);
+}: VistaProductosProps) {
+  const [busqueda, setBusqueda] = useState<string>('');
+  const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
+  const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState<boolean>(false);
 
   // Obtener categorías únicas
-  const categorias = useMemo(() => {
-    const catsSet = new Set(productos.map(p => p.categoria).filter(Boolean));
+  const categorias = useMemo((): string[] => {
+    const catsSet = new Set<string>(productos.map(p => p.categoria).filter((c): c is string => Boolean(c)));
     return ['todas', ...Array.from(catsSet).sort()];
   }, [productos]);
 
   // Productos con stock bajo
-  const productosStockBajo = useMemo(() => {
-    return productos.filter(p => p.stock < (p.stock_minimo || 10));
+  const productosStockBajo = useMemo((): ProductoDB[] => {
+    return productos.filter((p: ProductoDB) => p.stock < (p.stock_minimo || 10));
   }, [productos]);
 
   // Filtrar productos
-  const productosFiltrados = useMemo(() => {
-    return productos.filter(p => {
+  const productosFiltrados = useMemo((): ProductoDB[] => {
+    return productos.filter((p: ProductoDB) => {
       const matchBusqueda = !busqueda ||
         p.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
         p.codigo?.toLowerCase().includes(busqueda.toLowerCase());
@@ -44,7 +61,7 @@ export default function VistaProductos({
     });
   }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo]);
 
-  const getStockColor = (producto) => {
+  const getStockColor = (producto: ProductoDB): string => {
     const stockMinimo = producto.stock_minimo || 10;
     if (producto.stock === 0) return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
     if (producto.stock < stockMinimo) return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
@@ -130,7 +147,7 @@ export default function VistaProductos({
           <input
             type="text"
             value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setBusqueda(e.target.value)}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
             placeholder="Buscar por nombre o código..."
             aria-label="Buscar productos"

@@ -1,45 +1,79 @@
-import React, { useState } from 'react'
+import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalMermaSchema } from '../../lib/schemas'
+import type { Producto } from '../../types'
 
-const MOTIVOS_MERMA = [
-  { value: 'rotura', label: 'Rotura', icon: '💔' },
-  { value: 'vencimiento', label: 'Vencimiento', icon: '📅' },
-  { value: 'robo', label: 'Robo/Hurto', icon: '🚨' },
-  { value: 'decomiso', label: 'Decomiso', icon: '⚠️' },
-  { value: 'devolucion', label: 'Devolución defectuosa', icon: '↩️' },
-  { value: 'error_inventario', label: 'Error de inventario', icon: '📋' },
-  { value: 'muestra', label: 'Muestra/Degustación', icon: '🎁' },
-  { value: 'otro', label: 'Otro motivo', icon: '📝' }
+type MotivoMermaValue = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'otro';
+
+interface MotivoMermaOption {
+  value: MotivoMermaValue;
+  label: string;
+  icon: string;
+}
+
+const MOTIVOS_MERMA: MotivoMermaOption[] = [
+  { value: 'rotura', label: 'Rotura', icon: '!' },
+  { value: 'vencimiento', label: 'Vencimiento', icon: 'V' },
+  { value: 'robo', label: 'Robo/Hurto', icon: '!' },
+  { value: 'decomiso', label: 'Decomiso', icon: '!' },
+  { value: 'devolucion', label: 'Devolucion defectuosa', icon: '<-' },
+  { value: 'error_inventario', label: 'Error de inventario', icon: '#' },
+  { value: 'muestra', label: 'Muestra/Degustacion', icon: '*' },
+  { value: 'otro', label: 'Otro motivo', icon: '?' }
 ]
 
-export default function ModalMermaStock({ producto, onSave, onClose, isOffline = false }) {
+interface MermaSaveData {
+  productoId: string;
+  productoNombre: string;
+  productoCodigo?: string;
+  cantidad: number;
+  motivo: MotivoMermaValue;
+  motivoLabel: string;
+  observaciones: string;
+  stockAnterior: number;
+  stockNuevo: number;
+}
+
+export interface ModalMermaStockProps {
+  producto: Producto | null;
+  onSave: (data: MermaSaveData) => Promise<void>;
+  onClose: () => void;
+  isOffline?: boolean;
+}
+
+export default function ModalMermaStock({
+  producto,
+  onSave,
+  onClose,
+  isOffline = false
+}: ModalMermaStockProps): React.ReactElement | null {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalMermaSchema)
 
-  const [cantidad, setCantidad] = useState(1)
-  const [motivo, setMotivo] = useState('')
-  const [observaciones, setObservaciones] = useState('')
-  const [guardando, setGuardando] = useState(false)
-  const [error, setError] = useState('')
+  const [cantidad, setCantidad] = useState<number | string>(1)
+  const [motivo, setMotivo] = useState<MotivoMermaValue | ''>('')
+  const [observaciones, setObservaciones] = useState<string>('')
+  const [guardando, setGuardando] = useState<boolean>(false)
+  const [error, setError] = useState<string>('')
 
   if (!producto) return null
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
     setError('')
 
     // Validar con Zod
-    const result = validate({ cantidad: parseInt(cantidad) || 0, motivo, observaciones })
+    const cantidadNum = typeof cantidad === 'string' ? parseInt(cantidad) || 0 : cantidad
+    const result = validate({ cantidad: cantidadNum, motivo, observaciones })
     if (!result.success) {
-      setError(getFirstError() || 'Error de validación')
+      setError(getFirstError() || 'Error de validacion')
       return
     }
 
-    // Validación adicional: no exceder stock
+    // Validacion adicional: no exceder stock
     if (result.data.cantidad > producto.stock) {
-      setError(`No puede dar de baja más de ${producto.stock} unidades (stock actual)`)
+      setError(`No puede dar de baja mas de ${producto.stock} unidades (stock actual)`)
       return
     }
 
@@ -50,7 +84,7 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
         productoNombre: producto.nombre,
         productoCodigo: producto.codigo,
         cantidad: result.data.cantidad,
-        motivo: result.data.motivo,
+        motivo: result.data.motivo as MotivoMermaValue,
         motivoLabel: MOTIVOS_MERMA.find(m => m.value === result.data.motivo)?.label || result.data.motivo,
         observaciones: result.data.observaciones,
         stockAnterior: producto.stock,
@@ -58,11 +92,14 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
       })
       onClose()
     } catch (err) {
-      setError(err.message || 'Error al registrar la merma')
+      const errorMessage = err instanceof Error ? err.message : 'Error al registrar la merma'
+      setError(errorMessage)
     } finally {
       setGuardando(false)
     }
   }
+
+  const cantidadNum = typeof cantidad === 'string' ? parseInt(cantidad) || 0 : cantidad
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -75,7 +112,7 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Baja de Stock</h2>
-              <p className="text-sm text-gray-500">Registrar merma o pérdida</p>
+              <p className="text-sm text-gray-500">Registrar merma o perdida</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
@@ -91,7 +128,7 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
             </div>
             <div>
               <p className="font-medium text-gray-800 dark:text-white">{producto.nombre}</p>
-              {producto.codigo && <p className="text-sm text-gray-500">Código: {producto.codigo}</p>}
+              {producto.codigo && <p className="text-sm text-gray-500">Codigo: {producto.codigo}</p>}
               <p className="text-sm">
                 Stock actual: <span className="font-bold text-blue-600">{producto.stock}</span> unidades
               </p>
@@ -106,7 +143,7 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
             <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
               <AlertTriangle className="w-4 h-4 text-amber-600" />
               <p className="text-sm text-amber-700 dark:text-amber-400">
-                Sin conexión. Se guardará localmente y sincronizará después.
+                Sin conexion. Se guardara localmente y sincronizara despues.
               </p>
             </div>
           )}
@@ -121,12 +158,12 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
               min="1"
               max={producto.stock}
               value={cantidad}
-              onChange={e => setCantidad(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setCantidad(e.target.value)}
               className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
               required
             />
             <p className="mt-1 text-xs text-gray-500">
-              Stock después de la baja: <span className="font-bold">{Math.max(0, producto.stock - (cantidad || 0))}</span>
+              Stock despues de la baja: <span className="font-bold">{Math.max(0, producto.stock - cantidadNum)}</span>
             </p>
           </div>
 
@@ -162,7 +199,7 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
             </label>
             <textarea
               value={observaciones}
-              onChange={e => setObservaciones(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setObservaciones(e.target.value)}
               placeholder="Detalle adicional sobre la baja..."
               rows={2}
               className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
@@ -187,12 +224,12 @@ export default function ModalMermaStock({ producto, onSave, onClose, isOffline =
             </button>
             <button
               type="submit"
-              disabled={guardando || !motivo || cantidad <= 0}
+              disabled={guardando || !motivo || cantidadNum <= 0}
               className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
             >
               {guardando ? (
                 <>
-                  <span className="animate-spin">⏳</span>
+                  <span className="animate-spin">...</span>
                   Registrando...
                 </>
               ) : (

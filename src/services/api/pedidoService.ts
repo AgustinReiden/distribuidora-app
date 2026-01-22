@@ -134,7 +134,7 @@ class PedidoService extends BaseService<Pedido> {
       }
 
       return q.order('fecha_creacion', { ascending: false })
-    }) as Promise<Pedido[]>
+    }) as unknown as Promise<Pedido[]>
   }
 
   /**

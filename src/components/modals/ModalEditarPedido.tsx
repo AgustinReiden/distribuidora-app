@@ -1,7 +1,44 @@
-import React, { useState, memo, useEffect, useMemo } from 'react';
+import React, { useState, memo, useEffect, useMemo, ChangeEvent } from 'react';
 import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
+import type { PedidoDB, ProductoDB } from '../../types';
+
+/** Item del pedido para edición */
+export interface PedidoEditItem {
+  productoId: string;
+  nombre: string;
+  cantidad: number;
+  precioUnitario: number;
+  cantidadOriginal: number;
+  esNuevo?: boolean;
+}
+
+/** Datos a guardar del pedido */
+export interface PedidoSaveData {
+  notas: string;
+  formaPago: string;
+  estadoPago: string;
+  montoPagado: number;
+}
+
+/** Props del componente ModalEditarPedido */
+export interface ModalEditarPedidoProps {
+  /** Pedido a editar */
+  pedido: PedidoDB | null;
+  /** Lista de productos disponibles */
+  productos?: ProductoDB[];
+  /** Si es admin (puede editar items) */
+  isAdmin?: boolean;
+  /** Callback al guardar datos */
+  onSave: (data: PedidoSaveData) => void | Promise<void>;
+  /** Callback al guardar items */
+  onSaveItems?: (items: PedidoEditItem[]) => Promise<void>;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Indica si está guardando */
+  guardando: boolean;
+}
 
 const ModalEditarPedido = memo(function ModalEditarPedido({
   pedido,
@@ -11,18 +48,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   onSaveItems,
   onClose,
   guardando
-}) {
-  const [notas, setNotas] = useState(pedido?.notas || "");
-  const [formaPago, setFormaPago] = useState(pedido?.forma_pago || "efectivo");
-  const [estadoPago, setEstadoPago] = useState(pedido?.estado_pago || "pendiente");
-  const [montoPagado, setMontoPagado] = useState(pedido?.monto_pagado || 0);
+}: ModalEditarPedidoProps) {
+  const [notas, setNotas] = useState<string>(pedido?.notas || "");
+  const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago || "efectivo");
+  const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
+  const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
 
   // Estado para edición de items (solo admin)
-  const [items, setItems] = useState([]);
-  const [itemsOriginales, setItemsOriginales] = useState([]);
-  const [mostrarBuscador, setMostrarBuscador] = useState(false);
-  const [busquedaProducto, setBusquedaProducto] = useState('');
-  const [itemsModificados, setItemsModificados] = useState(false);
+  const [items, setItems] = useState<PedidoEditItem[]>([]);
+  const [itemsOriginales, setItemsOriginales] = useState<PedidoEditItem[]>([]);
+  const [mostrarBuscador, setMostrarBuscador] = useState<boolean>(false);
+  const [busquedaProducto, setBusquedaProducto] = useState<string>('');
+  const [itemsModificados, setItemsModificados] = useState<boolean>(false);
 
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
@@ -86,7 +123,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }
   }, [estadoPago, total]);
 
-  const handleMontoPagadoChange = (valor) => {
+  const handleMontoPagadoChange = (valor: string): void => {
     const monto = parseFloat(valor) || 0;
     setMontoPagado(monto);
     if (monto >= total) {
@@ -98,13 +135,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }
   };
 
-  const aplicarPorcentaje = (porcentaje) => {
+  const aplicarPorcentaje = (porcentaje: number): void => {
     const monto = (total * porcentaje) / 100;
-    handleMontoPagadoChange(monto);
+    handleMontoPagadoChange(String(monto));
   };
 
   // Funciones para editar items
-  const handleCantidadChange = (productoId, delta) => {
+  const handleCantidadChange = (productoId: string, delta: number): void => {
     setItems(prev => prev.map(item => {
       if (item.productoId === productoId) {
         const nuevaCantidad = Math.max(1, item.cantidad + delta);
@@ -122,11 +159,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }));
   };
 
-  const handleEliminarItem = (productoId) => {
+  const handleEliminarItem = (productoId: string): void => {
     setItems(prev => prev.filter(item => item.productoId !== productoId));
   };
 
-  const handleAgregarProducto = (producto) => {
+  const handleAgregarProducto = (producto: ProductoDB): void => {
     setItems(prev => [...prev, {
       productoId: producto.id,
       nombre: producto.nombre,
@@ -139,16 +176,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setMostrarBuscador(false);
   };
 
-  const handleGuardar = async () => {
+  const handleGuardar = async (): Promise<void> => {
     // Si hay cambios en items y es admin, guardar items primero
     if (itemsModificados && isAdmin && onSaveItems) {
       await onSaveItems(items);
     }
     // Guardar el resto de los datos
-    onSave({ notas, formaPago, estadoPago, montoPagado: parseFloat(montoPagado) || 0 });
+    onSave({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
   };
 
-  const getStockDisponible = (productoId) => {
+  const getStockDisponible = (productoId: string): number => {
     const producto = productos.find(p => p.id === productoId);
     const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
     return (producto?.stock || 0) + cantidadOriginal;

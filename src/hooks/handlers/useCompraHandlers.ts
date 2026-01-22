@@ -2,6 +2,89 @@
  * Handlers para operaciones con compras
  */
 import { useCallback } from 'react'
+import type { User } from '@supabase/supabase-js'
+import type {
+  CompraDBExtended,
+  CompraFormInputExtended,
+  RegistrarCompraResult
+} from '../../types'
+
+// =============================================================================
+// TIPOS PARA MODALES
+// =============================================================================
+
+export interface ModalControl {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}
+
+export interface ConfirmModalConfig {
+  visible: boolean;
+  titulo?: string;
+  mensaje?: string;
+  tipo?: 'success' | 'warning' | 'danger' | 'info';
+  onConfirm?: () => Promise<void> | void;
+}
+
+export interface ConfirmModal {
+  setConfig: (config: ConfirmModalConfig) => void;
+}
+
+export interface CompraModales {
+  compra: ModalControl;
+  detalleCompra: ModalControl;
+  confirm: ConfirmModal;
+}
+
+// =============================================================================
+// TIPOS PARA NOTIFICACIONES
+// =============================================================================
+
+export interface NotifyOptions {
+  persist?: boolean;
+}
+
+export interface NotifyService {
+  success: (message: string, options?: NotifyOptions) => void;
+  error: (message: string, duration?: number) => void;
+  warning: (message: string) => void;
+  info: (message: string) => void;
+}
+
+// =============================================================================
+// TIPOS PARA DATOS DE COMPRA
+// =============================================================================
+
+export interface CompraDataInput extends Omit<CompraFormInputExtended, 'usuarioId'> {
+  usuarioId?: string | null;
+}
+
+// =============================================================================
+// PROPS DEL HOOK
+// =============================================================================
+
+export interface UseCompraHandlersProps {
+  registrarCompra: (compraData: CompraFormInputExtended) => Promise<RegistrarCompraResult>;
+  anularCompra: (compraId: string) => Promise<void>;
+  modales: CompraModales;
+  setGuardando: (guardando: boolean) => void;
+  setCompraDetalle: (compra: CompraDBExtended | null) => void;
+  refetchProductos: () => Promise<void>;
+  refetchCompras: () => Promise<void>;
+  notify: NotifyService;
+  user: User | null;
+}
+
+// =============================================================================
+// RETURN TYPE DEL HOOK
+// =============================================================================
+
+export interface UseCompraHandlersReturn {
+  handleNuevaCompra: () => void;
+  handleRegistrarCompra: (compraData: CompraDataInput) => Promise<void>;
+  handleVerDetalleCompra: (compra: CompraDBExtended) => void;
+  handleAnularCompra: (compraId: string) => void;
+}
 
 export function useCompraHandlers({
   registrarCompra,
@@ -13,12 +96,12 @@ export function useCompraHandlers({
   refetchCompras,
   notify,
   user
-}) {
-  const handleNuevaCompra = useCallback(() => {
+}: UseCompraHandlersProps): UseCompraHandlersReturn {
+  const handleNuevaCompra = useCallback((): void => {
     modales.compra.setOpen(true)
   }, [modales.compra])
 
-  const handleRegistrarCompra = useCallback(async (compraData) => {
+  const handleRegistrarCompra = useCallback(async (compraData: CompraDataInput): Promise<void> => {
     try {
       await registrarCompra({
         ...compraData,
@@ -28,17 +111,18 @@ export function useCompraHandlers({
       refetchProductos()
       refetchCompras()
     } catch (e) {
-      notify.error('Error al registrar compra: ' + e.message)
+      const error = e as Error
+      notify.error('Error al registrar compra: ' + error.message)
       throw e
     }
   }, [registrarCompra, user, refetchProductos, refetchCompras, notify])
 
-  const handleVerDetalleCompra = useCallback((compra) => {
+  const handleVerDetalleCompra = useCallback((compra: CompraDBExtended): void => {
     setCompraDetalle(compra)
     modales.detalleCompra.setOpen(true)
   }, [setCompraDetalle, modales.detalleCompra])
 
-  const handleAnularCompra = useCallback((compraId) => {
+  const handleAnularCompra = useCallback((compraId: string): void => {
     modales.confirm.setConfig({
       visible: true,
       titulo: 'Anular compra',
@@ -54,7 +138,8 @@ export function useCompraHandlers({
           modales.detalleCompra.setOpen(false)
           setCompraDetalle(null)
         } catch (e) {
-          notify.error('Error al anular compra: ' + e.message)
+          const error = e as Error
+          notify.error('Error al anular compra: ' + error.message)
         } finally {
           setGuardando(false)
           modales.confirm.setConfig({ visible: false })

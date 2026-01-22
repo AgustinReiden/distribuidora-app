@@ -72,7 +72,7 @@ export function validateExcelFile(file: File | null | undefined): ValidationResu
   }
 
   // Validar tipo MIME (algunos navegadores pueden no reportarlo correctamente)
-  if (file.type && !EXCEL_CONFIG.allowedMimeTypes.includes(file.type)) {
+  if (file.type && !(EXCEL_CONFIG.allowedMimeTypes as readonly string[]).includes(file.type)) {
     console.warn(`[FileValidation] MIME type inesperado: ${file.type}, pero extensión válida`)
     // No rechazar por MIME ya que algunos navegadores reportan incorrectamente
   }
@@ -184,7 +184,7 @@ export function validateAndSanitizeExcelData(data: unknown): SanitizedDataResult
       }
     }
     return Object.keys(sanitizedRow).length > 0 ? sanitizedRow : null
-  }).filter((row): row is Record<string, unknown> => row !== null)
+  }).filter((row): row is Record<string, string | number | null> => row !== null)
 
   return {
     valid: true,

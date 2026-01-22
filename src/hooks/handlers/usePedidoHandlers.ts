@@ -1,9 +1,247 @@
 /**
  * Handlers para operaciones con pedidos
  */
-import { useCallback } from 'react'
+import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { calcularTotalPedido } from '../useAppState'
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada } from '../../lib/pdfExport'
+import type { User } from '@supabase/supabase-js'
+import type {
+  ProductoDB,
+  PedidoDB,
+  ClienteDB,
+  ClienteFormInput,
+  PedidoFormInput,
+  PerfilDB,
+  RutaOptimizada,
+  PagoFormInput,
+  PagoDBWithUsuario
+} from '../../types'
+
+// =============================================================================
+// TIPOS PARA NUEVOS PEDIDOS
+// =============================================================================
+
+export interface NuevoPedidoItem {
+  productoId: string;
+  cantidad: number;
+  precioUnitario: number;
+}
+
+export interface NuevoPedidoState {
+  clienteId: string;
+  items: NuevoPedidoItem[];
+  notas: string;
+  formaPago?: string;
+  estadoPago?: string;
+  montoPagado?: number;
+}
+
+// =============================================================================
+// TIPOS PARA MODALES
+// =============================================================================
+
+export interface ModalControl {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}
+
+export interface ConfirmModalConfig {
+  visible: boolean;
+  titulo?: string;
+  mensaje?: string;
+  tipo?: 'success' | 'warning' | 'danger' | 'info';
+  onConfirm?: () => Promise<void> | void;
+}
+
+export interface ConfirmModal {
+  setConfig: (config: ConfirmModalConfig) => void;
+}
+
+export interface PedidoModales {
+  pedido: ModalControl;
+  asignar: ModalControl;
+  historial: ModalControl;
+  editarPedido: ModalControl;
+  optimizarRuta: ModalControl;
+  confirm: ConfirmModal;
+}
+
+// =============================================================================
+// TIPOS PARA NOTIFICACIONES
+// =============================================================================
+
+export interface NotifyOptions {
+  persist?: boolean;
+}
+
+export interface NotifyService {
+  success: (message: string, options?: NotifyOptions) => void;
+  error: (message: string, duration?: number) => void;
+  warning: (message: string) => void;
+  info: (message: string) => void;
+}
+
+// =============================================================================
+// TIPOS PARA VALIDACION DE STOCK
+// =============================================================================
+
+export interface StockValidationError {
+  productoId: string;
+  mensaje: string;
+}
+
+export interface StockValidationResult {
+  valido: boolean;
+  errores: StockValidationError[];
+}
+
+// =============================================================================
+// TIPOS PARA PEDIDO OFFLINE
+// =============================================================================
+
+export interface PedidoOfflineData {
+  clienteId: number;
+  items: NuevoPedidoItem[];
+  total: number;
+  usuarioId: string;
+  notas?: string;
+  formaPago?: string;
+  estadoPago?: string;
+  montoPagado?: number;
+}
+
+// =============================================================================
+// TIPOS PARA ORDEN OPTIMIZADO
+// =============================================================================
+
+export interface OrdenOptimizadoItem {
+  id: string;
+  orden_entrega: number;
+}
+
+export interface OrdenOptimizadoData {
+  ordenOptimizado?: OrdenOptimizadoItem[];
+  transportistaId?: string | null;
+  distancia?: number | null;
+  duracion?: number | null;
+}
+
+// =============================================================================
+// TIPOS PARA EDICION DE PEDIDO
+// =============================================================================
+
+export interface EdicionPedidoData {
+  notas: string;
+  formaPago: string;
+  estadoPago: string;
+  montoPagado?: number;
+}
+
+// =============================================================================
+// TIPOS PARA HISTORIAL
+// =============================================================================
+
+export interface HistorialCambio {
+  id: string;
+  pedido_id: string;
+  campo: string;
+  valor_anterior?: string | null;
+  valor_nuevo?: string | null;
+  usuario_id?: string | null;
+  created_at?: string;
+}
+
+// =============================================================================
+// PROPS DEL HOOK
+// =============================================================================
+
+export interface UsePedidoHandlersProps {
+  productos: ProductoDB[];
+  crearPedido: (
+    clienteId: number,
+    items: NuevoPedidoItem[],
+    total: number,
+    usuarioId: string,
+    descontarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
+    notas?: string,
+    formaPago?: string,
+    estadoPago?: string
+  ) => Promise<PedidoDB>;
+  cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
+  asignarTransportista: (pedidoId: string, transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
+  eliminarPedido: (
+    pedidoId: string,
+    restaurarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
+    usuarioId?: string
+  ) => Promise<void>;
+  actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
+  actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
+  actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
+  actualizarOrdenEntrega: (pedidosOrdenados: OrdenOptimizadoItem[]) => Promise<void>;
+  actualizarItemsPedido?: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
+  fetchHistorialPedido: (pedidoId: string) => Promise<HistorialCambio[]>;
+  validarStock: (items: NuevoPedidoItem[]) => StockValidationResult;
+  descontarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>;
+  restaurarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>;
+  registrarPago: (pago: PagoFormInput) => Promise<PagoDBWithUsuario>;
+  crearRecorrido: (transportistaId: string, pedidosOrdenados: OrdenOptimizadoItem[], distancia?: number | null, duracion?: number | null) => Promise<string>;
+  limpiarRuta: () => void;
+  agregarCliente: (cliente: ClienteFormInput) => Promise<ClienteDB>;
+  modales: PedidoModales;
+  setGuardando: (guardando: boolean) => void;
+  setNuevoPedido: Dispatch<SetStateAction<NuevoPedidoState>>;
+  resetNuevoPedido: () => void;
+  nuevoPedido: NuevoPedidoState;
+  setPedidoAsignando: (pedido: PedidoDB | null) => void;
+  setPedidoHistorial: (pedido: PedidoDB | null) => void;
+  setHistorialCambios: (historial: HistorialCambio[]) => void;
+  setPedidoEditando: (pedido: PedidoDB | null) => void;
+  setCargandoHistorial: (loading: boolean) => void;
+  pedidoAsignando: PedidoDB | null;
+  pedidoEditando: PedidoDB | null;
+  refetchProductos: () => Promise<void>;
+  refetchPedidos: () => Promise<void>;
+  refetchMetricas: () => Promise<void>;
+  notify: NotifyService;
+  user: User;
+  isOnline: boolean;
+  guardarPedidoOffline: (pedido: PedidoOfflineData) => void;
+  rutaOptimizada: RutaOptimizada | null;
+}
+
+// =============================================================================
+// RETURN TYPE DEL HOOK
+// =============================================================================
+
+export interface UsePedidoHandlersReturn {
+  // Item management
+  agregarItemPedido: (productoId: string) => void;
+  actualizarCantidadItem: (productoId: string, cantidad: number) => void;
+  handleClienteChange: (clienteId: string) => void;
+  handleNotasChange: (notas: string) => void;
+  handleFormaPagoChange: (formaPago: string) => void;
+  handleEstadoPagoChange: (estadoPago: string) => void;
+  handleMontoPagadoChange: (montoPagado: number) => void;
+  handleCrearClienteEnPedido: (nuevoCliente: ClienteFormInput) => Promise<ClienteDB>;
+  handleGuardarPedidoConOffline: () => Promise<void>;
+  // State changes
+  handleMarcarEntregado: (pedido: PedidoDB) => void;
+  handleDesmarcarEntregado: (pedido: PedidoDB) => void;
+  handleMarcarEnPreparacion: (pedido: PedidoDB) => void;
+  handleAsignarTransportista: (transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
+  handleEliminarPedido: (id: string) => void;
+  // History and editing
+  handleVerHistorial: (pedido: PedidoDB) => Promise<void>;
+  handleEditarPedido: (pedido: PedidoDB) => void;
+  handleGuardarEdicionPedido: (data: EdicionPedidoData) => Promise<void>;
+  // Route optimization
+  handleAplicarOrdenOptimizado: (data: OrdenOptimizadoData | OrdenOptimizadoItem[]) => Promise<void>;
+  handleExportarHojaRutaOptimizada: (transportista: PerfilDB, pedidosOrdenados: PedidoDB[]) => void;
+  handleCerrarModalOptimizar: () => void;
+  // PDF exports
+  generarOrdenPreparacion: typeof generarOrdenPreparacion;
+  generarHojaRuta: typeof generarHojaRuta;
+}
 
 export function usePedidoHandlers({
   productos,
@@ -44,9 +282,9 @@ export function usePedidoHandlers({
   isOnline,
   guardarPedidoOffline,
   rutaOptimizada
-}) {
+}: UsePedidoHandlersProps): UsePedidoHandlersReturn {
   // Item management
-  const agregarItemPedido = useCallback((productoId) => {
+  const agregarItemPedido = useCallback((productoId: string): void => {
     const existe = nuevoPedido.items.find(i => i.productoId === productoId)
     const producto = productos.find(p => p.id === productoId)
     if (existe) {
@@ -62,7 +300,7 @@ export function usePedidoHandlers({
     }
   }, [productos, nuevoPedido.items, setNuevoPedido])
 
-  const actualizarCantidadItem = useCallback((productoId, cantidad) => {
+  const actualizarCantidadItem = useCallback((productoId: string, cantidad: number): void => {
     if (cantidad <= 0) {
       setNuevoPedido(prev => ({ ...prev, items: prev.items.filter(i => i.productoId !== productoId) }))
     } else {
@@ -71,34 +309,34 @@ export function usePedidoHandlers({
   }, [setNuevoPedido])
 
   // Form field handlers
-  const handleClienteChange = useCallback((clienteId) => {
+  const handleClienteChange = useCallback((clienteId: string): void => {
     setNuevoPedido(prev => ({ ...prev, clienteId }))
   }, [setNuevoPedido])
 
-  const handleNotasChange = useCallback((notas) => {
+  const handleNotasChange = useCallback((notas: string): void => {
     setNuevoPedido(prev => ({ ...prev, notas }))
   }, [setNuevoPedido])
 
-  const handleFormaPagoChange = useCallback((formaPago) => {
+  const handleFormaPagoChange = useCallback((formaPago: string): void => {
     setNuevoPedido(prev => ({ ...prev, formaPago }))
   }, [setNuevoPedido])
 
-  const handleEstadoPagoChange = useCallback((estadoPago) => {
+  const handleEstadoPagoChange = useCallback((estadoPago: string): void => {
     setNuevoPedido(prev => ({ ...prev, estadoPago, montoPagado: estadoPago === 'parcial' ? prev.montoPagado : 0 }))
   }, [setNuevoPedido])
 
-  const handleMontoPagadoChange = useCallback((montoPagado) => {
+  const handleMontoPagadoChange = useCallback((montoPagado: number): void => {
     setNuevoPedido(prev => ({ ...prev, montoPagado }))
   }, [setNuevoPedido])
 
-  const handleCrearClienteEnPedido = useCallback(async (nuevoCliente) => {
+  const handleCrearClienteEnPedido = useCallback(async (nuevoCliente: ClienteFormInput): Promise<ClienteDB> => {
     const cliente = await agregarCliente(nuevoCliente)
     notify.success('Cliente creado correctamente')
     return cliente
   }, [agregarCliente, notify])
 
   // Main order creation
-  const handleGuardarPedidoConOffline = useCallback(async () => {
+  const handleGuardarPedidoConOffline = useCallback(async (): Promise<void> => {
     if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
       notify.warning('Seleccioná cliente y productos')
       return
@@ -144,9 +382,9 @@ export function usePedidoHandlers({
         nuevoPedido.estadoPago
       )
 
-      if (nuevoPedido.estadoPago === 'parcial' && nuevoPedido.montoPagado > 0 && pedidoCreado?.id) {
+      if (nuevoPedido.estadoPago === 'parcial' && nuevoPedido.montoPagado && nuevoPedido.montoPagado > 0 && pedidoCreado?.id) {
         await registrarPago({
-          clienteId: parseInt(nuevoPedido.clienteId),
+          clienteId: nuevoPedido.clienteId,
           pedidoId: pedidoCreado.id,
           monto: nuevoPedido.montoPagado,
           formaPago: nuevoPedido.formaPago,
@@ -161,13 +399,14 @@ export function usePedidoHandlers({
       refetchMetricas()
       notify.success('Pedido creado correctamente', { persist: true })
     } catch (e) {
-      notify.error('Error al crear pedido: ' + e.message)
+      const error = e as Error
+      notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
   }, [nuevoPedido, validarStock, isOnline, guardarPedidoOffline, user, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
-  const handleMarcarEntregado = useCallback((pedido) => {
+  const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {
     modales.confirm.setConfig({
       visible: true,
       titulo: 'Confirmar entrega',
@@ -180,7 +419,8 @@ export function usePedidoHandlers({
           refetchMetricas()
           notify.success(`Pedido #${pedido.id} marcado como entregado`, { persist: true })
         } catch (e) {
-          notify.error(e.message)
+          const error = e as Error
+          notify.error(error.message)
         } finally {
           setGuardando(false)
           modales.confirm.setConfig({ visible: false })
@@ -189,7 +429,7 @@ export function usePedidoHandlers({
     })
   }, [cambiarEstado, refetchMetricas, notify, modales.confirm, setGuardando])
 
-  const handleDesmarcarEntregado = useCallback((pedido) => {
+  const handleDesmarcarEntregado = useCallback((pedido: PedidoDB): void => {
     modales.confirm.setConfig({
       visible: true,
       titulo: 'Revertir entrega',
@@ -202,7 +442,8 @@ export function usePedidoHandlers({
           refetchMetricas()
           notify.warning(`Pedido #${pedido.id} revertido`)
         } catch (e) {
-          notify.error(e.message)
+          const error = e as Error
+          notify.error(error.message)
         } finally {
           setGuardando(false)
           modales.confirm.setConfig({ visible: false })
@@ -211,7 +452,7 @@ export function usePedidoHandlers({
     })
   }, [cambiarEstado, refetchMetricas, notify, modales.confirm, setGuardando])
 
-  const handleMarcarEnPreparacion = useCallback((pedido) => {
+  const handleMarcarEnPreparacion = useCallback((pedido: PedidoDB): void => {
     modales.confirm.setConfig({
       visible: true,
       titulo: 'Marcar en preparación',
@@ -224,7 +465,8 @@ export function usePedidoHandlers({
           refetchMetricas()
           notify.success(`Pedido #${pedido.id} marcado como en preparación`)
         } catch (e) {
-          notify.error(e.message)
+          const error = e as Error
+          notify.error(error.message)
         } finally {
           setGuardando(false)
           modales.confirm.setConfig({ visible: false })
@@ -233,7 +475,7 @@ export function usePedidoHandlers({
     })
   }, [cambiarEstado, refetchMetricas, notify, modales.confirm, setGuardando])
 
-  const handleAsignarTransportista = useCallback(async (transportistaId, marcarListo = false) => {
+  const handleAsignarTransportista = useCallback(async (transportistaId: string | null, marcarListo: boolean = false): Promise<void> => {
     if (!pedidoAsignando) return
     setGuardando(true)
     try {
@@ -246,12 +488,13 @@ export function usePedidoHandlers({
         notify.success('Transportista desasignado')
       }
     } catch (e) {
-      notify.error('Error: ' + e.message)
+      const error = e as Error
+      notify.error('Error: ' + error.message)
     }
     setGuardando(false)
   }, [pedidoAsignando, asignarTransportista, modales.asignar, setPedidoAsignando, notify, setGuardando])
 
-  const handleEliminarPedido = useCallback((id) => {
+  const handleEliminarPedido = useCallback((id: string): void => {
     modales.confirm.setConfig({
       visible: true,
       titulo: 'Eliminar pedido',
@@ -265,7 +508,8 @@ export function usePedidoHandlers({
           refetchMetricas()
           notify.success('Pedido eliminado y registrado en historial')
         } catch (e) {
-          notify.error(e.message)
+          const error = e as Error
+          notify.error(error.message)
         } finally {
           setGuardando(false)
           modales.confirm.setConfig({ visible: false })
@@ -275,7 +519,7 @@ export function usePedidoHandlers({
   }, [eliminarPedido, restaurarStock, user, refetchProductos, refetchMetricas, notify, modales.confirm, setGuardando])
 
   // History and editing
-  const handleVerHistorial = useCallback(async (pedido) => {
+  const handleVerHistorial = useCallback(async (pedido: PedidoDB): Promise<void> => {
     setPedidoHistorial(pedido)
     modales.historial.setOpen(true)
     setCargandoHistorial(true)
@@ -283,19 +527,20 @@ export function usePedidoHandlers({
       const historial = await fetchHistorialPedido(pedido.id)
       setHistorialCambios(historial)
     } catch (e) {
-      notify.error('Error al cargar historial: ' + e.message)
+      const error = e as Error
+      notify.error('Error al cargar historial: ' + error.message)
       setHistorialCambios([])
     } finally {
       setCargandoHistorial(false)
     }
   }, [fetchHistorialPedido, setPedidoHistorial, modales.historial, setCargandoHistorial, setHistorialCambios, notify])
 
-  const handleEditarPedido = useCallback((pedido) => {
+  const handleEditarPedido = useCallback((pedido: PedidoDB): void => {
     setPedidoEditando(pedido)
     modales.editarPedido.setOpen(true)
   }, [setPedidoEditando, modales.editarPedido])
 
-  const handleGuardarEdicionPedido = useCallback(async ({ notas, formaPago, estadoPago, montoPagado }) => {
+  const handleGuardarEdicionPedido = useCallback(async ({ notas, formaPago, estadoPago, montoPagado }: EdicionPedidoData): Promise<void> => {
     if (!pedidoEditando) return
     setGuardando(true)
     try {
@@ -306,23 +551,26 @@ export function usePedidoHandlers({
       setPedidoEditando(null)
       notify.success('Pedido actualizado correctamente')
     } catch (e) {
-      notify.error('Error al actualizar pedido: ' + e.message)
+      const error = e as Error
+      notify.error('Error al actualizar pedido: ' + error.message)
     }
     setGuardando(false)
   }, [pedidoEditando, actualizarNotasPedido, actualizarFormaPago, actualizarEstadoPago, modales.editarPedido, setPedidoEditando, notify, setGuardando])
 
   // Route optimization
-  const handleAplicarOrdenOptimizado = useCallback(async (data) => {
+  const handleAplicarOrdenOptimizado = useCallback(async (data: OrdenOptimizadoData | OrdenOptimizadoItem[]): Promise<void> => {
     setGuardando(true)
     try {
       const ordenOptimizado = Array.isArray(data) ? data : data.ordenOptimizado
-      const transportistaId = data.transportistaId || null
-      const distancia = data.distancia || null
-      const duracion = data.duracion || null
+      const transportistaId = Array.isArray(data) ? null : (data.transportistaId || null)
+      const distancia = Array.isArray(data) ? null : (data.distancia || null)
+      const duracion = Array.isArray(data) ? null : (data.duracion || null)
 
-      await actualizarOrdenEntrega(ordenOptimizado)
+      if (ordenOptimizado) {
+        await actualizarOrdenEntrega(ordenOptimizado)
+      }
 
-      if (transportistaId && ordenOptimizado?.length > 0) {
+      if (transportistaId && ordenOptimizado && ordenOptimizado.length > 0) {
         try {
           await crearRecorrido(transportistaId, ordenOptimizado, distancia, duracion)
           notify.success('Ruta optimizada y recorrido creado correctamente')
@@ -337,21 +585,23 @@ export function usePedidoHandlers({
       limpiarRuta()
       refetchPedidos()
     } catch (e) {
-      notify.error('Error al actualizar orden: ' + e.message)
+      const error = e as Error
+      notify.error('Error al actualizar orden: ' + error.message)
     }
     setGuardando(false)
   }, [actualizarOrdenEntrega, crearRecorrido, limpiarRuta, refetchPedidos, modales.optimizarRuta, notify, setGuardando])
 
-  const handleExportarHojaRutaOptimizada = useCallback((transportista, pedidosOrdenados) => {
+  const handleExportarHojaRutaOptimizada = useCallback((transportista: PerfilDB, pedidosOrdenados: PedidoDB[]): void => {
     try {
-      generarHojaRutaOptimizada(transportista, pedidosOrdenados, rutaOptimizada || {})
+      generarHojaRutaOptimizada(transportista, pedidosOrdenados, (rutaOptimizada as { distanciaTotal?: number })?.distanciaTotal, (rutaOptimizada as { duracionTotal?: number })?.duracionTotal)
       notify.success('PDF generado correctamente')
     } catch (e) {
-      notify.error('Error al generar PDF: ' + e.message)
+      const error = e as Error
+      notify.error('Error al generar PDF: ' + error.message)
     }
   }, [rutaOptimizada, notify])
 
-  const handleCerrarModalOptimizar = useCallback(() => {
+  const handleCerrarModalOptimizar = useCallback((): void => {
     modales.optimizarRuta.setOpen(false)
     limpiarRuta()
   }, [modales.optimizarRuta, limpiarRuta])

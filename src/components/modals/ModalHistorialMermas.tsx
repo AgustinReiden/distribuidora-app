@@ -1,9 +1,36 @@
-import React, { useState } from 'react'
-import { X, Package, Calendar, User, FileText, TrendingDown, Filter } from 'lucide-react'
+import React, { useState, ChangeEvent } from 'react'
+import { X, Package, Calendar, User, FileText, TrendingDown } from 'lucide-react'
+import type { Producto, Usuario } from '../../types'
 
-export default function ModalHistorialMermas({ mermas = [], productos = [], usuarios = [], onClose }) {
-  const [filtroProducto, setFiltroProducto] = useState('')
-  const [filtroMotivo, setFiltroMotivo] = useState('')
+type MotivoMerma = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'otro';
+
+interface Merma {
+  id: string;
+  producto_id: string;
+  usuario_id?: string;
+  cantidad: number;
+  motivo: MotivoMerma;
+  observaciones?: string;
+  stock_anterior: number;
+  stock_nuevo: number;
+  created_at: string;
+}
+
+export interface ModalHistorialMermasProps {
+  mermas?: Merma[];
+  productos?: Producto[];
+  usuarios?: Usuario[];
+  onClose: () => void;
+}
+
+export default function ModalHistorialMermas({
+  mermas = [],
+  productos = [],
+  usuarios = [],
+  onClose
+}: ModalHistorialMermasProps): React.ReactElement {
+  const [filtroProducto, setFiltroProducto] = useState<string>('')
+  const [filtroMotivo, setFiltroMotivo] = useState<string>('')
 
   const mermasFiltradas = mermas.filter(m => {
     if (filtroProducto && m.producto_id !== filtroProducto) return false
@@ -11,37 +38,38 @@ export default function ModalHistorialMermas({ mermas = [], productos = [], usua
     return true
   })
 
-  const getProductoNombre = (productoId) => {
+  const getProductoNombre = (productoId: string): string => {
     const producto = productos.find(p => p.id === productoId)
     return producto?.nombre || 'Producto desconocido'
   }
 
-  const getUsuarioNombre = (usuarioId) => {
+  const getUsuarioNombre = (usuarioId: string | undefined): string => {
+    if (!usuarioId) return 'Usuario desconocido'
     const usuario = usuarios.find(u => u.id === usuarioId)
     return usuario?.nombre || 'Usuario desconocido'
   }
 
-  const getMotivoEmoji = (motivo) => {
-    const emojis = {
-      rotura: '💔',
-      vencimiento: '📅',
-      robo: '🚨',
-      decomiso: '⚠️',
-      devolucion: '↩️',
-      error_inventario: '📋',
-      muestra: '🎁',
-      otro: '📝'
+  const getMotivoEmoji = (motivo: MotivoMerma): string => {
+    const emojis: Record<MotivoMerma, string> = {
+      rotura: '!',
+      vencimiento: 'V',
+      robo: '!',
+      decomiso: '!',
+      devolucion: '<-',
+      error_inventario: '#',
+      muestra: '*',
+      otro: '?'
     }
-    return emojis[motivo] || '📦'
+    return emojis[motivo] || '?'
   }
 
-  const getMotivoLabel = (motivo) => {
-    const labels = {
+  const getMotivoLabel = (motivo: MotivoMerma): string => {
+    const labels: Record<MotivoMerma, string> = {
       rotura: 'Rotura',
       vencimiento: 'Vencimiento',
       robo: 'Robo/Hurto',
       decomiso: 'Decomiso',
-      devolucion: 'Devolución',
+      devolucion: 'Devolucion',
       error_inventario: 'Error inventario',
       muestra: 'Muestra',
       otro: 'Otro'
@@ -96,7 +124,7 @@ export default function ModalHistorialMermas({ mermas = [], productos = [], usua
             <label className="block text-xs font-medium text-gray-500 mb-1">Filtrar por producto</label>
             <select
               value={filtroProducto}
-              onChange={e => setFiltroProducto(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroProducto(e.target.value)}
               className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700"
             >
               <option value="">Todos los productos</option>
@@ -109,7 +137,7 @@ export default function ModalHistorialMermas({ mermas = [], productos = [], usua
             <label className="block text-xs font-medium text-gray-500 mb-1">Filtrar por motivo</label>
             <select
               value={filtroMotivo}
-              onChange={e => setFiltroMotivo(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroMotivo(e.target.value)}
               className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700"
             >
               <option value="">Todos los motivos</option>
@@ -163,7 +191,7 @@ export default function ModalHistorialMermas({ mermas = [], productos = [], usua
                       <p className="text-lg font-bold text-red-600">-{merma.cantidad}</p>
                       <p className="text-xs text-gray-500">{getMotivoLabel(merma.motivo)}</p>
                       <p className="text-xs text-gray-400 mt-1">
-                        {merma.stock_anterior} → {merma.stock_nuevo}
+                        {merma.stock_anterior} -&gt; {merma.stock_nuevo}
                       </p>
                     </div>
                   </div>

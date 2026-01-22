@@ -1,26 +1,69 @@
 /**
  * Componente Dialog accesible basado en Radix UI
  *
- * Características de accesibilidad:
- * - role="dialog" automático
+ * Caracteristicas de accesibilidad:
+ * - role="dialog" automatico
  * - aria-modal="true"
- * - aria-labelledby vinculado al título
- * - aria-describedby vinculado a la descripción
+ * - aria-labelledby vinculado al titulo
+ * - aria-describedby vinculado a la descripcion
  * - Focus trapping (el foco no sale del modal)
  * - Cierre con tecla Escape
- * - Devuelve el foco al elemento que abrió el modal al cerrarlo
+ * - Devuelve el foco al elemento que abrio el modal al cerrarlo
  */
 import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
+// =============================================================================
+// PROPS INTERFACES
+// =============================================================================
+
+export interface DialogOverlayProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay> {
+  className?: string;
+}
+
+export interface DialogContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+  className?: string;
+  children?: React.ReactNode;
+}
+
+export interface DialogHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
+  className?: string;
+  children?: React.ReactNode;
+  onClose?: () => void;
+}
+
+export interface DialogFooterProps extends React.HTMLAttributes<HTMLDivElement> {
+  className?: string;
+}
+
+export interface DialogTitleProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title> {
+  className?: string;
+}
+
+export interface DialogDescriptionProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description> {
+  className?: string;
+}
+
+export interface DialogBodyProps extends React.HTMLAttributes<HTMLDivElement> {
+  className?: string;
+  children?: React.ReactNode;
+}
+
+// =============================================================================
+// COMPONENTS
+// =============================================================================
+
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
 const DialogPortal = DialogPrimitive.Portal;
 const DialogClose = DialogPrimitive.Close;
 
-const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
+const DialogOverlay = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Overlay>,
+  DialogOverlayProps
+>(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
@@ -32,7 +75,10 @@ const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
-const DialogContent = React.forwardRef(({ className, children, ...props }, ref) => (
+const DialogContent = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  DialogContentProps
+>(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -51,7 +97,7 @@ const DialogContent = React.forwardRef(({ className, children, ...props }, ref) 
 ));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
-const DialogHeader = ({ className, children, onClose, ...props }) => (
+const DialogHeader: React.FC<DialogHeaderProps> = ({ className, children, onClose, ...props }) => (
   <div
     className={cn(
       'flex justify-between items-center p-4 border-b dark:border-gray-700 flex-shrink-0',
@@ -74,7 +120,7 @@ const DialogHeader = ({ className, children, onClose, ...props }) => (
 );
 DialogHeader.displayName = 'DialogHeader';
 
-const DialogFooter = ({ className, ...props }) => (
+const DialogFooter: React.FC<DialogFooterProps> = ({ className, ...props }) => (
   <div
     className={cn(
       'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-4 border-t dark:border-gray-700 flex-shrink-0',
@@ -85,7 +131,10 @@ const DialogFooter = ({ className, ...props }) => (
 );
 DialogFooter.displayName = 'DialogFooter';
 
-const DialogTitle = React.forwardRef(({ className, ...props }, ref) => (
+const DialogTitle = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Title>,
+  DialogTitleProps
+>(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
     className={cn(
@@ -97,7 +146,10 @@ const DialogTitle = React.forwardRef(({ className, ...props }, ref) => (
 ));
 DialogTitle.displayName = DialogPrimitive.Title.displayName;
 
-const DialogDescription = React.forwardRef(({ className, ...props }, ref) => (
+const DialogDescription = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Description>,
+  DialogDescriptionProps
+>(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
     className={cn('text-sm text-gray-500 dark:text-gray-400', className)}
@@ -106,7 +158,7 @@ const DialogDescription = React.forwardRef(({ className, ...props }, ref) => (
 ));
 DialogDescription.displayName = DialogPrimitive.Description.displayName;
 
-const DialogBody = ({ className, children, ...props }) => (
+const DialogBody: React.FC<DialogBodyProps> = ({ className, children, ...props }) => (
   <div
     className={cn('flex-1 overflow-y-auto overscroll-contain', className)}
     {...props}

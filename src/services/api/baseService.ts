@@ -6,7 +6,10 @@
  */
 
 import { supabase, notifyError } from '../../hooks/supabase/base'
-import type { SupabaseClient, PostgrestFilterBuilder } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+// Type for filter builder - using generic type to avoid importing non-exported types
+type FilterBuilder = ReturnType<ReturnType<SupabaseClient['from']>['select']>;
 
 export interface FilterWithOperator {
   operator: string;
@@ -65,7 +68,11 @@ export class BaseService<T = Record<string, unknown>> {
           if (typeof value === 'object' && value !== null && 'operator' in value) {
             // Filtro con operador personalizado: { operator: 'gte', value: 10 }
             const filterValue = value as FilterWithOperator
-            query = (query as PostgrestFilterBuilder<unknown, unknown, unknown>)[filterValue.operator as keyof PostgrestFilterBuilder<unknown, unknown, unknown>](key, filterValue.value)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const filterMethod = (query as any)[filterValue.operator]
+            if (typeof filterMethod === 'function') {
+              query = filterMethod.call(query, key, filterValue.value)
+            }
           } else {
             query = query.eq(key, value)
           }
@@ -111,16 +118,20 @@ export class BaseService<T = Record<string, unknown>> {
     const { returnData = true } = options
 
     try {
-      let query = this.db.from(this.table).insert([data])
-
       if (returnData) {
-        query = query.select().single()
+        const { data: result, error } = await this.db
+          .from(this.table)
+          .insert([data])
+          .select()
+          .single()
+
+        if (error) throw error
+        return result as T
+      } else {
+        const { error } = await this.db.from(this.table).insert([data])
+        if (error) throw error
+        return true
       }
-
-      const { data: result, error } = await query
-
-      if (error) throw error
-      return returnData ? (result as T) : true
     } catch (error) {
       this.handleError('crear registro', error as Error)
       throw error // Re-throw para que el llamador pueda manejar el error

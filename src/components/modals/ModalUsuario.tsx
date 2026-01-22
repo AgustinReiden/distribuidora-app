@@ -1,9 +1,44 @@
-import React, { useState, memo } from 'react';
+import React, { useState, memo, ChangeEvent } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
 import ModalBase from './ModalBase';
+import type { PerfilDB } from '../../types';
 
-const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guardando, zonasDisponibles = [] }) {
-  const [form, setForm] = useState(usuario || { nombre: '', rol: 'preventista', activo: true, zona: '' });
+/** Roles disponibles para usuarios */
+export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito';
+
+/** Datos del formulario de usuario */
+export interface UsuarioFormData {
+  id?: string;
+  nombre: string;
+  email?: string;
+  rol: RolUsuario;
+  activo: boolean;
+  zona: string;
+}
+
+/** Props del componente ModalUsuario */
+export interface ModalUsuarioProps {
+  /** Usuario a editar (null para nuevo) */
+  usuario: PerfilDB | null;
+  /** Callback al guardar */
+  onSave: (data: UsuarioFormData) => void | Promise<void>;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Indica si está guardando */
+  guardando: boolean;
+  /** Zonas disponibles para sugerencias */
+  zonasDisponibles?: string[];
+}
+
+const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guardando, zonasDisponibles = [] }: ModalUsuarioProps) {
+  const [form, setForm] = useState<UsuarioFormData>(usuario ? {
+    id: usuario.id,
+    nombre: usuario.nombre || '',
+    email: usuario.email,
+    rol: (usuario.rol as RolUsuario) || 'preventista',
+    activo: usuario.activo !== false,
+    zona: usuario.zona || ''
+  } : { nombre: '', rol: 'preventista', activo: true, zona: '' });
 
   // Mostrar campo de zona solo para preventistas
   const mostrarZona = form.rol === 'preventista';
@@ -33,7 +68,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           <label className="block text-sm font-medium mb-1 dark:text-gray-200">Rol</label>
           <select
             value={form.rol}
-            onChange={e => setForm({ ...form, rol: e.target.value, zona: e.target.value !== 'preventista' ? '' : form.zona })}
+            onChange={e => setForm({ ...form, rol: e.target.value as RolUsuario, zona: e.target.value !== 'preventista' ? '' : form.zona })}
             className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           >
             <option value="preventista">Preventista</option>

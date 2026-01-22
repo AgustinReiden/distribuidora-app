@@ -1,29 +1,54 @@
 import React, { useState } from 'react'
-import { Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Check, AlertTriangle, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Wifi, WifiOff, Cloud, CloudOff, RefreshCw, AlertTriangle, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import type { Cliente } from '../../types'
+
+interface PedidoOffline {
+  offlineId: string;
+  clienteId: string;
+  items?: Array<{ producto_id: string; cantidad: number }>;
+  total: number;
+  creadoOffline: string;
+}
+
+interface MermaOffline {
+  offlineId: string;
+  productoNombre?: string;
+  cantidad: number;
+  motivo: string;
+}
+
+export interface OfflineIndicatorProps {
+  isOnline: boolean;
+  pedidosPendientes?: PedidoOffline[];
+  mermasPendientes?: MermaOffline[];
+  sincronizando?: boolean;
+  onSincronizar?: () => void;
+  clientes?: Cliente[];
+}
 
 export default function OfflineIndicator({
   isOnline,
   pedidosPendientes = [],
   mermasPendientes = [],
-  sincronizando,
+  sincronizando = false,
   onSincronizar,
   clientes = []
-}) {
-  const [expandido, setExpandido] = useState(false)
+}: OfflineIndicatorProps): React.ReactElement | null {
+  const [expandido, setExpandido] = useState<boolean>(false)
   const cantidadTotal = pedidosPendientes.length + mermasPendientes.length
 
-  // No mostrar nada si está online y no hay pendientes
+  // No mostrar nada si esta online y no hay pendientes
   if (isOnline && cantidadTotal === 0) return null
 
-  const getClienteNombre = (clienteId) => {
+  const getClienteNombre = (clienteId: string): string => {
     const cliente = clientes.find(c => c.id === clienteId)
-    return cliente?.nombre_fantasia || 'Cliente desconocido'
+    return (cliente as Cliente & { nombre_fantasia?: string })?.nombre_fantasia || 'Cliente desconocido'
   }
 
   return (
     <div className={`fixed bottom-4 right-4 z-50 max-w-sm ${expandido ? 'w-80' : ''}`}>
-      {/* Botón principal */}
+      {/* Boton principal */}
       <button
         onClick={() => setExpandido(!expandido)}
         className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg transition-all ${
@@ -49,7 +74,7 @@ export default function OfflineIndicator({
         ) : (
           <>
             <WifiOff className="w-5 h-5" />
-            <span className="font-medium">Sin conexión</span>
+            <span className="font-medium">Sin conexion</span>
             {cantidadTotal > 0 && (
               <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">
                 {cantidadTotal}
@@ -95,7 +120,7 @@ export default function OfflineIndicator({
                         {getClienteNombre(pedido.clienteId)}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {pedido.items?.length || 0} productos • {new Date(pedido.creadoOffline).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                        {pedido.items?.length || 0} productos - {new Date(pedido.creadoOffline).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
                     <span className="font-bold text-amber-600">
@@ -124,7 +149,7 @@ export default function OfflineIndicator({
                         {merma.productoNombre || 'Producto'}
                       </p>
                       <p className="text-xs text-gray-500">
-                        -{merma.cantidad} • {merma.motivo}
+                        -{merma.cantidad} - {merma.motivo}
                       </p>
                     </div>
                   </div>
@@ -133,7 +158,7 @@ export default function OfflineIndicator({
             </div>
           )}
 
-          {/* Botón de sincronizar */}
+          {/* Boton de sincronizar */}
           <div className="p-3">
             {isOnline ? (
               <button
@@ -156,7 +181,7 @@ export default function OfflineIndicator({
             ) : (
               <div className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded text-sm text-gray-600 dark:text-gray-400">
                 <AlertTriangle className="w-4 h-4" />
-                <span>Se sincronizará cuando vuelva la conexión</span>
+                <span>Se sincronizara cuando vuelva la conexion</span>
               </div>
             )}
           </div>

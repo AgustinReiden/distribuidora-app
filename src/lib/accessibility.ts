@@ -8,13 +8,88 @@
  * - Detección de preferencias del usuario
  */
 
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
+
+/** Priority level for aria-live announcements */
+export type AnnouncePriority = 'polite' | 'assertive'
+
+/** User preference types */
+export type PreferenceType = 'reduced-motion' | 'high-contrast' | 'dark-mode'
+
+/** Media query mapping for preferences */
+export interface PreferenceQueries {
+  'reduced-motion': string
+  'high-contrast': string
+  'dark-mode': string
+}
+
+/** Orientation for list navigation */
+export type NavigationOrientation = 'vertical' | 'horizontal'
+
+/** Options for list navigation */
+export interface ListNavigationOptions {
+  /** Navigation orientation (vertical uses up/down, horizontal uses left/right) */
+  orientation?: NavigationOrientation
+  /** Whether to wrap around when reaching the end */
+  wrap?: boolean
+  /** Callback when an item is selected (Enter or Space) */
+  onSelect?: (element: Element, index: number) => void
+}
+
+/** Callback for preference changes */
+export type PreferenceChangeCallback = (matches: boolean) => void
+
+/** Cleanup function returned by event listeners */
+export type CleanupFunction = () => void
+
+/** Axe-core rule configuration */
+export interface AxeRule {
+  id: string
+  enabled: boolean
+}
+
+/** Axe-core configuration options */
+export interface AxeConfig {
+  rules: AxeRule[]
+}
+
+/** Default export interface */
+export interface AccessibilityModule {
+  init: () => Promise<void>
+  announce: (message: string, priority?: AnnouncePriority) => void
+  announceLoaded: (section: string) => void
+  announceError: (error: string) => void
+  announceSuccess: (action: string) => void
+  announceNavigation: (section: string) => void
+  focusMain: () => void
+  trapFocus: (container: HTMLElement) => CleanupFunction
+  restoreFocus: (element: HTMLElement | null) => void
+  prefersReducedMotion: () => boolean
+  prefersHighContrast: () => boolean
+  prefersDarkMode: () => boolean
+  onPreferenceChange: (preference: PreferenceType, callback: PreferenceChangeCallback) => CleanupFunction
+  enableListNavigation: (
+    container: HTMLElement,
+    itemSelector: string,
+    options?: ListNavigationOptions
+  ) => CleanupFunction
+  generateId: (prefix?: string) => string
+  isAccessiblyHidden: (element: HTMLElement | null) => boolean
+}
+
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
+
 // Inicializar axe-core solo en desarrollo
 let axeInitialized = false
 
 /**
  * Inicializa axe-core para auditoría de accesibilidad en desarrollo
  */
-export async function initAccessibilityAudit() {
+export async function initAccessibilityAudit(): Promise<void> {
   if (import.meta.env.PROD || axeInitialized) return
 
   try {
@@ -22,7 +97,7 @@ export async function initAccessibilityAudit() {
     const React = await import('react')
     const ReactDOM = await import('react-dom')
 
-    axe.default(React.default, ReactDOM.default, 1000, {
+    const config: AxeConfig = {
       // Configuración de reglas WCAG AA
       rules: [
         { id: 'color-contrast', enabled: true },
@@ -36,7 +111,9 @@ export async function initAccessibilityAudit() {
         { id: 'aria-roles', enabled: true },
         { id: 'tabindex', enabled: true }
       ]
-    })
+    }
+
+    axe.default(React.default, ReactDOM.default, 1000, config)
 
     axeInitialized = true
     console.log('[A11y] Auditoría de accesibilidad activada')
@@ -49,12 +126,12 @@ export async function initAccessibilityAudit() {
 // ARIA LIVE ANNOUNCEMENTS
 // =============================================================================
 
-let liveRegion = null
+let liveRegion: HTMLDivElement | null = null
 
 /**
  * Crea o obtiene la región aria-live para anuncios
  */
-function getLiveRegion() {
+function getLiveRegion(): HTMLDivElement {
   if (liveRegion && document.body.contains(liveRegion)) {
     return liveRegion
   }
@@ -83,10 +160,10 @@ function getLiveRegion() {
 
 /**
  * Anuncia un mensaje a lectores de pantalla
- * @param {string} message - Mensaje a anunciar
- * @param {'polite'|'assertive'} priority - Prioridad del anuncio
+ * @param message - Mensaje a anunciar
+ * @param priority - Prioridad del anuncio
  */
-export function announce(message, priority = 'polite') {
+export function announce(message: string, priority: AnnouncePriority = 'polite'): void {
   const region = getLiveRegion()
   region.setAttribute('aria-live', priority)
 
@@ -108,33 +185,33 @@ export function announce(message, priority = 'polite') {
 
 /**
  * Anuncia carga completada
- * @param {string} section - Sección que se cargó
+ * @param section - Sección que se cargó
  */
-export function announceLoaded(section) {
+export function announceLoaded(section: string): void {
   announce(`${section} cargado correctamente`)
 }
 
 /**
  * Anuncia un error
- * @param {string} error - Mensaje de error
+ * @param error - Mensaje de error
  */
-export function announceError(error) {
+export function announceError(error: string): void {
   announce(`Error: ${error}`, 'assertive')
 }
 
 /**
  * Anuncia éxito de una acción
- * @param {string} action - Descripción de la acción
+ * @param action - Descripción de la acción
  */
-export function announceSuccess(action) {
+export function announceSuccess(action: string): void {
   announce(`${action} completado con éxito`)
 }
 
 /**
  * Anuncia navegación a una nueva sección
- * @param {string} section - Nombre de la sección
+ * @param section - Nombre de la sección
  */
-export function announceNavigation(section) {
+export function announceNavigation(section: string): void {
   announce(`Navegando a ${section}`)
 }
 
@@ -142,11 +219,14 @@ export function announceNavigation(section) {
 // FOCUS MANAGEMENT
 // =============================================================================
 
+/** Selector for focusable elements */
+const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+
 /**
  * Mueve el foco al contenido principal
  */
-export function focusMain() {
-  const main = document.querySelector('main, [role="main"], #main-content')
+export function focusMain(): void {
+  const main = document.querySelector<HTMLElement>('main, [role="main"], #main-content')
   if (main) {
     main.setAttribute('tabindex', '-1')
     main.focus()
@@ -156,18 +236,16 @@ export function focusMain() {
 
 /**
  * Atrapa el foco dentro de un elemento (para modales)
- * @param {HTMLElement} container - Contenedor donde atrapar el foco
- * @returns {Function} Función para liberar el foco
+ * @param container - Contenedor donde atrapar el foco
+ * @returns Función para liberar el foco
  */
-export function trapFocus(container) {
-  const focusableElements = container.querySelectorAll(
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-  )
+export function trapFocus(container: HTMLElement): CleanupFunction {
+  const focusableElements = container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
 
-  const firstFocusable = focusableElements[0]
-  const lastFocusable = focusableElements[focusableElements.length - 1]
+  const firstFocusable = focusableElements[0] as HTMLElement | undefined
+  const lastFocusable = focusableElements[focusableElements.length - 1] as HTMLElement | undefined
 
-  const handleKeydown = (e) => {
+  const handleKeydown = (e: KeyboardEvent): void => {
     if (e.key !== 'Tab') return
 
     if (e.shiftKey && document.activeElement === firstFocusable) {
@@ -189,9 +267,9 @@ export function trapFocus(container) {
 
 /**
  * Restaura el foco a un elemento previo
- * @param {HTMLElement} element - Elemento donde restaurar el foco
+ * @param element - Elemento donde restaurar el foco
  */
-export function restoreFocus(element) {
+export function restoreFocus(element: HTMLElement | null): void {
   if (element && typeof element.focus === 'function') {
     element.focus()
   }
@@ -203,44 +281,47 @@ export function restoreFocus(element) {
 
 /**
  * Detecta si el usuario prefiere movimiento reducido
- * @returns {boolean}
+ * @returns true si el usuario prefiere movimiento reducido
  */
-export function prefersReducedMotion() {
+export function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 /**
  * Detecta si el usuario prefiere alto contraste
- * @returns {boolean}
+ * @returns true si el usuario prefiere alto contraste
  */
-export function prefersHighContrast() {
+export function prefersHighContrast(): boolean {
   return window.matchMedia('(prefers-contrast: more)').matches ||
          window.matchMedia('(-ms-high-contrast: active)').matches
 }
 
 /**
  * Detecta si el usuario prefiere modo oscuro
- * @returns {boolean}
+ * @returns true si el usuario prefiere modo oscuro
  */
-export function prefersDarkMode() {
+export function prefersDarkMode(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
 /**
  * Escucha cambios en preferencias del usuario
- * @param {string} preference - 'reduced-motion' | 'high-contrast' | 'dark-mode'
- * @param {Function} callback - Función a ejecutar cuando cambia
- * @returns {Function} Función para remover el listener
+ * @param preference - Tipo de preferencia a observar
+ * @param callback - Función a ejecutar cuando cambia
+ * @returns Función para remover el listener
  */
-export function onPreferenceChange(preference, callback) {
-  const queries = {
+export function onPreferenceChange(
+  preference: PreferenceType,
+  callback: PreferenceChangeCallback
+): CleanupFunction {
+  const queries: PreferenceQueries = {
     'reduced-motion': '(prefers-reduced-motion: reduce)',
     'high-contrast': '(prefers-contrast: more)',
     'dark-mode': '(prefers-color-scheme: dark)'
   }
 
   const query = window.matchMedia(queries[preference])
-  const handler = (e) => callback(e.matches)
+  const handler = (e: MediaQueryListEvent): void => callback(e.matches)
 
   query.addEventListener('change', handler)
   return () => query.removeEventListener('change', handler)
@@ -252,22 +333,27 @@ export function onPreferenceChange(preference, callback) {
 
 /**
  * Habilita navegación por teclado en una lista
- * @param {HTMLElement} container - Contenedor de la lista
- * @param {string} itemSelector - Selector de items
- * @param {object} options - Opciones de configuración
+ * @param container - Contenedor de la lista
+ * @param itemSelector - Selector de items
+ * @param options - Opciones de configuración
+ * @returns Función para deshabilitar la navegación
  */
-export function enableListNavigation(container, itemSelector, options = {}) {
+export function enableListNavigation(
+  container: HTMLElement,
+  itemSelector: string,
+  options: ListNavigationOptions = {}
+): CleanupFunction {
   const {
     orientation = 'vertical',
     wrap = true,
     onSelect = () => {}
   } = options
 
-  const getItems = () => Array.from(container.querySelectorAll(itemSelector))
+  const getItems = (): HTMLElement[] => Array.from(container.querySelectorAll<HTMLElement>(itemSelector))
 
-  const handleKeydown = (e) => {
+  const handleKeydown = (e: KeyboardEvent): void => {
     const items = getItems()
-    const currentIndex = items.indexOf(document.activeElement)
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement)
 
     let nextIndex = currentIndex
 
@@ -314,19 +400,19 @@ export function enableListNavigation(container, itemSelector, options = {}) {
 
 /**
  * Genera un ID único para atributos ARIA
- * @param {string} prefix - Prefijo del ID
- * @returns {string}
+ * @param prefix - Prefijo del ID
+ * @returns ID único
  */
-export function generateId(prefix = 'a11y') {
+export function generateId(prefix: string = 'a11y'): string {
   return `${prefix}-${Math.random().toString(36).substr(2, 9)}`
 }
 
 /**
  * Verifica si un elemento es visible para screen readers
- * @param {HTMLElement} element - Elemento a verificar
- * @returns {boolean}
+ * @param element - Elemento a verificar
+ * @returns true si el elemento está oculto para screen readers
  */
-export function isAccessiblyHidden(element) {
+export function isAccessiblyHidden(element: HTMLElement | null): boolean {
   if (!element) return true
 
   const style = window.getComputedStyle(element)
@@ -339,7 +425,11 @@ export function isAccessiblyHidden(element) {
   )
 }
 
-export default {
+// =============================================================================
+// DEFAULT EXPORT
+// =============================================================================
+
+const accessibilityModule: AccessibilityModule = {
   init: initAccessibilityAudit,
   announce,
   announceLoaded,
@@ -357,3 +447,5 @@ export default {
   generateId,
   isAccessiblyHidden
 }
+
+export default accessibilityModule

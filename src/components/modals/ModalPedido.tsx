@@ -1,6 +1,84 @@
-import React, { useState, useMemo, memo } from 'react';
+import React, { useState, useMemo, memo, MouseEvent } from 'react';
 import { X, Loader2, Search } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
+import type { ProductoDB, ClienteDB } from '../../types';
+
+/** Item en el pedido */
+export interface PedidoItem {
+  productoId: string;
+  cantidad: number;
+  precioUnitario: number;
+}
+
+/** Estado del nuevo pedido */
+export interface NuevoPedidoState {
+  clienteId: string;
+  items: PedidoItem[];
+  notas: string;
+  formaPago?: string;
+  estadoPago?: string;
+  montoPagado?: number;
+}
+
+/** Datos del cliente a crear */
+export interface NuevoClienteData {
+  nombre: string;
+  nombreFantasia: string;
+  direccion: string;
+  telefono: string;
+  zona: string;
+}
+
+/** Advertencia de stock */
+export interface StockWarning {
+  tipo: 'error' | 'warning';
+  mensaje: string;
+}
+
+/** Categoria option type - can be string or object */
+export type CategoriaOption = string | { id: string; nombre: string; descripcion?: string };
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** Props del componente ModalPedido */
+export interface ModalPedidoProps {
+  /** Lista de productos disponibles */
+  productos: ProductoDB[];
+  /** Lista de clientes */
+  clientes: ClienteDB[];
+  /** Categorías disponibles */
+  categorias: string[] | CategoriaOption[];
+  /** Estado del nuevo pedido */
+  nuevoPedido: NuevoPedidoState;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Callback al cambiar cliente */
+  onClienteChange: (clienteId: string) => void;
+  /** Callback al agregar item */
+  onAgregarItem: (productoId: string, cantidad?: number, precio?: number) => void;
+  /** Callback al actualizar cantidad */
+  onActualizarCantidad: (productoId: string, cantidad: number) => void;
+  /** Callback al crear cliente */
+  onCrearCliente: (cliente: any) => Promise<any>;
+  /** Callback al guardar pedido */
+  onGuardar: () => void | Promise<void>;
+  /** Indica si está guardando */
+  guardando: boolean;
+  /** Si es admin */
+  isAdmin?: boolean;
+  /** Si es preventista */
+  isPreventista?: boolean;
+  /** Callback al cambiar notas */
+  onNotasChange?: (notas: string) => void;
+  /** Callback al cambiar forma de pago */
+  onFormaPagoChange?: (formaPago: string) => void;
+  /** Callback al cambiar estado de pago */
+  onEstadoPagoChange?: (estadoPago: string) => void;
+  /** Callback al cambiar monto pagado */
+  onMontoPagadoChange?: (monto: number) => void;
+  /** Si está offline */
+  isOffline?: boolean;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 const ModalPedido = memo(function ModalPedido({
   productos,
@@ -20,13 +98,13 @@ const ModalPedido = memo(function ModalPedido({
   onFormaPagoChange,
   onEstadoPagoChange,
   onMontoPagadoChange
-}) {
-  const [busquedaProducto, setBusquedaProducto] = useState('');
-  const [busquedaCliente, setBusquedaCliente] = useState('');
-  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('');
-  const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState(false);
-  const [nuevoCliente, setNuevoCliente] = useState({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
-  const [guardandoCliente, setGuardandoCliente] = useState(false);
+}: ModalPedidoProps) {
+  const [busquedaProducto, setBusquedaProducto] = useState<string>('');
+  const [busquedaCliente, setBusquedaCliente] = useState<string>('');
+  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
+  const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
+  const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
+  const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
 
   const productosFiltrados = useMemo(() => {
     return productos.filter(p => {
@@ -50,13 +128,11 @@ const ModalPedido = memo(function ModalPedido({
 
   const clienteSeleccionado = useMemo(() => {
     if (!nuevoPedido.clienteId) return null;
-    const id = typeof nuevoPedido.clienteId === 'number'
-      ? nuevoPedido.clienteId
-      : parseInt(nuevoPedido.clienteId, 10);
-    return Number.isNaN(id) ? null : clientes.find(c => c.id === id);
+    // clienteId is a string, compare directly with string id
+    return clientes.find(c => String(c.id) === String(nuevoPedido.clienteId)) || null;
   }, [clientes, nuevoPedido.clienteId]);
 
-  const handleCrearClienteRapido = async () => {
+  const handleCrearClienteRapido = async (): Promise<void> => {
     const nombre = nuevoCliente.nombre?.trim();
     const nombreFantasia = nuevoCliente.nombreFantasia?.trim();
     const direccion = nuevoCliente.direccion?.trim();
@@ -73,7 +149,7 @@ const ModalPedido = memo(function ModalPedido({
     setGuardandoCliente(false);
   };
 
-  const getStockWarning = (productoId, cantidadEnPedido) => {
+  const getStockWarning = (productoId: string, cantidadEnPedido: number): StockWarning | null => {
     const producto = productos.find(p => p.id === productoId);
     if (!producto) return null;
     const stockDisponible = producto.stock - cantidadEnPedido;
@@ -83,7 +159,7 @@ const ModalPedido = memo(function ModalPedido({
     return null;
   };
 
-  const calcularTotal = () => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
+  const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -226,19 +302,23 @@ const ModalPedido = memo(function ModalPedido({
                 >
                   Todos
                 </button>
-                {categorias.map(cat => (
-                  <button
-                    key={cat}
-                    onClick={() => setCategoriaSeleccionada(cat)}
-                    className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                      categoriaSeleccionada === cat
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
+                {categorias.map((cat) => {
+                  const catValue = typeof cat === 'string' ? cat : cat.nombre;
+                  const catKey = typeof cat === 'string' ? cat : cat.id;
+                  return (
+                    <button
+                      key={catKey}
+                      onClick={() => setCategoriaSeleccionada(catValue)}
+                      className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                        categoriaSeleccionada === catValue
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {catValue}
+                    </button>
+                  );
+                })}
               </div>
             )}
 

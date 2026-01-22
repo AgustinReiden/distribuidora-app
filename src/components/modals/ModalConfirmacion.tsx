@@ -1,21 +1,36 @@
 import React, { memo, useId } from 'react';
-import PropTypes from 'prop-types';
 import { Trash2, AlertTriangle, Check } from 'lucide-react';
+
+/** Tipos de modal de confirmación */
+export type ModalConfirmacionTipo = 'danger' | 'warning' | 'success';
+
+/** Configuración del modal de confirmación */
+export interface ModalConfirmacionConfig {
+  /** Si el modal está visible */
+  visible: boolean;
+  /** Tipo de modal que determina colores e icono */
+  tipo: ModalConfirmacionTipo;
+  /** Título del modal */
+  titulo: string;
+  /** Mensaje descriptivo */
+  mensaje: string;
+  /** Callback ejecutado al confirmar */
+  onConfirm: () => void;
+}
+
+/** Props del componente ModalConfirmacion */
+export interface ModalConfirmacionProps {
+  /** Configuración del modal */
+  config: ModalConfirmacionConfig | null;
+  /** Callback ejecutado al cerrar o cancelar */
+  onClose: () => void;
+}
 
 /**
  * Modal de confirmación reutilizable
  * Soporta tipos: danger (eliminar), warning (advertencia), success (éxito)
- *
- * @param {Object} props
- * @param {Object} props.config - Configuración del modal
- * @param {boolean} props.config.visible - Si el modal está visible
- * @param {string} props.config.tipo - Tipo de modal: 'danger' | 'warning' | 'success'
- * @param {string} props.config.titulo - Título del modal
- * @param {string} props.config.mensaje - Mensaje descriptivo
- * @param {Function} props.config.onConfirm - Callback al confirmar
- * @param {Function} props.onClose - Callback al cerrar/cancelar
  */
-const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }) {
+const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: ModalConfirmacionProps) {
   const titleId = useId();
   const descId = useId();
 
@@ -80,23 +95,5 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }) {
     </div>
   );
 });
-
-ModalConfirmacion.propTypes = {
-  /** Configuración del modal */
-  config: PropTypes.shape({
-    /** Si el modal está visible */
-    visible: PropTypes.bool,
-    /** Tipo de modal que determina colores e icono */
-    tipo: PropTypes.oneOf(['danger', 'warning', 'success']),
-    /** Título del modal */
-    titulo: PropTypes.string,
-    /** Mensaje descriptivo */
-    mensaje: PropTypes.string,
-    /** Callback ejecutado al confirmar */
-    onConfirm: PropTypes.func
-  }),
-  /** Callback ejecutado al cerrar o cancelar */
-  onClose: PropTypes.func.isRequired
-};
 
 export default ModalConfirmacion;

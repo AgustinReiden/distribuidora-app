@@ -1,8 +1,70 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, ChangeEvent } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, Package, MapPin, AlertTriangle, FileText } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import { useReportesFinancieros } from '../../hooks/supabase';
+import type {
+  ClienteDB,
+  ReportePreventista,
+  ReporteCuentaPorCobrar,
+  ReporteRentabilidad,
+  VentaPorCliente,
+  VentaPorZona,
+  TotalesRentabilidad
+} from '../../types';
+
+// =============================================================================
+// INTERFACES DE PROPS
+// =============================================================================
+
+export interface VistaReportesProps {
+  reportePreventistas: ReportePreventista[];
+  reporteInicializado: boolean;
+  loading: boolean;
+  onCalcularReporte: (fechaDesde: string | null, fechaHasta: string | null) => Promise<void>;
+  onVerFichaCliente?: (cliente: ClienteDB) => void;
+}
+
+interface TabConfig {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface ReportePreventistasProps {
+  reportePreventistas: ReportePreventista[];
+  loading: boolean;
+  formatPrecio: (precio: number) => string;
+}
+
+interface ReporteCuentasPorCobrarProps {
+  reporte: ReporteCuentaPorCobrar[];
+  loading: boolean;
+  formatPrecio: (precio: number) => string;
+  onVerCliente?: (cliente: ClienteDB) => void;
+}
+
+interface ReporteRentabilidadProps {
+  reporte: ReporteRentabilidad;
+  loading: boolean;
+  formatPrecio: (precio: number) => string;
+}
+
+interface ReporteVentasClientesProps {
+  reporte: VentaPorCliente[];
+  loading: boolean;
+  formatPrecio: (precio: number) => string;
+  onVerCliente?: (cliente: ClienteDB | null) => void;
+}
+
+interface ReporteVentasZonasProps {
+  reporte: VentaPorZona[];
+  loading: boolean;
+  formatPrecio: (precio: number) => string;
+}
+
+type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas';
 
 export default function VistaReportes({
   reportePreventistas,
@@ -10,10 +72,10 @@ export default function VistaReportes({
   loading,
   onCalcularReporte,
   onVerFichaCliente
-}) {
-  const [fechaDesde, setFechaDesde] = useState('');
-  const [fechaHasta, setFechaHasta] = useState('');
-  const [activeTab, setActiveTab] = useState('preventistas');
+}: VistaReportesProps) {
+  const [fechaDesde, setFechaDesde] = useState<string>('');
+  const [fechaHasta, setFechaHasta] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<ReportTabId>('preventistas');
 
   // Reportes financieros
   const {
@@ -24,10 +86,10 @@ export default function VistaReportes({
     generarReporteVentasPorZona
   } = useReportesFinancieros();
 
-  const [reporteCuentas, setReporteCuentas] = useState([]);
-  const [reporteRentabilidad, setReporteRentabilidad] = useState({ productos: [], totales: {} });
-  const [reporteClientes, setReporteClientes] = useState([]);
-  const [reporteZonas, setReporteZonas] = useState([]);
+  const [reporteCuentas, setReporteCuentas] = useState<ReporteCuentaPorCobrar[]>([]);
+  const [reporteRentabilidad, setReporteRentabilidad] = useState<ReporteRentabilidad>({ productos: [], totales: {} as TotalesRentabilidad });
+  const [reporteClientes, setReporteClientes] = useState<VentaPorCliente[]>([]);
+  const [reporteZonas, setReporteZonas] = useState<VentaPorZona[]>([]);
 
   // Cargar reporte automáticamente solo la primera vez
   useEffect(() => {
@@ -36,17 +98,17 @@ export default function VistaReportes({
     }
   }, [reporteInicializado, loading, onCalcularReporte]);
 
-  const handleGenerarReporte = async () => {
+  const handleGenerarReporte = async (): Promise<void> => {
     await onCalcularReporte(fechaDesde || null, fechaHasta || null);
   };
 
-  const handleLimpiarFiltros = async () => {
+  const handleLimpiarFiltros = async (): Promise<void> => {
     setFechaDesde('');
     setFechaHasta('');
     await onCalcularReporte(null, null);
   };
 
-  const handleCargarReporteFinanciero = async (tipo) => {
+  const handleCargarReporteFinanciero = async (tipo: ReportTabId): Promise<void> => {
     switch (tipo) {
       case 'cuentas': {
         const cuentas = await generarReporteCuentasPorCobrar();
@@ -78,7 +140,7 @@ export default function VistaReportes({
     if (activeTab === 'zonas' && reporteZonas.length === 0) handleCargarReporteFinanciero('zonas');
   }, [activeTab]);
 
-  const tabs = [
+  const tabs: TabConfig[] = [
     { id: 'preventistas', label: 'Por Preventista', icon: Users },
     { id: 'cuentas', label: 'Cuentas por Cobrar', icon: DollarSign },
     { id: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
@@ -95,7 +157,7 @@ export default function VistaReportes({
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => setActiveTab(tab.id as ReportTabId)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === tab.id
                 ? 'bg-blue-600 text-white'
@@ -118,7 +180,7 @@ export default function VistaReportes({
               id="fecha-desde"
               type="date"
               value={fechaDesde}
-              onChange={e => setFechaDesde(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setFechaDesde(e.target.value)}
               className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -128,7 +190,7 @@ export default function VistaReportes({
               id="fecha-hasta"
               type="date"
               value={fechaHasta}
-              onChange={e => setFechaHasta(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setFechaHasta(e.target.value)}
               className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -176,7 +238,7 @@ export default function VistaReportes({
       )}
 
       {activeTab === 'rentabilidad' && (
-        <ReporteRentabilidad
+        <ReporteRentabilidadSection
           reporte={reporteRentabilidad}
           loading={loadingFinanciero}
           formatPrecio={formatPrecio}
@@ -203,7 +265,7 @@ export default function VistaReportes({
   );
 }
 
-function ReportePreventistas({ reportePreventistas, loading, formatPrecio }) {
+function ReportePreventistas({ reportePreventistas, loading, formatPrecio }: ReportePreventistasProps) {
   if (loading) return <LoadingSpinner />;
 
   if (reportePreventistas.length === 0) {
@@ -255,7 +317,7 @@ function ReportePreventistas({ reportePreventistas, loading, formatPrecio }) {
   );
 }
 
-function ReporteCuentasPorCobrar({ reporte, loading, formatPrecio, onVerCliente }) {
+function ReporteCuentasPorCobrar({ reporte, loading, formatPrecio, onVerCliente }: ReporteCuentasPorCobrarProps) {
   if (loading) return <LoadingSpinner />;
 
   // Totales por aging
@@ -340,7 +402,7 @@ function ReporteCuentasPorCobrar({ reporte, loading, formatPrecio, onVerCliente 
   );
 }
 
-function ReporteRentabilidad({ reporte, loading, formatPrecio }) {
+function ReporteRentabilidadSection({ reporte, loading, formatPrecio }: ReporteRentabilidadProps): React.ReactElement {
   if (loading) return <LoadingSpinner />;
 
   const { productos, totales } = reporte;
@@ -412,7 +474,7 @@ function ReporteRentabilidad({ reporte, loading, formatPrecio }) {
   );
 }
 
-function ReporteVentasClientes({ reporte, loading, formatPrecio, onVerCliente }) {
+function ReporteVentasClientes({ reporte, loading, formatPrecio, onVerCliente }: ReporteVentasClientesProps): React.ReactElement {
   if (loading) return <LoadingSpinner />;
 
   if (reporte.length === 0) {
@@ -475,7 +537,7 @@ function ReporteVentasClientes({ reporte, loading, formatPrecio, onVerCliente })
   );
 }
 
-function ReporteVentasZonas({ reporte, loading, formatPrecio }) {
+function ReporteVentasZonas({ reporte, loading, formatPrecio }: ReporteVentasZonasProps): React.ReactElement {
   if (loading) return <LoadingSpinner />;
 
   if (reporte.length === 0) {

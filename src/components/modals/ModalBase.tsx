@@ -9,7 +9,7 @@
  * - aria-describedby vinculado a la descripción (accesibilidad)
  * - Devuelve el foco al elemento que abrió el modal
  */
-import React, { memo } from 'react';
+import React, { memo, ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,32 @@ import {
 } from '../ui/Dialog';
 import { cn } from '../../lib/utils';
 
-const MAX_WIDTH_MAP = {
+export type ModalMaxWidth =
+  | 'max-w-sm'
+  | 'max-w-md'
+  | 'max-w-lg'
+  | 'max-w-xl'
+  | 'max-w-2xl'
+  | 'max-w-3xl'
+  | 'max-w-4xl'
+  | 'max-w-5xl';
+
+export interface ModalBaseProps {
+  /** Contenido del modal */
+  children: ReactNode;
+  /** Callback ejecutado al cerrar el modal */
+  onClose: () => void;
+  /** Título del modal */
+  title: string;
+  /** Descripción opcional para accesibilidad */
+  description?: string;
+  /** Ancho máximo del modal */
+  maxWidth?: ModalMaxWidth;
+  /** Clases CSS adicionales */
+  className?: string;
+}
+
+const MAX_WIDTH_MAP: Record<ModalMaxWidth, string> = {
   'max-w-sm': 'max-w-sm',
   'max-w-md': 'max-w-md',
   'max-w-lg': 'max-w-lg',
@@ -38,7 +63,7 @@ const ModalBase = memo(function ModalBase({
   description,
   maxWidth = 'max-w-md',
   className
-}) {
+}: ModalBaseProps) {
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
       <DialogContent

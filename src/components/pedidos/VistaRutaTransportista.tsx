@@ -4,16 +4,45 @@
 import React, { useState, useMemo, memo } from 'react';
 import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
+import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB } from '../../types';
 
-// Componente de tarjeta de entrega para transportista
-function EntregaRutaCard({ pedido, orden, onMarcarEntregado }) {
-  const [expandido, setExpandido] = useState(false);
+// =============================================================================
+// INTERFACES DE PROPS Y TIPOS
+// =============================================================================
 
-  const estadoPagoColors = {
+export interface VistaRutaTransportistaProps {
+  pedidos: PedidoDB[] | null;
+  onMarcarEntregado: (pedido: PedidoDB) => void;
+  userId: string;
+  clientes: ClienteDB[];
+  productos: ProductoDB[];
+}
+
+interface PedidoEnriquecido extends PedidoDB {
+  cliente: ClienteDB | null;
+  items: Array<PedidoItemDB & { producto: ProductoDB | null }>;
+}
+
+interface EntregaRutaCardProps {
+  pedido: PedidoEnriquecido;
+  orden: number;
+  onMarcarEntregado: (pedido: PedidoEnriquecido) => void;
+}
+
+// =============================================================================
+// COMPONENTE: EntregaRutaCard
+// =============================================================================
+
+function EntregaRutaCard({ pedido, orden, onMarcarEntregado }: EntregaRutaCardProps): React.ReactElement {
+  const [expandido, setExpandido] = useState<boolean>(false);
+
+  const estadoPagoColors: Record<string, string> = {
     pagado: 'bg-green-100 text-green-700 border-green-200',
     parcial: 'bg-yellow-100 text-yellow-700 border-yellow-200',
     pendiente: 'bg-red-100 text-red-700 border-red-200'
   };
+
+  const estadoPago = pedido.estado_pago || 'pendiente';
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-xl border shadow-sm ${
@@ -40,8 +69,8 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado }) {
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Pedido #{pedido.id}</p>
               </div>
-              <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${estadoPagoColors[pedido.estado_pago] || estadoPagoColors.pendiente}`}>
-                {pedido.estado_pago === 'pagado' ? 'PAGADO' : pedido.estado_pago === 'parcial' ? 'PARCIAL' : 'PEND'}
+              <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${estadoPagoColors[estadoPago] || estadoPagoColors.pendiente}`}>
+                {estadoPago === 'pagado' ? 'PAGADO' : estadoPago === 'parcial' ? 'PARCIAL' : 'PEND'}
               </span>
             </div>
 
@@ -73,7 +102,7 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado }) {
                 {formatPrecio(pedido.total)}
               </span>
               <span className="text-sm text-gray-500 dark:text-gray-400">
-                {getFormaPagoLabel(pedido.forma_pago)}
+                {getFormaPagoLabel(pedido.forma_pago || '')}
               </span>
             </div>
           </div>
@@ -141,24 +170,34 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado }) {
   );
 }
 
-function VistaRutaTransportista({ pedidos, onMarcarEntregado, userId, clientes, productos }) {
+// =============================================================================
+// COMPONENTE PRINCIPAL
+// =============================================================================
+
+function VistaRutaTransportista({
+  pedidos,
+  onMarcarEntregado,
+  userId,
+  clientes,
+  productos
+}: VistaRutaTransportistaProps): React.ReactElement {
   // Enriquecer pedidos con datos de clientes y productos
-  const pedidosEnriquecidos = useMemo(() => {
+  const pedidosEnriquecidos = useMemo<PedidoEnriquecido[]>(() => {
     if (!pedidos) return [];
 
     return pedidos.map(pedido => {
-      let cliente = null;
+      let cliente: ClienteDB | null = null;
       if (pedido.cliente_id && clientes && clientes.length > 0) {
-        cliente = clientes.find(c => c.id === pedido.cliente_id);
+        cliente = clientes.find(c => c.id === pedido.cliente_id) || null;
       }
       if (!cliente && pedido.cliente && pedido.cliente.nombre_fantasia) {
         cliente = pedido.cliente;
       }
 
-      const itemsEnriquecidos = pedido.items?.map(item => {
-        let producto = null;
+      const itemsEnriquecidos = (pedido.items || []).map(item => {
+        let producto: ProductoDB | null = null;
         if (item.producto_id && productos && productos.length > 0) {
-          producto = productos.find(p => p.id === item.producto_id);
+          producto = productos.find(p => p.id === item.producto_id) || null;
         }
         if (!producto && item.producto && item.producto.nombre) {
           producto = item.producto;
@@ -166,12 +205,12 @@ function VistaRutaTransportista({ pedidos, onMarcarEntregado, userId, clientes, 
         return { ...item, producto };
       });
 
-      return { ...pedido, cliente, items: itemsEnriquecidos };
+      return { ...pedido, cliente, items: itemsEnriquecidos } as PedidoEnriquecido;
     });
   }, [pedidos, clientes, productos]);
 
   // Filtrar solo pedidos asignados a este transportista y ordenar
-  const pedidosOrdenados = useMemo(() => {
+  const pedidosOrdenados = useMemo<PedidoEnriquecido[]>(() => {
     return pedidosEnriquecidos
       .filter(p =>
         (p.estado === 'asignado' || p.estado === 'entregado') &&
@@ -188,6 +227,10 @@ function VistaRutaTransportista({ pedidos, onMarcarEntregado, userId, clientes, 
   const entregasCompletadas = pedidosOrdenados.filter(p => p.estado === 'entregado').length;
   const totalACobrar = pedidosOrdenados.filter(p => p.estado === 'asignado').reduce((sum, p) => sum + (p.total || 0), 0);
   const totalPendienteCobro = pedidosOrdenados.filter(p => p.estado === 'asignado' && p.estado_pago !== 'pagado').reduce((sum, p) => sum + (p.total || 0), 0);
+
+  const handleMarcarEntregado = (pedido: PedidoEnriquecido): void => {
+    onMarcarEntregado(pedido as PedidoDB);
+  };
 
   if (pedidosOrdenados.length === 0) {
     return (
@@ -261,7 +304,7 @@ function VistaRutaTransportista({ pedidos, onMarcarEntregado, userId, clientes, 
               key={pedido.id}
               pedido={pedido}
               orden={pedido.orden_entrega || index + 1}
-              onMarcarEntregado={onMarcarEntregado}
+              onMarcarEntregado={handleMarcarEntregado}
             />
           ))}
         </div>

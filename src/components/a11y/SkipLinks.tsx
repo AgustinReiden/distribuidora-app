@@ -6,16 +6,25 @@
  *
  * WCAG 2.1 - 2.4.1 Bypass Blocks (Level A)
  */
-import { useCallback } from 'react'
+import { useCallback, MouseEvent } from 'react'
 
-const SKIP_TARGETS = [
+interface SkipTarget {
+  id: string;
+  label: string;
+}
+
+const SKIP_TARGETS: SkipTarget[] = [
   { id: 'main-content', label: 'Ir al contenido principal' },
   { id: 'main-navigation', label: 'Ir a la navegación' },
   { id: 'search-input', label: 'Ir a búsqueda' }
 ]
 
-export function SkipLinks({ targets = SKIP_TARGETS }) {
-  const handleClick = useCallback((e, targetId) => {
+export interface SkipLinksProps {
+  targets?: SkipTarget[];
+}
+
+export function SkipLinks({ targets = SKIP_TARGETS }: SkipLinksProps) {
+  const handleClick = useCallback((e: MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault()
 
     const target = document.getElementById(targetId)

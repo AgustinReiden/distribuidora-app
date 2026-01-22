@@ -1,11 +1,73 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, RefObject } from 'react';
 import { Bell, X, Check, AlertTriangle, Info, CheckCircle, Trash2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { getStorageItem, setStorageItem } from '../../utils/storage';
 
-// Hook para manejar notificaciones persistentes
-export function useNotifications() {
-  const [notifications, setNotifications] = useState(() => {
+// =============================================================================
+// INTERFACES Y TIPOS
+// =============================================================================
+
+export type NotificationType = 'success' | 'error' | 'warning' | 'info';
+
+export interface Notification {
+  id: number;
+  type: NotificationType;
+  title: string;
+  message?: string;
+  timestamp: string;
+  read: boolean;
+}
+
+export interface NotificationInput {
+  type: NotificationType;
+  title: string;
+  message?: string;
+}
+
+export interface UseNotificationsReturn {
+  notifications: Notification[];
+  addNotification: (notification: NotificationInput) => void;
+  markAsRead: (id: number) => void;
+  markAllAsRead: () => void;
+  removeNotification: (id: number) => void;
+  clearAll: () => void;
+  unreadCount: number;
+}
+
+export interface NotificationCenterProps {
+  notifications: Notification[];
+  onMarkAsRead: (id: number) => void;
+  onMarkAllAsRead: () => void;
+  onRemove: (id: number) => void;
+  onClearAll: () => void;
+  unreadCount: number;
+}
+
+// =============================================================================
+// CONSTANTES
+// =============================================================================
+
+const iconMap: Record<NotificationType, LucideIcon> = {
+  success: CheckCircle,
+  error: AlertTriangle,
+  warning: AlertTriangle,
+  info: Info
+};
+
+const colorMap: Record<NotificationType, string> = {
+  success: 'text-green-600 bg-green-100 dark:bg-green-900/30',
+  error: 'text-red-600 bg-red-100 dark:bg-red-900/30',
+  warning: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30',
+  info: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30'
+};
+
+// =============================================================================
+// HOOK: useNotifications
+// =============================================================================
+
+export function useNotifications(): UseNotificationsReturn {
+  const [notifications, setNotifications] = useState<Notification[]>(() => {
     const saved = getStorageItem('notifications', []);
     // Validar que sea un array
     return Array.isArray(saved) ? saved : [];
@@ -15,31 +77,31 @@ export function useNotifications() {
     setStorageItem('notifications', notifications);
   }, [notifications]);
 
-  const addNotification = (notification) => {
-    const newNotification = {
+  const addNotification = (notification: NotificationInput): void => {
+    const newNotification: Notification = {
       id: Date.now(),
       timestamp: new Date().toISOString(),
       read: false,
       ...notification
     };
-    setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Máximo 50
+    setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Maximo 50
   };
 
-  const markAsRead = (id) => {
+  const markAsRead = (id: number): void => {
     setNotifications(prev =>
       prev.map(n => n.id === id ? { ...n, read: true } : n)
     );
   };
 
-  const markAllAsRead = () => {
+  const markAllAsRead = (): void => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
-  const removeNotification = (id) => {
+  const removeNotification = (id: number): void => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
-  const clearAll = () => {
+  const clearAll = (): void => {
     setNotifications([]);
   };
 
@@ -56,30 +118,24 @@ export function useNotifications() {
   };
 }
 
-const iconMap = {
-  success: CheckCircle,
-  error: AlertTriangle,
-  warning: AlertTriangle,
-  info: Info
-};
+// =============================================================================
+// UTILIDADES
+// =============================================================================
 
-const colorMap = {
-  success: 'text-green-600 bg-green-100 dark:bg-green-900/30',
-  error: 'text-red-600 bg-red-100 dark:bg-red-900/30',
-  warning: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30',
-  info: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30'
-};
-
-function formatTimeAgo(timestamp) {
+function formatTimeAgo(timestamp: string): string {
   const now = new Date();
   const date = new Date(timestamp);
-  const seconds = Math.floor((now - date) / 1000);
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
   if (seconds < 60) return 'Hace un momento';
   if (seconds < 3600) return `Hace ${Math.floor(seconds / 60)} min`;
   if (seconds < 86400) return `Hace ${Math.floor(seconds / 3600)} h`;
   return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
 }
+
+// =============================================================================
+// COMPONENTE PRINCIPAL
+// =============================================================================
 
 export default function NotificationCenter({
   notifications,
@@ -88,13 +144,13 @@ export default function NotificationCenter({
   onRemove,
   onClearAll,
   unreadCount
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
+}: NotificationCenterProps): React.ReactElement {
+  const [isOpen, setIsOpen] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    const handleClickOutside = (event: MouseEvent): void => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -102,10 +158,14 @@ export default function NotificationCenter({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleToggle = (): void => {
+    setIsOpen(!isOpen);
+  };
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         aria-label={`Notificaciones${unreadCount > 0 ? ` (${unreadCount} sin leer)` : ''}`}
         aria-expanded={isOpen}
@@ -129,7 +189,7 @@ export default function NotificationCenter({
                   onClick={onMarkAllAsRead}
                   className="text-xs text-blue-600 hover:underline"
                 >
-                  Marcar todas leídas
+                  Marcar todas leidas
                 </button>
               )}
               {notifications.length > 0 && (
@@ -184,7 +244,7 @@ export default function NotificationCenter({
                             <button
                               onClick={() => onMarkAsRead(notification.id)}
                               className="p-1 text-gray-400 hover:text-blue-500 transition-colors"
-                              title="Marcar como leída"
+                              title="Marcar como leida"
                             >
                               <Check className="w-4 h-4" />
                             </button>

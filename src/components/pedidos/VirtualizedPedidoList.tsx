@@ -2,28 +2,87 @@
  * Lista virtualizada de pedidos
  *
  * Renderiza eficientemente listas grandes de pedidos usando react-window v2.
- * Recomendado para más de 50 pedidos.
+ * Recomendado para mas de 50 pedidos.
  */
-import React, { memo, useRef, useEffect, useState } from 'react'
+import React, { memo, useRef, useEffect, useState, CSSProperties } from 'react'
 import { List, useDynamicRowHeight, useListRef } from 'react-window'
 import { ShoppingCart } from 'lucide-react'
 import PedidoCard from './PedidoCard'
+import type { PedidoDB } from '../../types'
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
 
 // Altura estimada de cada PedidoCard (colapsada)
 const DEFAULT_ROW_HEIGHT = 180
 
-// Altura mínima del contenedor
+// Altura minima del contenedor
 const MIN_CONTAINER_HEIGHT = 400
 
-// Altura máxima del contenedor
+// Altura maxima del contenedor
 const MAX_CONTAINER_HEIGHT = 800
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+export interface VirtualizedPedidoListProps {
+  pedidos: PedidoDB[];
+  isAdmin?: boolean;
+  isPreventista?: boolean;
+  isTransportista?: boolean;
+  onVerHistorial?: (pedido: PedidoDB) => void;
+  onEditarPedido?: (pedido: PedidoDB) => void;
+  onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
+  onAsignarTransportista?: (pedido: PedidoDB) => void;
+  onMarcarEntregado?: (pedido: PedidoDB) => void;
+  onDesmarcarEntregado?: (pedido: PedidoDB) => void;
+  onEliminarPedido?: (pedidoId: string) => void;
+  height?: number;
+}
+
+interface PedidoRowProps {
+  index: number;
+  style: CSSProperties;
+  ariaAttributes?: Record<string, string>;
+}
+
+interface VirtualizedPedidoListData {
+  pedidos: PedidoDB[];
+  handlers: {
+    onVerHistorial?: (pedido: PedidoDB) => void;
+    onEditarPedido?: (pedido: PedidoDB) => void;
+    onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
+    onAsignarTransportista?: (pedido: PedidoDB) => void;
+    onMarcarEntregado?: (pedido: PedidoDB) => void;
+    onDesmarcarEntregado?: (pedido: PedidoDB) => void;
+    onEliminarPedido?: (pedidoId: string) => void;
+  };
+  permissions: {
+    isAdmin?: boolean;
+    isPreventista?: boolean;
+    isTransportista?: boolean;
+  };
+}
+
+// Extend Window interface for global data storage
+declare global {
+  interface Window {
+    __virtualizedPedidoListData?: VirtualizedPedidoListData;
+  }
+}
+
+// =============================================================================
+// COMPONENTS
+// =============================================================================
 
 /**
  * Componente de fila individual para el virtualizado
  * react-window v2 usa una API diferente para los row components
  */
-const PedidoRow = memo(function PedidoRow({ index, style, ariaAttributes }) {
-  // Los handlers y permisos se pasan vía contexto global
+const PedidoRow = memo(function PedidoRow({ index, style, ariaAttributes }: PedidoRowProps): React.ReactElement | null {
+  // Los handlers y permisos se pasan via contexto global
   // En v2, no hay itemData - usamos un store global
   const { pedidos, handlers, permissions } = window.__virtualizedPedidoListData || {}
 
@@ -70,12 +129,12 @@ function VirtualizedPedidoList({
   onDesmarcarEntregado,
   onEliminarPedido,
   height: propHeight
-}) {
-  const listRef = useListRef()
-  const containerRef = useRef(null)
-  const [containerHeight, setContainerHeight] = useState(propHeight || MAX_CONTAINER_HEIGHT)
+}: VirtualizedPedidoListProps): React.ReactElement {
+  const listRef = useListRef(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerHeight, setContainerHeight] = useState<number>(propHeight || MAX_CONTAINER_HEIGHT)
 
-  // Hook para alturas dinámicas
+  // Hook para alturas dinamicas
   const dynamicRowHeight = useDynamicRowHeight({
     defaultRowHeight: DEFAULT_ROW_HEIGHT,
     key: pedidos.length // Reset cuando cambia la cantidad
@@ -126,7 +185,7 @@ function VirtualizedPedidoList({
       return
     }
 
-    const updateHeight = () => {
+    const updateHeight = (): void => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect()
         const viewportHeight = window.innerHeight
@@ -150,14 +209,17 @@ function VirtualizedPedidoList({
     )
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const TypedList = List as any;
   return (
     <div ref={containerRef} className="virtualized-pedido-list">
-      <List
+      <TypedList
         listRef={listRef}
         defaultHeight={containerHeight}
         rowCount={pedidos.length}
         rowHeight={dynamicRowHeight}
         rowComponent={PedidoRow}
+        rowProps={{}}
         overscanCount={3}
         className="scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
         style={{ maxHeight: containerHeight }}

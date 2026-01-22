@@ -1,10 +1,25 @@
-import React, { useState, memo } from 'react';
+import React, { useState, memo, ChangeEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
+import type { PedidoDB, PerfilDB } from '../../types';
 
-const ModalAsignarTransportista = memo(function ModalAsignarTransportista({ pedido, transportistas, onSave, onClose, guardando }) {
-  const [sel, setSel] = useState(pedido?.transportista_id || '');
-  const [marcarListo, setMarcarListo] = useState(false);
+/** Props del componente ModalAsignarTransportista */
+export interface ModalAsignarTransportistaProps {
+  /** Pedido a asignar */
+  pedido: PedidoDB | null;
+  /** Lista de transportistas disponibles */
+  transportistas: PerfilDB[];
+  /** Callback al guardar */
+  onSave: (transportistaId: string, marcarListo: boolean) => void | Promise<void>;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Indica si está guardando */
+  guardando: boolean;
+}
+
+const ModalAsignarTransportista = memo(function ModalAsignarTransportista({ pedido, transportistas, onSave, onClose, guardando }: ModalAsignarTransportistaProps) {
+  const [sel, setSel] = useState<string>(pedido?.transportista_id || '');
+  const [marcarListo, setMarcarListo] = useState<boolean>(false);
 
   // Verificar si el pedido ya esta en estado 'asignado'
   const yaEstaAsignado = pedido?.estado === 'asignado';

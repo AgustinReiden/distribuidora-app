@@ -1,6 +1,22 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, ChangeEvent } from 'react';
 import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map, FileText, Tag, Building2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import type { ClienteDB } from '../../types';
+
+// =============================================================================
+// INTERFACES DE PROPS
+// =============================================================================
+
+export interface VistaClientesProps {
+  clientes: ClienteDB[];
+  loading: boolean;
+  isAdmin: boolean;
+  isPreventista: boolean;
+  onNuevoCliente: () => void;
+  onEditarCliente: (cliente: ClienteDB) => void;
+  onEliminarCliente: (id: string) => void;
+  onVerFichaCliente?: (cliente: ClienteDB) => void;
+}
 
 export default function VistaClientes({
   clientes,
@@ -11,27 +27,27 @@ export default function VistaClientes({
   onEditarCliente,
   onEliminarCliente,
   onVerFichaCliente
-}) {
-  const [busqueda, setBusqueda] = useState('');
-  const [filtroZona, setFiltroZona] = useState('todas');
+}: VistaClientesProps) {
+  const [busqueda, setBusqueda] = useState<string>('');
+  const [filtroZona, setFiltroZona] = useState<string>('todas');
 
   // Obtener zonas únicas
-  const zonas = useMemo(() => {
-    const zonasSet = new Set(clientes.map(c => c.zona).filter(Boolean));
+  const zonas = useMemo((): string[] => {
+    const zonasSet = new Set<string>(clientes.map(c => c.zona).filter((z): z is string => Boolean(z)));
     return ['todas', ...Array.from(zonasSet).sort()];
   }, [clientes]);
 
   // Obtener rubros únicos
-  const rubros = useMemo(() => {
-    const rubrosSet = new Set(clientes.map(c => c.rubro).filter(Boolean));
+  const rubros = useMemo((): string[] => {
+    const rubrosSet = new Set<string>(clientes.map(c => c.rubro).filter((r): r is string => Boolean(r)));
     return ['todos', ...Array.from(rubrosSet).sort()];
   }, [clientes]);
 
-  const [filtroRubro, setFiltroRubro] = useState('todos');
+  const [filtroRubro, setFiltroRubro] = useState<string>('todos');
 
   // Filtrar clientes
-  const clientesFiltrados = useMemo(() => {
-    return clientes.filter(c => {
+  const clientesFiltrados = useMemo((): ClienteDB[] => {
+    return clientes.filter((c: ClienteDB) => {
       const matchBusqueda = !busqueda ||
         c.nombre_fantasia?.toLowerCase().includes(busqueda.toLowerCase()) ||
         c.razon_social?.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -72,7 +88,7 @@ export default function VistaClientes({
           <input
             type="text"
             value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setBusqueda(e.target.value)}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
             placeholder="Buscar por nombre, CUIT, dirección o teléfono..."
           />
@@ -80,7 +96,7 @@ export default function VistaClientes({
         {zonas.length > 1 && (
           <select
             value={filtroZona}
-            onChange={e => setFiltroZona(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroZona(e.target.value)}
             className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           >
             {zonas.map(zona => (
@@ -93,7 +109,7 @@ export default function VistaClientes({
         {rubros.length > 1 && (
           <select
             value={filtroRubro}
-            onChange={e => setFiltroRubro(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroRubro(e.target.value)}
             className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           >
             {rubros.map(rubro => (

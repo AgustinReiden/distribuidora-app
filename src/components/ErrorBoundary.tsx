@@ -7,13 +7,78 @@
  * - withErrorBoundary: HOC para envolver componentes fácilmente
  * - useErrorHandler: Hook para manejar errores asíncronos
  */
-import React from 'react';
-import { AlertTriangle, RefreshCw, X, WifiOff, Lock, Database, Bug } from 'lucide-react';
+import React, { ReactNode, ErrorInfo, ComponentType } from 'react';
+import { AlertTriangle, RefreshCw, X, WifiOff, Lock, Database, Bug, LucideIcon } from 'lucide-react';
 import { captureException, addBreadcrumb } from '../lib/sentry';
-import { categorizeError, getRecoveryInfo, ErrorCategory } from '../utils/errorUtils';
+import { categorizeError, getRecoveryInfo, RecoveryInfo } from '../utils/errorUtils';
+import type { ErrorCategory } from '../types';
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+export type IconName = 'WifiOff' | 'Lock' | 'AlertTriangle' | 'Database' | 'Bug';
+
+/** Props for ErrorBoundary fallback render function */
+export interface ErrorFallbackProps {
+  error: Error | null;
+  errorInfo: ErrorInfo | null;
+  errorCategory: ErrorCategory | null;
+  onRetry: () => Promise<void>;
+  onReload: () => void;
+  onReset: () => void;
+  isRetrying: boolean;
+  retryCount: number;
+}
+
+/** Props for CompactErrorBoundary fallback render function */
+export interface CompactErrorFallbackProps {
+  error: Error | null;
+  errorCategory: ErrorCategory | null;
+  onRetry: () => Promise<void>;
+  onClose: () => void;
+  isRetrying: boolean;
+}
+
+/** Props for the main ErrorBoundary component */
+export interface ErrorBoundaryProps {
+  children: ReactNode;
+  componentName?: string;
+  fallback?: (props: ErrorFallbackProps) => ReactNode;
+  onError?: (error: Error, errorInfo: ErrorInfo, category: ErrorCategory) => void;
+}
+
+/** State for the main ErrorBoundary component */
+export interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: ErrorInfo | null;
+  errorCategory: ErrorCategory | null;
+  retryCount: number;
+  isRetrying: boolean;
+}
+
+/** Props for CompactErrorBoundary component */
+export interface CompactErrorBoundaryProps {
+  children: ReactNode;
+  componentName?: string;
+  errorMessage?: string;
+  fallback?: (props: CompactErrorFallbackProps) => ReactNode;
+  onError?: (error: Error, errorInfo: ErrorInfo, category: ErrorCategory) => void;
+  onClose?: () => void;
+}
+
+/** State for CompactErrorBoundary component */
+export interface CompactErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+  errorCategory: ErrorCategory | null;
+  retryCount: number;
+  isRetrying: boolean;
+}
 
 // Mapa de iconos por nombre
-const iconMap = {
+const iconMap: Record<IconName, LucideIcon> = {
   WifiOff,
   Lock,
   AlertTriangle,
@@ -24,16 +89,16 @@ const iconMap = {
 /**
  * Obtiene el componente de icono basado en el nombre
  */
-function getIconComponent(iconName) {
-  return iconMap[iconName] || Bug;
+function getIconComponent(iconName: string | undefined): LucideIcon {
+  return iconMap[iconName as IconName] || Bug;
 }
 
 /**
  * Error Boundary completo (pantalla completa)
  * Usar en el nivel raíz de la aplicación
  */
-class ErrorBoundary extends React.Component {
-  constructor(props) {
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = {
       hasError: false,
@@ -45,14 +110,14 @@ class ErrorBoundary extends React.Component {
     };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return {
       hasError: true,
       errorCategory: categorizeError(error)
     };
   }
 
-  componentDidCatch(error, errorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     const category = categorizeError(error);
 
     this.setState({ error, errorInfo, errorCategory: category });
@@ -74,17 +139,17 @@ class ErrorBoundary extends React.Component {
     this.props.onError?.(error, errorInfo, category);
   }
 
-  handleReload = () => {
+  handleReload = (): void => {
     window.location.reload();
   };
 
-  handleRelogin = () => {
+  handleRelogin = (): void => {
     // Limpiar sesión y redirigir al login
     localStorage.removeItem('supabase.auth.token');
     window.location.href = '/login';
   };
 
-  handleRetry = async () => {
+  handleRetry = async (): Promise<void> => {
     const { errorCategory, retryCount } = this.state;
     const recoveryInfo = getRecoveryInfo(errorCategory);
 
@@ -118,7 +183,7 @@ class ErrorBoundary extends React.Component {
     });
   };
 
-  resetError = () => {
+  resetError = (): void => {
     this.setState({
       hasError: false,
       error: null,
@@ -129,7 +194,7 @@ class ErrorBoundary extends React.Component {
     });
   };
 
-  render() {
+  render(): ReactNode {
     if (this.state.hasError) {
       // Fallback personalizado
       if (this.props.fallback) {
@@ -227,8 +292,8 @@ class ErrorBoundary extends React.Component {
  * Error Boundary compacto (inline)
  * Usar en modales, cards, y secciones
  */
-class CompactErrorBoundary extends React.Component {
-  constructor(props) {
+class CompactErrorBoundary extends React.Component<CompactErrorBoundaryProps, CompactErrorBoundaryState> {
+  constructor(props: CompactErrorBoundaryProps) {
     super(props);
     this.state = {
       hasError: false,
@@ -239,14 +304,14 @@ class CompactErrorBoundary extends React.Component {
     };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error): Partial<CompactErrorBoundaryState> {
     return {
       hasError: true,
       errorCategory: categorizeError(error)
     };
   }
 
-  componentDidCatch(error, errorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     const category = categorizeError(error);
 
     this.setState({ error, errorCategory: category });
@@ -267,7 +332,7 @@ class CompactErrorBoundary extends React.Component {
     this.props.onError?.(error, errorInfo, category);
   }
 
-  handleRetry = async () => {
+  handleRetry = async (): Promise<void> => {
     const { errorCategory, retryCount } = this.state;
     const recoveryInfo = getRecoveryInfo(errorCategory);
 
@@ -295,11 +360,11 @@ class CompactErrorBoundary extends React.Component {
     });
   };
 
-  handleClose = () => {
+  handleClose = (): void => {
     this.props.onClose?.();
   };
 
-  render() {
+  render(): ReactNode {
     if (this.state.hasError) {
       // Fallback personalizado
       if (this.props.fallback) {

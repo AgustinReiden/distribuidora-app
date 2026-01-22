@@ -6,15 +6,45 @@
  * - Notificación de actualizaciones disponibles
  * - Registro del Service Worker
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, MouseEvent, ReactElement } from 'react'
 import { Download, RefreshCw, X, Smartphone } from 'lucide-react'
+// @ts-expect-error - virtual:pwa-register/react is provided by vite-plugin-pwa
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
-export function PWAPrompt() {
-  const [showInstallPrompt, setShowInstallPrompt] = useState(false)
-  const [deferredPrompt, setDeferredPrompt] = useState(null)
-  const [isIOS, setIsIOS] = useState(false)
-  const [isStandalone, setIsStandalone] = useState(false)
+// =============================================================================
+// TYPES
+// =============================================================================
+
+/** BeforeInstallPromptEvent - Browser event for PWA install prompt */
+export interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+  prompt(): Promise<void>;
+}
+
+/** Extend Navigator for standalone mode on iOS */
+declare global {
+  interface Navigator {
+    standalone?: boolean;
+  }
+  interface Window {
+    MSStream?: unknown;
+  }
+}
+
+/** Props for PWAPrompt component (no props currently) */
+export interface PWAPromptProps {
+  // No props currently
+}
+
+export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
+  const [showInstallPrompt, setShowInstallPrompt] = useState<boolean>(false)
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [isIOS, setIsIOS] = useState<boolean>(false)
+  const [isStandalone, setIsStandalone] = useState<boolean>(false)
 
   // Registro del Service Worker con auto-update
   const {
@@ -22,7 +52,7 @@ export function PWAPrompt() {
     offlineReady: [offlineReady, setOfflineReady],
     updateServiceWorker
   } = useRegisterSW({
-    onRegistered(r) {
+    onRegistered(r: ServiceWorkerRegistration | undefined) {
       // Verificar actualizaciones cada hora
       if (r) {
         setInterval(() => {
@@ -30,7 +60,7 @@ export function PWAPrompt() {
         }, 60 * 60 * 1000)
       }
     },
-    onRegisterError(error) {
+    onRegisterError(error: Error) {
       console.error('SW registration error:', error)
     }
   })
@@ -46,9 +76,9 @@ export function PWAPrompt() {
     setIsStandalone(isInStandaloneMode)
 
     // Capturar evento de instalación
-    const handleBeforeInstallPrompt = (e) => {
+    const handleBeforeInstallPrompt = (e: Event): void => {
       e.preventDefault()
-      setDeferredPrompt(e)
+      setDeferredPrompt(e as BeforeInstallPromptEvent)
 
       // Mostrar prompt después de 30 segundos de uso
       setTimeout(() => {
@@ -65,7 +95,7 @@ export function PWAPrompt() {
     }
   }, [])
 
-  const handleInstall = async () => {
+  const handleInstall = async (): Promise<void> => {
     if (!deferredPrompt) return
 
     deferredPrompt.prompt()
@@ -77,21 +107,21 @@ export function PWAPrompt() {
     setDeferredPrompt(null)
   }
 
-  const handleDismissInstall = () => {
+  const handleDismissInstall = (): void => {
     setShowInstallPrompt(false)
     // No mostrar de nuevo por 7 días
     localStorage.setItem('pwa-install-dismissed', Date.now().toString())
   }
 
-  const handleUpdate = () => {
+  const handleUpdate = (): void => {
     updateServiceWorker(true)
   }
 
-  const handleDismissOffline = () => {
+  const handleDismissOffline = (): void => {
     setOfflineReady(false)
   }
 
-  const handleDismissRefresh = () => {
+  const handleDismissRefresh = (): void => {
     setNeedRefresh(false)
   }
 

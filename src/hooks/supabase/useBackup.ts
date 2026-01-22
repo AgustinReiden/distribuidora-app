@@ -1,25 +1,106 @@
 import { useState } from 'react'
 import { createMultiSheetExcel } from '../../utils/excel'
 import { supabase } from './base'
+import type {
+  BackupData,
+  FiltrosExportacion,
+  UseBackupReturnExtended,
+  PedidoDB,
+  PerfilDB,
+  ClienteDB,
+  ProductoDB
+} from '../../types'
 
-export function useBackup() {
-  const [exportando, setExportando] = useState(false)
+interface PedidoExportacion {
+  id: string;
+  cliente_id: string;
+  cliente?: ClienteDB | null;
+  transportista?: PerfilDB | null;
+  usuario?: PerfilDB | null;
+  estado: string;
+  estado_pago?: string;
+  forma_pago?: string;
+  total: number;
+  notas?: string | null;
+  fecha_entrega?: string | null;
+  created_at?: string;
+  items?: Array<{
+    cantidad: number;
+    precio_unitario: number;
+    subtotal?: number;
+    producto?: ProductoDB | null;
+  }>;
+}
 
-  const exportarDatos = async (tipo = 'completo') => {
+interface InfoFiltro {
+  Campo: string;
+  Valor: string | number;
+}
+
+interface DatoPedido {
+  'ID Pedido': string;
+  'Fecha': string;
+  'Hora': string;
+  'Cliente': string;
+  'Teléfono': string;
+  'Dirección': string;
+  'Zona': string;
+  'Estado Pedido': string;
+  'Estado Pago': string;
+  'Forma de Pago': string;
+  'Transportista': string;
+  'Preventista': string;
+  'Productos': string;
+  'Cantidad Items': number;
+  'Total': number;
+  'Notas': string;
+  'Fecha Entrega': string;
+}
+
+interface DatoItem {
+  'ID Pedido': string;
+  'Fecha Pedido': string;
+  'Cliente': string;
+  'Producto': string;
+  'Código': string;
+  'Categoría': string;
+  'Cantidad': number;
+  'Precio Unitario': number;
+  'Subtotal': number;
+}
+
+interface ResumenEstado {
+  Estado: string;
+  Cantidad: number;
+  Total: number;
+}
+
+interface ResumenPago {
+  'Estado Pago': string;
+  Cantidad: number;
+  Total: number;
+}
+
+type BackupTipo = 'completo' | 'clientes' | 'productos' | 'pedidos';
+
+export function useBackup(): UseBackupReturnExtended {
+  const [exportando, setExportando] = useState<boolean>(false)
+
+  const exportarDatos = async (tipo: BackupTipo | string = 'completo'): Promise<BackupData> => {
     setExportando(true)
     try {
-      const backup = { fecha: new Date().toISOString(), tipo }
+      const backup: BackupData = { fecha: new Date().toISOString(), tipo }
       if (tipo === 'completo' || tipo === 'clientes') {
         const { data } = await supabase.from('clientes').select('*')
-        backup.clientes = data
+        backup.clientes = (data || []) as ClienteDB[]
       }
       if (tipo === 'completo' || tipo === 'productos') {
         const { data } = await supabase.from('productos').select('*')
-        backup.productos = data
+        backup.productos = (data || []) as ProductoDB[]
       }
       if (tipo === 'completo' || tipo === 'pedidos') {
         const { data } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
-        backup.pedidos = data
+        backup.pedidos = (data || []) as PedidoDB[]
       }
       return backup
     } finally {
@@ -27,7 +108,7 @@ export function useBackup() {
     }
   }
 
-  const descargarJSON = async (tipo = 'completo') => {
+  const descargarJSON = async (tipo: BackupTipo | string = 'completo'): Promise<void> => {
     const datos = await exportarDatos(tipo)
     const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -38,21 +119,25 @@ export function useBackup() {
     URL.revokeObjectURL(url)
   }
 
-  const exportarPedidosExcel = async (pedidos, filtrosActivos = {}, transportistas = []) => {
+  const exportarPedidosExcel = async (
+    pedidos: PedidoDB[],
+    filtrosActivos: FiltrosExportacion = {},
+    transportistas: PerfilDB[] = []
+  ): Promise<void> => {
     setExportando(true)
     try {
-      const estadoLabels = {
+      const estadoLabels: Record<string, string> = {
         pendiente: 'Pendiente',
         en_preparacion: 'En Preparación',
         asignado: 'En Camino',
         entregado: 'Entregado'
       }
-      const estadoPagoLabels = {
+      const estadoPagoLabels: Record<string, string> = {
         pendiente: 'Pendiente',
         parcial: 'Parcial',
         pagado: 'Pagado'
       }
-      const formaPagoLabels = {
+      const formaPagoLabels: Record<string, string> = {
         efectivo: 'Efectivo',
         transferencia: 'Transferencia',
         cheque: 'Cheque',
@@ -60,14 +145,14 @@ export function useBackup() {
         tarjeta: 'Tarjeta'
       }
 
-      const getTransportistaNombre = (id) => {
+      const getTransportistaNombre = (id: string | null | undefined): string | null => {
         if (!id || id === 'todos') return null
         if (id === 'sin_asignar') return 'Sin asignar'
         const t = transportistas.find(tr => tr.id === id)
         return t?.nombre || id
       }
 
-      const infoFiltros = []
+      const infoFiltros: InfoFiltro[] = []
       infoFiltros.push({ 'Campo': 'Fecha de Exportación', 'Valor': new Date().toLocaleString('es-AR') })
       infoFiltros.push({ 'Campo': 'Total de Registros', 'Valor': pedidos.length })
       infoFiltros.push({ 'Campo': '', 'Valor': '' })
@@ -80,7 +165,7 @@ export function useBackup() {
         infoFiltros.push({ 'Campo': 'Estado de Pago', 'Valor': estadoPagoLabels[filtrosActivos.estadoPago] || filtrosActivos.estadoPago })
       }
       if (filtrosActivos.transportistaId && filtrosActivos.transportistaId !== 'todos') {
-        infoFiltros.push({ 'Campo': 'Transportista', 'Valor': getTransportistaNombre(filtrosActivos.transportistaId) })
+        infoFiltros.push({ 'Campo': 'Transportista', 'Valor': getTransportistaNombre(filtrosActivos.transportistaId) || '' })
       }
       if (filtrosActivos.fechaDesde) {
         infoFiltros.push({ 'Campo': 'Fecha Desde', 'Valor': filtrosActivos.fechaDesde })
@@ -101,17 +186,19 @@ export function useBackup() {
         infoFiltros.push({ 'Campo': '(Sin filtros - Todos los pedidos)', 'Valor': '' })
       }
 
-      const datosPedidos = pedidos.map(p => ({
+      const pedidosTyped = pedidos as PedidoExportacion[]
+
+      const datosPedidos: DatoPedido[] = pedidosTyped.map(p => ({
         'ID Pedido': p.id,
-        'Fecha': new Date(p.created_at).toLocaleDateString('es-AR'),
-        'Hora': new Date(p.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+        'Fecha': new Date(p.created_at || '').toLocaleDateString('es-AR'),
+        'Hora': new Date(p.created_at || '').toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
         'Cliente': p.cliente?.nombre_fantasia || 'Sin cliente',
         'Teléfono': p.cliente?.telefono || '-',
         'Dirección': p.cliente?.direccion || '-',
         'Zona': p.cliente?.zona || '-',
         'Estado Pedido': estadoLabels[p.estado] || p.estado,
-        'Estado Pago': estadoPagoLabels[p.estado_pago] || p.estado_pago || 'Pendiente',
-        'Forma de Pago': formaPagoLabels[p.forma_pago] || p.forma_pago || 'Efectivo',
+        'Estado Pago': estadoPagoLabels[p.estado_pago || ''] || p.estado_pago || 'Pendiente',
+        'Forma de Pago': formaPagoLabels[p.forma_pago || ''] || p.forma_pago || 'Efectivo',
         'Transportista': p.transportista?.nombre || 'Sin asignar',
         'Preventista': p.usuario?.nombre || '-',
         'Productos': p.items?.map(i => `${i.producto?.nombre || 'Producto'} x${i.cantidad}`).join(', ') || '-',
@@ -121,12 +208,12 @@ export function useBackup() {
         'Fecha Entrega': p.fecha_entrega ? new Date(p.fecha_entrega).toLocaleDateString('es-AR') : '-'
       }))
 
-      const datosItems = []
-      pedidos.forEach(p => {
+      const datosItems: DatoItem[] = []
+      pedidosTyped.forEach(p => {
         p.items?.forEach(item => {
           datosItems.push({
             'ID Pedido': p.id,
-            'Fecha Pedido': new Date(p.created_at).toLocaleDateString('es-AR'),
+            'Fecha Pedido': new Date(p.created_at || '').toLocaleDateString('es-AR'),
             'Cliente': p.cliente?.nombre_fantasia || 'Sin cliente',
             'Producto': item.producto?.nombre || 'Producto sin nombre',
             'Código': item.producto?.codigo || '-',
@@ -138,7 +225,7 @@ export function useBackup() {
         })
       })
 
-      const resumenEstados = [
+      const resumenEstados: ResumenEstado[] = [
         { 'Estado': 'Pendiente', 'Cantidad': pedidos.filter(p => p.estado === 'pendiente').length, 'Total': pedidos.filter(p => p.estado === 'pendiente').reduce((s, p) => s + (p.total || 0), 0) },
         { 'Estado': 'En Preparación', 'Cantidad': pedidos.filter(p => p.estado === 'en_preparacion').length, 'Total': pedidos.filter(p => p.estado === 'en_preparacion').reduce((s, p) => s + (p.total || 0), 0) },
         { 'Estado': 'En Camino', 'Cantidad': pedidos.filter(p => p.estado === 'asignado').length, 'Total': pedidos.filter(p => p.estado === 'asignado').reduce((s, p) => s + (p.total || 0), 0) },
@@ -146,7 +233,7 @@ export function useBackup() {
         { 'Estado': 'TOTAL', 'Cantidad': pedidos.length, 'Total': pedidos.reduce((s, p) => s + (p.total || 0), 0) }
       ]
 
-      const resumenPagos = [
+      const resumenPagos: ResumenPago[] = [
         { 'Estado Pago': 'Pendiente', 'Cantidad': pedidos.filter(p => p.estado_pago === 'pendiente' || !p.estado_pago).length, 'Total': pedidos.filter(p => p.estado_pago === 'pendiente' || !p.estado_pago).reduce((s, p) => s + (p.total || 0), 0) },
         { 'Estado Pago': 'Parcial', 'Cantidad': pedidos.filter(p => p.estado_pago === 'parcial').length, 'Total': pedidos.filter(p => p.estado_pago === 'parcial').reduce((s, p) => s + (p.total || 0), 0) },
         { 'Estado Pago': 'Pagado', 'Cantidad': pedidos.filter(p => p.estado_pago === 'pagado').length, 'Total': pedidos.filter(p => p.estado_pago === 'pagado').reduce((s, p) => s + (p.total || 0), 0) }
@@ -157,25 +244,25 @@ export function useBackup() {
       await createMultiSheetExcel([
         {
           name: 'Info Exportación',
-          data: infoFiltros,
+          data: infoFiltros as unknown as Record<string, unknown>[],
           columnWidths: [25, 40]
         },
         {
           name: 'Pedidos',
-          data: datosPedidos,
+          data: datosPedidos as unknown as Record<string, unknown>[],
           columnWidths: [10, 12, 8, 25, 15, 35, 12, 14, 12, 16, 20, 20, 50, 12, 12, 30, 14]
         },
         {
           name: 'Detalle Items',
-          data: datosItems
+          data: datosItems as unknown as Record<string, unknown>[]
         },
         {
           name: 'Resumen Estados',
-          data: resumenEstados
+          data: resumenEstados as unknown as Record<string, unknown>[]
         },
         {
           name: 'Resumen Pagos',
-          data: resumenPagos
+          data: resumenPagos as unknown as Record<string, unknown>[]
         }
       ], `pedidos_${fecha}`)
     } finally {

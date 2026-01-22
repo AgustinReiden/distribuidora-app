@@ -2,12 +2,19 @@ import React from 'react';
 import { UserCog, Edit2 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import type { PerfilDB } from '../../types';
+
+export interface VistaUsuariosProps {
+  usuarios: PerfilDB[];
+  loading: boolean;
+  onEditarUsuario: (usuario: PerfilDB) => void;
+}
 
 export default function VistaUsuarios({
   usuarios,
   loading,
   onEditarUsuario
-}) {
+}: VistaUsuariosProps) {
   return (
     <div className="space-y-4">
       <div>
@@ -35,7 +42,7 @@ export default function VistaUsuarios({
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
-              {usuarios.map(usuario => (
+              {usuarios.map((usuario: PerfilDB) => (
                 <tr key={usuario.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                   <td className="px-4 py-3 font-medium text-gray-800 dark:text-white">{usuario.nombre}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{usuario.email}</td>

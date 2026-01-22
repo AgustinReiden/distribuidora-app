@@ -1,12 +1,45 @@
 /**
- * Componente de estadísticas/resumen de pedidos
+ * Componente de estadisticas/resumen de pedidos
  */
 import React, { memo } from 'react';
-import { Clock, Package, Truck, Check, DollarSign, ShoppingCart } from 'lucide-react';
+import { Clock, Package, Truck, Check, DollarSign, ShoppingCart, LucideIcon } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
+import type { PedidoDB } from '../../types';
 
-function PedidoStats({ pedidosParaMostrar }) {
-  const stats = {
+// =============================================================================
+// PROPS INTERFACES
+// =============================================================================
+
+export interface PedidoStatsProps {
+  pedidosParaMostrar: PedidoDB[];
+}
+
+interface StatsData {
+  pendientes: PedidoDB[];
+  enPreparacion: PedidoDB[];
+  enCamino: PedidoDB[];
+  entregados: PedidoDB[];
+  impagos: PedidoDB[];
+  total: PedidoDB[];
+}
+
+interface StatItem {
+  key: keyof StatsData;
+  label: string;
+  icon: LucideIcon;
+  count: number;
+  total: number;
+  colorClass: string;
+  iconColor: string;
+  textColor: string;
+}
+
+// =============================================================================
+// COMPONENT
+// =============================================================================
+
+function PedidoStats({ pedidosParaMostrar }: PedidoStatsProps): React.ReactElement {
+  const stats: StatsData = {
     pendientes: pedidosParaMostrar.filter(p => p.estado === 'pendiente'),
     enPreparacion: pedidosParaMostrar.filter(p => p.estado === 'en_preparacion'),
     enCamino: pedidosParaMostrar.filter(p => p.estado === 'asignado'),
@@ -15,7 +48,7 @@ function PedidoStats({ pedidosParaMostrar }) {
     total: pedidosParaMostrar
   };
 
-  const items = [
+  const items: StatItem[] = [
     {
       key: 'pendientes',
       label: 'Pendientes',
@@ -28,7 +61,7 @@ function PedidoStats({ pedidosParaMostrar }) {
     },
     {
       key: 'enPreparacion',
-      label: 'En preparación',
+      label: 'En preparacion',
       icon: Package,
       count: stats.enPreparacion.length,
       total: stats.enPreparacion.reduce((s, p) => s + (p.total || 0), 0),
@@ -80,16 +113,19 @@ function PedidoStats({ pedidosParaMostrar }) {
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-      {items.map(item => (
-        <div key={item.key} className={`border rounded-lg p-3 ${item.colorClass}`}>
-          <div className="flex items-center justify-between">
-            <item.icon className={`w-5 h-5 ${item.iconColor}`} />
-            <span className={`text-xs ${item.iconColor}`}>{formatPrecio(item.total)}</span>
+      {items.map(item => {
+        const IconComponent = item.icon;
+        return (
+          <div key={item.key} className={`border rounded-lg p-3 ${item.colorClass}`}>
+            <div className="flex items-center justify-between">
+              <IconComponent className={`w-5 h-5 ${item.iconColor}`} />
+              <span className={`text-xs ${item.iconColor}`}>{formatPrecio(item.total)}</span>
+            </div>
+            <p className={`text-xl font-bold ${item.iconColor}`}>{item.count}</p>
+            <p className={`text-sm ${item.textColor}`}>{item.label}</p>
           </div>
-          <p className={`text-xl font-bold ${item.iconColor}`}>{item.count}</p>
-          <p className={`text-sm ${item.textColor}`}>{item.label}</p>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

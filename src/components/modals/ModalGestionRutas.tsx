@@ -1,4 +1,5 @@
 import React, { useState, useMemo, memo, useEffect } from 'react';
+import type { ChangeEvent } from 'react';
 import {
   Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation,
   Settings, Save, FileText, Download, ChevronDown, ChevronUp, Phone,
@@ -6,16 +7,88 @@ import {
 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { getDepositoCoords, setDepositoCoords } from '../../hooks/useOptimizarRuta';
+import type { PedidoDB, PerfilDB } from '../../types';
+
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+/** Orden optimizado para un pedido */
+export interface OrdenOptimizado {
+  pedido_id: string;
+  orden: number;
+  cliente?: string;
+  direccion?: string;
+}
+
+/** Resultado de la optimizacion de ruta */
+export interface RutaOptimizadaResult {
+  orden_optimizado?: OrdenOptimizado[];
+  distancia_total?: number;
+  duracion_total?: number;
+  distancia_formato?: string;
+  duracion_formato?: string;
+  total_pedidos?: number;
+}
+
+/** Datos para aplicar el orden optimizado */
+export interface AplicarOrdenData {
+  ordenOptimizado: OrdenOptimizado[];
+  transportistaId: string;
+  distancia: number | null;
+  duracion: number | null;
+}
+
+/** Pedido con orden optimizado extendido */
+interface PedidoOrdenado extends PedidoDB {
+  orden_optimizado?: number;
+}
+
+/** Props del componente PedidoRutaCard */
+interface PedidoRutaCardProps {
+  pedido: PedidoDB;
+  orden: number;
+  isFirst: boolean;
+  isLast: boolean;
+}
+
+/** Props del componente principal */
+export interface ModalGestionRutasProps {
+  transportistas: PerfilDB[];
+  pedidos: PedidoDB[];
+  onOptimizar: (transportistaId: string, pedidos: PedidoDB[]) => void;
+  onAplicarOrden: (data: AplicarOrdenData) => void;
+  onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
+  onClose: () => void;
+  loading: boolean;
+  guardando: boolean;
+  rutaOptimizada: RutaOptimizadaResult | null;
+  error: string | null;
+}
+
+/** Mapa de colores para estado de pago */
+type EstadoPagoColors = Record<string, string>;
+
+/** Mapa de etiquetas para forma de pago */
+type FormaPagoLabels = Record<string, string>;
+
+/** Totales calculados */
+interface Totales {
+  pedidos: number;
+  total: number;
+  pendienteCobro: number;
+  items: number;
+}
 
 // Componente para mostrar cada pedido en la lista de ruta
-const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, isLast }) {
-  const estadoPagoColors = {
+const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, isLast }: PedidoRutaCardProps) {
+  const estadoPagoColors: EstadoPagoColors = {
     pagado: 'bg-green-100 text-green-700 border-green-200',
     parcial: 'bg-yellow-100 text-yellow-700 border-yellow-200',
     pendiente: 'bg-red-100 text-red-700 border-red-200'
   };
 
-  const formaPagoLabels = {
+  const formaPagoLabels: FormaPagoLabels = {
     efectivo: 'Efectivo',
     transferencia: 'Transferencia',
     cheque: 'Cheque',
@@ -105,13 +178,13 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   guardando,
   rutaOptimizada,
   error
-}) {
-  const [transportistaSeleccionado, setTransportistaSeleccionado] = useState('');
-  const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState(false);
-  const [depositoLat, setDepositoLat] = useState('');
-  const [depositoLng, setDepositoLng] = useState('');
-  const [depositoGuardado, setDepositoGuardado] = useState(false);
-  const [vistaActiva, setVistaActiva] = useState('optimizar'); // 'optimizar' | 'resultado'
+}: ModalGestionRutasProps) {
+  const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
+  const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState<boolean>(false);
+  const [depositoLat, setDepositoLat] = useState<string>('');
+  const [depositoLng, setDepositoLng] = useState<string>('');
+  const [depositoGuardado, setDepositoGuardado] = useState<boolean>(false);
+  const [vistaActiva, setVistaActiva] = useState<'optimizar' | 'resultado'>('optimizar');
 
   // Cargar coordenadas del deposito al montar
   useEffect(() => {
@@ -128,7 +201,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   }, [rutaOptimizada]);
 
   // Obtener pedidos del transportista seleccionado
-  const pedidosTransportista = useMemo(() => {
+  const pedidosTransportista = useMemo((): PedidoDB[] => {
     if (!transportistaSeleccionado) return [];
     return pedidos
       .filter(p => p.transportista_id === transportistaSeleccionado && p.estado === 'asignado')
@@ -136,21 +209,25 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   }, [pedidos, transportistaSeleccionado]);
 
   // Pedidos ordenados segun la optimizacion
-  const pedidosOrdenados = useMemo(() => {
+  const pedidosOrdenados = useMemo((): PedidoOrdenado[] => {
     if (!rutaOptimizada?.orden_optimizado) return [];
-    return rutaOptimizada.orden_optimizado.map(item => {
+    const result: PedidoOrdenado[] = [];
+    for (const item of rutaOptimizada.orden_optimizado) {
       const pedido = pedidos.find(p => p.id === item.pedido_id);
-      return { ...pedido, orden_optimizado: item.orden };
-    }).filter(Boolean);
+      if (pedido) {
+        result.push({ ...pedido, orden_optimizado: item.orden });
+      }
+    }
+    return result;
   }, [rutaOptimizada, pedidos]);
 
   // Verificar si hay pedidos sin coordenadas
-  const pedidosSinCoordenadas = useMemo(() => {
+  const pedidosSinCoordenadas = useMemo((): PedidoDB[] => {
     return pedidosTransportista.filter(p => !p.cliente?.latitud || !p.cliente?.longitud);
   }, [pedidosTransportista]);
 
   // Calcular totales
-  const totales = useMemo(() => {
+  const totales = useMemo((): Totales => {
     const lista = vistaActiva === 'resultado' ? pedidosOrdenados : pedidosTransportista;
     return {
       pedidos: lista.length,
@@ -160,13 +237,13 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     };
   }, [vistaActiva, pedidosOrdenados, pedidosTransportista]);
 
-  const handleOptimizar = () => {
+  const handleOptimizar = (): void => {
     if (transportistaSeleccionado) {
       onOptimizar(transportistaSeleccionado, pedidos);
     }
   };
 
-  const handleGuardarDeposito = () => {
+  const handleGuardarDeposito = (): void => {
     const lat = parseFloat(depositoLat);
     const lng = parseFloat(depositoLng);
     if (!isNaN(lat) && !isNaN(lng)) {
@@ -176,23 +253,23 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     }
   };
 
-  const handleAplicar = () => {
+  const handleAplicar = (): void => {
     if (rutaOptimizada?.orden_optimizado) {
       onAplicarOrden({
         ordenOptimizado: rutaOptimizada.orden_optimizado,
         transportistaId: transportistaSeleccionado,
-        distancia: rutaOptimizada.distancia_total || null,
-        duracion: rutaOptimizada.duracion_total || null
+        distancia: rutaOptimizada.distancia_total ?? null,
+        duracion: rutaOptimizada.duracion_total ?? null
       });
     }
   };
 
-  const handleExportarPDF = () => {
+  const handleExportarPDF = (): void => {
     const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
     onExportarPDF(transportista, pedidosOrdenados);
   };
 
-  const handleVolverOptimizar = () => {
+  const handleVolverOptimizar = (): void => {
     setVistaActiva('optimizar');
   };
 
@@ -261,7 +338,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           type="number"
                           step="0.000001"
                           value={depositoLat}
-                          onChange={e => setDepositoLat(e.target.value)}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLat(e.target.value)}
                           className="w-full px-3 py-2 border rounded-lg text-sm"
                           placeholder="-26.8241"
                         />
@@ -272,7 +349,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           type="number"
                           step="0.000001"
                           value={depositoLng}
-                          onChange={e => setDepositoLng(e.target.value)}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLng(e.target.value)}
                           className="w-full px-3 py-2 border rounded-lg text-sm"
                           placeholder="-65.2226"
                         />
@@ -299,7 +376,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 <label className="block text-sm font-medium mb-2">Seleccionar Transportista</label>
                 <select
                   value={transportistaSeleccionado}
-                  onChange={e => setTransportistaSeleccionado(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLSelectElement>) => setTransportistaSeleccionado(e.target.value)}
                   className="w-full px-3 py-2 border rounded-lg"
                   disabled={loading}
                 >

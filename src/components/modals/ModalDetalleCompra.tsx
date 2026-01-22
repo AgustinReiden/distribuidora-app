@@ -1,15 +1,24 @@
 import React from 'react'
 import { X, ShoppingCart, Package, Building2, Calendar, CreditCard, FileText, TrendingUp, Hash } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import type { Producto, Proveedor, Usuario } from '../../types'
 
-const ESTADOS_COMPRA = {
+type EstadoCompra = 'pendiente' | 'recibida' | 'parcial' | 'cancelada';
+type FormaPagoCompra = 'efectivo' | 'transferencia' | 'cheque' | 'cuenta_corriente' | 'tarjeta';
+
+interface EstadoConfig {
+  label: string;
+  color: string;
+}
+
+const ESTADOS_COMPRA: Record<EstadoCompra, EstadoConfig> = {
   pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' },
   recibida: { label: 'Recibida', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' },
   parcial: { label: 'Parcial', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' },
   cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' }
 }
 
-const FORMAS_PAGO = {
+const FORMAS_PAGO: Record<FormaPagoCompra, string> = {
   efectivo: 'Efectivo',
   transferencia: 'Transferencia',
   cheque: 'Cheque',
@@ -17,7 +26,45 @@ const FORMAS_PAGO = {
   tarjeta: 'Tarjeta'
 }
 
-export default function ModalDetalleCompra({ compra, onClose, onAnular }) {
+interface CompraItem {
+  producto_id: string;
+  producto?: Producto;
+  cantidad: number;
+  costo_unitario: number;
+  subtotal?: number;
+  stock_anterior?: number;
+  stock_nuevo?: number;
+}
+
+interface CompraDetalle {
+  id: string;
+  proveedor?: Proveedor & { cuit?: string };
+  proveedor_nombre?: string;
+  estado: EstadoCompra;
+  items?: CompraItem[];
+  created_at: string;
+  fecha_compra: string;
+  numero_factura?: string;
+  forma_pago: FormaPagoCompra;
+  subtotal: number;
+  iva: number;
+  otros_impuestos?: number;
+  total: number;
+  notas?: string;
+  usuario?: Usuario;
+}
+
+export interface ModalDetalleCompraProps {
+  compra: CompraDetalle | null;
+  onClose: () => void;
+  onAnular?: (compraId: string) => void;
+}
+
+export default function ModalDetalleCompra({
+  compra,
+  onClose,
+  onAnular
+}: ModalDetalleCompraProps): React.ReactElement | null {
   if (!compra) return null
 
   const estado = ESTADOS_COMPRA[compra.estado] || ESTADOS_COMPRA.pendiente
@@ -87,7 +134,7 @@ export default function ModalDetalleCompra({ compra, onClose, onAnular }) {
             <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
               <div className="flex items-center gap-2 text-gray-500 mb-1">
                 <Hash className="w-4 h-4" />
-                <span className="text-xs">N° Factura</span>
+                <span className="text-xs">N Factura</span>
               </div>
               <p className="font-medium text-gray-800 dark:text-white">
                 {compra.numero_factura || 'Sin especificar'}
@@ -135,7 +182,7 @@ export default function ModalDetalleCompra({ compra, onClose, onAnular }) {
                           {item.producto?.nombre || 'Producto'}
                         </p>
                         <p className="text-xs text-gray-500">
-                          Stock: {item.stock_anterior} → {item.stock_nuevo}
+                          Stock: {item.stock_anterior} -&gt; {item.stock_nuevo}
                           <TrendingUp className="inline w-3 h-3 ml-1 text-green-500" />
                         </p>
                       </td>
@@ -166,7 +213,7 @@ export default function ModalDetalleCompra({ compra, onClose, onAnular }) {
                 <span className="text-gray-600 dark:text-gray-400">IVA:</span>
                 <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.iva)}</span>
               </div>
-              {compra.otros_impuestos > 0 && (
+              {compra.otros_impuestos && compra.otros_impuestos > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Otros impuestos:</span>
                   <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.otros_impuestos)}</span>
@@ -190,7 +237,7 @@ export default function ModalDetalleCompra({ compra, onClose, onAnular }) {
             </div>
           )}
 
-          {/* Usuario que registró */}
+          {/* Usuario que registro */}
           {compra.usuario && (
             <div className="text-sm text-gray-500 text-center">
               Registrado por: {compra.usuario.nombre}

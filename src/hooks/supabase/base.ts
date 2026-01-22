@@ -6,23 +6,21 @@
 import { supabase } from '../../lib/supabase'
 
 /**
- * @typedef {Function} ErrorNotifier
- * @param {string} message - Mensaje de error a mostrar
- * @returns {void}
+ * Function type for error notification
  */
+export type ErrorNotifier = (message: string) => void
 
 /**
  * Función de notificación de errores (se configura desde App.jsx)
- * @type {ErrorNotifier|null}
  * @private
  */
-let errorNotifier = null
+let errorNotifier: ErrorNotifier | null = null
 
 /**
  * Configura el notificador de errores global
  * Típicamente se llama desde App.jsx con toast.error
  *
- * @param {ErrorNotifier} notifier - Función que maneja la notificación de errores
+ * @param notifier - Función que maneja la notificación de errores
  * @example
  * // En App.jsx
  * import { setErrorNotifier } from './hooks/supabase/base'
@@ -32,7 +30,7 @@ let errorNotifier = null
  *   setErrorNotifier((msg) => toast.error(msg))
  * }, [])
  */
-export const setErrorNotifier = (notifier) => {
+export const setErrorNotifier = (notifier: ErrorNotifier): void => {
   errorNotifier = notifier
 }
 
@@ -40,7 +38,7 @@ export const setErrorNotifier = (notifier) => {
  * Notifica un error al usuario usando el notificador configurado
  * Si no hay notificador configurado, el error se ignora silenciosamente
  *
- * @param {string} message - Mensaje de error a mostrar al usuario
+ * @param message - Mensaje de error a mostrar al usuario
  * @example
  * try {
  *   await supabase.from('table').select()
@@ -48,7 +46,7 @@ export const setErrorNotifier = (notifier) => {
  *   notifyError('Error al cargar datos: ' + error.message)
  * }
  */
-export const notifyError = (message) => {
+export const notifyError = (message: string): void => {
   if (errorNotifier) {
     errorNotifier(message)
   }
