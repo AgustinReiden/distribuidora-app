@@ -203,7 +203,7 @@ export interface UsePedidoHandlersProps {
   refetchPedidos: () => Promise<void>;
   refetchMetricas: () => Promise<void>;
   notify: NotifyService;
-  user: User;
+  user: User | null;
   isOnline: boolean;
   guardarPedidoOffline: (pedido: PedidoOfflineData) => void;
   rutaOptimizada: RutaOptimizada | null;
@@ -352,7 +352,7 @@ export function usePedidoHandlers({
         clienteId: parseInt(nuevoPedido.clienteId),
         items: nuevoPedido.items,
         total: calcularTotalPedido(nuevoPedido.items),
-        usuarioId: user.id,
+        usuarioId: user?.id ?? '',
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
         estadoPago: nuevoPedido.estadoPago,
@@ -375,7 +375,7 @@ export function usePedidoHandlers({
         parseInt(nuevoPedido.clienteId),
         nuevoPedido.items,
         calcularTotalPedido(nuevoPedido.items),
-        user.id,
+        user?.id ?? '',
         descontarStock,
         nuevoPedido.notas,
         nuevoPedido.formaPago,
@@ -389,7 +389,7 @@ export function usePedidoHandlers({
           monto: nuevoPedido.montoPagado,
           formaPago: nuevoPedido.formaPago,
           notas: 'Pago parcial al crear pedido',
-          usuarioId: user.id
+          usuarioId: user?.id ?? ''
         })
       }
 

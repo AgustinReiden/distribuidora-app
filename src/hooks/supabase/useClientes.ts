@@ -60,7 +60,8 @@ export function useClientes(): UseClientesReturn {
       throw new Error(validation.errors.join(', '))
     }
 
-    const data = await clienteService.create(transformarDatos(cliente) as unknown as Partial<Cliente>) as unknown as ClienteDB
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await clienteService.create(transformarDatos(cliente) as any) as unknown as ClienteDB
     setClientes(prev =>
       [...prev, data].sort((a, b) =>
         a.nombre_fantasia.localeCompare(b.nombre_fantasia)
