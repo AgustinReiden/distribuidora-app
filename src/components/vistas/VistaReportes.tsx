@@ -238,7 +238,7 @@ export default function VistaReportes({
       )}
 
       {activeTab === 'rentabilidad' && (
-        <ReporteRentabilidad
+        <ReporteRentabilidadSection
           reporte={reporteRentabilidad}
           loading={loadingFinanciero}
           formatPrecio={formatPrecio}
@@ -402,7 +402,7 @@ function ReporteCuentasPorCobrar({ reporte, loading, formatPrecio, onVerCliente 
   );
 }
 
-function ReporteRentabilidad({ reporte, loading, formatPrecio }: ReporteRentabilidadProps): React.ReactElement {
+function ReporteRentabilidadSection({ reporte, loading, formatPrecio }: ReporteRentabilidadProps): React.ReactElement {
   if (loading) return <LoadingSpinner />;
 
   const { productos, totales } = reporte;

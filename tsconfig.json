@@ -32,18 +32,18 @@
     // Type Checking - Gradual Strict Mode
     // ===========================================
     // Migration Phase 9: Strict mode activation
-    // Current status: Files migrated to .ts/.tsx
-    // Next step: Add explicit types, then enable strict options
+    // Status: noImplicitAny enabled ✓
+    // Next step: Enable strictNullChecks, then full strict mode
     //
-    // To enable strict mode gradually, uncomment these options one at a time:
-    // 1. "noImplicitAny": true,        // ~2000 errors - requires adding types to all parameters
-    // 2. "strictNullChecks": true,     // Requires null checks throughout the codebase
-    // 3. "strict": true,               // Enables all strict type checking options
+    // Progress:
+    // ✓ "noImplicitAny": true,        // ENABLED - all parameters typed
+    // - "strictNullChecks": true,     // Requires null checks throughout the codebase
+    // - "strict": true,               // Enables all strict type checking options
     //
     // Run `npm run typecheck` after each change to see remaining errors.
     // ===========================================
     "strict": false,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "strictNullChecks": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,

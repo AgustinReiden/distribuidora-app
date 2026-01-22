@@ -1,7 +1,7 @@
 /**
  * Handlers para operaciones con pedidos
  */
-import { useCallback } from 'react'
+import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { calcularTotalPedido } from '../useAppState'
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada } from '../../lib/pdfExport'
 import type { User } from '@supabase/supabase-js'
@@ -189,7 +189,7 @@ export interface UsePedidoHandlersProps {
   agregarCliente: (cliente: ClienteFormInput) => Promise<ClienteDB>;
   modales: PedidoModales;
   setGuardando: (guardando: boolean) => void;
-  setNuevoPedido: React.Dispatch<React.SetStateAction<NuevoPedidoState>>;
+  setNuevoPedido: Dispatch<SetStateAction<NuevoPedidoState>>;
   resetNuevoPedido: () => void;
   nuevoPedido: NuevoPedidoState;
   setPedidoAsignando: (pedido: PedidoDB | null) => void;

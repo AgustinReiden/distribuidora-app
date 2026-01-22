@@ -193,17 +193,19 @@ class ProductoService extends BaseService<Producto> {
     }
 
     // Agrupar y sumar cantidades
-    const agrupado = (data || []).reduce((acc: Record<string, ProductoVendido>, item: { producto_id: string; productos: Producto; cantidad: number }) => {
-      const id = item.producto_id
+    const agrupado = (data || []).reduce((acc, item) => {
+      const id = item.producto_id as string
+      const producto = item.productos as unknown as Producto
+      const cantidad = item.cantidad as number
       if (!acc[id]) {
         acc[id] = {
-          ...item.productos,
+          ...producto,
           cantidad_vendida: 0
         }
       }
-      acc[id].cantidad_vendida += item.cantidad
+      acc[id].cantidad_vendida += cantidad
       return acc
-    }, {})
+    }, {} as Record<string, ProductoVendido>)
 
     return Object.values(agrupado)
       .sort((a, b) => b.cantidad_vendida - a.cantidad_vendida)

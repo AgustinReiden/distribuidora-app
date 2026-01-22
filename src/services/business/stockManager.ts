@@ -357,12 +357,22 @@ class StockManager {
       queryMermas
     ])
 
-    const ventas = (ventasResult.data || [])
-      .filter((v: { pedido?: { estado?: string } }) => v.pedido?.estado === 'entregado')
-      .reduce((sum: number, v: { cantidad: number }) => sum + v.cantidad, 0)
+    const ventasData = ventasResult.data || []
+    const ventas = ventasData
+      .filter((v) => {
+        const item = v as { pedido?: { estado?: string } }
+        return item.pedido?.estado === 'entregado'
+      })
+      .reduce((sum, v) => {
+        const item = v as { cantidad: number }
+        return sum + item.cantidad
+      }, 0)
 
-    const mermas = (mermasResult.data || [])
-      .reduce((sum: number, m: { cantidad: number }) => sum + m.cantidad, 0)
+    const mermasData = mermasResult.data || []
+    const mermas = mermasData.reduce((sum, m) => {
+      const item = m as { cantidad: number }
+      return sum + item.cantidad
+    }, 0)
 
     return {
       producto: {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import { supabase, notifyError } from './base'
 import type {
   PedidoDB,
@@ -113,7 +113,7 @@ export interface UsePedidosHookReturn {
   fetchHistorialPedido: (pedidoId: string) => Promise<PedidoHistorialDB[]>;
   fetchPedidosEliminados: () => Promise<PedidoEliminadoDB[]>;
   filtros: FiltrosPedidosState;
-  setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>;
+  setFiltros: Dispatch<SetStateAction<FiltrosPedidosState>>;
   refetch: () => Promise<void>;
 }
 

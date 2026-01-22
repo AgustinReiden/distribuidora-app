@@ -1,3 +1,4 @@
+/* global google */
 import React, { useEffect, useRef, useState, useCallback, ChangeEvent } from 'react';
 import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
 import { useGoogleMaps } from '../hooks/useGoogleMaps';

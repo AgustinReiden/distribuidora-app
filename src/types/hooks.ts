@@ -2,6 +2,7 @@
  * Tipos para los hooks de la aplicación
  */
 
+import type { Dispatch, SetStateAction } from 'react'
 import type { User } from '@supabase/supabase-js'
 
 // =============================================================================
@@ -274,7 +275,7 @@ export interface UsePedidosReturn {
   pedidosFiltrados: () => PedidoDB[];
   loading: boolean;
   filtros: FiltrosPedidosState;
-  setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>;
+  setFiltros: Dispatch<SetStateAction<FiltrosPedidosState>>;
   crearPedido: (pedido: PedidoFormInput, usuarioId?: string) => Promise<PedidoDB>;
   cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
   asignarTransportista: (pedidoId: string, transportistaId: string, usuarioId?: string) => Promise<void>;
@@ -470,7 +471,7 @@ export interface AppState {
     items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>;
     notas: string;
   };
-  setNuevoPedido: React.Dispatch<React.SetStateAction<AppState['nuevoPedido']>>;
+  setNuevoPedido: Dispatch<SetStateAction<AppState['nuevoPedido']>>;
   // Estadísticas
   estadisticasRecorridos: unknown;
 }
