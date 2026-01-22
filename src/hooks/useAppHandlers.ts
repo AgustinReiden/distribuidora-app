@@ -500,7 +500,7 @@ export function useAppHandlers({
   const proveedorHandlers = useProveedorHandlers({
     proveedores,
     agregarProveedor,
-    actualizarProveedor,
+    actualizarProveedor: actualizarProveedor as any,
     modales,
     setGuardando,
     setProveedorEditando,

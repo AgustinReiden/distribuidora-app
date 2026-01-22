@@ -558,7 +558,7 @@ export default function AppModals({
         <Suspense fallback={<ModalFallback />}>
           <ModalImportarPrecios
             productos={productos}
-            onActualizarPrecios={actualizarPreciosMasivo}
+            onActualizarPrecios={actualizarPreciosMasivo as any}
             onClose={() => modales.importarPrecios.setOpen(false)}
           />
         </Suspense>

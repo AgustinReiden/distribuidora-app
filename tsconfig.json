@@ -32,19 +32,19 @@
     // Type Checking - Gradual Strict Mode
     // ===========================================
     // Migration Phase 9: Strict mode activation
-    // Status: noImplicitAny enabled ✓
-    // Next step: Enable strictNullChecks, then full strict mode
+    // Status: noImplicitAny + strictNullChecks enabled ✓
+    // Next step: Enable full strict mode
     //
     // Progress:
     // ✓ "noImplicitAny": true,        // ENABLED - all parameters typed
-    // - "strictNullChecks": true,     // Requires null checks throughout the codebase
+    // ✓ "strictNullChecks": true,     // ENABLED - null checks throughout codebase
     // - "strict": true,               // Enables all strict type checking options
     //
     // Run `npm run typecheck` after each change to see remaining errors.
     // ===========================================
     "strict": false,
     "noImplicitAny": true,
-    "strictNullChecks": false,
+    "strictNullChecks": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,

@@ -88,7 +88,7 @@ function MainApp(): ReactElement {
     obtenerResumenCuenta: obtenerResumenCuenta as any,
     registrarMerma: registrarMerma as any,
     registrarCompra: registrarCompra as any,
-    anularCompra, agregarProveedor, actualizarProveedor,
+    anularCompra, agregarProveedor, actualizarProveedor: actualizarProveedor as any,
     crearRecorrido: crearRecorrido as any,
     limpiarRuta,
     refetchProductos, refetchPedidos, refetchMetricas, refetchMermas, refetchCompras, refetchProveedores,
@@ -115,7 +115,7 @@ function MainApp(): ReactElement {
     const sincronizar = async (): Promise<void> => {
       try {
         if (pedidosPendientes.length > 0) {
-          const resultadoPedidos = await sincronizarPedidos(crearPedido, descontarStock);
+          const resultadoPedidos = await sincronizarPedidos(crearPedido as any, descontarStock);
           if (resultadoPedidos.sincronizados > 0) {
             notify.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`);
             refetchPedidos();
@@ -152,7 +152,7 @@ function MainApp(): ReactElement {
   const handleSincronizar = async (): Promise<void> => {
     try {
       if (pedidosPendientes.length > 0) {
-        const resultadoPedidos = await sincronizarPedidos(crearPedido, descontarStock);
+        const resultadoPedidos = await sincronizarPedidos(crearPedido as any, descontarStock);
         if (resultadoPedidos.sincronizados > 0) {
           notify.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`);
           refetchPedidos();
@@ -191,7 +191,7 @@ function MainApp(): ReactElement {
               <VistaPedidos
                 pedidos={pedidos} pedidosParaMostrar={pedidosParaMostrar} pedidosPaginados={pedidosPaginados}
                 paginaActual={paginaActual} totalPaginas={totalPaginas} busqueda={busqueda} filtros={filtros}
-                isAdmin={isAdmin} isPreventista={isPreventista} isTransportista={isTransportista} userId={user?.id}
+                isAdmin={isAdmin} isPreventista={isPreventista} isTransportista={isTransportista} userId={user?.id ?? ''}
                 clientes={clientes} productos={productos} transportistas={transportistas} loading={loadingPedidos} exportando={exportando}
                 onBusquedaChange={handlers.handleBusquedaChange}
                 onFiltrosChange={(nuevosFiltros: Partial<FiltrosPedidosState>) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
@@ -199,7 +199,7 @@ function MainApp(): ReactElement {
                 onNuevoPedido={() => modales.pedido.setOpen(true)}
                 onOptimizarRuta={() => modales.optimizarRuta.setOpen(true)}
                 onExportarPDF={() => modales.exportarPDF.setOpen(true)}
-                onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar, { ...filtros, busqueda }, transportistas)}
+                onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar, { ...filtros, busqueda, fechaDesde: filtros.fechaDesde ?? undefined, fechaHasta: filtros.fechaHasta ?? undefined }, transportistas)}
                 onModalFiltroFecha={() => modales.filtroFecha.setOpen(true)}
                 onVerHistorial={handlers.handleVerHistorial}
                 onEditarPedido={handlers.handleEditarPedido}
