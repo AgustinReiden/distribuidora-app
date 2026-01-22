@@ -1,10 +1,57 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { Check, X, AlertTriangle, Info, Bell, CheckCircle, Trash2 } from 'lucide-react';
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode, useRef } from 'react';
+import { Check, X, AlertTriangle, Info, Bell, CheckCircle, Trash2, LucideIcon } from 'lucide-react';
 import { getStorageItem, setStorageItem } from '../utils/storage';
 import { formatTimeAgo } from '../utils/formatters';
 
-const NotificationContext = createContext({});
+export type NotificationType = 'success' | 'error' | 'warning' | 'info';
+
+export interface Toast {
+  id: number;
+  message: string;
+  type: NotificationType;
+}
+
+export interface Notification {
+  id: number;
+  timestamp: string;
+  read: boolean;
+  type: NotificationType;
+  title: string;
+  message?: string;
+}
+
+export interface NotifyOptions {
+  persist?: boolean;
+  duration?: number;
+}
+
+export interface NotificationContextValue {
+  // Toasts
+  toasts: Toast[];
+  addToast: (message: string, type?: NotificationType, duration?: number) => number;
+  removeToast: (id: number) => void;
+  // Notificaciones
+  notifications: Notification[];
+  addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
+  markAsRead: (id: number) => void;
+  markAllAsRead: () => void;
+  removeNotification: (id: number) => void;
+  clearAllNotifications: () => void;
+  unreadCount: number;
+  // Métodos unificados
+  notify: (title: string, message?: string, type?: NotificationType, options?: NotifyOptions) => void;
+  success: (message: string, options?: NotifyOptions) => void;
+  error: (message: string, options?: NotifyOptions) => void;
+  warning: (message: string, options?: NotifyOptions) => void;
+  info: (message: string, options?: NotifyOptions) => void;
+}
+
+const NotificationContext = createContext<NotificationContextValue | null>(null);
+
+interface NotificationProviderProps {
+  children: ReactNode;
+}
 
 /**
  * Proveedor unificado de notificaciones
@@ -12,13 +59,13 @@ const NotificationContext = createContext({});
  * - Toasts temporales (aparecen abajo a la derecha, desaparecen solos)
  * - Notificaciones persistentes (se muestran en el centro de notificaciones)
  */
-export function NotificationProvider({ children }) {
+export function NotificationProvider({ children }: NotificationProviderProps) {
   // Toasts temporales
-  const [toasts, setToasts] = useState([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Notificaciones persistentes
-  const [notifications, setNotifications] = useState(() => {
-    const saved = getStorageItem('notifications', []);
+  const [notifications, setNotifications] = useState<Notification[]>(() => {
+    const saved = getStorageItem<Notification[]>('notifications', []);
     return Array.isArray(saved) ? saved : [];
   });
 
@@ -28,7 +75,7 @@ export function NotificationProvider({ children }) {
   }, [notifications]);
 
   // === TOASTS ===
-  const addToast = useCallback((message, type = 'success', duration = 3000) => {
+  const addToast = useCallback((message: string, type: NotificationType = 'success', duration = 3000): number => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, message, type }]);
 
@@ -41,13 +88,13 @@ export function NotificationProvider({ children }) {
     return id;
   }, []);
 
-  const removeToast = useCallback((id) => {
+  const removeToast = useCallback((id: number) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
   // === NOTIFICACIONES PERSISTENTES ===
-  const addNotification = useCallback((notification) => {
-    const newNotification = {
+  const addNotification = useCallback((notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
+    const newNotification: Notification = {
       id: Date.now(),
       timestamp: new Date().toISOString(),
       read: false,
@@ -56,7 +103,7 @@ export function NotificationProvider({ children }) {
     setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Máximo 50
   }, []);
 
-  const markAsRead = useCallback((id) => {
+  const markAsRead = useCallback((id: number) => {
     setNotifications(prev =>
       prev.map(n => n.id === id ? { ...n, read: true } : n)
     );
@@ -66,7 +113,7 @@ export function NotificationProvider({ children }) {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   }, []);
 
-  const removeNotification = useCallback((id) => {
+  const removeNotification = useCallback((id: number) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
@@ -78,7 +125,7 @@ export function NotificationProvider({ children }) {
 
   // === MÉTODOS UNIFICADOS ===
   // Estos métodos muestran toast Y agregan notificación persistente
-  const notify = useCallback((title, message, type = 'info', options = {}) => {
+  const notify = useCallback((title: string, message?: string, type: NotificationType = 'info', options: NotifyOptions = {}) => {
     const { persist = true, duration = 3000 } = options;
 
     // Siempre mostrar toast
@@ -91,14 +138,14 @@ export function NotificationProvider({ children }) {
   }, [addToast, addNotification]);
 
   // Helpers de conveniencia
-  const success = useCallback((message, options = {}) => {
+  const success = useCallback((message: string, options: NotifyOptions = {}) => {
     addToast(message, 'success', options.duration || 3000);
     if (options.persist) {
       addNotification({ type: 'success', title: 'Éxito', message });
     }
   }, [addToast, addNotification]);
 
-  const error = useCallback((message, options = {}) => {
+  const error = useCallback((message: string, options: NotifyOptions = {}) => {
     addToast(message, 'error', options.duration || 5000);
     // Los errores se persisten por defecto
     if (options.persist !== false) {
@@ -106,21 +153,21 @@ export function NotificationProvider({ children }) {
     }
   }, [addToast, addNotification]);
 
-  const warning = useCallback((message, options = {}) => {
+  const warning = useCallback((message: string, options: NotifyOptions = {}) => {
     addToast(message, 'warning', options.duration || 4000);
     if (options.persist) {
       addNotification({ type: 'warning', title: 'Advertencia', message });
     }
   }, [addToast, addNotification]);
 
-  const info = useCallback((message, options = {}) => {
+  const info = useCallback((message: string, options: NotifyOptions = {}) => {
     addToast(message, 'info', options.duration || 3000);
     if (options.persist) {
       addNotification({ type: 'info', title: 'Información', message });
     }
   }, [addToast, addNotification]);
 
-  const value = {
+  const value: NotificationContextValue = {
     // Toasts
     toasts,
     addToast,
@@ -149,7 +196,7 @@ export function NotificationProvider({ children }) {
   );
 }
 
-export const useNotification = () => {
+export const useNotification = (): NotificationContextValue => {
   const context = useContext(NotificationContext);
   if (!context) {
     throw new Error('useNotification debe usarse dentro de NotificationProvider');
@@ -161,19 +208,29 @@ export const useNotification = () => {
 export const useToast = useNotification;
 
 // === COMPONENTES DE TOAST ===
-function ToastContainer({ toasts, removeToast }) {
+interface ToastContainerProps {
+  toasts: Toast[];
+  removeToast: (id: number) => void;
+}
+
+function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
   if (toasts.length === 0) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
       {toasts.map(toast => (
-        <Toast key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
+        <ToastItem key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
       ))}
     </div>
   );
 }
 
-function Toast({ toast, onClose }) {
+interface ToastItemProps {
+  toast: Toast;
+  onClose: () => void;
+}
+
+function ToastItem({ toast, onClose }: ToastItemProps) {
   const [isExiting, setIsExiting] = useState(false);
 
   const handleClose = () => {
@@ -181,7 +238,7 @@ function Toast({ toast, onClose }) {
     setTimeout(onClose, 200);
   };
 
-  const config = {
+  const config: Record<NotificationType, { bg: string; icon: React.ReactNode; text: string }> = {
     success: {
       bg: 'bg-green-50 border-green-200 dark:bg-green-900/30 dark:border-green-800',
       icon: <Check className="w-5 h-5 text-green-600 dark:text-green-400" />,
@@ -222,14 +279,14 @@ function Toast({ toast, onClose }) {
 }
 
 // === COMPONENTE NOTIFICATION CENTER ===
-const iconMap = {
+const iconMap: Record<NotificationType, LucideIcon> = {
   success: CheckCircle,
   error: AlertTriangle,
   warning: AlertTriangle,
   info: Info
 };
 
-const colorMap = {
+const colorMap: Record<NotificationType, string> = {
   success: 'text-green-600 bg-green-100 dark:bg-green-900/30',
   error: 'text-red-600 bg-red-100 dark:bg-red-900/30',
   warning: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30',
@@ -247,11 +304,11 @@ export function NotificationCenter() {
   } = useNotification();
 
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = React.useRef(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
