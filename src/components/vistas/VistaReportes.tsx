@@ -402,7 +402,7 @@ function ReporteCuentasPorCobrar({ reporte, loading, formatPrecio, onVerCliente 
   );
 }
 
-function ReporteRentabilidad({ reporte, loading, formatPrecio }) {
+function ReporteRentabilidad({ reporte, loading, formatPrecio }: ReporteRentabilidadProps): React.ReactElement {
   if (loading) return <LoadingSpinner />;
 
   const { productos, totales } = reporte;
@@ -474,7 +474,7 @@ function ReporteRentabilidad({ reporte, loading, formatPrecio }) {
   );
 }
 
-function ReporteVentasClientes({ reporte, loading, formatPrecio, onVerCliente }) {
+function ReporteVentasClientes({ reporte, loading, formatPrecio, onVerCliente }: ReporteVentasClientesProps): React.ReactElement {
   if (loading) return <LoadingSpinner />;
 
   if (reporte.length === 0) {
@@ -537,7 +537,7 @@ function ReporteVentasClientes({ reporte, loading, formatPrecio, onVerCliente })
   );
 }
 
-function ReporteVentasZonas({ reporte, loading, formatPrecio }) {
+function ReporteVentasZonas({ reporte, loading, formatPrecio }: ReporteVentasZonasProps): React.ReactElement {
   if (loading) return <LoadingSpinner />;
 
   if (reporte.length === 0) {

@@ -1,15 +1,46 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, MutableRefObject } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
-  UserCog, Route, ShoppingBag, Building2, Layers
+  UserCog, Route, ShoppingBag, Building2
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { NotificationCenter } from '../../contexts/NotificationContext';
+import type { PerfilDB, RolUsuario } from '../../types';
 
-// Configuración del menú con grupos
-const menuGroups = [
+// =============================================================================
+// INTERFACES Y TIPOS
+// =============================================================================
+
+export interface TopNavigationProps {
+  vista: string;
+  setVista: (vista: string) => void;
+  perfil: PerfilDB | null;
+  onLogout: () => void;
+}
+
+interface MenuItem {
+  id: string;
+  icon: LucideIcon;
+  label: string;
+  roles: RolUsuario[];
+}
+
+interface MenuGroup {
+  id: string;
+  label: string | null;
+  icon?: LucideIcon;
+  roles?: RolUsuario[];
+  items: MenuItem[];
+}
+
+// =============================================================================
+// CONFIGURACION DEL MENU
+// =============================================================================
+
+const menuGroups: MenuGroup[] = [
   {
     id: 'principal',
     label: null, // Items sin grupo (se muestran directo)
@@ -51,47 +82,54 @@ const menuGroups = [
   }
 ];
 
+// =============================================================================
+// COMPONENTE PRINCIPAL
+// =============================================================================
+
 export default function TopNavigation({
   vista,
   setVista,
   perfil,
   onLogout
-}) {
+}: TopNavigationProps): React.ReactElement {
   const { darkMode, toggleDarkMode } = useTheme();
-  const [menuAbierto, setMenuAbierto] = useState(false);
-  const [userMenuAbierto, setUserMenuAbierto] = useState(false);
-  const [dropdownAbierto, setDropdownAbierto] = useState(null);
-  const menuRef = useRef(null);
-  const userMenuRef = useRef(null);
-  const dropdownRefs = useRef({});
+  const [menuAbierto, setMenuAbierto] = useState<boolean>(false);
+  const [userMenuAbierto, setUserMenuAbierto] = useState<boolean>(false);
+  const [dropdownAbierto, setDropdownAbierto] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const dropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Filtrar grupos y items por rol
-  const getMenuFiltrado = () => {
+  const getMenuFiltrado = (): MenuGroup[] => {
+    const userRol = perfil?.rol;
+    if (!userRol) return [];
+
     return menuGroups.map(group => ({
       ...group,
-      items: group.items.filter(item => item.roles.includes(perfil?.rol))
+      items: group.items.filter(item => item.roles.includes(userRol))
     })).filter(group => {
-      // Filtrar grupos vacíos o sin permiso
+      // Filtrar grupos vacios o sin permiso
       if (group.items.length === 0) return false;
-      if (group.roles && !group.roles.some(r => r === perfil?.rol)) return false;
+      if (group.roles && !group.roles.some(r => r === userRol)) return false;
       return true;
     });
   };
 
   const menuFiltrado = getMenuFiltrado();
 
-  // Cerrar menús al hacer click fuera
+  // Cerrar menus al hacer click fuera
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
+    const handleClickOutside = (event: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setMenuAbierto(false);
       }
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setUserMenuAbierto(false);
       }
       // Cerrar dropdowns
       const clickedInsideDropdown = Object.values(dropdownRefs.current).some(
-        ref => ref && ref.contains(event.target)
+        ref => ref && ref.contains(event.target as Node)
       );
       if (!clickedInsideDropdown) {
         setDropdownAbierto(null);
@@ -102,33 +140,37 @@ export default function TopNavigation({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleVistaChange = (vistaId) => {
+  const handleVistaChange = (vistaId: string): void => {
     setVista(vistaId);
     setMenuAbierto(false);
     setDropdownAbierto(null);
   };
 
-  const toggleDropdown = (groupId) => {
+  const toggleDropdown = (groupId: string): void => {
     setDropdownAbierto(dropdownAbierto === groupId ? null : groupId);
   };
 
   // Verificar si un grupo tiene la vista activa
-  const grupoTieneVistaActiva = (group) => {
+  const grupoTieneVistaActiva = (group: MenuGroup): boolean => {
     return group.items.some(item => item.id === vista);
+  };
+
+  const setDropdownRef = (groupId: string) => (el: HTMLDivElement | null): void => {
+    dropdownRefs.current[groupId] = el;
   };
 
   return (
     <>
-      {/* Barra de navegación fija */}
+      {/* Barra de navegacion fija */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-sm z-50">
         <div className="h-full max-w-7xl mx-auto px-4 flex items-center justify-between">
-          {/* Logo y Menú hamburguesa (móvil) */}
+          {/* Logo y Menu hamburguesa (movil) */}
           <div className="flex items-center space-x-4">
-            {/* Botón hamburguesa - visible en móvil */}
+            {/* Boton hamburguesa - visible en movil */}
             <button
               onClick={() => setMenuAbierto(!menuAbierto)}
               className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              aria-label="Abrir menú"
+              aria-label="Abrir menu"
             >
               {menuAbierto ? (
                 <X className="w-6 h-6 text-gray-600 dark:text-gray-300" />
@@ -147,29 +189,32 @@ export default function TopNavigation({
               </span>
             </div>
 
-            {/* Menú horizontal - visible en desktop */}
-            <nav id="main-navigation" className="hidden lg:flex items-center space-x-1 ml-8" aria-label="Navegación principal">
+            {/* Menu horizontal - visible en desktop */}
+            <nav id="main-navigation" className="hidden lg:flex items-center space-x-1 ml-8" aria-label="Navegacion principal">
               {menuFiltrado.map(group => {
                 // Items sin grupo (se muestran directo)
                 if (!group.label) {
-                  return group.items.map(item => (
-                    <button
-                      key={item.id}
-                      onClick={() => handleVistaChange(item.id)}
-                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
-                        vista === item.id
-                          ? 'bg-blue-600 text-white shadow-md'
-                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      <item.icon className="w-4 h-4" />
-                      <span className="font-medium text-sm">{item.label}</span>
-                    </button>
-                  ));
+                  return group.items.map(item => {
+                    const ItemIcon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleVistaChange(item.id)}
+                        className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                          vista === item.id
+                            ? 'bg-blue-600 text-white shadow-md'
+                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        <ItemIcon className="w-4 h-4" />
+                        <span className="font-medium text-sm">{item.label}</span>
+                      </button>
+                    );
+                  });
                 }
 
                 // Grupos con dropdown
-                const GroupIcon = group.icon;
+                const GroupIcon = group.icon!;
                 const isActive = grupoTieneVistaActiva(group);
                 const isOpen = dropdownAbierto === group.id;
 
@@ -177,7 +222,7 @@ export default function TopNavigation({
                   <div
                     key={group.id}
                     className="relative"
-                    ref={el => dropdownRefs.current[group.id] = el}
+                    ref={setDropdownRef(group.id)}
                   >
                     <button
                       onClick={() => toggleDropdown(group.id)}
@@ -195,20 +240,23 @@ export default function TopNavigation({
                     {/* Dropdown */}
                     {isOpen && (
                       <div className="absolute top-full left-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 z-50">
-                        {group.items.map(item => (
-                          <button
-                            key={item.id}
-                            onClick={() => handleVistaChange(item.id)}
-                            className={`w-full flex items-center space-x-3 px-4 py-2.5 transition-colors ${
-                              vista === item.id
-                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            <item.icon className="w-4 h-4" />
-                            <span className="font-medium text-sm">{item.label}</span>
-                          </button>
-                        ))}
+                        {group.items.map(item => {
+                          const ItemIcon = item.icon;
+                          return (
+                            <button
+                              key={item.id}
+                              onClick={() => handleVistaChange(item.id)}
+                              className={`w-full flex items-center space-x-3 px-4 py-2.5 transition-colors ${
+                                vista === item.id
+                                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                              }`}
+                            >
+                              <ItemIcon className="w-4 h-4" />
+                              <span className="font-medium text-sm">{item.label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -231,7 +279,7 @@ export default function TopNavigation({
             {/* Notificaciones */}
             <NotificationCenter />
 
-            {/* Menú de usuario */}
+            {/* Menu de usuario */}
             <div className="relative" ref={userMenuRef}>
               <button
                 onClick={() => setUserMenuAbierto(!userMenuAbierto)}
@@ -254,8 +302,8 @@ export default function TopNavigation({
                   <div className="px-4 py-3 border-b dark:border-gray-700">
                     <p className="font-medium text-gray-800 dark:text-white truncate">{perfil?.nombre}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{perfil?.email}</p>
-                    <span className={`inline-block mt-2 text-xs px-2 py-1 rounded-full ${getRolColor(perfil?.rol)}`}>
-                      {getRolLabel(perfil?.rol)}
+                    <span className={`inline-block mt-2 text-xs px-2 py-1 rounded-full ${getRolColor(perfil?.rol || '')}`}>
+                      {getRolLabel(perfil?.rol || '')}
                     </span>
                   </div>
                   <button
@@ -263,7 +311,7 @@ export default function TopNavigation({
                     className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                   >
                     <LogOut className="w-5 h-5" />
-                    <span>Cerrar sesión</span>
+                    <span>Cerrar sesion</span>
                   </button>
                 </div>
               )}
@@ -272,7 +320,7 @@ export default function TopNavigation({
         </div>
       </header>
 
-      {/* Menú desplegable móvil */}
+      {/* Menu desplegable movil */}
       <div
         ref={menuRef}
         className={`fixed top-16 left-0 right-0 bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 lg:hidden transition-all duration-300 ease-in-out ${
@@ -282,41 +330,47 @@ export default function TopNavigation({
         }`}
       >
         <nav className="max-w-7xl mx-auto p-4 space-y-4">
-          {menuFiltrado.map(group => (
-            <div key={group.id}>
-              {/* Título del grupo */}
-              {group.label && (
-                <div className="flex items-center gap-2 px-2 mb-2">
-                  <group.icon className="w-4 h-4 text-gray-400" />
-                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                    {group.label}
-                  </span>
-                </div>
-              )}
+          {menuFiltrado.map(group => {
+            const GroupIcon = group.icon;
+            return (
+              <div key={group.id}>
+                {/* Titulo del grupo */}
+                {group.label && GroupIcon && (
+                  <div className="flex items-center gap-2 px-2 mb-2">
+                    <GroupIcon className="w-4 h-4 text-gray-400" />
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      {group.label}
+                    </span>
+                  </div>
+                )}
 
-              {/* Items del grupo */}
-              <div className="grid grid-cols-2 gap-2">
-                {group.items.map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => handleVistaChange(item.id)}
-                    className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
-                      vista === item.id
-                        ? 'bg-blue-600 text-white shadow-md'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 bg-gray-50 dark:bg-gray-700/50'
-                    }`}
-                  >
-                    <item.icon className="w-5 h-5" />
-                    <span className="font-medium">{item.label}</span>
-                  </button>
-                ))}
+                {/* Items del grupo */}
+                <div className="grid grid-cols-2 gap-2">
+                  {group.items.map(item => {
+                    const ItemIcon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleVistaChange(item.id)}
+                        className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
+                          vista === item.id
+                            ? 'bg-blue-600 text-white shadow-md'
+                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 bg-gray-50 dark:bg-gray-700/50'
+                        }`}
+                      >
+                        <ItemIcon className="w-5 h-5" />
+                        <span className="font-medium">{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
       </div>
 
-      {/* Overlay para cerrar menú móvil */}
+      {/* Overlay para cerrar menu movil */}
       {menuAbierto && (
         <div
           className="fixed inset-0 bg-black bg-opacity-25 z-30 lg:hidden"

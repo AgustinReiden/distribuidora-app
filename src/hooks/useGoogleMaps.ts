@@ -1,23 +1,68 @@
 /**
- * Hook para cargar Google Maps API dinámicamente
+ * Hook para cargar Google Maps API dinamicamente
  *
- * Ventajas sobre carga estática en index.html:
+ * Ventajas sobre carga estatica en index.html:
  * - API key en variable de entorno (no expuesta en HTML)
  * - Carga bajo demanda (mejor performance inicial)
  * - Mejor manejo de errores
  */
 
+import { useState, useCallback, useEffect } from 'react'
+
+/**
+ * ID del script de Google Maps en el DOM
+ */
 const GOOGLE_MAPS_SCRIPT_ID = 'google-maps-script'
 
-let loadPromise = null
+/**
+ * Promesa de carga compartida para evitar cargas duplicadas
+ */
+let loadPromise: Promise<void> | null = null
+
+/**
+ * Interfaz simplificada para Google Maps Places API
+ * Solo incluye lo necesario para verificar si está cargada
+ */
+interface GoogleMapsPlaces {
+  AutocompleteService: unknown
+  PlacesService?: unknown
+}
+
+interface GoogleMaps {
+  places?: GoogleMapsPlaces
+  Geocoder?: unknown
+  Map?: unknown
+  LatLng?: unknown
+  Marker?: unknown
+}
+
+interface GoogleAPI {
+  maps?: GoogleMaps
+}
+
+/**
+ * Extiende la interfaz Window para incluir Google Maps
+ */
+declare global {
+  interface Window {
+    google?: GoogleAPI
+  }
+}
+
+/**
+ * Verifica si la API de Google Maps Places está disponible
+ */
+function isGoogleMapsLoaded(): boolean {
+  return !!(window.google?.maps?.places?.AutocompleteService)
+}
 
 /**
  * Carga Google Maps API de forma dinámica
- * @returns {Promise<void>}
+ * @returns Promise que resuelve cuando la API está lista
  */
-export function loadGoogleMapsAPI() {
+export function loadGoogleMapsAPI(): Promise<void> {
   // Si ya está cargado, resolver inmediatamente
-  if (window.google?.maps?.places?.AutocompleteService) {
+  if (isGoogleMapsLoaded()) {
     return Promise.resolve()
   }
 
@@ -26,12 +71,12 @@ export function loadGoogleMapsAPI() {
     return loadPromise
   }
 
-  loadPromise = new Promise((resolve, reject) => {
+  loadPromise = new Promise<void>((resolve, reject) => {
     // Verificar si el script ya existe
     if (document.getElementById(GOOGLE_MAPS_SCRIPT_ID)) {
       // Script existe, esperar a que cargue
       const checkLoaded = setInterval(() => {
-        if (window.google?.maps?.places?.AutocompleteService) {
+        if (isGoogleMapsLoaded()) {
           clearInterval(checkLoaded)
           resolve()
         }
@@ -40,7 +85,7 @@ export function loadGoogleMapsAPI() {
       // Timeout de 15 segundos
       setTimeout(() => {
         clearInterval(checkLoaded)
-        if (!window.google?.maps?.places?.AutocompleteService) {
+        if (!isGoogleMapsLoaded()) {
           reject(new Error('Google Maps API timeout'))
         }
       }, 15000)
@@ -48,7 +93,8 @@ export function loadGoogleMapsAPI() {
     }
 
     // Obtener API key de variable de entorno
-    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const apiKey = (import.meta as any).env?.VITE_GOOGLE_API_KEY as string | undefined
 
     if (!apiKey) {
       console.warn('[Google Maps] VITE_GOOGLE_API_KEY no configurada. El autocompletado de direcciones no estará disponible.')
@@ -63,10 +109,10 @@ export function loadGoogleMapsAPI() {
     script.async = true
     script.defer = true
 
-    script.onload = () => {
+    script.onload = (): void => {
       // Esperar a que la API esté completamente inicializada
       const checkReady = setInterval(() => {
-        if (window.google?.maps?.places?.AutocompleteService) {
+        if (isGoogleMapsLoaded()) {
           clearInterval(checkReady)
           resolve()
         }
@@ -75,13 +121,13 @@ export function loadGoogleMapsAPI() {
       // Timeout
       setTimeout(() => {
         clearInterval(checkReady)
-        if (!window.google?.maps?.places?.AutocompleteService) {
+        if (!isGoogleMapsLoaded()) {
           reject(new Error('Google Maps API initialization timeout'))
         }
       }, 10000)
     }
 
-    script.onerror = () => {
+    script.onerror = (): void => {
       loadPromise = null
       reject(new Error('Failed to load Google Maps API'))
     }
@@ -93,7 +139,32 @@ export function loadGoogleMapsAPI() {
 }
 
 /**
+ * Opciones para el hook useGoogleMaps
+ */
+export interface UseGoogleMapsOptions {
+  /** Si cargar automáticamente al montar (default: true) */
+  autoLoad?: boolean
+}
+
+/**
+ * Estado del hook useGoogleMaps
+ */
+export interface UseGoogleMapsState {
+  /** Si la API está cargada */
+  isLoaded: boolean
+  /** Si está cargando */
+  isLoading: boolean
+  /** Mensaje de error si falló la carga */
+  error: string | null
+  /** Función para cargar manualmente la API */
+  load: () => Promise<void>
+}
+
+/**
  * Hook para usar Google Maps en componentes React
+ *
+ * @param options - Opciones de configuración
+ * @returns Estado de carga y función de carga manual
  *
  * @example
  * function MyComponent() {
@@ -108,16 +179,16 @@ export function loadGoogleMapsAPI() {
  *   return <AddressAutocomplete />
  * }
  */
-import { useState, useCallback, useEffect } from 'react'
+export function useGoogleMaps(options: UseGoogleMapsOptions = {}): UseGoogleMapsState {
+  const { autoLoad = true } = options
 
-export function useGoogleMaps({ autoLoad = true } = {}) {
-  const [isLoaded, setIsLoaded] = useState(
-    () => !!window.google?.maps?.places?.AutocompleteService
+  const [isLoaded, setIsLoaded] = useState<boolean>(
+    () => isGoogleMapsLoaded()
   )
-  const [error, setError] = useState(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState<boolean>(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     if (isLoaded) return
 
     setIsLoading(true)
@@ -127,7 +198,8 @@ export function useGoogleMaps({ autoLoad = true } = {}) {
       await loadGoogleMapsAPI()
       setIsLoaded(true)
     } catch (err) {
-      setError(err.message)
+      const errorMessage = err instanceof Error ? err.message : 'Error desconocido al cargar Google Maps'
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
     }

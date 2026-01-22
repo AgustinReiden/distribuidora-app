@@ -88,7 +88,7 @@ const RUBROS_OPCIONES = [
 
 // Validar formato de CUIT (XX-XXXXXXXX-X)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const validarCuit = (cuit) => {
+const validarCuit = (cuit: string): boolean => {
   if (!cuit) return false;
   const cuitLimpio = cuit.replace(/-/g, '');
   return /^\d{11}$/.test(cuitLimpio);
@@ -96,14 +96,14 @@ const validarCuit = (cuit) => {
 
 // Validar formato de DNI (7-8 digitos)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const validarDni = (dni) => {
+const validarDni = (dni: string): boolean => {
   if (!dni) return false;
   const dniLimpio = dni.replace(/\D/g, '');
   return /^\d{7,8}$/.test(dniLimpio);
 };
 
 // Formatear CUIT mientras se escribe (XX-XXXXXXXX-X)
-const formatearCuit = (valor) => {
+const formatearCuit = (valor: string): string => {
   const numeros = valor.replace(/\D/g, '').slice(0, 11);
   if (numeros.length <= 2) return numeros;
   if (numeros.length <= 10) return `${numeros.slice(0, 2)}-${numeros.slice(2)}`;
@@ -111,18 +111,18 @@ const formatearCuit = (valor) => {
 };
 
 // Formatear DNI mientras se escribe (solo numeros, max 8)
-const formatearDni = (valor) => {
+const formatearDni = (valor: string): string => {
   return valor.replace(/\D/g, '').slice(0, 8);
 };
 
 // Convertir DNI a formato estandarizado para almacenar (00-XXXXXXXX-0)
-const dniAFormatoAlmacenamiento = (dni) => {
+const dniAFormatoAlmacenamiento = (dni: string): string => {
   const dniLimpio = dni.replace(/\D/g, '').padStart(8, '0');
   return `00-${dniLimpio}-0`;
 };
 
 // Extraer DNI del formato de almacenamiento
-const extraerDniDeFormato = (codigo) => {
+const extraerDniDeFormato = (codigo: string | null | undefined): string => {
   if (!codigo) return '';
   // Si tiene formato 00-XXXXXXXX-0, extraer el DNI
   const match = codigo.match(/^00-(\d{8})-0$/);
@@ -134,7 +134,7 @@ const extraerDniDeFormato = (codigo) => {
 };
 
 // Detectar tipo de documento por el formato almacenado
-const detectarTipoDocumento = (codigo) => {
+const detectarTipoDocumento = (codigo: string | null | undefined): TipoDocumento => {
   if (!codigo) return 'CUIT';
   if (/^00-\d{8}-0$/.test(codigo)) return 'DNI';
   return 'CUIT';

@@ -1,30 +1,107 @@
-import React, { useState, useMemo } from 'react';
-import { Route, Truck, Calendar, Clock, Package, Check, MapPin, Phone, DollarSign, ChevronDown, ChevronUp, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
+import React, { useState, useMemo, ChangeEvent } from 'react';
+import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
 import { formatPrecio, formatFecha } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import type {
+  RecorridoDBExtended,
+  PedidoDB,
+  PedidoItemDB,
+  EstadisticasRecorridos,
+  TransportistaBasic
+} from '../../types';
 
-// Componente de tarjeta de pedido en recorrido
-function PedidoRecorridoCard({ pedido, orden }) {
-  const [expandido, setExpandido] = useState(false);
+// =============================================================================
+// INTERFACES DE PROPS Y TIPOS
+// =============================================================================
 
-  const estadoColors = {
+export interface VistaRecorridosProps {
+  recorridos?: RecorridoDBExtended[];
+  loading?: boolean;
+  onRefresh: () => void;
+  onFechaChange: (fecha: string) => void;
+  fechaSeleccionada: string;
+  estadisticas?: EstadisticasRecorridos | null;
+}
+
+interface PedidoRecorrido {
+  id?: string;
+  orden_entrega?: number;
+  pedido_id?: string;
+  pedido?: PedidoDB;
+  // Allow direct pedido properties when not nested
+  estado?: string;
+  estado_pago?: string;
+  total?: number;
+  monto_pagado?: number;
+  cliente?: {
+    nombre_fantasia?: string;
+    direccion?: string;
+    telefono?: string;
+  };
+  items?: PedidoItemDB[];
+  notas?: string;
+}
+
+interface RecorridoConPedidos extends RecorridoDBExtended {
+  pedidos?: PedidoRecorrido[];
+}
+
+interface EstadoRecorrido {
+  label: string;
+  color: string;
+}
+
+interface ResumenDia {
+  totalRecorridos: number;
+  totalPedidos: number;
+  pedidosEntregados: number;
+  totalFacturado: number;
+  totalCobrado: number;
+}
+
+interface PedidoRecorridoCardProps {
+  pedido: PedidoRecorrido;
+  orden: number;
+}
+
+interface RecorridoCardProps {
+  recorrido: RecorridoConPedidos;
+  defaultExpanded?: boolean;
+}
+
+// =============================================================================
+// COMPONENTE: PedidoRecorridoCard
+// =============================================================================
+
+function PedidoRecorridoCard({ pedido, orden }: PedidoRecorridoCardProps): React.ReactElement {
+  const [expandido, setExpandido] = useState<boolean>(false);
+
+  const estadoColors: Record<string, string> = {
     entregado: 'bg-green-100 text-green-700 border-green-200',
     asignado: 'bg-blue-100 text-blue-700 border-blue-200',
     pendiente: 'bg-yellow-100 text-yellow-700 border-yellow-200'
   };
 
-  const estadoPagoColors = {
+  const estadoPagoColors: Record<string, string> = {
     pagado: 'bg-green-100 text-green-700',
     parcial: 'bg-yellow-100 text-yellow-700',
     pendiente: 'bg-red-100 text-red-700'
   };
 
   const pedidoData = pedido.pedido || pedido;
-  const cliente = pedidoData.cliente || {};
+  const cliente = (pedidoData as PedidoDB).cliente || pedido.cliente || {};
+
+  const estado = (pedidoData as PedidoDB).estado || pedido.estado || 'pendiente';
+  const estadoPago = (pedidoData as PedidoDB).estado_pago || pedido.estado_pago || 'pendiente';
+  const total = (pedidoData as PedidoDB).total || pedido.total || 0;
+  const montoPagado = (pedidoData as PedidoDB).monto_pagado || pedido.monto_pagado || 0;
+  const items = (pedidoData as PedidoDB).items || pedido.items || [];
+  const notas = (pedidoData as PedidoDB).notas || pedido.notas;
+  const pedidoId = (pedidoData as PedidoDB).id || pedido.id || pedido.pedido_id;
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-lg border shadow-sm ${
-      pedidoData.estado === 'entregado'
+      estado === 'entregado'
         ? 'border-green-300 dark:border-green-700'
         : 'border-gray-200 dark:border-gray-700'
     }`}>
@@ -32,9 +109,9 @@ function PedidoRecorridoCard({ pedido, orden }) {
         <div className="flex items-start gap-3">
           {/* Numero de orden */}
           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${
-            pedidoData.estado === 'entregado' ? 'bg-green-500' : 'bg-blue-500'
+            estado === 'entregado' ? 'bg-green-500' : 'bg-blue-500'
           }`}>
-            {pedidoData.estado === 'entregado' ? <Check className="w-4 h-4" /> : orden}
+            {estado === 'entregado' ? <Check className="w-4 h-4" /> : orden}
           </div>
 
           {/* Info del pedido */}
@@ -44,23 +121,23 @@ function PedidoRecorridoCard({ pedido, orden }) {
                 <h4 className="font-semibold text-gray-900 dark:text-white text-sm">
                   {cliente.nombre_fantasia || 'Cliente'}
                 </h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Pedido #{pedidoData.id}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Pedido #{pedidoId}</p>
               </div>
               <div className="flex flex-col items-end gap-1">
-                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${estadoColors[pedidoData.estado] || estadoColors.pendiente}`}>
-                  {pedidoData.estado === 'entregado' ? 'Entregado' : 'Pendiente'}
+                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${estadoColors[estado] || estadoColors.pendiente}`}>
+                  {estado === 'entregado' ? 'Entregado' : 'Pendiente'}
                 </span>
-                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${estadoPagoColors[pedidoData.estado_pago] || estadoPagoColors.pendiente}`}>
-                  {pedidoData.estado_pago === 'pagado' ? 'Pagado' : pedidoData.estado_pago === 'parcial' ? 'Parcial' : 'Pend. Pago'}
+                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${estadoPagoColors[estadoPago] || estadoPagoColors.pendiente}`}>
+                  {estadoPago === 'pagado' ? 'Pagado' : estadoPago === 'parcial' ? 'Parcial' : 'Pend. Pago'}
                 </span>
               </div>
             </div>
 
             <div className="mt-2 flex items-center gap-4 text-sm">
-              <span className="font-bold text-blue-600">{formatPrecio(pedidoData.total)}</span>
-              {pedidoData.monto_pagado > 0 && pedidoData.estado_pago === 'parcial' && (
+              <span className="font-bold text-blue-600">{formatPrecio(total)}</span>
+              {montoPagado > 0 && estadoPago === 'parcial' && (
                 <span className="text-xs text-gray-500">
-                  (Pagado: {formatPrecio(pedidoData.monto_pagado)})
+                  (Pagado: {formatPrecio(montoPagado)})
                 </span>
               )}
             </div>
@@ -73,7 +150,7 @@ function PedidoRecorridoCard({ pedido, orden }) {
               className="flex items-start gap-1 mt-2 text-blue-600 dark:text-blue-400 hover:underline text-xs"
             >
               <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0" />
-              <span>{cliente.direccion || 'Sin dirección'}</span>
+              <span>{cliente.direccion || 'Sin direccion'}</span>
             </a>
 
             {cliente.telefono && (
@@ -99,10 +176,10 @@ function PedidoRecorridoCard({ pedido, orden }) {
       </div>
 
       {/* Contenido expandido */}
-      {expandido && pedidoData.items && (
+      {expandido && items && (
         <div className="px-3 pb-3 border-t dark:border-gray-700">
           <div className="mt-2 space-y-1">
-            {pedidoData.items.map(item => (
+            {items.map((item: PedidoItemDB) => (
               <div key={item.id} className="flex justify-between text-xs bg-gray-50 dark:bg-gray-700 p-2 rounded">
                 <span className="text-gray-700 dark:text-gray-300">
                   {item.cantidad}x {item.producto?.nombre || 'Producto'}
@@ -111,9 +188,9 @@ function PedidoRecorridoCard({ pedido, orden }) {
               </div>
             ))}
           </div>
-          {pedidoData.notas && (
+          {notas && (
             <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs">
-              <strong>Nota:</strong> {pedidoData.notas}
+              <strong>Nota:</strong> {notas}
             </div>
           )}
         </div>
@@ -122,21 +199,24 @@ function PedidoRecorridoCard({ pedido, orden }) {
   );
 }
 
-// Componente de tarjeta de recorrido
-function RecorridoCard({ recorrido, defaultExpanded = false }) {
-  const [expandido, setExpandido] = useState(defaultExpanded);
+// =============================================================================
+// COMPONENTE: RecorridoCard
+// =============================================================================
 
-  const pedidosOrdenados = useMemo(() => {
+function RecorridoCard({ recorrido, defaultExpanded = false }: RecorridoCardProps): React.ReactElement {
+  const [expandido, setExpandido] = useState<boolean>(defaultExpanded);
+
+  const pedidosOrdenados = useMemo<PedidoRecorrido[]>(() => {
     if (!recorrido.pedidos) return [];
     return [...recorrido.pedidos].sort((a, b) => (a.orden_entrega || 0) - (b.orden_entrega || 0));
   }, [recorrido.pedidos]);
 
   const totalPedidos = recorrido.total_pedidos || pedidosOrdenados.length;
   const pedidosEntregados = recorrido.pedidos_entregados ||
-    pedidosOrdenados.filter(p => (p.pedido?.estado || p.estado) === 'entregado').length;
+    pedidosOrdenados.filter(p => ((p.pedido as PedidoDB)?.estado || p.estado) === 'entregado').length;
   const progreso = totalPedidos > 0 ? Math.round((pedidosEntregados / totalPedidos) * 100) : 0;
 
-  const estadoRecorrido = recorrido.estado === 'completado'
+  const estadoRecorrido: EstadoRecorrido = recorrido.estado === 'completado'
     ? { label: 'Completado', color: 'bg-green-100 text-green-700 border-green-300' }
     : progreso === 100
       ? { label: 'Listo', color: 'bg-green-100 text-green-700 border-green-300' }
@@ -156,7 +236,7 @@ function RecorridoCard({ recorrido, defaultExpanded = false }) {
                 {recorrido.transportista?.nombre || 'Transportista'}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {formatFecha(recorrido.fecha)} • {totalPedidos} entregas
+                {formatFecha(recorrido.fecha)} - {totalPedidos} entregas
               </p>
             </div>
           </div>
@@ -179,7 +259,7 @@ function RecorridoCard({ recorrido, defaultExpanded = false }) {
           </div>
         </div>
 
-        {/* Métricas */}
+        {/* Metricas */}
         <div className="grid grid-cols-3 gap-3 mt-4">
           <div className="bg-white/50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
             <p className="text-lg font-bold text-gray-900 dark:text-white">
@@ -202,7 +282,7 @@ function RecorridoCard({ recorrido, defaultExpanded = false }) {
         </div>
       </div>
 
-      {/* Botón expandir */}
+      {/* Boton expandir */}
       <button
         onClick={() => setExpandido(!expandido)}
         className="w-full flex items-center justify-center gap-2 py-3 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
@@ -240,6 +320,10 @@ function RecorridoCard({ recorrido, defaultExpanded = false }) {
   );
 }
 
+// =============================================================================
+// COMPONENTE PRINCIPAL
+// =============================================================================
+
 export default function VistaRecorridos({
   recorridos = [],
   loading = false,
@@ -247,17 +331,17 @@ export default function VistaRecorridos({
   onFechaChange,
   fechaSeleccionada,
   estadisticas = null
-}) {
-  const [vistaEstadisticas, setVistaEstadisticas] = useState(false);
-  const [fechaDesde, setFechaDesde] = useState(() => {
+}: VistaRecorridosProps): React.ReactElement {
+  const [vistaEstadisticas, setVistaEstadisticas] = useState<boolean>(false);
+  const [fechaDesde, setFechaDesde] = useState<string>(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
     return d.toISOString().split('T')[0];
   });
-  const [fechaHasta, setFechaHasta] = useState(() => new Date().toISOString().split('T')[0]);
+  const [fechaHasta, setFechaHasta] = useState<string>(() => new Date().toISOString().split('T')[0]);
 
-  // Resumen del día
-  const resumenDia = useMemo(() => {
+  // Resumen del dia
+  const resumenDia = useMemo<ResumenDia | null>(() => {
     if (!recorridos.length) return null;
 
     return recorridos.reduce((acc, r) => ({
@@ -277,6 +361,18 @@ export default function VistaRecorridos({
 
   const hoy = new Date().toISOString().split('T')[0];
   const esHoy = fechaSeleccionada === hoy;
+
+  const handleFechaChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    onFechaChange(e.target.value);
+  };
+
+  const handleFechaDesdeChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setFechaDesde(e.target.value);
+  };
+
+  const handleFechaHastaChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setFechaHasta(e.target.value);
+  };
 
   return (
     <div className="space-y-6">
@@ -301,7 +397,7 @@ export default function VistaRecorridos({
             }`}
           >
             <BarChart3 className="w-5 h-5" />
-            <span>Estadísticas</span>
+            <span>Estadisticas</span>
           </button>
           <button
             onClick={onRefresh}
@@ -324,7 +420,7 @@ export default function VistaRecorridos({
           <input
             type="date"
             value={fechaSeleccionada}
-            onChange={(e) => onFechaChange(e.target.value)}
+            onChange={handleFechaChange}
             max={hoy}
             className="px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
           />
@@ -345,7 +441,7 @@ export default function VistaRecorridos({
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-purple-600" />
-              Estadísticas de Recorridos
+              Estadisticas de Recorridos
             </h2>
             <button
               onClick={() => setVistaEstadisticas(false)}
@@ -361,7 +457,7 @@ export default function VistaRecorridos({
               <input
                 type="date"
                 value={fechaDesde}
-                onChange={(e) => setFechaDesde(e.target.value)}
+                onChange={handleFechaDesdeChange}
                 className="ml-2 px-3 py-1 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white text-sm"
               />
             </div>
@@ -370,7 +466,7 @@ export default function VistaRecorridos({
               <input
                 type="date"
                 value={fechaHasta}
-                onChange={(e) => setFechaHasta(e.target.value)}
+                onChange={handleFechaHastaChange}
                 className="ml-2 px-3 py-1 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white text-sm"
               />
             </div>
@@ -418,7 +514,7 @@ export default function VistaRecorridos({
                               {t.transportista?.nombre || 'Transportista'}
                             </p>
                             <p className="text-sm text-gray-500">
-                              {t.recorridos} recorridos • {t.pedidosEntregados}/{t.pedidosTotales} entregas
+                              {t.recorridos} recorridos - {t.pedidosEntregados}/{t.pedidosTotales} entregas
                             </p>
                           </div>
                         </div>
@@ -434,16 +530,16 @@ export default function VistaRecorridos({
             </div>
           ) : (
             <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-              Seleccione un rango de fechas para ver las estadísticas
+              Seleccione un rango de fechas para ver las estadisticas
             </p>
           )}
         </div>
       )}
 
-      {/* Resumen del día */}
+      {/* Resumen del dia */}
       {resumenDia && !vistaEstadisticas && (
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white shadow-lg">
-          <h2 className="text-xl font-bold mb-4">Resumen del Día</h2>
+          <h2 className="text-xl font-bold mb-4">Resumen del Dia</h2>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
             <div className="bg-white/10 rounded-lg p-3 text-center">
               <p className="text-3xl font-bold">{resumenDia.totalRecorridos}</p>
@@ -490,7 +586,7 @@ export default function VistaRecorridos({
           {recorridos.map((recorrido, index) => (
             <RecorridoCard
               key={recorrido.id || index}
-              recorrido={recorrido}
+              recorrido={recorrido as RecorridoConPedidos}
               defaultExpanded={recorridos.length === 1}
             />
           ))}

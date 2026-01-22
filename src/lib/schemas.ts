@@ -55,21 +55,21 @@ export const telefonoSchema = z
  * Monto positivo
  */
 export const montoPositivoSchema = z
-  .number({ invalid_type_error: 'Debe ser un número' })
+  .number({ error: 'Debe ser un número' })
   .positive({ message: 'El monto debe ser mayor a 0' })
 
 /**
  * Monto no negativo (permite 0)
  */
 export const montoNoNegativoSchema = z
-  .number({ invalid_type_error: 'Debe ser un número' })
+  .number({ error: 'Debe ser un número' })
   .nonnegative({ message: 'El monto no puede ser negativo' })
 
 /**
  * Cantidad entera positiva
  */
 export const cantidadSchema = z
-  .number({ invalid_type_error: 'Debe ser un número' })
+  .number({ error: 'Debe ser un número' })
   .int({ message: 'Debe ser un número entero' })
   .positive({ message: 'La cantidad debe ser mayor a 0' })
 
@@ -77,7 +77,7 @@ export const cantidadSchema = z
  * Stock (entero no negativo)
  */
 export const stockSchema = z
-  .number({ invalid_type_error: 'Debe ser un número' })
+  .number({ error: 'Debe ser un número' })
   .int({ message: 'Debe ser un número entero' })
   .nonnegative({ message: 'El stock no puede ser negativo' })
 
@@ -110,7 +110,7 @@ export const clienteSchema = z.object({
   dni: dniSchema,
 
   tipo: z.enum(['minorista', 'mayorista', 'distribuidor'], {
-    errorMap: () => ({ message: 'Tipo de cliente inválido' })
+    error: 'Tipo de cliente inválido'
   }),
 
   zona: z
@@ -121,6 +121,9 @@ export const clienteSchema = z.object({
 
   notas: z.string().optional()
 })
+
+/** Inferred type for Cliente schema */
+export type ClienteFormData = z.infer<typeof clienteSchema>
 
 /**
  * Schema para cliente rápido (creación simplificada en modal de pedido)
@@ -147,6 +150,9 @@ export const clienteRapidoSchema = z.object({
   telefono: z.string().optional(),
   zona: z.string().min(1, { message: 'La zona es obligatoria' })
 })
+
+/** Inferred type for ClienteRapido schema */
+export type ClienteRapidoFormData = z.infer<typeof clienteRapidoSchema>
 
 // ============================================
 // SCHEMAS DE PRODUCTO
@@ -181,11 +187,17 @@ export const productoSchema = z.object({
   stock_minimo: stockSchema.default(0),
 
   unidad: z.enum(['unidad', 'kg', 'litro', 'pack', 'caja', 'docena'], {
-    errorMap: () => ({ message: 'Unidad inválida' })
+    error: 'Unidad inválida'
   }).default('unidad'),
 
   categoria: z.string().optional()
 })
+
+/** Inferred type for Producto schema */
+export type ProductoFormData = z.infer<typeof productoSchema>
+
+/** Valid product units */
+export type ProductoUnidad = 'unidad' | 'kg' | 'litro' | 'pack' | 'caja' | 'docena'
 
 // ============================================
 // SCHEMAS DE PEDIDO
@@ -202,6 +214,9 @@ export const itemPedidoSchema = z.object({
     .default(0)
 })
 
+/** Inferred type for ItemPedido schema */
+export type ItemPedidoFormData = z.infer<typeof itemPedidoSchema>
+
 export const pedidoSchema = z.object({
   cliente_id: z.string().uuid({ message: 'Debe seleccionar un cliente' }),
 
@@ -210,7 +225,7 @@ export const pedidoSchema = z.object({
     .min(1, { message: 'Debe agregar al menos un producto' }),
 
   forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
-    errorMap: () => ({ message: 'Forma de pago inválida' })
+    error: 'Forma de pago inválida'
   }),
 
   monto_pagado: montoNoNegativoSchema.default(0),
@@ -230,6 +245,12 @@ export const pedidoSchema = z.object({
   { message: 'El monto pagado no puede ser mayor al total del pedido', path: ['monto_pagado'] }
 )
 
+/** Inferred type for Pedido schema */
+export type PedidoFormData = z.infer<typeof pedidoSchema>
+
+/** Valid payment methods for orders */
+export type FormaPagoPedido = 'efectivo' | 'transferencia' | 'cheque' | 'cuenta_corriente' | 'tarjeta'
+
 // ============================================
 // SCHEMAS DE PAGO
 // ============================================
@@ -240,7 +261,7 @@ export const pagoSchema = z.object({
   monto: montoPositivoSchema,
 
   forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta'], {
-    errorMap: () => ({ message: 'Forma de pago inválida' })
+    error: 'Forma de pago inválida'
   }),
 
   numero_cheque: z.string().optional(),
@@ -261,6 +282,12 @@ export const pagoSchema = z.object({
   { message: 'El número de cheque es obligatorio para pagos con cheque', path: ['numero_cheque'] }
 )
 
+/** Inferred type for Pago schema */
+export type PagoFormData = z.infer<typeof pagoSchema>
+
+/** Valid payment methods */
+export type FormaPago = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta'
+
 // ============================================
 // SCHEMAS DE COMPRA
 // ============================================
@@ -273,6 +300,9 @@ export const itemCompraSchema = z.object({
   porcentaje_iva: z.number().min(0).max(100).default(21)
 })
 
+/** Inferred type for ItemCompra schema */
+export type ItemCompraFormData = z.infer<typeof itemCompraSchema>
+
 export const compraSchema = z.object({
   proveedor_id: z.string().uuid().optional(),
   proveedor_nombre: z.string().optional(),
@@ -282,7 +312,7 @@ export const compraSchema = z.object({
   fecha_compra: z.string().min(1, { message: 'La fecha es obligatoria' }),
 
   forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
-    errorMap: () => ({ message: 'Forma de pago inválida' })
+    error: 'Forma de pago inválida'
   }),
 
   items: z
@@ -298,6 +328,9 @@ export const compraSchema = z.object({
   { message: 'Debe seleccionar o ingresar un proveedor', path: ['proveedor_id'] }
 )
 
+/** Inferred type for Compra schema */
+export type CompraFormData = z.infer<typeof compraSchema>
+
 // ============================================
 // SCHEMAS DE MERMA
 // ============================================
@@ -308,11 +341,17 @@ export const mermaSchema = z.object({
   cantidad: cantidadSchema,
 
   motivo: z.enum(['vencimiento', 'rotura', 'deterioro', 'robo', 'otro'], {
-    errorMap: () => ({ message: 'Motivo inválido' })
+    error: 'Motivo inválido'
   }),
 
   notas: z.string().optional()
 })
+
+/** Inferred type for Merma schema */
+export type MermaFormData = z.infer<typeof mermaSchema>
+
+/** Valid merma reasons */
+export type MotivoMerma = 'vencimiento' | 'rotura' | 'deterioro' | 'robo' | 'otro'
 
 // ============================================
 // SCHEMAS DE USUARIO
@@ -331,13 +370,19 @@ export const usuarioSchema = z.object({
     .min(1, { message: 'El email es obligatorio' }),
 
   rol: z.enum(['admin', 'preventista', 'transportista'], {
-    errorMap: () => ({ message: 'Rol inválido' })
+    error: 'Rol inválido'
   }),
 
   zona: z.string().optional(),
 
   telefono: telefonoSchema
 })
+
+/** Inferred type for Usuario schema */
+export type UsuarioFormData = z.infer<typeof usuarioSchema>
+
+/** Valid user roles */
+export type RolUsuario = 'admin' | 'preventista' | 'transportista'
 
 // ============================================
 // SCHEMAS DE PROVEEDOR
@@ -363,26 +408,32 @@ export const proveedorSchema = z.object({
   notas: z.string().optional()
 })
 
+/** Inferred type for Proveedor schema */
+export type ProveedorFormData = z.infer<typeof proveedorSchema>
+
 // ============================================
 // HELPERS DE VALIDACIÓN
 // ============================================
 
 export interface ValidationSuccess<T> {
-  success: true;
-  data: T;
-  errors?: undefined;
+  success: true
+  data: T
+  errors?: undefined
 }
 
 export interface ValidationError {
-  success: false;
-  data?: undefined;
-  errors: Record<string, string>;
+  success: false
+  data?: undefined
+  errors: Record<string, string>
 }
 
-export type ValidationResult<T> = ValidationSuccess<T> | ValidationError;
+export type ValidationResult<T> = ValidationSuccess<T> | ValidationError
 
 /**
  * Valida datos contra un schema y retorna resultado estructurado
+ * @param schema - Zod schema to validate against
+ * @param data - Data to validate
+ * @returns Validation result with data or errors
  */
 export function validateForm<T>(schema: z.ZodSchema<T>, data: unknown): ValidationResult<T> {
   const result = schema.safeParse(data)
@@ -407,6 +458,9 @@ export function validateForm<T>(schema: z.ZodSchema<T>, data: unknown): Validati
 
 /**
  * Obtiene el primer mensaje de error de una validación fallida
+ * @param schema - Zod schema to validate against
+ * @param data - Data to validate
+ * @returns First error message or null if valid
  */
 export function getFirstError<T>(schema: z.ZodSchema<T>, data: unknown): string | null {
   const result = schema.safeParse(data)
@@ -419,20 +473,24 @@ export function getFirstError<T>(schema: z.ZodSchema<T>, data: unknown): string 
 }
 
 export interface FormValidator<T> {
-  validate: (data: unknown) => ValidationResult<T>;
-  validateField: (field: string, value: unknown) => string | null;
+  /** Validates the entire form data */
+  validate: (data: unknown) => ValidationResult<T>
+  /** Validates a single field */
+  validateField: (field: string, value: unknown) => string | null
 }
 
 /**
  * Hook helper para usar validación en formularios React
  * Ejemplo de uso:
  * const { validate, errors, clearErrors } = useFormValidation(clienteSchema)
+ * @param schema - Zod object schema
+ * @returns Form validator with validate and validateField methods
  */
 export function createFormValidator<T>(schema: z.ZodObject<z.ZodRawShape>): FormValidator<T> {
   return {
     validate: (data: unknown) => validateForm(schema as z.ZodSchema<T>, data),
-    validateField: (field: string, value: unknown) => {
-      const fieldSchema = schema.shape[field]
+    validateField: (field: string, value: unknown): string | null => {
+      const fieldSchema = schema.shape[field] as z.ZodSchema | undefined
       if (!fieldSchema) return null
       const result = fieldSchema.safeParse(value)
       return result.success ? null : (result.error.issues[0]?.message ?? null)
@@ -498,6 +556,12 @@ export const modalClienteSchema = z.object({
   diasCredito: z.coerce.number().int().nonnegative().default(30)
 })
 
+/** Inferred type for ModalCliente schema */
+export type ModalClienteFormData = z.infer<typeof modalClienteSchema>
+
+/** Document type for clients */
+export type TipoDocumento = 'CUIT' | 'DNI'
+
 /**
  * Schema para ModalProducto - usa nombres de campos del formulario
  */
@@ -512,7 +576,7 @@ export const modalProductoSchema = z.object({
   categoria: z.string().optional(),
 
   stock: z.coerce
-    .number({ invalid_type_error: 'El stock debe ser un número' })
+    .number({ error: 'El stock debe ser un número' })
     .int({ message: 'El stock debe ser un número entero' })
     .nonnegative({ message: 'El stock no puede ser negativo' }),
 
@@ -529,20 +593,23 @@ export const modalProductoSchema = z.object({
   precio_sin_iva: z.coerce.number().nonnegative().optional(),
 
   precio: z.coerce
-    .number({ invalid_type_error: 'El precio debe ser un número' })
+    .number({ error: 'El precio debe ser un número' })
     .positive({ message: 'El precio debe ser mayor a 0' })
 })
+
+/** Inferred type for ModalProducto schema */
+export type ModalProductoFormData = z.infer<typeof modalProductoSchema>
 
 /**
  * Schema para ModalRegistrarPago
  */
 export const modalPagoSchema = z.object({
   monto: z.coerce
-    .number({ invalid_type_error: 'El monto debe ser un número' })
+    .number({ error: 'El monto debe ser un número' })
     .positive({ message: 'El monto debe ser mayor a $0' }),
 
   formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente'], {
-    errorMap: () => ({ message: 'Forma de pago inválida' })
+    error: 'Forma de pago inválida'
   }),
 
   referencia: z.string().optional(),
@@ -558,12 +625,18 @@ export const modalPagoSchema = z.object({
   { message: 'El número de cheque es obligatorio', path: ['referencia'] }
 )
 
+/** Inferred type for ModalPago schema */
+export type ModalPagoFormData = z.infer<typeof modalPagoSchema>
+
+/** Valid payment methods for modal */
+export type ModalFormaPago = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'cuenta_corriente'
+
 /**
  * Schema para ModalMermaStock
  */
 export const modalMermaSchema = z.object({
   cantidad: z.coerce
-    .number({ invalid_type_error: 'La cantidad debe ser un número' })
+    .number({ error: 'La cantidad debe ser un número' })
     .int({ message: 'La cantidad debe ser un número entero' })
     .positive({ message: 'La cantidad debe ser mayor a 0' }),
 
@@ -573,6 +646,9 @@ export const modalMermaSchema = z.object({
 
   observaciones: z.string().optional()
 })
+
+/** Inferred type for ModalMerma schema */
+export type ModalMermaFormData = z.infer<typeof modalMermaSchema>
 
 /**
  * Schema para ModalProveedor
@@ -607,11 +683,38 @@ export const modalProveedorSchema = z.object({
   notas: z.string().optional()
 })
 
+/** Inferred type for ModalProveedor schema */
+export type ModalProveedorFormData = z.infer<typeof modalProveedorSchema>
+
+// ============================================
+// TYPE EXPORTS FOR SCHEMA COLLECTION
+// ============================================
+
+/** All available schemas */
+export interface Schemas {
+  cliente: typeof clienteSchema
+  clienteRapido: typeof clienteRapidoSchema
+  producto: typeof productoSchema
+  pedido: typeof pedidoSchema
+  itemPedido: typeof itemPedidoSchema
+  pago: typeof pagoSchema
+  compra: typeof compraSchema
+  itemCompra: typeof itemCompraSchema
+  merma: typeof mermaSchema
+  usuario: typeof usuarioSchema
+  proveedor: typeof proveedorSchema
+  modalCliente: typeof modalClienteSchema
+  modalProducto: typeof modalProductoSchema
+  modalPago: typeof modalPagoSchema
+  modalMerma: typeof modalMermaSchema
+  modalProveedor: typeof modalProveedorSchema
+}
+
 // ============================================
 // EXPORTS NOMBRADOS PARA TESTS
 // ============================================
 
-export const schemas = {
+export const schemas: Schemas = {
   cliente: clienteSchema,
   clienteRapido: clienteRapidoSchema,
   producto: productoSchema,

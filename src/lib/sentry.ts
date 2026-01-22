@@ -18,12 +18,121 @@
 
 import * as Sentry from '@sentry/react'
 
-const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN
-const IS_PRODUCTION = import.meta.env.PROD
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.0.0'
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
+
+/** Web Vital metric names */
+export type WebVitalName = 'LCP' | 'FID' | 'CLS' | 'TTFB' | 'FCP' | 'INP'
+
+/** Web Vital rating */
+export type WebVitalRating = 'good' | 'needs-improvement' | 'poor'
+
+/** Web Vital metric object from web-vitals library */
+export interface WebVitalMetric {
+  /** Metric name */
+  name: WebVitalName
+  /** Metric value */
+  value: number
+  /** Metric rating based on thresholds */
+  rating: WebVitalRating
+  /** Unique ID for the metric */
+  id?: string
+  /** Delta from previous value */
+  delta?: number
+  /** Navigation type */
+  navigationType?: string
+}
+
+/** Performance thresholds configuration */
+export interface PerformanceThresholds {
+  LCP: number
+  FID: number
+  CLS: number
+  TTFB: number
+  FCP: number
+}
+
+/** User context for Sentry */
+export interface SentryUser {
+  id?: string
+  email?: string
+  nombre?: string
+  username?: string
+  [key: string]: unknown
+}
+
+/** Tags for Sentry context */
+export interface SentryTags {
+  [key: string]: string | number | boolean
+}
+
+/** Extra data for Sentry context */
+export interface SentryExtra {
+  [key: string]: unknown
+}
+
+/** Context object for captureException */
+export interface CaptureExceptionContext {
+  tags?: SentryTags
+  extra?: SentryExtra
+  user?: SentryUser
+}
+
+/** Breadcrumb level */
+export type BreadcrumbLevel = 'debug' | 'info' | 'warning' | 'error' | 'fatal'
+
+/** Breadcrumb data */
+export interface BreadcrumbData {
+  [key: string]: unknown
+}
+
+/** Breadcrumb configuration */
+export interface SentryBreadcrumb {
+  category?: string
+  message: string
+  level?: BreadcrumbLevel
+  data?: BreadcrumbData
+}
+
+/** Message level */
+export type MessageLevel = 'info' | 'warning' | 'error'
+
+/** Metric tags */
+export interface MetricTags {
+  [key: string]: string | number | boolean
+}
+
+/** Distribution units */
+export type DistributionUnit = 'millisecond' | 'second' | 'byte' | 'kilobyte' | 'megabyte' | 'none'
+
+/** Hook return type for useSentryErrorBoundary */
+export interface SentryErrorBoundaryHook {
+  captureException: (error: Error, context?: CaptureExceptionContext) => void
+  captureMessage: (message: string, level?: MessageLevel) => void
+  addBreadcrumb: (breadcrumb: SentryBreadcrumb) => void
+}
+
+/** Default export interface */
+export interface SentryModule {
+  init: () => void
+  captureException: (error: Error, context?: CaptureExceptionContext) => void
+  captureMessage: (message: string, level?: MessageLevel) => void
+  setUser: (user: SentryUser | null) => void
+  addBreadcrumb: (breadcrumb: SentryBreadcrumb) => void
+  ErrorBoundary: typeof Sentry.ErrorBoundary
+}
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+const SENTRY_DSN: string | undefined = import.meta.env.VITE_SENTRY_DSN
+const IS_PRODUCTION: boolean = import.meta.env.PROD
+const APP_VERSION: string = import.meta.env.VITE_APP_VERSION || '1.0.0'
 
 // Umbrales de performance para alertas
-const PERFORMANCE_THRESHOLDS = {
+const PERFORMANCE_THRESHOLDS: PerformanceThresholds = {
   LCP: 2500, // Largest Contentful Paint (ms)
   FID: 100,  // First Input Delay (ms)
   CLS: 0.1,  // Cumulative Layout Shift
@@ -31,10 +140,14 @@ const PERFORMANCE_THRESHOLDS = {
   FCP: 1800  // First Contentful Paint (ms)
 }
 
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
+
 /**
  * Inicializa Sentry si está configurado
  */
-export function initSentry() {
+export function initSentry(): void {
   // Solo inicializar si hay DSN configurado
   if (!SENTRY_DSN) {
     if (IS_PRODUCTION) {
@@ -121,12 +234,13 @@ export function initSentry() {
       'Registration failed - Service Worker'
     ],
 
+    // Propagation targets for tracing (moved from browserTracingIntegration in Sentry v10)
+    tracePropagationTargets: ['localhost', /^\//],
+
     // Integrations
     integrations: [
       // Tracing de navegación y requests
       Sentry.browserTracingIntegration({
-        // Rutas de la aplicación
-        tracePropagationTargets: ['localhost', /^\//],
         // Capturar interacciones del usuario
         enableInp: true
       }),
@@ -157,11 +271,15 @@ export function initSentry() {
   console.log('[Sentry] Inicializado correctamente')
 }
 
+// =============================================================================
+// WEB VITALS
+// =============================================================================
+
 /**
  * Reporta métricas de Web Vitals a Sentry
- * @param {object} metric - Métrica de web-vitals
+ * @param metric - Métrica de web-vitals
  */
-export function reportWebVital(metric) {
+export function reportWebVital(metric: WebVitalMetric): void {
   const { name, value, rating } = metric
 
   // Agregar como breadcrumb para tracking
@@ -178,7 +296,7 @@ export function reportWebVital(metric) {
   })
 
   // Crear alerta si excede el umbral
-  const threshold = PERFORMANCE_THRESHOLDS[name]
+  const threshold = PERFORMANCE_THRESHOLDS[name as keyof PerformanceThresholds]
   if (threshold && value > threshold) {
     Sentry.addBreadcrumb({
       category: 'performance',
@@ -189,33 +307,42 @@ export function reportWebVital(metric) {
   }
 }
 
+// =============================================================================
+// PERFORMANCE MONITORING
+// =============================================================================
+
 /**
  * Inicia una transacción de performance personalizada
- * @param {string} name - Nombre de la transacción
- * @param {string} op - Tipo de operación
+ * @param name - Nombre de la transacción
+ * @param op - Tipo de operación
  */
-export function startTransaction(name, op = 'function') {
-  return Sentry.startSpan({ name, op }, () => {})
+export function startTransaction(name: string, op: string = 'function'): void {
+  Sentry.startSpan({ name, op }, () => {})
 }
 
 /**
- * Mide el tiempo de una operación
- * @param {string} name - Nombre de la medición
- * @param {Function} fn - Función a medir
+ * Mide el tiempo de una operación async
+ * @param name - Nombre de la medición
+ * @param fn - Función a medir
+ * @returns El resultado de la función
  */
-export async function measureAsync(name, fn) {
+export async function measureAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
   return Sentry.startSpan({ name, op: 'function' }, async () => {
     return await fn()
   })
 }
 
+// =============================================================================
+// METRICS
+// =============================================================================
+
 /**
  * Registra una métrica personalizada via breadcrumb
- * @param {string} name - Nombre de la métrica
- * @param {number} value - Valor
- * @param {object} tags - Tags adicionales
+ * @param name - Nombre de la métrica
+ * @param value - Valor
+ * @param tags - Tags adicionales
  */
-export function recordMetric(name, value, tags = {}) {
+export function recordMetric(name: string, value: number, tags: MetricTags = {}): void {
   Sentry.addBreadcrumb({
     category: 'metric',
     message: `${name}: ${value}`,
@@ -226,11 +353,11 @@ export function recordMetric(name, value, tags = {}) {
 
 /**
  * Incrementa un contador via breadcrumb
- * @param {string} name - Nombre del contador
- * @param {number} value - Valor a incrementar
- * @param {object} tags - Tags adicionales
+ * @param name - Nombre del contador
+ * @param value - Valor a incrementar
+ * @param tags - Tags adicionales
  */
-export function incrementCounter(name, value = 1, tags = {}) {
+export function incrementCounter(name: string, value: number = 1, tags: MetricTags = {}): void {
   Sentry.addBreadcrumb({
     category: 'counter',
     message: `${name}: +${value}`,
@@ -241,12 +368,17 @@ export function incrementCounter(name, value = 1, tags = {}) {
 
 /**
  * Registra una distribución via breadcrumb
- * @param {string} name - Nombre
- * @param {number} value - Valor
- * @param {string} unit - Unidad (millisecond, byte, etc.)
- * @param {object} tags - Tags adicionales
+ * @param name - Nombre
+ * @param value - Valor
+ * @param unit - Unidad (millisecond, byte, etc.)
+ * @param tags - Tags adicionales
  */
-export function recordDistribution(name, value, unit = 'millisecond', tags = {}) {
+export function recordDistribution(
+  name: string,
+  value: number,
+  unit: DistributionUnit = 'millisecond',
+  tags: MetricTags = {}
+): void {
   Sentry.addBreadcrumb({
     category: 'distribution',
     message: `${name}: ${value}${unit}`,
@@ -255,12 +387,16 @@ export function recordDistribution(name, value, unit = 'millisecond', tags = {})
   })
 }
 
+// =============================================================================
+// ERROR TRACKING
+// =============================================================================
+
 /**
  * Captura una excepción manualmente
- * @param {Error} error - Error a capturar
- * @param {object} context - Contexto adicional
+ * @param error - Error a capturar
+ * @param context - Contexto adicional
  */
-export function captureException(error, context = {}) {
+export function captureException(error: Error, context: CaptureExceptionContext = {}): void {
   if (!SENTRY_DSN) {
     console.error('[Error]', error, context)
     return
@@ -290,10 +426,10 @@ export function captureException(error, context = {}) {
 
 /**
  * Captura un mensaje (no error) para logging
- * @param {string} message - Mensaje a capturar
- * @param {'info'|'warning'|'error'} level - Nivel del mensaje
+ * @param message - Mensaje a capturar
+ * @param level - Nivel del mensaje
  */
-export function captureMessage(message, level = 'info') {
+export function captureMessage(message: string, level: MessageLevel = 'info'): void {
   if (!SENTRY_DSN) {
     console.log(`[${level.toUpperCase()}]`, message)
     return
@@ -302,11 +438,15 @@ export function captureMessage(message, level = 'info') {
   Sentry.captureMessage(message, level)
 }
 
+// =============================================================================
+// USER CONTEXT
+// =============================================================================
+
 /**
  * Configura el usuario actual para contexto
- * @param {object} user - Datos del usuario
+ * @param user - Datos del usuario
  */
-export function setUser(user) {
+export function setUser(user: SentryUser | null): void {
   if (!SENTRY_DSN) return
 
   Sentry.setUser(user ? {
@@ -316,11 +456,15 @@ export function setUser(user) {
   } : null)
 }
 
+// =============================================================================
+// BREADCRUMBS
+// =============================================================================
+
 /**
  * Agrega un breadcrumb para debugging
- * @param {object} breadcrumb - Breadcrumb data
+ * @param breadcrumb - Breadcrumb data
  */
-export function addBreadcrumb(breadcrumb) {
+export function addBreadcrumb(breadcrumb: SentryBreadcrumb): void {
   if (!SENTRY_DSN) return
 
   Sentry.addBreadcrumb({
@@ -331,6 +475,10 @@ export function addBreadcrumb(breadcrumb) {
   })
 }
 
+// =============================================================================
+// REACT INTEGRATION
+// =============================================================================
+
 /**
  * Higher-order component para error boundary con Sentry
  */
@@ -339,7 +487,7 @@ export const SentryErrorBoundary = Sentry.ErrorBoundary
 /**
  * Hook para capturar errores en componentes funcionales
  */
-export const useSentryErrorBoundary = () => {
+export const useSentryErrorBoundary = (): SentryErrorBoundaryHook => {
   return {
     captureException,
     captureMessage,
@@ -347,7 +495,11 @@ export const useSentryErrorBoundary = () => {
   }
 }
 
-export default {
+// =============================================================================
+// DEFAULT EXPORT
+// =============================================================================
+
+const sentryModule: SentryModule = {
   init: initSentry,
   captureException,
   captureMessage,
@@ -355,3 +507,5 @@ export default {
   addBreadcrumb,
   ErrorBoundary: SentryErrorBoundary
 }
+
+export default sentryModule

@@ -1,6 +1,40 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, ChangeEvent } from 'react';
 import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft, ToggleRight, ShoppingBag, FileText } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import type { ProveedorDBExtended, CompraDBExtended } from '../../types';
+
+// =============================================================================
+// INTERFACES DE PROPS
+// =============================================================================
+
+export interface VistaProveedoresProps {
+  proveedores: ProveedorDBExtended[];
+  compras: CompraDBExtended[];
+  loading: boolean;
+  isAdmin: boolean;
+  onNuevoProveedor: () => void;
+  onEditarProveedor: (proveedor: ProveedorDBExtended) => void;
+  onEliminarProveedor: (id: string) => void;
+  onToggleActivo: (proveedor: ProveedorDBExtended) => void;
+}
+
+interface EstadisticaProveedor {
+  totalCompras: number;
+  montoTotal: number;
+  ultimaCompra: Date | null;
+}
+
+type FiltroActivo = 'todos' | 'activos' | 'inactivos';
+
+interface ResumenProveedores {
+  total: number;
+  activos: number;
+  inactivos: number;
+}
+
+// =============================================================================
+// COMPONENTE PRINCIPAL
+// =============================================================================
 
 export default function VistaProveedores({
   proveedores,
@@ -11,13 +45,13 @@ export default function VistaProveedores({
   onEditarProveedor,
   onEliminarProveedor,
   onToggleActivo
-}) {
-  const [busqueda, setBusqueda] = useState('');
-  const [filtroActivo, setFiltroActivo] = useState('todos');
+}: VistaProveedoresProps): React.ReactElement {
+  const [busqueda, setBusqueda] = useState<string>('');
+  const [filtroActivo, setFiltroActivo] = useState<FiltroActivo>('todos');
 
   // Estadísticas por proveedor
-  const estadisticasProveedores = useMemo(() => {
-    const stats = {};
+  const estadisticasProveedores = useMemo<Record<string, EstadisticaProveedor>>(() => {
+    const stats: Record<string, EstadisticaProveedor> = {};
     (compras || []).forEach(compra => {
       const proveedorId = compra.proveedor_id;
       if (proveedorId) {
@@ -26,7 +60,7 @@ export default function VistaProveedores({
         }
         stats[proveedorId].totalCompras += 1;
         stats[proveedorId].montoTotal += compra.total || 0;
-        const fechaCompra = new Date(compra.fecha_compra);
+        const fechaCompra = new Date(compra.fecha_compra || compra.created_at || '');
         if (!stats[proveedorId].ultimaCompra || fechaCompra > stats[proveedorId].ultimaCompra) {
           stats[proveedorId].ultimaCompra = fechaCompra;
         }
@@ -36,7 +70,7 @@ export default function VistaProveedores({
   }, [compras]);
 
   // Filtrar proveedores
-  const proveedoresFiltrados = useMemo(() => {
+  const proveedoresFiltrados = useMemo<ProveedorDBExtended[]>(() => {
     return proveedores.filter(p => {
       const matchBusqueda = !busqueda ||
         p.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -52,14 +86,18 @@ export default function VistaProveedores({
   }, [proveedores, busqueda, filtroActivo]);
 
   // Resumen general
-  const resumen = useMemo(() => ({
+  const resumen = useMemo<ResumenProveedores>(() => ({
     total: proveedores.length,
     activos: proveedores.filter(p => p.activo !== false).length,
     inactivos: proveedores.filter(p => p.activo === false).length
   }), [proveedores]);
 
-  const formatPrecio = (precio) => {
+  const formatPrecio = (precio: number): string => {
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(precio || 0);
+  };
+
+  const handleBusquedaChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setBusqueda(e.target.value);
   };
 
   return (
@@ -141,7 +179,7 @@ export default function VistaProveedores({
         <input
           type="text"
           value={busqueda}
-          onChange={e => setBusqueda(e.target.value)}
+          onChange={handleBusquedaChange}
           className="w-full pl-10 pr-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
           placeholder="Buscar por nombre, CUIT o contacto..."
         />
@@ -166,7 +204,7 @@ export default function VistaProveedores({
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {proveedoresFiltrados.map(proveedor => {
-            const stats = estadisticasProveedores[proveedor.id] || {};
+            const stats = estadisticasProveedores[proveedor.id] || { totalCompras: 0, montoTotal: 0, ultimaCompra: null };
             const esActivo = proveedor.activo !== false;
 
             return (
@@ -244,7 +282,7 @@ export default function VistaProveedores({
                     </div>
                     {stats.ultimaCompra && (
                       <p className="text-xs text-gray-400 mt-1">
-                        Última: {stats.ultimaCompra.toLocaleDateString('es-AR')}
+                        Ultima: {stats.ultimaCompra.toLocaleDateString('es-AR')}
                       </p>
                     )}
                   </div>

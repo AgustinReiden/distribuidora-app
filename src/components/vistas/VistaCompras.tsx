@@ -1,22 +1,68 @@
-import React, { useState, useMemo } from 'react';
-import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, TrendingUp, DollarSign, XCircle } from 'lucide-react';
+import React, { useState, useMemo, ChangeEvent } from 'react';
+import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from '../../types';
 
-const ESTADOS_COMPRA = {
+// =============================================================================
+// CONSTANTES Y TIPOS
+// =============================================================================
+
+type EstadoCompra = 'pendiente' | 'recibida' | 'parcial' | 'cancelada';
+type FiltroEstado = 'todos' | EstadoCompra;
+
+interface EstadoConfig {
+  label: string;
+  color: string;
+}
+
+const ESTADOS_COMPRA: Record<EstadoCompra, EstadoConfig> = {
   pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' },
   recibida: { label: 'Recibida', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' },
   parcial: { label: 'Parcial', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' },
   cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' }
 };
 
-const FORMAS_PAGO = {
+const FORMAS_PAGO: Record<string, string> = {
   efectivo: 'Efectivo',
   transferencia: 'Transferencia',
   cheque: 'Cheque',
   cuenta_corriente: 'Cuenta Corriente',
   tarjeta: 'Tarjeta'
 };
+
+// =============================================================================
+// INTERFACES DE PROPS
+// =============================================================================
+
+export interface VistaComprasProps {
+  compras: CompraDBExtended[];
+  proveedores: ProveedorDBExtended[];
+  loading: boolean;
+  isAdmin: boolean;
+  onNuevaCompra: () => void;
+  onVerDetalle: (compra: CompraDBExtended) => void;
+  onAnularCompra: (compraId: string) => void;
+  resumen?: ResumenCompras | null;
+}
+
+interface ResumenCompras {
+  totalCompras?: number;
+  montoTotal?: number;
+  unidadesTotales?: number;
+  proveedoresUnicos?: number;
+}
+
+interface EstadisticasCompras {
+  totalCompras: number;
+  montoTotal: number;
+  unidadesTotales: number;
+  proveedoresUnicos: number;
+}
+
+// =============================================================================
+// COMPONENTE PRINCIPAL
+// =============================================================================
 
 export default function VistaCompras({
   compras,
@@ -27,30 +73,30 @@ export default function VistaCompras({
   onVerDetalle,
   onAnularCompra,
   resumen: _resumen
-}) {
-  const [busqueda, setBusqueda] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState('todos');
-  const [filtroProveedor, setFiltroProveedor] = useState('');
-  const [filtroFechaDesde, setFiltroFechaDesde] = useState('');
-  const [filtroFechaHasta, setFiltroFechaHasta] = useState('');
+}: VistaComprasProps): React.ReactElement {
+  const [busqueda, setBusqueda] = useState<string>('');
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todos');
+  const [filtroProveedor, setFiltroProveedor] = useState<string>('');
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState<string>('');
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState<string>('');
 
   // Estadísticas
-  const estadisticas = useMemo(() => {
+  const estadisticas = useMemo<EstadisticasCompras>(() => {
     const comprasActivas = compras.filter(c => c.estado !== 'cancelada');
     return {
       totalCompras: comprasActivas.length,
       montoTotal: comprasActivas.reduce((sum, c) => sum + (c.total || 0), 0),
       unidadesTotales: comprasActivas.reduce((sum, c) =>
-        sum + (c.items || []).reduce((s, i) => s + i.cantidad, 0), 0
+        sum + (c.items || []).reduce((s: number, i: CompraItemDBExtended) => s + i.cantidad, 0), 0
       ),
       proveedoresUnicos: new Set(comprasActivas.map(c => c.proveedor_id || c.proveedor_nombre).filter(Boolean)).size
     };
   }, [compras]);
 
   // Filtrar compras
-  const comprasFiltradas = useMemo(() => {
+  const comprasFiltradas = useMemo<CompraDBExtended[]>(() => {
     return compras.filter(c => {
-      // Búsqueda por número de factura o proveedor
+      // Busqueda por numero de factura o proveedor
       const matchBusqueda = !busqueda ||
         c.numero_factura?.toLowerCase().includes(busqueda.toLowerCase()) ||
         c.proveedor?.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -61,19 +107,20 @@ export default function VistaCompras({
 
       // Filtro por proveedor
       const matchProveedor = !filtroProveedor ||
-        c.proveedor_id === parseInt(filtroProveedor) ||
-        c.proveedor?.id === parseInt(filtroProveedor);
+        c.proveedor_id === filtroProveedor ||
+        c.proveedor?.id === filtroProveedor;
 
       // Filtro por fecha
-      const matchFechaDesde = !filtroFechaDesde || c.fecha_compra >= filtroFechaDesde;
-      const matchFechaHasta = !filtroFechaHasta || c.fecha_compra <= filtroFechaHasta;
+      const fechaCompra = c.fecha_compra || c.created_at || '';
+      const matchFechaDesde = !filtroFechaDesde || fechaCompra >= filtroFechaDesde;
+      const matchFechaHasta = !filtroFechaHasta || fechaCompra <= filtroFechaHasta;
 
       return matchBusqueda && matchEstado && matchProveedor && matchFechaDesde && matchFechaHasta;
     });
   }, [compras, busqueda, filtroEstado, filtroProveedor, filtroFechaDesde, filtroFechaHasta]);
 
   // Limpiar filtros
-  const limpiarFiltros = () => {
+  const limpiarFiltros = (): void => {
     setBusqueda('');
     setFiltroEstado('todos');
     setFiltroProveedor('');
@@ -83,13 +130,33 @@ export default function VistaCompras({
 
   const hayFiltrosActivos = busqueda || filtroEstado !== 'todos' || filtroProveedor || filtroFechaDesde || filtroFechaHasta;
 
+  const handleBusquedaChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setBusqueda(e.target.value);
+  };
+
+  const handleEstadoChange = (e: ChangeEvent<HTMLSelectElement>): void => {
+    setFiltroEstado(e.target.value as FiltroEstado);
+  };
+
+  const handleProveedorChange = (e: ChangeEvent<HTMLSelectElement>): void => {
+    setFiltroProveedor(e.target.value);
+  };
+
+  const handleFechaDesdeChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setFiltroFechaDesde(e.target.value);
+  };
+
+  const handleFechaHastaChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setFiltroFechaHasta(e.target.value);
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Compras</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Gestión de compras a proveedores</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Gestion de compras a proveedores</p>
         </div>
         {isAdmin && (
           <button
@@ -152,13 +219,13 @@ export default function VistaCompras({
 
       {/* Filtros */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 space-y-4">
-        {/* Búsqueda */}
+        {/* Busqueda */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" />
           <input
             type="text"
             value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
+            onChange={handleBusquedaChange}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500"
             placeholder="Buscar por factura o proveedor..."
           />
@@ -169,7 +236,7 @@ export default function VistaCompras({
           {/* Filtro por estado */}
           <select
             value={filtroEstado}
-            onChange={e => setFiltroEstado(e.target.value)}
+            onChange={handleEstadoChange}
             className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
           >
             <option value="todos">Todos estados</option>
@@ -181,7 +248,7 @@ export default function VistaCompras({
           {/* Filtro por proveedor */}
           <select
             value={filtroProveedor}
-            onChange={e => setFiltroProveedor(e.target.value)}
+            onChange={handleProveedorChange}
             className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
           >
             <option value="">Todos proveedores</option>
@@ -196,7 +263,7 @@ export default function VistaCompras({
             <input
               type="date"
               value={filtroFechaDesde}
-              onChange={e => setFiltroFechaDesde(e.target.value)}
+              onChange={handleFechaDesdeChange}
               className="w-full px-2 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
             />
           </div>
@@ -207,7 +274,7 @@ export default function VistaCompras({
             <input
               type="date"
               value={filtroFechaHasta}
-              onChange={e => setFiltroFechaHasta(e.target.value)}
+              onChange={handleFechaHastaChange}
               className="w-full px-2 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
             />
           </div>
@@ -253,7 +320,7 @@ export default function VistaCompras({
               <tr>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Fecha</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Proveedor</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">N° Factura</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">N Factura</th>
                 <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Items</th>
                 <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Estado</th>
                 <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Total</th>
@@ -262,8 +329,9 @@ export default function VistaCompras({
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
               {comprasFiltradas.map(compra => {
-                const estado = ESTADOS_COMPRA[compra.estado] || ESTADOS_COMPRA.pendiente;
-                const totalItems = (compra.items || []).reduce((sum, i) => sum + i.cantidad, 0);
+                const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
+                const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
+                const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
 
                 return (
                   <tr key={compra.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
@@ -271,7 +339,7 @@ export default function VistaCompras({
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-gray-400" />
                         <span className="text-gray-800 dark:text-white">
-                          {new Date(compra.fecha_compra).toLocaleDateString('es-AR')}
+                          {new Date(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR')}
                         </span>
                       </div>
                     </td>

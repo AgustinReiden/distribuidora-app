@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, lazy, Suspense, ReactElement } from 'react';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, setErrorNotifier } from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -7,6 +7,7 @@ import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
 import { useAppHandlers } from './hooks/useAppHandlers';
+import type { FiltrosPedidosState } from './types/hooks';
 
 // Componentes base
 import LoginScreen from './components/auth/LoginScreen';
@@ -28,7 +29,7 @@ const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos')
 const VistaCompras = lazy(() => import('./components/vistas/VistaCompras'));
 const VistaProveedores = lazy(() => import('./components/vistas/VistaProveedores'));
 
-function LoadingVista() {
+function LoadingVista(): ReactElement {
   return (
     <div className="flex items-center justify-center py-20">
       <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -36,17 +37,17 @@ function LoadingVista() {
   );
 }
 
-function MainApp() {
+function MainApp(): ReactElement {
   const { user, perfil, logout, isAdmin, isPreventista, isTransportista } = useAuth();
   const notify = useNotification();
 
-  // Estado de la aplicación (consolidado)
+  // Estado de la aplicacion (consolidado)
   const appState = useAppState(perfil);
   const { vista, setVista, fechaRecorridos, setFechaRecorridos, modales, guardando, cargandoHistorial, busqueda, paginaActual, setPaginaActual } = appState;
 
   // Configurar notificador de errores
   useEffect(() => {
-    setErrorNotifier((message) => notify.error(message));
+    setErrorNotifier((message: string) => notify.error(message));
   }, [notify]);
 
   // Hooks de datos
@@ -87,9 +88,9 @@ function MainApp() {
     }
   }, [vista, fechaRecorridos, isAdmin, fetchRecorridosHoy, fetchRecorridosPorFecha]);
 
-  // Auto-sincronizar cuando vuelve la conexión
+  // Auto-sincronizar cuando vuelve la conexion
   useEffect(() => {
-    const sincronizar = async () => {
+    const sincronizar = async (): Promise<void> => {
       try {
         if (pedidosPendientes.length > 0) {
           const resultadoPedidos = await sincronizarPedidos(crearPedido, descontarStock);
@@ -109,8 +110,9 @@ function MainApp() {
             refetchMermas();
           }
         }
-      } catch (err) {
-        notify.error('Error durante la sincronización: ' + err.message);
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
+        notify.error('Error durante la sincronizacion: ' + errorMessage);
       }
     };
 
@@ -120,12 +122,12 @@ function MainApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
 
-  const handleLogout = async () => {
+  const handleLogout = async (): Promise<void> => {
     try { await logout(); } catch { /* error silenciado */ }
   };
 
-  // Handler para sincronización manual
-  const handleSincronizar = async () => {
+  // Handler para sincronizacion manual
+  const handleSincronizar = async (): Promise<void> => {
     try {
       if (pedidosPendientes.length > 0) {
         const resultadoPedidos = await sincronizarPedidos(crearPedido, descontarStock);
@@ -145,8 +147,9 @@ function MainApp() {
           refetchMermas();
         }
       }
-    } catch (err) {
-      notify.error('Error durante la sincronización: ' + err.message);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
+      notify.error('Error durante la sincronizacion: ' + errorMessage);
     }
   };
 
@@ -169,7 +172,7 @@ function MainApp() {
                 isAdmin={isAdmin} isPreventista={isPreventista} isTransportista={isTransportista} userId={user?.id}
                 clientes={clientes} productos={productos} transportistas={transportistas} loading={loadingPedidos} exportando={exportando}
                 onBusquedaChange={handlers.handleBusquedaChange}
-                onFiltrosChange={(nuevosFiltros) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
+                onFiltrosChange={(nuevosFiltros: Partial<FiltrosPedidosState>) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
                 onPageChange={setPaginaActual}
                 onNuevoPedido={() => modales.pedido.setOpen(true)}
                 onOptimizarRuta={() => modales.optimizarRuta.setOpen(true)}
@@ -221,7 +224,7 @@ function MainApp() {
               <VistaRecorridos
                 recorridos={recorridos} loading={loadingRecorridos} fechaSeleccionada={fechaRecorridos} estadisticas={appState.estadisticasRecorridos}
                 onRefresh={async () => { const hoy = new Date().toISOString().split('T')[0]; if (fechaRecorridos === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fechaRecorridos); }}
-                onFechaChange={async (fecha) => { setFechaRecorridos(fecha); const hoy = new Date().toISOString().split('T')[0]; if (fecha === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fecha); }}
+                onFechaChange={async (fecha: string) => { setFechaRecorridos(fecha); const hoy = new Date().toISOString().split('T')[0]; if (fecha === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fecha); }}
               />
             )}
 
@@ -256,7 +259,7 @@ function MainApp() {
   );
 }
 
-export default function App() {
+export default function App(): ReactElement {
   return (
     <ErrorBoundary>
       <ThemeProvider>
@@ -270,7 +273,7 @@ export default function App() {
   );
 }
 
-function AppContent() {
+function AppContent(): ReactElement {
   const { user, loading } = useAuth();
   if (loading) {
     return (

@@ -11,6 +11,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { categorizeError } from '../utils/errorUtils'
+import type { ErrorCategory } from '@/types'
 
 /**
  * Estados posibles de una operación
@@ -20,14 +21,86 @@ export const ServiceStatus = {
   LOADING: 'loading',
   SUCCESS: 'success',
   ERROR: 'error'
+} as const
+
+export type ServiceStatusType = typeof ServiceStatus[keyof typeof ServiceStatus]
+
+/**
+ * Estado interno del servicio
+ */
+interface ServiceState<T> {
+  data: T | null
+  status: ServiceStatusType
+  error: Error | null
+  errorCategory: ErrorCategory | null
+}
+
+/**
+ * Opciones de configuración para useService
+ */
+export interface UseServiceOptions<T> {
+  /** Ejecutar inmediatamente al montar */
+  immediate?: boolean
+  /** Datos iniciales */
+  initialData?: T | null
+  /** Callback al completar exitosamente */
+  onSuccess?: (data: T) => void
+  /** Callback al ocurrir un error */
+  onError?: (error: Error, category: ErrorCategory) => void
+  /** Número de reintentos */
+  retries?: number
+  /** Delay base entre reintentos (ms) */
+  retryDelay?: number
+  /** Clave para caché */
+  cacheKey?: string
+  /** TTL del caché en ms (default: 5 min) */
+  cacheTTL?: number
+}
+
+/**
+ * Resultado del hook useService
+ */
+export interface UseServiceResult<T, TArgs extends unknown[] = unknown[]> {
+  /** Datos obtenidos */
+  data: T | null
+  /** Estado actual de la operación */
+  status: ServiceStatusType
+  /** Error si ocurrió alguno */
+  error: Error | null
+  /** Categoría del error */
+  errorCategory: ErrorCategory | null
+  /** Si está cargando */
+  loading: boolean
+  /** Si está en estado idle */
+  isIdle: boolean
+  /** Si completó exitosamente */
+  isSuccess: boolean
+  /** Si hay error */
+  isError: boolean
+  /** Ejecuta la operación */
+  execute: (...args: TArgs) => Promise<T>
+  /** Resetea el estado */
+  reset: () => void
+  /** Actualiza los datos manualmente */
+  setData: (data: T | ((prev: T | null) => T)) => void
+  /** Invalida el caché */
+  invalidateCache: (key?: string) => void
+}
+
+/**
+ * Entrada de caché
+ */
+interface CacheEntry<T> {
+  data: T
+  timestamp: number
 }
 
 /**
  * Hook para manejar una operación de servicio
  *
- * @param {Function} serviceFn - Función del servicio a ejecutar
- * @param {Object} options - Opciones de configuración
- * @returns {Object} Estado y funciones de control
+ * @param serviceFn - Función del servicio a ejecutar
+ * @param options - Opciones de configuración
+ * @returns Estado y funciones de control
  *
  * @example
  * const { data, loading, error, execute } = useService(
@@ -35,7 +108,10 @@ export const ServiceStatus = {
  *   { immediate: true }
  * )
  */
-export function useService(serviceFn, options = {}) {
+export function useService<T, TArgs extends unknown[] = unknown[]>(
+  serviceFn: (...args: TArgs) => Promise<T>,
+  options: UseServiceOptions<T> = {}
+): UseServiceResult<T, TArgs> {
   const {
     immediate = false,
     initialData = null,
@@ -47,16 +123,16 @@ export function useService(serviceFn, options = {}) {
     cacheTTL = 5 * 60 * 1000 // 5 minutos
   } = options
 
-  const [state, setState] = useState({
+  const [state, setState] = useState<ServiceState<T>>({
     data: initialData,
     status: ServiceStatus.IDLE,
     error: null,
     errorCategory: null
   })
 
-  const mountedRef = useRef(true)
-  const cacheRef = useRef(new Map())
-  const retryCountRef = useRef(0)
+  const mountedRef = useRef<boolean>(true)
+  const cacheRef = useRef<Map<string, CacheEntry<T>>>(new Map())
+  const retryCountRef = useRef<number>(0)
 
   // Limpiar al desmontar
   useEffect(() => {
@@ -69,7 +145,7 @@ export function useService(serviceFn, options = {}) {
   /**
    * Obtiene datos del caché si están disponibles y válidos
    */
-  const getFromCache = useCallback((key) => {
+  const getFromCache = useCallback((key: string | undefined): T | null => {
     if (!key) return null
 
     const cached = cacheRef.current.get(key)
@@ -87,7 +163,7 @@ export function useService(serviceFn, options = {}) {
   /**
    * Guarda datos en caché
    */
-  const saveToCache = useCallback((key, data) => {
+  const saveToCache = useCallback((key: string | undefined, data: T): void => {
     if (!key) return
 
     cacheRef.current.set(key, {
@@ -99,7 +175,7 @@ export function useService(serviceFn, options = {}) {
   /**
    * Ejecuta la operación del servicio
    */
-  const execute = useCallback(async (...args) => {
+  const execute = useCallback(async (...args: TArgs): Promise<T> => {
     // Verificar caché primero
     const cachedData = getFromCache(cacheKey)
     if (cachedData) {
@@ -139,6 +215,8 @@ export function useService(serviceFn, options = {}) {
 
       return result
     } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err))
+
       // Reintentar si es posible
       if (retryCountRef.current < retries) {
         retryCountRef.current++
@@ -151,28 +229,28 @@ export function useService(serviceFn, options = {}) {
         }
       }
 
-      if (!mountedRef.current) throw err
+      if (!mountedRef.current) throw error
 
-      const category = categorizeError(err)
+      const category = categorizeError(error)
 
       setState(prev => ({
         ...prev,
         status: ServiceStatus.ERROR,
-        error: err,
+        error,
         errorCategory: category
       }))
 
       retryCountRef.current = 0
-      onError?.(err, category)
+      onError?.(error, category)
 
-      throw err
+      throw error
     }
   }, [serviceFn, cacheKey, getFromCache, saveToCache, retries, retryDelay, onSuccess, onError])
 
   /**
    * Resetea el estado
    */
-  const reset = useCallback(() => {
+  const reset = useCallback((): void => {
     setState({
       data: initialData,
       status: ServiceStatus.IDLE,
@@ -185,7 +263,7 @@ export function useService(serviceFn, options = {}) {
   /**
    * Invalida el caché
    */
-  const invalidateCache = useCallback((key = cacheKey) => {
+  const invalidateCache = useCallback((key: string | undefined = cacheKey): void => {
     if (key) {
       cacheRef.current.delete(key)
     } else {
@@ -196,18 +274,18 @@ export function useService(serviceFn, options = {}) {
   /**
    * Actualiza los datos manualmente (optimistic update)
    */
-  const setData = useCallback((newData) => {
+  const setData = useCallback((newData: T | ((prev: T | null) => T)): void => {
     setState(prev => ({
       ...prev,
-      data: typeof newData === 'function' ? newData(prev.data) : newData
+      data: typeof newData === 'function' ? (newData as (prev: T | null) => T)(prev.data) : newData
     }))
   }, [])
 
   // Ejecutar inmediatamente si se especifica (solo al montar)
-  const immediateRef = useRef(immediate)
+  const immediateRef = useRef<boolean>(immediate)
   useEffect(() => {
     if (immediateRef.current) {
-      execute()
+      execute(...([] as unknown as TArgs))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -229,10 +307,22 @@ export function useService(serviceFn, options = {}) {
 }
 
 /**
+ * Tipo para el mapa de servicios
+ */
+type ServiceFunctions = Record<string, (...args: unknown[]) => Promise<unknown>>
+
+/**
+ * Resultado de useServices
+ */
+type UseServicesResult<T extends ServiceFunctions> = {
+  [K in keyof T]: UseServiceResult<Awaited<ReturnType<T[K]>>, Parameters<T[K]>>
+}
+
+/**
  * Hook para manejar múltiples operaciones de servicio
  *
- * @param {Object} services - Mapa de servicios { nombre: serviceFn }
- * @returns {Object} Estado y funciones para cada servicio
+ * @param services - Mapa de servicios { nombre: serviceFn }
+ * @returns Estado y funciones para cada servicio
  *
  * @example
  * const { clientes, productos } = useServices({
@@ -240,23 +330,68 @@ export function useService(serviceFn, options = {}) {
  *   productos: () => productoService.getAll()
  * })
  */
-export function useServices(services) {
-  const results = {}
+export function useServices<T extends ServiceFunctions>(services: T): UseServicesResult<T> {
+  const results = {} as UseServicesResult<T>
 
   Object.entries(services).forEach(([key, serviceFn]) => {
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    results[key] = useService(serviceFn)
+    results[key as keyof T] = useService(serviceFn) as UseServicesResult<T>[keyof T]
   })
 
   return results
 }
 
 /**
+ * Opciones para useMutation
+ */
+export interface UseMutationOptions<TData, TArgs extends unknown[]> {
+  /** Callback al completar exitosamente */
+  onSuccess?: (data: TData, ...args: TArgs) => void
+  /** Callback al ocurrir un error */
+  onError?: (error: Error, ...args: TArgs) => void
+  /** Callback al finalizar (éxito o error) */
+  onSettled?: (data: TData | null, error: Error | null, ...args: TArgs) => void
+}
+
+/**
+ * Estado de la mutación
+ */
+interface MutationState<TData> {
+  status: ServiceStatusType
+  error: Error | null
+  data: TData | null
+}
+
+/**
+ * Resultado del hook useMutation
+ */
+export interface UseMutationResult<TData, TArgs extends unknown[]> {
+  /** Ejecuta la mutación */
+  mutate: (...args: TArgs) => Promise<TData>
+  /** Resetea el estado */
+  reset: () => void
+  /** Datos obtenidos */
+  data: TData | null
+  /** Error si ocurrió alguno */
+  error: Error | null
+  /** Estado actual */
+  status: ServiceStatusType
+  /** Si está cargando */
+  loading: boolean
+  /** Si está en estado idle */
+  isIdle: boolean
+  /** Si completó exitosamente */
+  isSuccess: boolean
+  /** Si hay error */
+  isError: boolean
+}
+
+/**
  * Hook para manejar mutaciones (create, update, delete)
  *
- * @param {Function} mutationFn - Función de mutación
- * @param {Object} options - Opciones
- * @returns {Object} Estado y función de mutación
+ * @param mutationFn - Función de mutación
+ * @param options - Opciones
+ * @returns Estado y función de mutación
  *
  * @example
  * const { mutate, loading } = useMutation(
@@ -264,20 +399,23 @@ export function useServices(services) {
  *   { onSuccess: () => refetch() }
  * )
  */
-export function useMutation(mutationFn, options = {}) {
+export function useMutation<TData, TArgs extends unknown[] = unknown[]>(
+  mutationFn: (...args: TArgs) => Promise<TData>,
+  options: UseMutationOptions<TData, TArgs> = {}
+): UseMutationResult<TData, TArgs> {
   const {
     onSuccess,
     onError,
     onSettled
   } = options
 
-  const [state, setState] = useState({
+  const [state, setState] = useState<MutationState<TData>>({
     status: ServiceStatus.IDLE,
     error: null,
     data: null
   })
 
-  const mountedRef = useRef(true)
+  const mountedRef = useRef<boolean>(true)
 
   useEffect(() => {
     return () => {
@@ -285,7 +423,7 @@ export function useMutation(mutationFn, options = {}) {
     }
   }, [])
 
-  const mutate = useCallback(async (...args) => {
+  const mutate = useCallback(async (...args: TArgs): Promise<TData> => {
     setState({
       status: ServiceStatus.LOADING,
       error: null,
@@ -308,22 +446,24 @@ export function useMutation(mutationFn, options = {}) {
 
       return result
     } catch (err) {
-      if (!mountedRef.current) throw err
+      const error = err instanceof Error ? err : new Error(String(err))
+
+      if (!mountedRef.current) throw error
 
       setState({
         status: ServiceStatus.ERROR,
-        error: err,
+        error,
         data: null
       })
 
-      onError?.(err, ...args)
-      onSettled?.(null, err, ...args)
+      onError?.(error, ...args)
+      onSettled?.(null, error, ...args)
 
-      throw err
+      throw error
     }
   }, [mutationFn, onSuccess, onError, onSettled])
 
-  const reset = useCallback(() => {
+  const reset = useCallback((): void => {
     setState({
       status: ServiceStatus.IDLE,
       error: null,
@@ -345,16 +485,28 @@ export function useMutation(mutationFn, options = {}) {
 }
 
 /**
+ * Opciones para usePolling
+ */
+export interface UsePollingOptions<T> extends UseServiceOptions<T> {
+  /** Si el polling está habilitado */
+  enabled?: boolean
+}
+
+/**
  * Hook para polling periódico de datos
  *
- * @param {Function} serviceFn - Función del servicio
- * @param {number} interval - Intervalo en ms
- * @param {Object} options - Opciones adicionales
+ * @param serviceFn - Función del servicio
+ * @param interval - Intervalo en ms
+ * @param options - Opciones adicionales
  */
-export function usePolling(serviceFn, interval, options = {}) {
+export function usePolling<T, TArgs extends unknown[] = unknown[]>(
+  serviceFn: (...args: TArgs) => Promise<T>,
+  interval: number,
+  options: UsePollingOptions<T> = {}
+): UseServiceResult<T, TArgs> {
   const { enabled = true, ...serviceOptions } = options
-  const service = useService(serviceFn, serviceOptions)
-  const intervalRef = useRef(null)
+  const service = useService<T, TArgs>(serviceFn, serviceOptions)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const executeRef = useRef(service.execute)
 
   // Mantener referencia actualizada
@@ -372,11 +524,11 @@ export function usePolling(serviceFn, interval, options = {}) {
     }
 
     // Ejecutar inmediatamente
-    executeRef.current()
+    executeRef.current(...([] as unknown as TArgs))
 
     // Configurar polling
     intervalRef.current = setInterval(() => {
-      executeRef.current()
+      executeRef.current(...([] as unknown as TArgs))
     }, interval)
 
     return () => {
