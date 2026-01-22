@@ -438,11 +438,11 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
                   <p className="text-green-600 dark:text-green-500 mt-1">
                     Se actualizaron {resultado.actualizados} productos
                   </p>
-                  {resultado.errores?.length > 0 && (
+                  {(resultado.errores?.length ?? 0) > 0 && (
                     <div className="mt-3 text-sm text-yellow-600">
                       <p>Advertencias:</p>
                       <ul className="list-disc list-inside">
-                        {resultado.errores.map((e, i) => <li key={i}>{e}</li>)}
+                        {resultado.errores?.map((e, i) => <li key={i}>{e}</li>)}
                       </ul>
                     </div>
                   )}

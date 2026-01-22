@@ -94,7 +94,7 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
                       {cambio.usuario?.nombre || "Usuario desconocido"}
                     </p>
                   </div>
-                  <p className="text-xs text-gray-500">{formatFecha(cambio.created_at)}</p>
+                  <p className="text-xs text-gray-500">{cambio.created_at ? formatFecha(cambio.created_at) : '-'}</p>
                 </div>
                 {cambio.campo_modificado === "creacion" ? (
                   <p className="text-sm text-green-600 font-medium">{cambio.valor_nuevo}</p>

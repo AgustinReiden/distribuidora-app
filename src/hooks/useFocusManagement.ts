@@ -57,7 +57,7 @@ export interface UseAutoFocusOptions {
  */
 export function useAutoFocus<T extends HTMLElement = HTMLDivElement>(
   options: UseAutoFocusOptions = {}
-): RefObject<T> {
+): RefObject<T | null> {
   const { enabled = true, delay = 100, selector } = options
   const containerRef = useRef<T>(null)
 
@@ -119,7 +119,7 @@ export interface UseEnterNavigationOptions {
  */
 export function useEnterNavigation<T extends HTMLElement = HTMLDivElement>(
   options: UseEnterNavigationOptions = {}
-): RefObject<T> {
+): RefObject<T | null> {
   const { enabled = true, onSubmit, submitOnLastField = true } = options
   const containerRef = useRef<T>(null)
 
@@ -194,7 +194,7 @@ export interface UseKeyboardSubmitOptions {
 export function useKeyboardSubmit<T extends HTMLElement = HTMLDivElement>(
   onSubmit: ((e: KeyboardEvent) => void) | undefined,
   options: UseKeyboardSubmitOptions = {}
-): RefObject<T> {
+): RefObject<T | null> {
   const { enabled = true } = options
   const containerRef = useRef<T>(null)
 
@@ -246,7 +246,7 @@ export interface UseFormKeyboardOptions {
  */
 export function useFormKeyboard<T extends HTMLElement = HTMLDivElement>(
   options: UseFormKeyboardOptions = {}
-): RefObject<T> {
+): RefObject<T | null> {
   const {
     onSubmit,
     autoFocus = true,
@@ -366,7 +366,7 @@ export interface UseFocusOnErrorOptions {
 export function useFocusOnError<T extends HTMLElement = HTMLDivElement>(
   errors: FormErrors | null | undefined,
   options: UseFocusOnErrorOptions = {}
-): RefObject<T> {
+): RefObject<T | null> {
   const { enabled = true } = options
   const containerRef = useRef<T>(null)
   const prevErrorsRef = useRef<FormErrors | null | undefined>(errors)

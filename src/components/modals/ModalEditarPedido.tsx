@@ -219,7 +219,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         )}
 
         {/* Sección de productos - Vista de solo lectura para no-admin o pedido entregado */}
-        {(!isAdmin || pedidoEntregado) && pedido?.items?.length > 0 && (
+        {(!isAdmin || pedidoEntregado) && pedido && (pedido.items?.length ?? 0) > 0 && (
           <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-blue-600" />
@@ -227,7 +227,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               <span className="text-xs text-gray-500">(solo lectura)</span>
             </div>
             <div className="divide-y dark:divide-gray-600">
-              {pedido.items.map(item => (
+              {pedido.items?.map(item => (
                 <div key={item.producto_id} className="p-3 flex items-center justify-between">
                   <div className="flex-1">
                     <p className="font-medium text-sm dark:text-white">{item.producto?.nombre || 'Producto'}</p>

@@ -112,7 +112,7 @@ export async function sendMessageToSW<T = unknown>(message: SWMessage): Promise<
     messageChannel.port1.onmessage = (event: MessageEvent) => {
       resolve(event.data as T)
     }
-    navigator.serviceWorker.controller.postMessage(message, [messageChannel.port2])
+    navigator.serviceWorker.controller?.postMessage(message, [messageChannel.port2])
   })
 }
 

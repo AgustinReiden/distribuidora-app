@@ -184,7 +184,7 @@ export function useDebounce<T>(value: T, delay: number = 300): T {
  */
 export function useClickOutside<T extends HTMLElement = HTMLDivElement>(
   handler: (event: MouseEvent | TouchEvent) => void
-): RefObject<T> {
+): RefObject<T | null> {
   const ref = useRef<T>(null)
 
   useEffect(() => {

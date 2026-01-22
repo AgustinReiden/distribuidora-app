@@ -118,7 +118,7 @@ type SanitizedArray = SanitizedValue[];
  * Sanitiza un objeto, limpiando todos los valores string
  */
 export function sanitizeObject<T extends Record<string, unknown>>(obj: T | null | undefined, excludeKeys: string[] = []): T {
-  if (obj == null || typeof obj !== 'object') return obj as T
+  if (obj == null || typeof obj !== 'object') return obj as unknown as T
 
   const sanitized: Record<string, unknown> = Array.isArray(obj) ? ([] as unknown as Record<string, unknown>) : {}
 
@@ -149,7 +149,7 @@ export interface SanitizeFormDataOptions {
 export function sanitizeFormData<T extends Record<string, unknown>>(formData: T | null | undefined, options: SanitizeFormDataOptions = {}): T {
   const { htmlFields = [], richFields = [], skipFields = [] } = options
 
-  if (formData == null || typeof formData !== 'object') return formData as T
+  if (formData == null || typeof formData !== 'object') return formData as unknown as T
 
   const sanitized: Record<string, unknown> = {}
 

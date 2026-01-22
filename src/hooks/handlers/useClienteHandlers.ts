@@ -85,7 +85,7 @@ export interface UseClienteHandlersProps {
   setClientePago: (cliente: ClienteDB | null) => void;
   setSaldoPendienteCliente: (saldo: number) => void;
   notify: NotifyService;
-  user: User;
+  user: User | null;
 }
 
 // =============================================================================
@@ -176,7 +176,7 @@ export function useClienteHandlers({
     try {
       const pago = await registrarPago({
         ...datosPago,
-        usuarioId: user.id
+        usuarioId: user?.id ?? ''
       })
       notify.success('Pago registrado correctamente')
       return pago

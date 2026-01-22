@@ -86,7 +86,7 @@ export default function ModalMermaStock({
         cantidad: result.data.cantidad,
         motivo: result.data.motivo as MotivoMermaValue,
         motivoLabel: MOTIVOS_MERMA.find(m => m.value === result.data.motivo)?.label || result.data.motivo,
-        observaciones: result.data.observaciones,
+        observaciones: result.data.observaciones || '',
         stockAnterior: producto.stock,
         stockNuevo: producto.stock - result.data.cantidad
       })

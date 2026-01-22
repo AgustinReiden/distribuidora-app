@@ -19,8 +19,8 @@ export interface VistaRutaTransportistaProps {
 }
 
 interface PedidoEnriquecido extends PedidoDB {
-  cliente: ClienteDB | null;
-  items: Array<PedidoItemDB & { producto: ProductoDB | null }>;
+  cliente?: ClienteDB;
+  items: Array<PedidoItemDB & { producto?: ProductoDB }>;
 }
 
 interface EntregaRutaCardProps {

@@ -233,7 +233,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   icon={Clock}
                   label="Días sin Comprar"
                   value={estadisticas?.diasDesdeUltimoPedido ?? 'N/A'}
-                  color={estadisticas?.diasDesdeUltimoPedido > 30 ? 'red' : 'gray'}
+                  color={(estadisticas?.diasDesdeUltimoPedido ?? 0) > 30 ? 'red' : 'gray'}
                 />
               </div>
 
@@ -262,14 +262,14 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               </div>
 
               {/* Favorite Products */}
-              {estadisticas?.productosFavoritos?.length > 0 && (
+              {(estadisticas?.productosFavoritos?.length ?? 0) > 0 && estadisticas && (
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                     <Package className="w-5 h-5" />
                     Productos Favoritos
                   </h3>
                   <div className="space-y-2">
-                    {estadisticas.productosFavoritos.map((prod, idx) => (
+                    {estadisticas.productosFavoritos?.map((prod, idx) => (
                       <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <span className="font-medium text-gray-900 dark:text-white">{prod.nombre}</span>
                         <div className="text-right">

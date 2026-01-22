@@ -267,7 +267,7 @@ const ModalOptimizarRuta = memo(function ModalOptimizarRuta({
         )}
 
         {/* Resultado de la optimizacion */}
-        {rutaOptimizada && rutaOptimizada.total_pedidos > 0 && (
+        {rutaOptimizada && (rutaOptimizada.total_pedidos ?? 0) > 0 && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <div className="flex items-center space-x-2 mb-3">
               <Route className="w-5 h-5 text-green-600" />

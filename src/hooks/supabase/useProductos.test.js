@@ -475,7 +475,7 @@ describe('useProductos', () => {
         act(async () => {
           await result.current.actualizarPreciosMasivo(productosData)
         })
-      ).rejects.toThrow('No hay productos válidos para actualizar')
+      ).rejects.toThrow('No hay productos validos para actualizar')
     })
   })
 
