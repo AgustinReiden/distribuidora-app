@@ -277,9 +277,9 @@ const ModalPedido = memo(function ModalPedido({
                   placeholder="Ingrese el monto pagado"
                 />
               </div>
-              {nuevoPedido.montoPagado > 0 && (
+              {(nuevoPedido.montoPagado ?? 0) > 0 && (
                 <p className="text-sm text-yellow-700 mt-2">
-                  Resta por pagar: {formatPrecio(calcularTotal() - nuevoPedido.montoPagado)}
+                  Resta por pagar: {formatPrecio(calcularTotal() - (nuevoPedido.montoPagado ?? 0))}
                 </p>
               )}
             </div>

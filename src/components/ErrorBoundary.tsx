@@ -151,6 +151,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
   handleRetry = async (): Promise<void> => {
     const { errorCategory, retryCount } = this.state;
+    if (!errorCategory) return;
     const recoveryInfo = getRecoveryInfo(errorCategory);
 
     if (!recoveryInfo.canRetry) {
@@ -170,7 +171,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
     this.setState({ isRetrying: true });
 
     // Esperar antes de reintentar (backoff exponencial)
-    const delay = recoveryInfo.retryDelay * Math.pow(2, retryCount);
+    const delay = (recoveryInfo.retryDelay ?? 1000) * Math.pow(2, retryCount);
     await new Promise(resolve => setTimeout(resolve, delay));
 
     this.setState({
@@ -210,7 +211,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
         });
       }
 
-      const recoveryInfo = getRecoveryInfo(this.state.errorCategory);
+      const recoveryInfo = getRecoveryInfo(this.state.errorCategory ?? 'UNKNOWN');
       const IconComponent = getIconComponent(recoveryInfo.iconName);
       const canRetryNow = recoveryInfo.canRetry &&
         (!recoveryInfo.maxRetries || this.state.retryCount < recoveryInfo.maxRetries);
@@ -334,6 +335,7 @@ class CompactErrorBoundary extends React.Component<CompactErrorBoundaryProps, Co
 
   handleRetry = async (): Promise<void> => {
     const { errorCategory, retryCount } = this.state;
+    if (!errorCategory) return;
     const recoveryInfo = getRecoveryInfo(errorCategory);
 
     if (!recoveryInfo.canRetry) {
@@ -348,7 +350,7 @@ class CompactErrorBoundary extends React.Component<CompactErrorBoundaryProps, Co
 
     this.setState({ isRetrying: true });
 
-    const delay = recoveryInfo.retryDelay * Math.pow(2, retryCount);
+    const delay = (recoveryInfo.retryDelay ?? 1000) * Math.pow(2, retryCount);
     await new Promise(resolve => setTimeout(resolve, Math.min(delay, 5000)));
 
     this.setState({
@@ -377,7 +379,7 @@ class CompactErrorBoundary extends React.Component<CompactErrorBoundaryProps, Co
         });
       }
 
-      const recoveryInfo = getRecoveryInfo(this.state.errorCategory);
+      const recoveryInfo = getRecoveryInfo(this.state.errorCategory ?? 'UNKNOWN');
       const IconComponent = getIconComponent(recoveryInfo.iconName);
 
       return (

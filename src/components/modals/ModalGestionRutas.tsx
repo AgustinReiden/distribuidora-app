@@ -121,7 +121,7 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
               </h4>
               <p className="text-sm text-gray-500">Pedido #{pedido.id}</p>
             </div>
-            <span className={`px-2 py-1 text-xs font-medium rounded-full border ${estadoPagoColors[pedido.estado_pago] || estadoPagoColors.pendiente}`}>
+            <span className={`px-2 py-1 text-xs font-medium rounded-full border ${estadoPagoColors[pedido.estado_pago || 'pendiente'] || estadoPagoColors.pendiente}`}>
               {pedido.estado_pago === 'pagado' ? 'Pagado' : pedido.estado_pago === 'parcial' ? 'Parcial' : 'Pendiente'}
             </span>
           </div>
@@ -151,7 +151,7 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
             </div>
 
             <div className="text-xs text-gray-500">
-              {formaPagoLabels[pedido.forma_pago] || 'Efectivo'}
+              {formaPagoLabels[pedido.forma_pago || 'efectivo'] || 'Efectivo'}
             </div>
           </div>
 
@@ -195,7 +195,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   // Cambiar a vista resultado cuando hay ruta optimizada
   useEffect(() => {
-    if (rutaOptimizada?.orden_optimizado?.length > 0) {
+    if ((rutaOptimizada?.orden_optimizado?.length ?? 0) > 0) {
       setVistaActiva('resultado');
     }
   }, [rutaOptimizada]);

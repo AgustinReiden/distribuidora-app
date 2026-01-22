@@ -116,10 +116,10 @@ export function useDashboard(usuarioFiltro: string | null = null): UseDashboardR
 
       let pedidosFiltrados = pedidosTyped
       if (fechaInicioStr) {
-        pedidosFiltrados = pedidosTyped.filter(p => p.created_at?.split('T')[0] >= fechaInicioStr!)
+        pedidosFiltrados = pedidosTyped.filter(p => (p.created_at?.split('T')[0] ?? '') >= fechaInicioStr!)
       }
       if (periodo === 'personalizado' && fHasta) {
-        pedidosFiltrados = pedidosFiltrados.filter(p => p.created_at?.split('T')[0] <= fHasta)
+        pedidosFiltrados = pedidosFiltrados.filter(p => (p.created_at?.split('T')[0] ?? '') <= fHasta)
       }
 
       const productosVendidos: Record<string, ProductoVendido> = {}

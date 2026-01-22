@@ -43,7 +43,7 @@ export interface VirtualVariableListProps<T> {
 }
 
 export interface UseContainerHeightReturn {
-  containerRef: RefObject<HTMLDivElement>;
+  containerRef: RefObject<HTMLDivElement | null>;
   height: number;
 }
 
