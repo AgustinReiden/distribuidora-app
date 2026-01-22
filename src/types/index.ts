@@ -3,6 +3,9 @@
  * Preparación para migración gradual a TypeScript
  */
 
+// Re-exportar tipos de hooks
+export * from './hooks'
+
 // =============================================================================
 // ENTIDADES BASE
 // =============================================================================

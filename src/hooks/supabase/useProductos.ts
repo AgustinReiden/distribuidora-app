@@ -1,18 +1,54 @@
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
+import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'
 
-export function useProductos() {
-  const [productos, setProductos] = useState([])
-  const [loading, setLoading] = useState(true)
+interface StockItem {
+  productoId?: string;
+  producto_id?: string;
+  cantidad: number;
+}
 
-  const fetchProductos = async () => {
+interface StockValidationItem {
+  productoId: string;
+  cantidad: number;
+}
+
+interface StockError {
+  productoId: string;
+  mensaje: string;
+}
+
+interface PrecioMasivoItem {
+  productoId: string;
+  precioNeto?: number;
+  impInternos?: number;
+  precioFinal?: number;
+}
+
+interface ActualizarPreciosResult {
+  success: boolean;
+  actualizados: number;
+  errores: string[];
+}
+
+interface DescontarStockRPCResult {
+  success: boolean;
+  errores?: string[];
+}
+
+export function useProductos(): UseProductosReturn {
+  const [productos, setProductos] = useState<ProductoDB[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+
+  const fetchProductos = async (): Promise<void> => {
     setLoading(true)
     try {
       const { data, error } = await supabase.from('productos').select('*').order('nombre')
       if (error) throw error
-      setProductos(data || [])
+      setProductos((data as ProductoDB[]) || [])
     } catch (error) {
-      notifyError('Error al cargar productos: ' + error.message)
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido'
+      notifyError('Error al cargar productos: ' + errorMessage)
       setProductos([])
     } finally {
       setLoading(false)
@@ -21,7 +57,7 @@ export function useProductos() {
 
   useEffect(() => { fetchProductos() }, [])
 
-  const agregarProducto = async (producto) => {
+  const agregarProducto = async (producto: ProductoFormInput): Promise<ProductoDB> => {
     const { data, error } = await supabase.from('productos').insert([{
       nombre: producto.nombre,
       codigo: producto.codigo || null,
@@ -29,42 +65,45 @@ export function useProductos() {
       stock: producto.stock,
       stock_minimo: producto.stock_minimo !== undefined ? producto.stock_minimo : 10,
       categoria: producto.categoria || null,
-      costo_sin_iva: producto.costo_sin_iva ? parseFloat(producto.costo_sin_iva) : null,
-      costo_con_iva: producto.costo_con_iva ? parseFloat(producto.costo_con_iva) : null,
-      impuestos_internos: producto.impuestos_internos ? parseFloat(producto.impuestos_internos) : null,
-      precio_sin_iva: producto.precio_sin_iva ? parseFloat(producto.precio_sin_iva) : null
+      costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
+      costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
+      impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
+      precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
     }]).select().single()
     if (error) throw error
-    setProductos(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
-    return data
+    const newProducto = data as ProductoDB
+    setProductos(prev => [...prev, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    return newProducto
   }
 
-  const actualizarProducto = async (id, producto) => {
-    const { data, error } = await supabase.from('productos').update({
-      nombre: producto.nombre,
-      codigo: producto.codigo || null,
-      precio: producto.precio,
-      stock: producto.stock,
-      stock_minimo: producto.stock_minimo !== undefined ? producto.stock_minimo : 10,
-      categoria: producto.categoria || null,
-      costo_sin_iva: producto.costo_sin_iva ? parseFloat(producto.costo_sin_iva) : null,
-      costo_con_iva: producto.costo_con_iva ? parseFloat(producto.costo_con_iva) : null,
-      impuestos_internos: producto.impuestos_internos ? parseFloat(producto.impuestos_internos) : null,
-      precio_sin_iva: producto.precio_sin_iva ? parseFloat(producto.precio_sin_iva) : null
-    }).eq('id', id).select().single()
+  const actualizarProducto = async (id: string, producto: Partial<ProductoFormInput>): Promise<ProductoDB> => {
+    const updateData: Record<string, unknown> = {}
+    if (producto.nombre !== undefined) updateData.nombre = producto.nombre
+    if (producto.codigo !== undefined) updateData.codigo = producto.codigo || null
+    if (producto.precio !== undefined) updateData.precio = producto.precio
+    if (producto.stock !== undefined) updateData.stock = producto.stock
+    if (producto.stock_minimo !== undefined) updateData.stock_minimo = producto.stock_minimo
+    if (producto.categoria !== undefined) updateData.categoria = producto.categoria || null
+    if (producto.costo_sin_iva !== undefined) updateData.costo_sin_iva = producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null
+    if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
+    if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null
+    if (producto.precio_sin_iva !== undefined) updateData.precio_sin_iva = producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
+
+    const { data, error } = await supabase.from('productos').update(updateData).eq('id', id).select().single()
     if (error) throw error
-    setProductos(prev => prev.map(p => p.id === id ? data : p))
-    return data
+    const updatedProducto = data as ProductoDB
+    setProductos(prev => prev.map(p => p.id === id ? updatedProducto : p))
+    return updatedProducto
   }
 
-  const eliminarProducto = async (id) => {
+  const eliminarProducto = async (id: string): Promise<void> => {
     const { error } = await supabase.from('productos').delete().eq('id', id)
     if (error) throw error
     setProductos(prev => prev.filter(p => p.id !== id))
   }
 
-  const validarStock = (items) => {
-    const errores = []
+  const validarStock = (items: StockValidationItem[]): { valido: boolean; errores: StockError[] } => {
+    const errores: StockError[] = []
     for (const item of items) {
       const producto = productos.find(p => p.id === item.productoId)
       if (!producto) {
@@ -81,7 +120,7 @@ export function useProductos() {
     return { valido: errores.length === 0, errores }
   }
 
-  const descontarStock = async (items) => {
+  const descontarStock = async (items: StockItem[]): Promise<void> => {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId || item.producto_id,
       cantidad: item.cantidad
@@ -95,8 +134,9 @@ export function useProductos() {
       throw error
     }
 
-    if (data && !data.success) {
-      throw new Error(data.errores?.join(', ') || 'Error al descontar stock')
+    const rpcResult = data as DescontarStockRPCResult | null
+    if (rpcResult && !rpcResult.success) {
+      throw new Error(rpcResult.errores?.join(', ') || 'Error al descontar stock')
     }
 
     setProductos(prev => prev.map(p => {
@@ -106,7 +146,7 @@ export function useProductos() {
     }))
   }
 
-  const restaurarStock = async (items) => {
+  const restaurarStock = async (items: StockItem[]): Promise<void> => {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.producto_id || item.productoId,
       cantidad: item.cantidad
@@ -127,12 +167,12 @@ export function useProductos() {
     }))
   }
 
-  const actualizarPreciosMasivo = async (productosData) => {
-    // Filtrar productos sin ID válido
+  const actualizarPreciosMasivo = async (productosData: PrecioMasivoItem[]): Promise<ActualizarPreciosResult> => {
+    // Filtrar productos sin ID valido
     const productosValidos = productosData.filter(p => p.productoId != null)
 
     if (productosValidos.length === 0) {
-      throw new Error('No hay productos válidos para actualizar')
+      throw new Error('No hay productos validos para actualizar')
     }
 
     const productosParaRPC = productosValidos.map(p => ({
@@ -142,20 +182,20 @@ export function useProductos() {
       precio_final: p.precioFinal || 0
     }))
 
-    // Intentar usar la función RPC primero
+    // Intentar usar la funcion RPC primero
     const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
       p_productos: productosParaRPC
     })
 
-    // Si la función RPC no existe o falla, usar fallback con updates individuales
+    // Si la funcion RPC no existe o falla, usar fallback con updates individuales
     if (error) {
-      console.warn('RPC actualizar_precios_masivo falló, usando fallback:', error.message)
+      console.warn('RPC actualizar_precios_masivo fallo, usando fallback:', error.message)
 
       let actualizados = 0
-      const errores = []
+      const errores: string[] = []
 
       for (const p of productosValidos) {
-        const updateData = {
+        const updateData: Record<string, number> = {
           precio: p.precioFinal || 0
         }
         // Solo incluir campos si tienen valor
@@ -174,7 +214,7 @@ export function useProductos() {
         }
       }
 
-      // Refrescar productos después de actualizar
+      // Refrescar productos despues de actualizar
       await fetchProductos()
 
       if (errores.length > 0 && actualizados === 0) {
@@ -184,18 +224,19 @@ export function useProductos() {
       return { success: true, actualizados, errores }
     }
 
-    // Verificar si la función RPC retornó éxito
-    if (data && data.success === false) {
-      const erroresMsg = data.errores?.length > 0
-        ? data.errores.join(', ')
-        : 'Error en la actualización'
+    // Verificar si la funcion RPC retorno exito
+    const rpcResult = data as ActualizarPreciosResult | null
+    if (rpcResult && rpcResult.success === false) {
+      const erroresMsg = rpcResult.errores?.length > 0
+        ? rpcResult.errores.join(', ')
+        : 'Error en la actualizacion'
       throw new Error(erroresMsg)
     }
 
-    // Refrescar productos después de actualizar
+    // Refrescar productos despues de actualizar
     await fetchProductos()
 
-    return data || { success: true, actualizados: productosValidos.length, errores: [] }
+    return rpcResult || { success: true, actualizados: productosValidos.length, errores: [] }
   }
 
   return {

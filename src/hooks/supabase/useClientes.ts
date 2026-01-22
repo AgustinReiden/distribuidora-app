@@ -7,16 +7,17 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { clienteService } from '../../services'
+import type { ClienteDB, ClienteFormInput, UseClientesReturn } from '../../types'
 
-export function useClientes() {
-  const [clientes, setClientes] = useState([])
+export function useClientes(): UseClientesReturn {
+  const [clientes, setClientes] = useState<ClienteDB[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchClientes = useCallback(async () => {
     setLoading(true)
     try {
       const data = await clienteService.getAll()
-      setClientes(data)
+      setClientes(data as ClienteDB[])
     } finally {
       setLoading(false)
     }
@@ -29,7 +30,7 @@ export function useClientes() {
   /**
    * Transforma datos del formulario al formato de la base de datos
    */
-  const transformarDatos = (cliente) => ({
+  const transformarDatos = (cliente: ClienteFormInput) => ({
     cuit: cliente.cuit || null,
     razon_social: cliente.razonSocial,
     nombre_fantasia: cliente.nombreFantasia,
@@ -42,11 +43,11 @@ export function useClientes() {
     horarios_atencion: cliente.horarios_atencion || null,
     rubro: cliente.rubro || null,
     notas: cliente.notas || null,
-    limite_credito: cliente.limiteCredito ? parseFloat(cliente.limiteCredito) : 0,
-    dias_credito: cliente.diasCredito ? parseInt(cliente.diasCredito) : 30
+    limite_credito: cliente.limiteCredito ? parseFloat(String(cliente.limiteCredito)) : 0,
+    dias_credito: cliente.diasCredito ? parseInt(String(cliente.diasCredito)) : 30
   })
 
-  const agregarCliente = useCallback(async (cliente) => {
+  const agregarCliente = useCallback(async (cliente: ClienteFormInput): Promise<ClienteDB> => {
     // Validar datos
     const validation = clienteService.validate({
       nombre_fantasia: cliente.nombreFantasia,
@@ -59,7 +60,7 @@ export function useClientes() {
       throw new Error(validation.errors.join(', '))
     }
 
-    const data = await clienteService.create(transformarDatos(cliente))
+    const data = await clienteService.create(transformarDatos(cliente)) as ClienteDB
     setClientes(prev =>
       [...prev, data].sort((a, b) =>
         a.nombre_fantasia.localeCompare(b.nombre_fantasia)
@@ -68,8 +69,8 @@ export function useClientes() {
     return data
   }, [])
 
-  const actualizarCliente = useCallback(async (id, cliente) => {
-    const updateData = {
+  const actualizarCliente = useCallback(async (id: string, cliente: Partial<ClienteFormInput>): Promise<ClienteDB> => {
+    const updateData: Record<string, unknown> = {
       cuit: cliente.cuit || null,
       razon_social: cliente.razonSocial,
       nombre_fantasia: cliente.nombreFantasia,
@@ -85,32 +86,32 @@ export function useClientes() {
     }
 
     if (cliente.limiteCredito !== undefined) {
-      updateData.limite_credito = parseFloat(cliente.limiteCredito) || 0
+      updateData.limite_credito = parseFloat(String(cliente.limiteCredito)) || 0
     }
     if (cliente.diasCredito !== undefined) {
-      updateData.dias_credito = parseInt(cliente.diasCredito) || 30
+      updateData.dias_credito = parseInt(String(cliente.diasCredito)) || 30
     }
 
-    const data = await clienteService.update(id, updateData)
+    const data = await clienteService.update(id, updateData) as ClienteDB
     setClientes(prev => prev.map(c => c.id === id ? data : c))
     return data
   }, [])
 
-  const eliminarCliente = useCallback(async (id) => {
+  const eliminarCliente = useCallback(async (id: string): Promise<void> => {
     await clienteService.delete(id)
     setClientes(prev => prev.filter(c => c.id !== id))
   }, [])
 
   // Métodos adicionales delegados al servicio
-  const buscarClientes = useCallback(async (termino) => {
-    return clienteService.buscar(termino)
+  const buscarClientes = useCallback(async (termino: string): Promise<ClienteDB[]> => {
+    return clienteService.buscar(termino) as Promise<ClienteDB[]>
   }, [])
 
-  const getClientesPorZona = useCallback(async (zona) => {
-    return clienteService.getByZona(zona)
+  const getClientesPorZona = useCallback(async (zona: string): Promise<ClienteDB[]> => {
+    return clienteService.getByZona(zona) as Promise<ClienteDB[]>
   }, [])
 
-  const getResumenCuenta = useCallback(async (clienteId) => {
+  const getResumenCuenta = useCallback(async (clienteId: string) => {
     return clienteService.getResumenCuenta(clienteId)
   }, [])
 

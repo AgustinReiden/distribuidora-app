@@ -1,18 +1,49 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useEffect, createContext, useContext } from 'react'
+import { useState, useEffect, createContext, useContext, ReactNode } from 'react'
+import { User, AuthError } from '@supabase/supabase-js'
 import { supabase } from './base'
+import type { RolUsuario } from '../../types'
 
-const AuthContext = createContext({})
+// Tipo para el perfil de usuario
+export interface Perfil {
+  id: string;
+  nombre: string;
+  email: string;
+  rol: RolUsuario;
+  zona?: string;
+  activo: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
-  const [perfil, setPerfil] = useState(null)
+// Tipo para el contexto de autenticación
+export interface AuthContextValue {
+  user: User | null;
+  perfil: Perfil | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<{ user: User | null; session: unknown }>;
+  logout: () => Promise<void>;
+  isAdmin: boolean;
+  isPreventista: boolean;
+  isTransportista: boolean;
+  zonaUsuario: string | undefined;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null)
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export function AuthProvider({ children }: AuthProviderProps) {
+  const [user, setUser] = useState<User | null>(null)
+  const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchPerfil = async (userId) => {
+  const fetchPerfil = async (userId: string) => {
     try {
       const { data } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle()
-      if (data) setPerfil(data)
+      if (data) setPerfil(data as Perfil)
     } catch {
       // Error silenciado
     }
@@ -57,9 +88,10 @@ export function AuthProvider({ children }) {
       clearTimeout(safetyTimer)
       subscription.unsubscribe()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const login = async (email, password) => {
+  const login = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
     return data
@@ -72,21 +104,29 @@ export function AuthProvider({ children }) {
     setPerfil(null)
   }
 
+  const value: AuthContextValue = {
+    user,
+    perfil,
+    loading,
+    login,
+    logout,
+    isAdmin: perfil?.rol === 'admin',
+    isPreventista: perfil?.rol === 'preventista',
+    isTransportista: perfil?.rol === 'transportista',
+    zonaUsuario: perfil?.zona
+  }
+
   return (
-    <AuthContext.Provider value={{
-      user,
-      perfil,
-      loading,
-      login,
-      logout,
-      isAdmin: perfil?.rol === 'admin',
-      isPreventista: perfil?.rol === 'preventista',
-      isTransportista: perfil?.rol === 'transportista',
-      zonaUsuario: perfil?.zona
-    }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )
 }
 
-export const useAuth = () => useContext(AuthContext)
+export const useAuth = (): AuthContextValue => {
+  const context = useContext(AuthContext)
+  if (!context) {
+    throw new Error('useAuth debe usarse dentro de AuthProvider')
+  }
+  return context
+}
