@@ -439,7 +439,7 @@ export default function AppModals({
             pedidos={pedidos}
             transportistas={transportistas}
             onExportarOrdenPreparacion={handleExportarOrdenPreparacion}
-            onExportarHojaRuta={handleExportarHojaRuta}
+            onExportarHojaRuta={handleExportarHojaRuta as any}
             onClose={() => modales.exportarPDF.setOpen(false)}
           />
         </Suspense>

@@ -351,7 +351,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           <AddressAutocomplete
             value={form.direccion}
             onChange={(val: string) => handleFieldChange('direccion', val)}
-            onSelect={handleAddressSelect}
+            onSelect={handleAddressSelect as any}
             placeholder="Buscar dirección..."
             className={errores.direccion ? 'border-red-500' : ''}
           />

@@ -464,7 +464,7 @@ export function useAppHandlers({
     agregarCliente,
     modales: modales as any,
     setGuardando,
-    setNuevoPedido,
+    setNuevoPedido: setNuevoPedido as any,
     resetNuevoPedido,
     nuevoPedido,
     setPedidoAsignando,
@@ -499,7 +499,7 @@ export function useAppHandlers({
 
   const proveedorHandlers = useProveedorHandlers({
     proveedores,
-    agregarProveedor,
+    agregarProveedor: agregarProveedor as any,
     actualizarProveedor: actualizarProveedor as any,
     modales,
     setGuardando,

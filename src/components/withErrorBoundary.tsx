@@ -59,7 +59,7 @@ export function withErrorBoundary<P extends WithOnCloseProps>(
         componentName={componentName}
         errorMessage={errorMessage}
         fallback={fallback as unknown as undefined}
-        onError={onError}
+        onError={onError as any}
         onClose={props.onClose}
       >
         <WrappedComponent {...props} />
