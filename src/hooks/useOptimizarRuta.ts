@@ -1,13 +1,71 @@
 import { useState, useCallback } from 'react';
+import type { PedidoDB, ClienteDB } from '../types';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface DepositoCoords {
+  lat: number;
+  lng: number;
+}
+
+export interface PedidoParaOptimizar {
+  pedido_id: string;
+  cliente_id: string;
+  cliente_nombre: string;
+  direccion: string;
+  latitud: number;
+  longitud: number;
+}
+
+export interface OrdenOptimizadoItem {
+  pedido_id: string;
+  orden: number;
+  cliente_nombre?: string;
+  direccion?: string;
+  latitud?: number;
+  longitud?: number;
+}
+
+export interface RutaOptimizadaResponse {
+  success?: boolean;
+  total_pedidos: number;
+  orden_optimizado?: OrdenOptimizadoItem[];
+  distancia_total?: number;
+  duracion_total?: number;
+  polyline?: string;
+  mensaje?: string;
+  error?: string;
+}
+
+export interface OptimizarRutaRequestBody {
+  transportista_id: string;
+  deposito_lat: number;
+  deposito_lng: number;
+  pedidos: PedidoParaOptimizar[];
+}
+
+export interface UseOptimizarRutaReturn {
+  loading: boolean;
+  rutaOptimizada: RutaOptimizadaResponse | null;
+  error: string | null;
+  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[]) => Promise<RutaOptimizadaResponse | null>;
+  limpiarRuta: () => void;
+}
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
 // URL del webhook de n8n para optimizar rutas (desde variables de entorno)
-const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
+const N8N_WEBHOOK_URL: string = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
 
 // NOTA: La Google API Key ahora debe estar configurada en el servidor n8n
 // No se envia desde el cliente por razones de seguridad
 
 // Coordenadas del depósito por defecto (se pueden configurar)
-const DEPOSITO_DEFAULT = {
+const DEPOSITO_DEFAULT: DepositoCoords = {
   lat: -26.8241,
   lng: -65.2226
 };
@@ -15,16 +73,20 @@ const DEPOSITO_DEFAULT = {
 // Clave para localStorage
 const DEPOSITO_STORAGE_KEY = 'distribuidora_deposito_coords';
 
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
 /**
  * Obtiene las coordenadas del depósito desde localStorage o usa las por defecto
  */
-export const getDepositoCoords = () => {
+export const getDepositoCoords = (): DepositoCoords => {
   try {
     const stored = localStorage.getItem(DEPOSITO_STORAGE_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored);
+      const parsed = JSON.parse(stored) as Partial<DepositoCoords>;
       if (parsed.lat && parsed.lng) {
-        return parsed;
+        return { lat: parsed.lat, lng: parsed.lng };
       }
     }
   } catch {
@@ -36,7 +98,7 @@ export const getDepositoCoords = () => {
 /**
  * Guarda las coordenadas del depósito en localStorage
  */
-export const setDepositoCoords = (lat, lng) => {
+export const setDepositoCoords = (lat: number, lng: number): boolean => {
   try {
     localStorage.setItem(DEPOSITO_STORAGE_KEY, JSON.stringify({ lat, lng }));
     return true;
@@ -45,50 +107,58 @@ export const setDepositoCoords = (lat, lng) => {
   }
 };
 
+// ============================================================================
+// HOOK
+// ============================================================================
+
 /**
  * Hook para optimizar rutas de entrega usando Google Routes API vía n8n
  */
-export function useOptimizarRuta() {
-  const [loading, setLoading] = useState(false);
-  const [rutaOptimizada, setRutaOptimizada] = useState(null);
-  const [error, setError] = useState(null);
+export function useOptimizarRuta(): UseOptimizarRutaReturn {
+  const [loading, setLoading] = useState<boolean>(false);
+  const [rutaOptimizada, setRutaOptimizada] = useState<RutaOptimizadaResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   /**
    * Optimiza la ruta de entregas para un transportista
-   * @param {string} transportistaId - UUID del transportista
-   * @param {Array} pedidos - Array de pedidos con datos del cliente (incluyendo coordenadas)
-   * @returns {Object|null} Datos de la ruta optimizada o null si hay error
+   * @param transportistaId - UUID del transportista
+   * @param pedidos - Array de pedidos con datos del cliente (incluyendo coordenadas)
+   * @returns Datos de la ruta optimizada o null si hay error
    */
-  const optimizarRuta = useCallback(async (transportistaId, pedidos = []) => {
+  const optimizarRuta = useCallback(async (
+    transportistaId: string,
+    pedidos: PedidoDB[] = []
+  ): Promise<RutaOptimizadaResponse | null> => {
     if (!transportistaId) {
       setError('Debes seleccionar un transportista');
       return null;
     }
 
     // Filtrar pedidos del transportista que tengan coordenadas
-    const pedidosConCoordenadas = pedidos
-      .filter(p =>
+    const pedidosConCoordenadas: PedidoParaOptimizar[] = pedidos
+      .filter((p): p is PedidoDB & { cliente: ClienteDB & { latitud: number; longitud: number } } =>
         p.transportista_id === transportistaId &&
         p.estado === 'asignado' &&
-        p.cliente?.latitud &&
-        p.cliente?.longitud
+        p.cliente?.latitud != null &&
+        p.cliente?.longitud != null
       )
       .map(p => ({
         pedido_id: p.id,
         cliente_id: p.cliente_id,
-        cliente_nombre: p.cliente?.nombre_fantasia || p.cliente?.nombre || 'Sin nombre',
+        cliente_nombre: p.cliente?.nombre_fantasia || 'Sin nombre',
         direccion: p.cliente?.direccion || '',
         latitud: p.cliente.latitud,
         longitud: p.cliente.longitud
       }));
 
     if (pedidosConCoordenadas.length === 0) {
-      setRutaOptimizada({
+      const emptyResult: RutaOptimizadaResponse = {
         success: true,
         total_pedidos: 0,
         mensaje: 'No hay pedidos con coordenadas para optimizar'
-      });
-      return { success: true, total_pedidos: 0 };
+      };
+      setRutaOptimizada(emptyResult);
+      return emptyResult;
     }
 
     setLoading(true);
@@ -97,7 +167,7 @@ export function useOptimizarRuta() {
     // Obtener coordenadas del depósito (configurables)
     const deposito = getDepositoCoords();
 
-    const requestBody = {
+    const requestBody: OptimizarRutaRequestBody = {
       transportista_id: transportistaId,
       deposito_lat: deposito.lat,
       deposito_lng: deposito.lng,
@@ -126,10 +196,10 @@ export function useOptimizarRuta() {
       }
 
       // Parsear JSON
-      let data;
+      let data: RutaOptimizadaResponse;
       try {
         const responseText = await response.text();
-        data = JSON.parse(responseText);
+        data = JSON.parse(responseText) as RutaOptimizadaResponse;
       } catch {
         throw new Error('La respuesta no es JSON válido');
       }
@@ -141,12 +211,13 @@ export function useOptimizarRuta() {
 
       // Verificar si no hay pedidos
       if (data.total_pedidos === 0 || !data.orden_optimizado) {
-        setRutaOptimizada({
+        const noOrdersResult: RutaOptimizadaResponse = {
           success: true,
           total_pedidos: 0,
           mensaje: 'No hay pedidos asignados a este transportista'
-        });
-        return { success: true, total_pedidos: 0 };
+        };
+        setRutaOptimizada(noOrdersResult);
+        return noOrdersResult;
       }
 
       // Respuesta exitosa con ruta optimizada
@@ -154,13 +225,14 @@ export function useOptimizarRuta() {
       return data;
 
     } catch (err) {
+      const error = err as Error;
       // Determinar mensaje de error descriptivo
-      let errorMessage = err.message || 'Error al optimizar la ruta';
+      let errorMessage = error.message || 'Error al optimizar la ruta';
 
       // Detectar errores específicos
-      if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+      if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
         errorMessage = 'Error de conexión: No se pudo conectar con el servidor. Verifica tu conexión a internet o intenta más tarde.';
-      } else if (err.message.includes('CORS') || err.message.includes('cross-origin')) {
+      } else if (error.message.includes('CORS') || error.message.includes('cross-origin')) {
         errorMessage = 'Error de CORS: El servidor no permite esta solicitud desde el navegador.';
       }
 
@@ -174,7 +246,7 @@ export function useOptimizarRuta() {
   /**
    * Limpia los datos de la ruta optimizada
    */
-  const limpiarRuta = useCallback(() => {
+  const limpiarRuta = useCallback((): void => {
     setRutaOptimizada(null);
     setError(null);
   }, []);
@@ -191,9 +263,9 @@ export function useOptimizarRuta() {
 /**
  * Configuración del depósito (exportada para uso en otros componentes)
  */
-export const DEPOSITO_CONFIG = DEPOSITO_DEFAULT;
+export const DEPOSITO_CONFIG: DepositoCoords = DEPOSITO_DEFAULT;
 
 /**
  * URL del webhook (exportada para debug/configuración)
  */
-export const WEBHOOK_URL = N8N_WEBHOOK_URL;
+export const WEBHOOK_URL: string = N8N_WEBHOOK_URL;

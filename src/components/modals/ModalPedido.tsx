@@ -1,6 +1,77 @@
-import React, { useState, useMemo, memo } from 'react';
+import React, { useState, useMemo, memo, MouseEvent } from 'react';
 import { X, Loader2, Search } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
+import type { ProductoDB, ClienteDB } from '../../types';
+
+/** Item en el pedido */
+export interface PedidoItem {
+  productoId: string;
+  cantidad: number;
+  precioUnitario: number;
+}
+
+/** Estado del nuevo pedido */
+export interface NuevoPedidoState {
+  clienteId: string;
+  items: PedidoItem[];
+  notas: string;
+  formaPago?: string;
+  estadoPago?: string;
+  montoPagado?: number;
+}
+
+/** Datos del cliente a crear */
+export interface NuevoClienteData {
+  nombre: string;
+  nombreFantasia: string;
+  direccion: string;
+  telefono: string;
+  zona: string;
+}
+
+/** Advertencia de stock */
+export interface StockWarning {
+  tipo: 'error' | 'warning';
+  mensaje: string;
+}
+
+/** Props del componente ModalPedido */
+export interface ModalPedidoProps {
+  /** Lista de productos disponibles */
+  productos: ProductoDB[];
+  /** Lista de clientes */
+  clientes: ClienteDB[];
+  /** Categorías disponibles */
+  categorias: string[];
+  /** Estado del nuevo pedido */
+  nuevoPedido: NuevoPedidoState;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Callback al cambiar cliente */
+  onClienteChange: (clienteId: string) => void;
+  /** Callback al agregar item */
+  onAgregarItem: (productoId: string) => void;
+  /** Callback al actualizar cantidad */
+  onActualizarCantidad: (productoId: string, cantidad: number) => void;
+  /** Callback al crear cliente */
+  onCrearCliente: (cliente: NuevoClienteData) => Promise<ClienteDB>;
+  /** Callback al guardar pedido */
+  onGuardar: () => void | Promise<void>;
+  /** Indica si está guardando */
+  guardando: boolean;
+  /** Si es admin */
+  isAdmin?: boolean;
+  /** Si es preventista */
+  isPreventista?: boolean;
+  /** Callback al cambiar notas */
+  onNotasChange?: (notas: string) => void;
+  /** Callback al cambiar forma de pago */
+  onFormaPagoChange?: (formaPago: string) => void;
+  /** Callback al cambiar estado de pago */
+  onEstadoPagoChange?: (estadoPago: string) => void;
+  /** Callback al cambiar monto pagado */
+  onMontoPagadoChange?: (monto: number) => void;
+}
 
 const ModalPedido = memo(function ModalPedido({
   productos,
@@ -20,13 +91,13 @@ const ModalPedido = memo(function ModalPedido({
   onFormaPagoChange,
   onEstadoPagoChange,
   onMontoPagadoChange
-}) {
-  const [busquedaProducto, setBusquedaProducto] = useState('');
-  const [busquedaCliente, setBusquedaCliente] = useState('');
-  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('');
-  const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState(false);
-  const [nuevoCliente, setNuevoCliente] = useState({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
-  const [guardandoCliente, setGuardandoCliente] = useState(false);
+}: ModalPedidoProps) {
+  const [busquedaProducto, setBusquedaProducto] = useState<string>('');
+  const [busquedaCliente, setBusquedaCliente] = useState<string>('');
+  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
+  const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
+  const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
+  const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
 
   const productosFiltrados = useMemo(() => {
     return productos.filter(p => {
@@ -56,7 +127,7 @@ const ModalPedido = memo(function ModalPedido({
     return Number.isNaN(id) ? null : clientes.find(c => c.id === id);
   }, [clientes, nuevoPedido.clienteId]);
 
-  const handleCrearClienteRapido = async () => {
+  const handleCrearClienteRapido = async (): Promise<void> => {
     const nombre = nuevoCliente.nombre?.trim();
     const nombreFantasia = nuevoCliente.nombreFantasia?.trim();
     const direccion = nuevoCliente.direccion?.trim();
@@ -73,7 +144,7 @@ const ModalPedido = memo(function ModalPedido({
     setGuardandoCliente(false);
   };
 
-  const getStockWarning = (productoId, cantidadEnPedido) => {
+  const getStockWarning = (productoId: string, cantidadEnPedido: number): StockWarning | null => {
     const producto = productos.find(p => p.id === productoId);
     if (!producto) return null;
     const stockDisponible = producto.stock - cantidadEnPedido;
@@ -83,7 +154,7 @@ const ModalPedido = memo(function ModalPedido({
     return null;
   };
 
-  const calcularTotal = () => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
+  const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">

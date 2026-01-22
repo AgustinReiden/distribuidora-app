@@ -1,6 +1,54 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, ChangeEvent, MutableRefObject } from 'react';
 import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
 import { useGoogleMaps } from '../hooks/useGoogleMaps';
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+/** Google Places AutocompletePrediction type */
+export interface PlacePrediction {
+  place_id: string;
+  description: string;
+  structured_formatting?: {
+    main_text: string;
+    secondary_text: string;
+  };
+}
+
+/** Address component from Google Places API */
+export interface AddressComponent {
+  long_name: string;
+  short_name: string;
+  types: string[];
+}
+
+/** Result object returned when user selects an address */
+export interface AddressSelectResult {
+  direccion: string;
+  latitud: number | null;
+  longitud: number | null;
+  componentes: AddressComponent[];
+}
+
+/** Props for AddressAutocomplete component */
+export interface AddressAutocompleteProps {
+  /** Current value of the input */
+  value: string;
+  /** Callback when input value changes */
+  onChange: (value: string) => void;
+  /** Callback when user selects an address from suggestions */
+  onSelect: (result: AddressSelectResult) => void;
+  /** Placeholder text for the input */
+  placeholder?: string;
+  /** Additional CSS classes */
+  className?: string;
+  /** Whether the input is disabled */
+  disabled?: boolean;
+}
+
+/** Status of Google Maps API */
+export type GoogleStatus = 'loading' | 'ready' | 'error';
 
 /**
  * Componente de autocompletado de direcciones usando Google Places API
@@ -20,22 +68,22 @@ export const AddressAutocomplete = ({
   placeholder = 'Buscar dirección...',
   className = '',
   disabled = false
-}) => {
-  const inputRef = useRef(null);
-  const autocompleteServiceRef = useRef(null);
-  const placesServiceRef = useRef(null);
-  const sessionTokenRef = useRef(null);
-  const [loading, setLoading] = useState(false);
-  const [predictions, setPredictions] = useState([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const dropdownRef = useRef(null);
+}: AddressAutocompleteProps): JSX.Element => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
+  const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
+  const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
+  const [showDropdown, setShowDropdown] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Usar hook para cargar Google Maps dinámicamente
   const { isLoaded: googleReady, error: googleError } = useGoogleMaps();
-  const [initError, setInitError] = useState(false);
+  const [initError, setInitError] = useState<boolean>(false);
 
   // Mapear estados del hook a googleStatus para compatibilidad
-  const googleStatus = googleError || initError ? 'error' : googleReady ? 'ready' : 'loading';
+  const googleStatus: GoogleStatus = googleError || initError ? 'error' : googleReady ? 'ready' : 'loading';
 
   // Inicializar servicios cuando Google esté listo
   useEffect(() => {

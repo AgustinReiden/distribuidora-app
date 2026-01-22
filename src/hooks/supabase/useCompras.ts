@@ -1,12 +1,37 @@
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
+import type {
+  CompraDBExtended,
+  CompraItemDBExtended,
+  ProveedorDBExtended,
+  CompraFormInputExtended,
+  ProveedorFormInputExtended,
+  RegistrarCompraResult,
+  ResumenCompras,
+  ResumenComprasPorProveedor,
+  UseComprasReturnExtended,
+  ProductoDB
+} from '../../types'
 
-export function useCompras() {
-  const [compras, setCompras] = useState([])
-  const [proveedores, setProveedores] = useState([])
-  const [loading, setLoading] = useState(false)
+interface CompraItemRPC {
+  producto_id: string;
+  cantidad: number;
+  costo_unitario: number;
+  subtotal: number;
+}
 
-  const fetchCompras = async () => {
+interface RPCResult {
+  success: boolean;
+  compra_id: string;
+  error?: string;
+}
+
+export function useCompras(): UseComprasReturnExtended {
+  const [compras, setCompras] = useState<CompraDBExtended[]>([])
+  const [proveedores, setProveedores] = useState<ProveedorDBExtended[]>([])
+  const [loading, setLoading] = useState<boolean>(false)
+
+  const fetchCompras = async (): Promise<void> => {
     setLoading(true)
     try {
       const { data, error } = await supabase
@@ -26,16 +51,16 @@ export function useCompras() {
         }
         throw error
       }
-      setCompras(data || [])
+      setCompras((data || []) as CompraDBExtended[])
     } catch (error) {
-      notifyError('Error al cargar compras: ' + error.message)
+      notifyError('Error al cargar compras: ' + (error as Error).message)
       setCompras([])
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchProveedores = async () => {
+  const fetchProveedores = async (): Promise<void> => {
     try {
       const { data, error } = await supabase
         .from('proveedores')
@@ -50,7 +75,7 @@ export function useCompras() {
         }
         throw error
       }
-      setProveedores(data || [])
+      setProveedores((data || []) as ProveedorDBExtended[])
     } catch {
       setProveedores([])
     }
@@ -61,8 +86,8 @@ export function useCompras() {
     fetchProveedores()
   }, [])
 
-  const registrarCompra = async (compraData) => {
-    const itemsParaRPC = compraData.items.map(item => ({
+  const registrarCompra = async (compraData: CompraFormInputExtended): Promise<RegistrarCompraResult> => {
+    const itemsParaRPC: CompraItemRPC[] = compraData.items.map(item => ({
       producto_id: item.productoId,
       cantidad: item.cantidad,
       costo_unitario: item.costoUnitario || 0,
@@ -86,15 +111,16 @@ export function useCompras() {
 
     if (error) throw error
 
-    if (!data.success) {
-      throw new Error(data.error || 'Error al registrar compra')
+    const result = data as RPCResult
+    if (!result.success) {
+      throw new Error(result.error || 'Error al registrar compra')
     }
 
     await fetchCompras()
-    return { success: true, compraId: data.compra_id }
+    return { success: true, compraId: result.compra_id }
   }
 
-  const agregarProveedor = async (proveedor) => {
+  const agregarProveedor = async (proveedor: ProveedorFormInputExtended): Promise<ProveedorDBExtended> => {
     const { data, error } = await supabase
       .from('proveedores')
       .insert([{
@@ -112,11 +138,15 @@ export function useCompras() {
       .single()
 
     if (error) throw error
-    setProveedores(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
-    return data
+    const proveedorCreado = data as ProveedorDBExtended
+    setProveedores(prev => [...prev, proveedorCreado].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    return proveedorCreado
   }
 
-  const actualizarProveedor = async (id, proveedor) => {
+  const actualizarProveedor = async (
+    id: string,
+    proveedor: ProveedorFormInputExtended
+  ): Promise<ProveedorDBExtended> => {
     const { data, error } = await supabase
       .from('proveedores')
       .update({
@@ -136,12 +166,13 @@ export function useCompras() {
       .single()
 
     if (error) throw error
-    setProveedores(prev => prev.map(p => p.id === id ? data : p))
-    return data
+    const proveedorActualizado = data as ProveedorDBExtended
+    setProveedores(prev => prev.map(p => p.id === id ? proveedorActualizado : p))
+    return proveedorActualizado
   }
 
-  const getComprasPorProducto = (productoId) => {
-    const comprasConProducto = []
+  const getComprasPorProducto = (productoId: string): CompraDBExtended[] => {
+    const comprasConProducto: CompraDBExtended[] = []
     compras.forEach(compra => {
       const itemsDelProducto = compra.items?.filter(i => i.producto_id === productoId) || []
       if (itemsDelProducto.length > 0) {
@@ -154,17 +185,20 @@ export function useCompras() {
     return comprasConProducto
   }
 
-  const getResumenCompras = (fechaDesde = null, fechaHasta = null) => {
+  const getResumenCompras = (
+    fechaDesde: string | null = null,
+    fechaHasta: string | null = null
+  ): ResumenCompras => {
     let comprasFiltradas = [...compras]
 
     if (fechaDesde) {
-      comprasFiltradas = comprasFiltradas.filter(c => c.fecha_compra >= fechaDesde)
+      comprasFiltradas = comprasFiltradas.filter(c => (c.fecha_compra || '') >= fechaDesde)
     }
     if (fechaHasta) {
-      comprasFiltradas = comprasFiltradas.filter(c => c.fecha_compra <= fechaHasta)
+      comprasFiltradas = comprasFiltradas.filter(c => (c.fecha_compra || '') <= fechaHasta)
     }
 
-    const porProveedor = {}
+    const porProveedor: Record<string, ResumenComprasPorProveedor> = {}
     comprasFiltradas.forEach(c => {
       const proveedorNombre = c.proveedor?.nombre || c.proveedor_nombre || 'Sin proveedor'
       if (!porProveedor[proveedorNombre]) {
@@ -183,7 +217,7 @@ export function useCompras() {
     }
   }
 
-  const anularCompra = async (compraId) => {
+  const anularCompra = async (compraId: string): Promise<void> => {
     const compra = compras.find(c => c.id === compraId)
     if (!compra) throw new Error('Compra no encontrada')
 
@@ -195,7 +229,9 @@ export function useCompras() {
         .select('id, stock')
         .in('id', productIds)
 
-      const stockMap = Object.fromEntries((productosActuales || []).map(p => [p.id, p.stock || 0]))
+      const stockMap: Record<string, number> = Object.fromEntries(
+        ((productosActuales || []) as Array<{ id: string; stock: number }>).map(p => [p.id, p.stock || 0])
+      )
 
       // Revertir stock de cada item (restar del stock ACTUAL, no del guardado)
       for (const item of (compra.items || [])) {

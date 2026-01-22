@@ -2,8 +2,20 @@
  * Componente consolidado para todos los modales de la aplicación
  * Implementa lazy loading para optimización de bundle
  */
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, ReactNode } from 'react';
 import LoadingSpinner from './layout/LoadingSpinner';
+import type { User } from '@supabase/supabase-js';
+import type {
+  ClienteDB,
+  ProductoDB,
+  PedidoDB,
+  PerfilDB,
+  ProveedorDBExtended,
+  MermaDBExtended,
+  CompraDBExtended,
+  FiltrosPedidosState,
+  RutaOptimizada
+} from '../types/hooks';
 
 // Modales cargados de forma lazy
 const ModalConfirmacion = lazy(() => import('./modals/ModalConfirmacion'));
@@ -30,8 +42,170 @@ const ModalPedidosEliminados = lazy(() => import('./modals/ModalPedidosEliminado
 // Lazy load de utilidades PDF (solo cuando se necesiten)
 const loadPdfUtils = () => import('../lib/pdfExport.js');
 
+// =============================================================================
+// TYPES
+// =============================================================================
+
+/** Modal state with open/close controls */
+export interface ModalState<T = unknown> {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  data?: T;
+}
+
+/** Confirmation modal config */
+export interface ConfirmConfig {
+  visible: boolean;
+  title?: string;
+  message?: string;
+  onConfirm?: () => void;
+  variant?: 'danger' | 'warning' | 'info';
+}
+
+/** All modals state */
+export interface ModalesState {
+  confirm: { config: ConfirmConfig | null; setConfig: (config: ConfirmConfig) => void };
+  filtroFecha: ModalState;
+  cliente: ModalState;
+  producto: ModalState;
+  pedido: ModalState;
+  usuario: ModalState;
+  asignar: ModalState;
+  historial: ModalState;
+  editarPedido: ModalState;
+  exportarPDF: ModalState;
+  optimizarRuta: ModalState;
+  fichaCliente: ModalState;
+  registrarPago: ModalState;
+  mermaStock: ModalState;
+  historialMermas: ModalState;
+  compra: ModalState;
+  detalleCompra: ModalState;
+  proveedor: ModalState;
+  importarPrecios: ModalState;
+  pedidosEliminados: ModalState;
+}
+
+/** Nuevo pedido form state */
+export interface NuevoPedidoState {
+  clienteId: string;
+  items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>;
+  notas: string;
+  formaPago?: string;
+  estadoPago?: string;
+  montoPagado?: number;
+}
+
+/** App state passed to AppModals */
+export interface AppModalsAppState {
+  modales: ModalesState;
+  clienteEditando: ClienteDB | null;
+  setClienteEditando: (cliente: ClienteDB | null) => void;
+  productoEditando: ProductoDB | null;
+  setProductoEditando: (producto: ProductoDB | null) => void;
+  usuarioEditando: PerfilDB | null;
+  setUsuarioEditando: (usuario: PerfilDB | null) => void;
+  pedidoAsignando: PedidoDB | null;
+  setPedidoAsignando: (pedido: PedidoDB | null) => void;
+  pedidoHistorial: PedidoDB | null;
+  setPedidoHistorial: (pedido: PedidoDB | null) => void;
+  historialCambios: unknown[];
+  setHistorialCambios: (historial: unknown[]) => void;
+  pedidoEditando: PedidoDB | null;
+  setPedidoEditando: (pedido: PedidoDB | null) => void;
+  clienteFicha: ClienteDB | null;
+  setClienteFicha: (cliente: ClienteDB | null) => void;
+  clientePago: ClienteDB | null;
+  setClientePago: (cliente: ClienteDB | null) => void;
+  saldoPendienteCliente: number;
+  productoMerma: ProductoDB | null;
+  setProductoMerma: (producto: ProductoDB | null) => void;
+  compraDetalle: CompraDBExtended | null;
+  setCompraDetalle: (compra: CompraDBExtended | null) => void;
+  proveedorEditando: ProveedorDBExtended | null;
+  setProveedorEditando: (proveedor: ProveedorDBExtended | null) => void;
+  nuevoPedido: NuevoPedidoState;
+  resetNuevoPedido: () => void;
+  setCargandoHistorial: (cargando: boolean) => void;
+  filtros: FiltrosPedidosState;
+  setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>;
+}
+
+/** Event handlers for AppModals */
+export interface AppModalsHandlers {
+  handleFiltrosChange: (nuevosFiltros: Partial<FiltrosPedidosState>, filtros: FiltrosPedidosState, setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>) => void;
+  handleGuardarCliente: (clienteData: Partial<ClienteDB>) => Promise<void>;
+  handleGuardarProducto: (productoData: Partial<ProductoDB>) => Promise<void>;
+  handleClienteChange: (clienteId: string) => void;
+  agregarItemPedido: (productoId: string, cantidad: number, precio: number) => void;
+  actualizarCantidadItem: (productoId: string, cantidad: number) => void;
+  handleCrearClienteEnPedido: (clienteData: Partial<ClienteDB>) => Promise<void>;
+  handleGuardarPedidoConOffline: () => Promise<void>;
+  handleNotasChange: (notas: string) => void;
+  handleFormaPagoChange: (formaPago: string) => void;
+  handleEstadoPagoChange: (estadoPago: string) => void;
+  handleMontoPagadoChange: (monto: number) => void;
+  handleGuardarUsuario: (usuarioData: Partial<PerfilDB>) => Promise<void>;
+  handleAsignarTransportista: (transportistaId: string) => Promise<void>;
+  handleGuardarEdicionPedido: (pedidoData: Partial<PedidoDB>) => Promise<void>;
+  handleAplicarOrdenOptimizado: (pedidosOrdenados: Array<{ id: string; orden_entrega: number }>) => Promise<void>;
+  handleExportarHojaRutaOptimizada: () => Promise<void>;
+  handleCerrarModalOptimizar: () => void;
+  handleAbrirRegistrarPago: (cliente: ClienteDB, saldo: number) => void;
+  handleRegistrarPago: (monto: number, formaPago: string, notas?: string) => Promise<void>;
+  handleGenerarReciboPago: () => Promise<void>;
+  handleRegistrarMerma: (mermaData: { cantidad: number; motivo: string }) => Promise<void>;
+  handleRegistrarCompra: (compraData: unknown) => Promise<void>;
+  handleAnularCompra: (compraId: string) => Promise<void>;
+  handleGuardarProveedor: (proveedorData: Partial<ProveedorDBExtended>) => Promise<void>;
+  refetchProductos?: () => Promise<void>;
+}
+
+/** Category type */
+export interface Categoria {
+  id: string;
+  nombre: string;
+  descripcion?: string;
+}
+
+/** Props for AppModals component */
+export interface AppModalsProps {
+  // Estado de la app
+  appState: AppModalsAppState;
+  handlers: AppModalsHandlers;
+
+  // Datos
+  clientes: ClienteDB[];
+  productos: ProductoDB[];
+  pedidos: PedidoDB[];
+  usuarios: PerfilDB[];
+  transportistas: PerfilDB[];
+  proveedores: ProveedorDBExtended[];
+  mermas: MermaDBExtended[];
+  categorias: Categoria[];
+
+  // Funciones de datos
+  fetchPedidosEliminados: () => Promise<PedidoDB[]>;
+  actualizarItemsPedido: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
+  actualizarPreciosMasivo: (productos: Array<{ productoId: string; precioNeto?: number; impInternos?: number; precioFinal?: number }>) => Promise<{ success: boolean; actualizados: number; errores: string[] }>;
+  optimizarRuta: (transportistaId: string, pedidos: PedidoDB[]) => Promise<RutaOptimizada | null>;
+
+  // Estado de carga
+  guardando: boolean;
+  cargandoHistorial: boolean;
+  loadingOptimizacion: boolean;
+  rutaOptimizada: RutaOptimizada | null;
+  errorOptimizacion: string | null;
+
+  // Usuario y permisos
+  user: User | null;
+  isAdmin: boolean;
+  isPreventista: boolean;
+  isOnline: boolean;
+}
+
 // Fallback para loading de modales
-function ModalFallback() {
+function ModalFallback(): JSX.Element {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6">
@@ -74,7 +248,7 @@ export default function AppModals({
   isAdmin,
   isPreventista,
   isOnline
-}) {
+}: AppModalsProps): JSX.Element {
   const {
     modales,
     clienteEditando,
@@ -108,15 +282,15 @@ export default function AppModals({
     setFiltros
   } = appState;
 
-  const zonasExistentes = [...new Set(clientes.map(c => c.zona).filter(Boolean))];
+  const zonasExistentes: string[] = [...new Set(clientes.map(c => c.zona).filter((z): z is string => Boolean(z)))];
 
   // Handlers para PDF con lazy loading
-  const handleExportarOrdenPreparacion = async (...args) => {
+  const handleExportarOrdenPreparacion = async (...args: unknown[]): Promise<void> => {
     const { generarOrdenPreparacion } = await loadPdfUtils();
     return generarOrdenPreparacion(...args);
   };
 
-  const handleExportarHojaRuta = async (...args) => {
+  const handleExportarHojaRuta = async (...args: unknown[]): Promise<void> => {
     const { generarHojaRuta } = await loadPdfUtils();
     return generarHojaRuta(...args);
   };

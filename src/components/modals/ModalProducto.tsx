@@ -1,21 +1,71 @@
-import React, { useState, memo } from 'react';
+import React, { useState, memo, ChangeEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProductoSchema } from '../../lib/schemas';
+import type { ProductoDB } from '../../types';
+
+/** Datos del formulario de producto */
+export interface ProductoFormData {
+  id?: string;
+  nombre: string;
+  codigo: string;
+  categoria: string;
+  stock: number | string;
+  stock_minimo: number;
+  porcentaje_iva: number;
+  costo_sin_iva: number | string;
+  costo_con_iva: number | string;
+  impuestos_internos: number | string;
+  precio_sin_iva: number | string;
+  precio: number | string;
+}
+
+/** Opción de IVA */
+interface OpcionIVA {
+  valor: number;
+  label: string;
+}
+
+/** Props del componente ModalProducto */
+export interface ModalProductoProps {
+  /** Producto a editar (null para nuevo) */
+  producto: ProductoDB | null;
+  /** Categorías disponibles */
+  categorias: string[];
+  /** Callback al guardar */
+  onSave: (data: ProductoFormData) => void | Promise<void>;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Indica si está guardando */
+  guardando: boolean;
+}
 
 // Opciones de IVA disponibles
-const OPCIONES_IVA = [
+const OPCIONES_IVA: OpcionIVA[] = [
   { valor: 21, label: '21%' },
   { valor: 10.5, label: '10.5%' },
   { valor: 0, label: '0% (Exento)' }
 ];
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave, onClose, guardando }) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave, onClose, guardando }: ModalProductoProps) {
   // Zod validation hook
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
 
-  const [form, setForm] = useState(producto || {
+  const [form, setForm] = useState<ProductoFormData>(producto ? {
+    id: producto.id,
+    nombre: producto.nombre || '',
+    codigo: producto.codigo || '',
+    categoria: producto.categoria || '',
+    stock: producto.stock ?? '',
+    stock_minimo: producto.stock_minimo ?? 10,
+    porcentaje_iva: 21,
+    costo_sin_iva: producto.costo_sin_iva ?? '',
+    costo_con_iva: producto.costo_con_iva ?? '',
+    impuestos_internos: producto.impuestos_internos ?? '',
+    precio_sin_iva: producto.precio_sin_iva ?? '',
+    precio: producto.precio ?? ''
+  } : {
     nombre: '',
     codigo: '',
     categoria: '',
@@ -28,11 +78,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
     precio_sin_iva: '',
     precio: '' // precio_con_iva (precio final al cliente)
   });
-  const [nuevaCategoria, setNuevaCategoria] = useState('');
-  const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState(false);
+  const [nuevaCategoria, setNuevaCategoria] = useState<string>('');
+  const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState<boolean>(false);
 
   // Calcular costo total: neto + IVA(solo sobre neto) + impuestos internos
-  const calcularCostoTotal = (costoNeto, porcentajeIva, impInternos) => {
+  const calcularCostoTotal = (costoNeto: number | string, porcentajeIva: number | string, impInternos: number | string): number => {
     const neto = parseFloat(costoNeto) || 0;
     const iva = neto * (parseFloat(porcentajeIva) || 0) / 100;
     const internos = parseFloat(impInternos) || 0;
@@ -40,7 +90,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
   };
 
   // Calcular precio total: neto + IVA(solo sobre neto) + impuestos internos
-  const calcularPrecioTotal = (precioNeto, porcentajeIva, impInternos) => {
+  const calcularPrecioTotal = (precioNeto: number | string, porcentajeIva: number | string, impInternos: number | string): number => {
     const neto = parseFloat(precioNeto) || 0;
     const iva = neto * (parseFloat(porcentajeIva) || 0) / 100;
     const internos = parseFloat(impInternos) || 0;
@@ -48,7 +98,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
   };
 
   // Recalcular totales cuando cambian los valores
-  const recalcularTotales = (nuevoForm) => {
+  const recalcularTotales = (nuevoForm: ProductoFormData): ProductoFormData => {
     const costoTotal = calcularCostoTotal(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
     const precioTotal = calcularPrecioTotal(nuevoForm.precio_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
     return {
@@ -59,25 +109,25 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
   };
 
   // Manejar cambio de costo neto
-  const handleCostoSinIvaChange = (valor) => {
+  const handleCostoSinIvaChange = (valor: string): void => {
     const nuevoForm = { ...form, costo_sin_iva: valor };
     setForm(recalcularTotales(nuevoForm));
   };
 
   // Manejar cambio de impuestos internos
-  const handleImpuestosInternosChange = (valor) => {
+  const handleImpuestosInternosChange = (valor: string): void => {
     const nuevoForm = { ...form, impuestos_internos: valor };
     setForm(recalcularTotales(nuevoForm));
   };
 
   // Manejar cambio de porcentaje IVA
-  const handlePorcentajeIvaChange = (valor) => {
+  const handlePorcentajeIvaChange = (valor: string): void => {
     const nuevoForm = { ...form, porcentaje_iva: parseFloat(valor) };
     setForm(recalcularTotales(nuevoForm));
   };
 
   // Manejar cambio de precio neto
-  const handlePrecioSinIvaChange = (valor) => {
+  const handlePrecioSinIvaChange = (valor: string): void => {
     const nuevoForm = { ...form, precio_sin_iva: valor };
     setForm(recalcularTotales(nuevoForm));
     if (intentoGuardar && errores.precio) {
@@ -85,14 +135,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
     }
   };
 
-  const handleFieldChange = (field, value) => {
+  const handleFieldChange = (field: keyof ProductoFormData, value: string | number): void => {
     setForm({ ...form, [field]: value });
-    if (intentoGuardar && errores[field]) {
-      clearFieldError(field);
+    if (intentoGuardar && errores[field as string]) {
+      clearFieldError(field as string);
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = (): void => {
     const result = validate(form);
     if (result.success) {
       const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
@@ -102,7 +152,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
     }
   };
 
-  const inputClass = (field) => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
+  const inputClass = (field: string): string => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
 
   return (
     <ModalBase title={producto ? 'Editar Producto' : 'Nuevo Producto'} onClose={onClose} maxWidth="max-w-lg">

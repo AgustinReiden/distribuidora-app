@@ -1,9 +1,75 @@
 import React, { useState, useMemo, memo } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { RefreshCw, Download, DollarSign, ShoppingCart, Clock, Package, Truck, Check, TrendingUp, TrendingDown, Minus, Target, Users, AlertTriangle } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import type {
+  ProductoDB,
+  DashboardMetricasExtended,
+  FiltroPeriodo
+} from '../../types';
 
-const periodoLabels = {
+// =============================================================================
+// INTERFACES DE PROPS
+// =============================================================================
+
+interface TendenciaIndicatorProps {
+  valor: number;
+  comparacion?: number | null;
+  invertido?: boolean;
+}
+
+interface ColorClase {
+  bg: string;
+  icon: string;
+  text: string;
+  border?: string;
+}
+
+interface MetricaCardProps {
+  icono: LucideIcon;
+  titulo: string;
+  valor: string | number;
+  subtitulo?: string;
+  colorClase: ColorClase;
+  tendencia?: React.ReactNode;
+}
+
+interface EstadoCardProps {
+  icono: LucideIcon;
+  titulo: string;
+  valor: number;
+  colorClase: ColorClase;
+  onClick?: () => void;
+}
+
+interface BarraProgresoProps {
+  dia: string;
+  ventas: number;
+  maxVenta: number;
+  index: number;
+}
+
+export interface VistaDashboardProps {
+  metricas: DashboardMetricasExtended;
+  loading: boolean;
+  filtroPeriodo: string;
+  onCambiarPeriodo: (periodo: FiltroPeriodo | string, fechaDesde?: string | null, fechaHasta?: string | null) => void;
+  onRefetch: () => void;
+  onDescargarBackup: (tipo: string) => void;
+  exportando: boolean;
+  productosStockBajo?: ProductoDB[];
+  totalClientes?: number;
+  isAdmin?: boolean;
+  isPreventista?: boolean;
+}
+
+interface MetricasCalculadas {
+  ticketPromedio: number;
+  tasaEntrega: number;
+}
+
+const periodoLabels: Record<string, string> = {
   hoy: 'Hoy',
   semana: 'Última semana',
   mes: 'Este mes',
@@ -13,7 +79,7 @@ const periodoLabels = {
 };
 
 // Componente de indicador de tendencia
-const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion, invertido = false }) {
+const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion, invertido = false }: TendenciaIndicatorProps) {
   if (!comparacion || comparacion === 0) {
     return (
       <span className="flex items-center text-xs text-gray-500">
@@ -45,7 +111,7 @@ const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion
 });
 
 // Componente de tarjeta de métrica grande
-const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo, colorClase, tendencia }) {
+const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo, colorClase, tendencia }: MetricaCardProps) {
   const Icono = icono;
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow">
@@ -69,7 +135,7 @@ const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo,
 });
 
 // Componente de tarjeta de estado pequeña
-const EstadoCard = memo(function EstadoCard({ icono, titulo, valor, colorClase, onClick }) {
+const EstadoCard = memo(function EstadoCard({ icono, titulo, valor, colorClase, onClick }: EstadoCardProps) {
   const Icono = icono;
   return (
     <button
@@ -88,7 +154,7 @@ const EstadoCard = memo(function EstadoCard({ icono, titulo, valor, colorClase, 
 });
 
 // Componente de barra de progreso animada
-const BarraProgreso = memo(function BarraProgreso({ dia, ventas, maxVenta, index }) {
+const BarraProgreso = memo(function BarraProgreso({ dia, ventas, maxVenta, index }: BarraProgresoProps) {
   const porcentaje = maxVenta > 0 ? (ventas / maxVenta) * 100 : 0;
   const esHoy = index === 6; // Último día es hoy
 
@@ -133,13 +199,13 @@ export default function VistaDashboard({
   totalClientes = 0,
   isAdmin = false,
   isPreventista = false
-}) {
-  const [fechaDesdeLocal, setFechaDesdeLocal] = useState('');
-  const [fechaHastaLocal, setFechaHastaLocal] = useState('');
-  const [mostrarFechasPersonalizadas, setMostrarFechasPersonalizadas] = useState(false);
+}: VistaDashboardProps) {
+  const [fechaDesdeLocal, setFechaDesdeLocal] = useState<string>('');
+  const [fechaHastaLocal, setFechaHastaLocal] = useState<string>('');
+  const [mostrarFechasPersonalizadas, setMostrarFechasPersonalizadas] = useState<boolean>(false);
 
   // Calcular métricas adicionales
-  const metricasCalculadas = useMemo(() => {
+  const metricasCalculadas = useMemo((): MetricasCalculadas | null => {
     if (!metricas) return null;
 
     const ticketPromedio = metricas.pedidosPeriodo > 0
@@ -157,7 +223,7 @@ export default function VistaDashboard({
     return { ticketPromedio, tasaEntrega };
   }, [metricas]);
 
-  const handlePeriodoChange = (periodo) => {
+  const handlePeriodoChange = (periodo: string): void => {
     if (periodo === 'personalizado') {
       setMostrarFechasPersonalizadas(true);
     } else {
@@ -166,7 +232,7 @@ export default function VistaDashboard({
     }
   };
 
-  const aplicarFechasPersonalizadas = () => {
+  const aplicarFechasPersonalizadas = (): void => {
     if (fechaDesdeLocal || fechaHastaLocal) {
       onCambiarPeriodo('personalizado', fechaDesdeLocal || null, fechaHastaLocal || null);
     }

@@ -5,6 +5,114 @@ import {
   removeSecureItem,
   migrateToSecure
 } from '../utils/secureStorage'
+import type { MermaFormInput, ProductoDB } from '../types'
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface PedidoOfflineItem {
+  productoId: string;
+  cantidad: number;
+  precioUnitario: number;
+  nombre?: string;
+}
+
+export interface StockSnapshot {
+  [productoId: string]: {
+    stockAlMomento: number;
+    reservadoOffline: number;
+    disponible: number;
+  };
+}
+
+export interface PedidoOffline {
+  offlineId: string;
+  clienteId: string | number;
+  items: PedidoOfflineItem[];
+  total: number;
+  usuarioId?: string;
+  notas?: string;
+  formaPago?: string;
+  estadoPago?: string;
+  montoPagado?: number;
+  creadoOffline: string;
+  sincronizado: boolean;
+  stockSnapshot?: StockSnapshot;
+}
+
+export interface MermaOffline extends MermaFormInput {
+  offlineId: string;
+  creadoOffline: string;
+  sincronizado: boolean;
+}
+
+export interface GuardarPedidoOptions {
+  productos?: ProductoDB[];
+  validarStock?: boolean;
+}
+
+export interface ItemSinStock {
+  productoId: string;
+  nombre: string;
+  solicitado: number;
+  disponible: number;
+}
+
+export interface GuardarPedidoResult {
+  success: boolean;
+  pedido?: PedidoOffline;
+  error?: string;
+  itemsSinStock?: ItemSinStock[];
+}
+
+export interface SyncResult {
+  success: boolean;
+  sincronizados: number;
+  errores: Array<{ pedido?: PedidoOffline; merma?: MermaOffline; error: string }>;
+}
+
+export interface CrearPedidoFunction {
+  (
+    clienteId: string | number,
+    items: PedidoOfflineItem[],
+    total: number,
+    usuarioId?: string,
+    descontarStockFn?: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
+    notas?: string,
+    formaPago?: string,
+    estadoPago?: string
+  ): Promise<unknown>;
+}
+
+export interface RegistrarMermaFunction {
+  (merma: MermaFormInput, usuarioId?: string): Promise<unknown>;
+}
+
+export interface UseOfflineSyncReturn {
+  isOnline: boolean;
+  pedidosPendientes: PedidoOffline[];
+  mermasPendientes: MermaOffline[];
+  sincronizando: boolean;
+  guardarPedidoOffline: (
+    pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
+    options?: GuardarPedidoOptions
+  ) => GuardarPedidoResult;
+  guardarMermaOffline: (mermaData: MermaFormInput) => MermaOffline;
+  eliminarPedidoOffline: (offlineId: string) => void;
+  eliminarMermaOffline: (offlineId: string) => void;
+  sincronizarPedidos: (
+    crearPedidoFn: CrearPedidoFunction,
+    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>
+  ) => Promise<SyncResult>;
+  sincronizarMermas: (registrarMermaFn: RegistrarMermaFunction) => Promise<SyncResult>;
+  limpiarPedidosOffline: () => void;
+  cantidadPendientes: number;
+}
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
 const OFFLINE_PEDIDOS_KEY = 'pedidos'
 const OFFLINE_MERMAS_KEY = 'mermas'
@@ -13,28 +121,34 @@ const OFFLINE_MERMAS_KEY = 'mermas'
 const LEGACY_PEDIDOS_KEY = 'offline_pedidos'
 const LEGACY_MERMAS_KEY = 'offline_mermas'
 
-// Hook para manejar sincronización offline
-export function useOfflineSync() {
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-  const [pedidosPendientes, setPedidosPendientes] = useState([])
-  const [mermasPendientes, setMermasPendientes] = useState([])
-  const [sincronizando, setSincronizando] = useState(false)
+// ============================================================================
+// HOOK
+// ============================================================================
+
+/**
+ * Hook para manejar sincronización offline de pedidos y mermas
+ */
+export function useOfflineSync(): UseOfflineSyncReturn {
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine)
+  const [pedidosPendientes, setPedidosPendientes] = useState<PedidoOffline[]>([])
+  const [mermasPendientes, setMermasPendientes] = useState<MermaOffline[]>([])
+  const [sincronizando, setSincronizando] = useState<boolean>(false)
 
   // Cargar pedidos pendientes del secureStorage (con migracion de datos legacy)
   useEffect(() => {
-    const loadOfflineData = async () => {
+    const loadOfflineData = async (): Promise<void> => {
       // Migrar datos legacy si existen
       await migrateToSecure(LEGACY_PEDIDOS_KEY, OFFLINE_PEDIDOS_KEY)
       await migrateToSecure(LEGACY_MERMAS_KEY, OFFLINE_MERMAS_KEY)
 
       // Cargar pedidos desde almacenamiento seguro
-      const storedPedidos = await getSecureItem(OFFLINE_PEDIDOS_KEY, [])
+      const storedPedidos = await getSecureItem<PedidoOffline[]>(OFFLINE_PEDIDOS_KEY, [])
       if (Array.isArray(storedPedidos)) {
         setPedidosPendientes(storedPedidos)
       }
 
       // Cargar mermas desde almacenamiento seguro
-      const storedMermas = await getSecureItem(OFFLINE_MERMAS_KEY, [])
+      const storedMermas = await getSecureItem<MermaOffline[]>(OFFLINE_MERMAS_KEY, [])
       if (Array.isArray(storedMermas)) {
         setMermasPendientes(storedMermas)
       }
@@ -45,8 +159,8 @@ export function useOfflineSync() {
 
   // Escuchar cambios de conexión
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
+    const handleOnline = (): void => setIsOnline(true)
+    const handleOffline = (): void => setIsOnline(false)
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
@@ -59,22 +173,23 @@ export function useOfflineSync() {
 
   /**
    * Guarda un pedido en modo offline con validación de stock
-   * @param {Object} pedidoData - Datos del pedido
-   * @param {Object} options - Opciones de validación
-   * @param {Array} options.productos - Lista de productos para validar stock
-   * @param {boolean} options.validarStock - Si se debe validar el stock (default: true)
-   * @returns {{ success: boolean, pedido?: Object, error?: string, itemsSinStock?: Array }}
+   * @param pedidoData - Datos del pedido
+   * @param options - Opciones de validación
+   * @returns Resultado con el pedido guardado o errores de validación
    */
-  const guardarPedidoOffline = useCallback((pedidoData, options = {}) => {
+  const guardarPedidoOffline = useCallback((
+    pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
+    options: GuardarPedidoOptions = {}
+  ): GuardarPedidoResult => {
     const { productos = [], validarStock = true } = options
 
     // Validar stock si se proporciona lista de productos
     if (validarStock && productos.length > 0 && pedidoData.items?.length > 0) {
-      const itemsSinStock = []
-      const stockSnapshot = {}
+      const itemsSinStock: ItemSinStock[] = []
+      const stockSnapshot: StockSnapshot = {}
 
       // Calcular stock considerando pedidos offline pendientes
-      const stockReservado = {}
+      const stockReservado: Record<string, number> = {}
       pedidosPendientes.forEach(pedido => {
         pedido.items?.forEach(item => {
           stockReservado[item.productoId] = (stockReservado[item.productoId] || 0) + item.cantidad
@@ -97,7 +212,7 @@ export function useOfflineSync() {
           if (item.cantidad > stockDisponible) {
             itemsSinStock.push({
               productoId: item.productoId,
-              nombre: producto.nombre || item.nombre,
+              nombre: producto.nombre || item.nombre || 'Producto desconocido',
               solicitado: item.cantidad,
               disponible: Math.max(0, stockDisponible)
             })
@@ -117,7 +232,7 @@ export function useOfflineSync() {
       pedidoData = { ...pedidoData, stockSnapshot }
     }
 
-    const nuevoPedido = {
+    const nuevoPedido: PedidoOffline = {
       ...pedidoData,
       offlineId: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       creadoOffline: new Date().toISOString(),
@@ -134,9 +249,13 @@ export function useOfflineSync() {
     return { success: true, pedido: nuevoPedido }
   }, [pedidosPendientes])
 
-  // Guardar merma offline
-  const guardarMermaOffline = useCallback((mermaData) => {
-    const nuevaMerma = {
+  /**
+   * Guarda una merma en modo offline
+   * @param mermaData - Datos de la merma
+   * @returns La merma guardada con metadatos offline
+   */
+  const guardarMermaOffline = useCallback((mermaData: MermaFormInput): MermaOffline => {
+    const nuevaMerma: MermaOffline = {
       ...mermaData,
       offlineId: `offline_merma_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       creadoOffline: new Date().toISOString(),
@@ -153,8 +272,11 @@ export function useOfflineSync() {
     return nuevaMerma
   }, [])
 
-  // Eliminar pedido offline (despues de sincronizar)
-  const eliminarPedidoOffline = useCallback((offlineId) => {
+  /**
+   * Elimina un pedido offline (después de sincronizar)
+   * @param offlineId - ID del pedido offline a eliminar
+   */
+  const eliminarPedidoOffline = useCallback((offlineId: string): void => {
     setPedidosPendientes(prev => {
       const updated = prev.filter(p => p.offlineId !== offlineId)
       // Guardar async sin bloquear
@@ -163,8 +285,11 @@ export function useOfflineSync() {
     })
   }, [])
 
-  // Eliminar merma offline (despues de sincronizar)
-  const eliminarMermaOffline = useCallback((offlineId) => {
+  /**
+   * Elimina una merma offline (después de sincronizar)
+   * @param offlineId - ID de la merma offline a eliminar
+   */
+  const eliminarMermaOffline = useCallback((offlineId: string): void => {
     setMermasPendientes(prev => {
       const updated = prev.filter(m => m.offlineId !== offlineId)
       // Guardar async sin bloquear
@@ -173,12 +298,22 @@ export function useOfflineSync() {
     })
   }, [])
 
-  // Sincronizar pedidos pendientes
-  const sincronizarPedidos = useCallback(async (crearPedidoFn, descontarStockFn) => {
-    if (!isOnline || pedidosPendientes.length === 0) return { success: true, sincronizados: 0, errores: [] }
+  /**
+   * Sincroniza todos los pedidos pendientes con el servidor
+   * @param crearPedidoFn - Función para crear pedidos en el servidor
+   * @param descontarStockFn - Función para descontar stock
+   * @returns Resultado de la sincronización
+   */
+  const sincronizarPedidos = useCallback(async (
+    crearPedidoFn: CrearPedidoFunction,
+    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>
+  ): Promise<SyncResult> => {
+    if (!isOnline || pedidosPendientes.length === 0) {
+      return { success: true, sincronizados: 0, errores: [] }
+    }
 
     setSincronizando(true)
-    const errores = []
+    const errores: SyncResult['errores'] = []
     let sincronizados = 0
 
     for (const pedido of pedidosPendientes) {
@@ -196,7 +331,8 @@ export function useOfflineSync() {
         eliminarPedidoOffline(pedido.offlineId)
         sincronizados++
       } catch (error) {
-        errores.push({ pedido, error: error.message })
+        const err = error as Error
+        errores.push({ pedido, error: err.message })
       }
     }
 
@@ -204,12 +340,20 @@ export function useOfflineSync() {
     return { success: errores.length === 0, sincronizados, errores }
   }, [isOnline, pedidosPendientes, eliminarPedidoOffline])
 
-  // Sincronizar mermas pendientes
-  const sincronizarMermas = useCallback(async (registrarMermaFn) => {
-    if (!isOnline || mermasPendientes.length === 0) return { success: true, sincronizados: 0, errores: [] }
+  /**
+   * Sincroniza todas las mermas pendientes con el servidor
+   * @param registrarMermaFn - Función para registrar mermas en el servidor
+   * @returns Resultado de la sincronización
+   */
+  const sincronizarMermas = useCallback(async (
+    registrarMermaFn: RegistrarMermaFunction
+  ): Promise<SyncResult> => {
+    if (!isOnline || mermasPendientes.length === 0) {
+      return { success: true, sincronizados: 0, errores: [] }
+    }
 
     setSincronizando(true)
-    const errores = []
+    const errores: SyncResult['errores'] = []
     let sincronizados = 0
 
     for (const merma of mermasPendientes) {
@@ -218,7 +362,8 @@ export function useOfflineSync() {
         eliminarMermaOffline(merma.offlineId)
         sincronizados++
       } catch (error) {
-        errores.push({ merma, error: error.message })
+        const err = error as Error
+        errores.push({ merma, error: err.message })
       }
     }
 
@@ -226,8 +371,10 @@ export function useOfflineSync() {
     return { success: errores.length === 0, sincronizados, errores }
   }, [isOnline, mermasPendientes, eliminarMermaOffline])
 
-  // Limpiar todos los pedidos offline
-  const limpiarPedidosOffline = useCallback(() => {
+  /**
+   * Limpia todos los pedidos offline
+   */
+  const limpiarPedidosOffline = useCallback((): void => {
     setPedidosPendientes([])
     removeSecureItem(OFFLINE_PEDIDOS_KEY)
   }, [])

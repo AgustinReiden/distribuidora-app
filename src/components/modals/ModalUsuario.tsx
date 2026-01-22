@@ -1,9 +1,44 @@
-import React, { useState, memo } from 'react';
+import React, { useState, memo, ChangeEvent } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
 import ModalBase from './ModalBase';
+import type { PerfilDB } from '../../types';
 
-const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guardando, zonasDisponibles = [] }) {
-  const [form, setForm] = useState(usuario || { nombre: '', rol: 'preventista', activo: true, zona: '' });
+/** Roles disponibles para usuarios */
+export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito';
+
+/** Datos del formulario de usuario */
+export interface UsuarioFormData {
+  id?: string;
+  nombre: string;
+  email?: string;
+  rol: RolUsuario;
+  activo: boolean;
+  zona: string;
+}
+
+/** Props del componente ModalUsuario */
+export interface ModalUsuarioProps {
+  /** Usuario a editar (null para nuevo) */
+  usuario: PerfilDB | null;
+  /** Callback al guardar */
+  onSave: (data: UsuarioFormData) => void | Promise<void>;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Indica si está guardando */
+  guardando: boolean;
+  /** Zonas disponibles para sugerencias */
+  zonasDisponibles?: string[];
+}
+
+const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guardando, zonasDisponibles = [] }: ModalUsuarioProps) {
+  const [form, setForm] = useState<UsuarioFormData>(usuario ? {
+    id: usuario.id,
+    nombre: usuario.nombre || '',
+    email: usuario.email,
+    rol: (usuario.rol as RolUsuario) || 'preventista',
+    activo: usuario.activo !== false,
+    zona: usuario.zona || ''
+  } : { nombre: '', rol: 'preventista', activo: true, zona: '' });
 
   // Mostrar campo de zona solo para preventistas
   const mostrarZona = form.rol === 'preventista';

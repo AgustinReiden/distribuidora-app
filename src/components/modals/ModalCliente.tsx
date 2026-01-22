@@ -1,9 +1,61 @@
-import React, { useState, memo, useRef } from 'react';
+import React, { useState, memo, useRef, ChangeEvent } from 'react';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, MapPinned } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
+import type { ClienteDB } from '../../types';
+
+/** Tipo de documento del cliente */
+export type TipoDocumento = 'CUIT' | 'DNI';
+
+/** Datos del formulario de cliente */
+export interface ClienteFormData {
+  tipo_documento: TipoDocumento;
+  numero_documento: string;
+  razonSocial: string;
+  nombreFantasia: string;
+  direccion: string;
+  latitud: number | null;
+  longitud: number | null;
+  telefono: string;
+  contacto: string;
+  zona: string;
+  horarios_atencion: string;
+  rubro: string;
+  notas: string;
+  limiteCredito: number;
+  diasCredito: number;
+}
+
+/** Datos para guardar cliente */
+export interface ClienteSaveData extends ClienteFormData {
+  id?: string;
+  cuit: string;
+}
+
+/** Resultado de selección de dirección */
+export interface AddressSelectResult {
+  direccion: string;
+  latitud: number;
+  longitud: number;
+}
+
+/** Props del componente ModalCliente */
+export interface ModalClienteProps {
+  /** Cliente a editar (null para nuevo) */
+  cliente: (ClienteDB & { tipo_documento?: TipoDocumento }) | null;
+  /** Callback al guardar */
+  onSave: (data: ClienteSaveData) => void | Promise<void>;
+  /** Callback al cerrar */
+  onClose: () => void;
+  /** Indica si está guardando */
+  guardando: boolean;
+  /** Si el usuario es admin (puede editar crédito) */
+  isAdmin?: boolean;
+  /** Zonas existentes para sugerencias */
+  zonasExistentes?: string[];
+}
 
 // Opciones predefinidas de zonas
 const ZONAS_PREDEFINIDAS = [
@@ -88,9 +140,9 @@ const detectarTipoDocumento = (codigo) => {
   return 'CUIT';
 };
 
-const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }) {
+const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }: ModalClienteProps) {
   // Ref para scroll a errores
-  const formRef = useRef(null);
+  const formRef = useRef<HTMLDivElement>(null);
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -103,10 +155,10 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const zonasUnicas = [...new Set([...ZONAS_PREDEFINIDAS, ...zonasExistentes.filter(Boolean)])].sort();
 
   // Estado para nueva zona
-  const [mostrarNuevaZona, setMostrarNuevaZona] = useState(false);
-  const [nuevaZona, setNuevaZona] = useState('');
+  const [mostrarNuevaZona, setMostrarNuevaZona] = useState<boolean>(false);
+  const [nuevaZona, setNuevaZona] = useState<string>('');
 
-  const [form, setForm] = useState(cliente ? {
+  const [form, setForm] = useState<ClienteFormData>(cliente ? {
     tipo_documento: tipoDocInicial,
     numero_documento: numeroDocInicial || '',
     razonSocial: cliente.razon_social || '',
@@ -140,7 +192,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     diasCredito: 30
   });
 
-  const handleAddressSelect = (result) => {
+  const handleAddressSelect = (result: AddressSelectResult): void => {
     setForm(prev => ({
       ...prev,
       direccion: result.direccion,
@@ -150,7 +202,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     if (errores.direccion) clearFieldError('direccion');
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = (): void => {
     // Validar con Zod
     const result = validate(form);
 
@@ -205,7 +257,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     });
   };
 
-  const handleTipoDocumentoChange = (nuevoTipo) => {
+  const handleTipoDocumentoChange = (nuevoTipo: TipoDocumento): void => {
     // Limpiar el numero al cambiar de tipo
     setForm({ ...form, tipo_documento: nuevoTipo, numero_documento: '' });
     if (intentoGuardar && errores.numero_documento) {
@@ -213,7 +265,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     }
   };
 
-  const handleFieldChange = (field, value) => {
+  const handleFieldChange = (field: keyof ClienteFormData, value: string | number): void => {
     // Formatear documento segun tipo
     if (field === 'numero_documento') {
       if (form.tipo_documento === 'CUIT') {
@@ -228,7 +280,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     }
   };
 
-  const inputClass = (field) => `w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${errores[field] ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''}`;
+  const inputClass = (field: keyof ClienteFormData): string => `w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${errores[field] ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''}`;
 
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>

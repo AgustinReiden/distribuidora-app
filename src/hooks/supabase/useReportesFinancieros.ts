@@ -1,10 +1,66 @@
 import { useState } from 'react'
 import { supabase, notifyError } from './base'
+import type {
+  ReporteCuentaPorCobrar,
+  ReporteRentabilidad,
+  ProductoRentabilidad,
+  TotalesRentabilidad,
+  VentaPorCliente,
+  VentaPorZona,
+  AgingDeuda,
+  UseReportesFinancierosReturn,
+  ClienteDB,
+  PedidoDB,
+  PagoDB,
+  ProductoDB
+} from '../../types'
 
-export function useReportesFinancieros() {
-  const [loading, setLoading] = useState(false)
+interface PedidoWithItems {
+  id: string;
+  cliente_id: string;
+  estado: string;
+  estado_pago?: string;
+  total: number;
+  created_at?: string;
+  items?: Array<{
+    cantidad: number;
+    precio_unitario: number;
+    subtotal?: number;
+    producto?: ProductoDB | null;
+  }>;
+}
 
-  const generarReporteCuentasPorCobrar = async () => {
+interface PedidoWithCliente {
+  id: string;
+  cliente_id: string;
+  estado: string;
+  estado_pago?: string;
+  total: number;
+  created_at?: string;
+  cliente?: ClienteDB | null;
+}
+
+interface ProductoStatsMap {
+  [key: string]: ProductoRentabilidad;
+}
+
+interface ClienteStatsMap {
+  [key: string]: VentaPorCliente;
+}
+
+interface ZonaStatsMap {
+  [key: string]: {
+    zona: string;
+    cantidadPedidos: number;
+    totalVentas: number;
+    clientes: Set<string>;
+  };
+}
+
+export function useReportesFinancieros(): UseReportesFinancierosReturn {
+  const [loading, setLoading] = useState<boolean>(false)
+
+  const generarReporteCuentasPorCobrar = async (): Promise<ReporteCuentaPorCobrar[]> => {
     setLoading(true)
     try {
       const { data: clientes, error: errorClientes } = await supabase
@@ -24,10 +80,14 @@ export function useReportesFinancieros() {
         .select('*')
       if (errorPagos && !errorPagos.message.includes('does not exist')) throw errorPagos
 
+      const clientesTyped = (clientes || []) as ClienteDB[]
+      const pedidosTyped = (pedidos || []) as PedidoDB[]
+      const pagosTyped = (pagos || []) as PagoDB[]
+
       const hoy = new Date()
-      const reporte = (clientes || []).map(cliente => {
-        const pedidosCliente = (pedidos || []).filter(p => p.cliente_id === cliente.id)
-        const pagosCliente = (pagos || []).filter(p => p.cliente_id === cliente.id)
+      const reporte: ReporteCuentaPorCobrar[] = clientesTyped.map(cliente => {
+        const pedidosCliente = pedidosTyped.filter(p => p.cliente_id === cliente.id)
+        const pagosCliente = pagosTyped.filter(p => p.cliente_id === cliente.id)
 
         const totalDeuda = pedidosCliente.reduce((s, p) => s + (p.total || 0), 0)
         const totalPagado = pagosCliente.reduce((s, p) => s + (p.monto || 0), 0)
@@ -35,17 +95,19 @@ export function useReportesFinancieros() {
 
         let corriente = 0, vencido30 = 0, vencido60 = 0, vencido90 = 0
         pedidosCliente.forEach(p => {
-          const fechaPedido = new Date(p.created_at)
+          const fechaPedido = new Date(p.created_at || 0)
           const diasCredito = cliente.dias_credito || 30
           const fechaVencimiento = new Date(fechaPedido)
           fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito)
-          const diasVencido = Math.floor((hoy - fechaVencimiento) / (1000 * 60 * 60 * 24))
+          const diasVencido = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24))
 
           if (diasVencido <= 0) corriente += p.total || 0
           else if (diasVencido <= 30) vencido30 += p.total || 0
           else if (diasVencido <= 60) vencido60 += p.total || 0
           else vencido90 += p.total || 0
         })
+
+        const aging: AgingDeuda = { corriente, vencido30, vencido60, vencido90 }
 
         return {
           cliente,
@@ -54,21 +116,24 @@ export function useReportesFinancieros() {
           saldoPendiente,
           limiteCredito: cliente.limite_credito || 0,
           creditoDisponible: (cliente.limite_credito || 0) - saldoPendiente,
-          aging: { corriente, vencido30, vencido60, vencido90 },
+          aging,
           pedidosPendientes: pedidosCliente.length
         }
       }).filter(r => r.saldoPendiente > 0).sort((a, b) => b.saldoPendiente - a.saldoPendiente)
 
       return reporte
     } catch (error) {
-      notifyError('Error al generar reporte: ' + error.message)
+      notifyError('Error al generar reporte: ' + (error as Error).message)
       return []
     } finally {
       setLoading(false)
     }
   }
 
-  const generarReporteRentabilidad = async (fechaDesde = null, fechaHasta = null) => {
+  const generarReporteRentabilidad = async (
+    fechaDesde: string | null = null,
+    fechaHasta: string | null = null
+  ): Promise<ReporteRentabilidad> => {
     setLoading(true)
     try {
       let query = supabase.from('pedidos').select(`*, items:pedido_items(*, producto:productos(*))`)
@@ -78,8 +143,10 @@ export function useReportesFinancieros() {
       const { data: pedidos, error } = await query
       if (error) throw error
 
-      const productoStats = {}
-      ;(pedidos || []).forEach(p => {
+      const pedidosTyped = (pedidos || []) as PedidoWithItems[]
+
+      const productoStats: ProductoStatsMap = {}
+      pedidosTyped.forEach(p => {
         p.items?.forEach(item => {
           const prod = item.producto
           if (!prod) return
@@ -92,7 +159,8 @@ export function useReportesFinancieros() {
               cantidadVendida: 0,
               ingresos: 0,
               costos: 0,
-              margen: 0
+              margen: 0,
+              margenPorcentaje: 0
             }
           }
           productoStats[id].cantidadVendida += item.cantidad
@@ -102,17 +170,18 @@ export function useReportesFinancieros() {
         })
       })
 
-      const reporteProductos = Object.values(productoStats).map(p => ({
+      const reporteProductos: ProductoRentabilidad[] = Object.values(productoStats).map(p => ({
         ...p,
         margen: p.ingresos - p.costos,
         margenPorcentaje: p.ingresos > 0 ? ((p.ingresos - p.costos) / p.ingresos * 100) : 0
       })).sort((a, b) => b.margen - a.margen)
 
-      const totales = {
+      const totales: TotalesRentabilidad = {
         ingresosTotales: reporteProductos.reduce((s, p) => s + p.ingresos, 0),
         costosTotales: reporteProductos.reduce((s, p) => s + p.costos, 0),
         margenTotal: reporteProductos.reduce((s, p) => s + p.margen, 0),
-        cantidadPedidos: (pedidos || []).length
+        cantidadPedidos: pedidosTyped.length,
+        margenPorcentaje: 0
       }
       totales.margenPorcentaje = totales.ingresosTotales > 0
         ? (totales.margenTotal / totales.ingresosTotales * 100)
@@ -120,14 +189,26 @@ export function useReportesFinancieros() {
 
       return { productos: reporteProductos, totales }
     } catch (error) {
-      notifyError('Error al generar reporte: ' + error.message)
-      return { productos: [], totales: {} }
+      notifyError('Error al generar reporte: ' + (error as Error).message)
+      return {
+        productos: [],
+        totales: {
+          ingresosTotales: 0,
+          costosTotales: 0,
+          margenTotal: 0,
+          cantidadPedidos: 0,
+          margenPorcentaje: 0
+        }
+      }
     } finally {
       setLoading(false)
     }
   }
 
-  const generarReporteVentasPorCliente = async (fechaDesde = null, fechaHasta = null) => {
+  const generarReporteVentasPorCliente = async (
+    fechaDesde: string | null = null,
+    fechaHasta: string | null = null
+  ): Promise<VentaPorCliente[]> => {
     setLoading(true)
     try {
       let query = supabase.from('pedidos').select(`*, cliente:clientes(*)`)
@@ -137,12 +218,14 @@ export function useReportesFinancieros() {
       const { data: pedidos, error } = await query
       if (error) throw error
 
-      const clienteStats = {}
-      ;(pedidos || []).forEach(p => {
+      const pedidosTyped = (pedidos || []) as PedidoWithCliente[]
+
+      const clienteStats: ClienteStatsMap = {}
+      pedidosTyped.forEach(p => {
         const clienteId = p.cliente_id
         if (!clienteStats[clienteId]) {
           clienteStats[clienteId] = {
-            cliente: p.cliente,
+            cliente: p.cliente || null,
             cantidadPedidos: 0,
             totalVentas: 0,
             pedidosPagados: 0,
@@ -163,7 +246,10 @@ export function useReportesFinancieros() {
     }
   }
 
-  const generarReporteVentasPorZona = async (fechaDesde = null, fechaHasta = null) => {
+  const generarReporteVentasPorZona = async (
+    fechaDesde: string | null = null,
+    fechaHasta: string | null = null
+  ): Promise<VentaPorZona[]> => {
     setLoading(true)
     try {
       let query = supabase.from('pedidos').select(`*, cliente:clientes(*)`)
@@ -173,15 +259,17 @@ export function useReportesFinancieros() {
       const { data: pedidos, error } = await query
       if (error) throw error
 
-      const zonaStats = {}
-      ;(pedidos || []).forEach(p => {
+      const pedidosTyped = (pedidos || []) as PedidoWithCliente[]
+
+      const zonaStats: ZonaStatsMap = {}
+      pedidosTyped.forEach(p => {
         const zona = p.cliente?.zona || 'Sin zona'
         if (!zonaStats[zona]) {
           zonaStats[zona] = {
             zona,
             cantidadPedidos: 0,
             totalVentas: 0,
-            clientes: new Set()
+            clientes: new Set<string>()
           }
         }
         zonaStats[zona].cantidadPedidos += 1
@@ -190,7 +278,9 @@ export function useReportesFinancieros() {
       })
 
       return Object.values(zonaStats).map(z => ({
-        ...z,
+        zona: z.zona,
+        cantidadPedidos: z.cantidadPedidos,
+        totalVentas: z.totalVentas,
         cantidadClientes: z.clientes.size,
         ticketPromedio: z.cantidadPedidos > 0 ? z.totalVentas / z.cantidadPedidos : 0
       })).sort((a, b) => b.totalVentas - a.totalVentas)

@@ -474,3 +474,476 @@ export interface AppState {
   // Estadísticas
   estadisticasRecorridos: unknown;
 }
+
+// =============================================================================
+// DASHBOARD TYPES
+// =============================================================================
+
+export interface ProductoVendido {
+  id: string;
+  nombre: string;
+  cantidad: number;
+}
+
+export interface ClienteActivo {
+  id: string;
+  nombre: string;
+  total: number;
+  pedidos: number;
+}
+
+export interface VentaPorDia {
+  dia: string;
+  ventas: number;
+  pedidos: number;
+}
+
+export interface PedidosPorEstado {
+  pendiente: number;
+  en_preparacion: number;
+  asignado: number;
+  entregado: number;
+}
+
+export interface DashboardMetricasExtended {
+  ventasPeriodo: number;
+  pedidosPeriodo: number;
+  productosMasVendidos: ProductoVendido[];
+  clientesMasActivos: ClienteActivo[];
+  pedidosPorEstado: PedidosPorEstado;
+  ventasPorDia: VentaPorDia[];
+}
+
+export interface ReportePreventista {
+  id: string;
+  nombre: string;
+  email: string;
+  totalVentas: number;
+  cantidadPedidos: number;
+  pedidosPendientes: number;
+  pedidosAsignados: number;
+  pedidosEntregados: number;
+  totalPagado: number;
+  totalPendiente: number;
+}
+
+export type FiltroPeriodo = 'hoy' | 'semana' | 'mes' | 'anio' | 'personalizado' | 'historico';
+
+export interface UseDashboardReturnExtended {
+  metricas: DashboardMetricasExtended;
+  loading: boolean;
+  loadingReporte: boolean;
+  reportePreventistas: ReportePreventista[];
+  reporteInicializado: boolean;
+  calcularReportePreventistas: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<void>;
+  refetch: (periodo?: FiltroPeriodo, fDesde?: string | null, fHasta?: string | null) => Promise<void>;
+  filtroPeriodo: string;
+  cambiarPeriodo: (nuevoPeriodo: string, fDesde?: string | null, fHasta?: string | null) => void;
+}
+
+// =============================================================================
+// BACKUP TYPES
+// =============================================================================
+
+export interface BackupData {
+  fecha: string;
+  tipo: string;
+  clientes?: ClienteDB[];
+  productos?: ProductoDB[];
+  pedidos?: PedidoDB[];
+}
+
+export interface FiltrosExportacion {
+  estado?: string;
+  estadoPago?: string;
+  transportistaId?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  busqueda?: string;
+}
+
+export interface UseBackupReturnExtended {
+  exportando: boolean;
+  exportarDatos: (tipo?: string) => Promise<BackupData>;
+  descargarJSON: (tipo?: string) => Promise<void>;
+  exportarPedidosExcel: (
+    pedidos: PedidoDB[],
+    filtrosActivos?: FiltrosExportacion,
+    transportistas?: PerfilDB[]
+  ) => Promise<void>;
+}
+
+// =============================================================================
+// PAGOS TYPES
+// =============================================================================
+
+export interface PagoDBWithUsuario extends PagoDB {
+  usuario?: {
+    id: string;
+    nombre: string;
+  } | null;
+}
+
+export interface PagoFormInput {
+  clienteId: string;
+  pedidoId?: string | null;
+  monto: number | string;
+  formaPago?: string;
+  referencia?: string | null;
+  notas?: string | null;
+  usuarioId?: string | null;
+}
+
+export interface ResumenCuenta {
+  saldo_actual: number;
+  limite_credito: number;
+  credito_disponible: number;
+  total_pedidos: number;
+  total_compras: number;
+  total_pagos: number;
+  pedidos_pendientes_pago: number;
+  ultimo_pedido: string | null;
+  ultimo_pago: string | null;
+}
+
+export interface UsePagosReturnExtended {
+  pagos: PagoDBWithUsuario[];
+  loading: boolean;
+  fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[]>;
+  registrarPago: (pago: PagoFormInput) => Promise<PagoDBWithUsuario>;
+  eliminarPago: (pagoId: string) => Promise<void>;
+  obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
+}
+
+// =============================================================================
+// MERMAS TYPES
+// =============================================================================
+
+export interface MermaDBExtended {
+  id: string;
+  producto_id: string;
+  cantidad: number;
+  motivo: string;
+  observaciones?: string | null;
+  stock_anterior: number;
+  stock_nuevo: number;
+  usuario_id?: string | null;
+  created_at?: string;
+}
+
+export interface MermaFormInputExtended {
+  productoId: string;
+  cantidad: number;
+  motivo: string;
+  observaciones?: string | null;
+  stockAnterior: number;
+  stockNuevo: number;
+  usuarioId?: string | null;
+}
+
+export interface MermaRegistroResult {
+  success: boolean;
+  merma: MermaDBExtended | null;
+  soloStock?: boolean;
+}
+
+export interface ResumenMermasPorMotivo {
+  cantidad: number;
+  registros: number;
+}
+
+export interface ResumenMermas {
+  totalUnidades: number;
+  totalRegistros: number;
+  porMotivo: Record<string, ResumenMermasPorMotivo>;
+}
+
+export interface UseMermasReturnExtended {
+  mermas: MermaDBExtended[];
+  loading: boolean;
+  registrarMerma: (mermaData: MermaFormInputExtended) => Promise<MermaRegistroResult>;
+  getMermasPorProducto: (productoId: string) => MermaDBExtended[];
+  getResumenMermas: (fechaDesde?: string | null, fechaHasta?: string | null) => ResumenMermas;
+  refetch: () => Promise<void>;
+}
+
+// =============================================================================
+// COMPRAS TYPES
+// =============================================================================
+
+export interface ProveedorDBExtended {
+  id: string;
+  nombre: string;
+  cuit?: string | null;
+  direccion?: string | null;
+  latitud?: number | null;
+  longitud?: number | null;
+  telefono?: string | null;
+  email?: string | null;
+  contacto?: string | null;
+  notas?: string | null;
+  activo?: boolean;
+  created_at?: string;
+}
+
+export interface CompraItemDBExtended {
+  id: string;
+  compra_id: string;
+  producto_id: string;
+  producto?: ProductoDB | null;
+  cantidad: number;
+  costo_unitario: number;
+  subtotal?: number;
+}
+
+export interface CompraDBExtended {
+  id: string;
+  proveedor_id?: string | null;
+  proveedor?: ProveedorDBExtended | null;
+  proveedor_nombre?: string | null;
+  usuario_id?: string | null;
+  usuario?: { id: string; nombre: string } | null;
+  numero_factura?: string | null;
+  fecha_compra?: string;
+  subtotal?: number;
+  iva?: number;
+  otros_impuestos?: number;
+  total: number;
+  forma_pago?: string;
+  estado?: 'activa' | 'cancelada';
+  notas?: string | null;
+  items?: CompraItemDBExtended[];
+  created_at?: string;
+}
+
+export interface CompraFormInputExtended {
+  proveedorId?: string | null;
+  proveedorNombre?: string | null;
+  numeroFactura?: string | null;
+  fechaCompra?: string;
+  subtotal?: number;
+  iva?: number;
+  otrosImpuestos?: number;
+  total?: number;
+  formaPago?: string;
+  notas?: string | null;
+  usuarioId?: string | null;
+  items: Array<{
+    productoId: string;
+    cantidad: number;
+    costoUnitario?: number;
+    subtotal?: number;
+  }>;
+}
+
+export interface ProveedorFormInputExtended {
+  nombre: string;
+  cuit?: string | null;
+  direccion?: string | null;
+  latitud?: number | null;
+  longitud?: number | null;
+  telefono?: string | null;
+  email?: string | null;
+  contacto?: string | null;
+  notas?: string | null;
+  activo?: boolean;
+}
+
+export interface ResumenComprasPorProveedor {
+  total: number;
+  compras: number;
+  unidades: number;
+}
+
+export interface ResumenCompras {
+  totalMonto: number;
+  totalCompras: number;
+  totalUnidades: number;
+  porProveedor: Record<string, ResumenComprasPorProveedor>;
+}
+
+export interface RegistrarCompraResult {
+  success: boolean;
+  compraId: string;
+}
+
+export interface UseComprasReturnExtended {
+  compras: CompraDBExtended[];
+  proveedores: ProveedorDBExtended[];
+  loading: boolean;
+  registrarCompra: (compraData: CompraFormInputExtended) => Promise<RegistrarCompraResult>;
+  agregarProveedor: (proveedor: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
+  actualizarProveedor: (id: string, proveedor: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
+  getComprasPorProducto: (productoId: string) => CompraDBExtended[];
+  getResumenCompras: (fechaDesde?: string | null, fechaHasta?: string | null) => ResumenCompras;
+  anularCompra: (compraId: string) => Promise<void>;
+  refetch: () => Promise<void>;
+  refetchProveedores: () => Promise<void>;
+}
+
+// =============================================================================
+// RECORRIDOS TYPES
+// =============================================================================
+
+export interface TransportistaBasic {
+  id: string;
+  nombre: string;
+}
+
+export interface RecorridoDBExtended {
+  id: string;
+  transportista_id: string;
+  transportista?: TransportistaBasic | null;
+  fecha: string;
+  pedidos_json?: Array<{ pedido_id: string; orden_entrega: number }>;
+  estado?: string;
+  total_pedidos?: number;
+  pedidos_entregados?: number;
+  total_facturado?: number;
+  total_cobrado?: number;
+  distancia_total?: number;
+  duracion_total?: number;
+  completed_at?: string | null;
+  created_at?: string;
+}
+
+export interface PedidoOrdenado {
+  pedido_id?: string;
+  id?: string;
+  orden?: number;
+}
+
+export interface EstadisticaTransportista {
+  transportista: TransportistaBasic | null;
+  recorridos: number;
+  pedidosTotales: number;
+  pedidosEntregados: number;
+  totalFacturado: number;
+  totalCobrado: number;
+  distanciaTotal: number;
+}
+
+export interface EstadisticasRecorridos {
+  total: number;
+  porTransportista: EstadisticaTransportista[];
+}
+
+export interface UseRecorridosReturnExtended {
+  recorridos: RecorridoDBExtended[];
+  recorridoActual: { id: string } | null;
+  loading: boolean;
+  fetchRecorridosHoy: () => Promise<RecorridoDBExtended[]>;
+  fetchRecorridosPorFecha: (fecha: string) => Promise<RecorridoDBExtended[]>;
+  crearRecorrido: (
+    transportistaId: string,
+    pedidosOrdenados: PedidoOrdenado[],
+    distancia?: number | null,
+    duracion?: number | null
+  ) => Promise<string>;
+  completarRecorrido: (recorridoId: string) => Promise<void>;
+  getEstadisticasRecorridos: (fechaDesde: string, fechaHasta: string) => Promise<EstadisticasRecorridos>;
+}
+
+// =============================================================================
+// FICHA CLIENTE TYPES
+// =============================================================================
+
+export interface PedidoClienteWithItems extends PedidoDB {
+  items?: Array<PedidoItemDB & { producto?: ProductoDB }>;
+}
+
+export interface ProductoFavorito {
+  nombre: string;
+  cantidad: number;
+  veces: number;
+}
+
+export interface EstadisticasCliente {
+  totalPedidos: number;
+  totalCompras: number;
+  pedidosPagados: number;
+  montoPagado: number;
+  pedidosPendientes: number;
+  montoPendiente: number;
+  ticketPromedio: number;
+  frecuenciaCompra: number;
+  diasDesdeUltimoPedido: number | null;
+  productosFavoritos: ProductoFavorito[];
+}
+
+export interface UseFichaClienteReturn {
+  pedidosCliente: PedidoClienteWithItems[];
+  estadisticas: EstadisticasCliente | null;
+  loading: boolean;
+  refetch: () => Promise<void>;
+}
+
+// =============================================================================
+// REPORTES FINANCIEROS TYPES
+// =============================================================================
+
+export interface AgingDeuda {
+  corriente: number;
+  vencido30: number;
+  vencido60: number;
+  vencido90: number;
+}
+
+export interface ReporteCuentaPorCobrar {
+  cliente: ClienteDB;
+  totalDeuda: number;
+  totalPagado: number;
+  saldoPendiente: number;
+  limiteCredito: number;
+  creditoDisponible: number;
+  aging: AgingDeuda;
+  pedidosPendientes: number;
+}
+
+export interface ProductoRentabilidad {
+  id: string;
+  nombre: string;
+  codigo?: string | null;
+  cantidadVendida: number;
+  ingresos: number;
+  costos: number;
+  margen: number;
+  margenPorcentaje: number;
+}
+
+export interface TotalesRentabilidad {
+  ingresosTotales: number;
+  costosTotales: number;
+  margenTotal: number;
+  cantidadPedidos: number;
+  margenPorcentaje: number;
+}
+
+export interface ReporteRentabilidad {
+  productos: ProductoRentabilidad[];
+  totales: TotalesRentabilidad;
+}
+
+export interface VentaPorCliente {
+  cliente: ClienteDB | null;
+  cantidadPedidos: number;
+  totalVentas: number;
+  pedidosPagados: number;
+  pedidosPendientes: number;
+}
+
+export interface VentaPorZona {
+  zona: string;
+  cantidadPedidos: number;
+  totalVentas: number;
+  cantidadClientes: number;
+  ticketPromedio: number;
+}
+
+export interface UseReportesFinancierosReturn {
+  loading: boolean;
+  generarReporteCuentasPorCobrar: () => Promise<ReporteCuentaPorCobrar[]>;
+  generarReporteRentabilidad: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<ReporteRentabilidad>;
+  generarReporteVentasPorCliente: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<VentaPorCliente[]>;
+  generarReporteVentasPorZona: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<VentaPorZona[]>;
+}
