@@ -5,6 +5,10 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProductoSchema } from '../../lib/schemas';
 import type { ProductoDB } from '../../types';
 
+// =============================================================================
+// TYPES
+// =============================================================================
+
 /** Datos del formulario de producto */
 export interface ProductoFormData {
   id?: string;
@@ -27,12 +31,21 @@ interface OpcionIVA {
   label: string;
 }
 
+/** Validation errors map */
+type ValidationErrors = Record<string, string | undefined>;
+
+/** Categoria object or string */
+export interface CategoriaOption {
+  id?: string;
+  nombre: string;
+}
+
 /** Props del componente ModalProducto */
 export interface ModalProductoProps {
   /** Producto a editar (null para nuevo) */
   producto: ProductoDB | null;
-  /** Categorías disponibles */
-  categorias: string[];
+  /** Categorías disponibles (can be strings or objects) */
+  categorias: string[] | CategoriaOption[];
   /** Callback al guardar */
   onSave: (data: ProductoFormData) => void | Promise<void>;
   /** Callback al cerrar */
@@ -48,9 +61,20 @@ const OPCIONES_IVA: OpcionIVA[] = [
   { valor: 0, label: '0% (Exento)' }
 ];
 
+/** Helper to get category name */
+const getCategoryName = (cat: string | CategoriaOption): string => {
+  return typeof cat === 'string' ? cat : cat.nombre;
+};
+
+/** Helper to get category key */
+const getCategoryKey = (cat: string | CategoriaOption): string => {
+  return typeof cat === 'string' ? cat : (cat.id || cat.nombre);
+};
+
 const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave, onClose, guardando }: ModalProductoProps) {
   // Zod validation hook
-  const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
+  const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
+  const errores = errors as ValidationErrors;
 
   const [form, setForm] = useState<ProductoFormData>(producto ? {
     id: producto.id,
@@ -83,17 +107,17 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
 
   // Calcular costo total: neto + IVA(solo sobre neto) + impuestos internos
   const calcularCostoTotal = (costoNeto: number | string, porcentajeIva: number | string, impInternos: number | string): number => {
-    const neto = parseFloat(costoNeto) || 0;
-    const iva = neto * (parseFloat(porcentajeIva) || 0) / 100;
-    const internos = parseFloat(impInternos) || 0;
+    const neto = parseFloat(String(costoNeto)) || 0;
+    const iva = neto * (parseFloat(String(porcentajeIva)) || 0) / 100;
+    const internos = parseFloat(String(impInternos)) || 0;
     return neto + iva + internos;
   };
 
   // Calcular precio total: neto + IVA(solo sobre neto) + impuestos internos
   const calcularPrecioTotal = (precioNeto: number | string, porcentajeIva: number | string, impInternos: number | string): number => {
-    const neto = parseFloat(precioNeto) || 0;
-    const iva = neto * (parseFloat(porcentajeIva) || 0) / 100;
-    const internos = parseFloat(impInternos) || 0;
+    const neto = parseFloat(String(precioNeto)) || 0;
+    const iva = neto * (parseFloat(String(porcentajeIva)) || 0) / 100;
+    const internos = parseFloat(String(impInternos)) || 0;
     return neto + iva + internos;
   };
 
@@ -137,8 +161,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
 
   const handleFieldChange = (field: keyof ProductoFormData, value: string | number): void => {
     setForm({ ...form, [field]: value });
-    if (intentoGuardar && errores[field as string]) {
-      clearFieldError(field as string);
+    if (intentoGuardar && errores[field]) {
+      clearFieldError(field);
     }
   };
 
@@ -164,7 +188,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
             <input
               type="text"
               value={form.codigo || ''}
-              onChange={e => handleFieldChange('codigo', e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange('codigo', e.target.value)}
               className="w-full px-3 py-2 border rounded-lg"
               placeholder="SKU o codigo interno"
             />
@@ -174,7 +198,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
             <input
               type="number"
               value={form.stock}
-              onChange={e => {
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
                 const val = e.target.value;
                 // Permitir campo vacío temporalmente mientras escribe, pero validar como número
                 handleFieldChange('stock', val === '' ? '' : (parseInt(val, 10) || 0));
@@ -191,7 +215,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
           <input
             type="number"
             value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
-            onChange={e => handleFieldChange('stock_minimo', parseInt(e.target.value) || 0)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange('stock_minimo', parseInt(e.target.value) || 0)}
             className={inputClass('stock_minimo')}
             placeholder="10"
           />
@@ -206,7 +230,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
           <input
             type="text"
             value={form.nombre}
-            onChange={e => handleFieldChange('nombre', e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange('nombre', e.target.value)}
             className={inputClass('nombre')}
           />
           {errores.nombre && <p className="text-red-500 text-xs mt-1">{errores.nombre}</p>}
@@ -227,19 +251,19 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
             <input
               type="text"
               value={nuevaCategoria}
-              onChange={e => setNuevaCategoria(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setNuevaCategoria(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg"
               placeholder="Escribir nueva categoria..."
             />
           ) : (
             <select
               value={form.categoria || ''}
-              onChange={e => setForm({ ...form, categoria: e.target.value })}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, categoria: e.target.value })}
               className="w-full px-3 py-2 border rounded-lg"
             >
               <option value="">Sin categoria</option>
               {categorias.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
+                <option key={getCategoryKey(cat)} value={getCategoryName(cat)}>{getCategoryName(cat)}</option>
               ))}
             </select>
           )}
@@ -253,7 +277,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
               <label className="block text-xs font-medium mb-1 text-gray-600">% IVA</label>
               <select
                 value={form.porcentaje_iva ?? 21}
-                onChange={e => handlePorcentajeIvaChange(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => handlePorcentajeIvaChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
               >
                 {OPCIONES_IVA.map(opt => (
@@ -268,7 +292,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
                 type="number"
                 step="0.01"
                 value={form.impuestos_internos || ''}
-                onChange={e => handleImpuestosInternosChange(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => handleImpuestosInternosChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
                 placeholder="0.00"
               />
@@ -287,7 +311,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
                 type="number"
                 step="0.01"
                 value={form.costo_sin_iva || ''}
-                onChange={e => handleCostoSinIvaChange(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => handleCostoSinIvaChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
                 placeholder="0.00"
               />
@@ -305,7 +329,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            Costo real = Neto + Imp. Internos (sin IVA) = ${((parseFloat(form.costo_sin_iva) || 0) + (parseFloat(form.impuestos_internos) || 0)).toFixed(2)}
+            Costo real = Neto + Imp. Internos (sin IVA) = ${((parseFloat(String(form.costo_sin_iva)) || 0) + (parseFloat(String(form.impuestos_internos)) || 0)).toFixed(2)}
           </p>
         </div>
 
@@ -319,7 +343,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
                 type="number"
                 step="0.01"
                 value={form.precio_sin_iva || ''}
-                onChange={e => handlePrecioSinIvaChange(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => handlePrecioSinIvaChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg"
                 placeholder="0.00"
               />
@@ -340,11 +364,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
           <p className="text-xs text-gray-500 mt-2">
             * El precio final incluye IVA ({form.porcentaje_iva || 21}% sobre neto) + Imp. Internos
           </p>
-          {(parseFloat(form.costo_sin_iva) > 0 && parseFloat(form.precio_sin_iva) > 0) && (
+          {(parseFloat(String(form.costo_sin_iva)) > 0 && parseFloat(String(form.precio_sin_iva)) > 0) && (
             <div className="mt-3 p-3 bg-blue-50 rounded-lg">
               <p className="text-xs font-medium text-blue-800">
-                Rentabilidad neta: ${((parseFloat(form.precio_sin_iva) || 0) - (parseFloat(form.costo_sin_iva) || 0)).toFixed(2)}
-                {' '}({(((parseFloat(form.precio_sin_iva) - parseFloat(form.costo_sin_iva)) / parseFloat(form.costo_sin_iva)) * 100).toFixed(1)}%)
+                Rentabilidad neta: ${((parseFloat(String(form.precio_sin_iva)) || 0) - (parseFloat(String(form.costo_sin_iva)) || 0)).toFixed(2)}
+                {' '}({(((parseFloat(String(form.precio_sin_iva)) - parseFloat(String(form.costo_sin_iva))) / parseFloat(String(form.costo_sin_iva))) * 100).toFixed(1)}%)
               </p>
               <p className="text-xs text-blue-600 mt-1">
                 Margen sobre costo neto (sin IVA ni imp. internos)

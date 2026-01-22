@@ -1,13 +1,21 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
+export interface PaginacionProps {
+  paginaActual: number;
+  totalPaginas: number;
+  onPageChange: (page: number) => void;
+  totalItems: number;
+  itemsLabel?: string;
+}
+
 export default function Paginacion({
   paginaActual,
   totalPaginas,
   onPageChange,
   totalItems,
   itemsLabel = 'items'
-}) {
+}: PaginacionProps) {
   if (totalPaginas <= 1) return null;
 
   const getPageNumbers = () => {

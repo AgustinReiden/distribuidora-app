@@ -1,8 +1,35 @@
 /**
  * Componente de filtros para la vista de pedidos
  */
-import React, { memo } from 'react';
+import React, { memo, ChangeEvent } from 'react';
 import { Search, Calendar, X } from 'lucide-react';
+import type { Usuario, EstadoPedido, EstadoPago } from '../../types';
+
+interface FiltrosPedido {
+  estado: string;
+  estadoPago?: string;
+  transportistaId?: string;
+  fechaDesde?: string | null;
+  fechaHasta?: string | null;
+}
+
+interface FiltrosChange {
+  estado?: string;
+  estadoPago?: string;
+  transportistaId?: string;
+  fechaDesde?: string | null;
+  fechaHasta?: string | null;
+}
+
+export interface PedidoFiltersProps {
+  busqueda: string;
+  filtros: FiltrosPedido;
+  transportistas?: Usuario[];
+  isAdmin: boolean;
+  onBusquedaChange: (value: string) => void;
+  onFiltrosChange: (filtros: FiltrosChange) => void;
+  onModalFiltroFecha: () => void;
+}
 
 function PedidoFilters({
   busqueda,
@@ -12,29 +39,29 @@ function PedidoFilters({
   onBusquedaChange,
   onFiltrosChange,
   onModalFiltroFecha
-}) {
+}: PedidoFiltersProps): React.ReactElement {
   return (
     <div className="flex flex-col gap-4">
-      {/* Primera fila: Búsqueda y filtros principales */}
+      {/* Primera fila: Busqueda y filtros principales */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
             type="text"
             value={busqueda}
-            onChange={e => onBusquedaChange(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onBusquedaChange(e.target.value)}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-            placeholder="Buscar por cliente, dirección o ID..."
+            placeholder="Buscar por cliente, direccion o ID..."
           />
         </div>
         <select
           value={filtros.estado}
-          onChange={e => onFiltrosChange({ estado: e.target.value })}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => onFiltrosChange({ estado: e.target.value })}
           className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
         >
           <option value="todos">Todos los estados</option>
           <option value="pendiente">Pendientes</option>
-          <option value="en_preparacion">En preparación</option>
+          <option value="en_preparacion">En preparacion</option>
           <option value="asignado">En camino</option>
           <option value="entregado">Entregados</option>
         </select>
@@ -56,7 +83,7 @@ function PedidoFilters({
         <div className="flex flex-wrap gap-4">
           <select
             value={filtros.estadoPago || 'todos'}
-            onChange={e => onFiltrosChange({ estadoPago: e.target.value })}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => onFiltrosChange({ estadoPago: e.target.value })}
             className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
               filtros.estadoPago && filtros.estadoPago !== 'todos'
                 ? 'bg-red-50 border-red-300 dark:bg-red-900/30 dark:border-red-600'
@@ -70,7 +97,7 @@ function PedidoFilters({
           </select>
           <select
             value={filtros.transportistaId || 'todos'}
-            onChange={e => onFiltrosChange({ transportistaId: e.target.value })}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => onFiltrosChange({ transportistaId: e.target.value })}
             className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
               filtros.transportistaId && filtros.transportistaId !== 'todos'
                 ? 'bg-orange-50 border-orange-300 dark:bg-orange-900/30 dark:border-orange-600'

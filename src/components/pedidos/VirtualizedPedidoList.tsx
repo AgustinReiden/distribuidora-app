@@ -130,7 +130,7 @@ function VirtualizedPedidoList({
   onEliminarPedido,
   height: propHeight
 }: VirtualizedPedidoListProps): React.ReactElement {
-  const listRef = useListRef()
+  const listRef = useListRef(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerHeight, setContainerHeight] = useState<number>(propHeight || MAX_CONTAINER_HEIGHT)
 
@@ -209,14 +209,17 @@ function VirtualizedPedidoList({
     )
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const TypedList = List as any;
   return (
     <div ref={containerRef} className="virtualized-pedido-list">
-      <List
+      <TypedList
         listRef={listRef}
         defaultHeight={containerHeight}
         rowCount={pedidos.length}
         rowHeight={dynamicRowHeight}
         rowComponent={PedidoRow}
+        rowProps={{}}
         overscanCount={3}
         className="scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
         style={{ maxHeight: containerHeight }}

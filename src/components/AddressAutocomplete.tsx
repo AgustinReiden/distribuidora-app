@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, ChangeEvent, MutableRefObject } from 'react';
+import React, { useEffect, useRef, useState, useCallback, ChangeEvent } from 'react';
 import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
 import { useGoogleMaps } from '../hooks/useGoogleMaps';
 
@@ -28,7 +28,7 @@ export interface AddressSelectResult {
   direccion: string;
   latitud: number | null;
   longitud: number | null;
-  componentes: AddressComponent[];
+  componentes?: AddressComponent[];
 }
 
 /** Props for AddressAutocomplete component */
@@ -68,7 +68,7 @@ export const AddressAutocomplete = ({
   placeholder = 'Buscar dirección...',
   className = '',
   disabled = false
-}: AddressAutocompleteProps): JSX.Element => {
+}: AddressAutocompleteProps): React.ReactElement => {
   const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
   const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
@@ -109,9 +109,10 @@ export const AddressAutocomplete = ({
 
   // Cerrar dropdown cuando se hace click fuera
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target) &&
-          inputRef.current && !inputRef.current.contains(event.target)) {
+    const handleClickOutside = (event: MouseEvent): void => {
+      const target = event.target as Node;
+      if (dropdownRef.current && !dropdownRef.current.contains(target) &&
+          inputRef.current && !inputRef.current.contains(target)) {
         setShowDropdown(false);
       }
     };
@@ -121,7 +122,7 @@ export const AddressAutocomplete = ({
   }, []);
 
   // Buscar predicciones cuando cambia el valor
-  const fetchPredictions = useCallback((inputValue) => {
+  const fetchPredictions = useCallback((inputValue: string): void => {
     if (!autocompleteServiceRef.current || !inputValue || inputValue.length < 3) {
       setPredictions([]);
       setShowDropdown(false);
@@ -145,10 +146,10 @@ export const AddressAutocomplete = ({
           radius: 100000 // 100 km en metros
         }
       },
-      (results, status) => {
+      (results: google.maps.places.AutocompletePrediction[] | null, status: google.maps.places.PlacesServiceStatus) => {
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
-          setPredictions(results);
+          setPredictions(results as PlacePrediction[]);
           setShowDropdown(true);
         } else {
           setPredictions([]);
@@ -159,7 +160,7 @@ export const AddressAutocomplete = ({
   }, []);
 
   // Obtener detalles del lugar seleccionado
-  const handleSelectPrediction = useCallback((prediction) => {
+  const handleSelectPrediction = useCallback((prediction: PlacePrediction): void => {
     if (!placesServiceRef.current) return;
 
     setLoading(true);
@@ -172,15 +173,15 @@ export const AddressAutocomplete = ({
         fields: ['formatted_address', 'geometry', 'address_components'],
         sessionToken: sessionTokenRef.current
       },
-      (place, status) => {
+      (place: google.maps.places.PlaceResult | null, status: google.maps.places.PlacesServiceStatus) => {
         setLoading(false);
 
         if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
-          const result = {
+          const result: AddressSelectResult = {
             direccion: place.formatted_address || prediction.description,
             latitud: place.geometry?.location?.lat() || null,
             longitud: place.geometry?.location?.lng() || null,
-            componentes: place.address_components || []
+            componentes: (place.address_components as AddressComponent[]) || []
           };
           onSelect(result);
 
@@ -199,7 +200,7 @@ export const AddressAutocomplete = ({
     );
   }, [onChange, onSelect]);
 
-  const handleClear = useCallback(() => {
+  const handleClear = useCallback((): void => {
     onChange('');
     onSelect({ direccion: '', latitud: null, longitud: null });
     setPredictions([]);
@@ -209,7 +210,7 @@ export const AddressAutocomplete = ({
     }
   }, [onChange, onSelect]);
 
-  const handleInputChange = useCallback((e) => {
+  const handleInputChange = useCallback((e: ChangeEvent<HTMLInputElement>): void => {
     const newValue = e.target.value;
     onChange(newValue);
 
@@ -219,7 +220,7 @@ export const AddressAutocomplete = ({
     }
   }, [onChange, googleStatus, fetchPredictions]);
 
-  const handleInputFocus = useCallback(() => {
+  const handleInputFocus = useCallback((): void => {
     if (predictions.length > 0) {
       setShowDropdown(true);
     }

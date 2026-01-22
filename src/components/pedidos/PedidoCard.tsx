@@ -208,7 +208,7 @@ function PedidoCard({
           <div className="flex items-center gap-2">
             {pedido.estado_pago === 'pagado' && (
               <button
-                onClick={() => generarReciboPedido(pedido)}
+                onClick={() => pedido.cliente && generarReciboPedido(pedido, pedido.cliente)}
                 className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
                 title="Descargar recibo PDF"
               >

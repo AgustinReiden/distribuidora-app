@@ -6,8 +6,9 @@
  * - Notificación de actualizaciones disponibles
  * - Registro del Service Worker
  */
-import { useState, useEffect, MouseEvent } from 'react'
+import { useState, useEffect, MouseEvent, ReactElement } from 'react'
 import { Download, RefreshCw, X, Smartphone } from 'lucide-react'
+// @ts-expect-error - virtual:pwa-register/react is provided by vite-plugin-pwa
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 // =============================================================================
@@ -39,7 +40,7 @@ export interface PWAPromptProps {
   // No props currently
 }
 
-export function PWAPrompt(_props: PWAPromptProps): JSX.Element | null {
+export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
   const [showInstallPrompt, setShowInstallPrompt] = useState<boolean>(false)
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isIOS, setIsIOS] = useState<boolean>(false)

@@ -173,7 +173,7 @@ export default function VistaPedidos({
       <PedidoFilters
         busqueda={busqueda}
         filtros={filtros}
-        transportistas={transportistas}
+        transportistas={transportistas as unknown as import('../../types').Usuario[]}
         isAdmin={isAdmin}
         onBusquedaChange={onBusquedaChange}
         onFiltrosChange={onFiltrosChange}
@@ -208,7 +208,10 @@ export default function VistaPedidos({
             onAsignarTransportista={onAsignarTransportista}
             onMarcarEntregado={onMarcarEntregado}
             onDesmarcarEntregado={onDesmarcarEntregado}
-            onEliminarPedido={onEliminarPedido}
+            onEliminarPedido={(pedidoId: string) => {
+              const pedido = pedidosParaMostrar.find(p => p.id === pedidoId);
+              if (pedido) onEliminarPedido(pedido);
+            }}
           />
         </>
       ) : (
@@ -228,7 +231,10 @@ export default function VistaPedidos({
                 onAsignarTransportista={onAsignarTransportista}
                 onMarcarEntregado={onMarcarEntregado}
                 onDesmarcarEntregado={onDesmarcarEntregado}
-                onEliminarPedido={onEliminarPedido}
+                onEliminarPedido={(pedidoId: string) => {
+                  const p = pedidosPaginados.find(x => x.id === pedidoId);
+                  if (p) onEliminarPedido(p);
+                }}
               />
             ))}
           </div>

@@ -2,21 +2,59 @@ import React, { useState, useEffect } from 'react';
 import { X, Trash2, Calendar, User, Package, DollarSign, Loader2, AlertCircle } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio, formatFecha } from '../../utils/formatters';
+import type { EstadoPedido, FormaPago } from '../../types';
 
-export default function ModalPedidosEliminados({ onFetch, onClose }) {
-  const [pedidos, setPedidos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [pedidoExpandido, setPedidoExpandido] = useState(null);
+type EstadoPago = 'pendiente' | 'parcial' | 'pagado';
+
+interface PedidoItem {
+  producto_id: string;
+  producto_nombre?: string;
+  producto_codigo?: string;
+  cantidad: number;
+  precio_unitario: number;
+  subtotal: number;
+}
+
+interface PedidoEliminado {
+  id: string;
+  pedido_id: string;
+  cliente_nombre?: string;
+  cliente_direccion?: string;
+  total: number;
+  estado: EstadoPedido;
+  forma_pago?: FormaPago;
+  fecha_pedido: string;
+  eliminado_por_nombre?: string;
+  eliminado_at: string;
+  motivo_eliminacion?: string;
+  usuario_creador_nombre?: string;
+  items?: PedidoItem[];
+  stock_restaurado?: boolean;
+}
+
+export interface ModalPedidosEliminadosProps {
+  onFetch: () => Promise<PedidoEliminado[]>;
+  onClose: () => void;
+}
+
+export default function ModalPedidosEliminados({
+  onFetch,
+  onClose
+}: ModalPedidosEliminadosProps): React.ReactElement {
+  const [pedidos, setPedidos] = useState<PedidoEliminado[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pedidoExpandido, setPedidoExpandido] = useState<string | null>(null);
 
   useEffect(() => {
-    const cargarPedidos = async () => {
+    const cargarPedidos = async (): Promise<void> => {
       try {
         setLoading(true);
         const data = await onFetch();
         setPedidos(data);
       } catch (err) {
-        setError(err.message);
+        const errorMessage = err instanceof Error ? err.message : 'Error al cargar pedidos';
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -24,8 +62,8 @@ export default function ModalPedidosEliminados({ onFetch, onClose }) {
     cargarPedidos();
   }, [onFetch]);
 
-  const getEstadoColor = (estado) => {
-    const colores = {
+  const getEstadoColor = (estado: EstadoPedido): string => {
+    const colores: Record<string, string> = {
       pendiente: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
       en_preparacion: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
       asignado: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
@@ -87,7 +125,7 @@ export default function ModalPedidosEliminados({ onFetch, onClose }) {
                     </div>
                   </div>
 
-                  {/* Info de eliminación */}
+                  {/* Info de eliminacion */}
                   <div className="mt-3 pt-3 border-t dark:border-gray-600 flex flex-wrap items-center gap-4 text-sm">
                     <div className="flex items-center gap-1 text-red-600 dark:text-red-400">
                       <User className="w-4 h-4" />
@@ -99,7 +137,7 @@ export default function ModalPedidosEliminados({ onFetch, onClose }) {
                     </div>
                     {pedido.motivo_eliminacion && (
                       <div className="text-gray-600 dark:text-gray-400 italic">
-                        Motivo: "{pedido.motivo_eliminacion}"
+                        Motivo: &quot;{pedido.motivo_eliminacion}&quot;
                       </div>
                     )}
                   </div>
@@ -154,7 +192,7 @@ export default function ModalPedidosEliminados({ onFetch, onClose }) {
                           ))
                         ) : (
                           <div className="px-3 py-2 text-sm text-gray-500">
-                            No hay información de productos
+                            No hay informacion de productos
                           </div>
                         )}
                       </div>

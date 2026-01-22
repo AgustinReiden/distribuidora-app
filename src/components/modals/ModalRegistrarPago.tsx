@@ -1,10 +1,19 @@
-import { useState } from 'react'
+import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, DollarSign, FileText, AlertCircle, Check } from 'lucide-react'
 import { formatPrecio as formatCurrency } from '../../utils/formatters'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalPagoSchema } from '../../lib/schemas'
+import type { ClienteDB, Pedido, Pago, FormaPago } from '../../types'
 
-const FORMAS_PAGO = [
+// Alias for the Cliente type used in this component
+type Cliente = ClienteDB;
+
+interface FormaPagoOption {
+  value: string;
+  label: string;
+}
+
+const FORMAS_PAGO: FormaPagoOption[] = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
   { value: 'cheque', label: 'Cheque' },
@@ -12,39 +21,68 @@ const FORMAS_PAGO = [
   { value: 'cuenta_corriente', label: 'Cuenta Corriente' }
 ]
 
-export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, onClose, onConfirmar, onGenerarRecibo }) {
+interface PagoData {
+  clienteId: string;
+  pedidoId: string | null;
+  monto: number;
+  formaPago: string;
+  referencia: string;
+  notas: string;
+}
+
+interface PagoRegistrado extends Pago {
+  monto: number;
+}
+
+export interface ModalRegistrarPagoProps {
+  cliente: Cliente | null;
+  saldoPendiente: number;
+  pedidos: Pedido[];
+  onClose: () => void;
+  onConfirmar: (data: PagoData) => Promise<PagoRegistrado>;
+  onGenerarRecibo?: (pago: PagoRegistrado, cliente: Cliente) => void;
+}
+
+export default function ModalRegistrarPago({
+  cliente,
+  saldoPendiente,
+  pedidos,
+  onClose,
+  onConfirmar,
+  onGenerarRecibo
+}: ModalRegistrarPagoProps): React.ReactElement | null {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
 
-  const [monto, setMonto] = useState('')
-  const [formaPago, setFormaPago] = useState('efectivo')
-  const [referencia, setReferencia] = useState('')
-  const [notas, setNotas] = useState('')
-  const [pedidoSeleccionado, setPedidoSeleccionado] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [pagoRegistrado, setPagoRegistrado] = useState(null)
-  const [error, setError] = useState('')
+  const [monto, setMonto] = useState<string>('')
+  const [formaPago, setFormaPago] = useState<string>('efectivo')
+  const [referencia, setReferencia] = useState<string>('')
+  const [notas, setNotas] = useState<string>('')
+  const [pedidoSeleccionado, setPedidoSeleccionado] = useState<string>('')
+  const [loading, setLoading] = useState<boolean>(false)
+  const [pagoRegistrado, setPagoRegistrado] = useState<PagoRegistrado | null>(null)
+  const [error, setError] = useState<string>('')
 
   // Filter pending payment orders
   const pedidosPendientes = (pedidos || []).filter(p =>
     p.cliente_id === cliente?.id && p.estado_pago !== 'pagado'
   )
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
     setError('')
 
     // Validar con Zod
     const result = validate({ monto: parseFloat(monto) || 0, formaPago, referencia, notas, pedidoSeleccionado })
     if (!result.success) {
-      setError(getFirstError() || 'Error de validación')
+      setError(getFirstError() || 'Error de validacion')
       return
     }
 
     setLoading(true)
     try {
       const pago = await onConfirmar({
-        clienteId: cliente.id,
+        clienteId: cliente!.id,
         pedidoId: pedidoSeleccionado || null,
         monto: result.data.monto,
         formaPago,
@@ -53,13 +91,14 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
       })
       setPagoRegistrado(pago)
     } catch (err) {
-      setError(err.message || 'Error al registrar el pago')
+      const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleMontoPreset = (porcentaje) => {
+  const handleMontoPreset = (porcentaje: number): void => {
     if (saldoPendiente) {
       setMonto((saldoPendiente * porcentaje / 100).toFixed(2))
     }
@@ -80,7 +119,7 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
               Pago Registrado
             </h2>
             <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Se registró un pago de <span className="font-bold text-green-600">{formatCurrency(pagoRegistrado.monto)}</span> para {cliente.nombre_fantasia}
+              Se registro un pago de <span className="font-bold text-green-600">{formatCurrency(pagoRegistrado.monto)}</span> para {cliente.nombre_fantasia}
             </p>
             <div className="flex gap-3 justify-center">
               {onGenerarRecibo && (
@@ -154,7 +193,7 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
                 step="0.01"
                 min="0"
                 value={monto}
-                onChange={(e) => setMonto(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setMonto(e.target.value)}
                 placeholder="0.00"
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg font-semibold"
                 required
@@ -230,12 +269,12 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
           {(formaPago === 'transferencia' || formaPago === 'cheque') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {formaPago === 'cheque' ? 'Número de Cheque *' : 'Referencia/Comprobante'}
+                {formaPago === 'cheque' ? 'Numero de Cheque *' : 'Referencia/Comprobante'}
               </label>
               <input
                 type="text"
                 value={referencia}
-                onChange={(e) => setReferencia(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setReferencia(e.target.value)}
                 placeholder={formaPago === 'cheque' ? 'Ej: 12345678' : 'Ej: TRF-001234'}
                 className={`w-full px-4 py-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
                   formaPago === 'cheque' && !referencia.trim()
@@ -250,7 +289,7 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
             </div>
           )}
 
-          {/* Aplicar a pedido específico */}
+          {/* Aplicar a pedido especifico */}
           {pedidosPendientes.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -258,7 +297,7 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
               </label>
               <select
                 value={pedidoSeleccionado}
-                onChange={(e) => setPedidoSeleccionado(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setPedidoSeleccionado(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="">Pago a cuenta general</option>
@@ -278,7 +317,7 @@ export default function ModalRegistrarPago({ cliente, saldoPendiente, pedidos, o
             </label>
             <textarea
               value={notas}
-              onChange={(e) => setNotas(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNotas(e.target.value)}
               placeholder="Observaciones del pago..."
               rows={2}
               className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"

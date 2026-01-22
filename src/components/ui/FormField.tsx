@@ -7,17 +7,23 @@
  * - aria-required para campos obligatorios
  * - Labels asociados correctamente con htmlFor
  */
-import { useId } from 'react'
+import { useId, ReactNode, ReactElement, isValidElement, cloneElement } from 'react'
 
-/**
- * @param {object} props
- * @param {string} props.label - Etiqueta del campo
- * @param {string} [props.error] - Mensaje de error
- * @param {boolean} [props.required] - Si el campo es obligatorio
- * @param {string} [props.hint] - Texto de ayuda
- * @param {React.ReactNode} props.children - Input/Select/Textarea
- * @param {string} [props.className] - Clases adicionales
- */
+export interface FormFieldProps {
+  /** Etiqueta del campo */
+  label: string;
+  /** Mensaje de error */
+  error?: string;
+  /** Si el campo es obligatorio */
+  required?: boolean;
+  /** Texto de ayuda */
+  hint?: string;
+  /** Input/Select/Textarea */
+  children: ReactNode;
+  /** Clases adicionales */
+  className?: string;
+}
+
 export function FormField({
   label,
   error,
@@ -25,17 +31,32 @@ export function FormField({
   hint,
   children,
   className = ''
-}) {
+}: FormFieldProps): ReactElement {
   const id = useId()
   const inputId = `field-${id}`
   const errorId = `error-${id}`
   const hintId = `hint-${id}`
 
   // Construir aria-describedby
-  const describedByIds = []
+  const describedByIds: string[] = []
   if (error) describedByIds.push(errorId)
   if (hint) describedByIds.push(hintId)
   const ariaDescribedBy = describedByIds.length > 0 ? describedByIds.join(' ') : undefined
+
+  // Clone and enhance children with accessibility props
+  const enhancedChildren = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ id?: string; className?: string; 'aria-invalid'?: string; 'aria-required'?: string; 'aria-describedby'?: string }>, {
+        id: inputId,
+        'aria-invalid': error ? 'true' : undefined,
+        'aria-required': required ? 'true' : undefined,
+        'aria-describedby': ariaDescribedBy,
+        className: `${(children.props as { className?: string }).className || ''} ${
+          error
+            ? 'border-red-500 dark:border-red-400 bg-red-50 dark:bg-red-900/20 focus:ring-red-500'
+            : ''
+        }`
+      })
+    : children
 
   return (
     <div className={`form-field ${className}`}>
@@ -47,21 +68,8 @@ export function FormField({
         {required && <span className="text-red-500 ml-1" aria-hidden="true">*</span>}
       </label>
 
-      {/* Clonar el children para inyectar props de accesibilidad */}
-      {children && typeof children === 'object' && 'props' in children ? (
-        <children.type
-          {...children.props}
-          id={inputId}
-          aria-invalid={error ? 'true' : undefined}
-          aria-required={required ? 'true' : undefined}
-          aria-describedby={ariaDescribedBy}
-          className={`${children.props.className || ''} ${
-            error
-              ? 'border-red-500 dark:border-red-400 bg-red-50 dark:bg-red-900/20 focus:ring-red-500'
-              : ''
-          }`}
-        />
-      ) : children}
+      {/* Render enhanced children */}
+      {enhancedChildren}
 
       {/* Texto de ayuda */}
       {hint && !error && (

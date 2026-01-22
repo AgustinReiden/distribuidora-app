@@ -593,7 +593,7 @@ export function usePedidoHandlers({
 
   const handleExportarHojaRutaOptimizada = useCallback((transportista: PerfilDB, pedidosOrdenados: PedidoDB[]): void => {
     try {
-      generarHojaRutaOptimizada(transportista, pedidosOrdenados, rutaOptimizada || {})
+      generarHojaRutaOptimizada(transportista, pedidosOrdenados, (rutaOptimizada as { distanciaTotal?: number })?.distanciaTotal, (rutaOptimizada as { duracionTotal?: number })?.duracionTotal)
       notify.success('PDF generado correctamente')
     } catch (e) {
       const error = e as Error

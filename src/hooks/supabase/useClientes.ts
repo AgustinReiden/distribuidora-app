@@ -16,8 +16,8 @@ export function useClientes(): UseClientesReturn {
   const fetchClientes = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await clienteService.getAll()
-      setClientes(data as ClienteDB[])
+      const data = await clienteService.getAll() as unknown as ClienteDB[]
+      setClientes(data)
     } finally {
       setLoading(false)
     }
@@ -60,7 +60,7 @@ export function useClientes(): UseClientesReturn {
       throw new Error(validation.errors.join(', '))
     }
 
-    const data = await clienteService.create(transformarDatos(cliente)) as ClienteDB
+    const data = await clienteService.create(transformarDatos(cliente)) as unknown as ClienteDB
     setClientes(prev =>
       [...prev, data].sort((a, b) =>
         a.nombre_fantasia.localeCompare(b.nombre_fantasia)
@@ -92,7 +92,7 @@ export function useClientes(): UseClientesReturn {
       updateData.dias_credito = parseInt(String(cliente.diasCredito)) || 30
     }
 
-    const data = await clienteService.update(id, updateData) as ClienteDB
+    const data = await clienteService.update(id, updateData) as unknown as ClienteDB
     setClientes(prev => prev.map(c => c.id === id ? data : c))
     return data
   }, [])
@@ -104,11 +104,11 @@ export function useClientes(): UseClientesReturn {
 
   // Métodos adicionales delegados al servicio
   const buscarClientes = useCallback(async (termino: string): Promise<ClienteDB[]> => {
-    return clienteService.buscar(termino) as Promise<ClienteDB[]>
+    return clienteService.buscar(termino) as unknown as Promise<ClienteDB[]>
   }, [])
 
   const getClientesPorZona = useCallback(async (zona: string): Promise<ClienteDB[]> => {
-    return clienteService.getByZona(zona) as Promise<ClienteDB[]>
+    return clienteService.getByZona(zona) as unknown as Promise<ClienteDB[]>
   }, [])
 
   const getResumenCuenta = useCallback(async (clienteId: string) => {

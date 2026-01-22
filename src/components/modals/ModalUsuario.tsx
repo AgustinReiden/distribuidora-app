@@ -68,7 +68,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           <label className="block text-sm font-medium mb-1 dark:text-gray-200">Rol</label>
           <select
             value={form.rol}
-            onChange={e => setForm({ ...form, rol: e.target.value, zona: e.target.value !== 'preventista' ? '' : form.zona })}
+            onChange={e => setForm({ ...form, rol: e.target.value as RolUsuario, zona: e.target.value !== 'preventista' ? '' : form.zona })}
             className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           >
             <option value="preventista">Preventista</option>

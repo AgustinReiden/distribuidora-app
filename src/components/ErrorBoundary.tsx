@@ -10,7 +10,8 @@
 import React, { ReactNode, ErrorInfo, ComponentType } from 'react';
 import { AlertTriangle, RefreshCw, X, WifiOff, Lock, Database, Bug, LucideIcon } from 'lucide-react';
 import { captureException, addBreadcrumb } from '../lib/sentry';
-import { categorizeError, getRecoveryInfo, ErrorCategory, RecoveryInfo } from '../utils/errorUtils';
+import { categorizeError, getRecoveryInfo, RecoveryInfo } from '../utils/errorUtils';
+import type { ErrorCategory } from '../types';
 
 // =============================================================================
 // TYPES

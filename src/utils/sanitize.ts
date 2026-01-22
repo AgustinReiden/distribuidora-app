@@ -26,7 +26,9 @@ const DEFAULT_CONFIG: DOMPurify.Config = {
 // Configuración para texto plano (sin HTML)
 const TEXT_ONLY_CONFIG: DOMPurify.Config = {
   ALLOWED_TAGS: [],
-  ALLOWED_ATTR: []
+  ALLOWED_ATTR: [],
+  RETURN_DOM: false,
+  RETURN_DOM_FRAGMENT: false
 }
 
 // Configuración para contenido rico (más etiquetas permitidas)
@@ -38,7 +40,17 @@ const RICH_CONFIG: DOMPurify.Config = {
   ],
   ALLOWED_ATTR: ['class', 'style', 'href', 'target', 'rel'],
   ADD_ATTR: ['target'], // Permitir target en links
-  ALLOW_DATA_ATTR: false
+  ALLOW_DATA_ATTR: false,
+  RETURN_DOM: false,
+  RETURN_DOM_FRAGMENT: false
+}
+
+// Helper to sanitize with explicit string return
+const sanitizeToString = (dirty: string, config: DOMPurify.Config): string => {
+  // DOMPurify.sanitize returns string when RETURN_DOM and RETURN_DOM_FRAGMENT are both false
+  // Using type assertion to work around DOMPurify overload complexity
+  const result = (DOMPurify as { sanitize: (dirty: string, config: DOMPurify.Config) => string }).sanitize(dirty, { ...config, RETURN_DOM: false, RETURN_DOM_FRAGMENT: false })
+  return result
 }
 
 /**
@@ -46,7 +58,7 @@ const RICH_CONFIG: DOMPurify.Config = {
  */
 export function sanitizeHTML(dirty: string | null | undefined): string {
   if (dirty == null) return ''
-  return DOMPurify.sanitize(String(dirty), DEFAULT_CONFIG)
+  return sanitizeToString(String(dirty), DEFAULT_CONFIG)
 }
 
 /**
@@ -54,7 +66,7 @@ export function sanitizeHTML(dirty: string | null | undefined): string {
  */
 export function sanitizeText(dirty: string | null | undefined): string {
   if (dirty == null) return ''
-  return DOMPurify.sanitize(String(dirty), TEXT_ONLY_CONFIG)
+  return sanitizeToString(String(dirty), TEXT_ONLY_CONFIG)
 }
 
 /**
@@ -62,7 +74,7 @@ export function sanitizeText(dirty: string | null | undefined): string {
  */
 export function sanitizeRichContent(dirty: string | null | undefined): string {
   if (dirty == null) return ''
-  return DOMPurify.sanitize(String(dirty), RICH_CONFIG)
+  return sanitizeToString(String(dirty), RICH_CONFIG)
 }
 
 /**
@@ -108,7 +120,7 @@ type SanitizedArray = SanitizedValue[];
 export function sanitizeObject<T extends Record<string, unknown>>(obj: T | null | undefined, excludeKeys: string[] = []): T {
   if (obj == null || typeof obj !== 'object') return obj as T
 
-  const sanitized: Record<string, unknown> = Array.isArray(obj) ? [] : {}
+  const sanitized: Record<string, unknown> = Array.isArray(obj) ? ([] as unknown as Record<string, unknown>) : {}
 
   for (const [key, value] of Object.entries(obj)) {
     if (excludeKeys.includes(key)) {

@@ -257,9 +257,9 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     });
   };
 
-  const handleTipoDocumentoChange = (nuevoTipo: TipoDocumento): void => {
+  const handleTipoDocumentoChange = (nuevoTipo: string): void => {
     // Limpiar el numero al cambiar de tipo
-    setForm({ ...form, tipo_documento: nuevoTipo, numero_documento: '' });
+    setForm({ ...form, tipo_documento: nuevoTipo as TipoDocumento, numero_documento: '' });
     if (intentoGuardar && errores.numero_documento) {
       clearFieldError('numero_documento');
     }
@@ -267,14 +267,15 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
 
   const handleFieldChange = (field: keyof ClienteFormData, value: string | number): void => {
     // Formatear documento segun tipo
+    let processedValue = value;
     if (field === 'numero_documento') {
       if (form.tipo_documento === 'CUIT') {
-        value = formatearCuit(value);
+        processedValue = formatearCuit(String(value));
       } else {
-        value = formatearDni(value);
+        processedValue = formatearDni(String(value));
       }
     }
-    setForm({ ...form, [field]: value });
+    setForm({ ...form, [field]: processedValue });
     if (intentoGuardar && errores[field]) {
       clearFieldError(field);
     }
@@ -348,15 +349,11 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
         <div>
           <label htmlFor="direccion" className="block text-sm font-medium mb-1 dark:text-gray-200">Dirección *</label>
           <AddressAutocomplete
-            id="direccion"
             value={form.direccion}
-            onChange={(val) => handleFieldChange('direccion', val)}
+            onChange={(val: string) => handleFieldChange('direccion', val)}
             onSelect={handleAddressSelect}
             placeholder="Buscar dirección..."
             className={errores.direccion ? 'border-red-500' : ''}
-            aria-invalid={errores.direccion ? 'true' : undefined}
-            aria-required="true"
-            aria-describedby={errores.direccion ? 'error-direccion' : undefined}
           />
           {errores.direccion && <p {...getErrorMessageProps('direccion')} className="text-red-500 text-xs mt-1">{errores.direccion}</p>}
           {form.latitud && form.longitud && (

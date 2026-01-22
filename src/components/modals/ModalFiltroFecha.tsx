@@ -1,7 +1,18 @@
 import React, { useState, memo } from 'react';
 import ModalBase from './ModalBase';
 
-const ModalFiltroFecha = memo(function ModalFiltroFecha({ filtros, onApply, onClose }) {
+interface FiltrosFecha {
+  fechaDesde: string | null;
+  fechaHasta: string | null;
+}
+
+interface ModalFiltroFechaProps {
+  filtros: FiltrosFecha;
+  onApply: (filtros: FiltrosFecha) => void;
+  onClose: () => void;
+}
+
+const ModalFiltroFecha = memo(function ModalFiltroFecha({ filtros, onApply, onClose }: ModalFiltroFechaProps) {
   const [fechaDesde, setFechaDesde] = useState(filtros.fechaDesde || '');
   const [fechaHasta, setFechaHasta] = useState(filtros.fechaHasta || '');
 

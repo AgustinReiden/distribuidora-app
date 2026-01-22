@@ -508,6 +508,8 @@ export interface PedidosPorEstado {
 export interface DashboardMetricasExtended {
   ventasPeriodo: number;
   pedidosPeriodo: number;
+  ventasPeriodoAnterior?: number | null;
+  pedidosPeriodoAnterior?: number | null;
   productosMasVendidos: ProductoVendido[];
   clientesMasActivos: ClienteActivo[];
   pedidosPorEstado: PedidosPorEstado;

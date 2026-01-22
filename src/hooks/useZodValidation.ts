@@ -94,7 +94,7 @@ export function useZodValidation<T = unknown>(schema: ZodSchema<T>): UseZodValid
     const fieldSchema = zodObject.shape?.[field]
     if (!fieldSchema) return null
 
-    const result = fieldSchema.safeParse(value)
+    const result = (fieldSchema as ZodSchema).safeParse(value)
     if (result.success) {
       setErrors(prev => {
         const newErrors = { ...prev }

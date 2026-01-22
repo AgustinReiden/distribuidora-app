@@ -1,16 +1,16 @@
 /**
  * HOC para envolver componentes con Error Boundary
  *
- * @param {React.Component} WrappedComponent - Componente a envolver
- * @param {object} options - Opciones de configuración
- * @param {string} options.componentName - Nombre del componente para logging
- * @param {boolean} options.compact - Usar boundary compacto
- * @param {string} options.errorMessage - Mensaje de error personalizado
- * @param {function} options.fallback - Componente de fallback personalizado
- * @param {function} options.onError - Callback cuando ocurre un error
+ * @param WrappedComponent - Componente a envolver
+ * @param options - Opciones de configuracion
+ * @param options.componentName - Nombre del componente para logging
+ * @param options.compact - Usar boundary compacto
+ * @param options.errorMessage - Mensaje de error personalizado
+ * @param options.fallback - Componente de fallback personalizado
+ * @param options.onError - Callback cuando ocurre un error
  *
  * @example
- * // Uso básico
+ * // Uso basico
  * export default withErrorBoundary(MiComponente);
  *
  * // Con opciones
@@ -20,9 +20,29 @@
  *   errorMessage: 'Error al cargar el modal'
  * });
  */
+import React, { ComponentType, ReactElement } from 'react';
 import { ErrorBoundary, CompactErrorBoundary } from './ErrorBoundary';
 
-export function withErrorBoundary(WrappedComponent, options = {}) {
+interface ErrorInfo {
+  componentStack: string;
+}
+
+interface ErrorBoundaryOptions {
+  componentName?: string;
+  compact?: boolean;
+  errorMessage?: string;
+  fallback?: ReactElement;
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
+}
+
+interface WithOnCloseProps {
+  onClose?: () => void;
+}
+
+export function withErrorBoundary<P extends WithOnCloseProps>(
+  WrappedComponent: ComponentType<P>,
+  options: ErrorBoundaryOptions = {}
+): ComponentType<P> {
   const {
     componentName = WrappedComponent.displayName || WrappedComponent.name || 'Component',
     compact = false,
@@ -33,12 +53,12 @@ export function withErrorBoundary(WrappedComponent, options = {}) {
 
   const Boundary = compact ? CompactErrorBoundary : ErrorBoundary;
 
-  function WithErrorBoundary(props) {
+  function WithErrorBoundary(props: P): ReactElement {
     return (
       <Boundary
         componentName={componentName}
         errorMessage={errorMessage}
-        fallback={fallback}
+        fallback={fallback as unknown as undefined}
         onError={onError}
         onClose={props.onClose}
       >

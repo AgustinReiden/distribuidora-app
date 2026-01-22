@@ -137,7 +137,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   const aplicarPorcentaje = (porcentaje: number): void => {
     const monto = (total * porcentaje) / 100;
-    handleMontoPagadoChange(monto);
+    handleMontoPagadoChange(String(monto));
   };
 
   // Funciones para editar items
@@ -182,7 +182,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       await onSaveItems(items);
     }
     // Guardar el resto de los datos
-    onSave({ notas, formaPago, estadoPago, montoPagado: parseFloat(montoPagado) || 0 });
+    onSave({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
   };
 
   const getStockDisponible = (productoId: string): number => {

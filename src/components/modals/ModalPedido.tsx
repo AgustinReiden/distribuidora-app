@@ -35,6 +35,10 @@ export interface StockWarning {
   mensaje: string;
 }
 
+/** Categoria option type - can be string or object */
+export type CategoriaOption = string | { id: string; nombre: string; descripcion?: string };
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /** Props del componente ModalPedido */
 export interface ModalPedidoProps {
   /** Lista de productos disponibles */
@@ -42,7 +46,7 @@ export interface ModalPedidoProps {
   /** Lista de clientes */
   clientes: ClienteDB[];
   /** Categorías disponibles */
-  categorias: string[];
+  categorias: string[] | CategoriaOption[];
   /** Estado del nuevo pedido */
   nuevoPedido: NuevoPedidoState;
   /** Callback al cerrar */
@@ -50,11 +54,11 @@ export interface ModalPedidoProps {
   /** Callback al cambiar cliente */
   onClienteChange: (clienteId: string) => void;
   /** Callback al agregar item */
-  onAgregarItem: (productoId: string) => void;
+  onAgregarItem: (productoId: string, cantidad?: number, precio?: number) => void;
   /** Callback al actualizar cantidad */
   onActualizarCantidad: (productoId: string, cantidad: number) => void;
   /** Callback al crear cliente */
-  onCrearCliente: (cliente: NuevoClienteData) => Promise<ClienteDB>;
+  onCrearCliente: (cliente: any) => Promise<any>;
   /** Callback al guardar pedido */
   onGuardar: () => void | Promise<void>;
   /** Indica si está guardando */
@@ -71,7 +75,10 @@ export interface ModalPedidoProps {
   onEstadoPagoChange?: (estadoPago: string) => void;
   /** Callback al cambiar monto pagado */
   onMontoPagadoChange?: (monto: number) => void;
+  /** Si está offline */
+  isOffline?: boolean;
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 const ModalPedido = memo(function ModalPedido({
   productos,
@@ -121,10 +128,8 @@ const ModalPedido = memo(function ModalPedido({
 
   const clienteSeleccionado = useMemo(() => {
     if (!nuevoPedido.clienteId) return null;
-    const id = typeof nuevoPedido.clienteId === 'number'
-      ? nuevoPedido.clienteId
-      : parseInt(nuevoPedido.clienteId, 10);
-    return Number.isNaN(id) ? null : clientes.find(c => c.id === id);
+    // clienteId is a string, compare directly with string id
+    return clientes.find(c => String(c.id) === String(nuevoPedido.clienteId)) || null;
   }, [clientes, nuevoPedido.clienteId]);
 
   const handleCrearClienteRapido = async (): Promise<void> => {
@@ -297,19 +302,23 @@ const ModalPedido = memo(function ModalPedido({
                 >
                   Todos
                 </button>
-                {categorias.map(cat => (
-                  <button
-                    key={cat}
-                    onClick={() => setCategoriaSeleccionada(cat)}
-                    className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                      categoriaSeleccionada === cat
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
+                {categorias.map((cat) => {
+                  const catValue = typeof cat === 'string' ? cat : cat.nombre;
+                  const catKey = typeof cat === 'string' ? cat : cat.id;
+                  return (
+                    <button
+                      key={catKey}
+                      onClick={() => setCategoriaSeleccionada(catValue)}
+                      className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                        categoriaSeleccionada === catValue
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {catValue}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
