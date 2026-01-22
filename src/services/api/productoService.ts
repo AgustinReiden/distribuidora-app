@@ -3,8 +3,35 @@
  */
 
 import { BaseService } from './baseService'
+import type { Producto } from '../../types'
 
-class ProductoService extends BaseService {
+export interface StockItem {
+  producto_id: string;
+  cantidad: number;
+}
+
+export interface PrecioUpdate {
+  codigo: string;
+  precio_neto?: number;
+  imp_internos?: number;
+  precio_final?: number;
+}
+
+export interface ActualizarPreciosResult {
+  actualizados: number;
+  errores: string[];
+}
+
+export interface ProductoVendido extends Producto {
+  cantidad_vendida: number;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+class ProductoService extends BaseService<Producto> {
   constructor() {
     super('productos', {
       orderBy: 'nombre',
@@ -14,24 +41,20 @@ class ProductoService extends BaseService {
 
   /**
    * Obtiene productos con stock bajo
-   * @param {number} umbral - Umbral de stock mínimo
-   * @returns {Promise<Array>}
    */
-  async getStockBajo(umbral = 10) {
+  async getStockBajo(umbral = 10): Promise<Producto[]> {
     return this.query(async (query) => {
       return query
         .select('*')
         .lt('stock', umbral)
         .order('stock', { ascending: true })
-    })
+    }) as Promise<Producto[]>
   }
 
   /**
    * Obtiene productos por categoría
-   * @param {string} categoria
-   * @returns {Promise<Array>}
    */
-  async getByCategoria(categoria) {
+  async getByCategoria(categoria: string): Promise<Producto[]> {
     return this.getAll({
       filters: { categoria }
     })
@@ -39,25 +62,20 @@ class ProductoService extends BaseService {
 
   /**
    * Busca productos por nombre o código
-   * @param {string} termino
-   * @returns {Promise<Array>}
    */
-  async buscar(termino) {
+  async buscar(termino: string): Promise<Producto[]> {
     return this.query(async (query) => {
       return query
         .select('*')
         .or(`nombre.ilike.%${termino}%,codigo.ilike.%${termino}%`)
         .order('nombre')
-    })
+    }) as Promise<Producto[]>
   }
 
   /**
    * Actualiza stock de un producto
-   * @param {string} productoId
-   * @param {number} cantidad - Cantidad a agregar (negativo para restar)
-   * @returns {Promise<Object>}
    */
-  async actualizarStock(productoId, cantidad) {
+  async actualizarStock(productoId: string, cantidad: number): Promise<Producto | null> {
     // Primero obtener stock actual
     const producto = await this.getById(productoId)
     if (!producto) {
@@ -74,11 +92,9 @@ class ProductoService extends BaseService {
 
   /**
    * Descuenta stock atómicamente usando RPC
-   * @param {Array<{producto_id: string, cantidad: number}>} items
-   * @returns {Promise<boolean>}
    */
-  async descontarStock(items) {
-    return this.rpc(
+  async descontarStock(items: StockItem[]): Promise<boolean> {
+    return this.rpc<boolean>(
       'descontar_stock_atomico',
       { items: JSON.stringify(items) },
       async () => {
@@ -93,11 +109,9 @@ class ProductoService extends BaseService {
 
   /**
    * Restaura stock atómicamente usando RPC
-   * @param {Array<{producto_id: string, cantidad: number}>} items
-   * @returns {Promise<boolean>}
    */
-  async restaurarStock(items) {
-    return this.rpc(
+  async restaurarStock(items: StockItem[]): Promise<boolean> {
+    return this.rpc<boolean>(
       'restaurar_stock_atomico',
       { items: JSON.stringify(items) },
       async () => {
@@ -112,19 +126,17 @@ class ProductoService extends BaseService {
 
   /**
    * Actualiza precios masivamente
-   * @param {Array<{codigo: string, precio_neto?: number, imp_internos?: number, precio_final?: number}>} precios
-   * @returns {Promise<{actualizados: number, errores: string[]}>}
    */
-  async actualizarPreciosMasivo(precios) {
+  async actualizarPreciosMasivo(precios: PrecioUpdate[]): Promise<ActualizarPreciosResult> {
     // Intentar con RPC primero
     try {
-      const result = await this.rpc('actualizar_precios_masivo', {
+      const result = await this.rpc<ActualizarPreciosResult>('actualizar_precios_masivo', {
         precios: JSON.stringify(precios)
       })
       return result
     } catch {
       // Fallback: actualizar uno por uno
-      const errores = []
+      const errores: string[] = []
       let actualizados = 0
 
       for (const precio of precios) {
@@ -140,13 +152,13 @@ class ProductoService extends BaseService {
               precio_neto: precio.precio_neto,
               imp_internos: precio.imp_internos,
               precio_final: precio.precio_final
-            })
+            } as Partial<Producto>)
             actualizados++
           } else {
             errores.push(`Producto ${precio.codigo} no encontrado`)
           }
         } catch (error) {
-          errores.push(`Error en ${precio.codigo}: ${error.message}`)
+          errores.push(`Error en ${precio.codigo}: ${(error as Error).message}`)
         }
       }
 
@@ -156,12 +168,8 @@ class ProductoService extends BaseService {
 
   /**
    * Obtiene productos más vendidos
-   * @param {number} limit
-   * @param {Date} desde
-   * @param {Date} hasta
-   * @returns {Promise<Array>}
    */
-  async getMasVendidos(limit = 10, desde = null, hasta = null) {
+  async getMasVendidos(limit = 10, desde: Date | null = null, hasta: Date | null = null): Promise<ProductoVendido[]> {
     let query = this.db
       .from('pedido_items')
       .select(`
@@ -185,7 +193,7 @@ class ProductoService extends BaseService {
     }
 
     // Agrupar y sumar cantidades
-    const agrupado = (data || []).reduce((acc, item) => {
+    const agrupado = (data || []).reduce((acc: Record<string, ProductoVendido>, item: { producto_id: string; productos: Producto; cantidad: number }) => {
       const id = item.producto_id
       if (!acc[id]) {
         acc[id] = {
@@ -204,11 +212,9 @@ class ProductoService extends BaseService {
 
   /**
    * Valida datos del producto
-   * @param {Object} data
-   * @returns {{ valid: boolean, errors: string[] }}
    */
-  validate(data) {
-    const errors = []
+  validate(data: Partial<Producto> & { precio_final?: number }): ValidationResult {
+    const errors: string[] = []
 
     if (!data.nombre?.trim()) {
       errors.push('El nombre es requerido')
