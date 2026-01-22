@@ -20,36 +20,6 @@ const GOOGLE_MAPS_SCRIPT_ID = 'google-maps-script'
 let loadPromise: Promise<void> | null = null
 
 /**
- * Interfaz simplificada para Google Maps Places API
- * Solo incluye lo necesario para verificar si está cargada
- */
-interface GoogleMapsPlaces {
-  AutocompleteService: unknown
-  PlacesService?: unknown
-}
-
-interface GoogleMaps {
-  places?: GoogleMapsPlaces
-  Geocoder?: unknown
-  Map?: unknown
-  LatLng?: unknown
-  Marker?: unknown
-}
-
-interface GoogleAPI {
-  maps?: GoogleMaps
-}
-
-/**
- * Extiende la interfaz Window para incluir Google Maps
- */
-declare global {
-  interface Window {
-    google?: GoogleAPI
-  }
-}
-
-/**
  * Verifica si la API de Google Maps Places está disponible
  */
 function isGoogleMapsLoaded(): boolean {
@@ -93,8 +63,7 @@ export function loadGoogleMapsAPI(): Promise<void> {
     }
 
     // Obtener API key de variable de entorno
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const apiKey = (import.meta as any).env?.VITE_GOOGLE_API_KEY as string | undefined
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY
 
     if (!apiKey) {
       console.warn('[Google Maps] VITE_GOOGLE_API_KEY no configurada. El autocompletado de direcciones no estará disponible.')
