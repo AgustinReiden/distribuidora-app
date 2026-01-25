@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
-  UserCog, Route, ShoppingBag, Building2
+  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -77,6 +77,8 @@ const menuGroups: MenuGroup[] = [
     roles: ['admin'],
     items: [
       { id: 'recorridos', icon: Route, label: 'Recorridos', roles: ['admin'] },
+      { id: 'rendiciones', icon: Banknote, label: 'Rendiciones', roles: ['admin'] },
+      { id: 'salvedades', icon: AlertTriangle, label: 'Salvedades', roles: ['admin'] },
       { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
     ]
   }
