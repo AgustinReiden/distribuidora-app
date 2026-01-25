@@ -735,3 +735,142 @@ export const schemas: Schemas = {
 }
 
 export default schemas
+
+// ============================================
+// SCHEMAS DE RENDICION
+// ============================================
+
+export const tipoAjusteRendicionSchema = z.enum([
+  'faltante',
+  'sobrante',
+  'vuelto_no_dado',
+  'error_cobro',
+  'descuento_autorizado',
+  'otro'
+], {
+  error: 'Tipo de ajuste inválido'
+})
+
+export type TipoAjusteRendicionSchema = z.infer<typeof tipoAjusteRendicionSchema>
+
+export const ajusteRendicionSchema = z.object({
+  tipo: tipoAjusteRendicionSchema,
+  monto: z.coerce
+    .number({ error: 'El monto debe ser un número' })
+    .positive({ message: 'El monto debe ser mayor a 0' }),
+  descripcion: z
+    .string()
+    .min(10, { message: 'La descripción debe tener al menos 10 caracteres' })
+    .max(500, { message: 'La descripción no puede superar 500 caracteres' })
+})
+
+export type AjusteRendicionFormData = z.infer<typeof ajusteRendicionSchema>
+
+export const presentarRendicionSchema = z.object({
+  montoRendido: z.coerce
+    .number({ error: 'El monto debe ser un número' })
+    .nonnegative({ message: 'El monto no puede ser negativo' }),
+  justificacion: z.string().optional()
+})
+
+export type PresentarRendicionFormData = z.infer<typeof presentarRendicionSchema>
+
+export const revisarRendicionSchema = z.object({
+  accion: z.enum(['aprobar', 'rechazar', 'observar'], {
+    error: 'Acción no válida'
+  }),
+  observaciones: z.string().optional()
+}).refine(
+  (data) => {
+    // Si es rechazar u observar, las observaciones son obligatorias
+    if (data.accion === 'rechazar' || data.accion === 'observar') {
+      return data.observaciones && data.observaciones.trim().length >= 10
+    }
+    return true
+  },
+  { message: 'Debe incluir observaciones (mínimo 10 caracteres) al rechazar u observar', path: ['observaciones'] }
+)
+
+export type RevisarRendicionFormData = z.infer<typeof revisarRendicionSchema>
+
+// ============================================
+// SCHEMAS DE SALVEDADES
+// ============================================
+
+export const motivoSalvedadSchema = z.enum([
+  'faltante_stock',
+  'producto_danado',
+  'cliente_rechaza',
+  'error_pedido',
+  'producto_vencido',
+  'diferencia_precio',
+  'otro'
+], {
+  error: 'Motivo no válido'
+})
+
+export type MotivoSalvedadSchema = z.infer<typeof motivoSalvedadSchema>
+
+export const estadoResolucionSalvedadSchema = z.enum([
+  'reprogramada',
+  'nota_credito',
+  'descuento_transportista',
+  'absorcion_empresa',
+  'resuelto_otro',
+  'anulada'
+], {
+  error: 'Estado de resolución no válido'
+})
+
+export type EstadoResolucionSalvedadSchema = z.infer<typeof estadoResolucionSalvedadSchema>
+
+export const registrarSalvedadSchema = z.object({
+  pedidoItemId: z.string().min(1, { message: 'Debe seleccionar un item' }),
+  cantidadAfectada: z.coerce
+    .number({ error: 'La cantidad debe ser un número' })
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+  motivo: motivoSalvedadSchema,
+  descripcion: z.string().optional(),
+  devolverStock: z.boolean().default(true)
+})
+
+export type RegistrarSalvedadFormData = z.infer<typeof registrarSalvedadSchema>
+
+export const resolverSalvedadSchema = z.object({
+  estadoResolucion: estadoResolucionSalvedadSchema,
+  notas: z.string().min(5, { message: 'Debe agregar notas de la resolución (mínimo 5 caracteres)' }),
+  pedidoReprogramadoId: z.string().optional()
+})
+
+export type ResolverSalvedadFormData = z.infer<typeof resolverSalvedadSchema>
+
+// Etiquetas para mostrar en UI
+export const MOTIVOS_SALVEDAD_LABELS: Record<MotivoSalvedadSchema, string> = {
+  faltante_stock: 'Faltante de Stock',
+  producto_danado: 'Producto Dañado',
+  cliente_rechaza: 'Cliente Rechaza',
+  error_pedido: 'Error en Pedido',
+  producto_vencido: 'Producto Vencido',
+  diferencia_precio: 'Diferencia de Precio',
+  otro: 'Otro'
+}
+
+export const ESTADOS_RESOLUCION_LABELS: Record<EstadoResolucionSalvedadSchema | 'pendiente', string> = {
+  pendiente: 'Pendiente',
+  reprogramada: 'Reprogramada',
+  nota_credito: 'Nota de Crédito',
+  descuento_transportista: 'Descuento a Transportista',
+  absorcion_empresa: 'Absorción Empresa',
+  resuelto_otro: 'Resuelto (Otro)',
+  anulada: 'Anulada'
+}
+
+export const TIPOS_AJUSTE_LABELS: Record<TipoAjusteRendicionSchema, string> = {
+  faltante: 'Faltante',
+  sobrante: 'Sobrante',
+  vuelto_no_dado: 'Vuelto no dado',
+  error_cobro: 'Error de cobro',
+  descuento_autorizado: 'Descuento autorizado',
+  otro: 'Otro'
+}
