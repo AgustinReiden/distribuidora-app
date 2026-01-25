@@ -952,3 +952,268 @@ export interface UseReportesFinancierosReturn {
   generarReporteVentasPorCliente: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<VentaPorCliente[]>;
   generarReporteVentasPorZona: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<VentaPorZona[]>;
 }
+
+// =============================================================================
+// RENDICIONES TYPES
+// =============================================================================
+
+export type EstadoRendicion = 'pendiente' | 'presentada' | 'aprobada' | 'rechazada' | 'con_observaciones';
+
+export type TipoAjusteRendicion = 'faltante' | 'sobrante' | 'vuelto_no_dado' | 'error_cobro' | 'descuento_autorizado' | 'otro';
+
+export interface RendicionDB {
+  id: string;
+  recorrido_id: string;
+  transportista_id: string;
+  fecha: string;
+  total_efectivo_esperado: number;
+  total_otros_medios: number;
+  monto_rendido: number;
+  diferencia: number;
+  estado: EstadoRendicion;
+  justificacion_transportista?: string | null;
+  observaciones_admin?: string | null;
+  presentada_at?: string | null;
+  revisada_at?: string | null;
+  revisada_por?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface RendicionItemDB {
+  id: string;
+  rendicion_id: string;
+  pedido_id: string;
+  monto_cobrado: number;
+  forma_pago: string;
+  referencia?: string | null;
+  incluido_en_rendicion: boolean;
+  notas?: string | null;
+  created_at?: string;
+  pedido?: PedidoDB;
+}
+
+export interface RendicionAjusteDB {
+  id: string;
+  rendicion_id: string;
+  tipo: TipoAjusteRendicion;
+  monto: number;
+  descripcion: string;
+  foto_url?: string | null;
+  aprobado?: boolean | null;
+  aprobado_por?: string | null;
+  aprobado_at?: string | null;
+  created_at?: string;
+}
+
+export interface RendicionDBExtended extends RendicionDB {
+  transportista?: PerfilDB | null;
+  revisada_por_perfil?: PerfilDB | null;
+  recorrido?: RecorridoDBExtended | null;
+  items?: RendicionItemDB[];
+  ajustes?: RendicionAjusteDB[];
+  total_pedidos?: number;
+  pedidos_entregados?: number;
+  total_facturado?: number;
+  total_cobrado?: number;
+  total_ajustes?: number;
+}
+
+export interface RendicionAjusteInput {
+  tipo: TipoAjusteRendicion;
+  monto: number;
+  descripcion: string;
+  foto?: File | null;
+}
+
+export interface PresentarRendicionInput {
+  rendicionId: string;
+  montoRendido: number;
+  justificacion?: string | null;
+  ajustes?: RendicionAjusteInput[];
+}
+
+export interface RevisarRendicionInput {
+  rendicionId: string;
+  accion: 'aprobar' | 'rechazar' | 'observar';
+  observaciones?: string | null;
+}
+
+export interface EstadisticasRendiciones {
+  total: number;
+  pendientes: number;
+  aprobadas: number;
+  rechazadas: number;
+  con_observaciones: number;
+  total_efectivo_esperado: number;
+  total_rendido: number;
+  total_diferencias: number;
+  por_transportista?: Array<{
+    transportista_id: string;
+    transportista_nombre: string;
+    rendiciones: number;
+    total_rendido: number;
+    total_diferencias: number;
+  }>;
+}
+
+export interface UseRendicionesReturn {
+  rendiciones: RendicionDBExtended[];
+  rendicionActual: RendicionDBExtended | null;
+  loading: boolean;
+  // Crear y presentar (transportista o admin)
+  crearRendicion: (recorridoId: string, transportistaId?: string) => Promise<string>;
+  presentarRendicion: (input: PresentarRendicionInput) => Promise<{ success: boolean; diferencia: number }>;
+  agregarAjuste: (rendicionId: string, ajuste: RendicionAjusteInput) => Promise<void>;
+  // Admin
+  revisarRendicion: (input: RevisarRendicionInput) => Promise<{ success: boolean; nuevoEstado: EstadoRendicion }>;
+  // Consultas
+  fetchRendicionActual: (transportistaId: string) => Promise<RendicionDBExtended | null>;
+  fetchRendicionesPorFecha: (fecha: string) => Promise<RendicionDBExtended[]>;
+  fetchRendicionesPorTransportista: (transportistaId: string, desde?: string, hasta?: string) => Promise<RendicionDBExtended[]>;
+  fetchRendicionById: (id: string) => Promise<RendicionDBExtended | null>;
+  getEstadisticas: (desde?: string, hasta?: string, transportistaId?: string) => Promise<EstadisticasRendiciones>;
+  refetch: () => Promise<void>;
+}
+
+// =============================================================================
+// SALVEDADES TYPES
+// =============================================================================
+
+export type MotivoSalvedad =
+  | 'faltante_stock'
+  | 'producto_danado'
+  | 'cliente_rechaza'
+  | 'error_pedido'
+  | 'producto_vencido'
+  | 'diferencia_precio'
+  | 'otro';
+
+export type EstadoResolucionSalvedad =
+  | 'pendiente'
+  | 'reprogramada'
+  | 'nota_credito'
+  | 'descuento_transportista'
+  | 'absorcion_empresa'
+  | 'resuelto_otro'
+  | 'anulada';
+
+export interface SalvedadItemDB {
+  id: string;
+  pedido_id: string;
+  pedido_item_id: string;
+  producto_id: string;
+  cantidad_original: number;
+  cantidad_afectada: number;
+  cantidad_entregada: number;
+  motivo: MotivoSalvedad;
+  descripcion?: string | null;
+  foto_url?: string | null;
+  monto_afectado: number;
+  precio_unitario: number;
+  estado_resolucion: EstadoResolucionSalvedad;
+  resolucion_notas?: string | null;
+  resolucion_fecha?: string | null;
+  resuelto_por?: string | null;
+  stock_devuelto: boolean;
+  stock_devuelto_at?: string | null;
+  pedido_reprogramado_id?: string | null;
+  reportado_por: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SalvedadHistorialDB {
+  id: string;
+  salvedad_id: string;
+  accion: string;
+  estado_anterior?: string | null;
+  estado_nuevo?: string | null;
+  notas?: string | null;
+  usuario_id?: string | null;
+  created_at?: string;
+}
+
+export interface SalvedadItemDBExtended extends SalvedadItemDB {
+  producto?: ProductoDB | null;
+  producto_nombre?: string;
+  producto_codigo?: string | null;
+  pedido?: PedidoDB | null;
+  cliente_id?: string;
+  cliente_nombre?: string;
+  transportista_id?: string | null;
+  transportista_nombre?: string | null;
+  pedido_estado?: string;
+  pedido_total?: number;
+  reportado_por_nombre?: string;
+  resuelto_por_nombre?: string | null;
+  historial?: SalvedadHistorialDB[];
+}
+
+export interface RegistrarSalvedadInput {
+  pedidoId: string;
+  pedidoItemId: string;
+  cantidadAfectada: number;
+  motivo: MotivoSalvedad;
+  descripcion?: string | null;
+  fotoUrl?: string | null;
+  devolverStock?: boolean;
+}
+
+export interface RegistrarSalvedadResult {
+  success: boolean;
+  error?: string;
+  salvedad_id?: string;
+  monto_afectado?: number;
+  cantidad_entregada?: number;
+  stock_devuelto?: boolean;
+  nuevo_total_pedido?: number;
+}
+
+export interface ResolverSalvedadInput {
+  salvedadId: string;
+  estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente'>;
+  notas?: string | null;
+  pedidoReprogramadoId?: string | null;
+}
+
+export interface EstadisticasSalvedades {
+  total: number;
+  pendientes: number;
+  resueltas: number;
+  anuladas: number;
+  monto_total_afectado: number;
+  monto_pendiente: number;
+  por_motivo?: Record<MotivoSalvedad, number>;
+  por_resolucion?: Record<EstadoResolucionSalvedad, number>;
+  por_producto?: Array<{
+    producto_id: string;
+    producto_nombre: string;
+    cantidad: number;
+    monto: number;
+    unidades_afectadas: number;
+  }>;
+  por_transportista?: Array<{
+    transportista_id: string;
+    transportista_nombre: string;
+    cantidad: number;
+    monto: number;
+  }>;
+}
+
+export interface UseSalvedadesReturn {
+  salvedades: SalvedadItemDBExtended[];
+  loading: boolean;
+  // Transportista o admin puede registrar
+  registrarSalvedad: (input: RegistrarSalvedadInput) => Promise<RegistrarSalvedadResult>;
+  // Admin
+  resolverSalvedad: (input: ResolverSalvedadInput) => Promise<{ success: boolean; nuevoEstado: EstadoResolucionSalvedad }>;
+  anularSalvedad: (salvedadId: string, notas?: string) => Promise<{ success: boolean }>;
+  // Consultas
+  fetchSalvedadesPorPedido: (pedidoId: string) => Promise<SalvedadItemDBExtended[]>;
+  fetchSalvedadesPendientes: () => Promise<SalvedadItemDBExtended[]>;
+  fetchSalvedadesPorFecha: (desde: string, hasta?: string) => Promise<SalvedadItemDBExtended[]>;
+  fetchSalvedadById: (id: string) => Promise<SalvedadItemDBExtended | null>;
+  getEstadisticas: (desde?: string, hasta?: string) => Promise<EstadisticasSalvedades>;
+  refetch: () => Promise<void>;
+}

@@ -1,13 +1,13 @@
-import { useEffect, lazy, Suspense, ReactElement } from 'react';
+import { useEffect, lazy, Suspense, ReactElement, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, setErrorNotifier } from './hooks/supabase';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, useRendiciones, useSalvedades, setErrorNotifier } from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
 import { useAppHandlers } from './hooks/useAppHandlers';
-import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos } from './types/hooks';
+import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RendicionDBExtended } from './types/hooks';
 import type { AppModalsProps, AppModalsAppState, AppModalsHandlers } from './components/AppModals';
 
 // Componentes base
@@ -29,6 +29,11 @@ const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
 const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
 const VistaCompras = lazy(() => import('./components/vistas/VistaCompras'));
 const VistaProveedores = lazy(() => import('./components/vistas/VistaProveedores'));
+const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'));
+const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'));
+
+// Modales nuevos
+import ModalRendicion from './components/modals/ModalRendicion';
 
 function LoadingVista(): ReactElement {
   return (
@@ -65,6 +70,12 @@ function MainApp(): ReactElement {
   const { compras, proveedores, registrarCompra, anularCompra, agregarProveedor, actualizarProveedor, loading: loadingCompras, refetch: refetchCompras, refetchProveedores } = useCompras();
   const { recorridos, loading: loadingRecorridos, fetchRecorridosHoy, fetchRecorridosPorFecha, crearRecorrido } = useRecorridos();
   const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
+  const { rendiciones, rendicionActual, loading: loadingRendiciones, crearRendicion, presentarRendicion, revisarRendicion, fetchRendicionActual, fetchRendicionesPorFecha } = useRendiciones();
+  const { salvedades, loading: loadingSalvedades, registrarSalvedad, resolverSalvedad, fetchSalvedadesPendientes, refetch: refetchSalvedades } = useSalvedades();
+
+  // Estado para modal de rendicion
+  const [modalRendicionOpen, setModalRendicionOpen] = useState(false);
+  const [rendicionParaModal, setRendicionParaModal] = useState<RendicionDBExtended | null>(null);
 
   // Datos derivados
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
@@ -259,6 +270,14 @@ function MainApp(): ReactElement {
             {vista === 'proveedores' && isAdmin && (
               <VistaProveedores proveedores={proveedores} compras={compras} loading={loadingCompras} isAdmin={isAdmin} onNuevoProveedor={handlers.handleNuevoProveedor} onEditarProveedor={handlers.handleEditarProveedor} onEliminarProveedor={handlers.handleEliminarProveedor} onToggleActivo={handlers.handleToggleActivoProveedor} />
             )}
+
+            {vista === 'rendiciones' && isAdmin && (
+              <VistaRendiciones />
+            )}
+
+            {vista === 'salvedades' && isAdmin && (
+              <VistaSalvedades />
+            )}
           </Suspense>
         </div>
       </main>
@@ -283,6 +302,26 @@ function MainApp(): ReactElement {
 
       {/* PWA Prompt */}
       <PWAPrompt />
+
+      {/* Modal de Rendicion */}
+      {modalRendicionOpen && rendicionParaModal && (
+        <ModalRendicion
+          rendicion={rendicionParaModal}
+          onPresentar={async (data) => {
+            const result = await presentarRendicion(data);
+            if (result.success) {
+              setModalRendicionOpen(false);
+              setRendicionParaModal(null);
+              notify.success('Rendicion presentada correctamente');
+            }
+            return result;
+          }}
+          onClose={() => {
+            setModalRendicionOpen(false);
+            setRendicionParaModal(null);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -2,9 +2,10 @@
  * Vista de ruta para transportista
  */
 import React, { useState, useMemo, memo } from 'react';
-import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation } from 'lucide-react';
+import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Banknote } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
-import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB } from '../../types';
+import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types';
+import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 
 // =============================================================================
 // INTERFACES DE PROPS Y TIPOS
@@ -16,6 +17,16 @@ export interface VistaRutaTransportistaProps {
   userId: string;
   clientes: ClienteDB[];
   productos: ProductoDB[];
+  onRegistrarSalvedad?: (data: {
+    pedidoId: string;
+    pedidoItemId: string;
+    cantidadAfectada: number;
+    motivo: MotivoSalvedad;
+    descripcion?: string;
+    fotoUrl?: string;
+    devolverStock: boolean;
+  }) => Promise<RegistrarSalvedadResult>;
+  onAbrirRendicion?: () => void;
 }
 
 interface PedidoEnriquecido extends PedidoDB {
@@ -27,13 +38,14 @@ interface EntregaRutaCardProps {
   pedido: PedidoEnriquecido;
   orden: number;
   onMarcarEntregado: (pedido: PedidoEnriquecido) => void;
+  onReportarSalvedad?: (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }) => void;
 }
 
 // =============================================================================
 // COMPONENTE: EntregaRutaCard
 // =============================================================================
 
-function EntregaRutaCard({ pedido, orden, onMarcarEntregado }: EntregaRutaCardProps): React.ReactElement {
+function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad }: EntregaRutaCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
 
   const estadoPagoColors: Record<string, string> = {
@@ -125,11 +137,23 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado }: EntregaRutaCardPr
             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">PRODUCTOS:</p>
             <div className="space-y-2">
               {pedido.items?.map(item => (
-                <div key={item.id} className="flex justify-between text-sm bg-gray-50 dark:bg-gray-700 p-2 rounded">
-                  <span className="text-gray-700 dark:text-gray-300">
+                <div key={item.id} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-700 p-2 rounded gap-2">
+                  <span className="text-gray-700 dark:text-gray-300 flex-1">
                     {item.cantidad}x {item.producto?.nombre || 'Producto sin nombre'}
                   </span>
                   <span className="text-gray-500">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</span>
+                  {pedido.estado === 'asignado' && onReportarSalvedad && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onReportarSalvedad(pedido.id, item);
+                      }}
+                      className="p-1 text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded"
+                      title="Reportar problema con este item"
+                    >
+                      <AlertTriangle className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -179,8 +203,16 @@ function VistaRutaTransportista({
   onMarcarEntregado,
   userId,
   clientes,
-  productos
+  productos,
+  onRegistrarSalvedad,
+  onAbrirRendicion
 }: VistaRutaTransportistaProps): React.ReactElement {
+  // Estado para modal de salvedad
+  const [salvedadModal, setSalvedadModal] = useState<{
+    pedidoId: string;
+    item: PedidoItemDB & { producto?: ProductoDB };
+  } | null>(null);
+
   // Enriquecer pedidos con datos de clientes y productos
   const pedidosEnriquecidos = useMemo<PedidoEnriquecido[]>(() => {
     if (!pedidos) return [];
@@ -230,6 +262,29 @@ function VistaRutaTransportista({
 
   const handleMarcarEntregado = (pedido: PedidoEnriquecido): void => {
     onMarcarEntregado(pedido as PedidoDB);
+  };
+
+  const handleReportarSalvedad = (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }): void => {
+    setSalvedadModal({ pedidoId, item });
+  };
+
+  const handleGuardarSalvedad = async (data: {
+    pedidoId: string;
+    pedidoItemId: string;
+    cantidadAfectada: number;
+    motivo: MotivoSalvedad;
+    descripcion?: string;
+    fotoUrl?: string;
+    devolverStock: boolean;
+  }): Promise<RegistrarSalvedadResult> => {
+    if (!onRegistrarSalvedad) {
+      return { success: false, error: 'Funcion no disponible' };
+    }
+    const result = await onRegistrarSalvedad(data);
+    if (result.success) {
+      setSalvedadModal(null);
+    }
+    return result;
   };
 
   if (pedidosOrdenados.length === 0) {
@@ -305,10 +360,34 @@ function VistaRutaTransportista({
               pedido={pedido}
               orden={pedido.orden_entrega || index + 1}
               onMarcarEntregado={handleMarcarEntregado}
+              onReportarSalvedad={onRegistrarSalvedad ? handleReportarSalvedad : undefined}
             />
           ))}
         </div>
       </div>
+
+      {/* Boton de rendicion (mostrar si hay entregas completadas) */}
+      {entregasCompletadas > 0 && onAbrirRendicion && (
+        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:bottom-6">
+          <button
+            onClick={onAbrirRendicion}
+            className="w-full md:w-auto px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl shadow-lg flex items-center justify-center gap-2"
+          >
+            <Banknote className="w-5 h-5" />
+            Cerrar Dia / Rendicion
+          </button>
+        </div>
+      )}
+
+      {/* Modal de salvedad */}
+      {salvedadModal && (
+        <ModalSalvedadItem
+          pedidoId={salvedadModal.pedidoId}
+          item={salvedadModal.item}
+          onSave={handleGuardarSalvedad}
+          onClose={() => setSalvedadModal(null)}
+        />
+      )}
     </div>
   );
 }
