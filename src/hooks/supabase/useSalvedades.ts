@@ -15,59 +15,54 @@ import type {
   UseSalvedadesReturn
 } from '../../types'
 
-interface RPCResponse {
-  success: boolean;
-  error?: string;
-  salvedad_id?: string;
-  monto_afectado?: number;
-  cantidad_entregada?: number;
-  stock_devuelto?: boolean;
-  nuevo_total_pedido?: number;
-  nuevo_estado?: EstadoResolucionSalvedad;
-  message?: string;
-}
-
-interface EstadisticasRPCResponse {
-  total: number;
-  pendientes: number;
-  resueltas: number;
-  anuladas: number;
-  monto_total_afectado: number;
-  monto_pendiente: number;
-  por_motivo?: Record<string, number>;
-  por_resolucion?: Record<string, number>;
-  por_producto?: Array<{
-    producto_id: string;
-    producto_nombre: string;
-    cantidad: number;
-    monto: number;
-    unidades_afectadas: number;
-  }>;
-  por_transportista?: Array<{
-    transportista_id: string;
-    transportista_nombre: string;
-    cantidad: number;
-    monto: number;
-  }>;
-}
-
 export function useSalvedades(): UseSalvedadesReturn {
   const [salvedades, setSalvedades] = useState<SalvedadItemDBExtended[]>([])
   const [loading, setLoading] = useState<boolean>(false)
 
-  // Fetch salvedades pendientes
+  // Query base para salvedades con joins
+  const buildSalvedadesQuery = () => {
+    return supabase
+      .from('salvedades_items')
+      .select(`
+        *,
+        producto:productos!producto_id(id, nombre, codigo),
+        pedido:pedidos!pedido_id(
+          id,
+          total,
+          estado,
+          cliente:clientes!cliente_id(id, nombre_fantasia),
+          transportista:perfiles!transportista_id(id, nombre)
+        ),
+        reportado:perfiles!reportado_por(id, nombre),
+        resuelto:perfiles!resuelto_por(id, nombre)
+      `)
+  }
+
+  // Transformar datos para compatibilidad con tipos extendidos
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const transformarSalvedad = (s: any): SalvedadItemDBExtended => ({
+    ...s,
+    producto_nombre: s.producto?.nombre,
+    producto_codigo: s.producto?.codigo,
+    cliente_nombre: s.pedido?.cliente?.nombre_fantasia,
+    transportista_nombre: s.pedido?.transportista?.nombre,
+    pedido_estado: s.pedido?.estado,
+    pedido_total: s.pedido?.total,
+    reportado_por_nombre: s.reportado?.nombre,
+    resuelto_por_nombre: s.resuelto?.nombre
+  })
+
+  // Fetch salvedades pendientes - usando tabla directa
   const fetchSalvedadesPendientes = useCallback(async (): Promise<SalvedadItemDBExtended[]> => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('vista_salvedades')
-        .select('*')
+      const { data, error } = await buildSalvedadesQuery()
         .eq('estado_resolucion', 'pendiente')
         .order('created_at', { ascending: false })
 
       if (error) throw error
 
-      const salvedadesData = (data || []) as SalvedadItemDBExtended[]
+      const salvedadesData = (data || []).map(transformarSalvedad)
       setSalvedades(salvedadesData)
       return salvedadesData
     } catch (error) {
@@ -82,14 +77,12 @@ export function useSalvedades(): UseSalvedadesReturn {
   // Fetch salvedades por pedido
   const fetchSalvedadesPorPedido = useCallback(async (pedidoId: string): Promise<SalvedadItemDBExtended[]> => {
     try {
-      const { data, error } = await supabase
-        .from('vista_salvedades')
-        .select('*')
-        .eq('pedido_id', pedidoId)
+      const { data, error } = await buildSalvedadesQuery()
+        .eq('pedido_id', parseInt(pedidoId, 10))
         .order('created_at', { ascending: false })
 
       if (error) throw error
-      return (data || []) as SalvedadItemDBExtended[]
+      return (data || []).map(transformarSalvedad)
     } catch (error) {
       notifyError('Error al cargar salvedades del pedido: ' + (error as Error).message)
       return []
@@ -100,9 +93,7 @@ export function useSalvedades(): UseSalvedadesReturn {
   const fetchSalvedadesPorFecha = useCallback(async (desde: string, hasta?: string): Promise<SalvedadItemDBExtended[]> => {
     setLoading(true)
     try {
-      let query = supabase
-        .from('vista_salvedades')
-        .select('*')
+      let query = buildSalvedadesQuery()
         .gte('created_at', desde + 'T00:00:00')
         .order('created_at', { ascending: false })
 
@@ -113,7 +104,7 @@ export function useSalvedades(): UseSalvedadesReturn {
       const { data, error } = await query
       if (error) throw error
 
-      const salvedadesData = (data || []) as SalvedadItemDBExtended[]
+      const salvedadesData = (data || []).map(transformarSalvedad)
       setSalvedades(salvedadesData)
       return salvedadesData
     } catch (error) {
@@ -128,14 +119,12 @@ export function useSalvedades(): UseSalvedadesReturn {
   // Fetch salvedad por ID
   const fetchSalvedadById = useCallback(async (id: string): Promise<SalvedadItemDBExtended | null> => {
     try {
-      const { data, error } = await supabase
-        .from('vista_salvedades')
-        .select('*')
-        .eq('id', id)
+      const { data, error } = await buildSalvedadesQuery()
+        .eq('id', parseInt(id, 10))
         .single()
 
       if (error) throw error
-      return data as SalvedadItemDBExtended
+      return transformarSalvedad(data)
     } catch (error) {
       notifyError('Error al cargar salvedad: ' + (error as Error).message)
       return null
@@ -146,8 +135,8 @@ export function useSalvedades(): UseSalvedadesReturn {
   const registrarSalvedad = async (input: RegistrarSalvedadInput): Promise<RegistrarSalvedadResult> => {
     try {
       const { data, error } = await supabase.rpc('registrar_salvedad', {
-        p_pedido_id: input.pedidoId,
-        p_pedido_item_id: input.pedidoItemId,
+        p_pedido_id: parseInt(input.pedidoId, 10),
+        p_pedido_item_id: parseInt(input.pedidoItemId, 10),
         p_cantidad_afectada: input.cantidadAfectada,
         p_motivo: input.motivo,
         p_descripcion: input.descripcion || null,
@@ -160,16 +149,17 @@ export function useSalvedades(): UseSalvedadesReturn {
         return { success: false, error: error.message }
       }
 
-      const result = data as RPCResponse
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = data as any
 
-      if (!result.success) {
-        notifyError(result.error || 'Error al registrar salvedad')
-        return { success: false, error: result.error }
+      if (!result?.success) {
+        notifyError(result?.error || 'Error al registrar salvedad')
+        return { success: false, error: result?.error }
       }
 
       return {
         success: true,
-        salvedad_id: result.salvedad_id,
+        salvedad_id: result.salvedad_id ? String(result.salvedad_id) : undefined,
         monto_afectado: result.monto_afectado,
         cantidad_entregada: result.cantidad_entregada,
         stock_devuelto: result.stock_devuelto,
@@ -185,10 +175,10 @@ export function useSalvedades(): UseSalvedadesReturn {
   // Resolver salvedad (admin)
   const resolverSalvedad = async (input: ResolverSalvedadInput): Promise<{ success: boolean; nuevoEstado: EstadoResolucionSalvedad }> => {
     const { data, error } = await supabase.rpc('resolver_salvedad', {
-      p_salvedad_id: input.salvedadId,
+      p_salvedad_id: parseInt(input.salvedadId, 10),
       p_estado_resolucion: input.estadoResolucion,
       p_notas: input.notas || null,
-      p_pedido_reprogramado_id: input.pedidoReprogramadoId || null
+      p_pedido_reprogramado_id: input.pedidoReprogramadoId ? parseInt(input.pedidoReprogramadoId, 10) : null
     })
 
     if (error) {
@@ -196,11 +186,12 @@ export function useSalvedades(): UseSalvedadesReturn {
       throw error
     }
 
-    const result = data as RPCResponse
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = data as any
 
-    if (!result.success) {
-      notifyError(result.error || 'Error al resolver salvedad')
-      throw new Error(result.error)
+    if (!result?.success) {
+      notifyError(result?.error || 'Error al resolver salvedad')
+      throw new Error(result?.error)
     }
 
     // Refrescar lista
@@ -215,7 +206,7 @@ export function useSalvedades(): UseSalvedadesReturn {
   // Anular salvedad (admin)
   const anularSalvedad = async (salvedadId: string, notas?: string): Promise<{ success: boolean }> => {
     const { data, error } = await supabase.rpc('anular_salvedad', {
-      p_salvedad_id: salvedadId,
+      p_salvedad_id: parseInt(salvedadId, 10),
       p_notas: notas || null
     })
 
@@ -224,11 +215,12 @@ export function useSalvedades(): UseSalvedadesReturn {
       throw error
     }
 
-    const result = data as RPCResponse
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = data as any
 
-    if (!result.success) {
-      notifyError(result.error || 'Error al anular salvedad')
-      throw new Error(result.error)
+    if (!result?.success) {
+      notifyError(result?.error || 'Error al anular salvedad')
+      throw new Error(result?.error)
     }
 
     // Refrescar lista
@@ -237,7 +229,7 @@ export function useSalvedades(): UseSalvedadesReturn {
     return { success: true }
   }
 
-  // Obtener estadísticas
+  // Obtener estadísticas - con fallback a cálculo local
   const getEstadisticas = async (desde?: string, hasta?: string): Promise<EstadisticasSalvedades> => {
     try {
       const { data, error } = await supabase.rpc('obtener_estadisticas_salvedades', {
@@ -245,32 +237,42 @@ export function useSalvedades(): UseSalvedadesReturn {
         p_fecha_hasta: hasta || null
       })
 
-      if (error) throw error
+      if (error) {
+        // Si el RPC falla, calcular manualmente
+        console.warn('RPC estadisticas salvedades fallo, usando datos locales:', error.message)
+        return calcularEstadisticasLocales()
+      }
 
-      const stats = data as EstadisticasRPCResponse
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stats = data as any
 
       return {
-        total: stats.total || 0,
-        pendientes: stats.pendientes || 0,
-        resueltas: stats.resueltas || 0,
-        anuladas: stats.anuladas || 0,
-        monto_total_afectado: stats.monto_total_afectado || 0,
-        monto_pendiente: stats.monto_pendiente || 0,
-        por_motivo: stats.por_motivo as Record<MotivoSalvedad, number> | undefined,
-        por_resolucion: stats.por_resolucion as Record<EstadoResolucionSalvedad, number> | undefined,
-        por_producto: stats.por_producto,
-        por_transportista: stats.por_transportista
+        total: stats?.total || 0,
+        pendientes: stats?.pendientes || 0,
+        resueltas: stats?.resueltas || 0,
+        anuladas: stats?.anuladas || 0,
+        monto_total_afectado: stats?.monto_total_afectado || 0,
+        monto_pendiente: stats?.monto_pendiente || 0,
+        por_motivo: stats?.por_motivo as Record<MotivoSalvedad, number> | undefined,
+        por_resolucion: stats?.por_resolucion as Record<EstadoResolucionSalvedad, number> | undefined,
+        por_producto: stats?.por_producto,
+        por_transportista: stats?.por_transportista
       }
     } catch (error) {
       notifyError('Error al obtener estadísticas: ' + (error as Error).message)
-      return {
-        total: 0,
-        pendientes: 0,
-        resueltas: 0,
-        anuladas: 0,
-        monto_total_afectado: 0,
-        monto_pendiente: 0
-      }
+      return calcularEstadisticasLocales()
+    }
+  }
+
+  // Calcular estadísticas desde los datos locales
+  const calcularEstadisticasLocales = (): EstadisticasSalvedades => {
+    return {
+      total: salvedades.length,
+      pendientes: salvedades.filter(s => s.estado_resolucion === 'pendiente').length,
+      resueltas: salvedades.filter(s => s.estado_resolucion !== 'pendiente' && s.estado_resolucion !== 'anulada').length,
+      anuladas: salvedades.filter(s => s.estado_resolucion === 'anulada').length,
+      monto_total_afectado: salvedades.reduce((sum, s) => sum + (s.monto_afectado || 0), 0),
+      monto_pendiente: salvedades.filter(s => s.estado_resolucion === 'pendiente').reduce((sum, s) => sum + (s.monto_afectado || 0), 0)
     }
   }
 
