@@ -3,7 +3,7 @@
  * Usado por transportistas y admin cuando un item no puede ser entregado
  */
 import React, { useState, FormEvent, ChangeEvent } from 'react'
-import { X, AlertTriangle, Package, Camera, FileText, AlertCircle } from 'lucide-react'
+import { X, AlertTriangle, Package, FileText, AlertCircle } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
 

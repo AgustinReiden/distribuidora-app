@@ -6,6 +6,7 @@ import { useState, useCallback } from 'react'
 import { supabase, notifyError } from './base'
 import type {
   RendicionDBExtended,
+  RendicionAjusteInput,
   PresentarRendicionInput,
   RevisarRendicionInput,
   EstadisticasRendiciones,
@@ -189,7 +190,7 @@ export function useRendiciones(): UseRendicionesReturn {
   }
 
   // Agregar ajuste a rendición
-  const agregarAjuste = async (rendicionId: string, ajuste: { tipo: string; monto: number; descripcion: string; foto?: File }): Promise<void> => {
+  const agregarAjuste = async (rendicionId: string, ajuste: RendicionAjusteInput): Promise<void> => {
     let fotoUrl: string | null = null
 
     // Subir foto si existe
