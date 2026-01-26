@@ -133,12 +133,13 @@ export default function VistaReportes({
     }
   };
 
-   
+
   useEffect(() => {
     if (activeTab === 'cuentas' && reporteCuentas.length === 0) handleCargarReporteFinanciero('cuentas');
     if (activeTab === 'rentabilidad' && reporteRentabilidad.productos.length === 0) handleCargarReporteFinanciero('rentabilidad');
     if (activeTab === 'clientes' && reporteClientes.length === 0) handleCargarReporteFinanciero('clientes');
     if (activeTab === 'zonas' && reporteZonas.length === 0) handleCargarReporteFinanciero('zonas');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const tabs: TabConfig[] = [

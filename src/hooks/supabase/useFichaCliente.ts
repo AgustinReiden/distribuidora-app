@@ -102,9 +102,9 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
     }
   }
 
-   
   useEffect(() => {
     if (clienteId) fetchDatosCliente()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteId])
 
   return { pedidosCliente, estadisticas, loading, refetch: fetchDatosCliente }
