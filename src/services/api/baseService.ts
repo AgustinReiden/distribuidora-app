@@ -68,7 +68,7 @@ export class BaseService<T = Record<string, unknown>> {
           if (typeof value === 'object' && value !== null && 'operator' in value) {
             // Filtro con operador personalizado: { operator: 'gte', value: 10 }
             const filterValue = value as FilterWithOperator
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             const filterMethod = (query as any)[filterValue.operator]
             if (typeof filterMethod === 'function') {
               query = filterMethod.call(query, key, filterValue.value)

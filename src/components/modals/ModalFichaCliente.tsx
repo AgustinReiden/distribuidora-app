@@ -45,11 +45,13 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen')
   const [expandedPedido, setExpandedPedido] = useState<string | null>(null)
 
+
   useEffect(() => {
     if (cliente?.id) {
       fetchPagosCliente(cliente.id)
       obtenerResumenCuenta(cliente.id).then((res: ResumenCuenta | null) => setResumenCuenta(res))
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cliente?.id])
 
   const saldoActual = useMemo((): number => {

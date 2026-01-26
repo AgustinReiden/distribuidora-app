@@ -209,7 +209,7 @@ function VirtualizedPedidoList({
     )
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const TypedList = List as any;
   return (
     <div ref={containerRef} className="virtualized-pedido-list">

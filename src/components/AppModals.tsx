@@ -131,7 +131,7 @@ export interface AppModalsAppState {
   setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>;
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /** Event handlers for AppModals - flexible types to match child components */
 export interface AppModalsHandlers {
   handleFiltrosChange: (...args: any[]) => void;
@@ -161,7 +161,7 @@ export interface AppModalsHandlers {
   handleGuardarProveedor: (proveedorData: any) => Promise<void>;
   refetchProductos?: () => Promise<void>;
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
+ 
 
 /** Category type - can be string or object */
 export type Categoria = string | { id: string; nombre: string; descripcion?: string };
@@ -183,12 +183,12 @@ export interface AppModalsProps {
   categorias: Categoria[];
 
   // Funciones de datos - flexible return types
-  /* eslint-disable @typescript-eslint/no-explicit-any */
+   
   fetchPedidosEliminados: () => Promise<any[]>;
   actualizarItemsPedido: (...args: any[]) => Promise<any>;
   actualizarPreciosMasivo: (productos: Array<{ productoId: string; precioNeto?: number; impInternos?: number; precioFinal?: number }>) => Promise<{ success: boolean; actualizados: number; errores: string[] }>;
   optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[]) => Promise<any>;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+   
 
   // Estado de carga
   guardando: boolean;
@@ -298,7 +298,7 @@ export default function AppModals({
   return (
     <Suspense fallback={null}>
       {/* Modal de Confirmación - siempre visible si hay config */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
+      { }
       {modales.confirm.config?.visible && (
         <Suspense fallback={<ModalFallback />}>
           <ModalConfirmacion
@@ -318,7 +318,7 @@ export default function AppModals({
           />
         </Suspense>
       )}
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
+      { }
 
       {/* Modal de Cliente */}
       {modales.cliente.open && (
@@ -335,7 +335,7 @@ export default function AppModals({
       )}
 
       {/* Modal de Producto */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
+      { }
       {modales.producto.open && (
         <Suspense fallback={<ModalFallback />}>
           <ModalProducto
@@ -373,7 +373,7 @@ export default function AppModals({
           />
         </Suspense>
       )}
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
+      { }
 
       {/* Modal de Usuario */}
       {modales.usuario.open && (
@@ -401,7 +401,7 @@ export default function AppModals({
       )}
 
       {/* Modal de Historial de Pedido */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
+      { }
       {modales.historial.open && (
         <Suspense fallback={<ModalFallback />}>
           <ModalHistorialPedido
@@ -412,7 +412,7 @@ export default function AppModals({
           />
         </Suspense>
       )}
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
+      { }
 
       {/* Modal de Editar Pedido */}
       {modales.editarPedido.open && pedidoEditando && (
@@ -446,7 +446,7 @@ export default function AppModals({
       )}
 
       {/* Modal de Gestión de Rutas */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
+      { }
       {modales.optimizarRuta.open && (
         <Suspense fallback={<ModalFallback />}>
           <ModalGestionRutas
@@ -463,10 +463,10 @@ export default function AppModals({
           />
         </Suspense>
       )}
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
+      { }
 
       {/* Modal de Ficha de Cliente */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
+      { }
       {modales.fichaCliente.open && clienteFicha && (
         <Suspense fallback={<ModalFallback />}>
           <ModalFichaCliente
@@ -514,7 +514,7 @@ export default function AppModals({
           />
         </Suspense>
       )}
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
+      { }
 
       {/* Modal de Compra */}
       {modales.compra.open && (
@@ -529,7 +529,7 @@ export default function AppModals({
       )}
 
       {/* Modal de Detalle de Compra */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
+      { }
       {modales.detalleCompra.open && compraDetalle && (
         <Suspense fallback={<ModalFallback />}>
           <ModalDetalleCompra
@@ -551,7 +551,7 @@ export default function AppModals({
           />
         </Suspense>
       )}
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
+      { }
 
       {/* Modal de Importar Precios */}
       {modales.importarPrecios.open && (

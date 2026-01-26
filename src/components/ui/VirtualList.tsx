@@ -109,7 +109,7 @@ export const VirtualFixedList = memo(function VirtualFixedList<T>({
     )
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const TypedList = List as any;
   return (
     <TypedList
@@ -195,7 +195,7 @@ export const VirtualVariableList = memo(function VirtualVariableList<T>({
     )
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const TypedList = List as any;
   return (
     <TypedList

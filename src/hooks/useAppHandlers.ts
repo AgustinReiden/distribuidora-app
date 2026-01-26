@@ -139,7 +139,7 @@ export interface PedidoOfflineData extends Partial<NuevoPedidoState> {
   usuarioId?: string;
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /** Params for useAppHandlers hook - flexible types to match actual hook signatures */
 export interface UseAppHandlersParams {
   // Hooks de datos
@@ -220,7 +220,7 @@ export interface UseAppHandlersParams {
   guardarPedidoOffline: (...args: any[]) => any;
   guardarMermaOffline: (merma: MermaFormInput) => void;
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
+ 
 
 /** Payment data for handler */
 export interface PagoHandlerData {
@@ -238,7 +238,7 @@ export interface EdicionPedidoData {
   montoPagado?: number;
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /** Return type for useAppHandlers - flexible types for compatibility */
 export interface UseAppHandlersReturn {
   // Búsqueda y filtros
@@ -300,7 +300,7 @@ export interface UseAppHandlersReturn {
   handleToggleActivoProveedor: (proveedor: any) => Promise<void>;
   handleEliminarProveedor: (id: string) => void;
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
+ 
 
 // ============================================================================
 // HOOK PRINCIPAL
@@ -409,7 +409,7 @@ export function useAppHandlers({
   }, [setPaginaActual])
 
   // Componer handlers por dominio - using type assertions for flexibility
-  /* eslint-disable @typescript-eslint/no-explicit-any */
+   
   const clienteHandlers = useClienteHandlers({
     agregarCliente,
     actualizarCliente,
@@ -495,7 +495,7 @@ export function useAppHandlers({
     notify: notify as any,
     user
   })
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+   
 
   const proveedorHandlers = useProveedorHandlers({
     proveedores,

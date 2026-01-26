@@ -134,6 +134,7 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
       const error = err as Error;
       setErroresParseo(['Error al leer el archivo: ' + error.message]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos]);
 
   const procesarDatos = (datos: ExcelRow[]): void => {
