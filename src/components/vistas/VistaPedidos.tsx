@@ -54,6 +54,7 @@ export interface VistaPedidosProps {
   onVolverAPendiente: (pedido: PedidoDB) => void;
   onAsignarTransportista: (pedido: PedidoDB) => void;
   onMarcarEntregado: (pedido: PedidoDB) => void;
+  onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado: (pedido: PedidoDB) => void;
   onEliminarPedido: (pedido: PedidoDB) => void;
   onVerPedidosEliminados?: () => void;
@@ -94,6 +95,7 @@ export default function VistaPedidos({
   onVolverAPendiente,
   onAsignarTransportista,
   onMarcarEntregado,
+  onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onEliminarPedido,
   onVerPedidosEliminados
@@ -210,6 +212,7 @@ export default function VistaPedidos({
             onVolverAPendiente={onVolverAPendiente}
             onAsignarTransportista={onAsignarTransportista}
             onMarcarEntregado={onMarcarEntregado}
+            onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
             onDesmarcarEntregado={onDesmarcarEntregado}
             onEliminarPedido={(pedidoId: string) => {
               const pedido = pedidosParaMostrar.find(p => p.id === pedidoId);
@@ -234,6 +237,7 @@ export default function VistaPedidos({
                 onVolverAPendiente={onVolverAPendiente}
                 onAsignarTransportista={onAsignarTransportista}
                 onMarcarEntregado={onMarcarEntregado}
+                onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
                 onDesmarcarEntregado={onDesmarcarEntregado}
                 onEliminarPedido={(pedidoId: string) => {
                   const p = pedidosPaginados.find(x => x.id === pedidoId);
