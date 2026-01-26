@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2, RotateCcw, LucideIcon } from 'lucide-react';
+import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2, RotateCcw, AlertCircle, LucideIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -34,6 +34,7 @@ export interface AccionesDropdownProps {
   onVolverAPendiente?: (pedido: PedidoDB) => void;
   onAsignar?: (pedido: PedidoDB) => void;
   onEntregado?: (pedido: PedidoDB) => void;
+  onEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
   onEliminar?: (pedidoId: string) => void;
 }
@@ -61,6 +62,7 @@ function AccionesDropdown({
   onVolverAPendiente,
   onAsignar,
   onEntregado,
+  onEntregadoConSalvedad,
   onRevertir,
   onEliminar
 }: AccionesDropdownProps): React.ReactElement {
@@ -128,6 +130,16 @@ function AccionesDropdown({
       });
     }
 
+    // Transportista o admin pueden marcar entregado con salvedad
+    if ((isTransportista || isAdmin) && pedido.estado === 'asignado' && onEntregadoConSalvedad && pedido.items && pedido.items.length > 0) {
+      items.push({
+        label: 'Entrega con Salvedad',
+        icon: AlertCircle,
+        onClick: () => onEntregadoConSalvedad(pedido),
+        className: 'text-amber-700 dark:text-amber-400'
+      });
+    }
+
     // Admin puede revertir si esta entregado
     if (isAdmin && pedido.estado === 'entregado' && onRevertir) {
       items.push({
@@ -150,7 +162,7 @@ function AccionesDropdown({
     }
 
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onRevertir, onEliminar]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onEliminar]);
 
   return (
     <DropdownMenu>

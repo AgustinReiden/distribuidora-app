@@ -32,6 +32,7 @@ export interface PedidoCardProps {
   onVolverAPendiente?: (pedido: PedidoDB) => void;
   onAsignarTransportista?: (pedido: PedidoDB) => void;
   onMarcarEntregado?: (pedido: PedidoDB) => void;
+  onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
   onEliminarPedido?: (pedidoId: string) => void;
 }
@@ -128,6 +129,7 @@ function PedidoCard({
   onVolverAPendiente,
   onAsignarTransportista,
   onMarcarEntregado,
+  onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onEliminarPedido
 }: PedidoCardProps): React.ReactElement {
@@ -179,6 +181,7 @@ function PedidoCard({
             onVolverAPendiente={onVolverAPendiente}
             onAsignar={onAsignarTransportista}
             onEntregado={onMarcarEntregado}
+            onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
             onRevertir={onDesmarcarEntregado}
             onEliminar={onEliminarPedido}
           />

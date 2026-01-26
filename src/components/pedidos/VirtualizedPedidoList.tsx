@@ -38,6 +38,7 @@ export interface VirtualizedPedidoListProps {
   onVolverAPendiente?: (pedido: PedidoDB) => void;
   onAsignarTransportista?: (pedido: PedidoDB) => void;
   onMarcarEntregado?: (pedido: PedidoDB) => void;
+  onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
   onEliminarPedido?: (pedidoId: string) => void;
   height?: number;
@@ -58,6 +59,7 @@ interface VirtualizedPedidoListData {
     onVolverAPendiente?: (pedido: PedidoDB) => void;
     onAsignarTransportista?: (pedido: PedidoDB) => void;
     onMarcarEntregado?: (pedido: PedidoDB) => void;
+    onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
     onDesmarcarEntregado?: (pedido: PedidoDB) => void;
     onEliminarPedido?: (pedidoId: string) => void;
   };
@@ -108,6 +110,7 @@ const PedidoRow = memo(function PedidoRow({ index, style, ariaAttributes }: Pedi
           onVolverAPendiente={handlers?.onVolverAPendiente}
           onAsignarTransportista={handlers?.onAsignarTransportista}
           onMarcarEntregado={handlers?.onMarcarEntregado}
+          onMarcarEntregadoConSalvedad={handlers?.onMarcarEntregadoConSalvedad}
           onDesmarcarEntregado={handlers?.onDesmarcarEntregado}
           onEliminarPedido={handlers?.onEliminarPedido}
         />
@@ -130,6 +133,7 @@ function VirtualizedPedidoList({
   onVolverAPendiente,
   onAsignarTransportista,
   onMarcarEntregado,
+  onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onEliminarPedido,
   height: propHeight
@@ -156,6 +160,7 @@ function VirtualizedPedidoList({
         onVolverAPendiente,
         onAsignarTransportista,
         onMarcarEntregado,
+        onMarcarEntregadoConSalvedad,
         onDesmarcarEntregado,
         onEliminarPedido
       },
@@ -180,6 +185,7 @@ function VirtualizedPedidoList({
     onVolverAPendiente,
     onAsignarTransportista,
     onMarcarEntregado,
+    onMarcarEntregadoConSalvedad,
     onDesmarcarEntregado,
     onEliminarPedido
   ])

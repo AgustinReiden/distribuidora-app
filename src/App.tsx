@@ -1,6 +1,6 @@
 import { useEffect, lazy, Suspense, ReactElement, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, useRendiciones, setErrorNotifier } from './hooks/supabase';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, useRendiciones, useSalvedades, setErrorNotifier } from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
@@ -34,6 +34,7 @@ const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades')
 
 // Modales nuevos
 import ModalRendicion from './components/modals/ModalRendicion';
+import ModalEntregaConSalvedad from './components/modals/ModalEntregaConSalvedad';
 
 function LoadingVista(): ReactElement {
   return (
@@ -71,10 +72,15 @@ function MainApp(): ReactElement {
   const { recorridos, loading: loadingRecorridos, fetchRecorridosHoy, fetchRecorridosPorFecha, crearRecorrido } = useRecorridos();
   const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
   const { presentarRendicion } = useRendiciones();
+  const { registrarSalvedad } = useSalvedades();
 
   // Estado para modal de rendicion
   const [modalRendicionOpen, setModalRendicionOpen] = useState(false);
   const [rendicionParaModal, setRendicionParaModal] = useState<RendicionDBExtended | null>(null);
+
+  // Estado para modal de entrega con salvedad
+  const [modalSalvedadOpen, setModalSalvedadOpen] = useState(false);
+  const [pedidoParaSalvedad, setPedidoParaSalvedad] = useState<PedidoDB | null>(null);
 
   // Datos derivados
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
@@ -215,6 +221,7 @@ function MainApp(): ReactElement {
                 onVolverAPendiente={handlers.handleVolverAPendiente}
                 onAsignarTransportista={(pedido) => { appState.setPedidoAsignando(pedido); modales.asignar.setOpen(true); }}
                 onMarcarEntregado={handlers.handleMarcarEntregado}
+                onMarcarEntregadoConSalvedad={(pedido) => { setPedidoParaSalvedad(pedido); setModalSalvedadOpen(true); }}
                 onDesmarcarEntregado={handlers.handleDesmarcarEntregado}
                 onEliminarPedido={(pedido: PedidoDB) => handlers.handleEliminarPedido(pedido.id)}
                 onVerPedidosEliminados={() => modales.pedidosEliminados.setOpen(true)}
@@ -311,6 +318,28 @@ function MainApp(): ReactElement {
           onClose={() => {
             setModalRendicionOpen(false);
             setRendicionParaModal(null);
+          }}
+        />
+      )}
+
+      {/* Modal de Entrega con Salvedad */}
+      {modalSalvedadOpen && pedidoParaSalvedad && (
+        <ModalEntregaConSalvedad
+          pedido={pedidoParaSalvedad}
+          onSave={async (salvedades) => {
+            const results = await Promise.all(
+              salvedades.map(s => registrarSalvedad(s))
+            );
+            return results;
+          }}
+          onMarcarEntregado={async () => {
+            await cambiarEstado(pedidoParaSalvedad.id, 'entregado');
+            refetchMetricas();
+            notify.success(`Pedido #${pedidoParaSalvedad.id} entregado con salvedades registradas`, { persist: true });
+          }}
+          onClose={() => {
+            setModalSalvedadOpen(false);
+            setPedidoParaSalvedad(null);
           }}
         />
       )}

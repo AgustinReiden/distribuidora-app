@@ -15,10 +15,13 @@ import {
   ChevronUp,
   Filter,
   RefreshCw,
-  Eye
+  Eye,
+  Plus,
+  X
 } from 'lucide-react'
-import { useRendiciones } from '../../hooks/supabase'
-import type { RendicionDBExtended, EstadoRendicion } from '../../types'
+import { useRendiciones, useUsuarios, useRecorridos } from '../../hooks/supabase'
+import { useNotification } from '../../contexts/NotificationContext'
+import type { RendicionDBExtended, EstadoRendicion, PerfilDB } from '../../types'
 
 interface RendicionCardProps {
   rendicion: RendicionDBExtended;
@@ -219,17 +222,111 @@ function RendicionCard({ rendicion, onAprobar, onRechazar, onObservar, onVerDeta
   )
 }
 
+// Modal para crear rendicion
+interface ModalCrearRendicionProps {
+  transportistas: PerfilDB[];
+  fecha: string;
+  onCrear: (transportistaId: string) => Promise<void>;
+  onClose: () => void;
+  creando: boolean;
+}
+
+function ModalCrearRendicion({ transportistas, fecha, onCrear, onClose, creando }: ModalCrearRendicionProps) {
+  const [transportistaId, setTransportistaId] = useState<string>('')
+
+  const handleCrear = async () => {
+    if (!transportistaId) return
+    await onCrear(transportistaId)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+          <div className="flex items-center gap-2">
+            <Plus className="w-5 h-5 text-green-600" />
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Crear Rendicion</h2>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div>
+            <p className="text-sm text-gray-500 mb-2">
+              Crear rendicion para la fecha: <span className="font-medium">{new Date(fecha + 'T12:00:00').toLocaleDateString('es-AR')}</span>
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Transportista
+            </label>
+            <select
+              value={transportistaId}
+              onChange={(e) => setTransportistaId(e.target.value)}
+              className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            >
+              <option value="">Seleccionar transportista...</option>
+              {transportistas.map(t => (
+                <option key={t.id} value={t.id}>{t.nombre}</option>
+              ))}
+            </select>
+          </div>
+
+          <p className="text-xs text-gray-500">
+            Se creara una rendicion para los pedidos entregados por este transportista en la fecha seleccionada.
+          </p>
+        </div>
+
+        <div className="flex gap-3 p-4 border-t dark:border-gray-700">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleCrear}
+            disabled={!transportistaId || creando}
+            className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg flex items-center justify-center gap-2"
+          >
+            {creando ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Creando...
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                Crear Rendicion
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function VistaRendiciones(): React.ReactElement {
+  const notify = useNotification()
   const {
     rendiciones,
     loading,
     fetchRendicionesPorFecha,
     revisarRendicion,
+    crearRendicion,
     getEstadisticas
   } = useRendiciones()
+  const { transportistas } = useUsuarios()
+  const { fetchRecorridosPorFecha, recorridos } = useRecorridos()
 
   const [fechaFiltro, setFechaFiltro] = useState<string>(new Date().toISOString().split('T')[0])
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoRendicion | 'todas'>('todas')
+  const [modalCrearOpen, setModalCrearOpen] = useState(false)
+  const [creandoRendicion, setCreandoRendicion] = useState(false)
   const [estadisticas, setEstadisticas] = useState<{
     total: number;
     pendientes: number;
@@ -240,8 +337,40 @@ export default function VistaRendiciones(): React.ReactElement {
   } | null>(null)
 
   const cargarDatos = useCallback(async () => {
-    await fetchRendicionesPorFecha(fechaFiltro)
-  }, [fechaFiltro, fetchRendicionesPorFecha])
+    await Promise.all([
+      fetchRendicionesPorFecha(fechaFiltro),
+      fetchRecorridosPorFecha(fechaFiltro)
+    ])
+  }, [fechaFiltro, fetchRendicionesPorFecha, fetchRecorridosPorFecha])
+
+  const handleCrearRendicion = async (transportistaId: string) => {
+    setCreandoRendicion(true)
+    try {
+      // Buscar recorrido del transportista en esta fecha
+      const recorrido = recorridos.find(r => r.transportista_id === transportistaId)
+
+      if (!recorrido) {
+        notify.error('No hay recorrido para este transportista en la fecha seleccionada')
+        return
+      }
+
+      // Verificar si ya existe una rendicion para este recorrido
+      const yaExiste = rendiciones.some(r => r.recorrido_id === recorrido.id)
+      if (yaExiste) {
+        notify.warning('Ya existe una rendicion para este transportista en esta fecha')
+        return
+      }
+
+      await crearRendicion(String(recorrido.id), transportistaId)
+      notify.success('Rendicion creada correctamente')
+      setModalCrearOpen(false)
+      await cargarDatos()
+    } catch (error) {
+      notify.error('Error al crear la rendicion: ' + (error as Error).message)
+    } finally {
+      setCreandoRendicion(false)
+    }
+  }
 
   // Calcular estadísticas cuando cambian los datos
   useEffect(() => {
@@ -290,14 +419,23 @@ export default function VistaRendiciones(): React.ReactElement {
           </h1>
           <p className="text-gray-500 mt-1">Revisa y aprueba las rendiciones diarias</p>
         </div>
-        <button
-          onClick={cargarDatos}
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg flex items-center gap-2"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Actualizar
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setModalCrearOpen(true)}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Crear Rendicion
+          </button>
+          <button
+            onClick={cargarDatos}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Actualizar
+          </button>
+        </div>
       </div>
 
       {/* Filtros */}
@@ -379,6 +517,17 @@ export default function VistaRendiciones(): React.ReactElement {
             />
           ))}
         </div>
+      )}
+
+      {/* Modal crear rendicion */}
+      {modalCrearOpen && (
+        <ModalCrearRendicion
+          transportistas={transportistas}
+          fecha={fechaFiltro}
+          onCrear={handleCrearRendicion}
+          onClose={() => setModalCrearOpen(false)}
+          creando={creandoRendicion}
+        />
       )}
     </div>
   )
