@@ -51,6 +51,7 @@ export interface VistaPedidosProps {
   onVerHistorial: (pedido: PedidoDB) => void;
   onEditarPedido: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion: (pedido: PedidoDB) => void;
+  onVolverAPendiente: (pedido: PedidoDB) => void;
   onAsignarTransportista: (pedido: PedidoDB) => void;
   onMarcarEntregado: (pedido: PedidoDB) => void;
   onDesmarcarEntregado: (pedido: PedidoDB) => void;
@@ -90,6 +91,7 @@ export default function VistaPedidos({
   onVerHistorial,
   onEditarPedido,
   onMarcarEnPreparacion,
+  onVolverAPendiente,
   onAsignarTransportista,
   onMarcarEntregado,
   onDesmarcarEntregado,
@@ -205,6 +207,7 @@ export default function VistaPedidos({
             onVerHistorial={onVerHistorial}
             onEditarPedido={onEditarPedido}
             onMarcarEnPreparacion={onMarcarEnPreparacion}
+            onVolverAPendiente={onVolverAPendiente}
             onAsignarTransportista={onAsignarTransportista}
             onMarcarEntregado={onMarcarEntregado}
             onDesmarcarEntregado={onDesmarcarEntregado}
@@ -228,6 +231,7 @@ export default function VistaPedidos({
                 onVerHistorial={onVerHistorial}
                 onEditarPedido={onEditarPedido}
                 onMarcarEnPreparacion={onMarcarEnPreparacion}
+                onVolverAPendiente={onVolverAPendiente}
                 onAsignarTransportista={onAsignarTransportista}
                 onMarcarEntregado={onMarcarEntregado}
                 onDesmarcarEntregado={onDesmarcarEntregado}

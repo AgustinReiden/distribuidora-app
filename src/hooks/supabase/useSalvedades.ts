@@ -20,6 +20,7 @@ export function useSalvedades(): UseSalvedadesReturn {
   const [loading, setLoading] = useState<boolean>(false)
 
   // Query base para salvedades con joins
+  // Nota: evitamos el join anidado pedidos->perfiles porque genera errores de FK en Supabase
   const buildSalvedadesQuery = () => {
     return supabase
       .from('salvedades_items')
@@ -30,8 +31,8 @@ export function useSalvedades(): UseSalvedadesReturn {
           id,
           total,
           estado,
-          cliente:clientes!cliente_id(id, nombre_fantasia),
-          transportista:perfiles!transportista_id(id, nombre)
+          transportista_id,
+          cliente:clientes!cliente_id(id, nombre_fantasia)
         ),
         reportado:perfiles!reportado_por(id, nombre),
         resuelto:perfiles!resuelto_por(id, nombre)
@@ -39,13 +40,12 @@ export function useSalvedades(): UseSalvedadesReturn {
   }
 
   // Transformar datos para compatibilidad con tipos extendidos
-   
   const transformarSalvedad = (s: any): SalvedadItemDBExtended => ({
     ...s,
     producto_nombre: s.producto?.nombre,
     producto_codigo: s.producto?.codigo,
     cliente_nombre: s.pedido?.cliente?.nombre_fantasia,
-    transportista_nombre: s.pedido?.transportista?.nombre,
+    transportista_id: s.pedido?.transportista_id,
     pedido_estado: s.pedido?.estado,
     pedido_total: s.pedido?.total,
     reportado_por_nombre: s.reportado?.nombre,

@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2, LucideIcon } from 'lucide-react';
+import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2, RotateCcw, LucideIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -31,6 +31,7 @@ export interface AccionesDropdownProps {
   onHistorial?: (pedido: PedidoDB) => void;
   onEditar?: (pedido: PedidoDB) => void;
   onPreparar?: (pedido: PedidoDB) => void;
+  onVolverAPendiente?: (pedido: PedidoDB) => void;
   onAsignar?: (pedido: PedidoDB) => void;
   onEntregado?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
@@ -57,6 +58,7 @@ function AccionesDropdown({
   onHistorial,
   onEditar,
   onPreparar,
+  onVolverAPendiente,
   onAsignar,
   onEntregado,
   onRevertir,
@@ -93,6 +95,16 @@ function AccionesDropdown({
         icon: Package,
         onClick: () => onPreparar(pedido),
         className: 'text-orange-700 dark:text-orange-400'
+      });
+    }
+
+    // Admin puede volver a pendiente si esta en preparacion o asignado
+    if (isAdmin && (pedido.estado === 'en_preparacion' || pedido.estado === 'asignado') && onVolverAPendiente) {
+      items.push({
+        label: 'Volver a Pendiente',
+        icon: RotateCcw,
+        onClick: () => onVolverAPendiente(pedido),
+        className: 'text-gray-700 dark:text-gray-400'
       });
     }
 
@@ -138,7 +150,7 @@ function AccionesDropdown({
     }
 
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onAsignar, onEntregado, onRevertir, onEliminar]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onRevertir, onEliminar]);
 
   return (
     <DropdownMenu>

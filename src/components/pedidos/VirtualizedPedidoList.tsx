@@ -35,6 +35,7 @@ export interface VirtualizedPedidoListProps {
   onVerHistorial?: (pedido: PedidoDB) => void;
   onEditarPedido?: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
+  onVolverAPendiente?: (pedido: PedidoDB) => void;
   onAsignarTransportista?: (pedido: PedidoDB) => void;
   onMarcarEntregado?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
@@ -54,6 +55,7 @@ interface VirtualizedPedidoListData {
     onVerHistorial?: (pedido: PedidoDB) => void;
     onEditarPedido?: (pedido: PedidoDB) => void;
     onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
+    onVolverAPendiente?: (pedido: PedidoDB) => void;
     onAsignarTransportista?: (pedido: PedidoDB) => void;
     onMarcarEntregado?: (pedido: PedidoDB) => void;
     onDesmarcarEntregado?: (pedido: PedidoDB) => void;
@@ -103,6 +105,7 @@ const PedidoRow = memo(function PedidoRow({ index, style, ariaAttributes }: Pedi
           onVerHistorial={handlers?.onVerHistorial}
           onEditarPedido={handlers?.onEditarPedido}
           onMarcarEnPreparacion={handlers?.onMarcarEnPreparacion}
+          onVolverAPendiente={handlers?.onVolverAPendiente}
           onAsignarTransportista={handlers?.onAsignarTransportista}
           onMarcarEntregado={handlers?.onMarcarEntregado}
           onDesmarcarEntregado={handlers?.onDesmarcarEntregado}
@@ -124,6 +127,7 @@ function VirtualizedPedidoList({
   onVerHistorial,
   onEditarPedido,
   onMarcarEnPreparacion,
+  onVolverAPendiente,
   onAsignarTransportista,
   onMarcarEntregado,
   onDesmarcarEntregado,
@@ -149,6 +153,7 @@ function VirtualizedPedidoList({
         onVerHistorial,
         onEditarPedido,
         onMarcarEnPreparacion,
+        onVolverAPendiente,
         onAsignarTransportista,
         onMarcarEntregado,
         onDesmarcarEntregado,
@@ -172,6 +177,7 @@ function VirtualizedPedidoList({
     onVerHistorial,
     onEditarPedido,
     onMarcarEnPreparacion,
+    onVolverAPendiente,
     onAsignarTransportista,
     onMarcarEntregado,
     onDesmarcarEntregado,

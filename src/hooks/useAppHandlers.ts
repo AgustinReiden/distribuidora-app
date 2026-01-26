@@ -276,6 +276,7 @@ export interface UseAppHandlersReturn {
   handleMarcarEntregado: (pedido: PedidoDB) => void;
   handleDesmarcarEntregado: (pedido: PedidoDB) => void;
   handleMarcarEnPreparacion: (pedido: PedidoDB) => void;
+  handleVolverAPendiente: (pedido: PedidoDB) => void;
   handleAsignarTransportista: (transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
   handleEliminarPedido: (id: string) => void;
   handleVerHistorial: (pedido: PedidoDB) => Promise<void>;

@@ -19,15 +19,15 @@ export function useRendiciones(): UseRendicionesReturn {
   const [rendicionActual, setRendicionActual] = useState<RendicionDBExtended | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
 
-  // Fetch rendiciones por fecha - usando tabla directa con joins
+  // Fetch rendiciones por fecha - usando tabla directa
   const fetchRendicionesPorFecha = useCallback(async (fecha: string): Promise<RendicionDBExtended[]> => {
     setLoading(true)
     try {
+      // Query simplificada sin joins problemáticos
       const { data, error } = await supabase
         .from('rendiciones')
         .select(`
           *,
-          transportista:perfiles!transportista_id(id, nombre),
           recorrido:recorridos!recorrido_id(id, total_pedidos, pedidos_entregados, total_facturado, total_cobrado)
         `)
         .eq('fecha', fecha)
@@ -35,10 +35,23 @@ export function useRendiciones(): UseRendicionesReturn {
 
       if (error) throw error
 
+      // Obtener nombres de transportistas por separado
+      const transportistaIds = [...new Set((data || []).map(r => r.transportista_id).filter(Boolean))]
+      let perfilesMap: Record<string, string> = {}
+
+      if (transportistaIds.length > 0) {
+        const { data: perfiles } = await supabase
+          .from('perfiles')
+          .select('id, nombre')
+          .in('id', transportistaIds)
+
+        perfilesMap = (perfiles || []).reduce((acc, p) => ({ ...acc, [p.id]: p.nombre }), {})
+      }
+
       // Transformar datos para compatibilidad
       const rendicionesData = (data || []).map(r => ({
         ...r,
-        transportista_nombre: r.transportista?.nombre,
+        transportista_nombre: perfilesMap[r.transportista_id] || 'Sin asignar',
         total_pedidos: r.recorrido?.total_pedidos || 0,
         pedidos_entregados: r.recorrido?.pedidos_entregados || 0,
         total_facturado: r.recorrido?.total_facturado || 0,
@@ -65,7 +78,6 @@ export function useRendiciones(): UseRendicionesReturn {
         .from('rendiciones')
         .select(`
           *,
-          transportista:perfiles!transportista_id(id, nombre),
           items:rendicion_items(*),
           ajustes:rendicion_ajustes(*)
         `)
@@ -93,7 +105,6 @@ export function useRendiciones(): UseRendicionesReturn {
         .from('rendiciones')
         .select(`
           *,
-          transportista:perfiles!transportista_id(id, nombre),
           items:rendicion_items(*),
           ajustes:rendicion_ajustes(*)
         `)
@@ -101,7 +112,19 @@ export function useRendiciones(): UseRendicionesReturn {
         .single()
 
       if (error) throw error
-      return data as RendicionDBExtended
+
+      // Obtener nombre del transportista si existe
+      let transportistaNombre = 'Sin asignar'
+      if (data.transportista_id) {
+        const { data: perfil } = await supabase
+          .from('perfiles')
+          .select('nombre')
+          .eq('id', data.transportista_id)
+          .single()
+        transportistaNombre = perfil?.nombre || 'Sin asignar'
+      }
+
+      return { ...data, transportista_nombre: transportistaNombre } as RendicionDBExtended
     } catch (error) {
       notifyError('Error al cargar rendición: ' + (error as Error).message)
       return null
@@ -117,10 +140,7 @@ export function useRendiciones(): UseRendicionesReturn {
     try {
       let query = supabase
         .from('rendiciones')
-        .select(`
-          *,
-          transportista:perfiles!transportista_id(id, nombre)
-        `)
+        .select('*')
         .eq('transportista_id', transportistaId)
         .order('fecha', { ascending: false })
 
@@ -130,9 +150,20 @@ export function useRendiciones(): UseRendicionesReturn {
       const { data, error } = await query
       if (error) throw error
 
+      // Obtener nombre del transportista
+      let transportistaNombre = 'Sin asignar'
+      if (transportistaId) {
+        const { data: perfil } = await supabase
+          .from('perfiles')
+          .select('nombre')
+          .eq('id', transportistaId)
+          .single()
+        transportistaNombre = perfil?.nombre || 'Sin asignar'
+      }
+
       return (data || []).map(r => ({
         ...r,
-        transportista_nombre: r.transportista?.nombre
+        transportista_nombre: transportistaNombre
       })) as RendicionDBExtended[]
     } catch (error) {
       notifyError('Error al cargar rendiciones: ' + (error as Error).message)
