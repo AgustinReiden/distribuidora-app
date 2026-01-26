@@ -241,9 +241,16 @@ export default function VistaRendiciones(): React.ReactElement {
 
   const cargarDatos = useCallback(async () => {
     await fetchRendicionesPorFecha(fechaFiltro)
-    const stats = await getEstadisticas(fechaFiltro, fechaFiltro)
-    setEstadisticas(stats)
-  }, [fechaFiltro, fetchRendicionesPorFecha, getEstadisticas])
+  }, [fechaFiltro, fetchRendicionesPorFecha])
+
+  // Calcular estadísticas cuando cambian los datos
+  useEffect(() => {
+    const calcular = async () => {
+      const stats = await getEstadisticas()
+      setEstadisticas(stats)
+    }
+    calcular()
+  }, [rendiciones, getEstadisticas])
 
   useEffect(() => {
     cargarDatos()

@@ -221,9 +221,16 @@ export default function VistaSalvedades(): React.ReactElement {
     } else {
       await fetchSalvedadesPorFecha(fechaDesde, fechaHasta)
     }
-    const stats = await getEstadisticas(fechaDesde, fechaHasta)
-    setEstadisticas(stats)
-  }, [filtroEstado, fechaDesde, fechaHasta, fetchSalvedadesPendientes, fetchSalvedadesPorFecha, getEstadisticas])
+  }, [filtroEstado, fechaDesde, fechaHasta, fetchSalvedadesPendientes, fetchSalvedadesPorFecha])
+
+  // Calcular estadísticas cuando cambian los datos
+  useEffect(() => {
+    const calcular = async () => {
+      const stats = await getEstadisticas()
+      setEstadisticas(stats)
+    }
+    calcular()
+  }, [salvedades, getEstadisticas])
 
   useEffect(() => {
     cargarDatos()
