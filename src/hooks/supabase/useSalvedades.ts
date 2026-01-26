@@ -229,43 +229,9 @@ export function useSalvedades(): UseSalvedadesReturn {
     return { success: true }
   }
 
-  // Obtener estadísticas - con fallback a cálculo local
-  const getEstadisticas = async (desde?: string, hasta?: string): Promise<EstadisticasSalvedades> => {
-    try {
-      const { data, error } = await supabase.rpc('obtener_estadisticas_salvedades', {
-        p_fecha_desde: desde || null,
-        p_fecha_hasta: hasta || null
-      })
-
-      if (error) {
-        // Si el RPC falla, calcular manualmente
-        console.warn('RPC estadisticas salvedades fallo, usando datos locales:', error.message)
-        return calcularEstadisticasLocales()
-      }
-
-       
-      const stats = data as any
-
-      return {
-        total: stats?.total || 0,
-        pendientes: stats?.pendientes || 0,
-        resueltas: stats?.resueltas || 0,
-        anuladas: stats?.anuladas || 0,
-        monto_total_afectado: stats?.monto_total_afectado || 0,
-        monto_pendiente: stats?.monto_pendiente || 0,
-        por_motivo: stats?.por_motivo as Record<MotivoSalvedad, number> | undefined,
-        por_resolucion: stats?.por_resolucion as Record<EstadoResolucionSalvedad, number> | undefined,
-        por_producto: stats?.por_producto,
-        por_transportista: stats?.por_transportista
-      }
-    } catch (error) {
-      notifyError('Error al obtener estadísticas: ' + (error as Error).message)
-      return calcularEstadisticasLocales()
-    }
-  }
-
-  // Calcular estadísticas desde los datos locales
-  const calcularEstadisticasLocales = (): EstadisticasSalvedades => {
+  // Obtener estadísticas - cálculo directo desde datos locales
+  // (No usamos RPC porque puede no existir en Supabase)
+  const getEstadisticas = useCallback(async (): Promise<EstadisticasSalvedades> => {
     return {
       total: salvedades.length,
       pendientes: salvedades.filter(s => s.estado_resolucion === 'pendiente').length,
@@ -274,7 +240,7 @@ export function useSalvedades(): UseSalvedadesReturn {
       monto_total_afectado: salvedades.reduce((sum, s) => sum + (s.monto_afectado || 0), 0),
       monto_pendiente: salvedades.filter(s => s.estado_resolucion === 'pendiente').reduce((sum, s) => sum + (s.monto_afectado || 0), 0)
     }
-  }
+  }, [salvedades])
 
   // Refetch
   const refetch = useCallback(async () => {

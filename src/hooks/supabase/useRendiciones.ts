@@ -278,48 +278,9 @@ export function useRendiciones(): UseRendicionesReturn {
     }
   }
 
-  // Obtener estadísticas - simplificado para evitar errores
-  const getEstadisticas = async (
-    desde?: string,
-    hasta?: string,
-    transportistaId?: string
-  ): Promise<EstadisticasRendiciones> => {
-    try {
-      // Intentar usar el RPC
-      const { data, error } = await supabase.rpc('obtener_estadisticas_rendiciones', {
-        p_fecha_desde: desde || null,
-        p_fecha_hasta: hasta || null,
-        p_transportista_id: transportistaId || null
-      })
-
-      if (error) {
-        // Si el RPC falla, calcular manualmente desde los datos locales
-        console.warn('RPC estadisticas fallo, usando datos locales:', error.message)
-        return calcularEstadisticasLocales()
-      }
-
-       
-      const stats = data as any
-
-      return {
-        total: stats?.total || 0,
-        pendientes: stats?.pendientes || 0,
-        aprobadas: stats?.aprobadas || 0,
-        rechazadas: stats?.rechazadas || 0,
-        con_observaciones: stats?.con_observaciones || 0,
-        total_efectivo_esperado: stats?.total_efectivo_esperado || 0,
-        total_rendido: stats?.total_rendido || 0,
-        total_diferencias: stats?.total_diferencias || 0,
-        por_transportista: stats?.por_transportista || []
-      }
-    } catch (error) {
-      notifyError('Error al obtener estadísticas: ' + (error as Error).message)
-      return calcularEstadisticasLocales()
-    }
-  }
-
-  // Calcular estadísticas desde los datos locales
-  const calcularEstadisticasLocales = (): EstadisticasRendiciones => {
+  // Obtener estadísticas - cálculo directo desde datos locales
+  // (No usamos RPC porque puede no existir en Supabase)
+  const getEstadisticas = useCallback(async (): Promise<EstadisticasRendiciones> => {
     return {
       total: rendiciones.length,
       pendientes: rendiciones.filter(r => r.estado === 'pendiente' || r.estado === 'presentada').length,
@@ -330,7 +291,7 @@ export function useRendiciones(): UseRendicionesReturn {
       total_rendido: rendiciones.filter(r => r.estado === 'aprobada').reduce((sum, r) => sum + (r.monto_rendido || 0), 0),
       total_diferencias: rendiciones.filter(r => r.estado === 'aprobada').reduce((sum, r) => sum + (r.diferencia || 0), 0)
     }
-  }
+  }, [rendiciones])
 
   // Refetch del día actual
   const refetch = useCallback(async () => {
