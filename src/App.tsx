@@ -212,6 +212,7 @@ function MainApp(): ReactElement {
                 onVerHistorial={handlers.handleVerHistorial}
                 onEditarPedido={handlers.handleEditarPedido}
                 onMarcarEnPreparacion={handlers.handleMarcarEnPreparacion}
+                onVolverAPendiente={handlers.handleVolverAPendiente}
                 onAsignarTransportista={(pedido) => { appState.setPedidoAsignando(pedido); modales.asignar.setOpen(true); }}
                 onMarcarEntregado={handlers.handleMarcarEntregado}
                 onDesmarcarEntregado={handlers.handleDesmarcarEntregado}

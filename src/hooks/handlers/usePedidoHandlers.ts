@@ -475,6 +475,34 @@ export function usePedidoHandlers({
     })
   }, [cambiarEstado, refetchMetricas, notify, modales.confirm, setGuardando])
 
+  const handleVolverAPendiente = useCallback((pedido: PedidoDB): void => {
+    modales.confirm.setConfig({
+      visible: true,
+      titulo: 'Volver a pendiente',
+      mensaje: `¿Volver el pedido #${pedido.id} a estado "Pendiente"? ${pedido.transportista_id ? 'Se quitará el transportista asignado.' : ''}`,
+      tipo: 'warning',
+      onConfirm: async () => {
+        setGuardando(true)
+        try {
+          // Primero quitar transportista si tiene
+          if (pedido.transportista_id) {
+            await asignarTransportista(pedido.id, null, false)
+          }
+          // Luego cambiar estado a pendiente
+          await cambiarEstado(pedido.id, 'pendiente')
+          refetchMetricas()
+          notify.warning(`Pedido #${pedido.id} vuelto a pendiente`)
+        } catch (e) {
+          const error = e as Error
+          notify.error(error.message)
+        } finally {
+          setGuardando(false)
+          modales.confirm.setConfig({ visible: false })
+        }
+      }
+    })
+  }, [asignarTransportista, cambiarEstado, refetchMetricas, notify, modales.confirm, setGuardando])
+
   const handleAsignarTransportista = useCallback(async (transportistaId: string | null, marcarListo: boolean = false): Promise<void> => {
     if (!pedidoAsignando) return
     setGuardando(true)
@@ -621,6 +649,7 @@ export function usePedidoHandlers({
     handleMarcarEntregado,
     handleDesmarcarEntregado,
     handleMarcarEnPreparacion,
+    handleVolverAPendiente,
     handleAsignarTransportista,
     handleEliminarPedido,
     // History and editing
