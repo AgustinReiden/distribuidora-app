@@ -38,7 +38,7 @@ export interface StockWarning {
 /** Categoria option type - can be string or object */
 export type CategoriaOption = string | { id: string; nombre: string; descripcion?: string };
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /** Props del componente ModalPedido */
 export interface ModalPedidoProps {
   /** Lista de productos disponibles */
@@ -78,7 +78,7 @@ export interface ModalPedidoProps {
   /** Si está offline */
   isOffline?: boolean;
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
+ 
 
 const ModalPedido = memo(function ModalPedido({
   productos,

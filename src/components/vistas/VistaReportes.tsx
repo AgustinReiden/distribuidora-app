@@ -133,6 +133,7 @@ export default function VistaReportes({
     }
   };
 
+   
   useEffect(() => {
     if (activeTab === 'cuentas' && reporteCuentas.length === 0) handleCargarReporteFinanciero('cuentas');
     if (activeTab === 'rentabilidad' && reporteRentabilidad.productos.length === 0) handleCargarReporteFinanciero('rentabilidad');

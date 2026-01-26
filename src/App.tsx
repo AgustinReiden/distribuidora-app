@@ -1,6 +1,6 @@
 import { useEffect, lazy, Suspense, ReactElement, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, useRendiciones, useSalvedades, setErrorNotifier } from './hooks/supabase';
+import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, useRendiciones, setErrorNotifier } from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
@@ -70,8 +70,7 @@ function MainApp(): ReactElement {
   const { compras, proveedores, registrarCompra, anularCompra, agregarProveedor, actualizarProveedor, loading: loadingCompras, refetch: refetchCompras, refetchProveedores } = useCompras();
   const { recorridos, loading: loadingRecorridos, fetchRecorridosHoy, fetchRecorridosPorFecha, crearRecorrido } = useRecorridos();
   const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
-  const { rendiciones, rendicionActual, loading: loadingRendiciones, crearRendicion, presentarRendicion, revisarRendicion, fetchRendicionActual, fetchRendicionesPorFecha } = useRendiciones();
-  const { salvedades, loading: loadingSalvedades, registrarSalvedad, resolverSalvedad, fetchSalvedadesPendientes, refetch: refetchSalvedades } = useSalvedades();
+  const { presentarRendicion } = useRendiciones();
 
   // Estado para modal de rendicion
   const [modalRendicionOpen, setModalRendicionOpen] = useState(false);
@@ -81,7 +80,6 @@ function MainApp(): ReactElement {
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
 
   // Handlers (consolidados) - using type assertions for hook compatibility
-  /* eslint-disable @typescript-eslint/no-explicit-any */
   const handlers = useAppHandlers({
     clientes, productos, pedidos, proveedores,
     agregarCliente, actualizarCliente, eliminarCliente,
@@ -110,7 +108,6 @@ function MainApp(): ReactElement {
     guardarPedidoOffline: guardarPedidoOffline as any,
     guardarMermaOffline
   });
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   // Cargar recorridos cuando se cambia a la vista
   useEffect(() => {
@@ -262,9 +259,7 @@ function MainApp(): ReactElement {
             )}
 
             {vista === 'compras' && isAdmin && (
-              /* eslint-disable @typescript-eslint/no-explicit-any */
               <VistaCompras compras={compras as any} proveedores={proveedores as any} loading={loadingCompras} isAdmin={isAdmin} onNuevaCompra={handlers.handleNuevaCompra} onVerDetalle={handlers.handleVerDetalleCompra as any} onAnularCompra={handlers.handleAnularCompra} />
-              /* eslint-enable @typescript-eslint/no-explicit-any */
             )}
 
             {vista === 'proveedores' && isAdmin && (
@@ -283,7 +278,6 @@ function MainApp(): ReactElement {
       </main>
 
       {/* Modales */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
       <AppModals
         appState={{ ...appState, filtros, setFiltros } as unknown as AppModalsAppState}
         handlers={handlers as unknown as AppModalsHandlers}
@@ -293,12 +287,9 @@ function MainApp(): ReactElement {
         guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as any} errorOptimizacion={errorOptimizacion}
         user={user} isAdmin={isAdmin} isPreventista={isPreventista} isOnline={isOnline}
       />
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
 
       {/* Indicador de estado offline */}
-      {/* eslint-disable @typescript-eslint/no-explicit-any */}
       <OfflineIndicator isOnline={isOnline} pedidosPendientes={pedidosPendientes as any} mermasPendientes={mermasPendientes as any} sincronizando={sincronizando} onSincronizar={handleSincronizar} clientes={clientes as any} />
-      {/* eslint-enable @typescript-eslint/no-explicit-any */}
 
       {/* PWA Prompt */}
       <PWAPrompt />

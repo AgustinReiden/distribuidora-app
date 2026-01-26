@@ -39,7 +39,7 @@ export function useSalvedades(): UseSalvedadesReturn {
   }
 
   // Transformar datos para compatibilidad con tipos extendidos
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const transformarSalvedad = (s: any): SalvedadItemDBExtended => ({
     ...s,
     producto_nombre: s.producto?.nombre,
@@ -149,7 +149,7 @@ export function useSalvedades(): UseSalvedadesReturn {
         return { success: false, error: error.message }
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const result = data as any
 
       if (!result?.success) {
@@ -186,7 +186,7 @@ export function useSalvedades(): UseSalvedadesReturn {
       throw error
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = data as any
 
     if (!result?.success) {
@@ -215,7 +215,7 @@ export function useSalvedades(): UseSalvedadesReturn {
       throw error
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = data as any
 
     if (!result?.success) {
@@ -243,7 +243,7 @@ export function useSalvedades(): UseSalvedadesReturn {
         return calcularEstadisticasLocales()
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const stats = data as any
 
       return {

@@ -273,6 +273,7 @@ export function useDashboard(usuarioFiltro: string | null = null): UseDashboardR
     }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { calcularMetricas() }, [])
 
   return {

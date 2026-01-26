@@ -45,6 +45,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen')
   const [expandedPedido, setExpandedPedido] = useState<string | null>(null)
 
+   
   useEffect(() => {
     if (cliente?.id) {
       fetchPagosCliente(cliente.id)

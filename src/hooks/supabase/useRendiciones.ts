@@ -175,7 +175,7 @@ export function useRendiciones(): UseRendicionesReturn {
       throw error
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = data as any
 
     if (!result?.success) {
@@ -233,7 +233,7 @@ export function useRendiciones(): UseRendicionesReturn {
       throw error
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = data as any
 
     if (!result?.success) {
@@ -267,7 +267,7 @@ export function useRendiciones(): UseRendicionesReturn {
         return calcularEstadisticasLocales()
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const stats = data as any
 
       return {

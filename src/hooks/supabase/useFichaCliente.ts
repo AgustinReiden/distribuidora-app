@@ -102,6 +102,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
     }
   }
 
+   
   useEffect(() => {
     if (clienteId) fetchDatosCliente()
   }, [clienteId])
