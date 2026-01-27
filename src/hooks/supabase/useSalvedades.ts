@@ -52,6 +52,27 @@ export function useSalvedades(): UseSalvedadesReturn {
     resuelto_por_nombre: s.resuelto?.nombre
   })
 
+  // Fetch todas las salvedades (para análisis y métricas)
+  const fetchTodasSalvedades = useCallback(async (): Promise<SalvedadItemDBExtended[]> => {
+    setLoading(true)
+    try {
+      const { data, error } = await buildSalvedadesQuery()
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      const salvedadesData = (data || []).map(transformarSalvedad)
+      setSalvedades(salvedadesData)
+      return salvedadesData
+    } catch (error) {
+      notifyError('Error al cargar salvedades: ' + (error as Error).message)
+      setSalvedades([])
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   // Fetch salvedades pendientes - usando tabla directa
   const fetchSalvedadesPendientes = useCallback(async (): Promise<SalvedadItemDBExtended[]> => {
     setLoading(true)
@@ -194,8 +215,8 @@ export function useSalvedades(): UseSalvedadesReturn {
       throw new Error(result?.error)
     }
 
-    // Refrescar lista
-    await fetchSalvedadesPendientes()
+    // Refrescar lista (todas, no solo pendientes)
+    await fetchTodasSalvedades()
 
     return {
       success: true,
@@ -223,8 +244,8 @@ export function useSalvedades(): UseSalvedadesReturn {
       throw new Error(result?.error)
     }
 
-    // Refrescar lista
-    await fetchSalvedadesPendientes()
+    // Refrescar lista (todas, no solo pendientes)
+    await fetchTodasSalvedades()
 
     return { success: true }
   }
@@ -242,10 +263,10 @@ export function useSalvedades(): UseSalvedadesReturn {
     }
   }, [salvedades])
 
-  // Refetch
+  // Refetch (carga todas las salvedades para análisis completo)
   const refetch = useCallback(async () => {
-    await fetchSalvedadesPendientes()
-  }, [fetchSalvedadesPendientes])
+    await fetchTodasSalvedades()
+  }, [fetchTodasSalvedades])
 
   return {
     salvedades,
@@ -255,6 +276,7 @@ export function useSalvedades(): UseSalvedadesReturn {
     anularSalvedad,
     fetchSalvedadesPorPedido,
     fetchSalvedadesPendientes,
+    fetchTodasSalvedades,
     fetchSalvedadesPorFecha,
     fetchSalvedadById,
     getEstadisticas,

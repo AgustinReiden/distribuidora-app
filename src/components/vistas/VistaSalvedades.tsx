@@ -191,8 +191,7 @@ export default function VistaSalvedades(): React.ReactElement {
   const {
     salvedades,
     loading,
-    fetchSalvedadesPendientes,
-    fetchSalvedadesPorFecha,
+    fetchTodasSalvedades,
     resolverSalvedad,
     getEstadisticas
   } = useSalvedades()
@@ -215,13 +214,11 @@ export default function VistaSalvedades(): React.ReactElement {
     monto_pendiente: number;
   } | null>(null)
 
+  // Siempre cargamos todas las salvedades y filtramos en el cliente
+  // Esto permite que las salvedades resueltas permanezcan visibles para métricas
   const cargarDatos = useCallback(async () => {
-    if (filtroEstado === 'pendientes') {
-      await fetchSalvedadesPendientes()
-    } else {
-      await fetchSalvedadesPorFecha(fechaDesde, fechaHasta)
-    }
-  }, [filtroEstado, fechaDesde, fechaHasta, fetchSalvedadesPendientes, fetchSalvedadesPorFecha])
+    await fetchTodasSalvedades()
+  }, [fetchTodasSalvedades])
 
   // Calcular estadísticas cuando cambian los datos
   useEffect(() => {
@@ -243,13 +240,28 @@ export default function VistaSalvedades(): React.ReactElement {
   }) => {
     await resolverSalvedad(data)
     setSalvedadResolver(null)
-    await cargarDatos()
+    // No llamamos cargarDatos() porque resolverSalvedad ya refresca los datos
+    // y queremos que la salvedad resuelta permanezca visible
     return { success: true }
   }
 
-  const salvedadesFiltradas = salvedades.filter(s =>
-    filtroMotivo === 'todos' || s.motivo === filtroMotivo
-  )
+  // Filtrado client-side para todas las condiciones
+  const salvedadesFiltradas = salvedades.filter(s => {
+    // Filtrar por motivo
+    if (filtroMotivo !== 'todos' && s.motivo !== filtroMotivo) return false
+
+    // Filtrar por estado (pendientes vs todas)
+    if (filtroEstado === 'pendientes' && s.estado_resolucion !== 'pendiente') return false
+
+    // Filtrar por fecha si estamos viendo todas
+    if (filtroEstado === 'todas') {
+      const createdAt = s.created_at?.split('T')[0]
+      if (createdAt && createdAt < fechaDesde) return false
+      if (createdAt && createdAt > fechaHasta) return false
+    }
+
+    return true
+  })
 
   const formatMoney = (value: number | undefined): string => {
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)

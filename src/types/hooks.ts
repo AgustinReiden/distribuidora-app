@@ -1223,6 +1223,7 @@ export interface UseSalvedadesReturn {
   // Consultas
   fetchSalvedadesPorPedido: (pedidoId: string) => Promise<SalvedadItemDBExtended[]>;
   fetchSalvedadesPendientes: () => Promise<SalvedadItemDBExtended[]>;
+  fetchTodasSalvedades: () => Promise<SalvedadItemDBExtended[]>;
   fetchSalvedadesPorFecha: (desde: string, hasta?: string) => Promise<SalvedadItemDBExtended[]>;
   fetchSalvedadById: (id: string) => Promise<SalvedadItemDBExtended | null>;
   getEstadisticas: (desde?: string, hasta?: string) => Promise<EstadisticasSalvedades>;
