@@ -68,6 +68,15 @@ export interface PerfilDB {
   activo?: boolean;
 }
 
+export interface PedidoSalvedadResumen {
+  id: string;
+  motivo: string;
+  cantidad_afectada: number;
+  monto_afectado: number;
+  estado_resolucion: string;
+  producto_id: string;
+}
+
 export interface PedidoDB {
   id: string;
   cliente_id: string;
@@ -84,6 +93,7 @@ export interface PedidoDB {
   notas?: string | null;
   orden_entrega?: number | null;
   items?: PedidoItemDB[];
+  salvedades?: PedidoSalvedadResumen[];
   stock_descontado?: boolean;
   fecha_entrega?: string | null;
   created_at?: string;

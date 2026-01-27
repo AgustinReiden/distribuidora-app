@@ -134,7 +134,7 @@ export function usePedidos(): UsePedidosHookReturn {
     try {
       const { data, error } = await supabase
         .from('pedidos')
-        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), salvedades:salvedades_items(id, motivo, cantidad_afectada, monto_afectado, estado_resolucion, producto_id)`)
         .order('created_at', { ascending: false })
 
       if (error) {

@@ -134,7 +134,7 @@ export function useSalvedades(): UseSalvedadesReturn {
   // Registrar salvedad
   const registrarSalvedad = async (input: RegistrarSalvedadInput): Promise<RegistrarSalvedadResult> => {
     try {
-      const { data, error } = await supabase.rpc('registrar_salvedad_debug', {
+      const { data, error } = await supabase.rpc('registrar_salvedad', {
         p_pedido_id: parseInt(input.pedidoId, 10),
         p_pedido_item_id: parseInt(input.pedidoItemId, 10),
         p_cantidad_afectada: input.cantidadAfectada,

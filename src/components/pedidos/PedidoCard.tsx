@@ -2,11 +2,12 @@
  * Componente de tarjeta individual de pedido
  */
 import React, { useState, memo } from 'react';
-import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon } from 'lucide-react';
+import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle } from 'lucide-react';
 import { generarReciboPedido } from '../../lib/pdfExport';
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
+import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
-import type { PedidoDB } from '../../types';
+import type { PedidoDB, MotivoSalvedad } from '../../types';
 
 // =============================================================================
 // PROPS INTERFACES
@@ -19,6 +20,7 @@ export interface BadgeAntiguedadProps {
 
 export interface EstadoStepperProps {
   estado: PedidoDB['estado'];
+  tieneSalvedad?: boolean;
 }
 
 export interface PedidoCardProps {
@@ -78,12 +80,12 @@ function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactEle
 }
 
 // Componente de stepper de estado
-function EstadoStepper({ estado }: EstadoStepperProps): React.ReactElement {
+function EstadoStepper({ estado, tieneSalvedad }: EstadoStepperProps): React.ReactElement {
   const estados: EstadoConfig[] = [
     { key: 'pendiente', label: 'Pendiente', icon: Clock },
     { key: 'en_preparacion', label: 'Preparando', icon: Package },
     { key: 'asignado', label: 'En camino', icon: Truck },
-    { key: 'entregado', label: 'Entregado', icon: Check },
+    { key: 'entregado', label: tieneSalvedad ? 'Con Salvedad' : 'Entregado', icon: tieneSalvedad ? AlertTriangle : Check },
   ];
 
   const estadoIndex = estados.findIndex(e => e.key === estado);
@@ -94,9 +96,11 @@ function EstadoStepper({ estado }: EstadoStepperProps): React.ReactElement {
         const isCompleted = idx <= estadoIndex;
         const isCurrent = idx === estadoIndex;
         const IconComponent = e.icon;
+        const isEntregadoConSalvedad = isCurrent && estado === 'entregado' && tieneSalvedad;
         return (
           <React.Fragment key={e.key}>
             <div className={`flex items-center space-x-1 px-2 py-1 rounded ${
+              isEntregadoConSalvedad ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
               isCurrent ? getEstadoColor(estado) :
               isCompleted ? 'bg-gray-200 text-gray-600' :
               'bg-gray-100 text-gray-400'
@@ -134,6 +138,7 @@ function PedidoCard({
   onEliminarPedido
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
+  const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
 
   return (
     <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
@@ -163,7 +168,7 @@ function PedidoCard({
         {/* Acciones */}
         <div className="flex items-start space-x-2">
           <div className="flex flex-col items-end gap-2">
-            <EstadoStepper estado={pedido.estado} />
+            <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
             {pedido.estado_pago && (
               <span className={`px-3 py-1 rounded-full text-xs font-medium ${getEstadoPagoColor(pedido.estado_pago)}`}>
                 {getEstadoPagoLabel(pedido.estado_pago)}
@@ -295,6 +300,52 @@ function PedidoCard({
               </div>
             </div>
           </div>
+
+          {/* Salvedades */}
+          {tieneSalvedad && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-2 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Salvedades ({pedido.salvedades?.length})
+              </h4>
+              <div className="space-y-2">
+                {pedido.salvedades?.map(salvedad => {
+                  const productoItem = pedido.items?.find(i => i.producto_id === salvedad.producto_id);
+                  const motivoLabel = MOTIVOS_SALVEDAD_LABELS[salvedad.motivo as MotivoSalvedad] || salvedad.motivo;
+                  return (
+                    <div key={salvedad.id} className="flex justify-between items-center py-2 border-b border-amber-200 dark:border-amber-700 last:border-0">
+                      <div className="flex-1">
+                        <p className="font-medium text-amber-900 dark:text-amber-100">
+                          {productoItem?.producto?.nombre || 'Producto'}
+                        </p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                          {motivoLabel} - {salvedad.cantidad_afectada} unidad(es)
+                        </p>
+                        <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs ${
+                          salvedad.estado_resolucion === 'pendiente'
+                            ? 'bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-200'
+                            : 'bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200'
+                        }`}>
+                          {salvedad.estado_resolucion === 'pendiente' ? 'Pendiente de resolver' : 'Resuelta'}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                          -{formatPrecio(salvedad.monto_afectado)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="flex justify-between items-center pt-2 border-t border-amber-300 dark:border-amber-600">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Total afectado:</p>
+                  <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                    -{formatPrecio(pedido.salvedades?.reduce((sum, s) => sum + s.monto_afectado, 0) || 0)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Notas */}
           {pedido.notas && (
