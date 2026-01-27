@@ -334,6 +334,7 @@ function MainApp(): ReactElement {
           }}
           onMarcarEntregado={async () => {
             await cambiarEstado(pedidoParaSalvedad.id, 'entregado');
+            await refetchPedidos();
             refetchMetricas();
             notify.success(`Pedido #${pedidoParaSalvedad.id} entregado con salvedades registradas`, { persist: true });
           }}

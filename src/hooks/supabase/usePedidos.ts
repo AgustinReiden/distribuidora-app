@@ -126,7 +126,8 @@ export function usePedidos(): UsePedidosHookReturn {
     estado: 'todos',
     estadoPago: 'todos',
     transportistaId: 'todos',
-    busqueda: ''
+    busqueda: '',
+    conSalvedad: 'todos'
   })
 
   const fetchPedidos = async (): Promise<void> => {
@@ -251,6 +252,12 @@ export function usePedidos(): UsePedidosHookReturn {
       } else {
         if (p.transportista_id !== filtros.transportistaId) return false
       }
+    }
+    // Filtro por salvedad
+    if (filtros.conSalvedad && filtros.conSalvedad !== 'todos') {
+      const tieneSalvedad = p.salvedades && p.salvedades.length > 0
+      if (filtros.conSalvedad === 'con_salvedad' && !tieneSalvedad) return false
+      if (filtros.conSalvedad === 'sin_salvedad' && tieneSalvedad) return false
     }
     const fechaPedido = p.created_at ? p.created_at.split('T')[0] : null
     if (filtros.fechaDesde && fechaPedido && fechaPedido < filtros.fechaDesde) return false
