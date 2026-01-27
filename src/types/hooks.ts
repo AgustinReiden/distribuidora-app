@@ -249,6 +249,7 @@ export interface FiltrosPedidosState {
   estadoPago: string;
   transportistaId: string;
   busqueda: string;
+  conSalvedad: 'todos' | 'con_salvedad' | 'sin_salvedad';
 }
 
 // =============================================================================

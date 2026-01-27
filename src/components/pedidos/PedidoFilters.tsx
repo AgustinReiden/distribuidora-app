@@ -11,6 +11,7 @@ interface FiltrosPedido {
   transportistaId?: string;
   fechaDesde?: string | null;
   fechaHasta?: string | null;
+  conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
 }
 
 interface FiltrosChange {
@@ -19,6 +20,7 @@ interface FiltrosChange {
   transportistaId?: string;
   fechaDesde?: string | null;
   fechaHasta?: string | null;
+  conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
 }
 
 export interface PedidoFiltersProps {
@@ -109,6 +111,19 @@ function PedidoFilters({
             {transportistas.map(t => (
               <option key={t.id} value={t.id}>{t.nombre}</option>
             ))}
+          </select>
+          <select
+            value={filtros.conSalvedad || 'todos'}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => onFiltrosChange({ conSalvedad: e.target.value as 'todos' | 'con_salvedad' | 'sin_salvedad' })}
+            className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+              filtros.conSalvedad && filtros.conSalvedad !== 'todos'
+                ? 'bg-amber-50 border-amber-300 dark:bg-amber-900/30 dark:border-amber-600'
+                : ''
+            }`}
+          >
+            <option value="todos">Todas las entregas</option>
+            <option value="con_salvedad">Con salvedad</option>
+            <option value="sin_salvedad">Sin salvedad</option>
           </select>
         </div>
       )}
