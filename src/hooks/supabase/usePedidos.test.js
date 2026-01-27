@@ -124,7 +124,8 @@ describe('usePedidos', () => {
         estado: 'todos',
         estadoPago: 'todos',
         transportistaId: 'todos',
-        busqueda: ''
+        busqueda: '',
+        conSalvedad: 'todos'
       })
     })
   })
