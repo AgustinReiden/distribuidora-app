@@ -165,11 +165,50 @@ export function usePedidos(): UsePedidosHookReturn {
         }
       }
 
-      // Mapear perfiles a pedidos
+      // Obtener salvedades de pedidos entregados
+      const pedidosEntregadosIds = (data || [])
+        .filter(p => p.estado === 'entregado')
+        .map(p => p.id)
+
+      let salvedadesMap: Record<string, Array<{
+        id: string;
+        motivo: string;
+        cantidad_afectada: number;
+        monto_afectado: number;
+        estado_resolucion: string;
+        producto_id: string;
+      }>> = {}
+
+      if (pedidosEntregadosIds.length > 0) {
+        const { data: salvedades } = await supabase
+          .from('salvedades_items')
+          .select('id, pedido_id, motivo, cantidad_afectada, monto_afectado, estado_resolucion, producto_id')
+          .in('pedido_id', pedidosEntregadosIds)
+
+        if (salvedades) {
+          for (const s of salvedades) {
+            const pedidoId = String(s.pedido_id)
+            if (!salvedadesMap[pedidoId]) {
+              salvedadesMap[pedidoId] = []
+            }
+            salvedadesMap[pedidoId].push({
+              id: String(s.id),
+              motivo: s.motivo,
+              cantidad_afectada: s.cantidad_afectada,
+              monto_afectado: Number(s.monto_afectado),
+              estado_resolucion: s.estado_resolucion,
+              producto_id: String(s.producto_id)
+            })
+          }
+        }
+      }
+
+      // Mapear perfiles y salvedades a pedidos
       const pedidosCompletos: PedidoDB[] = (data || []).map(pedido => ({
         ...pedido,
         usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id as string] || null : null,
-        transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] || null : null
+        transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] || null : null,
+        salvedades: salvedadesMap[String(pedido.id)] || []
       })) as PedidoDB[]
 
       setPedidos(pedidosCompletos)
