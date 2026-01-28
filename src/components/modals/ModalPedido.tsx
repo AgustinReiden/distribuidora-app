@@ -1,6 +1,7 @@
 import React, { useState, useMemo, memo, MouseEvent } from 'react';
-import { X, Loader2, Search } from 'lucide-react';
+import { X, Loader2, Search, MapPin } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
+import { AddressAutocomplete } from '../AddressAutocomplete';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -28,6 +29,8 @@ export interface NuevoClienteData {
   telefono: string;
   zona: string;
   razonSocial?: string; // Se usa "nombre" como razonSocial en creación rápida
+  latitud?: number | null;
+  longitud?: number | null;
 }
 
 /** Advertencia de stock */
@@ -104,7 +107,7 @@ const ModalPedido = memo(function ModalPedido({
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
-  const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
+  const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
   const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
 
   const productosFiltrados = useMemo(() => {
@@ -148,7 +151,7 @@ const ModalPedido = memo(function ModalPedido({
       const cliente = await onCrearCliente(clienteData);
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
-      setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
+      setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
     } catch {
       // Error handled by parent
     }
@@ -191,7 +194,20 @@ const ModalPedido = memo(function ModalPedido({
               <div className="border rounded-lg p-3 space-y-3 bg-blue-50 dark:bg-gray-700 dark:border-gray-600">
                 <input type="text" value={nuevoCliente.nombreFantasia} onChange={e => setNuevoCliente({ ...nuevoCliente, nombreFantasia: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre fantasia *" />
                 <input type="text" value={nuevoCliente.nombre} onChange={e => setNuevoCliente({ ...nuevoCliente, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre completo *" />
-                <input type="text" value={nuevoCliente.direccion} onChange={e => setNuevoCliente({ ...nuevoCliente, direccion: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Direccion *" />
+                <AddressAutocomplete
+                  value={nuevoCliente.direccion}
+                  onChange={(val: string) => setNuevoCliente({ ...nuevoCliente, direccion: val })}
+                  onSelect={(address: string, lat: number | null, lng: number | null) => {
+                    setNuevoCliente({ ...nuevoCliente, direccion: address, latitud: lat, longitud: lng });
+                  }}
+                  placeholder="Buscar dirección..."
+                />
+                {nuevoCliente.latitud && nuevoCliente.longitud && (
+                  <div className="flex items-center text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
+                    <MapPin className="w-3 h-3 mr-1" />
+                    <span>Ubicación guardada</span>
+                  </div>
+                )}
                 <button onClick={handleCrearClienteRapido} disabled={guardandoCliente} className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400">
                   {guardandoCliente ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Crear y seleccionar'}
                 </button>
