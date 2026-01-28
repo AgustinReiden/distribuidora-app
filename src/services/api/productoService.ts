@@ -96,14 +96,7 @@ class ProductoService extends BaseService<Producto> {
   async descontarStock(items: StockItem[]): Promise<boolean> {
     return this.rpc<boolean>(
       'descontar_stock_atomico',
-      { items: JSON.stringify(items) },
-      async () => {
-        // Fallback: actualizar uno por uno en transacción
-        for (const item of items) {
-          await this.actualizarStock(item.producto_id, -item.cantidad)
-        }
-        return true
-      }
+      { items: JSON.stringify(items) }
     )
   }
 
@@ -113,14 +106,7 @@ class ProductoService extends BaseService<Producto> {
   async restaurarStock(items: StockItem[]): Promise<boolean> {
     return this.rpc<boolean>(
       'restaurar_stock_atomico',
-      { items: JSON.stringify(items) },
-      async () => {
-        // Fallback: actualizar uno por uno
-        for (const item of items) {
-          await this.actualizarStock(item.producto_id, item.cantidad)
-        }
-        return true
-      }
+      { items: JSON.stringify(items) }
     )
   }
 
