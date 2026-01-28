@@ -237,26 +237,29 @@ export class BaseService<T = Record<string, unknown>> {
   }
 
   /**
-   * Ejecuta una función RPC de Supabase con fallback
+   * Ejecuta una función RPC de Supabase
+   *
+   * IMPORTANTE: Las RPCs son transacciones atómicas en PostgreSQL.
+   * Si fallan, es por una razón válida (constraint, permisos, etc.).
+   * NO usar fallbacks manuales ya que rompen la atomicidad.
    */
-  async rpc<R>(functionName: string, params: Record<string, unknown> = {}, fallback: (() => Promise<R>) | null = null): Promise<R> {
+  async rpc<R>(functionName: string, params: Record<string, unknown> = {}): Promise<R> {
     try {
       const { data, error } = await this.db.rpc(functionName, params)
 
       if (error) {
-        if (fallback) {
-          console.warn(`RPC ${functionName} falló, usando fallback:`, error.message)
-          return await fallback()
-        }
-        throw error
+        // Log detallado para debugging
+        console.error(`[RPC Error] ${functionName}:`, {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        })
+        throw new Error(`Error en operación ${functionName}: ${error.message}`)
       }
 
       return data as R
     } catch (error) {
-      if (fallback) {
-        console.warn(`RPC ${functionName} error, usando fallback:`, (error as Error).message)
-        return await fallback()
-      }
       this.handleError(`ejecutar ${functionName}`, error as Error)
       throw error
     }

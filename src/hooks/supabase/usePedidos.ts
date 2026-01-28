@@ -333,161 +333,45 @@ export function usePedidos(): UsePedidosHookReturn {
     await fetchPedidos()
   }
 
+  /**
+   * Elimina un pedido usando la RPC transaccional
+   *
+   * IMPORTANTE: Esta función usa una RPC de PostgreSQL que garantiza
+   * atomicidad. Si falla, es por una razón válida y NO se debe
+   * intentar eliminar manualmente ya que podría corromper los datos.
+   */
   const eliminarPedido = async (
     id: string,
-    restaurarStockFn: ((items: PedidoItemDB[]) => Promise<void>) | null,
+    _restaurarStockFn: ((items: PedidoItemDB[]) => Promise<void>) | null,
     usuarioId: string | null = null,
     motivo: string | null = null
   ): Promise<void> => {
     const pedido = pedidos.find(p => p.id === id)
     const restaurarStock = pedido?.stock_descontado ?? true
 
-    // Intentar usar la función RPC primero
-    try {
-      const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
-        p_pedido_id: id,
-        p_restaurar_stock: restaurarStock,
-        p_usuario_id: usuarioId,
-        p_motivo: motivo
+    const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
+      p_pedido_id: id,
+      p_restaurar_stock: restaurarStock,
+      p_usuario_id: usuarioId,
+      p_motivo: motivo
+    })
+
+    if (error) {
+      console.error('[RPC Error] eliminar_pedido_completo:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
       })
-
-      if (error) {
-        // Si hay error en la función RPC, usar método alternativo
-        if (error.message.includes('v_transportista') || error.message.includes('not assigned')) {
-          console.warn('Función RPC con error, usando método alternativo')
-          await eliminarPedidoManual(id, pedido || null, restaurarStock, usuarioId, motivo)
-          setPedidos(prev => prev.filter(p => p.id !== id))
-          return
-        }
-        throw error
-      }
-
-      const response = data as EliminarPedidoRPCResponse
-      if (!response.success) {
-        throw new Error(response.error || 'Error al eliminar pedido')
-      }
-
-      setPedidos(prev => prev.filter(p => p.id !== id))
-    } catch (rpcError) {
-      const err = rpcError as Error
-      // Fallback: eliminar manualmente si la función RPC falla
-      if (err.message.includes('v_transportista') || err.message.includes('not assigned')) {
-        console.warn('Función RPC con error, usando método alternativo')
-        await eliminarPedidoManual(id, pedido || null, restaurarStock, usuarioId, motivo)
-        setPedidos(prev => prev.filter(p => p.id !== id))
-        return
-      }
-      throw rpcError
-    }
-  }
-
-  // Método alternativo para eliminar pedido sin usar RPC
-  const eliminarPedidoManual = async (
-    pedidoId: string,
-    pedido: PedidoDB | null,
-    restaurarStock: boolean,
-    usuarioId: string | null,
-    motivo: string | null
-  ): Promise<void> => {
-    // Obtener nombre del usuario que elimina
-    let eliminadoPorNombre = 'Sistema'
-    if (usuarioId) {
-      const { data: perfil } = await supabase
-        .from('perfiles')
-        .select('nombre')
-        .eq('id', usuarioId)
-        .single()
-      if (perfil) eliminadoPorNombre = (perfil as { nombre: string }).nombre
+      throw new Error(`Error al eliminar pedido: ${error.message}`)
     }
 
-    // 1. Guardar datos para trazabilidad con estructura correcta
-    const datosEliminado: PedidoEliminadoDB = {
-      pedido_id: pedidoId,
-      cliente_id: pedido?.cliente_id,
-      cliente_nombre: pedido?.cliente?.nombre_fantasia || 'Desconocido',
-      cliente_direccion: pedido?.cliente?.direccion || '',
-      total: pedido?.total || 0,
-      estado: pedido?.estado,
-      estado_pago: pedido?.estado_pago,
-      forma_pago: pedido?.forma_pago,
-      monto_pagado: pedido?.monto_pagado || 0,
-      notas: pedido?.notas || null,
-      items: pedido?.items?.map(i => ({
-        producto_id: i.producto_id,
-        producto_nombre: i.producto?.nombre,
-        cantidad: i.cantidad,
-        precio_unitario: i.precio_unitario,
-        subtotal: i.subtotal || (i.cantidad * i.precio_unitario)
-      })) || [],
-      usuario_creador_id: pedido?.usuario_id || null,
-      usuario_creador_nombre: pedido?.usuario?.nombre || null,
-      transportista_id: pedido?.transportista_id || null,
-      transportista_nombre: pedido?.transportista?.nombre || null,
-      fecha_pedido: pedido?.created_at || null,
-      fecha_entrega: pedido?.fecha_entrega || null,
-      eliminado_por_id: usuarioId,
-      eliminado_por_nombre: eliminadoPorNombre,
-      motivo_eliminacion: motivo || 'Sin especificar',
-      stock_restaurado: restaurarStock
+    const response = data as EliminarPedidoRPCResponse
+    if (!response.success) {
+      throw new Error(response.error || 'Error al eliminar pedido')
     }
 
-    // Ejecutar operaciones en paralelo para mayor velocidad
-    const operaciones: Promise<unknown>[] = []
-
-    // 2. Guardar en tabla de eliminados
-    operaciones.push(
-      Promise.resolve(supabase.from('pedidos_eliminados').insert(datosEliminado))
-        .then(({ error }) => {
-          if (error) console.warn('No se pudo guardar en pedidos_eliminados:', error.message)
-        })
-    )
-
-    // 3. Restaurar stock en paralelo si corresponde
-    if (restaurarStock && pedido?.items?.length && pedido.items.length > 0) {
-      // Obtener todos los productos de una vez
-      const productIds = pedido.items.map(i => i.producto_id).filter(Boolean)
-      if (productIds.length > 0) {
-        const { data: productosActuales } = await supabase
-          .from('productos')
-          .select('id, stock')
-          .in('id', productIds)
-
-        if (productosActuales) {
-          const actualizaciones = pedido.items.map(item => {
-            const prod = (productosActuales as Array<{ id: string; stock: number }>).find(p => p.id === item.producto_id)
-            if (prod && item.cantidad) {
-              return Promise.resolve(
-                supabase
-                  .from('productos')
-                  .update({ stock: (prod.stock || 0) + item.cantidad })
-                  .eq('id', item.producto_id)
-              )
-            }
-            return Promise.resolve()
-          })
-          operaciones.push(...actualizaciones)
-        }
-      }
-    }
-
-    // 4. Eliminar items del pedido
-    operaciones.push(
-      Promise.resolve(supabase.from('pedido_items').delete().eq('pedido_id', pedidoId))
-    )
-
-    // 5. Eliminar historial del pedido
-    operaciones.push(
-      Promise.resolve(supabase.from('pedido_historial').delete().eq('pedido_id', pedidoId))
-        .then(() => {})
-        .catch(() => {}) // Ignorar errores si no existe historial
-    )
-
-    // Ejecutar todas las operaciones en paralelo
-    await Promise.all(operaciones)
-
-    // 6. Finalmente eliminar el pedido
-    const { error } = await supabase.from('pedidos').delete().eq('id', pedidoId)
-    if (error) throw error
+    setPedidos(prev => prev.filter(p => p.id !== id))
   }
 
   const fetchPedidosEliminados = async (): Promise<PedidoEliminadoDB[]> => {

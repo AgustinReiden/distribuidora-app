@@ -9,7 +9,6 @@
  */
 
 import { BaseService } from './baseService'
-import { productoService } from './productoService'
 import type { Pedido, PedidoItem, EstadoPedido } from '../../types'
 
 export interface PedidoFiltros {
@@ -139,131 +138,34 @@ class PedidoService extends BaseService<Pedido> {
 
   /**
    * Crea un pedido completo con items
+   *
+   * Usa la RPC 'crear_pedido_completo' que es una transacción atómica.
+   * Si falla, es por una razón válida (stock insuficiente, constraint, etc.)
+   * y NO se debe intentar crear manualmente.
    */
-  async crearPedidoCompleto(pedidoData: PedidoData, items: PedidoItemInput[], descontarStock = true): Promise<Pedido> {
-    // Intentar con RPC primero
-    return this.rpc<Pedido>(
-      'crear_pedido_completo',
-      {
-        p_cliente_id: pedidoData.cliente_id,
-        p_preventista_id: pedidoData.preventista_id,
-        p_items: JSON.stringify(items),
-        p_notas: pedidoData.notas || '',
-        p_metodo_pago: pedidoData.metodo_pago || 'efectivo',
-        p_descuento: pedidoData.descuento || 0
-      },
-      async () => {
-        // Fallback: crear manualmente
-        return this.crearPedidoManual(pedidoData, items, descontarStock)
-      }
-    )
-  }
-
-  /**
-   * Crea pedido manualmente (fallback)
-   */
-  private async crearPedidoManual(pedidoData: PedidoData, items: PedidoItemInput[], descontarStock: boolean): Promise<Pedido> {
-    // Calcular total
-    const total = items.reduce((sum, item) => {
-      return sum + (item.cantidad * item.precio_unitario)
-    }, 0)
-
-    const totalConDescuento = total - (pedidoData.descuento || 0)
-
-    // Crear pedido
-    const pedido = await this.create({
-      cliente_id: pedidoData.cliente_id,
-      preventista_id: pedidoData.preventista_id,
-      transportista_id: pedidoData.transportista_id || null,
-      estado: 'pendiente' as EstadoPedido,
-      metodo_pago: pedidoData.metodo_pago || 'efectivo',
-      notas: pedidoData.notas || '',
-      descuento: pedidoData.descuento || 0,
-      total: totalConDescuento,
-      fecha_creacion: new Date().toISOString()
-    } as Partial<Pedido>) as Pedido
-
-    // Crear items
-    const itemsConPedidoId = items.map(item => ({
-      pedido_id: pedido.id,
-      producto_id: item.producto_id,
-      cantidad: item.cantidad,
-      precio_unitario: item.precio_unitario,
-      subtotal: item.cantidad * item.precio_unitario
-    }))
-
-    await this.db.from('pedido_items').insert(itemsConPedidoId)
-
-    // Descontar stock si es necesario
-    if (descontarStock) {
-      await productoService.descontarStock(
-        items.map(i => ({
-          producto_id: i.producto_id,
-          cantidad: i.cantidad
-        }))
-      )
-    }
-
-    // Registrar en historial
-    await this.registrarHistorial(pedido.id, 'creado', 'Pedido creado')
-
-    return pedido
+  async crearPedidoCompleto(pedidoData: PedidoData, items: PedidoItemInput[], _descontarStock = true): Promise<Pedido> {
+    return this.rpc<Pedido>('crear_pedido_completo', {
+      p_cliente_id: pedidoData.cliente_id,
+      p_preventista_id: pedidoData.preventista_id,
+      p_items: JSON.stringify(items),
+      p_notas: pedidoData.notas || '',
+      p_metodo_pago: pedidoData.metodo_pago || 'efectivo',
+      p_descuento: pedidoData.descuento || 0
+    })
   }
 
   /**
    * Actualiza items de un pedido existente
+   *
+   * Usa la RPC 'actualizar_pedido_items' que es una transacción atómica.
+   * Restaura el stock de items anteriores y descuenta el de los nuevos
+   * en una sola transacción.
    */
   async actualizarItems(pedidoId: string, nuevosItems: PedidoItemInput[]): Promise<Pedido | null> {
-    return this.rpc<Pedido | null>(
-      'actualizar_pedido_items',
-      {
-        p_pedido_id: pedidoId,
-        p_items: JSON.stringify(nuevosItems)
-      },
-      async () => {
-        // Fallback manual
-        // 1. Obtener items actuales para restaurar stock
-        const { data: itemsActuales } = await this.db
-          .from('pedido_items')
-          .select('producto_id, cantidad')
-          .eq('pedido_id', pedidoId)
-
-        // 2. Restaurar stock de items actuales
-        if (itemsActuales?.length) {
-          await productoService.restaurarStock(itemsActuales as { producto_id: string; cantidad: number }[])
-        }
-
-        // 3. Eliminar items actuales
-        await this.db.from('pedido_items').delete().eq('pedido_id', pedidoId)
-
-        // 4. Insertar nuevos items
-        const itemsParaInsertar = nuevosItems.map(item => ({
-          pedido_id: pedidoId,
-          producto_id: item.producto_id,
-          cantidad: item.cantidad,
-          precio_unitario: item.precio_unitario,
-          subtotal: item.cantidad * item.precio_unitario
-        }))
-
-        await this.db.from('pedido_items').insert(itemsParaInsertar)
-
-        // 5. Descontar stock de nuevos items
-        await productoService.descontarStock(
-          nuevosItems.map(i => ({
-            producto_id: i.producto_id,
-            cantidad: i.cantidad
-          }))
-        )
-
-        // 6. Actualizar total del pedido
-        const nuevoTotal = nuevosItems.reduce(
-          (sum, item) => sum + (item.cantidad * item.precio_unitario),
-          0
-        )
-
-        return this.update(pedidoId, { total: nuevoTotal })
-      }
-    )
+    return this.rpc<Pedido | null>('actualizar_pedido_items', {
+      p_pedido_id: pedidoId,
+      p_items: JSON.stringify(nuevosItems)
+    })
   }
 
   /**
@@ -311,71 +213,41 @@ class PedidoService extends BaseService<Pedido> {
 
   /**
    * Elimina un pedido con rollback de stock
+   *
+   * Usa la RPC 'eliminar_pedido_completo' que es una transacción atómica.
+   * Guarda el pedido en auditoría, restaura stock y elimina items
+   * en una sola transacción.
    */
   async eliminarPedido(pedidoId: string, restaurarStock = true, motivo = ''): Promise<boolean> {
-    return this.rpc<boolean>(
-      'eliminar_pedido_completo',
-      {
-        p_pedido_id: pedidoId,
-        p_restaurar_stock: restaurarStock,
-        p_motivo: motivo
-      },
-      async () => {
-        // Fallback manual
-        // 1. Obtener pedido con items
-        const pedido = await this.getById(pedidoId)
-        if (!pedido) {
-          throw new Error('Pedido no encontrado')
-        }
-
-        // 2. Obtener items para restaurar stock
-        const { data: items } = await this.db
-          .from('pedido_items')
-          .select('producto_id, cantidad')
-          .eq('pedido_id', pedidoId)
-
-        // 3. Guardar en pedidos_eliminados para auditoría
-        await this.db.from('pedidos_eliminados').insert({
-          pedido_id: pedidoId,
-          datos_pedido: pedido,
-          motivo: motivo,
-          eliminado_por: null, // Se podría pasar el userId
-          fecha_eliminacion: new Date().toISOString()
-        })
-
-        // 4. Eliminar items
-        await this.db.from('pedido_items').delete().eq('pedido_id', pedidoId)
-
-        // 5. Eliminar pedido
-        await this.delete(pedidoId)
-
-        // 6. Restaurar stock si es necesario
-        if (restaurarStock && items?.length) {
-          await productoService.restaurarStock(items as { producto_id: string; cantidad: number }[])
-        }
-
-        return true
-      }
-    )
+    return this.rpc<boolean>('eliminar_pedido_completo', {
+      p_pedido_id: pedidoId,
+      p_restaurar_stock: restaurarStock,
+      p_motivo: motivo
+    })
   }
 
   /**
    * Actualiza orden de entrega para ruta optimizada
+   *
+   * Nota: Este método usa un fallback seguro porque cada actualización
+   * de orden es independiente y no afecta la integridad de datos.
    */
   async actualizarOrdenEntrega(ordenes: OrdenEntrega[]): Promise<boolean> {
-    return this.rpc<boolean>(
-      'actualizar_orden_entrega_batch',
-      { ordenes: JSON.stringify(ordenes) },
-      async () => {
-        // Fallback: actualizar uno por uno
-        for (const orden of ordenes) {
-          await this.update(orden.pedido_id, {
-            orden_entrega: orden.orden_entrega
-          })
-        }
-        return true
+    try {
+      // Intentar RPC batch primero (más eficiente)
+      return await this.rpc<boolean>('actualizar_orden_entrega_batch', {
+        ordenes: JSON.stringify(ordenes)
+      })
+    } catch {
+      // Fallback seguro: actualizar uno por uno
+      // Esto es aceptable porque cada orden_entrega es independiente
+      for (const orden of ordenes) {
+        await this.update(orden.pedido_id, {
+          orden_entrega: orden.orden_entrega
+        })
       }
-    )
+      return true
+    }
   }
 
   /**
