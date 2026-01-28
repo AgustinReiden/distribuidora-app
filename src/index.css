@@ -13,6 +13,39 @@ html {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/*
+ * Fix para iOS Safari: Forzar color-scheme en form controls
+ * Esto previene que el navegador aplique dark mode automático a inputs
+ * cuando el dispositivo tiene modo oscuro pero la app está en light mode
+ */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+/* Forzar estilos de inputs en light mode para iOS Safari */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  border-color: #d1d5db;
+}
+
+/* Dark mode overrides */
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark textarea,
+.dark select {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+  border-color: #4b5563;
+}
+
 /* Scrollbar personalizada */
 ::-webkit-scrollbar {
   width: 8px;
