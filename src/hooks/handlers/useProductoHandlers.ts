@@ -165,13 +165,14 @@ export function useProductoHandlers({
   const handleRegistrarMerma = useCallback(async (mermaData: MermaDataInput): Promise<void> => {
     try {
       if (!isOnline) {
+        // SECURITY FIX: Solo guardar para sincronización posterior
+        // NO actualizamos stock directamente para evitar bypass de validación
+        // El stock se actualizará cuando se sincronice via RPC con validación server-side
         guardarMermaOffline({
           ...mermaData,
           usuarioId: user?.id
         })
-        await actualizarProducto(mermaData.productoId, { stock: mermaData.stockNuevo })
-        notify.warning('Merma guardada localmente. Se sincronizará cuando vuelva la conexión.')
-        refetchProductos()
+        notify.warning('Merma guardada localmente. El stock se actualizará cuando vuelva la conexión.')
         return
       }
 
@@ -187,7 +188,7 @@ export function useProductoHandlers({
       notify.error('Error al registrar merma: ' + error.message)
       throw e
     }
-  }, [isOnline, guardarMermaOffline, actualizarProducto, registrarMerma, user, refetchProductos, refetchMermas, notify])
+  }, [isOnline, guardarMermaOffline, registrarMerma, user, refetchProductos, refetchMermas, notify])
 
   const handleVerHistorialMermas = useCallback((): void => {
     modales.historialMermas.setOpen(true)
