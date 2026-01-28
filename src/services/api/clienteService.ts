@@ -90,29 +90,7 @@ class ClienteService extends BaseService<Cliente> {
   async getResumenCuenta(clienteId: string): Promise<ResumenCuenta> {
     return this.rpc<ResumenCuenta>(
       'obtener_resumen_cuenta_cliente',
-      { p_cliente_id: clienteId },
-      async () => {
-        // Fallback: calcular manualmente
-        const pedidos = await this.db
-          .from('pedidos')
-          .select('total, estado, metodo_pago')
-          .eq('cliente_id', clienteId)
-          .in('estado', ['pendiente', 'en_preparacion', 'en_camino', 'entregado'])
-
-        const pagos = await this.db
-          .from('pagos')
-          .select('monto')
-          .eq('cliente_id', clienteId)
-
-        const totalPedidos = pedidos.data?.reduce((sum, p) => sum + (p.total || 0), 0) || 0
-        const totalPagos = pagos.data?.reduce((sum, p) => sum + (p.monto || 0), 0) || 0
-
-        return {
-          total_pedidos: totalPedidos,
-          total_pagos: totalPagos,
-          saldo: totalPedidos - totalPagos
-        }
-      }
+      { p_cliente_id: clienteId }
     )
   }
 

@@ -209,20 +209,10 @@ describe('BaseService', () => {
       expect(result).toEqual(mockResult)
     })
 
-    it('debe usar fallback si RPC falla', async () => {
-      supabase.rpc.mockResolvedValue({ data: null, error: new Error('RPC Error') })
-      const fallback = vi.fn().mockResolvedValue('fallback result')
-
-      const result = await service.rpc('test_function', {}, fallback)
-
-      expect(fallback).toHaveBeenCalled()
-      expect(result).toBe('fallback result')
-    })
-
-    it('debe lanzar error si RPC falla sin fallback', async () => {
+    it('debe lanzar error si RPC falla', async () => {
       supabase.rpc.mockResolvedValue({ data: null, error: new Error('RPC Error') })
 
-      await expect(service.rpc('test_function', {})).rejects.toThrow()
+      await expect(service.rpc('test_function', {})).rejects.toThrow('Error en operación test_function')
     })
   })
 

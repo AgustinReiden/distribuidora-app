@@ -180,43 +180,11 @@ describe('ClienteService', () => {
       expect(result).toEqual(mockResumen)
     })
 
-    it('debe usar fallback si RPC falla', async () => {
-      // Mock RPC falla
+    it('debe lanzar error si RPC falla', async () => {
       supabase.rpc.mockResolvedValue({ data: null, error: new Error('RPC Error') })
 
-      // Mock para fallback - pedidos
-      const mockPedidos = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        in: vi.fn().mockResolvedValue({
-          data: [
-            { total: 5000, estado: 'entregado' },
-            { total: 3000, estado: 'pendiente' }
-          ],
-          error: null
-        })
-      }
-
-      // Mock para fallback - pagos
-      const mockPagos = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockResolvedValue({
-          data: [{ monto: 4000 }],
-          error: null
-        })
-      }
-
-      supabase.from
-        .mockReturnValueOnce(mockPedidos)
-        .mockReturnValueOnce(mockPagos)
-
-      const result = await clienteService.getResumenCuenta('cliente-123')
-
-      expect(result).toEqual({
-        total_pedidos: 8000,
-        total_pagos: 4000,
-        saldo: 4000
-      })
+      await expect(clienteService.getResumenCuenta('cliente-123'))
+        .rejects.toThrow('Error en operación obtener_resumen_cuenta_cliente')
     })
   })
 })
