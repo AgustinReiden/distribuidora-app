@@ -27,6 +27,7 @@ export interface NuevoClienteData {
   direccion: string;
   telefono: string;
   zona: string;
+  razonSocial?: string; // Se usa "nombre" como razonSocial en creación rápida
 }
 
 /** Advertencia de stock */
@@ -139,7 +140,12 @@ const ModalPedido = memo(function ModalPedido({
     if (!nombre || !nombreFantasia || !direccion) return;
     setGuardandoCliente(true);
     try {
-      const cliente = await onCrearCliente(nuevoCliente);
+      // Usar "nombre" como razonSocial (requerido por la DB)
+      const clienteData = {
+        ...nuevoCliente,
+        razonSocial: nombre, // El "Nombre completo" es la razón social
+      };
+      const cliente = await onCrearCliente(clienteData);
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
       setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '' });
@@ -163,17 +169,17 @@ const ModalPedido = memo(function ModalPedido({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b">
-          <h2 className="text-xl font-semibold">Nuevo Pedido</h2>
-          <button onClick={onClose}><X className="w-6 h-6 text-gray-500" /></button>
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-4 border-b dark:border-gray-700">
+          <h2 className="text-xl font-semibold dark:text-white">Nuevo Pedido</h2>
+          <button onClick={onClose}><X className="w-6 h-6 text-gray-500 dark:text-gray-400" /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Seccion Cliente */}
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="block text-sm font-medium">Cliente *</label>
+              <label className="block text-sm font-medium dark:text-gray-200">Cliente *</label>
               {(isAdmin || isPreventista) && (
                 <button onClick={() => setMostrarNuevoCliente(!mostrarNuevoCliente)} className="text-sm text-blue-600">
                   {mostrarNuevoCliente ? 'Cancelar' : '+ Nuevo'}
@@ -182,11 +188,11 @@ const ModalPedido = memo(function ModalPedido({
             </div>
 
             {mostrarNuevoCliente ? (
-              <div className="border rounded-lg p-3 space-y-3 bg-blue-50">
-                <input type="text" value={nuevoCliente.nombreFantasia} onChange={e => setNuevoCliente({ ...nuevoCliente, nombreFantasia: e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="Nombre fantasia *" />
-                <input type="text" value={nuevoCliente.nombre} onChange={e => setNuevoCliente({ ...nuevoCliente, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="Nombre completo *" />
-                <input type="text" value={nuevoCliente.direccion} onChange={e => setNuevoCliente({ ...nuevoCliente, direccion: e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="Direccion *" />
-                <button onClick={handleCrearClienteRapido} disabled={guardandoCliente} className="w-full py-2 bg-blue-600 text-white rounded-lg">
+              <div className="border rounded-lg p-3 space-y-3 bg-blue-50 dark:bg-gray-700 dark:border-gray-600">
+                <input type="text" value={nuevoCliente.nombreFantasia} onChange={e => setNuevoCliente({ ...nuevoCliente, nombreFantasia: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre fantasia *" />
+                <input type="text" value={nuevoCliente.nombre} onChange={e => setNuevoCliente({ ...nuevoCliente, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre completo *" />
+                <input type="text" value={nuevoCliente.direccion} onChange={e => setNuevoCliente({ ...nuevoCliente, direccion: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Direccion *" />
+                <button onClick={handleCrearClienteRapido} disabled={guardandoCliente} className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400">
                   {guardandoCliente ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Crear y seleccionar'}
                 </button>
               </div>
@@ -220,11 +226,11 @@ const ModalPedido = memo(function ModalPedido({
 
           {/* Seccion Notas */}
           <div>
-            <label className="block text-sm font-medium mb-1">Notas / Observaciones</label>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">Notas / Observaciones</label>
             <textarea
               value={nuevoPedido.notas || ''}
               onChange={e => onNotasChange && onNotasChange(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg"
+              className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               placeholder="Observaciones importantes para la preparacion del pedido..."
               rows={2}
             />
@@ -233,11 +239,11 @@ const ModalPedido = memo(function ModalPedido({
           {/* Seccion Forma de Pago y Estado de Pago */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Forma de Pago</label>
+              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Forma de Pago</label>
               <select
                 value={nuevoPedido.formaPago || 'efectivo'}
                 onChange={e => onFormaPagoChange && onFormaPagoChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg"
+                className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               >
                 <option value="efectivo">Efectivo</option>
                 <option value="transferencia">Transferencia</option>
@@ -247,11 +253,11 @@ const ModalPedido = memo(function ModalPedido({
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Estado de Pago</label>
+              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Estado de Pago</label>
               <select
                 value={nuevoPedido.estadoPago || 'pendiente'}
                 onChange={e => onEstadoPagoChange && onEstadoPagoChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg"
+                className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               >
                 <option value="pendiente">Pendiente</option>
                 <option value="pagado">Pagado</option>
