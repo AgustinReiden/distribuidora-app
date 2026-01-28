@@ -6,46 +6,19 @@ import type {
   ProveedorDBExtended,
   ProveedorFormInputExtended
 } from '../../types'
+import type { ModalControl, ConfirmModal, NotifyService } from './types'
+
+// Re-exportar tipos compartidos para compatibilidad
+export type { ModalControl, ConfirmModal, NotifyService } from './types'
+export type { ConfirmModalConfig, NotifyOptions } from './types'
 
 // =============================================================================
-// TIPOS PARA MODALES
+// TIPOS ESPECÍFICOS DE PROVEEDOR
 // =============================================================================
-
-export interface ModalControl {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}
-
-export interface ConfirmModalConfig {
-  visible: boolean;
-  titulo?: string;
-  mensaje?: string;
-  tipo?: 'success' | 'warning' | 'danger' | 'info';
-  onConfirm?: () => Promise<void> | void;
-}
-
-export interface ConfirmModal {
-  setConfig: (config: ConfirmModalConfig) => void;
-}
 
 export interface ProveedorModales {
   proveedor: ModalControl;
   confirm: ConfirmModal;
-}
-
-// =============================================================================
-// TIPOS PARA NOTIFICACIONES
-// =============================================================================
-
-export interface NotifyOptions {
-  persist?: boolean;
-}
-
-export interface NotifyService {
-  success: (message: string, options?: NotifyOptions) => void;
-  error: (message: string, duration?: number) => void;
-  warning: (message: string) => void;
-  info: (message: string) => void;
 }
 
 // =============================================================================

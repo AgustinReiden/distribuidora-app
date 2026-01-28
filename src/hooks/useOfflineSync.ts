@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getSecureItem,
   setSecureItem,
@@ -133,6 +133,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   const [pedidosPendientes, setPedidosPendientes] = useState<PedidoOffline[]>([])
   const [mermasPendientes, setMermasPendientes] = useState<MermaOffline[]>([])
   const [sincronizando, setSincronizando] = useState<boolean>(false)
+
+  // Ref para evitar race conditions en sincronización
+  const sincronizandoRef = useRef<boolean>(false)
 
   // Cargar pedidos pendientes del secureStorage (con migracion de datos legacy)
   useEffect(() => {
@@ -327,31 +330,41 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       return { success: true, sincronizados: 0, errores: [] }
     }
 
+    // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref
+    if (sincronizandoRef.current) {
+      return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }] }
+    }
+
+    sincronizandoRef.current = true
     setSincronizando(true)
     const errores: SyncResult['errores'] = []
     let sincronizados = 0
 
-    for (const pedido of pedidosPendientes) {
-      try {
-        await crearPedidoFn(
-          pedido.clienteId,
-          pedido.items,
-          pedido.total,
-          pedido.usuarioId,
-          descontarStockFn,
-          pedido.notas,
-          pedido.formaPago,
-          pedido.estadoPago
-        )
-        eliminarPedidoOffline(pedido.offlineId)
-        sincronizados++
-      } catch (error) {
-        const err = error as Error
-        errores.push({ pedido, error: err.message })
+    try {
+      for (const pedido of pedidosPendientes) {
+        try {
+          await crearPedidoFn(
+            pedido.clienteId,
+            pedido.items,
+            pedido.total,
+            pedido.usuarioId,
+            descontarStockFn,
+            pedido.notas,
+            pedido.formaPago,
+            pedido.estadoPago
+          )
+          eliminarPedidoOffline(pedido.offlineId)
+          sincronizados++
+        } catch (error) {
+          const err = error as Error
+          errores.push({ pedido, error: err.message })
+        }
       }
+    } finally {
+      sincronizandoRef.current = false
+      setSincronizando(false)
     }
 
-    setSincronizando(false)
     return { success: errores.length === 0, sincronizados, errores }
   }, [isOnline, pedidosPendientes, eliminarPedidoOffline])
 
@@ -367,22 +380,32 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       return { success: true, sincronizados: 0, errores: [] }
     }
 
+    // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref
+    if (sincronizandoRef.current) {
+      return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }] }
+    }
+
+    sincronizandoRef.current = true
     setSincronizando(true)
     const errores: SyncResult['errores'] = []
     let sincronizados = 0
 
-    for (const merma of mermasPendientes) {
-      try {
-        await registrarMermaFn(merma)
-        eliminarMermaOffline(merma.offlineId)
-        sincronizados++
-      } catch (error) {
-        const err = error as Error
-        errores.push({ merma, error: err.message })
+    try {
+      for (const merma of mermasPendientes) {
+        try {
+          await registrarMermaFn(merma)
+          eliminarMermaOffline(merma.offlineId)
+          sincronizados++
+        } catch (error) {
+          const err = error as Error
+          errores.push({ merma, error: err.message })
+        }
       }
+    } finally {
+      sincronizandoRef.current = false
+      setSincronizando(false)
     }
 
-    setSincronizando(false)
     return { success: errores.length === 0, sincronizados, errores }
   }, [isOnline, mermasPendientes, eliminarMermaOffline])
 

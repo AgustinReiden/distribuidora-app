@@ -16,6 +16,11 @@ import type {
   PagoFormInput,
   PagoDBWithUsuario
 } from '../../types'
+import type { ModalControl, ConfirmModal, NotifyService } from './types'
+
+// Re-exportar tipos compartidos para compatibilidad
+export type { ModalControl, ConfirmModal, NotifyService } from './types'
+export type { ConfirmModalConfig, NotifyOptions } from './types'
 
 // =============================================================================
 // TIPOS PARA NUEVOS PEDIDOS
@@ -37,25 +42,8 @@ export interface NuevoPedidoState {
 }
 
 // =============================================================================
-// TIPOS PARA MODALES
+// TIPOS ESPECÍFICOS DE PEDIDO
 // =============================================================================
-
-export interface ModalControl {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}
-
-export interface ConfirmModalConfig {
-  visible: boolean;
-  titulo?: string;
-  mensaje?: string;
-  tipo?: 'success' | 'warning' | 'danger' | 'info';
-  onConfirm?: () => Promise<void> | void;
-}
-
-export interface ConfirmModal {
-  setConfig: (config: ConfirmModalConfig) => void;
-}
 
 export interface PedidoModales {
   pedido: ModalControl;
@@ -64,21 +52,6 @@ export interface PedidoModales {
   editarPedido: ModalControl;
   optimizarRuta: ModalControl;
   confirm: ConfirmModal;
-}
-
-// =============================================================================
-// TIPOS PARA NOTIFICACIONES
-// =============================================================================
-
-export interface NotifyOptions {
-  persist?: boolean;
-}
-
-export interface NotifyService {
-  success: (message: string, options?: NotifyOptions) => void;
-  error: (message: string, duration?: number) => void;
-  warning: (message: string) => void;
-  info: (message: string) => void;
 }
 
 // =============================================================================

@@ -3,14 +3,13 @@
  */
 import { useCallback } from 'react'
 import type { PerfilDB, ModalState } from '../../types/hooks'
+import type { NotifyService } from './types'
 
-/** Notification API interface */
-export interface NotifyApi {
-  success: (message: string, options?: { persist?: boolean }) => void;
-  error: (message: string, duration?: number) => void;
-  warning: (message: string) => void;
-  info: (message: string) => void;
-}
+// Re-exportar tipos compartidos para compatibilidad
+export type { NotifyService } from './types'
+
+// Alias para compatibilidad
+export type NotifyApi = NotifyService
 
 /** Modales interface for usuario handlers */
 export interface ModalesUsuario {

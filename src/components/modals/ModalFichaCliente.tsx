@@ -49,7 +49,12 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   useEffect(() => {
     if (cliente?.id) {
       fetchPagosCliente(cliente.id)
-      obtenerResumenCuenta(cliente.id).then((res: ResumenCuenta | null) => setResumenCuenta(res))
+      obtenerResumenCuenta(cliente.id)
+        .then((res: ResumenCuenta | null) => setResumenCuenta(res))
+        .catch((err: Error) => {
+          console.error('Error al obtener resumen de cuenta:', err.message)
+          setResumenCuenta(null)
+        })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cliente?.id])
