@@ -6,7 +6,7 @@
  * con manejo de estados, errores y notificaciones.
  */
 import { useCallback } from 'react';
-import { withLoadingState, showDeleteConfirmation, getErrorMessage } from '../utils/errorHandling';
+import { withLoadingState, showDeleteConfirmation } from '../utils/errorHandling';
 import type { NotifyService, ModalControl, ConfirmModal } from './handlers/types';
 
 // ============================================
