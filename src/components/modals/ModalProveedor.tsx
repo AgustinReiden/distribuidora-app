@@ -3,6 +3,7 @@ import { X, Building2, Phone, Mail, MapPin, FileText, User, Hash, CheckCircle } 
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProveedorSchema } from '../../lib/schemas';
+import { formatCuitInput } from '../../utils/formatters';
 import type { Proveedor } from '../../types';
 
 interface AddressResult {
@@ -87,17 +88,8 @@ export default function ModalProveedor({
     setError('');
   };
 
-  const formatCuit = (value: string): string => {
-    // Remover todo lo que no sea numero
-    const numbers = value.replace(/\D/g, '');
-    // Formatear como XX-XXXXXXXX-X
-    if (numbers.length <= 2) return numbers;
-    if (numbers.length <= 10) return `${numbers.slice(0, 2)}-${numbers.slice(2)}`;
-    return `${numbers.slice(0, 2)}-${numbers.slice(2, 10)}-${numbers.slice(10, 11)}`;
-  };
-
   const handleCuitChange = (value: string): void => {
-    const formatted = formatCuit(value);
+    const formatted = formatCuitInput(value);
     if (formatted.replace(/\D/g, '').length <= 11) {
       handleChange('cuit', formatted);
     }

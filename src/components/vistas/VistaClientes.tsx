@@ -84,40 +84,49 @@ export default function VistaClientes({
       {/* Filtros */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" aria-hidden="true" />
           <input
             type="text"
             value={busqueda}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setBusqueda(e.target.value)}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
             placeholder="Buscar por nombre, CUIT, dirección o teléfono..."
+            aria-label="Buscar clientes por nombre, CUIT, dirección o teléfono"
           />
         </div>
         {zonas.length > 1 && (
-          <select
-            value={filtroZona}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroZona(e.target.value)}
-            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            {zonas.map(zona => (
-              <option key={zona} value={zona}>
-                {zona === 'todas' ? 'Todas las zonas' : zona}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label htmlFor="filtro-zona-clientes" className="sr-only">Filtrar clientes por zona</label>
+            <select
+              id="filtro-zona-clientes"
+              value={filtroZona}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroZona(e.target.value)}
+              className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              {zonas.map(zona => (
+                <option key={zona} value={zona}>
+                  {zona === 'todas' ? 'Todas las zonas' : zona}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
         {rubros.length > 1 && (
-          <select
-            value={filtroRubro}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroRubro(e.target.value)}
-            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            {rubros.map(rubro => (
-              <option key={rubro} value={rubro}>
-                {rubro === 'todos' ? 'Todos los rubros' : rubro}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label htmlFor="filtro-rubro-clientes" className="sr-only">Filtrar clientes por rubro</label>
+            <select
+              id="filtro-rubro-clientes"
+              value={filtroRubro}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroRubro(e.target.value)}
+              className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              {rubros.map(rubro => (
+                <option key={rubro} value={rubro}>
+                  {rubro === 'todos' ? 'Todos los rubros' : rubro}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
       </div>
 
@@ -166,17 +175,17 @@ export default function VistaClientes({
                   <div className="flex space-x-1 ml-2">
                     <button
                       onClick={() => onEditarCliente(cliente)}
-                      className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Editar"
+                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                      aria-label={`Editar cliente ${cliente.nombre_fantasia}`}
                     >
-                      <Edit2 className="w-4 h-4" />
+                      <Edit2 className="w-4 h-4" aria-hidden="true" />
                     </button>
                     <button
                       onClick={() => onEliminarCliente(cliente.id)}
-                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Eliminar"
+                      className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                      aria-label={`Eliminar cliente ${cliente.nombre_fantasia}`}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </div>
                 )}

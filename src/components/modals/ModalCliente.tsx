@@ -4,6 +4,13 @@ import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
+import {
+  formatCuitInput,
+  formatDniInput,
+  dniToStorageFormat,
+  extractDniFromStorage,
+  detectDocumentType
+} from '../../utils/formatters';
 import type { ClienteDB } from '../../types';
 
 /** Tipo de documento del cliente */
@@ -86,60 +93,6 @@ const RUBROS_OPCIONES = [
   'Otro'
 ];
 
-// Validar formato de CUIT (XX-XXXXXXXX-X)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const validarCuit = (cuit: string): boolean => {
-  if (!cuit) return false;
-  const cuitLimpio = cuit.replace(/-/g, '');
-  return /^\d{11}$/.test(cuitLimpio);
-};
-
-// Validar formato de DNI (7-8 digitos)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const validarDni = (dni: string): boolean => {
-  if (!dni) return false;
-  const dniLimpio = dni.replace(/\D/g, '');
-  return /^\d{7,8}$/.test(dniLimpio);
-};
-
-// Formatear CUIT mientras se escribe (XX-XXXXXXXX-X)
-const formatearCuit = (valor: string): string => {
-  const numeros = valor.replace(/\D/g, '').slice(0, 11);
-  if (numeros.length <= 2) return numeros;
-  if (numeros.length <= 10) return `${numeros.slice(0, 2)}-${numeros.slice(2)}`;
-  return `${numeros.slice(0, 2)}-${numeros.slice(2, 10)}-${numeros.slice(10)}`;
-};
-
-// Formatear DNI mientras se escribe (solo numeros, max 8)
-const formatearDni = (valor: string): string => {
-  return valor.replace(/\D/g, '').slice(0, 8);
-};
-
-// Convertir DNI a formato estandarizado para almacenar (00-XXXXXXXX-0)
-const dniAFormatoAlmacenamiento = (dni: string): string => {
-  const dniLimpio = dni.replace(/\D/g, '').padStart(8, '0');
-  return `00-${dniLimpio}-0`;
-};
-
-// Extraer DNI del formato de almacenamiento
-const extraerDniDeFormato = (codigo: string | null | undefined): string => {
-  if (!codigo) return '';
-  // Si tiene formato 00-XXXXXXXX-0, extraer el DNI
-  const match = codigo.match(/^00-(\d{8})-0$/);
-  if (match) {
-    // Quitar ceros iniciales del DNI
-    return match[1].replace(/^0+/, '') || '0';
-  }
-  return codigo;
-};
-
-// Detectar tipo de documento por el formato almacenado
-const detectarTipoDocumento = (codigo: string | null | undefined): TipoDocumento => {
-  if (!codigo) return 'CUIT';
-  if (/^00-\d{8}-0$/.test(codigo)) return 'DNI';
-  return 'CUIT';
-};
-
 const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }: ModalClienteProps) {
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
@@ -148,8 +101,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
 
   // Detectar tipo de documento y extraer numero si es edicion
-  const tipoDocInicial = cliente ? (cliente.tipo_documento || detectarTipoDocumento(cliente.cuit)) : 'CUIT';
-  const numeroDocInicial = cliente ? (tipoDocInicial === 'DNI' ? extraerDniDeFormato(cliente.cuit) : cliente.cuit) : '';
+  const tipoDocInicial = cliente ? (cliente.tipo_documento || detectDocumentType(cliente.cuit)) : 'CUIT';
+  const numeroDocInicial = cliente ? (tipoDocInicial === 'DNI' ? extractDniFromStorage(cliente.cuit) : cliente.cuit) : '';
 
   // Combinar zonas predefinidas con las existentes de la base de datos
   const zonasUnicas = [...new Set([...ZONAS_PREDEFINIDAS, ...zonasExistentes.filter(Boolean)])].sort();
@@ -240,7 +193,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     // Convertir documento al formato de almacenamiento
     let cuitFinal;
     if (form.tipo_documento === 'DNI') {
-      cuitFinal = dniAFormatoAlmacenamiento(form.numero_documento);
+      cuitFinal = dniToStorageFormat(form.numero_documento);
     } else {
       cuitFinal = form.numero_documento;
     }
@@ -270,9 +223,9 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     let processedValue = value;
     if (field === 'numero_documento') {
       if (form.tipo_documento === 'CUIT') {
-        processedValue = formatearCuit(String(value));
+        processedValue = formatCuitInput(String(value));
       } else {
-        processedValue = formatearDni(String(value));
+        processedValue = formatDniInput(String(value));
       }
     }
     setForm({ ...form, [field]: processedValue });

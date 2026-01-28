@@ -230,10 +230,13 @@ function PedidoCard({
             <button
               onClick={() => setExpandido(!expandido)}
               className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+              aria-expanded={expandido}
+              aria-controls={`pedido-detalle-${pedido.id}`}
+              aria-label={expandido ? 'Ocultar detalle del pedido' : 'Ver detalle del pedido'}
             >
-              <Eye className="w-4 h-4" />
+              <Eye className="w-4 h-4" aria-hidden="true" />
               {expandido ? 'Ocultar' : 'Ver detalle'}
-              {expandido ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {expandido ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
             </button>
           </div>
         </div>
@@ -241,7 +244,7 @@ function PedidoCard({
 
       {/* Contenido expandido del pedido */}
       {expandido && (
-        <div className="mt-4 pt-4 border-t dark:border-gray-700 space-y-4 animate-fadeIn">
+        <div id={`pedido-detalle-${pedido.id}`} className="mt-4 pt-4 border-t dark:border-gray-700 space-y-4 animate-fadeIn">
           {/* Informacion del cliente */}
           <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">

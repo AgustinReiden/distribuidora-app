@@ -184,6 +184,66 @@ export function formatDni(value: string | number | null | undefined): string {
 }
 
 /**
+ * Formatea un DNI mientras se escribe (solo números, max 8 dígitos)
+ * Útil para inputs de formularios
+ */
+export function formatDniInput(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 8)
+}
+
+/**
+ * Formatea un CUIT mientras se escribe (XX-XXXXXXXX-X)
+ * Útil para inputs de formularios
+ */
+export function formatCuitInput(value: string): string {
+  const numbers = value.replace(/\D/g, '').slice(0, 11)
+  if (numbers.length <= 2) return numbers
+  if (numbers.length <= 10) return `${numbers.slice(0, 2)}-${numbers.slice(2)}`
+  return `${numbers.slice(0, 2)}-${numbers.slice(2, 10)}-${numbers.slice(10)}`
+}
+
+/**
+ * Valida formato de DNI (7-8 dígitos)
+ */
+export function isValidDni(dni: string | null | undefined): boolean {
+  if (!dni) return false
+  const dniLimpio = dni.replace(/\D/g, '')
+  return /^\d{7,8}$/.test(dniLimpio)
+}
+
+/**
+ * Convierte DNI a formato de almacenamiento (00-XXXXXXXX-0)
+ * Permite almacenar DNI en el mismo campo que CUIT
+ */
+export function dniToStorageFormat(dni: string): string {
+  const dniLimpio = dni.replace(/\D/g, '').padStart(8, '0')
+  return `00-${dniLimpio}-0`
+}
+
+/**
+ * Extrae DNI del formato de almacenamiento
+ */
+export function extractDniFromStorage(codigo: string | null | undefined): string {
+  if (!codigo) return ''
+  // Si tiene formato 00-XXXXXXXX-0, extraer el DNI
+  const match = codigo.match(/^00-(\d{8})-0$/)
+  if (match) {
+    // Quitar ceros iniciales del DNI
+    return match[1].replace(/^0+/, '') || '0'
+  }
+  return codigo
+}
+
+/**
+ * Detecta tipo de documento por el formato almacenado
+ */
+export function detectDocumentType(codigo: string | null | undefined): 'CUIT' | 'DNI' {
+  if (!codigo) return 'CUIT'
+  if (/^00-\d{8}-0$/.test(codigo)) return 'DNI'
+  return 'CUIT'
+}
+
+/**
  * Formatea un numero de telefono
  */
 export function formatTelefono(value: string | number | null | undefined): string {
@@ -319,6 +379,12 @@ export default {
   unformatCuit,
   isValidCuit,
   formatDni,
+  formatDniInput,
+  formatCuitInput,
+  isValidDni,
+  dniToStorageFormat,
+  extractDniFromStorage,
+  detectDocumentType,
   formatTelefono,
   getEstadoColor,
   getEstadoLabel,

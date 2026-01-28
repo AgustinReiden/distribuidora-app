@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProductoSchema } from '../../lib/schemas';
+import { calcularTotalConIva } from '../../utils/calculations';
 import type { ProductoDB } from '../../types';
 
 // =============================================================================
@@ -105,26 +106,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
   const [nuevaCategoria, setNuevaCategoria] = useState<string>('');
   const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState<boolean>(false);
 
-  // Calcular costo total: neto + IVA(solo sobre neto) + impuestos internos
-  const calcularCostoTotal = (costoNeto: number | string, porcentajeIva: number | string, impInternos: number | string): number => {
-    const neto = parseFloat(String(costoNeto)) || 0;
-    const iva = neto * (parseFloat(String(porcentajeIva)) || 0) / 100;
-    const internos = parseFloat(String(impInternos)) || 0;
-    return neto + iva + internos;
-  };
-
-  // Calcular precio total: neto + IVA(solo sobre neto) + impuestos internos
-  const calcularPrecioTotal = (precioNeto: number | string, porcentajeIva: number | string, impInternos: number | string): number => {
-    const neto = parseFloat(String(precioNeto)) || 0;
-    const iva = neto * (parseFloat(String(porcentajeIva)) || 0) / 100;
-    const internos = parseFloat(String(impInternos)) || 0;
-    return neto + iva + internos;
-  };
-
   // Recalcular totales cuando cambian los valores
   const recalcularTotales = (nuevoForm: ProductoFormData): ProductoFormData => {
-    const costoTotal = calcularCostoTotal(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
-    const precioTotal = calcularPrecioTotal(nuevoForm.precio_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
+    const costoTotal = calcularTotalConIva(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
+    const precioTotal = calcularTotalConIva(nuevoForm.precio_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
     return {
       ...nuevoForm,
       costo_con_iva: costoTotal ? costoTotal.toFixed(2) : '',
