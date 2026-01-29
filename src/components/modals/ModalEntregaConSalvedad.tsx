@@ -1,10 +1,11 @@
 /**
  * Modal para registrar entrega con salvedades
  * Permite seleccionar items con problemas antes de marcar el pedido como entregado
+ * Validación con Zod
  */
 import React, { useState, useCallback } from 'react'
 import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck } from 'lucide-react'
-import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
+import { MOTIVOS_SALVEDAD_LABELS, itemSalvedadSchema } from '../../lib/schemas'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
 interface MotivoOption {
@@ -76,20 +77,25 @@ export default function ModalEntregaConSalvedad({
 
   const validarDatos = (): boolean => {
     for (const itemSalv of itemsConSalvedad) {
-      if (!itemSalv.motivo) {
-        setError(`Debe seleccionar un motivo para "${itemSalv.item.producto?.nombre || 'Producto'}"`)
+      const productoNombre = itemSalv.item.producto?.nombre || 'Producto'
+
+      // Validar con Zod schema
+      const result = itemSalvedadSchema.safeParse({
+        itemId: itemSalv.item.id,
+        cantidadAfectada: itemSalv.cantidadAfectada,
+        motivo: itemSalv.motivo || undefined,
+        descripcion: itemSalv.descripcion
+      })
+
+      if (!result.success) {
+        const firstError = result.error.issues[0]?.message || 'Error de validación'
+        setError(`${productoNombre}: ${firstError}`)
         return false
       }
-      if (itemSalv.cantidadAfectada <= 0) {
-        setError(`La cantidad debe ser mayor a 0 para "${itemSalv.item.producto?.nombre || 'Producto'}"`)
-        return false
-      }
+
+      // Validación adicional: cantidad no puede exceder la cantidad del item
       if (itemSalv.cantidadAfectada > itemSalv.item.cantidad) {
-        setError(`La cantidad no puede exceder ${itemSalv.item.cantidad} para "${itemSalv.item.producto?.nombre || 'Producto'}"`)
-        return false
-      }
-      if (itemSalv.motivo === 'otro' && itemSalv.descripcion.trim().length < 10) {
-        setError(`Debe especificar una descripcion para "${itemSalv.item.producto?.nombre || 'Producto'}"`)
+        setError(`La cantidad no puede exceder ${itemSalv.item.cantidad} para "${productoNombre}"`)
         return false
       }
     }

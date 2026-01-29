@@ -161,22 +161,40 @@ export function useCrearProductoMutation() {
 }
 
 /**
- * Hook para actualizar un producto
+ * Hook para actualizar un producto (con optimistic update)
  */
 export function useActualizarProductoMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: updateProducto,
-    onSuccess: (updatedProducto) => {
-      // Actualizar cache de detalle
-      queryClient.setQueryData(productosKeys.detail(updatedProducto.id), updatedProducto)
-      // Actualizar cache de lista
+    // Optimistic update
+    onMutate: async ({ id, data: producto }) => {
+      await queryClient.cancelQueries({ queryKey: productosKeys.lists() })
+
+      const previousProductos = queryClient.getQueryData<ProductoDB[]>(productosKeys.lists())
+
+      // Aplicar cambios optimistamente
       queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(), (old) => {
-        if (!old) return [updatedProducto]
-        return old.map(p => p.id === updatedProducto.id ? updatedProducto : p)
+        if (!old) return old
+        return old.map(p => p.id === id ? { ...p, ...producto } as ProductoDB : p)
       })
-      // Invalidar queries relacionadas
+
+      return { previousProductos }
+    },
+    onError: (_, __, context) => {
+      // Rollback on error
+      if (context?.previousProductos) {
+        queryClient.setQueryData(productosKeys.lists(), context.previousProductos)
+      }
+    },
+    onSuccess: (updatedProducto) => {
+      // Actualizar cache de detalle con datos reales del servidor
+      queryClient.setQueryData(productosKeys.detail(updatedProducto.id), updatedProducto)
+    },
+    onSettled: () => {
+      // Revalidar para asegurar consistencia
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists() })
       queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
     },
   })

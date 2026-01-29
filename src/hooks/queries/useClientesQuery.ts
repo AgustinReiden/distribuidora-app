@@ -207,22 +207,40 @@ export function useCrearClienteMutation() {
 }
 
 /**
- * Hook para actualizar un cliente
+ * Hook para actualizar un cliente (con optimistic update)
  */
 export function useActualizarClienteMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: updateCliente,
-    onSuccess: (updatedCliente) => {
-      // Actualizar cache de detalle
-      queryClient.setQueryData(clientesKeys.detail(updatedCliente.id), updatedCliente)
-      // Actualizar cache de lista
+    // Optimistic update
+    onMutate: async ({ id, data: cliente }) => {
+      await queryClient.cancelQueries({ queryKey: clientesKeys.lists() })
+
+      const previousClientes = queryClient.getQueryData<ClienteDB[]>(clientesKeys.lists())
+
+      // Aplicar cambios optimistamente
       queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(), (old) => {
-        if (!old) return [updatedCliente]
-        return old.map(c => c.id === updatedCliente.id ? updatedCliente : c)
+        if (!old) return old
+        return old.map(c => c.id === id ? { ...c, ...cliente } as ClienteDB : c)
       })
-      // Invalidar zonas
+
+      return { previousClientes }
+    },
+    onError: (_, __, context) => {
+      // Rollback on error
+      if (context?.previousClientes) {
+        queryClient.setQueryData(clientesKeys.lists(), context.previousClientes)
+      }
+    },
+    onSuccess: (updatedCliente) => {
+      // Actualizar cache de detalle con datos reales del servidor
+      queryClient.setQueryData(clientesKeys.detail(updatedCliente.id), updatedCliente)
+    },
+    onSettled: () => {
+      // Revalidar para asegurar consistencia
+      queryClient.invalidateQueries({ queryKey: clientesKeys.lists() })
       queryClient.invalidateQueries({ queryKey: clientesKeys.zonas() })
     },
   })
