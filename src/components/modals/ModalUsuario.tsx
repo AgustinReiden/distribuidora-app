@@ -1,6 +1,8 @@
-import React, { useState, memo, ChangeEvent } from 'react';
+import React, { useState, memo, useRef } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { useZodValidation } from '../../hooks/useZodValidation';
+import { usuarioSchema } from '../../lib/schemas';
 import type { PerfilDB } from '../../types';
 
 /** Roles disponibles para usuarios */
@@ -31,6 +33,11 @@ export interface ModalUsuarioProps {
 }
 
 const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guardando, zonasDisponibles = [] }: ModalUsuarioProps) {
+  const formRef = useRef<HTMLDivElement>(null);
+
+  // Zod validation hook
+  const { errors, validate, clearFieldError, hasAttemptedSubmit, getAriaProps, getErrorMessageProps } = useZodValidation(usuarioSchema);
+
   const [form, setForm] = useState<UsuarioFormData>(usuario ? {
     id: usuario.id,
     nombre: usuario.nombre || '',
@@ -43,9 +50,39 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
   // Mostrar campo de zona solo para preventistas
   const mostrarZona = form.rol === 'preventista';
 
+  const handleFieldChange = (field: keyof UsuarioFormData, value: string | boolean): void => {
+    setForm({ ...form, [field]: value });
+    if (hasAttemptedSubmit && errors[field]) {
+      clearFieldError(field);
+    }
+  };
+
+  const handleSubmit = (): void => {
+    const result = validate({
+      nombre: form.nombre,
+      email: form.email || '',
+      rol: form.rol,
+      zona: form.zona,
+      telefono: '' // Optional field
+    });
+
+    if (!result.success) {
+      setTimeout(() => {
+        const firstError = formRef.current?.querySelector('.border-red-500');
+        if (firstError) firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+      return;
+    }
+
+    onSave({ ...form, id: usuario?.id });
+  };
+
+  const inputClass = (field: string): string =>
+    `w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${errors[field] ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''}`;
+
   return (
     <ModalBase title="Editar Usuario" onClose={onClose}>
-      <div className="p-4 space-y-4">
+      <div ref={formRef} className="p-4 space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1 dark:text-gray-200">Email</label>
           <input
@@ -56,38 +93,49 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200">Nombre</label>
+          <label htmlFor="nombre" className="block text-sm font-medium mb-1 dark:text-gray-200">Nombre *</label>
           <input
+            id="nombre"
             type="text"
             value={form.nombre}
-            onChange={e => setForm({ ...form, nombre: e.target.value })}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            onChange={e => handleFieldChange('nombre', e.target.value)}
+            className={inputClass('nombre')}
+            {...getAriaProps('nombre', true)}
           />
+          {errors.nombre && <p {...getErrorMessageProps('nombre')} className="text-red-500 text-xs mt-1">{errors.nombre}</p>}
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200">Rol</label>
+          <label htmlFor="rol" className="block text-sm font-medium mb-1 dark:text-gray-200">Rol *</label>
           <select
+            id="rol"
             value={form.rol}
-            onChange={e => setForm({ ...form, rol: e.target.value as RolUsuario, zona: e.target.value !== 'preventista' ? '' : form.zona })}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            onChange={e => {
+              const newRol = e.target.value as RolUsuario;
+              setForm({ ...form, rol: newRol, zona: newRol !== 'preventista' ? '' : form.zona });
+              if (hasAttemptedSubmit && errors.rol) clearFieldError('rol');
+            }}
+            className={inputClass('rol')}
+            {...getAriaProps('rol', true)}
           >
             <option value="preventista">Preventista</option>
             <option value="transportista">Transportista</option>
             <option value="admin">Administrador</option>
           </select>
+          {errors.rol && <p {...getErrorMessageProps('rol')} className="text-red-500 text-xs mt-1">{errors.rol}</p>}
         </div>
 
         {/* Campo de zona solo para preventistas */}
         {mostrarZona && (
           <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+            <label htmlFor="zona" className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
               <MapPin className="w-4 h-4" />
               Zona Asignada
             </label>
             <input
+              id="zona"
               type="text"
               value={form.zona || ''}
-              onChange={e => setForm({ ...form, zona: e.target.value })}
+              onChange={e => handleFieldChange('zona', e.target.value)}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               placeholder="Ej: 1, 2, Norte, Centro..."
               list="zonas-list"
@@ -111,7 +159,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
             type="checkbox"
             id="activo"
             checked={form.activo}
-            onChange={e => setForm({ ...form, activo: e.target.checked })}
+            onChange={e => handleFieldChange('activo', e.target.checked)}
             className="w-4 h-4"
           />
           <label htmlFor="activo" className="text-sm dark:text-gray-200">Usuario activo</label>
@@ -125,7 +173,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           Cancelar
         </button>
         <button
-          onClick={() => onSave({ ...form, id: usuario?.id })}
+          onClick={handleSubmit}
           disabled={guardando}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
