@@ -3,6 +3,11 @@
  *
  * Componente principal de la aplicacion.
  * Usa React Router para navegacion URL y Contexts para estado global.
+ *
+ * ARQUITECTURA OPTIMIZADA:
+ * - Los containers cargan datos bajo demanda usando TanStack Query
+ * - Solo las rutas visitadas cargan sus datos
+ * - El App ya no es un "God Component"
  */
 import { useEffect, lazy, Suspense, ReactElement, useState, useMemo, useCallback } from 'react';
 import { BrowserRouter, useLocation, useNavigate, Navigate, Routes, Route } from 'react-router-dom';
@@ -27,6 +32,7 @@ import {
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { AppDataProvider, type AppDataContextValue } from './contexts/AppDataContext';
+import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
@@ -43,16 +49,20 @@ import AppModals from './components/AppModals';
 import PWAPrompt from './components/PWAPrompt';
 import SkipLinks from './components/a11y/SkipLinks';
 
-// Vistas con lazy loading
-const VistaDashboard = lazy(() => import('./components/vistas/VistaDashboard'));
+// Containers (cargan datos bajo demanda)
+import {
+  DashboardContainer,
+  ProductosContainer,
+  ClientesContainer,
+  ComprasContainer,
+  ProveedoresContainer
+} from './components/containers';
+
+// Vistas con lazy loading (rutas legacy que aún no tienen container)
 const VistaPedidos = lazy(() => import('./components/vistas/VistaPedidos'));
-const VistaClientes = lazy(() => import('./components/vistas/VistaClientes'));
-const VistaProductos = lazy(() => import('./components/vistas/VistaProductos'));
 const VistaReportes = lazy(() => import('./components/vistas/VistaReportes'));
 const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
 const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
-const VistaCompras = lazy(() => import('./components/vistas/VistaCompras'));
-const VistaProveedores = lazy(() => import('./components/vistas/VistaProveedores'));
 const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'));
 const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'));
 
@@ -101,8 +111,8 @@ function MainApp(): ReactElement {
   const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, actualizarItemsPedido, fetchHistorialPedido, fetchPedidosEliminados, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
   const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
-  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo } = useDashboard(dashboardUsuarioId);
-  const { exportando, descargarJSON, exportarPedidosExcel } = useBackup();
+  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo: _cambiarPeriodo } = useDashboard(dashboardUsuarioId);
+  const { exportando, descargarJSON: _descargarJSON, exportarPedidosExcel } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
   const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
@@ -277,7 +287,19 @@ function MainApp(): ReactElement {
   // Determinar la ruta por defecto
   const defaultRoute = (isAdmin || isPreventista) ? '/dashboard' : '/pedidos';
 
+  // Valor para AuthDataContext (usado por containers)
+  const authDataValue = useMemo<AuthDataContextValue>(() => ({
+    user,
+    perfil,
+    isAdmin,
+    isPreventista,
+    isTransportista,
+    isOnline,
+    logout: handleLogout
+  }), [user, perfil, isAdmin, isPreventista, isTransportista, isOnline, handleLogout]);
+
   return (
+    <AuthDataProvider value={authDataValue}>
     <AppDataProvider value={appDataValue}>
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
         <SkipLinks />
@@ -290,10 +312,10 @@ function MainApp(): ReactElement {
                 {/* Ruta raíz - redirige según rol */}
                 <Route path="/" element={<Navigate to={defaultRoute} replace />} />
 
-                {/* Dashboard */}
+                {/* Dashboard - usa container con TanStack Query */}
                 <Route path="/dashboard" element={
                   (isAdmin || isPreventista) ? (
-                    <VistaDashboard metricas={metricas} loading={loadingMetricas} filtroPeriodo={filtroPeriodo} onCambiarPeriodo={cambiarPeriodo} onRefetch={refetchMetricas} onDescargarBackup={descargarJSON} exportando={exportando} isAdmin={isAdmin} isPreventista={isPreventista} totalClientes={clientes.length} />
+                    <DashboardContainer />
                   ) : <Navigate to="/pedidos" replace />
                 } />
 
@@ -325,29 +347,11 @@ function MainApp(): ReactElement {
                   />
                 } />
 
-                {/* Clientes */}
-                <Route path="/clientes" element={
-                  <VistaClientes
-                    clientes={clientes} loading={loadingClientes} isAdmin={isAdmin} isPreventista={isPreventista}
-                    onNuevoCliente={() => modales.cliente.setOpen(true)}
-                    onEditarCliente={(cliente) => { appState.setClienteEditando(cliente); modales.cliente.setOpen(true); }}
-                    onEliminarCliente={handlers.handleEliminarCliente}
-                    onVerFichaCliente={handlers.handleVerFichaCliente}
-                  />
-                } />
+                {/* Clientes - usa container con TanStack Query */}
+                <Route path="/clientes" element={<ClientesContainer />} />
 
-                {/* Productos */}
-                <Route path="/productos" element={
-                  <VistaProductos
-                    productos={productos} loading={loadingProductos} isAdmin={isAdmin}
-                    onNuevoProducto={() => modales.producto.setOpen(true)}
-                    onEditarProducto={(producto) => { appState.setProductoEditando(producto); modales.producto.setOpen(true); }}
-                    onEliminarProducto={handlers.handleEliminarProducto}
-                    onBajaStock={handlers.handleAbrirMerma}
-                    onVerHistorialMermas={handlers.handleVerHistorialMermas}
-                    onImportarPrecios={() => modales.importarPrecios.setOpen(true)}
-                  />
-                } />
+                {/* Productos - usa container con TanStack Query */}
+                <Route path="/productos" element={<ProductosContainer />} />
 
                 {/* Reportes - solo admin */}
                 <Route path="/reportes" element={
@@ -374,18 +378,14 @@ function MainApp(): ReactElement {
                   ) : <Navigate to="/pedidos" replace />
                 } />
 
-                {/* Compras - solo admin */}
+                {/* Compras - usa container con TanStack Query */}
                 <Route path="/compras" element={
-                  isAdmin ? (
-                    <VistaCompras compras={compras as any} proveedores={proveedores as any} loading={loadingCompras} isAdmin={isAdmin} onNuevaCompra={handlers.handleNuevaCompra} onVerDetalle={handlers.handleVerDetalleCompra as any} onAnularCompra={handlers.handleAnularCompra} />
-                  ) : <Navigate to="/pedidos" replace />
+                  isAdmin ? <ComprasContainer /> : <Navigate to="/pedidos" replace />
                 } />
 
-                {/* Proveedores - solo admin */}
+                {/* Proveedores - usa container con TanStack Query */}
                 <Route path="/proveedores" element={
-                  isAdmin ? (
-                    <VistaProveedores proveedores={proveedores} compras={compras} loading={loadingCompras} isAdmin={isAdmin} onNuevoProveedor={handlers.handleNuevoProveedor} onEditarProveedor={handlers.handleEditarProveedor} onEliminarProveedor={handlers.handleEliminarProveedor} onToggleActivo={handlers.handleToggleActivoProveedor} />
-                  ) : <Navigate to="/pedidos" replace />
+                  isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />
                 } />
 
                 {/* Rendiciones - solo admin */}
@@ -466,6 +466,7 @@ function MainApp(): ReactElement {
         )}
       </div>
     </AppDataProvider>
+    </AuthDataProvider>
   );
 }
 
