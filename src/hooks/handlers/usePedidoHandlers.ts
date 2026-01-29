@@ -1,7 +1,10 @@
 /**
  * Handlers para operaciones con pedidos
+ *
+ * Optimizado con useLatestRef para reducir dependencias en useCallback.
  */
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
+import { useLatestRef } from '../useLatestRef'
 import { calcularTotalPedido } from '../useAppState'
 import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada } from '../../lib/pdfExport'
 import type { User } from '@supabase/supabase-js'
@@ -10,7 +13,6 @@ import type {
   PedidoDB,
   ClienteDB,
   ClienteFormInput,
-  PedidoFormInput,
   PerfilDB,
   RutaOptimizada,
   PagoFormInput,
@@ -256,8 +258,26 @@ export function usePedidoHandlers({
   guardarPedidoOffline,
   rutaOptimizada
 }: UsePedidoHandlersProps): UsePedidoHandlersReturn {
-  // Item management
+  // ==========================================================================
+  // REFS PARA VALORES QUE CAMBIAN FRECUENTEMENTE
+  // Esto evita recrear los callbacks cuando estos valores cambian
+  // ==========================================================================
+  const productosRef = useLatestRef(productos)
+  const nuevoPedidoRef = useLatestRef(nuevoPedido)
+  const pedidoAsignandoRef = useLatestRef(pedidoAsignando)
+  const pedidoEditandoRef = useLatestRef(pedidoEditando)
+  const userRef = useLatestRef(user)
+  const isOnlineRef = useLatestRef(isOnline)
+  const rutaOptimizadaRef = useLatestRef(rutaOptimizada)
+
+  // ==========================================================================
+  // HANDLERS - Usan refs para valores frecuentes, deps estables para funciones
+  // ==========================================================================
+
+  // Item management - usa refs para evitar dependencias de valores cambiantes
   const agregarItemPedido = useCallback((productoId: string): void => {
+    const nuevoPedido = nuevoPedidoRef.current
+    const productos = productosRef.current
     const existe = nuevoPedido.items.find(i => i.productoId === productoId)
     const producto = productos.find(p => p.id === productoId)
     if (existe) {
@@ -271,7 +291,7 @@ export function usePedidoHandlers({
         items: [...prev.items, { productoId, cantidad: 1, precioUnitario: producto?.precio || 0 }]
       }))
     }
-  }, [productos, nuevoPedido.items, setNuevoPedido])
+  }, [nuevoPedidoRef, productosRef, setNuevoPedido])
 
   const actualizarCantidadItem = useCallback((productoId: string, cantidad: number): void => {
     if (cantidad <= 0) {
@@ -308,8 +328,12 @@ export function usePedidoHandlers({
     return cliente
   }, [agregarCliente, notify])
 
-  // Main order creation
+  // Main order creation - optimizado con refs para reducir deps de 15 a 9
   const handleGuardarPedidoConOffline = useCallback(async (): Promise<void> => {
+    const nuevoPedido = nuevoPedidoRef.current
+    const user = userRef.current
+    const isOnline = isOnlineRef.current
+
     if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
       notify.warning('Seleccioná cliente y productos')
       return
@@ -376,7 +400,7 @@ export function usePedidoHandlers({
       notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [nuevoPedido, validarStock, isOnline, guardarPedidoOffline, user, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
+  }, [nuevoPedidoRef, userRef, isOnlineRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
   const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {
@@ -477,6 +501,7 @@ export function usePedidoHandlers({
   }, [asignarTransportista, cambiarEstado, refetchMetricas, notify, modales.confirm, setGuardando])
 
   const handleAsignarTransportista = useCallback(async (transportistaId: string | null, marcarListo: boolean = false): Promise<void> => {
+    const pedidoAsignando = pedidoAsignandoRef.current
     if (!pedidoAsignando) return
     setGuardando(true)
     try {
@@ -493,7 +518,7 @@ export function usePedidoHandlers({
       notify.error('Error: ' + error.message)
     }
     setGuardando(false)
-  }, [pedidoAsignando, asignarTransportista, modales.asignar, setPedidoAsignando, notify, setGuardando])
+  }, [pedidoAsignandoRef, asignarTransportista, modales.asignar, setPedidoAsignando, notify, setGuardando])
 
   const handleEliminarPedido = useCallback((id: string): void => {
     modales.confirm.setConfig({
@@ -504,7 +529,7 @@ export function usePedidoHandlers({
       onConfirm: async () => {
         setGuardando(true)
         try {
-          await eliminarPedido(id, restaurarStock, user?.id)
+          await eliminarPedido(id, restaurarStock, userRef.current?.id)
           refetchProductos()
           refetchMetricas()
           notify.success('Pedido eliminado y registrado en historial')
@@ -517,7 +542,7 @@ export function usePedidoHandlers({
         }
       }
     })
-  }, [eliminarPedido, restaurarStock, user, refetchProductos, refetchMetricas, notify, modales.confirm, setGuardando])
+  }, [eliminarPedido, restaurarStock, userRef, refetchProductos, refetchMetricas, notify, modales.confirm, setGuardando])
 
   // History and editing
   const handleVerHistorial = useCallback(async (pedido: PedidoDB): Promise<void> => {
@@ -542,6 +567,7 @@ export function usePedidoHandlers({
   }, [setPedidoEditando, modales.editarPedido])
 
   const handleGuardarEdicionPedido = useCallback(async ({ notas, formaPago, estadoPago, montoPagado }: EdicionPedidoData): Promise<void> => {
+    const pedidoEditando = pedidoEditandoRef.current
     if (!pedidoEditando) return
     setGuardando(true)
     try {
@@ -556,7 +582,7 @@ export function usePedidoHandlers({
       notify.error('Error al actualizar pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [pedidoEditando, actualizarNotasPedido, actualizarFormaPago, actualizarEstadoPago, modales.editarPedido, setPedidoEditando, notify, setGuardando])
+  }, [pedidoEditandoRef, actualizarNotasPedido, actualizarFormaPago, actualizarEstadoPago, modales.editarPedido, setPedidoEditando, notify, setGuardando])
 
   // Route optimization
   const handleAplicarOrdenOptimizado = useCallback(async (data: OrdenOptimizadoData | OrdenOptimizadoItem[]): Promise<void> => {
@@ -594,13 +620,14 @@ export function usePedidoHandlers({
 
   const handleExportarHojaRutaOptimizada = useCallback((transportista: PerfilDB, pedidosOrdenados: PedidoDB[]): void => {
     try {
+      const rutaOptimizada = rutaOptimizadaRef.current
       generarHojaRutaOptimizada(transportista, pedidosOrdenados, (rutaOptimizada as { distanciaTotal?: number })?.distanciaTotal, (rutaOptimizada as { duracionTotal?: number })?.duracionTotal)
       notify.success('PDF generado correctamente')
     } catch (e) {
       const error = e as Error
       notify.error('Error al generar PDF: ' + error.message)
     }
-  }, [rutaOptimizada, notify])
+  }, [rutaOptimizadaRef, notify])
 
   const handleCerrarModalOptimizar = useCallback((): void => {
     modales.optimizarRuta.setOpen(false)
