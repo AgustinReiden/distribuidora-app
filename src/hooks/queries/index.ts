@@ -55,3 +55,42 @@ export {
   useActualizarUsuarioMutation,
   useToggleUsuarioActivoMutation,
 } from './useUsuariosQuery'
+
+// Compras
+export {
+  comprasKeys,
+  useComprasQuery,
+  useCompraQuery,
+  useComprasByProveedorQuery,
+  useRegistrarCompraMutation,
+  useAnularCompraMutation,
+} from './useComprasQuery'
+
+// Proveedores
+export {
+  proveedoresKeys,
+  useProveedoresQuery,
+  useProveedoresActivosQuery,
+  useProveedorQuery,
+  useCrearProveedorMutation,
+  useActualizarProveedorMutation,
+  useToggleProveedorActivoMutation,
+} from './useProveedoresQuery'
+
+// Mermas
+export {
+  mermasKeys,
+  useMermasQuery,
+  useMermasByProductoQuery,
+  useMermasByMotivoQuery,
+  useRegistrarMermaMutation,
+  useMermasResumen,
+} from './useMermasQuery'
+
+// Métricas
+export {
+  metricasKeys,
+  useMetricasQuery,
+  useReportePreventistasQuery,
+  useInvalidateMetricas,
+} from './useMetricasQuery'
