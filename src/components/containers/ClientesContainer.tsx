@@ -63,15 +63,17 @@ export default function ClientesContainer(): React.ReactElement {
     setModalClienteOpen(true)
   }, [])
 
-  const handleEliminarCliente = useCallback(async (cliente: ClienteDB) => {
+  const handleEliminarCliente = useCallback(async (clienteId: string) => {
+    const cliente = clientes.find(c => c.id === clienteId)
+    if (!cliente) return
     if (!window.confirm(`¿Eliminar "${cliente.nombre_fantasia || cliente.razon_social}"?`)) return
     try {
-      await eliminarCliente.mutateAsync(cliente.id)
+      await eliminarCliente.mutateAsync(clienteId)
       notify.success('Cliente eliminado')
     } catch {
       notify.error('Error al eliminar cliente')
     }
-  }, [eliminarCliente, notify])
+  }, [clientes, eliminarCliente, notify])
 
   const handleVerFichaCliente = useCallback(async (cliente: ClienteDB) => {
     await cargarFicha(cliente.id)
