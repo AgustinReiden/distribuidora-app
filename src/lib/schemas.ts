@@ -845,6 +845,76 @@ export const resolverSalvedadSchema = z.object({
 
 export type ResolverSalvedadFormData = z.infer<typeof resolverSalvedadSchema>
 
+// ============================================
+// SCHEMAS PARA MODALES ADICIONALES
+// ============================================
+
+/**
+ * Schema para ModalCompra (validación de formulario de compra)
+ */
+export const modalCompraSchema = z.object({
+  proveedorId: z.string().optional(),
+  proveedorNombre: z.string().optional(),
+  usarProveedorNuevo: z.boolean(),
+  fechaCompra: z.string().min(1, { message: 'La fecha es obligatoria' }),
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
+    error: 'Forma de pago inválida'
+  }),
+  items: z.array(z.object({
+    productoId: z.string(),
+    cantidad: z.number().positive({ message: 'La cantidad debe ser mayor a 0' }),
+    costoUnitario: z.number().nonnegative()
+  })).min(1, { message: 'Debe agregar al menos un producto' })
+}).refine(
+  (data) => {
+    if (data.usarProveedorNuevo) {
+      return data.proveedorNombre && data.proveedorNombre.trim().length > 0
+    }
+    return data.proveedorId && data.proveedorId.length > 0
+  },
+  { message: 'Debe seleccionar o ingresar un proveedor', path: ['proveedorId'] }
+)
+
+export type ModalCompraFormData = z.infer<typeof modalCompraSchema>
+
+/**
+ * Schema para ModalEditarPedido
+ */
+export const modalEditarPedidoSchema = z.object({
+  notas: z.string().optional(),
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
+    error: 'Forma de pago inválida'
+  }),
+  estadoPago: z.enum(['pendiente', 'pagado', 'parcial'], {
+    error: 'Estado de pago inválido'
+  }),
+  montoPagado: z.coerce.number().nonnegative({ message: 'El monto no puede ser negativo' })
+})
+
+export type ModalEditarPedidoFormData = z.infer<typeof modalEditarPedidoSchema>
+
+/**
+ * Schema para validar items de salvedad en ModalEntregaConSalvedad
+ */
+export const itemSalvedadSchema = z.object({
+  itemId: z.string(),
+  cantidadAfectada: z.number()
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+  motivo: motivoSalvedadSchema,
+  descripcion: z.string().optional()
+}).refine(
+  (data) => {
+    if (data.motivo === 'otro') {
+      return data.descripcion && data.descripcion.trim().length >= 10
+    }
+    return true
+  },
+  { message: 'Debe especificar una descripción (mínimo 10 caracteres)', path: ['descripcion'] }
+)
+
+export type ItemSalvedadFormData = z.infer<typeof itemSalvedadSchema>
+
 // Etiquetas para mostrar en UI
 export const MOTIVOS_SALVEDAD_LABELS: Record<MotivoSalvedadSchema, string> = {
   faltante_stock: 'Faltante de Stock',

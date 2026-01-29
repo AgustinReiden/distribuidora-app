@@ -2,11 +2,14 @@
  * Modal para registrar compras a proveedores
  *
  * Refactorizado con useReducer para mejor gestión de estado
+ * Validación con Zod
  */
 import React, { useReducer, useMemo, useCallback } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import { useZodValidation } from '../../hooks/useZodValidation'
+import { modalCompraSchema } from '../../lib/schemas'
 import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended } from '../../types'
 
 // =============================================================================
@@ -283,6 +286,9 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const { subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
 
+  // Zod validation
+  const { validate } = useZodValidation(modalCompraSchema)
+
   // Productos filtrados
   const productosFiltrados = useMemo(() => {
     if (!state.busquedaProducto.trim()) return productos.slice(0, 10)
@@ -310,29 +316,26 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
     e.preventDefault()
     dispatch({ type: 'SET_ERROR', payload: '' })
 
-    // Validaciones
-    if (state.items.length === 0) {
-      dispatch({ type: 'SET_ERROR', payload: 'Debe agregar al menos un producto' })
+    // Validar con Zod
+    const formData = {
+      proveedorId: state.proveedorId,
+      proveedorNombre: state.proveedorNombre,
+      usarProveedorNuevo: state.usarProveedorNuevo,
+      fechaCompra: state.fechaCompra,
+      formaPago: state.formaPago,
+      items: state.items.map(item => ({
+        productoId: item.productoId,
+        cantidad: item.cantidad,
+        costoUnitario: item.costoUnitario
+      }))
+    }
+
+    const result = validate(formData)
+    if (!result.success) {
+      // Obtener el primer error
+      const firstError = Object.values(result.errors || {})[0] || 'Error de validación'
+      dispatch({ type: 'SET_ERROR', payload: firstError })
       return
-    }
-
-    if (state.usarProveedorNuevo) {
-      if (!state.proveedorNombre.trim()) {
-        dispatch({ type: 'SET_ERROR', payload: 'Debe ingresar el nombre del proveedor' })
-        return
-      }
-    } else {
-      if (!state.proveedorId) {
-        dispatch({ type: 'SET_ERROR', payload: 'Debe seleccionar un proveedor' })
-        return
-      }
-    }
-
-    for (const item of state.items) {
-      if (item.cantidad <= 0) {
-        dispatch({ type: 'SET_ERROR', payload: `La cantidad de "${item.productoNombre}" debe ser mayor a 0` })
-        return
-      }
     }
 
     dispatch({ type: 'SET_GUARDANDO', payload: true })

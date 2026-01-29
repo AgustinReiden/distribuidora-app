@@ -2,6 +2,8 @@ import React, { useState, memo, useEffect, useMemo, ChangeEvent } from 'react';
 import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
+import { useZodValidation } from '../../hooks/useZodValidation';
+import { modalEditarPedidoSchema } from '../../lib/schemas';
 import type { PedidoDB, ProductoDB } from '../../types';
 
 /** Item del pedido para edición */
@@ -53,6 +55,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago || "efectivo");
   const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
   const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
+  const [errorValidacion, setErrorValidacion] = useState<string>('');
+
+  // Zod validation
+  const { validate } = useZodValidation(modalEditarPedidoSchema);
 
   // Estado para edición de items (solo admin)
   const [items, setItems] = useState<PedidoEditItem[]>([]);
@@ -177,6 +183,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   };
 
   const handleGuardar = async (): Promise<void> => {
+    setErrorValidacion('');
+
+    // Validar con Zod
+    const result = validate({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
+    if (!result.success) {
+      const firstError = Object.values(result.errors || {})[0] || 'Error de validación';
+      setErrorValidacion(firstError);
+      return;
+    }
+
     // Si hay cambios en items y es admin, guardar items primero
     if (itemsModificados && isAdmin && onSaveItems) {
       await onSaveItems(items);
@@ -525,6 +541,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           )}
         </div>
       </div>
+
+      {/* Error de validación */}
+      {errorValidacion && (
+        <div className="mx-4 mb-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-600 dark:text-red-400">{errorValidacion}</p>
+        </div>
+      )}
 
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <button
