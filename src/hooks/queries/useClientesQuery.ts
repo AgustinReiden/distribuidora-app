@@ -22,7 +22,6 @@ async function fetchClientes(): Promise<ClienteDB[]> {
   const { data, error } = await supabase
     .from('clientes')
     .select('*')
-    .eq('activo', true)
     .order('nombre_fantasia')
 
   if (error) throw error
@@ -44,7 +43,6 @@ async function fetchClientesByZona(zona: string): Promise<ClienteDB[]> {
   const { data, error } = await supabase
     .from('clientes')
     .select('*')
-    .eq('activo', true)
     .eq('zona', zona)
     .order('nombre_fantasia')
 
@@ -56,7 +54,6 @@ async function fetchZonasUnicas(): Promise<string[]> {
   const { data, error } = await supabase
     .from('clientes')
     .select('zona')
-    .eq('activo', true)
     .not('zona', 'is', null)
 
   if (error) throw error
