@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, MutableRefObject } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
@@ -15,8 +16,6 @@ import type { PerfilDB, RolUsuario } from '../../types';
 // =============================================================================
 
 export interface TopNavigationProps {
-  vista: string;
-  setVista: (vista: string) => void;
   perfil: PerfilDB | null;
   onLogout: () => void;
 }
@@ -89,11 +88,11 @@ const menuGroups: MenuGroup[] = [
 // =============================================================================
 
 export default function TopNavigation({
-  vista,
-  setVista,
   perfil,
   onLogout
 }: TopNavigationProps): React.ReactElement {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { darkMode, toggleDarkMode } = useTheme();
   const [menuAbierto, setMenuAbierto] = useState<boolean>(false);
   const [userMenuAbierto, setUserMenuAbierto] = useState<boolean>(false);
@@ -101,6 +100,9 @@ export default function TopNavigation({
   const menuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const dropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Obtener la vista actual desde la ruta
+  const vista = location.pathname.replace('/', '') || 'dashboard';
 
   // Filtrar grupos y items por rol
   const getMenuFiltrado = (): MenuGroup[] => {
@@ -143,7 +145,7 @@ export default function TopNavigation({
   }, []);
 
   const handleVistaChange = (vistaId: string): void => {
-    setVista(vistaId);
+    navigate(`/${vistaId}`);
     setMenuAbierto(false);
     setDropdownAbierto(null);
   };

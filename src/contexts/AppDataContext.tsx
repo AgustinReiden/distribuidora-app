@@ -14,7 +14,7 @@ import type {
   CompraDB,
   MermaDB,
   RecorridoDB,
-  DashboardMetrics,
+  DashboardMetricas,
   ReportePreventista,
   FiltrosPedidosState
 } from '../types'
@@ -37,7 +37,7 @@ export interface AppDataContextValue {
   recorridos: RecorridoDB[]
 
   // Dashboard
-  metricas: DashboardMetrics | null
+  metricas: DashboardMetricas | null
   reportePreventistas: ReportePreventista[]
   reporteInicializado: boolean
 

@@ -1,14 +1,38 @@
-import { useEffect, lazy, Suspense, ReactElement, useState } from 'react';
+/**
+ * App.tsx
+ *
+ * Componente principal de la aplicacion.
+ * Usa React Router para navegacion URL y Contexts para estado global.
+ */
+import { useEffect, lazy, Suspense, ReactElement, useState, useMemo, useCallback } from 'react';
+import { BrowserRouter, useLocation, useNavigate, Navigate, Routes, Route } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { AuthProvider, useAuth, useClientes, useProductos, usePedidos, useUsuarios, useDashboard, useBackup, usePagos, useMermas, useCompras, useRecorridos, useRendiciones, useSalvedades, setErrorNotifier } from './hooks/supabase';
+import {
+  AuthProvider,
+  useAuth,
+  useClientes,
+  useProductos,
+  usePedidos,
+  useUsuarios,
+  useDashboard,
+  useBackup,
+  usePagos,
+  useMermas,
+  useCompras,
+  useRecorridos,
+  useRendiciones,
+  useSalvedades,
+  setErrorNotifier
+} from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
+import { AppDataProvider, type AppDataContextValue } from './contexts/AppDataContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
 import { useAppHandlers } from './hooks/useAppHandlers';
 import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RendicionDBExtended } from './types/hooks';
-import type { AppModalsProps, AppModalsAppState, AppModalsHandlers } from './components/AppModals';
+import type { AppModalsAppState, AppModalsHandlers } from './components/AppModals';
 
 // Componentes base
 import LoginScreen from './components/auth/LoginScreen';
@@ -32,7 +56,7 @@ const VistaProveedores = lazy(() => import('./components/vistas/VistaProveedores
 const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'));
 const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'));
 
-// Modales nuevos
+// Modales adicionales
 import ModalRendicion from './components/modals/ModalRendicion';
 import ModalEntregaConSalvedad from './components/modals/ModalEntregaConSalvedad';
 
@@ -44,13 +68,27 @@ function LoadingVista(): ReactElement {
   );
 }
 
+// =============================================================================
+// MAIN APP COMPONENT
+// =============================================================================
+
 function MainApp(): ReactElement {
   const { user, perfil, logout, isAdmin, isPreventista, isTransportista } = useAuth();
   const notify = useNotification();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Obtener vista actual desde la URL
+  const vista = location.pathname.replace('/', '') || 'dashboard';
+
+  // Funcion para cambiar vista (mantiene compatibilidad)
+  const _setVista = useCallback((newVista: string) => {
+    navigate(`/${newVista}`);
+  }, [navigate]);
 
   // Estado de la aplicacion (consolidado)
   const appState = useAppState(perfil);
-  const { vista, setVista, fechaRecorridos, setFechaRecorridos, modales, guardando, cargandoHistorial, busqueda, paginaActual, setPaginaActual } = appState;
+  const { fechaRecorridos, setFechaRecorridos, modales, guardando, cargandoHistorial, busqueda, paginaActual, setPaginaActual } = appState;
 
   // Configurar notificador de errores
   useEffect(() => {
@@ -85,7 +123,7 @@ function MainApp(): ReactElement {
   // Datos derivados
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
 
-  // Handlers (consolidados) - using type assertions for hook compatibility
+  // Handlers (consolidados)
   const handlers = useAppHandlers({
     clientes, productos, pedidos, proveedores,
     agregarCliente, actualizarCliente, eliminarCliente,
@@ -158,12 +196,12 @@ function MainApp(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
 
-  const handleLogout = async (): Promise<void> => {
+  const handleLogout = useCallback(async (): Promise<void> => {
     try { await logout(); } catch { /* error silenciado */ }
-  };
+  }, [logout]);
 
   // Handler para sincronizacion manual
-  const handleSincronizar = async (): Promise<void> => {
+  const handleSincronizar = useCallback(async (): Promise<void> => {
     try {
       if (pedidosPendientes.length > 0) {
         const resultadoPedidos = await sincronizarPedidos(crearPedido as any, descontarStock);
@@ -187,180 +225,253 @@ function MainApp(): ReactElement {
       const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
       notify.error('Error durante la sincronizacion: ' + errorMessage);
     }
-  };
+  }, [crearPedido, descontarStock, mermasPendientes.length, notify, pedidosPendientes.length, refetchMermas, refetchPedidos, refetchProductos, registrarMerma, sincronizarMermas, sincronizarPedidos]);
+
+  // Memoizar el valor del contexto de datos
+  const appDataValue = useMemo<AppDataContextValue>(() => ({
+    clientes,
+    productos,
+    pedidos,
+    pedidosFiltrados,
+    usuarios,
+    transportistas,
+    proveedores: proveedores as any,
+    compras: compras as any,
+    mermas: mermas as any,
+    recorridos: recorridos as any,
+    metricas,
+    reportePreventistas,
+    reporteInicializado,
+    filtros,
+    filtroPeriodo,
+    categorias,
+    loading: {
+      clientes: loadingClientes,
+      productos: loadingProductos,
+      pedidos: loadingPedidos,
+      usuarios: loadingUsuarios,
+      compras: loadingCompras,
+      recorridos: loadingRecorridos,
+      metricas: loadingMetricas,
+      reporte: loadingReporte,
+      optimizacion: loadingOptimizacion
+    },
+    user,
+    perfil,
+    isAdmin,
+    isPreventista,
+    isTransportista,
+    isOnline,
+    rutaOptimizada,
+    errorOptimizacion
+  }), [
+    clientes, productos, pedidos, pedidosFiltrados, usuarios, transportistas,
+    proveedores, compras, mermas, recorridos, metricas, reportePreventistas,
+    reporteInicializado, filtros, filtroPeriodo, categorias,
+    loadingClientes, loadingProductos, loadingPedidos, loadingUsuarios,
+    loadingCompras, loadingRecorridos, loadingMetricas, loadingReporte, loadingOptimizacion,
+    user, perfil, isAdmin, isPreventista, isTransportista, isOnline,
+    rutaOptimizada, errorOptimizacion
+  ]);
+
+  // Determinar la ruta por defecto
+  const defaultRoute = (isAdmin || isPreventista) ? '/dashboard' : '/pedidos';
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
-      <SkipLinks />
-      <TopNavigation vista={vista} setVista={setVista} perfil={perfil} onLogout={handleLogout} />
+    <AppDataProvider value={appDataValue}>
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
+        <SkipLinks />
+        <TopNavigation perfil={perfil} onLogout={handleLogout} />
 
-      <main id="main-content" className="pt-20 pb-6 px-4" role="main">
-        <div className="max-w-7xl mx-auto">
-          <Suspense fallback={<LoadingVista />}>
-            {vista === 'dashboard' && (isAdmin || isPreventista) && (
-              <VistaDashboard metricas={metricas} loading={loadingMetricas} filtroPeriodo={filtroPeriodo} onCambiarPeriodo={cambiarPeriodo} onRefetch={refetchMetricas} onDescargarBackup={descargarJSON} exportando={exportando} isAdmin={isAdmin} isPreventista={isPreventista} totalClientes={clientes.length} />
-            )}
+        <main id="main-content" className="pt-20 pb-6 px-4" role="main">
+          <div className="max-w-7xl mx-auto">
+            <Suspense fallback={<LoadingVista />}>
+              <Routes>
+                {/* Ruta raíz - redirige según rol */}
+                <Route path="/" element={<Navigate to={defaultRoute} replace />} />
 
-            {vista === 'pedidos' && (
-              <VistaPedidos
-                pedidos={pedidos} pedidosParaMostrar={pedidosParaMostrar} pedidosPaginados={pedidosPaginados}
-                paginaActual={paginaActual} totalPaginas={totalPaginas} busqueda={busqueda} filtros={filtros}
-                isAdmin={isAdmin} isPreventista={isPreventista} isTransportista={isTransportista} userId={user?.id ?? ''}
-                clientes={clientes} productos={productos} transportistas={transportistas} loading={loadingPedidos} exportando={exportando}
-                onBusquedaChange={handlers.handleBusquedaChange}
-                onFiltrosChange={(nuevosFiltros: Partial<FiltrosPedidosState>) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
-                onPageChange={setPaginaActual}
-                onNuevoPedido={() => modales.pedido.setOpen(true)}
-                onOptimizarRuta={() => modales.optimizarRuta.setOpen(true)}
-                onExportarPDF={() => modales.exportarPDF.setOpen(true)}
-                onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar, { ...filtros, busqueda, fechaDesde: filtros.fechaDesde ?? undefined, fechaHasta: filtros.fechaHasta ?? undefined }, transportistas)}
-                onModalFiltroFecha={() => modales.filtroFecha.setOpen(true)}
-                onVerHistorial={handlers.handleVerHistorial}
-                onEditarPedido={handlers.handleEditarPedido}
-                onMarcarEnPreparacion={handlers.handleMarcarEnPreparacion}
-                onVolverAPendiente={handlers.handleVolverAPendiente}
-                onAsignarTransportista={(pedido) => { appState.setPedidoAsignando(pedido); modales.asignar.setOpen(true); }}
-                onMarcarEntregado={handlers.handleMarcarEntregado}
-                onMarcarEntregadoConSalvedad={(pedido) => { setPedidoParaSalvedad(pedido); setModalSalvedadOpen(true); }}
-                onDesmarcarEntregado={handlers.handleDesmarcarEntregado}
-                onEliminarPedido={(pedido: PedidoDB) => handlers.handleEliminarPedido(pedido.id)}
-                onVerPedidosEliminados={() => modales.pedidosEliminados.setOpen(true)}
-              />
-            )}
+                {/* Dashboard */}
+                <Route path="/dashboard" element={
+                  (isAdmin || isPreventista) ? (
+                    <VistaDashboard metricas={metricas} loading={loadingMetricas} filtroPeriodo={filtroPeriodo} onCambiarPeriodo={cambiarPeriodo} onRefetch={refetchMetricas} onDescargarBackup={descargarJSON} exportando={exportando} isAdmin={isAdmin} isPreventista={isPreventista} totalClientes={clientes.length} />
+                  ) : <Navigate to="/pedidos" replace />
+                } />
 
-            {vista === 'clientes' && (
-              <VistaClientes
-                clientes={clientes} loading={loadingClientes} isAdmin={isAdmin} isPreventista={isPreventista}
-                onNuevoCliente={() => modales.cliente.setOpen(true)}
-                onEditarCliente={(cliente) => { appState.setClienteEditando(cliente); modales.cliente.setOpen(true); }}
-                onEliminarCliente={handlers.handleEliminarCliente}
-                onVerFichaCliente={handlers.handleVerFichaCliente}
-              />
-            )}
+                {/* Pedidos */}
+                <Route path="/pedidos" element={
+                  <VistaPedidos
+                    pedidos={pedidos} pedidosParaMostrar={pedidosParaMostrar} pedidosPaginados={pedidosPaginados}
+                    paginaActual={paginaActual} totalPaginas={totalPaginas} busqueda={busqueda} filtros={filtros}
+                    isAdmin={isAdmin} isPreventista={isPreventista} isTransportista={isTransportista} userId={user?.id ?? ''}
+                    clientes={clientes} productos={productos} transportistas={transportistas} loading={loadingPedidos} exportando={exportando}
+                    onBusquedaChange={handlers.handleBusquedaChange}
+                    onFiltrosChange={(nuevosFiltros: Partial<FiltrosPedidosState>) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
+                    onPageChange={setPaginaActual}
+                    onNuevoPedido={() => modales.pedido.setOpen(true)}
+                    onOptimizarRuta={() => modales.optimizarRuta.setOpen(true)}
+                    onExportarPDF={() => modales.exportarPDF.setOpen(true)}
+                    onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar, { ...filtros, busqueda, fechaDesde: filtros.fechaDesde ?? undefined, fechaHasta: filtros.fechaHasta ?? undefined }, transportistas)}
+                    onModalFiltroFecha={() => modales.filtroFecha.setOpen(true)}
+                    onVerHistorial={handlers.handleVerHistorial}
+                    onEditarPedido={handlers.handleEditarPedido}
+                    onMarcarEnPreparacion={handlers.handleMarcarEnPreparacion}
+                    onVolverAPendiente={handlers.handleVolverAPendiente}
+                    onAsignarTransportista={(pedido) => { appState.setPedidoAsignando(pedido); modales.asignar.setOpen(true); }}
+                    onMarcarEntregado={handlers.handleMarcarEntregado}
+                    onMarcarEntregadoConSalvedad={(pedido) => { setPedidoParaSalvedad(pedido); setModalSalvedadOpen(true); }}
+                    onDesmarcarEntregado={handlers.handleDesmarcarEntregado}
+                    onEliminarPedido={(pedido: PedidoDB) => handlers.handleEliminarPedido(pedido.id)}
+                    onVerPedidosEliminados={() => modales.pedidosEliminados.setOpen(true)}
+                  />
+                } />
 
-            {vista === 'productos' && (
-              <VistaProductos
-                productos={productos} loading={loadingProductos} isAdmin={isAdmin}
-                onNuevoProducto={() => modales.producto.setOpen(true)}
-                onEditarProducto={(producto) => { appState.setProductoEditando(producto); modales.producto.setOpen(true); }}
-                onEliminarProducto={handlers.handleEliminarProducto}
-                onBajaStock={handlers.handleAbrirMerma}
-                onVerHistorialMermas={handlers.handleVerHistorialMermas}
-                onImportarPrecios={() => modales.importarPrecios.setOpen(true)}
-              />
-            )}
+                {/* Clientes */}
+                <Route path="/clientes" element={
+                  <VistaClientes
+                    clientes={clientes} loading={loadingClientes} isAdmin={isAdmin} isPreventista={isPreventista}
+                    onNuevoCliente={() => modales.cliente.setOpen(true)}
+                    onEditarCliente={(cliente) => { appState.setClienteEditando(cliente); modales.cliente.setOpen(true); }}
+                    onEliminarCliente={handlers.handleEliminarCliente}
+                    onVerFichaCliente={handlers.handleVerFichaCliente}
+                  />
+                } />
 
-            {vista === 'reportes' && isAdmin && (
-              <VistaReportes reportePreventistas={reportePreventistas} reporteInicializado={reporteInicializado} loading={loadingReporte} onCalcularReporte={calcularReportePreventistas} onVerFichaCliente={handlers.handleVerFichaCliente} />
-            )}
+                {/* Productos */}
+                <Route path="/productos" element={
+                  <VistaProductos
+                    productos={productos} loading={loadingProductos} isAdmin={isAdmin}
+                    onNuevoProducto={() => modales.producto.setOpen(true)}
+                    onEditarProducto={(producto) => { appState.setProductoEditando(producto); modales.producto.setOpen(true); }}
+                    onEliminarProducto={handlers.handleEliminarProducto}
+                    onBajaStock={handlers.handleAbrirMerma}
+                    onVerHistorialMermas={handlers.handleVerHistorialMermas}
+                    onImportarPrecios={() => modales.importarPrecios.setOpen(true)}
+                  />
+                } />
 
-            {vista === 'usuarios' && isAdmin && (
-              <VistaUsuarios usuarios={usuarios} loading={loadingUsuarios} onEditarUsuario={(usuario: PerfilDB) => { appState.setUsuarioEditando(usuario); modales.usuario.setOpen(true); }} />
-            )}
+                {/* Reportes - solo admin */}
+                <Route path="/reportes" element={
+                  isAdmin ? (
+                    <VistaReportes reportePreventistas={reportePreventistas} reporteInicializado={reporteInicializado} loading={loadingReporte} onCalcularReporte={calcularReportePreventistas} onVerFichaCliente={handlers.handleVerFichaCliente} />
+                  ) : <Navigate to="/pedidos" replace />
+                } />
 
-            {vista === 'recorridos' && isAdmin && (
-              <VistaRecorridos
-                recorridos={recorridos} loading={loadingRecorridos} fechaSeleccionada={fechaRecorridos} estadisticas={appState.estadisticasRecorridos as EstadisticasRecorridos}
-                onRefresh={async () => { const hoy = new Date().toISOString().split('T')[0]; if (fechaRecorridos === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fechaRecorridos); }}
-                onFechaChange={async (fecha: string) => { setFechaRecorridos(fecha); const hoy = new Date().toISOString().split('T')[0]; if (fecha === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fecha); }}
-              />
-            )}
+                {/* Usuarios - solo admin */}
+                <Route path="/usuarios" element={
+                  isAdmin ? (
+                    <VistaUsuarios usuarios={usuarios} loading={loadingUsuarios} onEditarUsuario={(usuario: PerfilDB) => { appState.setUsuarioEditando(usuario); modales.usuario.setOpen(true); }} />
+                  ) : <Navigate to="/pedidos" replace />
+                } />
 
-            {vista === 'compras' && isAdmin && (
-              <VistaCompras compras={compras as any} proveedores={proveedores as any} loading={loadingCompras} isAdmin={isAdmin} onNuevaCompra={handlers.handleNuevaCompra} onVerDetalle={handlers.handleVerDetalleCompra as any} onAnularCompra={handlers.handleAnularCompra} />
-            )}
+                {/* Recorridos - solo admin */}
+                <Route path="/recorridos" element={
+                  isAdmin ? (
+                    <VistaRecorridos
+                      recorridos={recorridos} loading={loadingRecorridos} fechaSeleccionada={fechaRecorridos} estadisticas={appState.estadisticasRecorridos as EstadisticasRecorridos}
+                      onRefresh={async () => { const hoy = new Date().toISOString().split('T')[0]; if (fechaRecorridos === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fechaRecorridos); }}
+                      onFechaChange={async (fecha: string) => { setFechaRecorridos(fecha); const hoy = new Date().toISOString().split('T')[0]; if (fecha === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fecha); }}
+                    />
+                  ) : <Navigate to="/pedidos" replace />
+                } />
 
-            {vista === 'proveedores' && isAdmin && (
-              <VistaProveedores proveedores={proveedores} compras={compras} loading={loadingCompras} isAdmin={isAdmin} onNuevoProveedor={handlers.handleNuevoProveedor} onEditarProveedor={handlers.handleEditarProveedor} onEliminarProveedor={handlers.handleEliminarProveedor} onToggleActivo={handlers.handleToggleActivoProveedor} />
-            )}
+                {/* Compras - solo admin */}
+                <Route path="/compras" element={
+                  isAdmin ? (
+                    <VistaCompras compras={compras as any} proveedores={proveedores as any} loading={loadingCompras} isAdmin={isAdmin} onNuevaCompra={handlers.handleNuevaCompra} onVerDetalle={handlers.handleVerDetalleCompra as any} onAnularCompra={handlers.handleAnularCompra} />
+                  ) : <Navigate to="/pedidos" replace />
+                } />
 
-            {vista === 'rendiciones' && isAdmin && (
-              <VistaRendiciones />
-            )}
+                {/* Proveedores - solo admin */}
+                <Route path="/proveedores" element={
+                  isAdmin ? (
+                    <VistaProveedores proveedores={proveedores} compras={compras} loading={loadingCompras} isAdmin={isAdmin} onNuevoProveedor={handlers.handleNuevoProveedor} onEditarProveedor={handlers.handleEditarProveedor} onEliminarProveedor={handlers.handleEliminarProveedor} onToggleActivo={handlers.handleToggleActivoProveedor} />
+                  ) : <Navigate to="/pedidos" replace />
+                } />
 
-            {vista === 'salvedades' && isAdmin && (
-              <VistaSalvedades />
-            )}
-          </Suspense>
-        </div>
-      </main>
+                {/* Rendiciones - solo admin */}
+                <Route path="/rendiciones" element={
+                  isAdmin ? <VistaRendiciones /> : <Navigate to="/pedidos" replace />
+                } />
 
-      {/* Modales */}
-      <AppModals
-        appState={{ ...appState, filtros, setFiltros } as unknown as AppModalsAppState}
-        handlers={handlers as unknown as AppModalsHandlers}
-        clientes={clientes} productos={productos} pedidos={pedidos} usuarios={usuarios}
-        transportistas={transportistas} proveedores={proveedores as any} mermas={mermas as any} categorias={categorias}
-        fetchPedidosEliminados={fetchPedidosEliminados as any} actualizarItemsPedido={actualizarItemsPedido as any} actualizarPreciosMasivo={actualizarPreciosMasivo} optimizarRuta={optimizarRuta as any}
-        guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as any} errorOptimizacion={errorOptimizacion}
-        user={user} isAdmin={isAdmin} isPreventista={isPreventista} isOnline={isOnline}
-      />
+                {/* Salvedades - solo admin */}
+                <Route path="/salvedades" element={
+                  isAdmin ? <VistaSalvedades /> : <Navigate to="/pedidos" replace />
+                } />
 
-      {/* Indicador de estado offline */}
-      <OfflineIndicator isOnline={isOnline} pedidosPendientes={pedidosPendientes as any} mermasPendientes={mermasPendientes as any} sincronizando={sincronizando} onSincronizar={handleSincronizar} clientes={clientes as any} />
+                {/* Fallback */}
+                <Route path="*" element={<Navigate to={defaultRoute} replace />} />
+              </Routes>
+            </Suspense>
+          </div>
+        </main>
 
-      {/* PWA Prompt */}
-      <PWAPrompt />
+        {/* Modales */}
+        <AppModals
+          appState={{ ...appState, filtros, setFiltros } as unknown as AppModalsAppState}
+          handlers={handlers as unknown as AppModalsHandlers}
+          clientes={clientes} productos={productos} pedidos={pedidos} usuarios={usuarios}
+          transportistas={transportistas} proveedores={proveedores as any} mermas={mermas as any} categorias={categorias}
+          fetchPedidosEliminados={fetchPedidosEliminados as any} actualizarItemsPedido={actualizarItemsPedido as any} actualizarPreciosMasivo={actualizarPreciosMasivo} optimizarRuta={optimizarRuta as any}
+          guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as any} errorOptimizacion={errorOptimizacion}
+          user={user} isAdmin={isAdmin} isPreventista={isPreventista} isOnline={isOnline}
+        />
 
-      {/* Modal de Rendicion */}
-      {modalRendicionOpen && rendicionParaModal && (
-        <ModalRendicion
-          rendicion={rendicionParaModal}
-          onPresentar={async (data) => {
-            const result = await presentarRendicion(data);
-            if (result.success) {
+        {/* Indicador de estado offline */}
+        <OfflineIndicator isOnline={isOnline} pedidosPendientes={pedidosPendientes as any} mermasPendientes={mermasPendientes as any} sincronizando={sincronizando} onSincronizar={handleSincronizar} clientes={clientes as any} />
+
+        {/* PWA Prompt */}
+        <PWAPrompt />
+
+        {/* Modal de Rendicion */}
+        {modalRendicionOpen && rendicionParaModal && (
+          <ModalRendicion
+            rendicion={rendicionParaModal}
+            onPresentar={async (data) => {
+              const result = await presentarRendicion(data);
+              if (result.success) {
+                setModalRendicionOpen(false);
+                setRendicionParaModal(null);
+                notify.success('Rendicion presentada correctamente');
+              }
+              return result;
+            }}
+            onClose={() => {
               setModalRendicionOpen(false);
               setRendicionParaModal(null);
-              notify.success('Rendicion presentada correctamente');
-            }
-            return result;
-          }}
-          onClose={() => {
-            setModalRendicionOpen(false);
-            setRendicionParaModal(null);
-          }}
-        />
-      )}
+            }}
+          />
+        )}
 
-      {/* Modal de Entrega con Salvedad */}
-      {modalSalvedadOpen && pedidoParaSalvedad && (
-        <ModalEntregaConSalvedad
-          pedido={pedidoParaSalvedad}
-          onSave={async (salvedades) => {
-            const results = await Promise.all(
-              salvedades.map(s => registrarSalvedad(s))
-            );
-            return results;
-          }}
-          onMarcarEntregado={async () => {
-            await cambiarEstado(pedidoParaSalvedad.id, 'entregado');
-            await refetchPedidos();
-            refetchMetricas();
-            notify.success(`Pedido #${pedidoParaSalvedad.id} entregado con salvedades registradas`, { persist: true });
-          }}
-          onClose={() => {
-            setModalSalvedadOpen(false);
-            setPedidoParaSalvedad(null);
-          }}
-        />
-      )}
-    </div>
+        {/* Modal de Entrega con Salvedad */}
+        {modalSalvedadOpen && pedidoParaSalvedad && (
+          <ModalEntregaConSalvedad
+            pedido={pedidoParaSalvedad}
+            onSave={async (salvedades) => {
+              const results = await Promise.all(
+                salvedades.map(s => registrarSalvedad(s))
+              );
+              return results;
+            }}
+            onMarcarEntregado={async () => {
+              await cambiarEstado(pedidoParaSalvedad.id, 'entregado');
+              await refetchPedidos();
+              refetchMetricas();
+              notify.success(`Pedido #${pedidoParaSalvedad.id} entregado con salvedades registradas`, { persist: true });
+            }}
+            onClose={() => {
+              setModalSalvedadOpen(false);
+              setPedidoParaSalvedad(null);
+            }}
+          />
+        )}
+      </div>
+    </AppDataProvider>
   );
 }
 
-export default function App(): ReactElement {
-  return (
-    <ErrorBoundary>
-      <ThemeProvider>
-        <AuthProvider>
-          <NotificationProvider>
-            <AppContent />
-          </NotificationProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </ErrorBoundary>
-  );
-}
+// =============================================================================
+// APP CONTENT (Authentication Check)
+// =============================================================================
 
 function AppContent(): ReactElement {
   const { user, loading } = useAuth();
@@ -372,4 +483,24 @@ function AppContent(): ReactElement {
     );
   }
   return user ? <MainApp /> : <LoginScreen />;
+}
+
+// =============================================================================
+// ROOT APP
+// =============================================================================
+
+export default function App(): ReactElement {
+  return (
+    <ErrorBoundary>
+      <BrowserRouter>
+        <ThemeProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <AppContent />
+            </NotificationProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
+  );
 }
