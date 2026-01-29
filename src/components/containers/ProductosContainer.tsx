@@ -76,15 +76,17 @@ export default function ProductosContainer(): React.ReactElement {
     setModalProductoOpen(true)
   }, [])
 
-  const handleEliminarProducto = useCallback(async (producto: ProductoDB) => {
+  const handleEliminarProducto = useCallback(async (productoId: string) => {
+    const producto = productos.find(p => p.id === productoId)
+    if (!producto) return
     if (!window.confirm(`¿Eliminar "${producto.nombre}"?`)) return
     try {
-      await eliminarProducto.mutateAsync(producto.id)
+      await eliminarProducto.mutateAsync(productoId)
       notify.success('Producto eliminado')
     } catch {
       notify.error('Error al eliminar producto')
     }
-  }, [eliminarProducto, notify])
+  }, [productos, eliminarProducto, notify])
 
   const handleBajaStock = useCallback((producto: ProductoDB) => {
     setProductoMerma(producto)
