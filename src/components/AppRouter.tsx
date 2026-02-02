@@ -9,7 +9,7 @@
 import React, { Suspense, lazy, ReactElement } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
-import { useAppData } from '../contexts/AppDataContext'
+import { useAuthData } from '../contexts/AuthDataContext'
 
 // =============================================================================
 // LAZY LOADED VIEWS
@@ -54,7 +54,7 @@ function ProtectedRoute({
   requireAdmin = false,
   requireAdminOrPreventista = false
 }: ProtectedRouteProps): ReactElement {
-  const { isAdmin, isPreventista } = useAppData()
+  const { isAdmin, isPreventista } = useAuthData()
 
   if (requireAdmin && !isAdmin) {
     return <Navigate to="/pedidos" replace />
@@ -101,7 +101,7 @@ export function useCurrentVista(): string {
 // =============================================================================
 
 export default function AppRouter({ vistaProps }: AppRouterProps): ReactElement {
-  const { isAdmin, isPreventista } = useAppData()
+  const { isAdmin, isPreventista } = useAuthData()
 
   // Determinar la ruta por defecto según el rol
   const defaultRoute = (isAdmin || isPreventista) ? '/dashboard' : '/pedidos'

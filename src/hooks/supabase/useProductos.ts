@@ -1,3 +1,17 @@
+/**
+ * useProductos - Hook para gestión de productos
+ *
+ * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
+ * usar TanStack Query hooks de `src/hooks/queries/useProductosQuery.ts`:
+ * - useProductosQuery() para obtener productos
+ * - useCrearProductoMutation() para crear
+ * - useActualizarProductoMutation() para actualizar
+ * - useDescontarStockMutation() para descontar stock
+ *
+ * Migración: Reemplazar `const { productos } = useProductos()`
+ * con `const { data: productos } = useProductosQuery()`
+ */
+
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'

@@ -1,3 +1,17 @@
+/**
+ * usePedidos - Hook para gestión de pedidos
+ *
+ * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
+ * usar TanStack Query hooks de `src/hooks/queries/usePedidosQuery.ts`:
+ * - usePedidosQuery() para obtener pedidos
+ * - useCrearPedidoMutation() para crear
+ * - useCambiarEstadoMutation() para cambiar estado
+ * - useAsignarTransportistaMutation() para asignar
+ *
+ * Migración: Reemplazar `const { pedidos } = usePedidos()`
+ * con `const { data: pedidos } = usePedidosQuery()`
+ */
+
 import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import { supabase, notifyError } from './base'
 import type {

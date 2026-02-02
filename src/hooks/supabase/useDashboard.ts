@@ -1,3 +1,15 @@
+/**
+ * useDashboard - Hook para métricas del dashboard
+ *
+ * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
+ * usar TanStack Query hooks de `src/hooks/queries/useMetricasQuery.ts`:
+ * - useMetricasQuery() para obtener métricas
+ * - useReportePreventistasQuery() para reportes
+ *
+ * Migración: Reemplazar `const { metricas } = useDashboard()`
+ * con `const { data: metricas } = useMetricasQuery(periodo, usuarioId)`
+ */
+
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import type {

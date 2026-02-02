@@ -33,12 +33,16 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
 import { AppDataProvider, type AppDataContextValue } from './contexts/AppDataContext';
 import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext';
+import { ClientesProvider, type ClientesContextValue } from './contexts/ClientesContext';
+import { ProductosProvider, type ProductosContextValue } from './contexts/ProductosContext';
+import { PedidosProvider, type PedidosContextValue } from './contexts/PedidosContext';
+import { OperationsProvider, type OperationsContextValue } from './contexts/OperationsContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
 import { useAppHandlers } from './hooks/useAppHandlers';
 import { useSyncManager } from './hooks/useSyncManager';
-import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RegistrarSalvedadInput } from './types/hooks';
+import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RegistrarSalvedadInput, CompraDB, ProveedorDB, MermaDB, RecorridoDB } from './types/hooks';
 import type { AppModalsAppState, AppModalsHandlers } from './components/AppModals';
 
 // Componentes base
@@ -267,8 +271,45 @@ function MainApp(): ReactElement {
     logout: handleLogout
   }), [user, perfil, isAdmin, isPreventista, isTransportista, isOnline, handleLogout]);
 
+  // Contextos separados para evitar re-renders innecesarios
+  const clientesValue = useMemo<ClientesContextValue>(() => ({
+    clientes,
+    loading: loadingClientes
+  }), [clientes, loadingClientes]);
+
+  const productosValue = useMemo<ProductosContextValue>(() => ({
+    productos,
+    categorias,
+    loading: loadingProductos
+  }), [productos, categorias, loadingProductos]);
+
+  const pedidosValue = useMemo<PedidosContextValue>(() => ({
+    pedidos,
+    pedidosFiltrados: pedidosFiltrados(),
+    filtros,
+    loading: loadingPedidos
+  }), [pedidos, pedidosFiltrados, filtros, loadingPedidos]);
+
+  const operationsValue = useMemo<OperationsContextValue>(() => ({
+    compras: compras as CompraDB[],
+    proveedores: proveedores as ProveedorDB[],
+    mermas: mermas as MermaDB[],
+    recorridos: recorridos as RecorridoDB[],
+    usuarios,
+    transportistas,
+    loading: {
+      compras: loadingCompras,
+      recorridos: loadingRecorridos,
+      usuarios: loadingUsuarios
+    }
+  }), [compras, proveedores, mermas, recorridos, usuarios, transportistas, loadingCompras, loadingRecorridos, loadingUsuarios]);
+
   return (
     <AuthDataProvider value={authDataValue}>
+    <ClientesProvider value={clientesValue}>
+    <ProductosProvider value={productosValue}>
+    <PedidosProvider value={pedidosValue}>
+    <OperationsProvider value={operationsValue}>
     <AppDataProvider value={appDataValue}>
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
         <SkipLinks />
@@ -397,6 +438,10 @@ function MainApp(): ReactElement {
         <PWAPrompt />
       </div>
     </AppDataProvider>
+    </OperationsProvider>
+    </PedidosProvider>
+    </ProductosProvider>
+    </ClientesProvider>
     </AuthDataProvider>
   );
 }
