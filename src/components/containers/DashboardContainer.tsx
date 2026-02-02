@@ -26,12 +26,17 @@ export default function DashboardContainer(): React.ReactElement {
   // Determinar si debe filtrar por usuario
   const usuarioFiltro = isPreventista && !isAdmin ? user?.id : null
 
-  // Cargar métricas bajo demanda
+  // Estado local para el filtro de periodo y fechas personalizadas
+  const [filtroPeriodo, setFiltroPeriodo] = React.useState('mes')
+  const [fechaDesde, setFechaDesde] = React.useState<string | null>(null)
+  const [fechaHasta, setFechaHasta] = React.useState<string | null>(null)
+
+  // Cargar métricas bajo demanda - ahora usa filtroPeriodo del estado
   const {
     data: metricas,
     isLoading: loadingMetricas,
     refetch: refetchMetricas
-  } = useMetricasQuery('mes', usuarioFiltro)
+  } = useMetricasQuery(filtroPeriodo, usuarioFiltro, fechaDesde, fechaHasta)
 
   // Cargar clientes solo para el contador
   const { data: clientes = [] } = useClientesQuery()
@@ -39,12 +44,15 @@ export default function DashboardContainer(): React.ReactElement {
   // Backup
   const { exportando, descargarJSON } = useBackup()
 
-  // Estado local para el filtro de periodo
-  const [filtroPeriodo, setFiltroPeriodo] = React.useState('mes')
-
-  const handleCambiarPeriodo = (nuevoPeriodo: string) => {
+  const handleCambiarPeriodo = (nuevoPeriodo: string, nuevaFechaDesde?: string | null, nuevaFechaHasta?: string | null) => {
     setFiltroPeriodo(nuevoPeriodo)
-    // El hook se actualizará automáticamente
+    if (nuevoPeriodo === 'personalizado') {
+      setFechaDesde(nuevaFechaDesde || null)
+      setFechaHasta(nuevaFechaHasta || null)
+    } else {
+      setFechaDesde(null)
+      setFechaHasta(null)
+    }
   }
 
   return (

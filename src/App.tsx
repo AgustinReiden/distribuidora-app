@@ -211,7 +211,7 @@ function MainApp(): ReactElement {
     clientes,
     productos,
     pedidos,
-    pedidosFiltrados,
+    pedidosFiltrados: pedidosFiltrados(),
     usuarios,
     transportistas,
     proveedores: proveedores as any,
