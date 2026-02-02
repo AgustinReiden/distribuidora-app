@@ -1,7 +1,23 @@
+/**
+ * useUsuarios - Hook para gestión de usuarios
+ *
+ * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
+ * usar TanStack Query hooks de `src/hooks/queries/useUsuariosQuery.ts`:
+ * - useUsuariosQuery() para obtener usuarios
+ * - useTransportistasQuery() para obtener transportistas
+ * - useActualizarUsuarioMutation() para actualizar
+ *
+ * Migración: Reemplazar `const { usuarios, transportistas } = useUsuarios()`
+ * con hooks individuales de TanStack Query
+ */
+
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import type { PerfilDB, UseUsuariosReturn } from '../../types'
 
+/**
+ * @deprecated Usar useUsuariosQuery de src/hooks/queries en su lugar
+ */
 export function useUsuarios(): UseUsuariosReturn {
   const [usuarios, setUsuarios] = useState<PerfilDB[]>([])
   const [transportistas, setTransportistas] = useState<PerfilDB[]>([])

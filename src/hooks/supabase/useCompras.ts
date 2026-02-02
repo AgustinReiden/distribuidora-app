@@ -1,3 +1,17 @@
+/**
+ * useCompras - Hook para gestión de compras y proveedores
+ *
+ * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
+ * usar TanStack Query hooks de `src/hooks/queries/`:
+ * - useComprasQuery() para obtener compras
+ * - useRegistrarCompraMutation() para registrar
+ * - useProveedoresQuery() para obtener proveedores
+ * - useCrearProveedorMutation() para crear proveedor
+ *
+ * Migración: Reemplazar `const { compras, proveedores } = useCompras()`
+ * con hooks individuales de TanStack Query
+ */
+
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
 import type {

@@ -1,3 +1,16 @@
+/**
+ * useMermas - Hook para gestión de mermas de stock
+ *
+ * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
+ * usar TanStack Query hooks de `src/hooks/queries/useMermasQuery.ts`:
+ * - useMermasQuery() para obtener mermas
+ * - useRegistrarMermaMutation() para registrar
+ * - useMermasResumen() para resúmenes
+ *
+ * Migración: Reemplazar `const { mermas } = useMermas()`
+ * con `const { data: mermas } = useMermasQuery()`
+ */
+
 import { useState, useEffect } from 'react'
 import { supabase } from './base'
 import type {
@@ -9,6 +22,9 @@ import type {
   UseMermasReturnExtended
 } from '../../types'
 
+/**
+ * @deprecated Usar useMermasQuery de src/hooks/queries en su lugar
+ */
 export function useMermas(): UseMermasReturnExtended {
   const [mermas, setMermas] = useState<MermaDBExtended[]>([])
   const [loading, setLoading] = useState<boolean>(false)

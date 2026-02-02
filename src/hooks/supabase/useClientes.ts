@@ -1,14 +1,24 @@
 /**
  * useClientes - Hook para gestión de clientes
  *
- * Refactorizado para usar clienteService.
- * El hook ahora solo maneja estado React y delega operaciones al servicio.
+ * @deprecated Este hook usa useState/useEffect. Para nuevos componentes,
+ * usar TanStack Query hooks de `src/hooks/queries/useClientesQuery.ts`:
+ * - useClientesQuery() para obtener clientes
+ * - useCrearClienteMutation() para crear
+ * - useActualizarClienteMutation() para actualizar
+ * - useEliminarClienteMutation() para eliminar
+ *
+ * Migración: Reemplazar `const { clientes } = useClientes()`
+ * con `const { data: clientes } = useClientesQuery()`
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import { clienteService } from '../../services'
 import type { ClienteDB, ClienteFormInput, UseClientesReturn } from '../../types'
 
+/**
+ * @deprecated Usar useClientesQuery de src/hooks/queries en su lugar
+ */
 export function useClientes(): UseClientesReturn {
   const [clientes, setClientes] = useState<ClienteDB[]>([])
   const [loading, setLoading] = useState(true)
