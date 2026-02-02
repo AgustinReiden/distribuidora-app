@@ -14,7 +14,11 @@ import type {
   MermaDBExtended,
   CompraDBExtended,
   FiltrosPedidosState,
-  RutaOptimizada
+  RutaOptimizada,
+  RendicionDBExtended,
+  RegistrarSalvedadInput,
+  RegistrarSalvedadResult,
+  RendicionAjusteInput
 } from '../types/hooks';
 
 // Modales cargados de forma lazy
@@ -38,6 +42,8 @@ const ModalDetalleCompra = lazy(() => import('./modals/ModalDetalleCompra'));
 const ModalProveedor = lazy(() => import('./modals/ModalProveedor'));
 const ModalImportarPrecios = lazy(() => import('./modals/ModalImportarPrecios'));
 const ModalPedidosEliminados = lazy(() => import('./modals/ModalPedidosEliminados'));
+const ModalRendicion = lazy(() => import('./modals/ModalRendicion'));
+const ModalEntregaConSalvedad = lazy(() => import('./modals/ModalEntregaConSalvedad'));
 
 // Lazy load de utilidades PDF (solo cuando se necesiten)
 const loadPdfUtils = () => import('../lib/pdfExport');
@@ -84,6 +90,8 @@ export interface ModalesState {
   proveedor: ModalState;
   importarPrecios: ModalState;
   pedidosEliminados: ModalState;
+  rendicion: ModalState;
+  entregaConSalvedad: ModalState;
 }
 
 /** Nuevo pedido form state */
@@ -129,6 +137,12 @@ export interface AppModalsAppState {
   setCargandoHistorial: (cargando: boolean) => void;
   filtros: FiltrosPedidosState;
   setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>;
+  // Estado para modal de rendición
+  rendicionParaModal: RendicionDBExtended | null;
+  setRendicionParaModal: (rendicion: RendicionDBExtended | null) => void;
+  // Estado para modal de entrega con salvedad
+  pedidoParaSalvedad: PedidoDB | null;
+  setPedidoParaSalvedad: (pedido: PedidoDB | null) => void;
 }
 
  
@@ -160,6 +174,16 @@ export interface AppModalsHandlers {
   handleAnularCompra: (compraId: string) => Promise<void>;
   handleGuardarProveedor: (proveedorData: any) => Promise<void>;
   refetchProductos?: () => Promise<void>;
+  // Handlers para rendición
+  handlePresentarRendicion?: (data: {
+    rendicionId: string;
+    montoRendido: number;
+    justificacion?: string;
+    ajustes: RendicionAjusteInput[];
+  }) => Promise<{ success: boolean; diferencia: number }>;
+  // Handlers para entrega con salvedad
+  handleRegistrarSalvedades?: (salvedades: RegistrarSalvedadInput[]) => Promise<RegistrarSalvedadResult[]>;
+  handleMarcarEntregadoConSalvedad?: (pedidoId: string) => Promise<void>;
 }
  
 
@@ -570,6 +594,37 @@ export default function AppModals({
           <ModalPedidosEliminados
             onFetch={fetchPedidosEliminados}
             onClose={() => modales.pedidosEliminados.setOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal de Rendición */}
+      {modales.rendicion.open && appState.rendicionParaModal && handlers.handlePresentarRendicion && (
+        <Suspense fallback={<ModalFallback />}>
+          <ModalRendicion
+            rendicion={appState.rendicionParaModal}
+            onPresentar={handlers.handlePresentarRendicion}
+            onClose={() => {
+              modales.rendicion.setOpen(false);
+              appState.setRendicionParaModal(null);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal de Entrega con Salvedad */}
+      {modales.entregaConSalvedad.open && appState.pedidoParaSalvedad && handlers.handleRegistrarSalvedades && handlers.handleMarcarEntregadoConSalvedad && (
+        <Suspense fallback={<ModalFallback />}>
+          <ModalEntregaConSalvedad
+            pedido={appState.pedidoParaSalvedad}
+            onSave={handlers.handleRegistrarSalvedades}
+            onMarcarEntregado={async () => {
+              await handlers.handleMarcarEntregadoConSalvedad!(appState.pedidoParaSalvedad!.id);
+            }}
+            onClose={() => {
+              modales.entregaConSalvedad.setOpen(false);
+              appState.setPedidoParaSalvedad(null);
+            }}
           />
         </Suspense>
       )}

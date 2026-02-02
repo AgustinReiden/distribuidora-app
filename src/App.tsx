@@ -9,7 +9,7 @@
  * - Solo las rutas visitadas cargan sus datos
  * - El App ya no es un "God Component"
  */
-import { useEffect, lazy, Suspense, ReactElement, useState, useMemo, useCallback } from 'react';
+import { useEffect, lazy, Suspense, ReactElement, useMemo, useCallback } from 'react';
 import { BrowserRouter, useLocation, useNavigate, Navigate, Routes, Route } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import {
@@ -37,7 +37,8 @@ import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
 import { useAppHandlers } from './hooks/useAppHandlers';
-import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RendicionDBExtended } from './types/hooks';
+import { useSyncManager } from './hooks/useSyncManager';
+import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RegistrarSalvedadInput } from './types/hooks';
 import type { AppModalsAppState, AppModalsHandlers } from './components/AppModals';
 
 // Componentes base
@@ -65,10 +66,6 @@ const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
 const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
 const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'));
 const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'));
-
-// Modales adicionales
-import ModalRendicion from './components/modals/ModalRendicion';
-import ModalEntregaConSalvedad from './components/modals/ModalEntregaConSalvedad';
 
 function LoadingVista(): ReactElement {
   return (
@@ -122,14 +119,6 @@ function MainApp(): ReactElement {
   const { presentarRendicion } = useRendiciones();
   const { registrarSalvedad } = useSalvedades();
 
-  // Estado para modal de rendicion
-  const [modalRendicionOpen, setModalRendicionOpen] = useState(false);
-  const [rendicionParaModal, setRendicionParaModal] = useState<RendicionDBExtended | null>(null);
-
-  // Estado para modal de entrega con salvedad
-  const [modalSalvedadOpen, setModalSalvedadOpen] = useState(false);
-  const [pedidoParaSalvedad, setPedidoParaSalvedad] = useState<PedidoDB | null>(null);
-
   // Datos derivados
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
 
@@ -172,70 +161,50 @@ function MainApp(): ReactElement {
     }
   }, [vista, fechaRecorridos, isAdmin, fetchRecorridosHoy, fetchRecorridosPorFecha]);
 
-  // Auto-sincronizar cuando vuelve la conexion
-  useEffect(() => {
-    const sincronizar = async (): Promise<void> => {
-      try {
-        if (pedidosPendientes.length > 0) {
-          const resultadoPedidos = await sincronizarPedidos(crearPedido as any, descontarStock);
-          if (resultadoPedidos.sincronizados > 0) {
-            notify.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`);
-            refetchPedidos();
-            refetchProductos();
-          }
-          if (resultadoPedidos.errores.length > 0) {
-            notify.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`);
-          }
-        }
-        if (mermasPendientes.length > 0) {
-          const resultadoMermas = await sincronizarMermas(registrarMerma as any);
-          if (resultadoMermas.sincronizados > 0) {
-            notify.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`);
-            refetchMermas();
-          }
-        }
-      } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
-        notify.error('Error durante la sincronizacion: ' + errorMessage);
-      }
-    };
-
-    if (isOnline && (pedidosPendientes.length > 0 || mermasPendientes.length > 0)) {
-      sincronizar();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline]);
+  // Hook de sincronización (maneja auto-sync y sync manual)
+  const { handleSincronizar } = useSyncManager({
+    isOnline,
+    pedidosPendientes,
+    mermasPendientes,
+    sincronizando,
+    sincronizarPedidos,
+    sincronizarMermas,
+    crearPedido: crearPedido as (...args: unknown[]) => Promise<unknown>,
+    descontarStock: descontarStock as (...args: unknown[]) => Promise<void>,
+    registrarMerma: registrarMerma as (...args: unknown[]) => Promise<unknown>,
+    refetchPedidos,
+    refetchProductos,
+    refetchMermas,
+    refetchMetricas,
+    notify
+  });
 
   const handleLogout = useCallback(async (): Promise<void> => {
     try { await logout(); } catch { /* error silenciado */ }
   }, [logout]);
 
-  // Handler para sincronizacion manual
-  const handleSincronizar = useCallback(async (): Promise<void> => {
-    try {
-      if (pedidosPendientes.length > 0) {
-        const resultadoPedidos = await sincronizarPedidos(crearPedido as any, descontarStock);
-        if (resultadoPedidos.sincronizados > 0) {
-          notify.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`);
-          refetchPedidos();
-          refetchProductos();
-        }
-        if (resultadoPedidos.errores.length > 0) {
-          notify.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`);
-        }
-      }
-      if (mermasPendientes.length > 0) {
-        const resultadoMermas = await sincronizarMermas(registrarMerma as any);
-        if (resultadoMermas.sincronizados > 0) {
-          notify.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`);
-          refetchMermas();
-        }
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
-      notify.error('Error durante la sincronizacion: ' + errorMessage);
+  // Handlers para modales de rendición y salvedad
+  const handlePresentarRendicion = useCallback(async (data: Parameters<typeof presentarRendicion>[0]) => {
+    const result = await presentarRendicion(data);
+    if (result.success) {
+      notify.success('Rendicion presentada correctamente');
     }
-  }, [crearPedido, descontarStock, mermasPendientes.length, notify, pedidosPendientes.length, refetchMermas, refetchPedidos, refetchProductos, registrarMerma, sincronizarMermas, sincronizarPedidos]);
+    return result;
+  }, [presentarRendicion, notify]);
+
+  const handleRegistrarSalvedades = useCallback(async (salvedades: RegistrarSalvedadInput[]) => {
+    const results = await Promise.all(
+      salvedades.map(s => registrarSalvedad(s))
+    );
+    return results;
+  }, [registrarSalvedad]);
+
+  const handleMarcarEntregadoConSalvedad = useCallback(async (pedidoId: string) => {
+    await cambiarEstado(pedidoId, 'entregado');
+    await refetchPedidos();
+    refetchMetricas();
+    notify.success(`Pedido #${pedidoId} entregado con salvedades registradas`, { persist: true });
+  }, [cambiarEstado, refetchPedidos, refetchMetricas, notify]);
 
   // Memoizar el valor del contexto de datos
   const appDataValue = useMemo<AppDataContextValue>(() => ({
@@ -340,7 +309,7 @@ function MainApp(): ReactElement {
                     onVolverAPendiente={handlers.handleVolverAPendiente}
                     onAsignarTransportista={(pedido) => { appState.setPedidoAsignando(pedido); modales.asignar.setOpen(true); }}
                     onMarcarEntregado={handlers.handleMarcarEntregado}
-                    onMarcarEntregadoConSalvedad={(pedido) => { setPedidoParaSalvedad(pedido); setModalSalvedadOpen(true); }}
+                    onMarcarEntregadoConSalvedad={(pedido) => { appState.setPedidoParaSalvedad(pedido); modales.entregaConSalvedad.setOpen(true); }}
                     onDesmarcarEntregado={handlers.handleDesmarcarEntregado}
                     onEliminarPedido={(pedido: PedidoDB) => handlers.handleEliminarPedido(pedido.id)}
                     onVerPedidosEliminados={() => modales.pedidosEliminados.setOpen(true)}
@@ -408,7 +377,12 @@ function MainApp(): ReactElement {
         {/* Modales */}
         <AppModals
           appState={{ ...appState, filtros, setFiltros } as unknown as AppModalsAppState}
-          handlers={handlers as unknown as AppModalsHandlers}
+          handlers={{
+            ...handlers,
+            handlePresentarRendicion,
+            handleRegistrarSalvedades,
+            handleMarcarEntregadoConSalvedad
+          } as unknown as AppModalsHandlers}
           clientes={clientes} productos={productos} pedidos={pedidos} usuarios={usuarios}
           transportistas={transportistas} proveedores={proveedores as any} mermas={mermas as any} categorias={categorias}
           fetchPedidosEliminados={fetchPedidosEliminados as any} actualizarItemsPedido={actualizarItemsPedido as any} actualizarPreciosMasivo={actualizarPreciosMasivo} optimizarRuta={optimizarRuta as any}
@@ -421,49 +395,6 @@ function MainApp(): ReactElement {
 
         {/* PWA Prompt */}
         <PWAPrompt />
-
-        {/* Modal de Rendicion */}
-        {modalRendicionOpen && rendicionParaModal && (
-          <ModalRendicion
-            rendicion={rendicionParaModal}
-            onPresentar={async (data) => {
-              const result = await presentarRendicion(data);
-              if (result.success) {
-                setModalRendicionOpen(false);
-                setRendicionParaModal(null);
-                notify.success('Rendicion presentada correctamente');
-              }
-              return result;
-            }}
-            onClose={() => {
-              setModalRendicionOpen(false);
-              setRendicionParaModal(null);
-            }}
-          />
-        )}
-
-        {/* Modal de Entrega con Salvedad */}
-        {modalSalvedadOpen && pedidoParaSalvedad && (
-          <ModalEntregaConSalvedad
-            pedido={pedidoParaSalvedad}
-            onSave={async (salvedades) => {
-              const results = await Promise.all(
-                salvedades.map(s => registrarSalvedad(s))
-              );
-              return results;
-            }}
-            onMarcarEntregado={async () => {
-              await cambiarEstado(pedidoParaSalvedad.id, 'entregado');
-              await refetchPedidos();
-              refetchMetricas();
-              notify.success(`Pedido #${pedidoParaSalvedad.id} entregado con salvedades registradas`, { persist: true });
-            }}
-            onClose={() => {
-              setModalSalvedadOpen(false);
-              setPedidoParaSalvedad(null);
-            }}
-          />
-        )}
       </div>
     </AppDataProvider>
     </AuthDataProvider>
