@@ -10,7 +10,8 @@ import type {
   PedidoDB,
   PerfilDB,
   CompraDB,
-  ProveedorDB
+  ProveedorDB,
+  RendicionDBExtended
 } from '../types';
 
 // ============================================================================
@@ -36,7 +37,9 @@ export type ModalName =
   | 'detalleCompra'
   | 'proveedor'
   | 'importarPrecios'
-  | 'pedidosEliminados';
+  | 'pedidosEliminados'
+  | 'rendicion'
+  | 'entregaConSalvedad';
 
 export interface ConfirmConfig {
   visible: boolean;
@@ -66,6 +69,8 @@ export interface ModalsState {
   proveedor: boolean;
   importarPrecios: boolean;
   pedidosEliminados: boolean;
+  rendicion: boolean;
+  entregaConSalvedad: boolean;
   confirm: ConfirmConfig;
 }
 
@@ -89,6 +94,8 @@ export interface EditingState {
   productoMerma: ProductoDB | null;
   compraDetalle: CompraDB | null;
   proveedor: ProveedorDB | null;
+  rendicionParaModal: RendicionDBExtended | null;
+  pedidoParaSalvedad: PedidoDB | null;
 }
 
 export type EditingEntityName = keyof EditingState;
@@ -143,6 +150,8 @@ export interface ModalesApi {
   proveedor: ModalApi;
   importarPrecios: ModalApi;
   pedidosEliminados: ModalApi;
+  rendicion: ModalApi;
+  entregaConSalvedad: ModalApi;
   confirm: ConfirmModalApi;
 }
 
@@ -187,6 +196,10 @@ export interface UseAppStateReturn {
   setCompraDetalle: (compra: CompraDB | null) => void;
   proveedorEditando: ProveedorDB | null;
   setProveedorEditando: (proveedor: ProveedorDB | null) => void;
+  rendicionParaModal: RendicionDBExtended | null;
+  setRendicionParaModal: (rendicion: RendicionDBExtended | null) => void;
+  pedidoParaSalvedad: PedidoDB | null;
+  setPedidoParaSalvedad: (pedido: PedidoDB | null) => void;
 
   // Formulario de pedido
   nuevoPedido: NuevoPedidoState;
@@ -220,7 +233,7 @@ const MODAL_NAMES: ModalName[] = [
   'cliente', 'producto', 'pedido', 'usuario', 'asignar', 'filtroFecha',
   'historial', 'editarPedido', 'exportarPDF', 'optimizarRuta', 'fichaCliente',
   'registrarPago', 'mermaStock', 'historialMermas', 'compra', 'detalleCompra',
-  'proveedor', 'importarPrecios', 'pedidosEliminados'
+  'proveedor', 'importarPrecios', 'pedidosEliminados', 'rendicion', 'entregaConSalvedad'
 ];
 
 const initialModalsState: ModalsState = {
@@ -261,7 +274,9 @@ const initialEditingState: EditingState = {
   saldoPendienteCliente: 0,
   productoMerma: null,
   compraDetalle: null,
-  proveedor: null
+  proveedor: null,
+  rendicionParaModal: null,
+  pedidoParaSalvedad: null
 };
 
 function editingReducer(state: EditingState, action: EditingAction): EditingState {
@@ -359,6 +374,8 @@ export function useAppState(perfil: PerfilDB | null): UseAppStateReturn {
       proveedor: createModalApi('proveedor'),
       importarPrecios: createModalApi('importarPrecios'),
       pedidosEliminados: createModalApi('pedidosEliminados'),
+      rendicion: createModalApi('rendicion'),
+      entregaConSalvedad: createModalApi('entregaConSalvedad'),
       confirm: {
         config: modalsState.confirm,
         setConfig: (config: ConfirmConfig): void => dispatchModals({ type: 'SET_CONFIRM', config })
@@ -394,6 +411,8 @@ export function useAppState(perfil: PerfilDB | null): UseAppStateReturn {
   const setProductoMerma = useMemo(() => createSetter<ProductoDB | null>('productoMerma'), [createSetter]);
   const setCompraDetalle = useMemo(() => createSetter<CompraDB | null>('compraDetalle'), [createSetter]);
   const setProveedorEditando = useMemo(() => createSetter<ProveedorDB | null>('proveedor'), [createSetter]);
+  const setRendicionParaModal = useMemo(() => createSetter<RendicionDBExtended | null>('rendicionParaModal'), [createSetter]);
+  const setPedidoParaSalvedad = useMemo(() => createSetter<PedidoDB | null>('pedidoParaSalvedad'), [createSetter]);
 
   return {
     // Vista
@@ -436,6 +455,10 @@ export function useAppState(perfil: PerfilDB | null): UseAppStateReturn {
     setCompraDetalle,
     proveedorEditando: editingState.proveedor,
     setProveedorEditando,
+    rendicionParaModal: editingState.rendicionParaModal,
+    setRendicionParaModal,
+    pedidoParaSalvedad: editingState.pedidoParaSalvedad,
+    setPedidoParaSalvedad,
 
     // Formulario de pedido
     nuevoPedido,
