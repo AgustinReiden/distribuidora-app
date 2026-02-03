@@ -5,6 +5,8 @@
  * Mantiene compatibilidad con datos legacy (XOR) para migración automática.
  */
 
+import { logger } from './logger'
+
 const STORAGE_PREFIX = 'distribuidora_secure_'
 const KEY_STORAGE_NAME = 'distribuidora_crypto_key'
 
@@ -51,7 +53,7 @@ async function getCryptoKey(): Promise<CryptoKey | null> {
 
     return key
   } catch (e) {
-    console.warn('Error inicializando crypto key:', e)
+    logger.warn('Error inicializando crypto key:', e)
     return null
   }
 }
@@ -88,7 +90,7 @@ async function encryptAES(plaintext: string): Promise<string | null> {
 
     return btoa(String.fromCharCode(...combined))
   } catch (e) {
-    console.warn('Error cifrando:', e)
+    logger.warn('Error cifrando:', e)
     return null
   }
 }

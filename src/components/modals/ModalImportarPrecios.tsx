@@ -3,6 +3,7 @@ import type { ChangeEvent, DragEvent } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
 import { readExcelFile, createTemplate } from '../../utils/excel';
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
+import { logger } from '../../utils/logger';
 import type { ProductoDB } from '../../types';
 
 // =============================================================================
@@ -223,7 +224,7 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
       // Capturar mejor el error
       const error = err as Error;
       const errorMsg = error?.message || error?.toString?.() || 'Error desconocido al actualizar precios';
-      console.error('Error en importacion de precios:', err);
+      logger.error('Error en importacion de precios:', err);
       setResultado({ success: false, error: errorMsg });
     } finally {
       setProcesando(false);

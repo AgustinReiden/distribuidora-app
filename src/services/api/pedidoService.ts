@@ -9,6 +9,7 @@
  */
 
 import { BaseService } from './baseService'
+import { logger } from '../../utils/logger'
 import type { Pedido, PedidoItem, EstadoPedido } from '../../types'
 
 export interface PedidoFiltros {
@@ -263,7 +264,7 @@ class PedidoService extends BaseService<Pedido> {
       })
     } catch (error) {
       // No fallar si el historial falla
-      console.warn('Error registrando historial:', error)
+      logger.warn('Error registrando historial:', error)
     }
   }
 

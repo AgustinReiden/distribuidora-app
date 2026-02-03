@@ -5,6 +5,7 @@ import {
   removeSecureItem,
   migrateToSecure
 } from '../utils/secureStorage'
+import { logger } from '../utils/logger'
 import type { MermaFormInput, ProductoDB } from '../types'
 
 // ============================================================================
@@ -246,7 +247,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       const updated = [...prev, nuevoPedido]
       // Guardar async sin bloquear - con manejo de errores
       setSecureItem(OFFLINE_PEDIDOS_KEY, updated).catch((err) => {
-        console.error('Error crítico: No se pudo guardar pedido offline:', err)
+        logger.error('Error crítico: No se pudo guardar pedido offline:', err)
         // Intentar notificar al usuario via evento custom
         window.dispatchEvent(new CustomEvent('offline-storage-error', {
           detail: { type: 'pedido', error: err.message }
@@ -275,7 +276,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       const updated = [...prev, nuevaMerma]
       // Guardar async sin bloquear - con manejo de errores
       setSecureItem(OFFLINE_MERMAS_KEY, updated).catch((err) => {
-        console.error('Error crítico: No se pudo guardar merma offline:', err)
+        logger.error('Error crítico: No se pudo guardar merma offline:', err)
         window.dispatchEvent(new CustomEvent('offline-storage-error', {
           detail: { type: 'merma', error: err.message }
         }))
@@ -295,7 +296,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       const updated = prev.filter(p => p.offlineId !== offlineId)
       // Guardar async sin bloquear - con manejo de errores
       setSecureItem(OFFLINE_PEDIDOS_KEY, updated).catch((err) => {
-        console.error('Error al actualizar pedidos offline:', err)
+        logger.error('Error al actualizar pedidos offline:', err)
       })
       return updated
     })
@@ -310,7 +311,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       const updated = prev.filter(m => m.offlineId !== offlineId)
       // Guardar async sin bloquear - con manejo de errores
       setSecureItem(OFFLINE_MERMAS_KEY, updated).catch((err) => {
-        console.error('Error al actualizar mermas offline:', err)
+        logger.error('Error al actualizar mermas offline:', err)
       })
       return updated
     })

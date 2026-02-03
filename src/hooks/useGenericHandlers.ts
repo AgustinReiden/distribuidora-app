@@ -7,6 +7,7 @@
  */
 import { useCallback } from 'react';
 import { withLoadingState, showDeleteConfirmation } from '../utils/errorHandling';
+import { logger } from '../utils/logger';
 import type { NotifyService, ModalControl, ConfirmModal } from './handlers/types';
 
 // ============================================
@@ -131,7 +132,7 @@ export function useGenericHandlers<T extends { id?: string }, TInput = Partial<T
    */
   const handleDelete = useCallback((id: string, itemName?: string): void => {
     if (!confirmModal) {
-      console.warn('No se proporcionó modal de confirmación');
+      logger.warn('No se proporcionó modal de confirmación');
       return;
     }
 

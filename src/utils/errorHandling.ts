@@ -8,6 +8,7 @@
  */
 
 import type { NotifyService } from '../hooks/handlers/types';
+import { logger } from './logger';
 
 // ============================================
 // TIPOS
@@ -89,7 +90,7 @@ export function handleError(
     : normalizedError.message;
 
   if (log) {
-    console.error('[Error]', message, normalizedError);
+    logger.error('[Error]', message, normalizedError);
   }
 
   if (notify && notifyService) {

@@ -10,6 +10,7 @@
 
 import { productoService } from '../api/productoService'
 import { supabase } from '../../hooks/supabase/base'
+import { logger } from '../../utils/logger'
 import type { Producto } from '../../types'
 
 export interface StockItem {
@@ -278,7 +279,7 @@ class StockManager {
 
       return data as Merma
     } catch (error) {
-      console.error('Error registrando merma:', error)
+      logger.error('Error registrando merma:', error)
       throw error
     }
   }
@@ -310,7 +311,7 @@ class StockManager {
     const { data, error } = await query
 
     if (error) {
-      console.error('Error obteniendo mermas:', error)
+      logger.error('Error obteniendo mermas:', error)
       return []
     }
 
