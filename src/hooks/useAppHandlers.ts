@@ -11,7 +11,7 @@
  *
  * Refactorizado de 766 líneas a ~200 líneas usando composición modular.
  */
-import { useCallback, Dispatch, SetStateAction } from 'react'
+import React, { useCallback, Dispatch, SetStateAction } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   useClienteHandlers,
@@ -27,7 +27,6 @@ import type {
   ClienteDB,
   PedidoDB,
   PerfilDB,
-  CompraDB,
   CompraDBExtended,
   ClienteFormInput,
   ProductoFormInput,
@@ -161,38 +160,85 @@ export interface UseAppHandlersParams {
   descontarStock: (items: StockItem[]) => Promise<void>;
   restaurarStock: (items: StockItem[]) => Promise<void>;
 
-  // Funciones CRUD Pedidos - flexible signatures
-  crearPedido: (...args: any[]) => Promise<any>;
+  // Funciones CRUD Pedidos
+  crearPedido: (
+    clienteId: number,
+    items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>,
+    total: number,
+    usuarioId: string,
+    descontarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
+    notas?: string,
+    formaPago?: string,
+    estadoPago?: string
+  ) => Promise<PedidoDB>;
   cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
-  asignarTransportista: (...args: any[]) => Promise<void>;
-  eliminarPedido: (...args: any[]) => Promise<void>;
+  asignarTransportista: (pedidoId: string, transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
+  eliminarPedido: (
+    pedidoId: string,
+    restaurarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
+    usuarioId?: string
+  ) => Promise<void>;
   actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
   actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
   actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
-  actualizarOrdenEntrega: (...args: any[]) => Promise<void>;
-  actualizarItemsPedido: (...args: any[]) => Promise<any>;
+  actualizarOrdenEntrega: (pedidosOrdenados: Array<{ id: string; orden_entrega: number }>) => Promise<void>;
+  actualizarItemsPedido: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
   fetchHistorialPedido: (pedidoId: string) => Promise<unknown[]>;
 
   // Funciones CRUD Usuarios
   actualizarUsuario: (id: string, datos: Partial<PerfilDB>) => Promise<void>;
 
-  // Funciones Pagos - flexible signatures
-  registrarPago: (...args: any[]) => Promise<any>;
+  // Funciones Pagos
+  registrarPago: (pago: {
+    clienteId: string;
+    pedidoId?: string | null;
+    monto: number | string;
+    formaPago?: string;
+    referencia?: string | null;
+    notas?: string | null;
+    usuarioId?: string | null;
+  }) => Promise<{ id: string; cliente_id: string; monto: number; forma_pago: string; created_at?: string }>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 
-  // Funciones Mermas - flexible signatures
-  registrarMerma: (...args: any[]) => Promise<any>;
+  // Funciones Mermas
+  registrarMerma: (mermaData: {
+    productoId: string;
+    cantidad: number;
+    motivo: string;
+    observaciones?: string | null;
+    stockAnterior: number;
+    stockNuevo: number;
+    usuarioId?: string | null;
+  }) => Promise<{ success: boolean; merma: { id: string } | null }>;
 
-  // Funciones Compras - flexible signatures
-  registrarCompra: (...args: any[]) => Promise<any>;
+  // Funciones Compras
+  registrarCompra: (compraData: {
+    proveedorId?: string | null;
+    proveedorNombre?: string | null;
+    numeroFactura?: string | null;
+    fechaCompra?: string;
+    subtotal?: number;
+    iva?: number;
+    otrosImpuestos?: number;
+    total?: number;
+    formaPago?: string;
+    notas?: string | null;
+    usuarioId?: string | null;
+    items: Array<{ productoId: string; cantidad: number; costoUnitario?: number; subtotal?: number }>;
+  }) => Promise<{ success: boolean; compraId: string }>;
   anularCompra: (compraId: string) => Promise<void>;
 
   // Funciones Proveedores
   agregarProveedor: (proveedor: ProveedorFormInput) => Promise<ProveedorDB>;
   actualizarProveedor: (id: string, proveedor: Partial<ProveedorFormInput>) => Promise<ProveedorDB>;
 
-  // Funciones Recorridos - flexible signatures
-  crearRecorrido: (...args: any[]) => Promise<any>;
+  // Funciones Recorridos
+  crearRecorrido: (
+    transportistaId: string,
+    pedidosOrdenados: Array<{ id: string; orden_entrega: number }>,
+    distancia?: number | null,
+    duracion?: number | null
+  ) => Promise<string>;
   limpiarRuta: () => void;
 
   // Funciones de refetch
@@ -217,7 +263,16 @@ export interface UseAppHandlersParams {
 
   // Offline sync
   isOnline: boolean;
-  guardarPedidoOffline: (...args: any[]) => any;
+  guardarPedidoOffline: (pedido: {
+    clienteId: number;
+    items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>;
+    total: number;
+    usuarioId: string;
+    notas?: string;
+    formaPago?: string;
+    estadoPago?: string;
+    montoPagado?: number;
+  }) => void;
   guardarMermaOffline: (merma: MermaFormInput) => void;
 }
  
@@ -239,29 +294,33 @@ export interface EdicionPedidoData {
 }
 
  
-/** Return type for useAppHandlers - flexible types for compatibility */
+/** Return type for useAppHandlers */
 export interface UseAppHandlersReturn {
   // Búsqueda y filtros
   handleBusquedaChange: (value: string) => void;
-  handleFiltrosChange: (...args: any[]) => void;
+  handleFiltrosChange: (
+    nuevosFiltros: Partial<FiltrosPedidosState>,
+    filtros: FiltrosPedidosState,
+    setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>
+  ) => void;
 
   // Clientes (from useClienteHandlers)
-  handleGuardarCliente: (cliente: any) => Promise<void>;
+  handleGuardarCliente: (cliente: ClienteFormInput) => Promise<void>;
   handleEliminarCliente: (id: string) => void;
   handleVerFichaCliente: (cliente: ClienteDB) => Promise<void>;
   handleAbrirRegistrarPago: (cliente: ClienteDB, saldo?: number) => Promise<void>;
-  handleRegistrarPago: (...args: any[]) => Promise<any>;
-  handleGenerarReciboPago: (...args: any[]) => void;
+  handleRegistrarPago: (pago: { clienteId: string; monto: number; formaPago: string; notas?: string }) => Promise<void>;
+  handleGenerarReciboPago: (pago: { clienteId: string; monto: number; fecha: string }) => void;
 
   // Productos (from useProductoHandlers)
-  handleGuardarProducto: (producto: any) => Promise<void>;
+  handleGuardarProducto: (producto: ProductoFormInput) => Promise<void>;
   handleEliminarProducto: (id: string) => void;
   handleAbrirMerma: (producto: ProductoDB) => void;
-  handleRegistrarMerma: (merma: any) => Promise<void>;
+  handleRegistrarMerma: (merma: MermaFormInput) => Promise<void>;
   handleVerHistorialMermas: () => void;
 
   // Usuarios (from useUsuarioHandlers)
-  handleGuardarUsuario: (usuario: any) => Promise<void>;
+  handleGuardarUsuario: (usuario: Partial<PerfilDB>) => Promise<void>;
 
   // Pedidos (from usePedidoHandlers)
   agregarItemPedido: (productoId: string, cantidad?: number, precio?: number) => void;
@@ -271,7 +330,7 @@ export interface UseAppHandlersReturn {
   handleFormaPagoChange: (formaPago: string) => void;
   handleEstadoPagoChange: (estadoPago: string) => void;
   handleMontoPagadoChange: (montoPagado: number) => void;
-  handleCrearClienteEnPedido: (nuevoCliente: any) => Promise<any>;
+  handleCrearClienteEnPedido: (nuevoCliente: ClienteFormInput) => Promise<ClienteDB>;
   handleGuardarPedidoConOffline: () => Promise<void>;
   handleMarcarEntregado: (pedido: PedidoDB) => void;
   handleDesmarcarEntregado: (pedido: PedidoDB) => void;
@@ -281,24 +340,24 @@ export interface UseAppHandlersReturn {
   handleEliminarPedido: (id: string) => void;
   handleVerHistorial: (pedido: PedidoDB) => Promise<void>;
   handleEditarPedido: (pedido: PedidoDB) => void;
-  handleGuardarEdicionPedido: (datos: any) => Promise<void>;
-  handleAplicarOrdenOptimizado: (data: any) => Promise<void>;
-  handleExportarHojaRutaOptimizada: (...args: any[]) => any;
+  handleGuardarEdicionPedido: (datos: { notas: string; formaPago: string; estadoPago: string; montoPagado?: number }) => Promise<void>;
+  handleAplicarOrdenOptimizado: (data: { ordenOptimizado?: Array<{ id: string; orden_entrega: number }>; transportistaId?: string | null; distancia?: number | null; duracion?: number | null } | Array<{ id: string; orden_entrega: number }>) => Promise<void>;
+  handleExportarHojaRutaOptimizada: (transportista: PerfilDB, pedidosOrdenados: PedidoDB[]) => void;
   handleCerrarModalOptimizar: () => void;
   generarOrdenPreparacion: (pedido: PedidoDB) => void;
   generarHojaRuta: (transportista: PerfilDB, pedidos: PedidoDB[]) => void;
 
   // Compras (from useCompraHandlers)
   handleNuevaCompra: () => void;
-  handleRegistrarCompra: (compraData: any) => Promise<void>;
-  handleVerDetalleCompra: (compra: any) => void;
+  handleRegistrarCompra: (compraData: CompraFormInput) => Promise<void>;
+  handleVerDetalleCompra: (compra: CompraDBExtended) => void;
   handleAnularCompra: (compraId: string) => void;
 
   // Proveedores (from useProveedorHandlers)
   handleNuevoProveedor: () => void;
-  handleEditarProveedor: (proveedor: any) => void;
-  handleGuardarProveedor: (proveedor: any) => Promise<void>;
-  handleToggleActivoProveedor: (proveedor: any) => Promise<void>;
+  handleEditarProveedor: (proveedor: ProveedorDB) => void;
+  handleGuardarProveedor: (proveedor: ProveedorFormInput) => Promise<void>;
+  handleToggleActivoProveedor: (proveedor: ProveedorDB) => Promise<void>;
   handleEliminarProveedor: (id: string) => void;
 }
  

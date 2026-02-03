@@ -31,3 +31,22 @@ export { ThemeProvider, useTheme } from './ThemeContext'
 
 // Notifications
 export { NotificationProvider, useNotification } from './NotificationContext'
+
+// Handlers (para reducir props drilling)
+export {
+  HandlersProvider,
+  usePedidoActions,
+  useClienteActions,
+  useProductoActions,
+  useCompraActions,
+  useProveedorActions,
+  useUsuarioActions
+} from './HandlersContext'
+export type {
+  PedidoActionsContext,
+  ClienteActionsContext,
+  ProductoActionsContext,
+  CompraActionsContext,
+  ProveedorActionsContext,
+  UsuarioActionsContext
+} from './HandlersContext'
