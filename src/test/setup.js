@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import 'fake-indexeddb/auto'
 
 // Cleanup after each test
 afterEach(() => {
@@ -39,7 +40,7 @@ global.ResizeObserver = vi.fn().mockImplementation(() => ({
   disconnect: vi.fn(),
 }))
 
-// Mock crypto for AES-GCM tests
+// Mock crypto for AES-GCM tests and Dexie.js
 Object.defineProperty(global, 'crypto', {
   value: {
     subtle: {
@@ -48,6 +49,16 @@ Object.defineProperty(global, 'crypto', {
       decrypt: vi.fn(),
       exportKey: vi.fn(),
       importKey: vi.fn(),
+      // Required by Dexie.js for content hashing
+      digest: vi.fn().mockImplementation(async (algorithm, data) => {
+        // Simple mock that returns a fake hash based on data length
+        const hashLength = algorithm === 'SHA-256' ? 32 : 20
+        const result = new Uint8Array(hashLength)
+        for (let i = 0; i < hashLength; i++) {
+          result[i] = (data.length + i) % 256
+        }
+        return result.buffer
+      }),
     },
     getRandomValues: (arr) => {
       for (let i = 0; i < arr.length; i++) {

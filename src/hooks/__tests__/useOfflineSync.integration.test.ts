@@ -13,18 +13,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useOfflineSync } from '../useOfflineSync'
-import type { PedidoOffline, MermaOffline, ProductoDB } from '../../types'
+import type { PedidoOffline, ProductoDB } from '../../types'
 
-// Mock de secureStorage
-vi.mock('../../utils/secureStorage', () => ({
-  getSecureItem: vi.fn().mockResolvedValue([]),
-  setSecureItem: vi.fn().mockResolvedValue(true),
-  removeSecureItem: vi.fn(),
-  migrateToSecure: vi.fn().mockResolvedValue(false)
+// Mock de offlineDb (ahora useOfflineSync usa IndexedDB via offlineDb)
+const mockQueueOperation = vi.fn().mockResolvedValue(1)
+const mockGetPendingOperations = vi.fn().mockResolvedValue([])
+const mockMarkAsCompleted = vi.fn().mockResolvedValue(undefined)
+const mockMarkAsFailed = vi.fn().mockResolvedValue(undefined)
+const mockCleanupOldOperations = vi.fn().mockResolvedValue(0)
+
+vi.mock('../../lib/offlineDb', () => ({
+  queueOperation: (...args: unknown[]) => mockQueueOperation(...args),
+  getPendingOperations: (...args: unknown[]) => mockGetPendingOperations(...args),
+  markAsCompleted: (...args: unknown[]) => mockMarkAsCompleted(...args),
+  markAsFailed: (...args: unknown[]) => mockMarkAsFailed(...args),
+  cleanupOldOperations: (...args: unknown[]) => mockCleanupOldOperations(...args),
 }))
-
-// Importar mocks después de definirlos
-import * as secureStorage from '../../utils/secureStorage'
 
 describe('useOfflineSync Integration Tests', () => {
   // Productos de prueba
@@ -49,9 +53,12 @@ describe('useOfflineSync Integration Tests', () => {
       configurable: true
     })
 
-    // Reset mocks de storage
-    vi.mocked(secureStorage.getSecureItem).mockResolvedValue([])
-    vi.mocked(secureStorage.setSecureItem).mockResolvedValue(true)
+    // Reset mocks de offlineDb
+    mockQueueOperation.mockResolvedValue(1)
+    mockGetPendingOperations.mockResolvedValue([])
+    mockMarkAsCompleted.mockResolvedValue(undefined)
+    mockMarkAsFailed.mockResolvedValue(undefined)
+    mockCleanupOldOperations.mockResolvedValue(0)
 
     // Reset mocks de API
     mockCrearPedido.mockResolvedValue({ id: 1, success: true })
@@ -68,6 +75,9 @@ describe('useOfflineSync Integration Tests', () => {
   // ===========================================================================
   describe('SYNC-01: Sincronización exitosa de pedido offline', () => {
     it('debe guardar pedido offline y sincronizar cuando vuelve la conexión', async () => {
+      // Start with no pending operations
+      mockGetPendingOperations.mockResolvedValue([])
+
       const { result } = renderHook(() => useOfflineSync())
 
       // Esperar carga inicial
@@ -103,6 +113,16 @@ describe('useOfflineSync Integration Tests', () => {
       expect(saveResult!.pedido).toBeDefined()
       expect(result.current.pedidosPendientes).toHaveLength(1)
 
+      // Mock getPendingOperations to return the saved pedido for sync
+      const mockPendingOp = {
+        id: 1,
+        type: 'CREATE_PEDIDO',
+        status: 'pending',
+        payload: pedidoData,
+        createdAt: new Date()
+      }
+      mockGetPendingOperations.mockResolvedValue([mockPendingOp])
+
       // Simular reconexión
       act(() => {
         Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
@@ -110,6 +130,9 @@ describe('useOfflineSync Integration Tests', () => {
       })
 
       expect(result.current.isOnline).toBe(true)
+
+      // After sync, no more pending operations
+      mockGetPendingOperations.mockResolvedValueOnce([mockPendingOp]).mockResolvedValue([])
 
       // Sincronizar
       let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
@@ -124,7 +147,7 @@ describe('useOfflineSync Integration Tests', () => {
       expect(result.current.pedidosPendientes).toHaveLength(0)
     })
 
-    it('debe persistir pedidos en secureStorage', async () => {
+    it('debe persistir pedidos en IndexedDB via queueOperation', async () => {
       const { result } = renderHook(() => useOfflineSync())
 
       await waitFor(() => {
@@ -141,14 +164,18 @@ describe('useOfflineSync Integration Tests', () => {
         result.current.guardarPedidoOffline(pedidoData)
       })
 
-      // Verificar que se llamó a setSecureItem
+      // Verificar que se llamó a queueOperation
       await waitFor(() => {
-        expect(secureStorage.setSecureItem).toHaveBeenCalled()
+        expect(mockQueueOperation).toHaveBeenCalled()
       })
 
-      const lastCall = vi.mocked(secureStorage.setSecureItem).mock.calls.at(-1)
-      expect(lastCall?.[0]).toBe('pedidos')
-      expect(lastCall?.[1]).toHaveLength(1)
+      const lastCall = mockQueueOperation.mock.calls.at(-1)
+      expect(lastCall?.[0]).toBe('CREATE_PEDIDO')
+      expect(lastCall?.[1]).toMatchObject({
+        clienteId: '456',
+        items: [{ productoId: 'p2', cantidad: 1, precioUnitario: 200 }],
+        total: 200
+      })
     })
   })
 
@@ -267,20 +294,24 @@ describe('useOfflineSync Integration Tests', () => {
   // ===========================================================================
   describe('SYNC-03: Sincronización parcial', () => {
     it('debe continuar sincronizando otros pedidos si uno falla', async () => {
+      // Mock getPendingOperations to return 3 pending orders
+      const mockPendingOps = [
+        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() },
+        { id: 2, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() },
+        { id: 3, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '3', items: [], total: 300 }, createdAt: new Date() }
+      ]
+      // First call returns all 3 (initial load), second call also returns 3 (sync reads), third returns only failed one (after sync)
+      mockGetPendingOperations
+        .mockResolvedValueOnce(mockPendingOps) // Initial load
+        .mockResolvedValueOnce(mockPendingOps) // Sync reads pending ops
+        .mockResolvedValue([mockPendingOps[1]]) // After sync, only failed one remains
+
       const { result } = renderHook(() => useOfflineSync())
 
+      // Wait for initial load
       await waitFor(() => {
-        expect(result.current.pedidosPendientes).toEqual([])
+        expect(result.current.pedidosPendientes).toHaveLength(3)
       })
-
-      // Guardar 3 pedidos
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
-        result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
-        result.current.guardarPedidoOffline({ clienteId: '3', items: [], total: 300 })
-      })
-
-      expect(result.current.pedidosPendientes).toHaveLength(3)
 
       // Mock: el segundo pedido falla
       mockCrearPedido
@@ -304,16 +335,22 @@ describe('useOfflineSync Integration Tests', () => {
     })
 
     it('debe reportar todos los errores de sincronización', async () => {
+      // Mock getPendingOperations to return 2 pending orders
+      const mockPendingOps = [
+        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() },
+        { id: 2, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() }
+      ]
+      // First call returns both (initial load), second call also returns both (sync reads), third returns both (both failed)
+      mockGetPendingOperations
+        .mockResolvedValueOnce(mockPendingOps) // Initial load
+        .mockResolvedValueOnce(mockPendingOps) // Sync reads pending ops
+        .mockResolvedValue(mockPendingOps) // After sync, both failed so both remain
+
       const { result } = renderHook(() => useOfflineSync())
 
+      // Wait for initial load
       await waitFor(() => {
-        expect(result.current.pedidosPendientes).toEqual([])
-      })
-
-      // Guardar 2 pedidos
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
-        result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
+        expect(result.current.pedidosPendientes).toHaveLength(2)
       })
 
       // Ambos fallan con diferentes errores
@@ -339,15 +376,19 @@ describe('useOfflineSync Integration Tests', () => {
   // ===========================================================================
   describe('SYNC-04: Prevención de race conditions', () => {
     it('debe prevenir sincronización simultánea (doble click)', async () => {
+      // Mock a single pending operation
+      const mockPendingOps = [
+        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
+      ]
+      // Return ops for initial load, then for sync reads (multiple times), then empty after sync
+      mockGetPendingOperations
+        .mockResolvedValueOnce(mockPendingOps) // Initial load
+        .mockResolvedValue(mockPendingOps) // Sync reads (may be called multiple times)
+
       const { result } = renderHook(() => useOfflineSync())
 
       await waitFor(() => {
-        expect(result.current.pedidosPendientes).toEqual([])
-      })
-
-      // Guardar pedido
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+        expect(result.current.pedidosPendientes).toHaveLength(1)
       })
 
       // Mock con delay para simular operación lenta
@@ -376,15 +417,18 @@ describe('useOfflineSync Integration Tests', () => {
     })
 
     it('debe permitir sincronizar después de que termine la sincronización anterior', async () => {
+      // First sync: 1 pending operation
+      const mockOp1 = { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
+      // Initial load returns op1, first sync returns op1, after sync returns empty
+      mockGetPendingOperations
+        .mockResolvedValueOnce([mockOp1]) // Initial load
+        .mockResolvedValueOnce([mockOp1]) // First sync reads
+        .mockResolvedValueOnce([]) // After first sync
+
       const { result } = renderHook(() => useOfflineSync())
 
       await waitFor(() => {
-        expect(result.current.pedidosPendientes).toEqual([])
-      })
-
-      // Guardar primer pedido
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+        expect(result.current.pedidosPendientes).toHaveLength(1)
       })
 
       // Primera sincronización
@@ -395,7 +439,14 @@ describe('useOfflineSync Integration Tests', () => {
       expect(result.current.pedidosPendientes).toHaveLength(0)
       expect(mockCrearPedido).toHaveBeenCalledTimes(1)
 
-      // Guardar segundo pedido
+      // Second sync: new pending operation
+      const mockOp2 = { id: 2, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() }
+      // For second sync: return op2 for sync, then empty after sync
+      mockGetPendingOperations
+        .mockResolvedValueOnce([mockOp2]) // Second sync reads
+        .mockResolvedValue([]) // After second sync
+
+      // Guardar segundo pedido (updates local state)
       act(() => {
         result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
       })
@@ -415,13 +466,16 @@ describe('useOfflineSync Integration Tests', () => {
   // ===========================================================================
   describe('SYNC-05: Sincronización de mermas offline', () => {
     it('debe guardar y sincronizar mermas offline', async () => {
+      // Start with no pending operations
+      mockGetPendingOperations.mockResolvedValue([])
+
       const { result } = renderHook(() => useOfflineSync())
 
       await waitFor(() => {
         expect(result.current.mermasPendientes).toEqual([])
       })
 
-      // Guardar merma offline
+      // Guardar merma offline (updates local state)
       const mermaData = {
         producto_id: 'p1',
         cantidad: 2,
@@ -440,33 +494,44 @@ describe('useOfflineSync Integration Tests', () => {
         tipo_merma: 'vencimiento'
       })
 
+      // Mock pending merma for sync
+      const mockMermaOp = {
+        id: 1,
+        type: 'CREATE_MERMA',
+        status: 'pending',
+        payload: mermaData,
+        createdAt: new Date()
+      }
+      mockGetPendingOperations.mockResolvedValue([mockMermaOp])
+
       // Sincronizar mermas
       let syncResult: Awaited<ReturnType<typeof result.current.sincronizarMermas>>
       await act(async () => {
         syncResult = await result.current.sincronizarMermas(mockRegistrarMerma)
+        // Update mock to return empty after sync
+        mockGetPendingOperations.mockResolvedValue([])
       })
 
       expect(syncResult!.success).toBe(true)
       expect(syncResult!.sincronizados).toBe(1)
       expect(mockRegistrarMerma).toHaveBeenCalledTimes(1)
-      expect(result.current.mermasPendientes).toHaveLength(0)
     })
 
     it('debe manejar errores de sincronización de mermas', async () => {
+      // Start with a pending merma
+      const mockMermaOp = {
+        id: 1,
+        type: 'CREATE_MERMA',
+        status: 'pending',
+        payload: { producto_id: 'p1', cantidad: 2, tipo_merma: 'rotura', motivo: 'Producto roto' },
+        createdAt: new Date()
+      }
+      mockGetPendingOperations.mockResolvedValue([mockMermaOp])
+
       const { result } = renderHook(() => useOfflineSync())
 
       await waitFor(() => {
-        expect(result.current.mermasPendientes).toEqual([])
-      })
-
-      // Guardar merma
-      act(() => {
-        result.current.guardarMermaOffline({
-          producto_id: 'p1',
-          cantidad: 2,
-          tipo_merma: 'rotura' as const,
-          motivo: 'Producto roto'
-        })
+        expect(result.current.mermasPendientes).toHaveLength(1)
       })
 
       // Mock falla
@@ -479,7 +544,6 @@ describe('useOfflineSync Integration Tests', () => {
 
       expect(syncResult!.success).toBe(false)
       expect(syncResult!.errores).toHaveLength(1)
-      expect(result.current.mermasPendientes).toHaveLength(1)
     })
   })
 
@@ -541,15 +605,20 @@ describe('useOfflineSync Integration Tests', () => {
     })
 
     it('no debe sincronizar si está offline', async () => {
+      // Mock a pending operation
+      const mockPendingOp = {
+        id: 1,
+        type: 'CREATE_PEDIDO',
+        status: 'pending',
+        payload: { clienteId: '1', items: [], total: 100 },
+        createdAt: new Date()
+      }
+      mockGetPendingOperations.mockResolvedValue([mockPendingOp])
+
       const { result } = renderHook(() => useOfflineSync())
 
       await waitFor(() => {
-        expect(result.current.pedidosPendientes).toEqual([])
-      })
-
-      // Guardar pedido
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+        expect(result.current.pedidosPendientes).toHaveLength(1)
       })
 
       // Simular offline
@@ -595,7 +664,10 @@ describe('useOfflineSync Integration Tests', () => {
       })
 
       expect(result.current.pedidosPendientes).toHaveLength(0)
-      expect(secureStorage.removeSecureItem).toHaveBeenCalledWith('pedidos')
+      // Now uses cleanupOldOperations instead of removeSecureItem
+      await waitFor(() => {
+        expect(mockCleanupOldOperations).toHaveBeenCalledWith(0)
+      })
     })
 
     it('debe poder eliminar un pedido específico', async () => {

@@ -402,21 +402,23 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       return { success: false, sincronizados: 0, errores: [{ error: 'Sin conexión' }] }
     }
 
-    // Obtener operaciones pendientes desde IndexedDB
-    const operations = await getPendingOperations(100)
-    const pedidoOps = operations.filter(op => op.type === 'CREATE_PEDIDO')
-
-    if (pedidoOps.length === 0) {
-      return { success: true, sincronizados: 0, errores: [] }
-    }
-
-    // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref
+    // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref BEFORE any async operations
     if (sincronizandoRef.current) {
       return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }] }
     }
 
     sincronizandoRef.current = true
     setSincronizando(true)
+
+    // Obtener operaciones pendientes desde IndexedDB
+    const operations = await getPendingOperations(100)
+    const pedidoOps = operations.filter(op => op.type === 'CREATE_PEDIDO')
+
+    if (pedidoOps.length === 0) {
+      sincronizandoRef.current = false
+      setSincronizando(false)
+      return { success: true, sincronizados: 0, errores: [] }
+    }
     const errores: SyncResult['errores'] = []
     let sincronizados = 0
 
@@ -464,21 +466,23 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       return { success: false, sincronizados: 0, errores: [{ error: 'Sin conexión' }] }
     }
 
-    // Obtener operaciones pendientes desde IndexedDB
-    const operations = await getPendingOperations(100)
-    const mermaOps = operations.filter(op => op.type === 'CREATE_MERMA')
-
-    if (mermaOps.length === 0) {
-      return { success: true, sincronizados: 0, errores: [] }
-    }
-
-    // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref
+    // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref BEFORE any async operations
     if (sincronizandoRef.current) {
       return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }] }
     }
 
     sincronizandoRef.current = true
     setSincronizando(true)
+
+    // Obtener operaciones pendientes desde IndexedDB
+    const operations = await getPendingOperations(100)
+    const mermaOps = operations.filter(op => op.type === 'CREATE_MERMA')
+
+    if (mermaOps.length === 0) {
+      sincronizandoRef.current = false
+      setSincronizando(false)
+      return { success: true, sincronizados: 0, errores: [] }
+    }
     const errores: SyncResult['errores'] = []
     let sincronizados = 0
 
