@@ -4,7 +4,8 @@
 -- Este archivo contiene las políticas de seguridad a nivel de fila para
 -- proteger los datos en la base de datos de Supabase.
 --
--- IMPORTANTE: Ejecutar este script en el SQL Editor de Supabase
+-- IMPORTANTE: Este script es IDEMPOTENTE - puede ejecutarse múltiples veces
+-- sin errores. Cada política se elimina antes de crearse.
 -- =============================================================================
 
 -- =============================================================================
@@ -46,6 +47,13 @@ $$ LANGUAGE SQL SECURITY DEFINER STABLE;
 
 ALTER TABLE public.perfiles ENABLE ROW LEVEL SECURITY;
 
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "perfiles_select_all" ON public.perfiles;
+DROP POLICY IF EXISTS "perfiles_insert_admin" ON public.perfiles;
+DROP POLICY IF EXISTS "perfiles_update_admin" ON public.perfiles;
+DROP POLICY IF EXISTS "perfiles_delete_admin" ON public.perfiles;
+DROP POLICY IF EXISTS "perfiles_update_self" ON public.perfiles;
+
 -- Todos pueden ver perfiles (necesario para mostrar nombres de usuarios)
 CREATE POLICY "perfiles_select_all" ON public.perfiles
   FOR SELECT USING (true);
@@ -70,6 +78,13 @@ CREATE POLICY "perfiles_update_self" ON public.perfiles
 -- =============================================================================
 
 ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
+
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "clientes_select" ON public.clientes;
+DROP POLICY IF EXISTS "clientes_select_transportista" ON public.clientes;
+DROP POLICY IF EXISTS "clientes_insert" ON public.clientes;
+DROP POLICY IF EXISTS "clientes_update" ON public.clientes;
+DROP POLICY IF EXISTS "clientes_delete" ON public.clientes;
 
 -- Admin y preventistas pueden ver todos los clientes
 CREATE POLICY "clientes_select" ON public.clientes
@@ -104,6 +119,12 @@ CREATE POLICY "clientes_delete" ON public.clientes
 
 ALTER TABLE public.productos ENABLE ROW LEVEL SECURITY;
 
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "productos_select" ON public.productos;
+DROP POLICY IF EXISTS "productos_insert" ON public.productos;
+DROP POLICY IF EXISTS "productos_update" ON public.productos;
+DROP POLICY IF EXISTS "productos_delete" ON public.productos;
+
 -- Todos los usuarios autenticados pueden ver productos
 CREATE POLICY "productos_select" ON public.productos
   FOR SELECT USING (auth.uid() IS NOT NULL);
@@ -128,6 +149,18 @@ CREATE POLICY "productos_delete" ON public.productos
 -- =============================================================================
 
 ALTER TABLE public.pedidos ENABLE ROW LEVEL SECURITY;
+
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "pedidos_select_admin" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_select_preventista" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_select_transportista" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_select_deposito" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_insert" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_update_admin" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_update_preventista" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_update_transportista" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_update_deposito" ON public.pedidos;
+DROP POLICY IF EXISTS "pedidos_delete" ON public.pedidos;
 
 -- Admin ve todos los pedidos
 CREATE POLICY "pedidos_select_admin" ON public.pedidos
@@ -194,6 +227,12 @@ CREATE POLICY "pedidos_delete" ON public.pedidos
 
 ALTER TABLE public.pedido_items ENABLE ROW LEVEL SECURITY;
 
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "pedido_items_select" ON public.pedido_items;
+DROP POLICY IF EXISTS "pedido_items_insert" ON public.pedido_items;
+DROP POLICY IF EXISTS "pedido_items_update" ON public.pedido_items;
+DROP POLICY IF EXISTS "pedido_items_delete" ON public.pedido_items;
+
 -- Ver items si puedes ver el pedido
 CREATE POLICY "pedido_items_select" ON public.pedido_items
   FOR SELECT USING (
@@ -227,6 +266,13 @@ CREATE POLICY "pedido_items_delete" ON public.pedido_items
 
 ALTER TABLE public.pagos ENABLE ROW LEVEL SECURITY;
 
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "pagos_select_admin" ON public.pagos;
+DROP POLICY IF EXISTS "pagos_select_preventista" ON public.pagos;
+DROP POLICY IF EXISTS "pagos_insert" ON public.pagos;
+DROP POLICY IF EXISTS "pagos_update" ON public.pagos;
+DROP POLICY IF EXISTS "pagos_delete" ON public.pagos;
+
 -- Admin ve todos los pagos
 CREATE POLICY "pagos_select_admin" ON public.pagos
   FOR SELECT USING (public.is_admin());
@@ -255,6 +301,12 @@ CREATE POLICY "pagos_delete" ON public.pagos
 
 ALTER TABLE public.compras ENABLE ROW LEVEL SECURITY;
 
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "compras_select" ON public.compras;
+DROP POLICY IF EXISTS "compras_insert" ON public.compras;
+DROP POLICY IF EXISTS "compras_update" ON public.compras;
+DROP POLICY IF EXISTS "compras_delete" ON public.compras;
+
 -- Admin y depósito pueden ver compras
 CREATE POLICY "compras_select" ON public.compras
   FOR SELECT USING (
@@ -282,6 +334,12 @@ CREATE POLICY "compras_delete" ON public.compras
 
 ALTER TABLE public.compra_items ENABLE ROW LEVEL SECURITY;
 
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "compra_items_select" ON public.compra_items;
+DROP POLICY IF EXISTS "compra_items_insert" ON public.compra_items;
+DROP POLICY IF EXISTS "compra_items_update" ON public.compra_items;
+DROP POLICY IF EXISTS "compra_items_delete" ON public.compra_items;
+
 CREATE POLICY "compra_items_select" ON public.compra_items
   FOR SELECT USING (
     public.is_admin() OR public.get_user_role() = 'deposito'
@@ -305,6 +363,12 @@ CREATE POLICY "compra_items_delete" ON public.compra_items
 -- =============================================================================
 
 ALTER TABLE public.proveedores ENABLE ROW LEVEL SECURITY;
+
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "proveedores_select" ON public.proveedores;
+DROP POLICY IF EXISTS "proveedores_insert" ON public.proveedores;
+DROP POLICY IF EXISTS "proveedores_update" ON public.proveedores;
+DROP POLICY IF EXISTS "proveedores_delete" ON public.proveedores;
 
 -- Admin y depósito pueden ver proveedores
 CREATE POLICY "proveedores_select" ON public.proveedores
@@ -332,6 +396,12 @@ CREATE POLICY "proveedores_delete" ON public.proveedores
 
 ALTER TABLE public.mermas ENABLE ROW LEVEL SECURITY;
 
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "mermas_select" ON public.mermas;
+DROP POLICY IF EXISTS "mermas_insert" ON public.mermas;
+DROP POLICY IF EXISTS "mermas_update" ON public.mermas;
+DROP POLICY IF EXISTS "mermas_delete" ON public.mermas;
+
 -- Admin y depósito pueden ver mermas
 CREATE POLICY "mermas_select" ON public.mermas
   FOR SELECT USING (
@@ -358,6 +428,13 @@ CREATE POLICY "mermas_delete" ON public.mermas
 -- =============================================================================
 
 ALTER TABLE public.recorridos ENABLE ROW LEVEL SECURITY;
+
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "recorridos_select_admin" ON public.recorridos;
+DROP POLICY IF EXISTS "recorridos_select_transportista" ON public.recorridos;
+DROP POLICY IF EXISTS "recorridos_insert" ON public.recorridos;
+DROP POLICY IF EXISTS "recorridos_update" ON public.recorridos;
+DROP POLICY IF EXISTS "recorridos_delete" ON public.recorridos;
 
 -- Admin ve todos los recorridos
 CREATE POLICY "recorridos_select_admin" ON public.recorridos
@@ -388,6 +465,13 @@ CREATE POLICY "recorridos_delete" ON public.recorridos
 -- =============================================================================
 
 ALTER TABLE public.rendiciones ENABLE ROW LEVEL SECURITY;
+
+-- Eliminar políticas existentes
+DROP POLICY IF EXISTS "rendiciones_select_admin" ON public.rendiciones;
+DROP POLICY IF EXISTS "rendiciones_select_transportista" ON public.rendiciones;
+DROP POLICY IF EXISTS "rendiciones_insert" ON public.rendiciones;
+DROP POLICY IF EXISTS "rendiciones_update" ON public.rendiciones;
+DROP POLICY IF EXISTS "rendiciones_delete" ON public.rendiciones;
 
 -- Admin ve todas las rendiciones
 CREATE POLICY "rendiciones_select_admin" ON public.rendiciones
@@ -420,55 +504,114 @@ CREATE POLICY "rendiciones_delete" ON public.rendiciones
   FOR DELETE USING (public.is_admin());
 
 -- =============================================================================
--- TABLA: salvedades
+-- TABLA: salvedades (si existe)
 -- =============================================================================
 
-ALTER TABLE public.salvedades ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'salvedades') THEN
+    ALTER TABLE public.salvedades ENABLE ROW LEVEL SECURITY;
 
--- Admin ve todas las salvedades
-CREATE POLICY "salvedades_select_admin" ON public.salvedades
-  FOR SELECT USING (public.is_admin());
+    -- Eliminar políticas existentes
+    DROP POLICY IF EXISTS "salvedades_select_admin" ON public.salvedades;
+    DROP POLICY IF EXISTS "salvedades_select_transportista" ON public.salvedades;
+    DROP POLICY IF EXISTS "salvedades_insert" ON public.salvedades;
+    DROP POLICY IF EXISTS "salvedades_update" ON public.salvedades;
+    DROP POLICY IF EXISTS "salvedades_delete" ON public.salvedades;
+  END IF;
+END $$;
 
--- Transportistas ven salvedades de sus pedidos
-CREATE POLICY "salvedades_select_transportista" ON public.salvedades
-  FOR SELECT USING (
-    public.get_user_role() = 'transportista' AND
-    EXISTS (
-      SELECT 1 FROM public.pedidos
-      WHERE pedidos.id = salvedades.pedido_id
-        AND pedidos.transportista_id = auth.uid()
-    )
-  );
+-- Solo crear políticas si la tabla existe
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'salvedades') THEN
+    EXECUTE 'CREATE POLICY "salvedades_select_admin" ON public.salvedades FOR SELECT USING (public.is_admin())';
 
--- Transportistas y admin pueden crear salvedades
-CREATE POLICY "salvedades_insert" ON public.salvedades
-  FOR INSERT WITH CHECK (
-    public.is_admin() OR public.get_user_role() = 'transportista'
-  );
+    EXECUTE 'CREATE POLICY "salvedades_select_transportista" ON public.salvedades
+      FOR SELECT USING (
+        public.get_user_role() = ''transportista'' AND
+        EXISTS (
+          SELECT 1 FROM public.pedidos
+          WHERE pedidos.id = salvedades.pedido_id
+            AND pedidos.transportista_id = auth.uid()
+        )
+      )';
 
--- Solo admin puede resolver/actualizar salvedades
-CREATE POLICY "salvedades_update" ON public.salvedades
-  FOR UPDATE USING (public.is_admin());
+    EXECUTE 'CREATE POLICY "salvedades_insert" ON public.salvedades
+      FOR INSERT WITH CHECK (
+        public.is_admin() OR public.get_user_role() = ''transportista''
+      )';
 
-CREATE POLICY "salvedades_delete" ON public.salvedades
-  FOR DELETE USING (public.is_admin());
+    EXECUTE 'CREATE POLICY "salvedades_update" ON public.salvedades
+      FOR UPDATE USING (public.is_admin())';
+
+    EXECUTE 'CREATE POLICY "salvedades_delete" ON public.salvedades
+      FOR DELETE USING (public.is_admin())';
+  END IF;
+END $$;
 
 -- =============================================================================
--- TABLA: historial_pedidos (auditoría)
+-- TABLA: historial_pedidos / pedido_historial (auditoría)
 -- =============================================================================
 
-ALTER TABLE public.historial_pedidos ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  -- Intentar con historial_pedidos
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'historial_pedidos') THEN
+    ALTER TABLE public.historial_pedidos ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "historial_pedidos_select" ON public.historial_pedidos;
+    DROP POLICY IF EXISTS "historial_pedidos_insert" ON public.historial_pedidos;
+    EXECUTE 'CREATE POLICY "historial_pedidos_select" ON public.historial_pedidos FOR SELECT USING (auth.uid() IS NOT NULL)';
+    EXECUTE 'CREATE POLICY "historial_pedidos_insert" ON public.historial_pedidos FOR INSERT WITH CHECK (auth.uid() IS NOT NULL)';
+  END IF;
 
--- Todos pueden ver historial (es auditoría)
-CREATE POLICY "historial_pedidos_select" ON public.historial_pedidos
-  FOR SELECT USING (auth.uid() IS NOT NULL);
+  -- Intentar con pedido_historial
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'pedido_historial') THEN
+    ALTER TABLE public.pedido_historial ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "pedido_historial_select" ON public.pedido_historial;
+    DROP POLICY IF EXISTS "pedido_historial_insert" ON public.pedido_historial;
+    EXECUTE 'CREATE POLICY "pedido_historial_select" ON public.pedido_historial FOR SELECT USING (auth.uid() IS NOT NULL)';
+    EXECUTE 'CREATE POLICY "pedido_historial_insert" ON public.pedido_historial FOR INSERT WITH CHECK (auth.uid() IS NOT NULL)';
+  END IF;
+END $$;
 
--- Sistema inserta automáticamente (trigger), permitir a usuarios autenticados
-CREATE POLICY "historial_pedidos_insert" ON public.historial_pedidos
-  FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+-- =============================================================================
+-- TABLA: salvedades_items (si existe)
+-- =============================================================================
 
--- Nadie puede modificar ni eliminar historial
--- (No se crean policies de UPDATE/DELETE)
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'salvedades_items') THEN
+    ALTER TABLE public.salvedades_items ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS "salvedades_items_select" ON public.salvedades_items;
+    DROP POLICY IF EXISTS "salvedades_items_insert" ON public.salvedades_items;
+    DROP POLICY IF EXISTS "salvedades_items_update" ON public.salvedades_items;
+    DROP POLICY IF EXISTS "salvedades_items_delete" ON public.salvedades_items;
+
+    EXECUTE 'CREATE POLICY "salvedades_items_select" ON public.salvedades_items FOR SELECT USING (auth.uid() IS NOT NULL)';
+    EXECUTE 'CREATE POLICY "salvedades_items_insert" ON public.salvedades_items FOR INSERT WITH CHECK (public.is_admin() OR public.get_user_role() = ''transportista'')';
+    EXECUTE 'CREATE POLICY "salvedades_items_update" ON public.salvedades_items FOR UPDATE USING (public.is_admin())';
+    EXECUTE 'CREATE POLICY "salvedades_items_delete" ON public.salvedades_items FOR DELETE USING (public.is_admin())';
+  END IF;
+END $$;
+
+-- =============================================================================
+-- TABLA: pedidos_eliminados (si existe)
+-- =============================================================================
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'pedidos_eliminados') THEN
+    ALTER TABLE public.pedidos_eliminados ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS "pedidos_eliminados_select" ON public.pedidos_eliminados;
+    DROP POLICY IF EXISTS "pedidos_eliminados_insert" ON public.pedidos_eliminados;
+
+    EXECUTE 'CREATE POLICY "pedidos_eliminados_select" ON public.pedidos_eliminados FOR SELECT USING (public.is_admin())';
+    EXECUTE 'CREATE POLICY "pedidos_eliminados_insert" ON public.pedidos_eliminados FOR INSERT WITH CHECK (auth.uid() IS NOT NULL)';
+  END IF;
+END $$;
 
 -- =============================================================================
 -- GRANT USAGE
@@ -478,3 +621,7 @@ GRANT USAGE ON SCHEMA public TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
+
+-- =============================================================================
+-- FIN DE MIGRACIÓN RLS
+-- =============================================================================
