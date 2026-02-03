@@ -9,7 +9,7 @@
  * - Estado de pago
  * - Monto pagado
  */
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
 
 // =============================================================================
 // TYPES
@@ -50,7 +50,7 @@ export interface UsePedidoFormStateReturn {
   // Utilidades
   reset: () => void;
   isValid: boolean;
-  setNuevoPedido: React.Dispatch<React.SetStateAction<NuevoPedidoState>>;
+  setNuevoPedido: Dispatch<SetStateAction<NuevoPedidoState>>;
 }
 
 // =============================================================================
