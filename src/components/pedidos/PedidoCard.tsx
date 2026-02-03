@@ -1,12 +1,19 @@
 /**
  * Componente de tarjeta individual de pedido
+ *
+ * Soporta dos modos de operación:
+ * 1. Props tradicionales: recibe handlers como props
+ * 2. Contexto: usa usePedidoActions() automáticamente si está disponible
+ *
+ * Esto permite una migración gradual hacia el uso de contextos.
  */
-import React, { useState, memo } from 'react';
+import React, { useState, memo, useContext } from 'react';
 import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle } from 'lucide-react';
 import { generarReciboPedido } from '../../lib/pdfExport';
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
+import { PedidoActionsCtx } from '../../contexts/HandlersContext';
 import type { PedidoDB, MotivoSalvedad } from '../../types';
 
 // =============================================================================
@@ -140,6 +147,18 @@ function PedidoCard({
   const [expandido, setExpandido] = useState<boolean>(false);
   const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
 
+  // Intentar usar contexto si está disponible (migración gradual)
+  const pedidoActions = useContext(PedidoActionsCtx);
+
+  // Usar handlers del contexto si están disponibles, de lo contrario usar props
+  const handleVerHistorial = onVerHistorial ?? pedidoActions?.handleVerHistorial;
+  const handleEditarPedido = onEditarPedido ?? pedidoActions?.handleEditarPedido;
+  const handleMarcarEnPreparacion = onMarcarEnPreparacion ?? pedidoActions?.handleMarcarEnPreparacion;
+  const handleVolverAPendiente = onVolverAPendiente ?? pedidoActions?.handleVolverAPendiente;
+  const handleMarcarEntregado = onMarcarEntregado ?? pedidoActions?.handleMarcarEntregado;
+  const handleDesmarcarEntregado = onDesmarcarEntregado ?? pedidoActions?.handleDesmarcarEntregado;
+  const handleEliminarPedido = onEliminarPedido ?? (pedidoActions?.handleEliminarPedido ? (id: string) => pedidoActions.handleEliminarPedido(id) : undefined);
+
   return (
     <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
       {/* Header del pedido */}
@@ -180,15 +199,15 @@ function PedidoCard({
             isAdmin={isAdmin}
             isPreventista={isPreventista}
             isTransportista={isTransportista}
-            onHistorial={onVerHistorial}
-            onEditar={onEditarPedido}
-            onPreparar={onMarcarEnPreparacion}
-            onVolverAPendiente={onVolverAPendiente}
+            onHistorial={handleVerHistorial}
+            onEditar={handleEditarPedido}
+            onPreparar={handleMarcarEnPreparacion}
+            onVolverAPendiente={handleVolverAPendiente}
             onAsignar={onAsignarTransportista}
-            onEntregado={onMarcarEntregado}
+            onEntregado={handleMarcarEntregado}
             onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
-            onRevertir={onDesmarcarEntregado}
-            onEliminar={onEliminarPedido}
+            onRevertir={handleDesmarcarEntregado}
+            onEliminar={handleEliminarPedido}
           />
         </div>
       </div>

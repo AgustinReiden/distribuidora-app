@@ -37,6 +37,7 @@ import { ClientesProvider, type ClientesContextValue } from './contexts/Clientes
 import { ProductosProvider, type ProductosContextValue } from './contexts/ProductosContext';
 import { PedidosProvider, type PedidosContextValue } from './contexts/PedidosContext';
 import { OperationsProvider, type OperationsContextValue } from './contexts/OperationsContext';
+import { HandlersProvider } from './contexts/HandlersContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
@@ -310,6 +311,7 @@ function MainApp(): ReactElement {
     <ProductosProvider value={productosValue}>
     <PedidosProvider value={pedidosValue}>
     <OperationsProvider value={operationsValue}>
+    <HandlersProvider handlers={handlers}>
     <AppDataProvider value={appDataValue}>
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
         <SkipLinks />
@@ -438,6 +440,7 @@ function MainApp(): ReactElement {
         <PWAPrompt />
       </div>
     </AppDataProvider>
+    </HandlersProvider>
     </OperationsProvider>
     </PedidosProvider>
     </ProductosProvider>
