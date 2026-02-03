@@ -5,6 +5,8 @@
  * con fallback a sincronización manual cuando vuelve la conexión.
  */
 
+import { logger } from './logger'
+
 const SYNC_TAG_PEDIDOS = 'sync-pedidos'
 const SYNC_TAG_MERMAS = 'sync-mermas'
 
@@ -33,17 +35,17 @@ export function isBackgroundSyncSupported(): boolean {
  */
 export async function registerPedidosSync(): Promise<boolean> {
   if (!isBackgroundSyncSupported()) {
-    console.log('Background Sync no soportado, usando fallback')
+    logger.info('Background Sync no soportado, usando fallback')
     return false
   }
 
   try {
     const registration = await navigator.serviceWorker.ready as ServiceWorkerRegistrationWithSync
     await registration.sync.register(SYNC_TAG_PEDIDOS)
-    console.log('Background sync registrado para pedidos')
+    logger.info('Background sync registrado para pedidos')
     return true
   } catch (error) {
-    console.error('Error registrando background sync:', error)
+    logger.error('Error registrando background sync:', error)
     return false
   }
 }
@@ -59,10 +61,10 @@ export async function registerMermasSync(): Promise<boolean> {
   try {
     const registration = await navigator.serviceWorker.ready as ServiceWorkerRegistrationWithSync
     await registration.sync.register(SYNC_TAG_MERMAS)
-    console.log('Background sync registrado para mermas')
+    logger.info('Background sync registrado para mermas')
     return true
   } catch (error) {
-    console.error('Error registrando background sync:', error)
+    logger.error('Error registrando background sync:', error)
     return false
   }
 }
@@ -85,11 +87,11 @@ export async function registerPeriodicSync(tag = 'periodic-sync', minInterval = 
       await registration.periodicSync.register(tag, {
         minInterval
       })
-      console.log('Periodic sync registrado:', tag)
+      logger.info('Periodic sync registrado:', tag)
       return true
     }
   } catch (error) {
-    console.error('Error registrando periodic sync:', error)
+    logger.error('Error registrando periodic sync:', error)
   }
   return false
 }

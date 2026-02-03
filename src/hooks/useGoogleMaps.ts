@@ -8,6 +8,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react'
+import { logger } from '../utils/logger'
 
 /**
  * ID del script de Google Maps en el DOM
@@ -66,7 +67,7 @@ export function loadGoogleMapsAPI(): Promise<void> {
     const apiKey = import.meta.env.VITE_GOOGLE_API_KEY
 
     if (!apiKey) {
-      console.warn('[Google Maps] VITE_GOOGLE_API_KEY no configurada. El autocompletado de direcciones no estará disponible.')
+      logger.warn('[Google Maps] VITE_GOOGLE_API_KEY no configurada. El autocompletado de direcciones no estará disponible.')
       reject(new Error('Google Maps API key not configured'))
       return
     }

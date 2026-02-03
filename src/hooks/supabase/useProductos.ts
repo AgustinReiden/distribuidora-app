@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
+import { logger } from '../../utils/logger'
 import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'
 
 interface StockItem {
@@ -203,7 +204,7 @@ export function useProductos(): UseProductosReturn {
 
     // Si la funcion RPC no existe o falla, usar fallback con updates individuales
     if (error) {
-      console.warn('RPC actualizar_precios_masivo fallo, usando fallback:', error.message)
+      logger.warn('RPC actualizar_precios_masivo fallo, usando fallback:', error.message)
 
       let actualizados = 0
       const errores: string[] = []

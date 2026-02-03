@@ -7,6 +7,8 @@
  * - Validación de estructura básica
  */
 
+import { logger } from './logger'
+
 // Configuración de límites
 export const FILE_LIMITS = {
   maxSizeBytes: 10 * 1024 * 1024, // 10MB máximo
@@ -73,7 +75,7 @@ export function validateExcelFile(file: File | null | undefined): ValidationResu
 
   // Validar tipo MIME (algunos navegadores pueden no reportarlo correctamente)
   if (file.type && !(EXCEL_CONFIG.allowedMimeTypes as readonly string[]).includes(file.type)) {
-    console.warn(`[FileValidation] MIME type inesperado: ${file.type}, pero extensión válida`)
+    logger.warn(`[FileValidation] MIME type inesperado: ${file.type}, pero extensión válida`)
     // No rechazar por MIME ya que algunos navegadores reportan incorrectamente
   }
 

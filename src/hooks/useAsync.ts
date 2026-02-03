@@ -3,6 +3,7 @@
  * @module hooks/useAsync
  */
 import { useState, useCallback, useRef, useEffect, type RefObject, type Dispatch, type SetStateAction } from 'react'
+import { logger } from '../utils/logger'
 
 /**
  * Estado de una operación async
@@ -266,7 +267,7 @@ export function useLocalStorage<T>(key: string, initialValue: T): UseLocalStorag
       const item = window.localStorage.getItem(key)
       return item ? (JSON.parse(item) as T) : initialValue
     } catch (error) {
-      console.warn(`Error reading localStorage key "${key}":`, error)
+      logger.warn(`Error reading localStorage key "${key}":`, error)
       return initialValue
     }
   })
@@ -277,7 +278,7 @@ export function useLocalStorage<T>(key: string, initialValue: T): UseLocalStorag
       setStoredValue(valueToStore)
       window.localStorage.setItem(key, JSON.stringify(valueToStore))
     } catch (error) {
-      console.warn(`Error setting localStorage key "${key}":`, error)
+      logger.warn(`Error setting localStorage key "${key}":`, error)
     }
   }, [key, storedValue])
 

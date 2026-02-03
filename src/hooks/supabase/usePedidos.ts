@@ -14,6 +14,7 @@
 
 import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import { supabase, notifyError } from './base'
+import { logger } from '../../utils/logger'
 import type {
   PedidoDB,
   PedidoItemDB,
@@ -371,7 +372,7 @@ export function usePedidos(): UsePedidosHookReturn {
     })
 
     if (error) {
-      console.error('[RPC Error] eliminar_pedido_completo:', {
+      logger.error('[RPC Error] eliminar_pedido_completo:', {
         code: error.code,
         message: error.message,
         details: error.details,

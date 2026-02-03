@@ -10,6 +10,7 @@ import { useState, useEffect, MouseEvent, ReactElement } from 'react'
 import { Download, RefreshCw, X, Smartphone } from 'lucide-react'
 // @ts-expect-error - virtual:pwa-register/react is provided by vite-plugin-pwa
 import { useRegisterSW } from 'virtual:pwa-register/react'
+import { logger } from '../utils/logger'
 
 // =============================================================================
 // TYPES
@@ -61,7 +62,7 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
       }
     },
     onRegisterError(error: Error) {
-      console.error('SW registration error:', error)
+      logger.error('SW registration error:', error)
     }
   })
 

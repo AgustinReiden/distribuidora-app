@@ -6,6 +6,7 @@
  */
 
 import type React from 'react'
+import { logger } from './logger'
 
 /**
  * Cache del resultado de soporte WebP
@@ -237,7 +238,7 @@ export function getOptimizedBackgroundStyle(src: string, options: BackgroundStyl
  */
 export async function initImageOptimization(): Promise<void> {
   await supportsWebP()
-  console.log(`[ImageOptimization] WebP support: ${webpSupportCache}`)
+  logger.info(`[ImageOptimization] WebP support: ${webpSupportCache}`)
 }
 
 export default {

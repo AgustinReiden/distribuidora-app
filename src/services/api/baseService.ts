@@ -10,6 +10,7 @@
  */
 
 import { supabase, notifyError } from '../../hooks/supabase/base'
+import { logger } from '../../utils/logger'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 // Type for filter builder - using generic type to avoid importing non-exported types
@@ -532,8 +533,8 @@ export class BaseService<T = Record<string, unknown>> {
       const { data, error } = await this.db.rpc(functionName, params)
 
       if (error) {
-        // Log detallado para debugging
-        console.error(`[RPC Error] ${functionName}:`, {
+        // Log detallado para debugging (solo en desarrollo)
+        logger.error(`[RPC Error] ${functionName}:`, {
           code: error.code,
           message: error.message,
           details: error.details,
@@ -603,7 +604,7 @@ export class BaseService<T = Record<string, unknown>> {
    */
   protected handleError(operation: string, error: Error): void {
     const message = `Error al ${operation} en ${this.table}: ${error.message}`
-    console.error(message, error)
+    logger.error(message, error)
     notifyError(message)
   }
 }
