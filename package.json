@@ -36,6 +36,7 @@
     "@tanstack/react-query-devtools": "^5.91.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dexie": "^4.3.0",
     "dompurify": "^3.3.1",
     "exceljs": "^4.4.0",
     "jspdf": "^4.0.0",
@@ -53,7 +54,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@playwright/test": "^1.57.0",
+    "@playwright/test": "^1.58.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",
