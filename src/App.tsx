@@ -10,7 +10,7 @@
  * - El App ya no es un "God Component"
  */
 import { useEffect, lazy, Suspense, ReactElement, useMemo, useCallback } from 'react';
-import { BrowserRouter, useLocation, useNavigate, Navigate, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, useLocation, Navigate, Routes, Route } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import {
   AuthProvider,
@@ -41,9 +41,9 @@ import { HandlersProvider } from './contexts/HandlersContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
-import { useAppHandlers } from './hooks/useAppHandlers';
-import { useSyncManager } from './hooks/useSyncManager';
-import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RegistrarSalvedadInput, CompraDB, ProveedorDB, MermaDB, RecorridoDB } from './types/hooks';
+import { useAppHandlers, type UseAppHandlersParams, type NotifyApi, type RutaOptimizadaData } from './hooks/useAppHandlers';
+import { useSyncManager, type SyncDependencies } from './hooks/useSyncManager';
+import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RegistrarSalvedadInput, CompraDB, ProveedorDB, MermaDB, RecorridoDB, ProveedorDBExtended, MermaDBExtended, RutaOptimizada } from './types/hooks';
 import type { AppModalsAppState, AppModalsHandlers } from './components/AppModals';
 
 // Componentes base
@@ -88,15 +88,9 @@ function MainApp(): ReactElement {
   const { user, perfil, logout, isAdmin, isPreventista, isTransportista } = useAuth();
   const notify = useNotification();
   const location = useLocation();
-  const navigate = useNavigate();
 
   // Obtener vista actual desde la URL
   const vista = location.pathname.replace('/', '') || 'dashboard';
-
-  // Funcion para cambiar vista (mantiene compatibilidad)
-  const _setVista = useCallback((newVista: string) => {
-    navigate(`/${newVista}`);
-  }, [navigate]);
 
   // Estado de la aplicacion (consolidado)
   const appState = useAppState(perfil);
@@ -128,32 +122,33 @@ function MainApp(): ReactElement {
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
 
   // Handlers (consolidados)
+  // Note: Type assertions use 'as unknown as Type' pattern for runtime-compatible but compile-time incompatible types
   const handlers = useAppHandlers({
     clientes, productos, pedidos, proveedores,
     agregarCliente, actualizarCliente, eliminarCliente,
     agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock,
-    crearPedido: crearPedido as any,
+    crearPedido: crearPedido as unknown as UseAppHandlersParams['crearPedido'],
     cambiarEstado,
-    asignarTransportista: asignarTransportista as any,
-    eliminarPedido: eliminarPedido as any,
+    asignarTransportista: asignarTransportista as unknown as UseAppHandlersParams['asignarTransportista'],
+    eliminarPedido: eliminarPedido as unknown as UseAppHandlersParams['eliminarPedido'],
     actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago,
-    actualizarOrdenEntrega: actualizarOrdenEntrega as any,
-    actualizarItemsPedido: actualizarItemsPedido as any,
+    actualizarOrdenEntrega: actualizarOrdenEntrega as unknown as UseAppHandlersParams['actualizarOrdenEntrega'],
+    actualizarItemsPedido: actualizarItemsPedido as unknown as UseAppHandlersParams['actualizarItemsPedido'],
     fetchHistorialPedido,
     actualizarUsuario,
-    registrarPago: registrarPago as any,
-    obtenerResumenCuenta: obtenerResumenCuenta as any,
-    registrarMerma: registrarMerma as any,
-    registrarCompra: registrarCompra as any,
-    anularCompra, agregarProveedor, actualizarProveedor: actualizarProveedor as any,
-    crearRecorrido: crearRecorrido as any,
+    registrarPago: registrarPago as unknown as UseAppHandlersParams['registrarPago'],
+    obtenerResumenCuenta: obtenerResumenCuenta as unknown as UseAppHandlersParams['obtenerResumenCuenta'],
+    registrarMerma: registrarMerma as unknown as UseAppHandlersParams['registrarMerma'],
+    registrarCompra: registrarCompra as unknown as UseAppHandlersParams['registrarCompra'],
+    anularCompra, agregarProveedor, actualizarProveedor: actualizarProveedor as unknown as UseAppHandlersParams['actualizarProveedor'],
+    crearRecorrido: crearRecorrido as unknown as UseAppHandlersParams['crearRecorrido'],
     limpiarRuta,
     refetchProductos, refetchPedidos, refetchMetricas, refetchMermas, refetchCompras, refetchProveedores,
     appState,
-    notify: notify as any,
-    user, rutaOptimizada: rutaOptimizada as any,
+    notify: notify as unknown as NotifyApi,
+    user, rutaOptimizada: rutaOptimizada as unknown as RutaOptimizadaData | null,
     isOnline,
-    guardarPedidoOffline: guardarPedidoOffline as any,
+    guardarPedidoOffline: guardarPedidoOffline as unknown as UseAppHandlersParams['guardarPedidoOffline'],
     guardarMermaOffline
   });
 
@@ -174,14 +169,14 @@ function MainApp(): ReactElement {
     sincronizando,
     sincronizarPedidos,
     sincronizarMermas,
-    crearPedido: crearPedido as (...args: unknown[]) => Promise<unknown>,
-    descontarStock: descontarStock as (...args: unknown[]) => Promise<void>,
-    registrarMerma: registrarMerma as (...args: unknown[]) => Promise<unknown>,
+    crearPedido: crearPedido as SyncDependencies['crearPedido'],
+    descontarStock: descontarStock as SyncDependencies['descontarStock'],
+    registrarMerma: registrarMerma as SyncDependencies['registrarMerma'],
     refetchPedidos,
     refetchProductos,
     refetchMermas,
     refetchMetricas,
-    notify
+    notify: notify as unknown as NotifyApi
   });
 
   const handleLogout = useCallback(async (): Promise<void> => {
@@ -219,10 +214,10 @@ function MainApp(): ReactElement {
     pedidosFiltrados: pedidosFiltrados(),
     usuarios,
     transportistas,
-    proveedores: proveedores as any,
-    compras: compras as any,
-    mermas: mermas as any,
-    recorridos: recorridos as any,
+    proveedores: proveedores as ProveedorDB[],
+    compras: compras as CompraDB[],
+    mermas: mermas as MermaDB[],
+    recorridos: recorridos as RecorridoDB[],
     metricas,
     reportePreventistas,
     reporteInicializado,
@@ -419,7 +414,7 @@ function MainApp(): ReactElement {
 
         {/* Modales */}
         <AppModals
-          appState={{ ...appState, filtros, setFiltros } as unknown as AppModalsAppState}
+          appState={{ ...appState, filtros, setFiltros } as AppModalsAppState}
           handlers={{
             ...handlers,
             handlePresentarRendicion,
@@ -427,14 +422,21 @@ function MainApp(): ReactElement {
             handleMarcarEntregadoConSalvedad
           } as unknown as AppModalsHandlers}
           clientes={clientes} productos={productos} pedidos={pedidos} usuarios={usuarios}
-          transportistas={transportistas} proveedores={proveedores as any} mermas={mermas as any} categorias={categorias}
-          fetchPedidosEliminados={fetchPedidosEliminados as any} actualizarItemsPedido={actualizarItemsPedido as any} actualizarPreciosMasivo={actualizarPreciosMasivo} optimizarRuta={optimizarRuta as any}
-          guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as any} errorOptimizacion={errorOptimizacion}
+          transportistas={transportistas} proveedores={proveedores as unknown as ProveedorDBExtended[]} mermas={mermas as unknown as MermaDBExtended[]} categorias={categorias}
+          fetchPedidosEliminados={fetchPedidosEliminados} actualizarItemsPedido={actualizarItemsPedido} actualizarPreciosMasivo={actualizarPreciosMasivo} optimizarRuta={optimizarRuta}
+          guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as unknown as RutaOptimizada | null} errorOptimizacion={errorOptimizacion}
           user={user} isAdmin={isAdmin} isPreventista={isPreventista} isOnline={isOnline}
         />
 
         {/* Indicador de estado offline */}
-        <OfflineIndicator isOnline={isOnline} pedidosPendientes={pedidosPendientes as any} mermasPendientes={mermasPendientes as any} sincronizando={sincronizando} onSincronizar={handleSincronizar} clientes={clientes as any} />
+        <OfflineIndicator
+          isOnline={isOnline}
+          pedidosPendientes={pedidosPendientes.map(p => ({ offlineId: p.offlineId, clienteId: String(p.clienteId), items: p.items.map(i => ({ producto_id: i.productoId, cantidad: i.cantidad })), total: p.total, creadoOffline: p.creadoOffline }))}
+          mermasPendientes={mermasPendientes.map(m => ({ offlineId: m.offlineId, productoNombre: productos.find(p => p.id === m.productoId)?.nombre, cantidad: m.cantidad, motivo: m.motivo }))}
+          sincronizando={sincronizando}
+          onSincronizar={handleSincronizar}
+          clientes={clientes.map(c => ({ id: c.id, nombre: c.nombre_fantasia, activo: c.activo ?? true })) as unknown as Parameters<typeof OfflineIndicator>[0]['clientes']}
+        />
 
         {/* PWA Prompt */}
         <PWAPrompt />

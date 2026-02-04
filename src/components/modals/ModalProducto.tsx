@@ -1,4 +1,5 @@
-import React, { useState, memo, ChangeEvent } from 'react';
+import { useState, memo } from 'react';
+import type { ChangeEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';

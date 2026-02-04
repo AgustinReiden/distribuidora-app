@@ -31,7 +31,7 @@ export default defineConfig([
       // Desactivar regla estricta de setState en effects (patrón válido para sync con props)
       'react-hooks/set-state-in-effect': 'off',
       // Downgrade warnings que no son críticos
-      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/exhaustive-deps': 'error',
     },
   },
   // TypeScript/TSX files
@@ -62,7 +62,7 @@ export default defineConfig([
       // Desactivar regla estricta de setState en effects
       'react-hooks/set-state-in-effect': 'off',
       // Downgrade warnings que no son críticos
-      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/exhaustive-deps': 'error',
     },
   },
 ])

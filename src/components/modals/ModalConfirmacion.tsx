@@ -1,4 +1,4 @@
-import React, { memo, useId } from 'react';
+import { memo, useId } from 'react';
 import { Trash2, AlertTriangle, Check } from 'lucide-react';
 
 /** Tipos de modal de confirmación */

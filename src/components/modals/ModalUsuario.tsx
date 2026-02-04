@@ -1,4 +1,4 @@
-import React, { useState, memo, useRef } from 'react';
+import { useState, memo, useRef } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';

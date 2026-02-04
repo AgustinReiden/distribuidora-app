@@ -285,7 +285,7 @@ export function usePedidos(): UsePedidosHookReturn {
     items: PedidoItemInput[],
     total: number,
     usuarioId: string | null,
-    descontarStockFn: ((items: PedidoItemInput[]) => Promise<void>) | null,
+    _descontarStockFn: ((items: PedidoItemInput[]) => Promise<void>) | null,
     notas: string = '',
     formaPago: string = 'efectivo',
     estadoPago: string = 'pendiente'

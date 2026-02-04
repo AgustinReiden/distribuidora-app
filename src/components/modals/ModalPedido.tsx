@@ -1,4 +1,4 @@
-import React, { useState, useMemo, memo, MouseEvent } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { X, Loader2, Search, MapPin } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';

@@ -3,7 +3,6 @@
  */
 
 import type { Dispatch, SetStateAction } from 'react'
-import type { User } from '@supabase/supabase-js'
 
 // =============================================================================
 // ENTIDADES DE BASE DE DATOS (formato real)

@@ -1,4 +1,4 @@
-import React, { useState, memo, useEffect, useMemo, ChangeEvent } from 'react';
+import { useState, memo, useEffect, useMemo } from 'react';
 import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';

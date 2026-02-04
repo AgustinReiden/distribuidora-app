@@ -5,7 +5,6 @@
  * - Paginación tradicional: para conjuntos pequeños de datos
  * - Virtual scrolling: para listas grandes (>50 items), mejor rendimiento
  */
-import React from 'react';
 import { ShoppingCart, Plus, Route, FileDown, Trash2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';

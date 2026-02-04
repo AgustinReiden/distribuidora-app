@@ -6,7 +6,7 @@
  * - Notificación de actualizaciones disponibles
  * - Registro del Service Worker
  */
-import { useState, useEffect, MouseEvent, ReactElement } from 'react'
+import { useState, useEffect, ReactElement } from 'react'
 import { Download, RefreshCw, X, Smartphone } from 'lucide-react'
 // @ts-expect-error - virtual:pwa-register/react is provided by vite-plugin-pwa
 import { useRegisterSW } from 'virtual:pwa-register/react'

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Trash2, Calendar, User, Package, DollarSign, Loader2, AlertCircle } from 'lucide-react';
+import { useState, useEffect, type ReactElement } from 'react';
+import { Trash2, Calendar, User, Package, DollarSign, Loader2, AlertCircle } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio, formatFecha } from '../../utils/formatters';
 import type { EstadoPedido, FormaPago } from '../../types';
@@ -40,7 +40,7 @@ export interface ModalPedidosEliminadosProps {
 export default function ModalPedidosEliminados({
   onFetch,
   onClose
-}: ModalPedidosEliminadosProps): React.ReactElement {
+}: ModalPedidosEliminadosProps): ReactElement {
   const [pedidos, setPedidos] = useState<PedidoEliminado[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);

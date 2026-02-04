@@ -18,7 +18,7 @@ import {
   Star,
   AlertCircle
 } from 'lucide-react'
-import { useSavedRoutes, formatDuration, formatDistance, type RouteToSave } from '../hooks/useSavedRoutes'
+import { useSavedRoutes, formatDuration, formatDistance } from '../hooks/useSavedRoutes'
 import type { SavedRoute } from '../lib/offlineDb'
 
 // =============================================================================

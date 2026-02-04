@@ -1,4 +1,5 @@
-import React, { useState, useMemo, ChangeEvent } from 'react';
+import { useState, useMemo } from 'react';
+import type { ChangeEvent } from 'react';
 import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';

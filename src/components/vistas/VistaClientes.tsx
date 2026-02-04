@@ -1,4 +1,5 @@
-import React, { useState, useMemo, ChangeEvent } from 'react';
+import { useState, useMemo } from 'react';
+import type { ChangeEvent } from 'react';
 import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map, FileText, Tag, Building2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import type { ClienteDB } from '../../types';

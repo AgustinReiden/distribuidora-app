@@ -23,14 +23,6 @@ const ESTADOS_COMPRA: Record<EstadoCompra, EstadoConfig> = {
   cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' }
 };
 
-const FORMAS_PAGO: Record<string, string> = {
-  efectivo: 'Efectivo',
-  transferencia: 'Transferencia',
-  cheque: 'Cheque',
-  cuenta_corriente: 'Cuenta Corriente',
-  tarjeta: 'Tarjeta'
-};
-
 // =============================================================================
 // INTERFACES DE PROPS
 // =============================================================================

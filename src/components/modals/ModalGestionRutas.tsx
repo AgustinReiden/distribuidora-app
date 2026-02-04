@@ -1,8 +1,8 @@
-import React, { useState, useMemo, memo, useEffect } from 'react';
+import { useState, useMemo, memo, useEffect } from 'react';
 import type { ChangeEvent } from 'react';
 import {
   Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation,
-  Settings, Save, FileText, Download, ChevronDown, ChevronUp, Phone,
+  Settings, Save, FileText, ChevronDown, ChevronUp, Phone,
   DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight
 } from 'lucide-react';
 import ModalBase from './ModalBase';

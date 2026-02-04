@@ -1,4 +1,3 @@
-import React from 'react';
 import { UserCog, Edit2 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';

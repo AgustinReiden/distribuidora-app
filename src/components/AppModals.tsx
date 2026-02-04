@@ -2,7 +2,7 @@
  * Componente consolidado para todos los modales de la aplicación
  * Implementa lazy loading para optimización de bundle
  */
-import React, { Suspense, lazy, ReactNode } from 'react';
+import { Suspense, lazy, type Dispatch, type SetStateAction, type ReactElement } from 'react';
 import LoadingSpinner from './layout/LoadingSpinner';
 import type { User } from '@supabase/supabase-js';
 import type {
@@ -136,7 +136,7 @@ export interface AppModalsAppState {
   resetNuevoPedido: () => void;
   setCargandoHistorial: (cargando: boolean) => void;
   filtros: FiltrosPedidosState;
-  setFiltros: React.Dispatch<React.SetStateAction<FiltrosPedidosState>>;
+  setFiltros: Dispatch<SetStateAction<FiltrosPedidosState>>;
   // Estado para modal de rendición
   rendicionParaModal: RendicionDBExtended | null;
   setRendicionParaModal: (rendicion: RendicionDBExtended | null) => void;
@@ -229,7 +229,7 @@ export interface AppModalsProps {
 }
 
 // Fallback para loading de modales
-function ModalFallback(): React.ReactElement {
+function ModalFallback(): ReactElement {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6">
@@ -272,7 +272,7 @@ export default function AppModals({
   isAdmin,
   isPreventista,
   isOnline
-}: AppModalsProps): React.ReactElement {
+}: AppModalsProps): ReactElement {
   const {
     modales,
     clienteEditando,

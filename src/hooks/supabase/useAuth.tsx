@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, createContext, useContext, useRef, ReactNode } from 'react'
-import { User, AuthError } from '@supabase/supabase-js'
+import { User } from '@supabase/supabase-js'
 import { supabase } from './base'
 import { logger } from '../../utils/logger'
 import type { RolUsuario } from '../../types'
