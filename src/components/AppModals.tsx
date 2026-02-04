@@ -7,10 +7,13 @@ import LoadingSpinner from './layout/LoadingSpinner';
 import type { User } from '@supabase/supabase-js';
 import type {
   ClienteDB,
+  ClienteFormInput,
   ProductoDB,
+  ProductoFormInput,
   PedidoDB,
   PerfilDB,
   ProveedorDBExtended,
+  ProveedorFormInputExtended,
   MermaDBExtended,
   CompraDBExtended,
   FiltrosPedidosState,
@@ -18,8 +21,15 @@ import type {
   RendicionDBExtended,
   RegistrarSalvedadInput,
   RegistrarSalvedadResult,
-  RendicionAjusteInput
+  RendicionAjusteInput,
+  PagoDBWithUsuario
 } from '../types/hooks';
+
+// Importar tipos específicos de handlers
+import type { DatosPagoInput } from '../hooks/handlers/useClienteHandlers';
+import type { MermaDataInput } from '../hooks/handlers/useProductoHandlers';
+import type { EdicionPedidoData, OrdenOptimizadoData, OrdenOptimizadoItem } from '../hooks/handlers/usePedidoHandlers';
+import type { CompraDataInput } from '../hooks/handlers/useCompraHandlers';
 
 // Modales cargados de forma lazy
 const ModalConfirmacion = lazy(() => import('./modals/ModalConfirmacion'));
@@ -146,34 +156,58 @@ export interface AppModalsAppState {
 }
 
  
-/** Event handlers for AppModals - flexible types to match child components */
+/** Event handlers for AppModals - strongly typed */
 export interface AppModalsHandlers {
-  handleFiltrosChange: (...args: any[]) => void;
-  handleGuardarCliente: (clienteData: any) => Promise<void>;
-  handleGuardarProducto: (productoData: any) => Promise<void>;
+  // Filtros
+  handleFiltrosChange: (
+    nuevosFiltros: Partial<FiltrosPedidosState>,
+    filtrosActuales: FiltrosPedidosState,
+    setFiltros: Dispatch<SetStateAction<FiltrosPedidosState>>
+  ) => void;
+
+  // Cliente handlers
+  handleGuardarCliente: (clienteData: ClienteFormInput & { id?: string }) => Promise<void>;
+  handleAbrirRegistrarPago: (cliente: ClienteDB) => Promise<void>;
+  handleRegistrarPago: (datosPago: DatosPagoInput) => Promise<PagoDBWithUsuario>;
+  handleGenerarReciboPago: (pago: PagoDBWithUsuario, cliente: ClienteDB) => void;
+
+  // Producto handlers
+  handleGuardarProducto: (productoData: ProductoFormInput & { id?: string }) => Promise<void>;
+  handleRegistrarMerma: (mermaData: MermaDataInput) => Promise<void>;
+
+  // Pedido handlers - item management
   handleClienteChange: (clienteId: string) => void;
-  agregarItemPedido: (productoId: string, cantidad?: number, precio?: number) => void;
+  agregarItemPedido: (productoId: string) => void;
   actualizarCantidadItem: (productoId: string, cantidad: number) => void;
-  handleCrearClienteEnPedido: (clienteData: any) => Promise<any>;
+  handleCrearClienteEnPedido: (clienteData: ClienteFormInput) => Promise<ClienteDB>;
   handleGuardarPedidoConOffline: () => Promise<void>;
   handleNotasChange: (notas: string) => void;
   handleFormaPagoChange: (formaPago: string) => void;
   handleEstadoPagoChange: (estadoPago: string) => void;
   handleMontoPagadoChange: (monto: number) => void;
-  handleGuardarUsuario: (usuarioData: any) => Promise<void>;
-  handleAsignarTransportista: (transportistaId: string, marcarListo?: boolean) => Promise<void>;
-  handleGuardarEdicionPedido: (pedidoData: any) => Promise<void>;
-  handleAplicarOrdenOptimizado: (data: any) => Promise<void>;
-  handleExportarHojaRutaOptimizada: (...args: any[]) => any;
+
+  // Pedido handlers - editing and assignment
+  handleAsignarTransportista: (transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
+  handleGuardarEdicionPedido: (pedidoData: EdicionPedidoData) => Promise<void>;
+
+  // Pedido handlers - route optimization
+  handleAplicarOrdenOptimizado: (data: OrdenOptimizadoData | OrdenOptimizadoItem[]) => Promise<void>;
+  handleExportarHojaRutaOptimizada: (transportista: PerfilDB, pedidosOrdenados: PedidoDB[]) => void;
   handleCerrarModalOptimizar: () => void;
-  handleAbrirRegistrarPago: (cliente: ClienteDB, saldo?: number) => void;
-  handleRegistrarPago: (...args: any[]) => Promise<any>;
-  handleGenerarReciboPago: (...args: any[]) => any;
-  handleRegistrarMerma: (mermaData: any) => Promise<void>;
-  handleRegistrarCompra: (compraData: any) => Promise<void>;
+
+  // Usuario handlers
+  handleGuardarUsuario: (usuarioData: PerfilDB) => Promise<void>;
+
+  // Compra handlers
+  handleRegistrarCompra: (compraData: CompraDataInput) => Promise<void>;
   handleAnularCompra: (compraId: string) => Promise<void>;
-  handleGuardarProveedor: (proveedorData: any) => Promise<void>;
+
+  // Proveedor handlers
+  handleGuardarProveedor: (proveedorData: ProveedorFormInputExtended & { id?: string }) => Promise<void>;
+
+  // Refetch functions
   refetchProductos?: () => Promise<void>;
+
   // Handlers para rendición
   handlePresentarRendicion?: (data: {
     rendicionId: string;
@@ -181,6 +215,7 @@ export interface AppModalsHandlers {
     justificacion?: string;
     ajustes: RendicionAjusteInput[];
   }) => Promise<{ success: boolean; diferencia: number }>;
+
   // Handlers para entrega con salvedad
   handleRegistrarSalvedades?: (salvedades: RegistrarSalvedadInput[]) => Promise<RegistrarSalvedadResult[]>;
   handleMarcarEntregadoConSalvedad?: (pedidoId: string) => Promise<void>;
