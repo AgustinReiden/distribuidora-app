@@ -536,3 +536,278 @@ npm audit: found 0 vulnerabilities ✅
 
 *Reporte generado el 2026-01-20*
 *Última actualización: 2026-01-21 (tercera actualización - Fases 1.1-1.4)*
+
+---
+
+## 10. Auditoría Completa - 2026-02-04
+
+### Resumen Ejecutivo
+
+Se realizó una auditoría exhaustiva del código cubriendo:
+- **Seguridad**: Vulnerabilidades, sanitización, autenticación
+- **Calidad de código**: Patrones, duplicación, tipos TypeScript
+- **Configuración**: Dependencias, ESLint, TypeScript, Vite, CI/CD
+- **Servicios**: Arquitectura, lógica de negocio, race conditions
+- **Hooks y Estado**: React Query, contextos, memory leaks
+
+### Puntuación General Actualizada
+
+| Categoría | Puntuación | Estado |
+|-----------|------------|--------|
+| **Seguridad** | 8.0/10 | Bueno |
+| **Calidad de Código** | 7.0/10 | Requiere mejoras |
+| **Configuración/DevOps** | 7.5/10 | Bueno con críticos |
+| **Servicios/Lógica** | 8.0/10 | Muy bueno |
+| **Hooks/Estado** | 7.0/10 | Requiere mejoras |
+| **Testing** | 6.5/10 | Necesita más cobertura |
+| **TOTAL** | **7.3/10** | **Aceptable** |
+
+---
+
+### 10.1 Hallazgos de Seguridad
+
+#### 🔴 CRÍTICOS (Acción Inmediata)
+
+| # | Problema | Ubicación | Severidad | Acción |
+|---|----------|-----------|-----------|--------|
+| 1 | **jsPDF v4.0.0 vulnerable** - PDF Injection, DoS, XMP Injection, Race Condition | `package.json` | CRÍTICA | Actualizar a v4.1.0+ |
+| 2 | **brace-expansion ReDoS** | Dependencia indirecta | CRÍTICA | `npm audit fix` |
+
+#### 🟡 MEDIOS
+
+| # | Problema | Ubicación | Recomendación |
+|---|----------|-----------|---------------|
+| 3 | Coordenadas de depósito en localStorage sin cifrar | `useOptimizarRuta.ts:85,103` | Usar `secureStorage.ts` |
+| 4 | JSON.parse sin validación de esquema | `useOptimizarRuta.ts:103` | Validar con Zod después del parse |
+| 5 | Falta de rate limiting en APIs | Global | Implementar throttling |
+| 6 | Validación de lat/lng sin rangos | `schemas.ts:548-549` | Agregar min/max (-90/90, -180/180) |
+
+#### ✅ Fortalezas de Seguridad
+
+- Validación robusta con Zod (schemas.ts)
+- Sanitización con DOMPurify correctamente configurada
+- Cifrado AES-GCM para datos sensibles (secureStorage.ts)
+- CSP y headers de seguridad bien configurados
+- Autenticación con Supabase Auth
+- RPC calls parametrizadas (no concatenación)
+- Logger que redacta campos sensibles
+
+---
+
+### 10.2 Hallazgos de Calidad de Código
+
+#### 🔴 CRÍTICOS
+
+| # | Problema | Ubicación | Impacto |
+|---|----------|-----------|---------|
+| 1 | **33+ instancias de `as any`** | `useAppHandlers.ts:135-158`, `AppModals.tsx:151-175` | Pérdida de type-safety |
+| 2 | **Props drilling excesivo** (23 handlers) | `VistaPedidos.tsx:25-61` | Difícil de mantener |
+| 3 | **Componentes muy grandes** | `ModalCompra.tsx` (819 líneas), `types/hooks.ts` (1,231 líneas) | Difícil de testear |
+
+#### 🟠 ALTOS
+
+| # | Problema | Ubicación | Recomendación |
+|---|----------|-----------|---------------|
+| 4 | Código duplicado en inicialización de modales | `ModalCliente.tsx:114-146`, `ModalProducto.tsx`, `ModalCompra.tsx` | Extraer helper |
+| 5 | Errores silenciados sin logging | `useAuth.tsx:47-49`, `App.tsx:188` | Agregar logging |
+| 6 | Complejidad ciclomática alta | `useOfflineSync.ts:397-457` (7+ branches) | Refactorizar en funciones |
+| 7 | State lifting innecesario | `App.tsx` (100+ props, "God Component") | Dividir en containers |
+
+#### 🟡 MEDIOS
+
+- Inconsistencia en nombres de variables (`tempOfflineId` vs `offlineId`)
+- Falta de tipos específicos en handlers (`(...args: any[])`)
+
+---
+
+### 10.3 Hallazgos de Configuración
+
+#### 🔴 VULNERABILIDADES npm ACTUALES
+
+```bash
+npm audit
+# 2 vulnerabilidades: 1 crítica + 1 alta
+# - @isaacs/brace-expansion: ReDoS (CRÍTICA)
+# - jspdf v4.0.0: Multiple CVEs (ALTA)
+```
+
+**Acción inmediata:**
+```bash
+npm install jspdf@^4.1.0
+npm audit fix
+```
+
+#### ⚠️ CI/CD Incompleto
+
+| Problema | Ubicación | Estado |
+|----------|-----------|--------|
+| Deploy pipeline sin hosting configurado | `deploy.yml` | Solo upload artifacts |
+| `continue-on-error: true` en security audit | `ci.yml` | Permite builds con vulnerabilidades |
+| Sin thresholds de coverage | `vite.config.js` | Sin límites mínimos |
+| Sin job de typecheck | `ci.yml` | No valida tipos en CI |
+
+#### ✅ Fortalezas de Configuración
+
+- TypeScript strict mode completamente habilitado
+- Path aliases sincronizados entre tsconfig y vite
+- Code splitting optimizado en Vite
+- PWA con caching strategy bien configurado
+- ESLint flat config moderno (v9+)
+- Husky + lint-staged para pre-commit
+
+---
+
+### 10.4 Hallazgos de Servicios y Lógica de Negocio
+
+#### ✅ Fortalezas
+
+- **Arquitectura limpia**: BaseService con CRUD genérico reutilizable
+- **Transacciones atómicas**: RPC con FOR UPDATE en PostgreSQL
+- **Prevención de race conditions**: Bloqueos a nivel de BD
+- **Logging detallado**: Contexto de errores preservado
+
+#### ⚠️ Problemas Identificados
+
+| # | Problema | Ubicación | Severidad |
+|---|----------|-----------|-----------|
+| 1 | N+1 queries en verificación de stock | `stockManager.ts:94-125` | MEDIA |
+| 2 | SQL injection potencial en búsquedas ILIKE | `clienteService.ts:82` | MEDIA |
+| 3 | Inconsistencia en error handling (getAll vs create) | `baseService.ts:89-101` | BAJA |
+| 4 | registrarMerma no es atómico con stock | `stockManager.ts:259-278` | BAJA |
+| 5 | Cache no invalidado en deleteWhere | `baseService.ts:502-522` | BAJA |
+
+#### Cobertura de Tests de Servicios
+
+| Servicio | Cobertura | Estado |
+|----------|-----------|--------|
+| BaseService | ~50-60% | Parcial |
+| ClienteService | ~40% | Bajo |
+| StockManager | ~60-70% | Aceptable |
+
+---
+
+### 10.5 Hallazgos de Hooks y Estado
+
+#### 🔴 CRÍTICOS
+
+| # | Problema | Ubicación | Riesgo |
+|---|----------|-----------|--------|
+| 1 | Dependencia innecesaria `pedidosPendientes` en useCallback | `useOfflineSync.ts:320` | Re-renders excesivos |
+| 2 | `loadPendingOperations()` sin await | `useOfflineSync.ts:304,344` | Memory leak potencial |
+| 3 | Race condition con `perfil` en useAuth | `useAuth.tsx:68` | Datos inconsistentes |
+
+#### 🟠 ALTOS
+
+| # | Problema | Ubicación | Recomendación |
+|---|----------|-----------|---------------|
+| 4 | AppDataContext monolítico (25 props) | `AppDataContext.tsx` | Dividir en contextos pequeños |
+| 5 | 7 eslint-disable sin justificación clara | Múltiples hooks | Revisar dependencias |
+| 6 | Múltiples `as any` en useAppHandlers | `useAppHandlers.ts:477-486` | Crear tipos estrictos |
+
+#### ✅ Fortalezas
+
+- React Query bien integrado con query keys estructurados
+- Stale times sensatos por entidad
+- Optimistic updates implementados correctamente
+- useOfflineSync con excelente cobertura de tests
+- NotificationContext bien implementado (toasts + persistencia)
+
+---
+
+### 10.6 Matriz de Riesgos Consolidada
+
+| ID | Severidad | Categoría | Problema | Acción Requerida |
+|----|-----------|-----------|----------|------------------|
+| S1 | 🔴 CRÍTICA | Seguridad | jsPDF vulnerable | Actualizar a 4.1.0+ |
+| S2 | 🔴 CRÍTICA | Seguridad | brace-expansion ReDoS | npm audit fix |
+| C1 | 🔴 CRÍTICA | Código | 33+ `as any` | Crear tipos estrictos |
+| C2 | 🔴 CRÍTICA | Código | Props drilling 23 handlers | Usar Context por dominio |
+| C3 | 🔴 CRÍTICA | Código | ModalCompra 819 líneas | Dividir en componentes |
+| H1 | 🔴 CRÍTICA | Hooks | useOfflineSync memory leak | Agregar mounted check |
+| H2 | 🔴 CRÍTICA | Hooks | useAuth race condition | Usar perfil ref |
+| D1 | 🟠 ALTA | DevOps | CI/CD sin deploy real | Configurar Vercel/Netlify |
+| D2 | 🟠 ALTA | DevOps | Security audit permisivo | continue-on-error: false |
+| T1 | 🟠 ALTA | Testing | Cobertura ~50% servicios | Agregar más tests |
+| T2 | 🟠 ALTA | Testing | Sin tests de useAuth | Agregar tests |
+
+---
+
+### 10.7 Plan de Acción Recomendado
+
+#### FASE 1: CRÍTICOS (Inmediato - 1 semana)
+
+```bash
+# 1. Actualizar dependencias vulnerables
+npm install jspdf@^4.1.0
+npm audit fix
+
+# 2. Verificar que no hay vulnerabilidades
+npm audit
+```
+
+- [ ] Corregir useOfflineSync (remover pedidosPendientes de deps)
+- [ ] Corregir useAuth (usar perfil ref)
+- [ ] Crear tipos estrictos para handlers (eliminar `as any`)
+
+#### FASE 2: ALTOS (2-3 semanas)
+
+- [ ] Dividir AppDataContext en contextos por dominio
+- [ ] Refactorizar ModalCompra (máximo 200 líneas/componente)
+- [ ] Configurar deploy real en CI/CD
+- [ ] Habilitar security checks obligatorios en CI
+- [ ] Agregar job de typecheck en CI
+- [ ] Configurar coverage thresholds (80% mínimo)
+
+#### FASE 3: MEDIOS (1 mes)
+
+- [ ] Extraer código duplicado de modales
+- [ ] Implementar N+1 fix en verificación de stock
+- [ ] Agregar tests para useAuth, useAsync
+- [ ] Implementar rate limiting
+- [ ] Mejorar validaciones de lat/lng
+- [ ] Migrar coordenadas a secureStorage
+
+---
+
+### 10.8 Comandos de Verificación
+
+```bash
+# Verificar vulnerabilidades
+npm audit
+
+# Ejecutar tests
+npm run test:run
+
+# Verificar tipos
+npm run typecheck
+
+# Ejecutar lint
+npm run lint
+
+# Verificar secretos
+npm run check-secrets
+
+# Tests e2e
+npm run test:e2e
+```
+
+---
+
+### 10.9 Archivos Clave para Revisión
+
+| Archivo | Prioridad | Razón |
+|---------|-----------|-------|
+| `package.json` | 🔴 CRÍTICA | Actualizar jspdf |
+| `src/hooks/useOfflineSync.ts` | 🔴 CRÍTICA | Memory leak |
+| `src/hooks/supabase/useAuth.tsx` | 🔴 CRÍTICA | Race condition |
+| `src/hooks/useAppHandlers.ts` | 🔴 CRÍTICA | 33+ as any |
+| `src/components/vistas/VistaPedidos.tsx` | 🔴 CRÍTICA | Props drilling |
+| `src/components/modals/ModalCompra.tsx` | 🟠 ALTA | 819 líneas |
+| `src/contexts/AppDataContext.tsx` | 🟠 ALTA | Re-renders |
+| `.github/workflows/ci.yml` | 🟠 ALTA | Security permisivo |
+| `.github/workflows/deploy.yml` | 🟠 ALTA | Sin deploy real |
+
+---
+
+*Auditoría realizada el 2026-02-04*
+*Herramientas: Análisis estático de código, npm audit, revisión manual*
