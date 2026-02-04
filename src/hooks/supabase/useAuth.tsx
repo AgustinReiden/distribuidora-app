@@ -1,7 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react'
+import { useState, useEffect, createContext, useContext, useRef, ReactNode } from 'react'
 import { User, AuthError } from '@supabase/supabase-js'
 import { supabase } from './base'
+import { logger } from '../../utils/logger'
 import type { RolUsuario } from '../../types'
 
 // Tipo para el perfil de usuario
@@ -40,12 +41,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Ref para evitar race conditions al verificar el perfil actual
+  const perfilRef = useRef<Perfil | null>(null)
+
+  // Mantener ref sincronizado con el estado
+  perfilRef.current = perfil
+
   const fetchPerfil = async (userId: string) => {
     try {
-      const { data } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle()
+      const { data, error } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle()
+      if (error) {
+        logger.error('[useAuth] Error fetching perfil:', error)
+        return
+      }
       if (data) setPerfil(data as Perfil)
-    } catch {
-      // Error silenciado
+    } catch (err) {
+      logger.error('[useAuth] Exception fetching perfil:', err)
     }
   }
 
@@ -54,10 +65,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     supabase.auth.getSession().then(({ data }) => {
       if (mounted && data?.session?.user) {
         setUser(data.session.user)
-        fetchPerfil(data.session.user.id)
+        void fetchPerfil(data.session.user.id)
       }
-    }).catch(() => {
-      // Error silenciado
+    }).catch((err) => {
+      logger.error('[useAuth] Error getting session:', err)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -65,7 +76,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (session?.user) {
           setUser(session.user)
-          if (!perfil || perfil?.id !== session.user.id) fetchPerfil(session.user.id)
+          // Usar perfilRef.current para evitar race condition con estado stale
+          const currentPerfil = perfilRef.current
+          if (!currentPerfil || currentPerfil.id !== session.user.id) {
+            void fetchPerfil(session.user.id)
+          }
         }
         setLoading(false)
       } else if (event === 'SIGNED_OUT') {

@@ -19,7 +19,10 @@ import {
   usePedidoHandlers,
   useCompraHandlers,
   useProveedorHandlers,
-  useUsuarioHandlers
+  useUsuarioHandlers,
+  type UseClienteHandlersProps,
+  type UseProductoHandlersProps,
+  type UsePedidoHandlersProps
 } from './handlers'
 import type {
   ProductoDB,
@@ -468,63 +471,86 @@ export function useAppHandlers({
     setPaginaActual(1)
   }, [setPaginaActual])
 
-  // Componer handlers por dominio - using type assertions for flexibility
-   
+  // Componer handlers por dominio
+  // Adaptadores de tipo para compatibilidad entre interfaces
+  const clienteModales = {
+    cliente: modales.cliente,
+    fichaCliente: modales.fichaCliente,
+    registrarPago: modales.registrarPago,
+    confirm: modales.confirm
+  }
+
   const clienteHandlers = useClienteHandlers({
     agregarCliente,
     actualizarCliente,
     eliminarCliente,
-    registrarPago: registrarPago as any,
-    obtenerResumenCuenta: obtenerResumenCuenta as any,
-    modales: modales as any,
+    registrarPago,
+    obtenerResumenCuenta: obtenerResumenCuenta as UseClienteHandlersProps['obtenerResumenCuenta'],
+    modales: clienteModales,
     setGuardando,
     setClienteEditando,
     setClienteFicha,
     setClientePago,
     setSaldoPendienteCliente,
-    notify: notify as any,
+    notify,
     user
   })
+
+  const productoModales = {
+    producto: modales.producto,
+    mermaStock: modales.mermaStock,
+    historialMermas: modales.historialMermas,
+    confirm: modales.confirm
+  }
 
   const productoHandlers = useProductoHandlers({
     agregarProducto,
     actualizarProducto,
     eliminarProducto,
-    registrarMerma: registrarMerma as any,
-    modales: modales as any,
+    registrarMerma: registrarMerma as UseProductoHandlersProps['registrarMerma'],
+    modales: productoModales,
     setGuardando,
     setProductoEditando,
     setProductoMerma,
     refetchProductos,
     refetchMermas,
-    notify: notify as any,
+    notify,
     user,
     isOnline,
     guardarMermaOffline
   })
 
+  const pedidoModales = {
+    pedido: modales.pedido,
+    asignar: modales.asignar,
+    historial: modales.historial,
+    editarPedido: modales.editarPedido,
+    optimizarRuta: modales.optimizarRuta,
+    confirm: modales.confirm
+  }
+
   const pedidoHandlers = usePedidoHandlers({
     productos,
-    crearPedido: crearPedido as any,
+    crearPedido: crearPedido as UsePedidoHandlersProps['crearPedido'],
     cambiarEstado,
-    asignarTransportista: asignarTransportista as any,
-    eliminarPedido: eliminarPedido as any,
+    asignarTransportista: asignarTransportista as UsePedidoHandlersProps['asignarTransportista'],
+    eliminarPedido: eliminarPedido as UsePedidoHandlersProps['eliminarPedido'],
     actualizarNotasPedido,
     actualizarEstadoPago,
     actualizarFormaPago,
-    actualizarOrdenEntrega: actualizarOrdenEntrega as any,
-    actualizarItemsPedido: actualizarItemsPedido as any,
-    fetchHistorialPedido: fetchHistorialPedido as any,
-    validarStock: validarStock as any,
+    actualizarOrdenEntrega: actualizarOrdenEntrega as UsePedidoHandlersProps['actualizarOrdenEntrega'],
+    actualizarItemsPedido: actualizarItemsPedido as UsePedidoHandlersProps['actualizarItemsPedido'],
+    fetchHistorialPedido: fetchHistorialPedido as UsePedidoHandlersProps['fetchHistorialPedido'],
+    validarStock: validarStock as UsePedidoHandlersProps['validarStock'],
     descontarStock,
     restaurarStock,
-    registrarPago: registrarPago as any,
-    crearRecorrido: crearRecorrido as any,
+    registrarPago: registrarPago as UsePedidoHandlersProps['registrarPago'],
+    crearRecorrido: crearRecorrido as UsePedidoHandlersProps['crearRecorrido'],
     limpiarRuta,
     agregarCliente,
-    modales: modales as any,
+    modales: pedidoModales,
     setGuardando,
-    setNuevoPedido: setNuevoPedido as any,
+    setNuevoPedido: setNuevoPedido as UsePedidoHandlersProps['setNuevoPedido'],
     resetNuevoPedido,
     nuevoPedido,
     setPedidoAsignando,
@@ -537,40 +563,55 @@ export function useAppHandlers({
     refetchProductos,
     refetchPedidos,
     refetchMetricas,
-    notify: notify as any,
+    notify,
     user,
     isOnline,
-    guardarPedidoOffline: guardarPedidoOffline as any,
-    rutaOptimizada: rutaOptimizada as any
+    guardarPedidoOffline: guardarPedidoOffline as UsePedidoHandlersProps['guardarPedidoOffline'],
+    rutaOptimizada: rutaOptimizada as UsePedidoHandlersProps['rutaOptimizada']
   })
 
+  const compraModales = {
+    compra: modales.compra,
+    detalleCompra: modales.detalleCompra,
+    confirm: modales.confirm
+  }
+
   const compraHandlers = useCompraHandlers({
-    registrarCompra: registrarCompra as any,
+    registrarCompra,
     anularCompra,
-    modales: modales as any,
+    modales: compraModales,
     setGuardando,
-    setCompraDetalle: setCompraDetalle as any,
+    setCompraDetalle,
     refetchProductos,
     refetchCompras,
-    notify: notify as any,
+    notify,
     user
   })
-   
+
+  const proveedorModales = {
+    proveedor: modales.proveedor,
+    confirm: modales.confirm
+  }
 
   const proveedorHandlers = useProveedorHandlers({
     proveedores,
-    agregarProveedor: agregarProveedor as any,
-    actualizarProveedor: actualizarProveedor as any,
-    modales,
+    agregarProveedor,
+    actualizarProveedor,
+    modales: proveedorModales,
     setGuardando,
     setProveedorEditando,
     refetchProveedores,
     notify
   })
 
+  const usuarioModales = {
+    usuario: modales.usuario,
+    confirm: modales.confirm
+  }
+
   const usuarioHandlers = useUsuarioHandlers({
     actualizarUsuario,
-    modales,
+    modales: usuarioModales,
     setGuardando,
     setUsuarioEditando,
     notify
@@ -601,5 +642,5 @@ export function useAppHandlers({
     ...proveedorHandlers
   }
 
-  return combinedHandlers as unknown as UseAppHandlersReturn
+  return combinedHandlers
 }

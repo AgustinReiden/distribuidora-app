@@ -171,12 +171,25 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   // Ref para evitar race conditions en sincronización
   const sincronizandoRef = useRef<boolean>(false)
 
+  // Ref para acceder a pedidosPendientes sin causar re-renders en callbacks
+  const pedidosPendientesRef = useRef<PedidoOffline[]>(pedidosPendientes)
+
+  // Ref para controlar si el componente está montado
+  const isMountedRef = useRef<boolean>(true)
+
+  // Mantener ref sincronizado con el estado
+  pedidosPendientesRef.current = pedidosPendientes
+
   /**
    * Carga las operaciones pendientes de IndexedDB
+   * Verifica si el componente está montado antes de actualizar estado
    */
   const loadPendingOperations = useCallback(async (): Promise<void> => {
     try {
       const operations = await getPendingOperations(100)
+
+      // Verificar si el componente sigue montado antes de actualizar estado
+      if (!isMountedRef.current) return
 
       const pedidos = operations
         .filter(op => op.type === 'CREATE_PEDIDO')
@@ -195,12 +208,17 @@ export function useOfflineSync(): UseOfflineSyncReturn {
 
   // Cargar operaciones pendientes al montar
   useEffect(() => {
-    loadPendingOperations()
+    isMountedRef.current = true
+    void loadPendingOperations()
 
     // Limpieza periódica de operaciones antiguas (mayores a 7 días)
     cleanupOldOperations(7).catch(err => {
       logger.warn('[useOfflineSync] Error en limpieza periódica:', err)
     })
+
+    return () => {
+      isMountedRef.current = false
+    }
   }, [loadPendingOperations])
 
   // Escuchar cambios de conexión
@@ -226,6 +244,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   /**
    * Guarda un pedido en modo offline con validación de stock
    * Ahora usa IndexedDB via queueOperation
+   * Usa pedidosPendientesRef para evitar re-renders innecesarios
    */
   const guardarPedidoOffline = useCallback((
     pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
@@ -239,8 +258,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       const stockSnapshot: StockSnapshot = {}
 
       // Calcular stock considerando pedidos offline pendientes
+      // Usar ref para evitar dependencia en el array de callbacks
       const stockReservado: Record<string, number> = {}
-      pedidosPendientes.forEach(pedido => {
+      pedidosPendientesRef.current.forEach(pedido => {
         pedido.items?.forEach(item => {
           stockReservado[item.productoId] = (stockReservado[item.productoId] || 0) + item.cantidad
         })
@@ -300,8 +320,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       .then((opId) => {
         if (opId !== null) {
           logger.info(`[useOfflineSync] Pedido encolado con ID: ${opId}`)
-          // Actualizar lista local
-          loadPendingOperations()
+          // Actualizar lista local (void para indicar que no esperamos el resultado)
+          void loadPendingOperations()
         } else {
           logger.warn('[useOfflineSync] Pedido duplicado detectado, no se encoló')
         }
@@ -317,7 +337,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     setPedidosPendientes(prev => [...prev, nuevoPedido])
 
     return { success: true, pedido: nuevoPedido }
-  }, [pedidosPendientes, loadPendingOperations])
+  }, [loadPendingOperations]) // pedidosPendientes removido, usamos ref
 
   /**
    * Guarda una merma en modo offline
@@ -341,7 +361,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       .then((opId) => {
         if (opId !== null) {
           logger.info(`[useOfflineSync] Merma encolada con ID: ${opId}`)
-          loadPendingOperations()
+          // Usar void para indicar que no esperamos el resultado
+          void loadPendingOperations()
         } else {
           logger.warn('[useOfflineSync] Merma duplicada detectada, no se encoló')
         }
