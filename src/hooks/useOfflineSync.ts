@@ -70,10 +70,22 @@ export interface GuardarPedidoResult {
   itemsSinStock?: ItemSinStock[];
 }
 
+export interface StockConflict {
+  pedido: PedidoOffline;
+  items: Array<{
+    productoId: string;
+    nombre: string;
+    solicitado: number;
+    stockAlMomento: number;
+    stockActual: number;
+  }>;
+}
+
 export interface SyncResult {
   success: boolean;
   sincronizados: number;
   errores: Array<{ pedido?: PedidoOffline; merma?: MermaOffline; error: string }>;
+  conflictos?: StockConflict[];
 }
 
 export interface CrearPedidoFunction {
@@ -107,7 +119,8 @@ export interface UseOfflineSyncReturn {
   eliminarMermaOffline: (offlineId: string) => void;
   sincronizarPedidos: (
     crearPedidoFn: CrearPedidoFunction,
-    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>
+    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
+    productosActuales?: ProductoDB[]
   ) => Promise<SyncResult>;
   sincronizarMermas: (registrarMermaFn: RegistrarMermaFunction) => Promise<SyncResult>;
   limpiarPedidosOffline: () => void;
@@ -413,11 +426,52 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   }, [])
 
   /**
+   * Valida que el stock actual sea suficiente comparando con el snapshot
+   * Retorna null si todo está bien, o un StockConflict si hay problemas
+   */
+  const validarStockParaSincronizacion = useCallback((
+    pedido: PedidoOffline,
+    payload: Record<string, unknown>,
+    productosActuales: ProductoDB[]
+  ): StockConflict | null => {
+    const items = payload.items as PedidoOfflineItem[]
+    const stockSnapshot = payload.stockSnapshot as StockSnapshot | undefined
+    const itemsConConflicto: StockConflict['items'] = []
+
+    for (const item of items) {
+      const productoActual = productosActuales.find(p => p.id === item.productoId)
+      if (!productoActual) continue
+
+      const stockActual = productoActual.stock || 0
+      const stockAlMomento = stockSnapshot?.[item.productoId]?.stockAlMomento ?? stockActual
+
+      // Si el stock actual es menor que lo solicitado, hay conflicto
+      if (item.cantidad > stockActual) {
+        itemsConConflicto.push({
+          productoId: item.productoId,
+          nombre: productoActual.nombre || item.nombre || 'Producto desconocido',
+          solicitado: item.cantidad,
+          stockAlMomento,
+          stockActual
+        })
+      }
+    }
+
+    if (itemsConConflicto.length > 0) {
+      return { pedido, items: itemsConConflicto }
+    }
+
+    return null
+  }, [])
+
+  /**
    * Sincroniza todos los pedidos pendientes con el servidor
+   * Valida stock actual antes de sincronizar para evitar overselling
    */
   const sincronizarPedidos = useCallback(async (
     crearPedidoFn: CrearPedidoFunction,
-    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>
+    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
+    productosActuales?: ProductoDB[]
   ): Promise<SyncResult> => {
     if (!isOnline) {
       return { success: false, sincronizados: 0, errores: [{ error: 'Sin conexión' }] }
@@ -441,12 +495,28 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       return { success: true, sincronizados: 0, errores: [] }
     }
     const errores: SyncResult['errores'] = []
+    const conflictos: StockConflict[] = []
     let sincronizados = 0
 
     try {
       for (const op of pedidoOps) {
         const payload = op.payload as Record<string, unknown>
         const pedido = operationToPedidoOffline(op)
+
+        // Validar stock si tenemos productos actuales
+        if (productosActuales && productosActuales.length > 0) {
+          const conflicto = validarStockParaSincronizacion(pedido, payload, productosActuales)
+          if (conflicto) {
+            // Marcar como fallido con mensaje descriptivo
+            const itemsDesc = conflicto.items
+              .map(i => `${i.nombre}: necesita ${i.solicitado}, disponible ${i.stockActual}`)
+              .join('; ')
+            await markAsFailed(op.id!, `Stock insuficiente: ${itemsDesc}`)
+            conflictos.push(conflicto)
+            logger.warn(`[useOfflineSync] Conflicto de stock en pedido ${pedido.offlineId}:`, conflicto.items)
+            continue // No sincronizar este pedido
+          }
+        }
 
         try {
           await crearPedidoFn(
@@ -474,8 +544,13 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       await loadPendingOperations()
     }
 
-    return { success: errores.length === 0, sincronizados, errores }
-  }, [isOnline, loadPendingOperations])
+    return {
+      success: errores.length === 0 && conflictos.length === 0,
+      sincronizados,
+      errores,
+      conflictos: conflictos.length > 0 ? conflictos : undefined
+    }
+  }, [isOnline, loadPendingOperations, validarStockParaSincronizacion])
 
   /**
    * Sincroniza todas las mermas pendientes con el servidor

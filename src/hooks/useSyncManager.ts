@@ -9,6 +9,8 @@
  */
 import { useCallback, useEffect, useRef } from 'react'
 import type { NotifyApi } from './useAppHandlers'
+import type { ProductoDB } from '../types/hooks'
+import type { StockConflict } from './useOfflineSync'
 
 export interface SyncDependencies {
   // Estado de conexión y pendientes
@@ -17,11 +19,15 @@ export interface SyncDependencies {
   mermasPendientes: Array<{ offlineId: string }>
   sincronizando: boolean
 
+  // Productos actuales para validación de stock
+  productos?: ProductoDB[]
+
   // Funciones de sincronización
   sincronizarPedidos: (
     crearPedidoFn: (...args: unknown[]) => Promise<unknown>,
-    descontarStockFn: (...args: unknown[]) => Promise<void>
-  ) => Promise<{ sincronizados: number; errores: Array<{ error: string }> }>
+    descontarStockFn: (...args: unknown[]) => Promise<void>,
+    productosActuales?: ProductoDB[]
+  ) => Promise<{ sincronizados: number; errores: Array<{ error: string }>; conflictos?: StockConflict[] }>
   sincronizarMermas: (
     registrarMermaFn: (...args: unknown[]) => Promise<unknown>
   ) => Promise<{ sincronizados: number; errores: Array<{ error: string }> }>
@@ -52,6 +58,7 @@ export function useSyncManager({
   isOnline,
   pedidosPendientes,
   mermasPendientes,
+  productos,
   sincronizarPedidos,
   sincronizarMermas,
   crearPedido,
@@ -68,17 +75,19 @@ export function useSyncManager({
 
   /**
    * Ejecuta la sincronización de pedidos y mermas pendientes
+   * Valida stock actual antes de sincronizar para evitar overselling
    */
   const ejecutarSincronizacion = useCallback(async (): Promise<void> => {
     if (isSyncingRef.current) return
     isSyncingRef.current = true
 
     try {
-      // Sincronizar pedidos
+      // Sincronizar pedidos (pasando productos para validación de stock)
       if (pedidosPendientes.length > 0) {
         const resultadoPedidos = await sincronizarPedidos(
           crearPedido as (...args: unknown[]) => Promise<unknown>,
-          descontarStock as (...args: unknown[]) => Promise<void>
+          descontarStock as (...args: unknown[]) => Promise<void>,
+          productos // Pasar productos actuales para validación
         )
 
         if (resultadoPedidos.sincronizados > 0) {
@@ -86,6 +95,15 @@ export function useSyncManager({
           await refetchPedidos()
           await refetchProductos()
           refetchMetricas()
+        }
+
+        // Notificar conflictos de stock (overselling prevenido)
+        if (resultadoPedidos.conflictos && resultadoPedidos.conflictos.length > 0) {
+          const totalConflictos = resultadoPedidos.conflictos.length
+          notify.warning(
+            `${totalConflictos} pedido(s) con stock insuficiente. Revise los pedidos fallidos.`,
+            { persist: true }
+          )
         }
 
         if (resultadoPedidos.errores.length > 0) {
@@ -117,6 +135,7 @@ export function useSyncManager({
   }, [
     pedidosPendientes.length,
     mermasPendientes.length,
+    productos,
     sincronizarPedidos,
     sincronizarMermas,
     crearPedido,

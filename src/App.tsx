@@ -162,11 +162,13 @@ function MainApp(): ReactElement {
   }, [vista, fechaRecorridos, isAdmin, fetchRecorridosHoy, fetchRecorridosPorFecha]);
 
   // Hook de sincronización (maneja auto-sync y sync manual)
+  // Pasa productos para validar stock antes de sincronizar (previene overselling)
   const { handleSincronizar } = useSyncManager({
     isOnline,
     pedidosPendientes,
     mermasPendientes,
     sincronizando,
+    productos, // Productos actuales para validación de stock
     sincronizarPedidos,
     sincronizarMermas,
     crearPedido: crearPedido as SyncDependencies['crearPedido'],

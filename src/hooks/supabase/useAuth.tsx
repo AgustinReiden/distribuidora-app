@@ -1,9 +1,21 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useEffect, createContext, useContext, useRef, ReactNode } from 'react'
+import { useState, useEffect, createContext, useContext, useRef, useCallback, ReactNode } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from './base'
 import { logger } from '../../utils/logger'
 import type { RolUsuario } from '../../types'
+
+// Tiempo de inactividad antes de cerrar sesión automáticamente (15 minutos)
+const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000
+
+// Eventos que reinician el timer de inactividad
+const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
+  'mousedown',
+  'keydown',
+  'touchstart',
+  'scroll',
+  'mousemove'
+]
 
 // Tipo para el perfil de usuario
 export interface Perfil {
@@ -112,12 +124,50 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return data
   }
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
     setUser(null)
     setPerfil(null)
-  }
+  }, [])
+
+  // Session timeout por inactividad (15 minutos)
+  useEffect(() => {
+    // Solo activar si hay un usuario autenticado
+    if (!user) return
+
+    let timeoutId: NodeJS.Timeout
+
+    const handleInactivityLogout = () => {
+      logger.info('[useAuth] Sesión cerrada por inactividad')
+      void logout()
+      // Mostrar mensaje al usuario (dispatch custom event)
+      window.dispatchEvent(new CustomEvent('session-timeout', {
+        detail: { reason: 'inactivity' }
+      }))
+    }
+
+    const resetInactivityTimer = () => {
+      clearTimeout(timeoutId)
+      timeoutId = setTimeout(handleInactivityLogout, INACTIVITY_TIMEOUT_MS)
+    }
+
+    // Iniciar el timer
+    resetInactivityTimer()
+
+    // Agregar listeners de actividad
+    ACTIVITY_EVENTS.forEach(event => {
+      window.addEventListener(event, resetInactivityTimer, { passive: true })
+    })
+
+    // Cleanup
+    return () => {
+      clearTimeout(timeoutId)
+      ACTIVITY_EVENTS.forEach(event => {
+        window.removeEventListener(event, resetInactivityTimer)
+      })
+    }
+  }, [user, logout])
 
   const value: AuthContextValue = {
     user,
