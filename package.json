@@ -18,7 +18,8 @@
     "prepare": "husky",
     "check-secrets": "./scripts/check-secrets.sh",
     "typecheck": "tsc --noEmit",
-    "typecheck:watch": "tsc --noEmit --watch"
+    "typecheck:watch": "tsc --noEmit --watch",
+    "generate:pwa-assets": "node scripts/generate-pwa-assets.js"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
@@ -62,6 +63,7 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@types/react-window": "^1.8.8",
+    "@types/sharp": "^0.31.1",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "@vitejs/plugin-react": "^5.1.1",
@@ -76,6 +78,7 @@
     "jsdom": "^27.4.0",
     "lint-staged": "^16.2.7",
     "postcss": "^8.5.6",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
     "vite": "^7.2.4",

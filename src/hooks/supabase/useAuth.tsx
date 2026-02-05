@@ -9,7 +9,8 @@ import type { RolUsuario } from '../../types'
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000
 
 // Eventos que reinician el timer de inactividad
-const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
+type ActivityEventName = 'mousedown' | 'keydown' | 'touchstart' | 'scroll' | 'mousemove'
+const ACTIVITY_EVENTS: ActivityEventName[] = [
   'mousedown',
   'keydown',
   'touchstart',
@@ -136,7 +137,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Solo activar si hay un usuario autenticado
     if (!user) return
 
-    let timeoutId: NodeJS.Timeout
+    let timeoutId: ReturnType<typeof setTimeout>
 
     const handleInactivityLogout = () => {
       logger.info('[useAuth] Sesión cerrada por inactividad')
