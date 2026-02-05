@@ -47,6 +47,10 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
   const [isIOS, setIsIOS] = useState<boolean>(false)
   const [isStandalone, setIsStandalone] = useState<boolean>(false)
 
+  // Refs para cleanup de timers (previene memory leaks)
+  const swUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const installPromptTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Registro del Service Worker con auto-update
   const {
     needRefresh: [needRefresh, setNeedRefresh],
@@ -56,7 +60,11 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
     onRegistered(r: ServiceWorkerRegistration | undefined) {
       // Verificar actualizaciones cada hora
       if (r) {
-        setInterval(() => {
+        // Limpiar interval anterior si existe
+        if (swUpdateIntervalRef.current) {
+          clearInterval(swUpdateIntervalRef.current)
+        }
+        swUpdateIntervalRef.current = setInterval(() => {
           r.update()
         }, 60 * 60 * 1000)
       }
@@ -65,6 +73,20 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
       logger.error('SW registration error:', error)
     }
   })
+
+  // Cleanup de intervals en unmount
+  useEffect(() => {
+    return () => {
+      if (swUpdateIntervalRef.current) {
+        clearInterval(swUpdateIntervalRef.current)
+        swUpdateIntervalRef.current = null
+      }
+      if (installPromptTimeoutRef.current) {
+        clearTimeout(installPromptTimeoutRef.current)
+        installPromptTimeoutRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     // Detectar iOS
@@ -81,8 +103,13 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
       e.preventDefault()
       setDeferredPrompt(e as BeforeInstallPromptEvent)
 
+      // Limpiar timeout anterior si existe
+      if (installPromptTimeoutRef.current) {
+        clearTimeout(installPromptTimeoutRef.current)
+      }
+
       // Mostrar prompt después de 30 segundos de uso
-      setTimeout(() => {
+      installPromptTimeoutRef.current = setTimeout(() => {
         if (!isInStandaloneMode) {
           setShowInstallPrompt(true)
         }
@@ -93,6 +120,7 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      // El timeout se limpia en el cleanup principal del componente
     }
   }, [])
 
