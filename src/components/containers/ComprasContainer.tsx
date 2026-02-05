@@ -30,7 +30,7 @@ function LoadingState() {
 }
 
 export default function ComprasContainer(): React.ReactElement {
-  const { isAdmin, user } = useAuthData()
+  const { isAdmin } = useAuthData()
   const notify = useNotification()
 
   // Queries

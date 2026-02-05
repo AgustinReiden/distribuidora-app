@@ -33,7 +33,7 @@ function LoadingState() {
 }
 
 export default function ProductosContainer(): React.ReactElement {
-  const { isAdmin, user } = useAuthData()
+  const { isAdmin } = useAuthData()
   const notify = useNotification()
 
   // Queries

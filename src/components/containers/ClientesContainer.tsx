@@ -48,8 +48,8 @@ export default function ClientesContainer(): React.ReactElement {
   const [modalFichaOpen, setModalFichaOpen] = useState(false)
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
 
-  // Ficha cliente (solo carga datos cuando hay clienteFichaId)
-  const { pedidosCliente, estadisticas, loading: loadingFicha } = useFichaCliente(clienteFichaId)
+  // Ficha cliente hook - ModalFichaCliente lo usa internamente
+  useFichaCliente(clienteFichaId)
 
   // Estado de edición
   const [clienteEditando, setClienteEditando] = useState<ClienteDB | null>(null)
