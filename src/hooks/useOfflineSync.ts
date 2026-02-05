@@ -156,7 +156,7 @@ function operationToPedidoOffline(op: PendingOperation): PedidoOffline {
  * Convierte una PendingOperation de IndexedDB a MermaOffline
  */
 function operationToMermaOffline(op: PendingOperation): MermaOffline {
-  const payload = op.payload as MermaFormInput & { offlineId?: string }
+  const payload = op.payload as unknown as MermaFormInput & { offlineId?: string }
   return {
     ...payload,
     offlineId: `op_${op.id}`,
@@ -585,7 +585,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     try {
       for (const op of mermaOps) {
         const merma = operationToMermaOffline(op)
-        const payload = op.payload as MermaFormInput
+        const payload = op.payload as unknown as MermaFormInput
 
         try {
           await registrarMermaFn(payload)

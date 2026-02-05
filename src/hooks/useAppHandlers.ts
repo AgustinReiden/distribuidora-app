@@ -52,8 +52,8 @@ import type {
 export interface NotifyApi {
   success: (message: string, options?: { persist?: boolean }) => void;
   error: (message: string, duration?: number) => void;
-  warning: (message: string) => void;
-  info: (message: string) => void;
+  warning: (message: string, options?: { persist?: boolean }) => void;
+  info: (message: string, options?: { persist?: boolean }) => void;
 }
 
 /** Optimized route order item */
