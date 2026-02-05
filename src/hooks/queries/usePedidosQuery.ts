@@ -299,7 +299,7 @@ export function useCambiarEstadoMutation() {
       queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(), (old) => {
         if (!old) return old
         return old.map(p =>
-          p.id === input.pedidoId ? { ...p, estado: input.nuevoEstado } : p
+          p.id === input.pedidoId ? { ...p, estado: input.nuevoEstado as PedidoDB['estado'] } : p
         )
       })
 
@@ -334,7 +334,7 @@ export function useActualizarPagoMutation() {
         if (!old) return old
         return old.map(p =>
           p.id === input.pedidoId
-            ? { ...p, estado_pago: input.estadoPago, monto_pagado: input.montoPagado ?? p.monto_pagado }
+            ? { ...p, estado_pago: input.estadoPago as PedidoDB['estado_pago'], monto_pagado: input.montoPagado ?? p.monto_pagado }
             : p
         )
       })

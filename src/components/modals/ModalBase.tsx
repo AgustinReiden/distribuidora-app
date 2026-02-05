@@ -9,7 +9,7 @@
  * - aria-describedby vinculado a la descripción (accesibilidad)
  * - Devuelve el foco al elemento que abrió el modal
  */
-import React, { memo, ReactNode } from 'react';
+import { memo, ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,

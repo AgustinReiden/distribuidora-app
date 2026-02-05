@@ -12,7 +12,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
       manifest: {
         name: 'Distribuidora App',
         short_name: 'Distribuidora',
@@ -264,8 +264,22 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      exclude: ['node_modules/', 'src/test/']
+      reporter: ['text', 'json', 'html', 'lcov'],
+      exclude: [
+        'node_modules/',
+        'src/test/',
+        'src/**/*.d.ts',
+        'src/vite-env.d.ts',
+        'src/main.jsx'
+      ],
+      // Thresholds de cobertura mínima
+      thresholds: {
+        // Thresholds globales
+        statements: 50,
+        branches: 40,
+        functions: 45,
+        lines: 50
+      }
     }
   }
 })

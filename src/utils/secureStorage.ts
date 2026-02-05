@@ -1,8 +1,12 @@
 /**
  * Secure Storage - Wrapper para localStorage con cifrado AES-GCM
  *
- * Usa Web Crypto API (AES-GCM) cuando está disponible.
- * Mantiene compatibilidad con datos legacy (XOR) para migración automática.
+ * Usa Web Crypto API (AES-GCM) exclusivamente para cifrado.
+ * Mantiene compatibilidad de LECTURA con datos legacy (XOR) para migración,
+ * pero NO escribe nuevos datos con XOR (inseguro).
+ *
+ * SECURITY: Si Web Crypto API no está disponible, los datos sensibles
+ * NO se almacenan. Esto es intencional para evitar almacenamiento inseguro.
  */
 
 import { logger } from './logger'
@@ -10,7 +14,8 @@ import { logger } from './logger'
 const STORAGE_PREFIX = 'distribuidora_secure_'
 const KEY_STORAGE_NAME = 'distribuidora_crypto_key'
 
-// Clave legacy para compatibilidad con datos existentes
+// Clave legacy SOLO para lectura de datos existentes (migración)
+// NO usar para escribir nuevos datos
 const LEGACY_ENCODING_KEY = 'D1str1bu1d0r4_2024_S3cur3'
 
 // Detectar si Web Crypto API está disponible
@@ -123,9 +128,11 @@ async function decryptAES(ciphertext: string): Promise<string | null> {
 }
 
 /**
- * Codifica un string usando XOR (método legacy para compatibilidad)
+ * @deprecated NO USAR - XOR encoding es criptográficamente débil.
+ * Esta función solo existe para migración de datos legacy.
+ * Nuevos datos deben usar AES-GCM exclusivamente.
  */
-function encodeLegacy(str: string): string {
+function _encodeLegacy_DEPRECATED(str: string): string {
   if (!str) return ''
 
   try {
@@ -140,8 +147,15 @@ function encodeLegacy(str: string): string {
   }
 }
 
+// Mantener referencia para que TypeScript no marque como unused
+// pero prevenir uso accidental
+void _encodeLegacy_DEPRECATED
+
 /**
- * Decodifica un string codificado con XOR (método legacy)
+ * Decodifica un string codificado con XOR (método legacy).
+ * SOLO para lectura de datos existentes y migración a AES-GCM.
+ *
+ * @internal Solo usar para migración de datos legacy
  */
 function decodeLegacy(encodedStr: string): string {
   if (!encodedStr) return ''
@@ -161,33 +175,44 @@ function decodeLegacy(encodedStr: string): string {
 }
 
 /**
- * Guarda un valor en localStorage de forma segura
+ * Guarda un valor en localStorage de forma segura usando AES-GCM.
+ *
+ * SECURITY: Si Web Crypto API no está disponible, NO almacena datos.
+ * Esto previene almacenamiento inseguro de datos sensibles.
+ *
+ * @returns true si se guardó exitosamente, false si no hay crypto disponible
  */
 export async function setSecureItem<T>(key: string, value: T): Promise<boolean> {
   try {
-    const jsonStr = JSON.stringify(value)
-
-    // Intentar cifrado AES primero
-    if (cryptoAvailable) {
-      const encrypted = await encryptAES(jsonStr)
-      if (encrypted) {
-        // Prefijo 'v2:' para identificar datos cifrados con AES
-        localStorage.setItem(STORAGE_PREFIX + key, 'v2:' + encrypted)
-        return true
-      }
+    // SECURITY: Solo permitir cifrado AES-GCM, NO XOR fallback
+    if (!cryptoAvailable) {
+      logger.warn(
+        '[secureStorage] Web Crypto API no disponible. ' +
+        'Datos sensibles NO almacenados para prevenir almacenamiento inseguro.'
+      )
+      return false
     }
 
-    // Fallback a método legacy
-    const encoded = encodeLegacy(jsonStr)
-    localStorage.setItem(STORAGE_PREFIX + key, encoded)
-    return true
-  } catch {
+    const jsonStr = JSON.stringify(value)
+    const encrypted = await encryptAES(jsonStr)
+
+    if (encrypted) {
+      // Prefijo 'v2:' para identificar datos cifrados con AES
+      localStorage.setItem(STORAGE_PREFIX + key, 'v2:' + encrypted)
+      return true
+    }
+
+    logger.warn('[secureStorage] Falló el cifrado AES, datos no almacenados')
+    return false
+  } catch (e) {
+    logger.error('[secureStorage] Error guardando datos seguros:', e)
     return false
   }
 }
 
 /**
- * Obtiene un valor de localStorage de forma segura
+ * Obtiene un valor de localStorage de forma segura.
+ * Soporta lectura de datos legacy (XOR) y los migra automáticamente a AES-GCM.
  */
 export async function getSecureItem<T>(key: string, defaultValue: T): Promise<T> {
   try {
@@ -198,11 +223,11 @@ export async function getSecureItem<T>(key: string, defaultValue: T): Promise<T>
 
     // Detectar formato de cifrado
     if (stored.startsWith('v2:')) {
-      // Formato AES-GCM (v2)
+      // Formato AES-GCM (v2) - preferido
       decrypted = await decryptAES(stored.slice(3))
     }
 
-    // Si no se pudo descifrar con AES, intentar legacy
+    // Si no se pudo descifrar con AES, intentar legacy (solo para migración)
     if (!decrypted) {
       const legacyData = stored.startsWith('v2:') ? null : stored
       if (legacyData) {
@@ -210,8 +235,17 @@ export async function getSecureItem<T>(key: string, defaultValue: T): Promise<T>
 
         // Migrar datos legacy a formato nuevo si es posible
         if (decrypted && cryptoAvailable) {
+          logger.info(
+            `[secureStorage] Migrando datos legacy "${key}" a AES-GCM. ` +
+            'Los datos XOR serán reemplazados con cifrado seguro.'
+          )
           const parsed = JSON.parse(decrypted) as T
           await setSecureItem(key, parsed) // Re-guardar con AES
+        } else if (decrypted && !cryptoAvailable) {
+          logger.warn(
+            `[secureStorage] Datos legacy encontrados para "${key}" pero ` +
+            'Web Crypto API no disponible para migración.'
+          )
         }
       }
     }

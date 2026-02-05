@@ -1,4 +1,4 @@
-import React, { useState, useMemo, memo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import type { ChangeEvent } from 'react';
 import { FileDown, Package, Truck } from 'lucide-react';
 import ModalBase from './ModalBase';

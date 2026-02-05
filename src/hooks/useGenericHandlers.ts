@@ -141,7 +141,7 @@ export function useGenericHandlers<T extends { id?: string }, TInput = Partial<T
       mensaje: itemName
         ? `¿Está seguro de que desea eliminar "${itemName}"?`
         : deleteConfirmMessage,
-      setConfig: confirmModal.setConfig,
+      setConfig: confirmModal.setConfig as Parameters<typeof showDeleteConfirmation>[0]['setConfig'],
       onConfirm: async () => {
         await withLoadingState(
           setLoading,

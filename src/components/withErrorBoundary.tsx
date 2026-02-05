@@ -20,7 +20,7 @@
  *   errorMessage: 'Error al cargar el modal'
  * });
  */
-import React, { ComponentType, ReactElement } from 'react';
+import { ComponentType, ReactElement } from 'react';
 import { ErrorBoundary, CompactErrorBoundary } from './ErrorBoundary';
 
 interface ErrorInfo {

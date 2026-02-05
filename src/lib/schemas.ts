@@ -545,8 +545,16 @@ export const modalClienteSchema = z.object({
     })
     .optional(),
 
-  latitud: z.number().nullable().optional(),
-  longitud: z.number().nullable().optional(),
+  latitud: z.number()
+    .min(-90, { message: 'La latitud debe estar entre -90 y 90' })
+    .max(90, { message: 'La latitud debe estar entre -90 y 90' })
+    .nullable()
+    .optional(),
+  longitud: z.number()
+    .min(-180, { message: 'La longitud debe estar entre -180 y 180' })
+    .max(180, { message: 'La longitud debe estar entre -180 y 180' })
+    .nullable()
+    .optional(),
   contacto: z.string().optional(),
   zona: z.string().optional(),
   horarios_atencion: z.string().optional(),
@@ -669,8 +677,16 @@ export const modalProveedorSchema = z.object({
     .optional(),
 
   direccion: z.string().optional(),
-  latitud: z.number().nullable().optional(),
-  longitud: z.number().nullable().optional(),
+  latitud: z.number()
+    .min(-90, { message: 'La latitud debe estar entre -90 y 90' })
+    .max(90, { message: 'La latitud debe estar entre -90 y 90' })
+    .nullable()
+    .optional(),
+  longitud: z.number()
+    .min(-180, { message: 'La longitud debe estar entre -180 y 180' })
+    .max(180, { message: 'La longitud debe estar entre -180 y 180' })
+    .nullable()
+    .optional(),
   telefono: z.string().optional(),
 
   email: z

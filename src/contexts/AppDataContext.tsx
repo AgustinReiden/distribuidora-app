@@ -154,4 +154,76 @@ export function useUserPermissions(): { user: AppDataContextValue['user']; perfi
   return { user, perfil, isAdmin, isPreventista, isTransportista }
 }
 
+/**
+ * Hook para acceder a usuarios y transportistas
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useUsuariosData(): { usuarios: PerfilDB[]; transportistas: PerfilDB[]; loading: boolean } {
+  const { usuarios, transportistas, loading } = useAppData()
+  return { usuarios, transportistas, loading: loading.usuarios }
+}
+
+/**
+ * Hook para acceder a compras
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useComprasData(): { compras: CompraDB[]; loading: boolean } {
+  const { compras, loading } = useAppData()
+  return { compras, loading: loading.compras }
+}
+
+/**
+ * Hook para acceder a proveedores
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useProveedoresData(): { proveedores: ProveedorDB[]; loading: boolean } {
+  const { proveedores, loading } = useAppData()
+  return { proveedores, loading: loading.clientes } // usa loading.clientes por compatibilidad
+}
+
+/**
+ * Hook para acceder a mermas
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useMermasData(): { mermas: MermaDB[]; loading: boolean } {
+  const { mermas, loading } = useAppData()
+  return { mermas, loading: loading.productos }
+}
+
+/**
+ * Hook para acceder a metricas del dashboard
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useMetricasData(): { metricas: DashboardMetricasExtended | null; reportePreventistas: ReportePreventista[]; loading: boolean } {
+  const { metricas, reportePreventistas, loading, reporteInicializado } = useAppData()
+  return { metricas, reportePreventistas, loading: loading.metricas || !reporteInicializado }
+}
+
+/**
+ * Hook para acceder al estado de conexión
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useConnectionStatus(): { isOnline: boolean } {
+  const { isOnline } = useAppData()
+  return { isOnline }
+}
+
+/**
+ * Hook para acceder a la ruta optimizada
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useRutaOptimizada(): { rutaOptimizada: unknown | null; loading: boolean; error: string | null } {
+  const { rutaOptimizada, loading, errorOptimizacion } = useAppData()
+  return { rutaOptimizada, loading: loading.optimizacion, error: errorOptimizacion }
+}
+
+/**
+ * Hook para acceder a recorridos
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useRecorridosData(): { recorridos: RecorridoDB[]; loading: boolean } {
+  const { recorridos, loading } = useAppData()
+  return { recorridos, loading: loading.recorridos }
+}
+
 export default AppDataContext

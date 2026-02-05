@@ -7,10 +7,10 @@
  * - withErrorBoundary: HOC para envolver componentes fácilmente
  * - useErrorHandler: Hook para manejar errores asíncronos
  */
-import React, { ReactNode, ErrorInfo, ComponentType } from 'react';
+import React, { ReactNode, ErrorInfo } from 'react';
 import { AlertTriangle, RefreshCw, X, WifiOff, Lock, Database, Bug, LucideIcon } from 'lucide-react';
 import { captureException, addBreadcrumb } from '../lib/sentry';
-import { categorizeError, getRecoveryInfo, RecoveryInfo } from '../utils/errorUtils';
+import { categorizeError, getRecoveryInfo } from '../utils/errorUtils';
 import type { ErrorCategory } from '../types';
 
 // =============================================================================

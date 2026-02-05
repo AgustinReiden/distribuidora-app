@@ -33,7 +33,7 @@ function LoadingState() {
 }
 
 export default function ProductosContainer(): React.ReactElement {
-  const { isAdmin, user } = useAuthData()
+  const { isAdmin } = useAuthData()
   const notify = useNotification()
 
   // Queries
@@ -168,11 +168,12 @@ export default function ProductosContainer(): React.ReactElement {
           <ModalProducto
             producto={productoEditando}
             categorias={categorias}
-            onSave={handleGuardarProducto}
+            onSave={handleGuardarProducto as unknown as Parameters<typeof ModalProducto>[0]['onSave']}
             onClose={() => {
               setModalProductoOpen(false)
               setProductoEditando(null)
             }}
+            guardando={crearProducto.isPending || actualizarProducto.isPending}
           />
         </Suspense>
       )}
@@ -181,13 +182,12 @@ export default function ProductosContainer(): React.ReactElement {
       {modalMermaOpen && productoMerma && (
         <Suspense fallback={null}>
           <ModalMermaStock
-            producto={productoMerma}
-            onSave={handleGuardarMerma}
+            producto={productoMerma as unknown as Parameters<typeof ModalMermaStock>[0]['producto']}
+            onSave={handleGuardarMerma as unknown as Parameters<typeof ModalMermaStock>[0]['onSave']}
             onClose={() => {
               setModalMermaOpen(false)
               setProductoMerma(null)
             }}
-            usuarioId={user?.id}
           />
         </Suspense>
       )}
@@ -196,8 +196,8 @@ export default function ProductosContainer(): React.ReactElement {
       {modalHistorialOpen && (
         <Suspense fallback={null}>
           <ModalHistorialMermas
-            mermas={mermas as any}
-            productos={productos}
+            mermas={mermas as unknown as Parameters<typeof ModalHistorialMermas>[0]['mermas']}
+            productos={productos as unknown as Parameters<typeof ModalHistorialMermas>[0]['productos']}
             onClose={() => setModalHistorialOpen(false)}
           />
         </Suspense>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, memo, MouseEvent } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { X, Loader2, Search, MapPin } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
@@ -197,8 +197,8 @@ const ModalPedido = memo(function ModalPedido({
                 <AddressAutocomplete
                   value={nuevoCliente.direccion}
                   onChange={(val: string) => setNuevoCliente({ ...nuevoCliente, direccion: val })}
-                  onSelect={(address: string, lat: number | null, lng: number | null) => {
-                    setNuevoCliente({ ...nuevoCliente, direccion: address, latitud: lat, longitud: lng });
+                  onSelect={(result) => {
+                    setNuevoCliente({ ...nuevoCliente, direccion: result.direccion, latitud: result.latitud, longitud: result.longitud });
                   }}
                   placeholder="Buscar dirección..."
                 />

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Loader2, History } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatFecha } from './utils';

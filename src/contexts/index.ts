@@ -23,7 +23,21 @@ export { OperationsProvider, useOperations, useUsuariosContext } from './Operati
 export type { OperationsContextValue } from './OperationsContext'
 
 // Legacy - AppDataContext (mantener para compatibilidad)
-export { AppDataProvider, useAppData, useClientesData, useProductosData, usePedidosData } from './AppDataContext'
+export {
+  AppDataProvider,
+  useAppData,
+  useClientesData,
+  useProductosData,
+  usePedidosData,
+  useUsuariosData,
+  useComprasData,
+  useProveedoresData,
+  useMermasData,
+  useMetricasData,
+  useConnectionStatus,
+  useRutaOptimizada,
+  useRecorridosData
+} from './AppDataContext'
 export type { AppDataContextValue } from './AppDataContext'
 
 // Theme

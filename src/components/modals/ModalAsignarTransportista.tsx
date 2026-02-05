@@ -1,4 +1,4 @@
-import React, { useState, memo, ChangeEvent } from 'react';
+import { useState, memo } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import type { PedidoDB, PerfilDB } from '../../types';

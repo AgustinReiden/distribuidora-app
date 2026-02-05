@@ -15,7 +15,8 @@ import {
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useFichaCliente } from '../../hooks/supabase/useFichaCliente'
-import type { ClienteDB, ClienteFormInput } from '../../types'
+import type { ClienteDB } from '../../types'
+import type { ClienteSaveData } from '../modals/ModalCliente'
 
 // Lazy load de componentes
 const VistaClientes = lazy(() => import('../vistas/VistaClientes'))
@@ -42,12 +43,13 @@ export default function ClientesContainer(): React.ReactElement {
   const actualizarCliente = useActualizarClienteMutation()
   const eliminarCliente = useEliminarClienteMutation()
 
-  // Ficha cliente
-  const { fichaCliente, loading: loadingFicha, cargarFicha, limpiarFicha } = useFichaCliente()
-
   // Estado de modales
   const [modalClienteOpen, setModalClienteOpen] = useState(false)
   const [modalFichaOpen, setModalFichaOpen] = useState(false)
+  const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
+
+  // Ficha cliente hook - ModalFichaCliente lo usa internamente
+  useFichaCliente(clienteFichaId)
 
   // Estado de edición
   const [clienteEditando, setClienteEditando] = useState<ClienteDB | null>(null)
@@ -75,18 +77,36 @@ export default function ClientesContainer(): React.ReactElement {
     }
   }, [clientes, eliminarCliente, notify])
 
-  const handleVerFichaCliente = useCallback(async (cliente: ClienteDB) => {
-    await cargarFicha(cliente.id)
+  const handleVerFichaCliente = useCallback((cliente: ClienteDB) => {
+    setClienteFichaId(cliente.id)
     setModalFichaOpen(true)
-  }, [cargarFicha])
+  }, [])
 
-  const handleGuardarCliente = useCallback(async (data: ClienteFormInput) => {
+  const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
+    // Transform from camelCase (form) to snake_case (database)
+    const dbData = {
+      razon_social: data.razonSocial || data.nombreFantasia,
+      nombre_fantasia: data.nombreFantasia,
+      direccion: data.direccion,
+      telefono: data.telefono || undefined,
+      cuit: data.cuit || undefined,
+      zona: data.zona || undefined,
+      latitud: data.latitud,
+      longitud: data.longitud,
+      limite_credito: data.limiteCredito,
+      dias_credito: data.diasCredito,
+      contacto: data.contacto || undefined,
+      horarios_atencion: data.horarios_atencion || undefined,
+      rubro: data.rubro || undefined,
+      notas: data.notas || undefined
+    }
+
     try {
       if (clienteEditando) {
-        await actualizarCliente.mutateAsync({ id: clienteEditando.id, data })
+        await actualizarCliente.mutateAsync({ id: clienteEditando.id, data: dbData })
         notify.success('Cliente actualizado')
       } else {
-        await crearCliente.mutateAsync(data)
+        await crearCliente.mutateAsync(dbData)
         notify.success('Cliente creado')
       }
       setModalClienteOpen(false)
@@ -122,19 +142,19 @@ export default function ClientesContainer(): React.ReactElement {
               setModalClienteOpen(false)
               setClienteEditando(null)
             }}
+            guardando={crearCliente.isPending || actualizarCliente.isPending}
           />
         </Suspense>
       )}
 
       {/* Modal Ficha Cliente */}
-      {modalFichaOpen && fichaCliente && (
+      {modalFichaOpen && clienteFichaId && (
         <Suspense fallback={null}>
           <ModalFichaCliente
-            ficha={fichaCliente}
-            loading={loadingFicha}
+            cliente={clientes.find(c => c.id === clienteFichaId) || null}
             onClose={() => {
               setModalFichaOpen(false)
-              limpiarFicha()
+              setClienteFichaId(null)
             }}
           />
         </Suspense>
