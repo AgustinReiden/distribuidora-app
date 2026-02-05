@@ -197,8 +197,8 @@ const ModalPedido = memo(function ModalPedido({
                 <AddressAutocomplete
                   value={nuevoCliente.direccion}
                   onChange={(val: string) => setNuevoCliente({ ...nuevoCliente, direccion: val })}
-                  onSelect={(address: string, lat: number | null, lng: number | null) => {
-                    setNuevoCliente({ ...nuevoCliente, direccion: address, latitud: lat, longitud: lng });
+                  onSelect={(result) => {
+                    setNuevoCliente({ ...nuevoCliente, direccion: result.direccion, latitud: result.latitud, longitud: result.longitud });
                   }}
                   placeholder="Buscar dirección..."
                 />

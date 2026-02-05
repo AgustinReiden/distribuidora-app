@@ -27,6 +27,8 @@ import {
 import type {
   ProductoDB,
   ProveedorDB,
+  ProveedorDBExtended,
+  ProveedorFormInputExtended,
   ClienteDB,
   PedidoDB,
   PerfilDB,
@@ -581,7 +583,7 @@ export function useAppHandlers({
     anularCompra,
     modales: compraModales,
     setGuardando,
-    setCompraDetalle,
+    setCompraDetalle: setCompraDetalle as unknown as (compra: CompraDBExtended | null) => void,
     refetchProductos,
     refetchCompras,
     notify,
@@ -595,8 +597,8 @@ export function useAppHandlers({
 
   const proveedorHandlers = useProveedorHandlers({
     proveedores,
-    agregarProveedor,
-    actualizarProveedor,
+    agregarProveedor: agregarProveedor as unknown as (proveedor: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>,
+    actualizarProveedor: actualizarProveedor as unknown as (id: string, proveedor: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>,
     modales: proveedorModales,
     setGuardando,
     setProveedorEditando,
@@ -642,5 +644,6 @@ export function useAppHandlers({
     ...proveedorHandlers
   }
 
-  return combinedHandlers
+  // Type assertion needed due to slight type differences between Extended types
+  return combinedHandlers as unknown as UseAppHandlersReturn
 }

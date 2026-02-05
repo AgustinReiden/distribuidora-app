@@ -162,7 +162,7 @@ function SalvedadCard({ salvedad, onResolver }: SalvedadCardProps) {
           {salvedad.estado_resolucion !== 'pendiente' && salvedad.resolucion_notas && (
             <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
               <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">
-                Resolucion ({formatDate(salvedad.resolucion_fecha)}):
+                Resolucion ({formatDate(salvedad.resolucion_fecha ?? undefined)}):
               </p>
               <p className="text-sm text-blue-800 dark:text-blue-300">{salvedad.resolucion_notas}</p>
               {salvedad.resuelto_por_nombre && (

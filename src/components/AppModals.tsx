@@ -439,7 +439,7 @@ export default function AppModals({
         <Suspense fallback={<ModalFallback />}>
           <ModalUsuario
             usuario={usuarioEditando}
-            onSave={handlers.handleGuardarUsuario}
+            onSave={handlers.handleGuardarUsuario as unknown as Parameters<typeof ModalUsuario>[0]['onSave']}
             onClose={() => { modales.usuario.setOpen(false); setUsuarioEditando(null); }}
             guardando={guardando}
           />
