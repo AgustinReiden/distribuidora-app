@@ -53,6 +53,7 @@ import TopNavigation from './components/layout/TopNavigation';
 import OfflineIndicator from './components/layout/OfflineIndicator';
 import AppModals from './components/AppModals';
 import PWAPrompt from './components/PWAPrompt';
+import SyncStatusBanner from './components/SyncStatusBanner';
 import SkipLinks from './components/a11y/SkipLinks';
 
 // Containers (cargan datos bajo demanda)
@@ -439,6 +440,9 @@ function MainApp(): ReactElement {
           onSincronizar={handleSincronizar}
           clientes={clientes.map(c => ({ id: c.id, nombre: c.nombre_fantasia, activo: c.activo ?? true })) as unknown as Parameters<typeof OfflineIndicator>[0]['clientes']}
         />
+
+        {/* Banner de estado de sincronización */}
+        <SyncStatusBanner onRetrySync={handleSincronizar} />
 
         {/* PWA Prompt */}
         <PWAPrompt />

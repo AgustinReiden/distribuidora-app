@@ -513,4 +513,84 @@ export async function clearAllData(): Promise<void> {
   })
 }
 
+/**
+ * Obtener operaciones fallidas
+ */
+export async function getFailedOperations(limit = 50): Promise<PendingOperation[]> {
+  return db.pendingOperations
+    .where('status')
+    .equals('failed')
+    .limit(limit)
+    .toArray()
+}
+
+/**
+ * Reintentar una operación fallida (resetea el contador de reintentos)
+ */
+export async function retryFailedOperation(id: number): Promise<void> {
+  const operation = await db.pendingOperations.get(id)
+  if (!operation || operation.status !== 'failed') {
+    throw new Error('Operación no encontrada o no está en estado fallido')
+  }
+
+  const now = new Date()
+  await db.pendingOperations.update(id, {
+    status: 'pending',
+    retryCount: 0,
+    lastError: undefined,
+    updatedAt: now
+  })
+
+  await db.syncEvents.add({
+    operationId: id,
+    type: 'operation_retried',
+    details: 'Operación marcada para reintento manual',
+    createdAt: now
+  })
+}
+
+/**
+ * Reintentar todas las operaciones fallidas
+ */
+export async function retryAllFailedOperations(): Promise<number> {
+  const failed = await getFailedOperations()
+  const now = new Date()
+
+  await db.transaction('rw', [db.pendingOperations, db.syncEvents], async () => {
+    for (const op of failed) {
+      if (op.id) {
+        await db.pendingOperations.update(op.id, {
+          status: 'pending',
+          retryCount: 0,
+          lastError: undefined,
+          updatedAt: now
+        })
+
+        await db.syncEvents.add({
+          operationId: op.id,
+          type: 'operation_retried',
+          details: 'Reintento masivo de operaciones fallidas',
+          createdAt: now
+        })
+      }
+    }
+  })
+
+  return failed.length
+}
+
+/**
+ * Descartar (eliminar) operaciones fallidas
+ */
+export async function discardFailedOperations(): Promise<number> {
+  const failed = await getFailedOperations()
+  const ids = failed.map(op => op.id!).filter(Boolean)
+
+  if (ids.length > 0) {
+    await db.pendingOperations.bulkDelete(ids)
+  }
+
+  return ids.length
+}
+
 export default db

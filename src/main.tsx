@@ -9,14 +9,36 @@ import { initSentry } from './lib/sentry'
 import { initWebVitals } from './lib/webVitals'
 import { initAccessibilityAudit } from './lib/accessibility'
 
-// Configurar TanStack Query
+// Configurar TanStack Query con retry inteligente y backoff exponencial
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000, // 5 minutos antes de considerar datos "stale"
       gcTime: 30 * 60 * 1000,   // 30 minutos en cache antes de garbage collection
-      retry: 2,                  // Reintentar 2 veces en caso de error
       refetchOnWindowFocus: false, // No refetch al volver a la ventana
+      // Retry inteligente: no reintentar errores 4xx (cliente), solo 5xx (servidor)
+      retry: (failureCount, error) => {
+        // No reintentar errores de cliente (4xx)
+        const status = (error as { status?: number })?.status
+        if (status && status >= 400 && status < 500) {
+          return false
+        }
+        // Máximo 3 reintentos para errores de servidor
+        return failureCount < 3
+      },
+      // Backoff exponencial: 1s, 2s, 4s (máximo 30s)
+      retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 30000),
+    },
+    mutations: {
+      // Mutations también con retry inteligente
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number })?.status
+        if (status && status >= 400 && status < 500) {
+          return false
+        }
+        return failureCount < 2
+      },
+      retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 10000),
     },
   },
 })
