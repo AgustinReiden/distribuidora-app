@@ -176,7 +176,7 @@ export default function VistaPedidos({
       <PedidoFilters
         busqueda={busqueda}
         filtros={filtros}
-        transportistas={transportistas as unknown as import('../../types').Usuario[]}
+        transportistas={transportistas as import('../../types').Usuario[]}
         isAdmin={isAdmin}
         onBusquedaChange={onBusquedaChange}
         onFiltrosChange={onFiltrosChange}

@@ -232,11 +232,17 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
   };
 
   const descargarPlantilla = async (): Promise<void> => {
-    const plantilla = [
-      { Codigo: 'EJEMPLO001', 'Precio Neto': 1000, 'Imp Internos': 50, 'Precio Final': 1200 },
-      { Codigo: 'EJEMPLO002', 'Precio Neto': 500, 'Imp Internos': 0, 'Precio Final': 600 }
-    ];
-    await createTemplate(plantilla, 'plantilla_precios', 'Precios');
+    try {
+      const plantilla = [
+        { Codigo: 'EJEMPLO001', 'Precio Neto': 1000, 'Imp Internos': 50, 'Precio Final': 1200 },
+        { Codigo: 'EJEMPLO002', 'Precio Neto': 500, 'Imp Internos': 0, 'Precio Final': 600 }
+      ];
+      await createTemplate(plantilla, 'plantilla_precios', 'Precios');
+    } catch (err) {
+      const error = err as Error;
+      logger.error('Error al descargar plantilla:', err);
+      setErroresParseo([`Error al descargar la plantilla: ${error.message || 'Error desconocido'}`]);
+    }
   };
 
   const productosEncontrados: PrecioPreviewItem[] = preview.filter(p => p.estado === 'encontrado');

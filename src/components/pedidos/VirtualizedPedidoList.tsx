@@ -7,7 +7,7 @@
  * Usa VirtualizedListContext para pasar datos a los componentes de fila
  * en lugar del anti-patrón de window global.
  */
-import React, { memo, useRef, useEffect, useState, CSSProperties } from 'react'
+import React, { memo, useRef, useEffect, useState, useMemo, CSSProperties } from 'react'
 import { List, useDynamicRowHeight, useListRef } from 'react-window'
 import { ShoppingCart } from 'lucide-react'
 import PedidoCard from './PedidoCard'
@@ -214,17 +214,8 @@ function VirtualizedPedidoList({
     return () => window.removeEventListener('resize', updateHeight)
   }, [propHeight])
 
-  if (pedidos.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
-        <p>No hay pedidos</p>
-      </div>
-    )
-  }
-
-  // Preparar handlers para el Context
-  const handlers: VirtualizedListHandlers = {
+  // Preparar handlers para el Context (memoizados para evitar re-renders)
+  const handlers = useMemo<VirtualizedListHandlers>(() => ({
     onVerHistorial,
     onEditarPedido,
     onMarcarEnPreparacion,
@@ -234,13 +225,22 @@ function VirtualizedPedidoList({
     onMarcarEntregadoConSalvedad,
     onDesmarcarEntregado,
     onEliminarPedido
-  }
+  }), [onVerHistorial, onEditarPedido, onMarcarEnPreparacion, onVolverAPendiente, onAsignarTransportista, onMarcarEntregado, onMarcarEntregadoConSalvedad, onDesmarcarEntregado, onEliminarPedido])
 
-  // Preparar permisos para el Context
-  const permissions: VirtualizedListPermissions = {
+  // Preparar permisos para el Context (memoizados)
+  const permissions = useMemo<VirtualizedListPermissions>(() => ({
     isAdmin,
     isPreventista,
     isTransportista
+  }), [isAdmin, isPreventista, isTransportista])
+
+  if (pedidos.length === 0) {
+    return (
+      <div className="text-center py-12 text-gray-500">
+        <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
+        <p>No hay pedidos</p>
+      </div>
+    )
   }
 
   return (

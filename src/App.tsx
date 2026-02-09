@@ -108,8 +108,8 @@ function MainApp(): ReactElement {
   const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, actualizarItemsPedido, fetchHistorialPedido, fetchPedidosEliminados, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
   const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
-  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo, cambiarPeriodo: _cambiarPeriodo } = useDashboard(dashboardUsuarioId);
-  const { exportando, descargarJSON: _descargarJSON, exportarPedidosExcel } = useBackup();
+  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo } = useDashboard(dashboardUsuarioId);
+  const { exportando, exportarPedidosExcel } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
   const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
@@ -123,33 +123,32 @@ function MainApp(): ReactElement {
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
 
   // Handlers (consolidados)
-  // Note: Type assertions use 'as unknown as Type' pattern for runtime-compatible but compile-time incompatible types
   const handlers = useAppHandlers({
     clientes, productos, pedidos, proveedores,
     agregarCliente, actualizarCliente, eliminarCliente,
     agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock,
-    crearPedido: crearPedido as unknown as UseAppHandlersParams['crearPedido'],
+    crearPedido,
     cambiarEstado,
-    asignarTransportista: asignarTransportista as unknown as UseAppHandlersParams['asignarTransportista'],
-    eliminarPedido: eliminarPedido as unknown as UseAppHandlersParams['eliminarPedido'],
+    asignarTransportista,
+    eliminarPedido,
     actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago,
-    actualizarOrdenEntrega: actualizarOrdenEntrega as unknown as UseAppHandlersParams['actualizarOrdenEntrega'],
-    actualizarItemsPedido: actualizarItemsPedido as unknown as UseAppHandlersParams['actualizarItemsPedido'],
+    actualizarOrdenEntrega,
+    actualizarItemsPedido,
     fetchHistorialPedido,
     actualizarUsuario,
-    registrarPago: registrarPago as unknown as UseAppHandlersParams['registrarPago'],
-    obtenerResumenCuenta: obtenerResumenCuenta as unknown as UseAppHandlersParams['obtenerResumenCuenta'],
-    registrarMerma: registrarMerma as unknown as UseAppHandlersParams['registrarMerma'],
-    registrarCompra: registrarCompra as unknown as UseAppHandlersParams['registrarCompra'],
-    anularCompra, agregarProveedor, actualizarProveedor: actualizarProveedor as unknown as UseAppHandlersParams['actualizarProveedor'],
-    crearRecorrido: crearRecorrido as unknown as UseAppHandlersParams['crearRecorrido'],
+    registrarPago,
+    obtenerResumenCuenta,
+    registrarMerma,
+    registrarCompra,
+    anularCompra, agregarProveedor, actualizarProveedor,
+    crearRecorrido,
     limpiarRuta,
     refetchProductos, refetchPedidos, refetchMetricas, refetchMermas, refetchCompras, refetchProveedores,
     appState,
-    notify: notify as unknown as NotifyApi,
-    user, rutaOptimizada: rutaOptimizada as unknown as RutaOptimizadaData | null,
+    notify: notify as NotifyApi,
+    user, rutaOptimizada: rutaOptimizada as RutaOptimizadaData | null,
     isOnline,
-    guardarPedidoOffline: guardarPedidoOffline as unknown as UseAppHandlersParams['guardarPedidoOffline'],
+    guardarPedidoOffline,
     guardarMermaOffline
   });
 
@@ -169,7 +168,7 @@ function MainApp(): ReactElement {
     pedidosPendientes,
     mermasPendientes,
     sincronizando,
-    productos, // Productos actuales para validación de stock
+    productos,
     sincronizarPedidos,
     sincronizarMermas,
     crearPedido: crearPedido as SyncDependencies['crearPedido'],
@@ -179,11 +178,11 @@ function MainApp(): ReactElement {
     refetchProductos,
     refetchMermas,
     refetchMetricas,
-    notify: notify as unknown as NotifyApi
+    notify: notify as NotifyApi
   });
 
   const handleLogout = useCallback(async (): Promise<void> => {
-    try { await logout(); } catch { /* error silenciado */ }
+    try { await logout(); } catch (err) { console.error('Error during logout:', err); }
   }, [logout]);
 
   // Handlers para modales de rendición y salvedad
@@ -425,9 +424,9 @@ function MainApp(): ReactElement {
             handleMarcarEntregadoConSalvedad
           } as unknown as AppModalsHandlers}
           clientes={clientes} productos={productos} pedidos={pedidos} usuarios={usuarios}
-          transportistas={transportistas} proveedores={proveedores as unknown as ProveedorDBExtended[]} mermas={mermas as unknown as MermaDBExtended[]} categorias={categorias}
+          transportistas={transportistas} proveedores={proveedores as ProveedorDBExtended[]} mermas={mermas as MermaDBExtended[]} categorias={categorias}
           fetchPedidosEliminados={fetchPedidosEliminados} actualizarItemsPedido={actualizarItemsPedido} actualizarPreciosMasivo={actualizarPreciosMasivo} optimizarRuta={optimizarRuta}
-          guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as unknown as RutaOptimizada | null} errorOptimizacion={errorOptimizacion}
+          guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as RutaOptimizada | null} errorOptimizacion={errorOptimizacion}
           user={user} isAdmin={isAdmin} isPreventista={isPreventista} isOnline={isOnline}
         />
 
@@ -438,7 +437,7 @@ function MainApp(): ReactElement {
           mermasPendientes={mermasPendientes.map(m => ({ offlineId: m.offlineId, productoNombre: productos.find(p => p.id === m.productoId)?.nombre, cantidad: m.cantidad, motivo: m.motivo }))}
           sincronizando={sincronizando}
           onSincronizar={handleSincronizar}
-          clientes={clientes.map(c => ({ id: c.id, nombre: c.nombre_fantasia, activo: c.activo ?? true })) as unknown as Parameters<typeof OfflineIndicator>[0]['clientes']}
+          clientes={clientes.map(c => ({ id: c.id, nombre: c.nombre_fantasia, activo: c.activo ?? true }))}
         />
 
         {/* Banner de estado de sincronización */}

@@ -100,7 +100,7 @@ export default function ComprasContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalCompra
             productos={productos}
-            proveedores={proveedores as unknown as Parameters<typeof ModalCompra>[0]['proveedores']}
+            proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
             onSave={handleGuardarCompra as unknown as Parameters<typeof ModalCompra>[0]['onSave']}
             onClose={() => setModalCompraOpen(false)}
           />
@@ -111,7 +111,7 @@ export default function ComprasContainer(): React.ReactElement {
       {modalDetalleOpen && compraDetalle && (
         <Suspense fallback={null}>
           <ModalDetalleCompra
-            compra={compraDetalle as unknown as Parameters<typeof ModalDetalleCompra>[0]['compra']}
+            compra={compraDetalle as Parameters<typeof ModalDetalleCompra>[0]['compra']}
             onClose={() => {
               setModalDetalleOpen(false)
               setCompraDetalle(null)

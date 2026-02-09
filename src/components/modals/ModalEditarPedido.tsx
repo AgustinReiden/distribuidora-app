@@ -66,6 +66,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [mostrarBuscador, setMostrarBuscador] = useState<boolean>(false);
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [itemsModificados, setItemsModificados] = useState<boolean>(false);
+  const [errorStock, setErrorStock] = useState<string | null>(null);
 
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
@@ -148,6 +149,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // Funciones para editar items
   const handleCantidadChange = (productoId: string, delta: number): void => {
+    setErrorStock(null);
     setItems(prev => prev.map(item => {
       if (item.productoId === productoId) {
         const nuevaCantidad = Math.max(1, item.cantidad + delta);
@@ -157,7 +159,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         const stockDisponible = (producto?.stock || 0) + cantidadOriginal;
 
         if (nuevaCantidad > stockDisponible) {
-          return item; // No aumentar si no hay stock
+          setErrorStock(`Stock insuficiente para "${item.nombre}". Disponible: ${stockDisponible}`);
+          return item;
         }
         return { ...item, cantidad: nuevaCantidad };
       }
@@ -184,6 +187,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   const handleGuardar = async (): Promise<void> => {
     setErrorValidacion('');
+    setErrorStock(null);
 
     // Validar con Zod
     const result = validate({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
@@ -193,12 +197,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       return;
     }
 
-    // Si hay cambios en items y es admin, guardar items primero
-    if (itemsModificados && isAdmin && onSaveItems) {
-      await onSaveItems(items);
+    try {
+      // Si hay cambios en items y es admin, guardar items primero
+      if (itemsModificados && isAdmin && onSaveItems) {
+        await onSaveItems(items);
+      }
+      // Guardar el resto de los datos
+      await onSave({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
+    } catch (err) {
+      const error = err as Error;
+      setErrorValidacion(error.message || 'Error al guardar los cambios');
     }
-    // Guardar el resto de los datos
-    onSave({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
   };
 
   const getStockDisponible = (productoId: string): number => {
@@ -541,6 +550,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           )}
         </div>
       </div>
+
+      {/* Error de stock */}
+      {errorStock && (
+        <div className="mx-4 mb-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+          <p className="text-sm text-yellow-600 dark:text-yellow-400">{errorStock}</p>
+        </div>
+      )}
 
       {/* Error de validación */}
       {errorValidacion && (

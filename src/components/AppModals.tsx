@@ -3,6 +3,7 @@
  * Implementa lazy loading para optimización de bundle
  */
 import { Suspense, lazy, type Dispatch, type SetStateAction, type ReactElement } from 'react';
+import { CompactErrorBoundary } from './ErrorBoundary';
 import LoadingSpinner from './layout/LoadingSpinner';
 import type { User } from '@supabase/supabase-js';
 import type {
@@ -355,7 +356,7 @@ export default function AppModals({
   };
 
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<ModalFallback />}>
       {/* Modal de Confirmación - siempre visible si hay config */}
       { }
       {modales.confirm.config?.visible && (
@@ -410,26 +411,28 @@ export default function AppModals({
       {/* Modal de Pedido */}
       {modales.pedido.open && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalPedido
-            productos={productos}
-            clientes={clientes}
-            categorias={categorias as any}
-            nuevoPedido={nuevoPedido}
-            onClose={() => { modales.pedido.setOpen(false); appState.resetNuevoPedido(); }}
-            onClienteChange={handlers.handleClienteChange}
-            onAgregarItem={handlers.agregarItemPedido as any}
-            onActualizarCantidad={handlers.actualizarCantidadItem}
-            onCrearCliente={handlers.handleCrearClienteEnPedido as any}
-            onGuardar={handlers.handleGuardarPedidoConOffline}
-            isOffline={!isOnline}
-            onNotasChange={handlers.handleNotasChange}
-            onFormaPagoChange={handlers.handleFormaPagoChange}
-            onEstadoPagoChange={handlers.handleEstadoPagoChange}
-            onMontoPagadoChange={handlers.handleMontoPagadoChange}
-            guardando={guardando}
-            isAdmin={isAdmin}
-            isPreventista={isPreventista}
-          />
+          <CompactErrorBoundary componentName="ModalPedido" onClose={() => { modales.pedido.setOpen(false); appState.resetNuevoPedido(); }}>
+            <ModalPedido
+              productos={productos}
+              clientes={clientes}
+              categorias={categorias as any}
+              nuevoPedido={nuevoPedido}
+              onClose={() => { modales.pedido.setOpen(false); appState.resetNuevoPedido(); }}
+              onClienteChange={handlers.handleClienteChange}
+              onAgregarItem={handlers.agregarItemPedido as any}
+              onActualizarCantidad={handlers.actualizarCantidadItem}
+              onCrearCliente={handlers.handleCrearClienteEnPedido as any}
+              onGuardar={handlers.handleGuardarPedidoConOffline}
+              isOffline={!isOnline}
+              onNotasChange={handlers.handleNotasChange}
+              onFormaPagoChange={handlers.handleFormaPagoChange}
+              onEstadoPagoChange={handlers.handleEstadoPagoChange}
+              onMontoPagadoChange={handlers.handleMontoPagadoChange}
+              guardando={guardando}
+              isAdmin={isAdmin}
+              isPreventista={isPreventista}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
       { }
@@ -476,18 +479,20 @@ export default function AppModals({
       {/* Modal de Editar Pedido */}
       {modales.editarPedido.open && pedidoEditando && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalEditarPedido
-            pedido={pedidoEditando}
-            productos={productos}
-            isAdmin={isAdmin}
-            onSave={handlers.handleGuardarEdicionPedido}
-            onSaveItems={async (items) => {
-              await actualizarItemsPedido(pedidoEditando.id, items, user?.id);
-              handlers.refetchProductos?.();
-            }}
-            onClose={() => { modales.editarPedido.setOpen(false); setPedidoEditando(null); }}
-            guardando={guardando}
-          />
+          <CompactErrorBoundary componentName="ModalEditarPedido" onClose={() => { modales.editarPedido.setOpen(false); setPedidoEditando(null); }}>
+            <ModalEditarPedido
+              pedido={pedidoEditando}
+              productos={productos}
+              isAdmin={isAdmin}
+              onSave={handlers.handleGuardarEdicionPedido}
+              onSaveItems={async (items) => {
+                await actualizarItemsPedido(pedidoEditando.id, items, user?.id);
+                handlers.refetchProductos?.();
+              }}
+              onClose={() => { modales.editarPedido.setOpen(false); setPedidoEditando(null); }}
+              guardando={guardando}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
 
@@ -508,18 +513,20 @@ export default function AppModals({
       { }
       {modales.optimizarRuta.open && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalGestionRutas
-            transportistas={transportistas}
-            pedidos={pedidos}
-            onOptimizar={(transportistaId, pedidosData) => optimizarRuta(transportistaId, pedidosData)}
-            onAplicarOrden={handlers.handleAplicarOrdenOptimizado as any}
-            onExportarPDF={handlers.handleExportarHojaRutaOptimizada as any}
-            onClose={handlers.handleCerrarModalOptimizar}
-            loading={loadingOptimizacion}
-            guardando={guardando}
-            rutaOptimizada={rutaOptimizada as any}
-            error={errorOptimizacion}
-          />
+          <CompactErrorBoundary componentName="ModalGestionRutas" onClose={handlers.handleCerrarModalOptimizar}>
+            <ModalGestionRutas
+              transportistas={transportistas}
+              pedidos={pedidos}
+              onOptimizar={(transportistaId, pedidosData) => optimizarRuta(transportistaId, pedidosData)}
+              onAplicarOrden={handlers.handleAplicarOrdenOptimizado as any}
+              onExportarPDF={handlers.handleExportarHojaRutaOptimizada as any}
+              onClose={handlers.handleCerrarModalOptimizar}
+              loading={loadingOptimizacion}
+              guardando={guardando}
+              rutaOptimizada={rutaOptimizada as any}
+              error={errorOptimizacion}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
       { }
@@ -539,14 +546,16 @@ export default function AppModals({
       {/* Modal de Registrar Pago */}
       {modales.registrarPago.open && clientePago && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalRegistrarPago
-            cliente={clientePago as any}
-            saldoPendiente={saldoPendienteCliente}
-            pedidos={pedidos as any}
-            onClose={() => { modales.registrarPago.setOpen(false); setClientePago(null); }}
-            onConfirmar={handlers.handleRegistrarPago as any}
-            onGenerarRecibo={handlers.handleGenerarReciboPago as any}
-          />
+          <CompactErrorBoundary componentName="ModalRegistrarPago" onClose={() => { modales.registrarPago.setOpen(false); setClientePago(null); }}>
+            <ModalRegistrarPago
+              cliente={clientePago as any}
+              saldoPendiente={saldoPendienteCliente}
+              pedidos={pedidos as any}
+              onClose={() => { modales.registrarPago.setOpen(false); setClientePago(null); }}
+              onConfirmar={handlers.handleRegistrarPago as any}
+              onGenerarRecibo={handlers.handleGenerarReciboPago as any}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
 
@@ -578,12 +587,14 @@ export default function AppModals({
       {/* Modal de Compra */}
       {modales.compra.open && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalCompra
-            productos={productos}
-            proveedores={proveedores}
-            onSave={handlers.handleRegistrarCompra}
-            onClose={() => modales.compra.setOpen(false)}
-          />
+          <CompactErrorBoundary componentName="ModalCompra" onClose={() => modales.compra.setOpen(false)}>
+            <ModalCompra
+              productos={productos}
+              proveedores={proveedores}
+              onSave={handlers.handleRegistrarCompra}
+              onClose={() => modales.compra.setOpen(false)}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
 
@@ -615,11 +626,13 @@ export default function AppModals({
       {/* Modal de Importar Precios */}
       {modales.importarPrecios.open && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalImportarPrecios
-            productos={productos}
-            onActualizarPrecios={actualizarPreciosMasivo as any}
-            onClose={() => modales.importarPrecios.setOpen(false)}
-          />
+          <CompactErrorBoundary componentName="ModalImportarPrecios" onClose={() => modales.importarPrecios.setOpen(false)}>
+            <ModalImportarPrecios
+              productos={productos}
+              onActualizarPrecios={actualizarPreciosMasivo as any}
+              onClose={() => modales.importarPrecios.setOpen(false)}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
 
@@ -636,31 +649,35 @@ export default function AppModals({
       {/* Modal de Rendición */}
       {modales.rendicion.open && appState.rendicionParaModal && handlers.handlePresentarRendicion && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalRendicion
-            rendicion={appState.rendicionParaModal}
-            onPresentar={handlers.handlePresentarRendicion}
-            onClose={() => {
-              modales.rendicion.setOpen(false);
-              appState.setRendicionParaModal(null);
-            }}
-          />
+          <CompactErrorBoundary componentName="ModalRendicion" onClose={() => { modales.rendicion.setOpen(false); appState.setRendicionParaModal(null); }}>
+            <ModalRendicion
+              rendicion={appState.rendicionParaModal}
+              onPresentar={handlers.handlePresentarRendicion}
+              onClose={() => {
+                modales.rendicion.setOpen(false);
+                appState.setRendicionParaModal(null);
+              }}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
 
       {/* Modal de Entrega con Salvedad */}
       {modales.entregaConSalvedad.open && appState.pedidoParaSalvedad && handlers.handleRegistrarSalvedades && handlers.handleMarcarEntregadoConSalvedad && (
         <Suspense fallback={<ModalFallback />}>
-          <ModalEntregaConSalvedad
-            pedido={appState.pedidoParaSalvedad}
-            onSave={handlers.handleRegistrarSalvedades}
-            onMarcarEntregado={async () => {
-              await handlers.handleMarcarEntregadoConSalvedad!(appState.pedidoParaSalvedad!.id);
-            }}
-            onClose={() => {
-              modales.entregaConSalvedad.setOpen(false);
-              appState.setPedidoParaSalvedad(null);
-            }}
-          />
+          <CompactErrorBoundary componentName="ModalEntregaConSalvedad" onClose={() => { modales.entregaConSalvedad.setOpen(false); appState.setPedidoParaSalvedad(null); }}>
+            <ModalEntregaConSalvedad
+              pedido={appState.pedidoParaSalvedad}
+              onSave={handlers.handleRegistrarSalvedades}
+              onMarcarEntregado={async () => {
+                await handlers.handleMarcarEntregadoConSalvedad!(appState.pedidoParaSalvedad!.id);
+              }}
+              onClose={() => {
+                modales.entregaConSalvedad.setOpen(false);
+                appState.setPedidoParaSalvedad(null);
+              }}
+            />
+          </CompactErrorBoundary>
         </Suspense>
       )}
     </Suspense>

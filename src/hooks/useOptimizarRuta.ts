@@ -134,6 +134,11 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       return null;
     }
 
+    if (!N8N_WEBHOOK_URL) {
+      setError('La URL del servicio de optimización no está configurada. Configura VITE_N8N_WEBHOOK_URL en las variables de entorno.');
+      return null;
+    }
+
     // Filtrar pedidos del transportista que tengan coordenadas
     const pedidosConCoordenadas: PedidoParaOptimizar[] = pedidos
       .filter((p): p is PedidoDB & { cliente: ClienteDB & { latitud: number; longitud: number } } =>
