@@ -12,7 +12,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: '**/*.spec.ts',
+  testMatch: '**/*.spec.{ts,js}',
 
   /* Timeout para tests de caos que pueden ser lentos */
   timeout: 60000,
