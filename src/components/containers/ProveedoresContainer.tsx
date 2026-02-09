@@ -106,7 +106,7 @@ export default function ProveedoresContainer(): React.ReactElement {
           isAdmin={isAdmin}
           onNuevoProveedor={handleNuevoProveedor}
           onEditarProveedor={handleEditarProveedor as Parameters<typeof VistaProveedores>[0]['onEditarProveedor']}
-          onEliminarProveedor={handleEliminarProveedor as Parameters<typeof VistaProveedores>[0]['onEliminarProveedor']}
+          onEliminarProveedor={handleEliminarProveedor as unknown as Parameters<typeof VistaProveedores>[0]['onEliminarProveedor']}
           onToggleActivo={handleToggleActivo}
         />
       </Suspense>
@@ -116,7 +116,7 @@ export default function ProveedoresContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalProveedor
             proveedor={proveedorEditando as Parameters<typeof ModalProveedor>[0]['proveedor']}
-            onSave={handleGuardarProveedor as Parameters<typeof ModalProveedor>[0]['onSave']}
+            onSave={handleGuardarProveedor as unknown as Parameters<typeof ModalProveedor>[0]['onSave']}
             onClose={() => {
               setModalProveedorOpen(false)
               setProveedorEditando(null)

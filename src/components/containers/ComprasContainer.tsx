@@ -101,7 +101,7 @@ export default function ComprasContainer(): React.ReactElement {
           <ModalCompra
             productos={productos}
             proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
-            onSave={handleGuardarCompra as Parameters<typeof ModalCompra>[0]['onSave']}
+            onSave={handleGuardarCompra as unknown as Parameters<typeof ModalCompra>[0]['onSave']}
             onClose={() => setModalCompraOpen(false)}
           />
         </Suspense>
