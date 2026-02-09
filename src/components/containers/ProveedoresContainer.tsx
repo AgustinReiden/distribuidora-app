@@ -100,13 +100,13 @@ export default function ProveedoresContainer(): React.ReactElement {
     <>
       <Suspense fallback={<LoadingState />}>
         <VistaProveedores
-          proveedores={proveedores as unknown as Parameters<typeof VistaProveedores>[0]['proveedores']}
-          compras={compras as unknown as Parameters<typeof VistaProveedores>[0]['compras']}
+          proveedores={proveedores as Parameters<typeof VistaProveedores>[0]['proveedores']}
+          compras={compras as Parameters<typeof VistaProveedores>[0]['compras']}
           loading={isLoading}
           isAdmin={isAdmin}
           onNuevoProveedor={handleNuevoProveedor}
-          onEditarProveedor={handleEditarProveedor as unknown as Parameters<typeof VistaProveedores>[0]['onEditarProveedor']}
-          onEliminarProveedor={handleEliminarProveedor as unknown as Parameters<typeof VistaProveedores>[0]['onEliminarProveedor']}
+          onEditarProveedor={handleEditarProveedor as Parameters<typeof VistaProveedores>[0]['onEditarProveedor']}
+          onEliminarProveedor={handleEliminarProveedor as Parameters<typeof VistaProveedores>[0]['onEliminarProveedor']}
           onToggleActivo={handleToggleActivo}
         />
       </Suspense>
@@ -115,8 +115,8 @@ export default function ProveedoresContainer(): React.ReactElement {
       {modalProveedorOpen && (
         <Suspense fallback={null}>
           <ModalProveedor
-            proveedor={proveedorEditando as unknown as Parameters<typeof ModalProveedor>[0]['proveedor']}
-            onSave={handleGuardarProveedor as unknown as Parameters<typeof ModalProveedor>[0]['onSave']}
+            proveedor={proveedorEditando as Parameters<typeof ModalProveedor>[0]['proveedor']}
+            onSave={handleGuardarProveedor as Parameters<typeof ModalProveedor>[0]['onSave']}
             onClose={() => {
               setModalProveedorOpen(false)
               setProveedorEditando(null)

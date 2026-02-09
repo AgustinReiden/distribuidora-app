@@ -9,7 +9,8 @@
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
     <!-- Content Security Policy - Fortalecido -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://maps.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://maps.googleapis.com https://n8n.shycia.com.ar https://*.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self';">
+    <!-- NOTE: 'unsafe-inline' in style-src is required by Vite/TailwindCSS injected styles -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://maps.googleapis.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://maps.googleapis.com https://*.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self';">
 
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#2563eb" />

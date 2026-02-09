@@ -178,7 +178,7 @@ export function useComprasData(): { compras: CompraDB[]; loading: boolean } {
 // eslint-disable-next-line react-refresh/only-export-components
 export function useProveedoresData(): { proveedores: ProveedorDB[]; loading: boolean } {
   const { proveedores, loading } = useAppData()
-  return { proveedores, loading: loading.clientes } // usa loading.clientes por compatibilidad
+  return { proveedores, loading: loading.compras }
 }
 
 /**

@@ -143,7 +143,7 @@ export interface PedidoOfflineData extends Partial<NuevoPedidoState> {
   usuarioId?: string;
 }
 
- 
+
 /** Params for useAppHandlers hook - flexible types to match actual hook signatures */
 export interface UseAppHandlersParams {
   // Hooks de datos
@@ -166,84 +166,39 @@ export interface UseAppHandlersParams {
   restaurarStock: (items: StockItem[]) => Promise<void>;
 
   // Funciones CRUD Pedidos
-  crearPedido: (
-    clienteId: number,
-    items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>,
-    total: number,
-    usuarioId: string,
-    descontarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
-    notas?: string,
-    formaPago?: string,
-    estadoPago?: string
-  ) => Promise<PedidoDB>;
+  // These use flexible function types because hooks return slightly different
+  // signatures than what sub-handlers expect. The sub-handlers cast internally.
+  crearPedido: (...args: any[]) => Promise<any>;
   cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
-  asignarTransportista: (pedidoId: string, transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
-  eliminarPedido: (
-    pedidoId: string,
-    restaurarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
-    usuarioId?: string
-  ) => Promise<void>;
+  asignarTransportista: (pedidoId: string, transportistaId: string | null, flag?: boolean) => Promise<void>;
+  eliminarPedido: (...args: any[]) => Promise<void>;
   actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
   actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
   actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
-  actualizarOrdenEntrega: (pedidosOrdenados: Array<{ id: string; orden_entrega: number }>) => Promise<void>;
-  actualizarItemsPedido: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
-  fetchHistorialPedido: (pedidoId: string) => Promise<unknown[]>;
+  actualizarOrdenEntrega: (...args: any[]) => Promise<void>;
+  actualizarItemsPedido: (...args: any[]) => Promise<any>;
+  fetchHistorialPedido: (pedidoId: string) => Promise<any[]>;
 
   // Funciones CRUD Usuarios
   actualizarUsuario: (id: string, datos: Partial<PerfilDB>) => Promise<void>;
 
   // Funciones Pagos
-  registrarPago: (pago: {
-    clienteId: string;
-    pedidoId?: string | null;
-    monto: number | string;
-    formaPago?: string;
-    referencia?: string | null;
-    notas?: string | null;
-    usuarioId?: string | null;
-  }) => Promise<{ id: string; cliente_id: string; monto: number; forma_pago: string; created_at?: string }>;
+  registrarPago: (...args: any[]) => Promise<any>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 
   // Funciones Mermas
-  registrarMerma: (mermaData: {
-    productoId: string;
-    cantidad: number;
-    motivo: string;
-    observaciones?: string | null;
-    stockAnterior: number;
-    stockNuevo: number;
-    usuarioId?: string | null;
-  }) => Promise<{ success: boolean; merma: { id: string } | null }>;
+  registrarMerma: (...args: any[]) => Promise<any>;
 
   // Funciones Compras
-  registrarCompra: (compraData: {
-    proveedorId?: string | null;
-    proveedorNombre?: string | null;
-    numeroFactura?: string | null;
-    fechaCompra?: string;
-    subtotal?: number;
-    iva?: number;
-    otrosImpuestos?: number;
-    total?: number;
-    formaPago?: string;
-    notas?: string | null;
-    usuarioId?: string | null;
-    items: Array<{ productoId: string; cantidad: number; costoUnitario?: number; subtotal?: number }>;
-  }) => Promise<{ success: boolean; compraId: string }>;
+  registrarCompra: (...args: any[]) => Promise<any>;
   anularCompra: (compraId: string) => Promise<void>;
 
   // Funciones Proveedores
-  agregarProveedor: (proveedor: ProveedorFormInput) => Promise<ProveedorDB>;
-  actualizarProveedor: (id: string, proveedor: Partial<ProveedorFormInput>) => Promise<ProveedorDB>;
+  agregarProveedor: (...args: any[]) => Promise<any>;
+  actualizarProveedor: (...args: any[]) => Promise<any>;
 
   // Funciones Recorridos
-  crearRecorrido: (
-    transportistaId: string,
-    pedidosOrdenados: Array<{ id: string; orden_entrega: number }>,
-    distancia?: number | null,
-    duracion?: number | null
-  ) => Promise<string>;
+  crearRecorrido: (...args: any[]) => Promise<string>;
   limpiarRuta: () => void;
 
   // Funciones de refetch
@@ -266,19 +221,10 @@ export interface UseAppHandlersParams {
   // Ruta optimizada
   rutaOptimizada: RutaOptimizadaData | null;
 
-  // Offline sync
+  // Offline sync - flexible to match actual hook
   isOnline: boolean;
-  guardarPedidoOffline: (pedido: {
-    clienteId: number;
-    items: Array<{ productoId: string; cantidad: number; precioUnitario: number }>;
-    total: number;
-    usuarioId: string;
-    notas?: string;
-    formaPago?: string;
-    estadoPago?: string;
-    montoPagado?: number;
-  }) => void;
-  guardarMermaOffline: (merma: MermaFormInput) => void;
+  guardarPedidoOffline: (...args: any[]) => any;
+  guardarMermaOffline: (...args: any[]) => any;
 }
  
 

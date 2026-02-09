@@ -392,11 +392,6 @@ export function useAppState(perfil: PerfilDB | null): UseAppStateReturn {
     dispatchEditing({ type: 'SET_EDITING', entity, data: data as EditingState[EditingEntityName] });
   }, []);
 
-  // createClearer removed - was unused. If needed in future, can be restored:
-  // const createClearer = useCallback((entity: EditingEntityName) => (): void => {
-  //   dispatchEditing({ type: 'CLEAR_EDITING', entity });
-  // }, []);
-
   // Setters memoizados para evitar re-renders
   const setClienteEditando = useMemo(() => createSetter<ClienteDB | null>('cliente'), [createSetter]);
   const setProductoEditando = useMemo(() => createSetter<ProductoDB | null>('producto'), [createSetter]);

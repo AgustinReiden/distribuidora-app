@@ -77,23 +77,23 @@ export function ReporteRentabilidadSection({
                     <p className="font-medium">{p.nombre}</p>
                     {p.codigo && <p className="text-sm text-gray-500">{p.codigo}</p>}
                   </td>
-                  <td className="px-4 py-3 text-right">{p.cantidadVendida}</td>
-                  <td className="px-4 py-3 text-right">{formatPrecio(p.ingresos)}</td>
-                  <td className="px-4 py-3 text-right text-red-600">{formatPrecio(p.costos)}</td>
+                  <td className="px-4 py-3 text-right">{p.cantidadVendida ?? 0}</td>
+                  <td className="px-4 py-3 text-right">{formatPrecio(p.ingresos ?? 0)}</td>
+                  <td className="px-4 py-3 text-right text-red-600">{formatPrecio(p.costos ?? 0)}</td>
                   <td className="px-4 py-3 text-right font-bold text-green-600">
-                    {formatPrecio(p.margen)}
+                    {formatPrecio(p.margen ?? 0)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <span
                       className={`px-2 py-1 rounded text-sm ${
-                        p.margenPorcentaje >= 20
+                        (p.margenPorcentaje ?? 0) >= 20
                           ? 'bg-green-100 text-green-700'
-                          : p.margenPorcentaje >= 10
+                          : (p.margenPorcentaje ?? 0) >= 10
                             ? 'bg-yellow-100 text-yellow-700'
                             : 'bg-red-100 text-red-700'
                       }`}
                     >
-                      {p.margenPorcentaje.toFixed(1)}%
+                      {(p.margenPorcentaje ?? 0).toFixed(1)}%
                     </span>
                   </td>
                 </tr>

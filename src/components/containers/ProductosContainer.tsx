@@ -168,7 +168,7 @@ export default function ProductosContainer(): React.ReactElement {
           <ModalProducto
             producto={productoEditando}
             categorias={categorias}
-            onSave={handleGuardarProducto as unknown as Parameters<typeof ModalProducto>[0]['onSave']}
+            onSave={handleGuardarProducto as Parameters<typeof ModalProducto>[0]['onSave']}
             onClose={() => {
               setModalProductoOpen(false)
               setProductoEditando(null)
@@ -182,8 +182,8 @@ export default function ProductosContainer(): React.ReactElement {
       {modalMermaOpen && productoMerma && (
         <Suspense fallback={null}>
           <ModalMermaStock
-            producto={productoMerma as unknown as Parameters<typeof ModalMermaStock>[0]['producto']}
-            onSave={handleGuardarMerma as unknown as Parameters<typeof ModalMermaStock>[0]['onSave']}
+            producto={productoMerma as Parameters<typeof ModalMermaStock>[0]['producto']}
+            onSave={handleGuardarMerma as Parameters<typeof ModalMermaStock>[0]['onSave']}
             onClose={() => {
               setModalMermaOpen(false)
               setProductoMerma(null)
@@ -196,8 +196,8 @@ export default function ProductosContainer(): React.ReactElement {
       {modalHistorialOpen && (
         <Suspense fallback={null}>
           <ModalHistorialMermas
-            mermas={mermas as unknown as Parameters<typeof ModalHistorialMermas>[0]['mermas']}
-            productos={productos as unknown as Parameters<typeof ModalHistorialMermas>[0]['productos']}
+            mermas={mermas as Parameters<typeof ModalHistorialMermas>[0]['mermas']}
+            productos={productos as Parameters<typeof ModalHistorialMermas>[0]['productos']}
             onClose={() => setModalHistorialOpen(false)}
           />
         </Suspense>
