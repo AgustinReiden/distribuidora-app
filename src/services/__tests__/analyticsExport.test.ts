@@ -564,8 +564,10 @@ describe('analyticsExport', () => {
 
       expect(result).toHaveLength(2)
       expect(result[0]).toMatchObject({
+        producto_a_id: 'prod1',
         producto_a_nombre: 'Producto A',
         producto_a_codigo: 'PA001',
+        producto_b_id: 'prod2',
         producto_b_nombre: 'Producto B',
         producto_b_codigo: 'PB002',
         veces_comprados_juntos: 5,
