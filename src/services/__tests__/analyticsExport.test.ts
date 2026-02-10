@@ -428,13 +428,13 @@ describe('analyticsExport', () => {
           items: [
             {
               cantidad: 10,
-              precio_unitario: 200,
+              costo_unitario: 200,
               subtotal: 2000,
               producto: { nombre: 'Producto X', codigo: 'PX001', categoria: 'Cat1' },
             },
             {
               cantidad: 5,
-              precio_unitario: 300,
+              costo_unitario: 300,
               subtotal: 1500,
               producto: { nombre: 'Producto Y', codigo: 'PY002', categoria: 'Cat2' },
             },

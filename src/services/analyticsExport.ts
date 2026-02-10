@@ -287,7 +287,7 @@ export async function fetchComprasFact(
       proveedor:proveedores(nombre, cuit),
       items:compra_items(
         cantidad,
-        precio_unitario,
+        costo_unitario,
         subtotal,
         producto:productos(nombre, codigo, categoria)
       )
@@ -315,7 +315,7 @@ export async function fetchComprasFact(
         producto_codigo: safe(producto?.codigo),
         producto_categoria: safe(producto?.categoria),
         cantidad: item.cantidad,
-        costo_unitario: item.precio_unitario,
+        costo_unitario: item.costo_unitario,
         subtotal: item.subtotal,
         estado: safe(compra.estado),
       })
