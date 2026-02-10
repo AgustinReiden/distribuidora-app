@@ -7,6 +7,8 @@ import { test, expect } from '@playwright/test'
 test.describe('Accesibilidad', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
+    // Wait for the React app to render (login form appears)
+    await page.waitForSelector('form', { timeout: 10000 })
   })
 
   test('la página debe tener un título', async ({ page }) => {
@@ -28,7 +30,7 @@ test.describe('Accesibilidad', () => {
     const buttons = page.getByRole('button')
     const count = await buttons.count()
 
-    // Verificar que al menos hay un botón
+    // Verificar que al menos hay un botón (login button)
     expect(count).toBeGreaterThan(0)
 
     // Verificar que el primer botón es focuseable
@@ -60,13 +62,12 @@ test.describe('Accesibilidad', () => {
   })
 
   test('no debe haber errores de contraste obvios', async ({ page }) => {
-    // Este es un test básico - verificar que el texto principal es visible
-    // Para tests completos de contraste, usar herramientas como axe-core
-    const bodyText = page.locator('body')
-    await expect(bodyText).toBeVisible()
+    // Verify the app has rendered visible content
+    const heading = page.getByRole('heading', { name: /distribuidora/i })
+    await expect(heading).toBeVisible()
 
     // Verificar que hay texto legible (no todo transparente o muy pequeño)
-    const fontSize = await bodyText.evaluate(el => {
+    const fontSize = await page.locator('body').evaluate(el => {
       return window.getComputedStyle(el).fontSize
     })
     const fontSizeNum = parseFloat(fontSize)

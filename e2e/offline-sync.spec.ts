@@ -114,12 +114,12 @@ test.describe('Offline Sync - Chaos Tests', () => {
     // Guardamos la URL actual
     const currentUrl = page.url()
 
-    // 6. REABRIR APP
+    // 6. RESTAURAR INTERNET (must be before goto)
+    await context.setOffline(false)
+
+    // 7. REABRIR APP
     await page.goto(currentUrl)
     await page.waitForLoadState('domcontentloaded')
-
-    // 7. RESTAURAR INTERNET
-    await context.setOffline(false)
 
     // 8. Esperar sincronización automática
     await page.waitForTimeout(3000) // Dar tiempo para sync
