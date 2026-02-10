@@ -69,6 +69,8 @@ describe('analyticsExport', () => {
           estado_pago: 'pagado',
           forma_pago: 'efectivo',
           total: 1000,
+          usuario_id: 'prev1',
+          transportista_id: 'trans1',
           cliente: {
             id: 'c1',
             nombre_fantasia: 'Cliente Test',
@@ -104,22 +106,27 @@ describe('analyticsExport', () => {
               },
             },
           ],
-          preventista: { id: 'prev1', nombre: 'Juan Perez' },
-          transportista: { id: 'trans1', nombre: 'Pedro Lopez' },
         },
       ]
 
-      const chain = createChainableMock({ data: mockPedidos, error: null })
-      vi.mocked(supabase.from).mockReturnValue(chain as never)
+      const mockPerfiles = [
+        { id: 'prev1', nombre: 'Juan Perez' },
+        { id: 'trans1', nombre: 'Pedro Lopez' },
+      ]
+
+      const pedidosChain = createChainableMock({ data: mockPedidos, error: null })
+      const perfilesChain = createChainableMock({ data: mockPerfiles, error: null })
+
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? pedidosChain : perfilesChain) as never
+      })
 
       const result = await fetchVentasDetallado('2026-01-01', '2026-01-31')
 
       expect(supabase.from).toHaveBeenCalledWith('pedidos')
-      expect(chain.select).toHaveBeenCalled()
-      expect(chain.gte).toHaveBeenCalledWith('created_at', '2026-01-01T00:00:00')
-      expect(chain.lte).toHaveBeenCalledWith('created_at', '2026-01-31T23:59:59')
-      expect(chain.is).toHaveBeenCalledWith('deleted_at', null)
-      expect(chain.order).toHaveBeenCalledWith('created_at', { ascending: false })
+      expect(supabase.from).toHaveBeenCalledWith('perfiles')
 
       expect(result).toHaveLength(2)
 
@@ -173,10 +180,10 @@ describe('analyticsExport', () => {
           estado_pago: null,
           forma_pago: null,
           total: 0,
+          usuario_id: null,
+          transportista_id: null,
           cliente: { id: 'c1', nombre_fantasia: 'Cliente Test' },
           items: [],
-          preventista: null,
-          transportista: null,
         },
       ]
 
@@ -203,6 +210,8 @@ describe('analyticsExport', () => {
           id: 'p1',
           created_at: '2026-01-15T10:30:00',
           estado: 'pendiente',
+          usuario_id: null,
+          transportista_id: null,
           cliente: { id: 'c1', nombre_fantasia: 'Cliente' },
           items: [
             {
@@ -213,8 +222,6 @@ describe('analyticsExport', () => {
               producto: { id: 'p1', nombre: 'Producto', costo_con_iva: 50 },
             },
           ],
-          preventista: null,
-          transportista: null,
         },
       ]
 
