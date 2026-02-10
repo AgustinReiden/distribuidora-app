@@ -2,7 +2,10 @@
  * Handlers para operaciones con clientes
  */
 import { useCallback } from 'react'
-import { generarReciboPago } from '../../lib/pdfExport'
+const generarReciboPago = async (...args: Parameters<typeof import('../../lib/pdfExport').generarReciboPago>) => {
+  const mod = await import('../../lib/pdfExport')
+  return mod.generarReciboPago(...args)
+}
 import type { User } from '@supabase/supabase-js'
 import type {
   ClienteDB,

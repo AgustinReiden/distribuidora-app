@@ -6,7 +6,6 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { useLatestRef } from '../useLatestRef'
 import { calcularTotalPedido } from '../useAppState'
-import { generarOrdenPreparacion, generarHojaRuta, generarHojaRutaOptimizada } from '../../lib/pdfExport'
 import type { User } from '@supabase/supabase-js'
 import type {
   ProductoDB,
@@ -214,9 +213,9 @@ export interface UsePedidoHandlersReturn {
   handleAplicarOrdenOptimizado: (data: OrdenOptimizadoData | OrdenOptimizadoItem[]) => Promise<void>;
   handleExportarHojaRutaOptimizada: (transportista: PerfilDB, pedidosOrdenados: PedidoDB[]) => void;
   handleCerrarModalOptimizar: () => void;
-  // PDF exports
-  generarOrdenPreparacion: typeof generarOrdenPreparacion;
-  generarHojaRuta: typeof generarHojaRuta;
+  // PDF exports (lazy loaded)
+  generarOrdenPreparacion: (...args: unknown[]) => Promise<void>;
+  generarHojaRuta: (...args: unknown[]) => Promise<void>;
 }
 
 export function usePedidoHandlers({
@@ -619,8 +618,9 @@ export function usePedidoHandlers({
     setGuardando(false)
   }, [actualizarOrdenEntrega, crearRecorrido, limpiarRuta, refetchPedidos, modales.optimizarRuta, notify, setGuardando])
 
-  const handleExportarHojaRutaOptimizada = useCallback((transportista: PerfilDB, pedidosOrdenados: PedidoDB[]): void => {
+  const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB, pedidosOrdenados: PedidoDB[]): Promise<void> => {
     try {
+      const { generarHojaRutaOptimizada } = await import('../../lib/pdfExport')
       const rutaOptimizada = rutaOptimizadaRef.current
       generarHojaRutaOptimizada(transportista, pedidosOrdenados, (rutaOptimizada as { distanciaTotal?: number })?.distanciaTotal, (rutaOptimizada as { duracionTotal?: number })?.duracionTotal)
       notify.success('PDF generado correctamente')
@@ -661,8 +661,14 @@ export function usePedidoHandlers({
     handleAplicarOrdenOptimizado,
     handleExportarHojaRutaOptimizada,
     handleCerrarModalOptimizar,
-    // PDF exports
-    generarOrdenPreparacion,
-    generarHojaRuta
+    // PDF exports (lazy loaded)
+    generarOrdenPreparacion: async (...args: unknown[]) => {
+      const mod = await import('../../lib/pdfExport')
+      return mod.generarOrdenPreparacion(...args as Parameters<typeof mod.generarOrdenPreparacion>)
+    },
+    generarHojaRuta: async (...args: unknown[]) => {
+      const mod = await import('../../lib/pdfExport')
+      return mod.generarHojaRuta(...args as Parameters<typeof mod.generarHojaRuta>)
+    }
   }
 }

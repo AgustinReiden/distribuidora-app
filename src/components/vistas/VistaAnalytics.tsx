@@ -118,14 +118,15 @@ export default function VistaAnalytics({
       </div>
 
       {/* Period selector */}
-      <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4">
-        <h2 className="font-semibold mb-3 text-gray-700 dark:text-gray-200">Periodo de datos</h2>
+      <section className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4" aria-labelledby="periodo-heading">
+        <h2 id="periodo-heading" className="font-semibold mb-3 text-gray-700 dark:text-gray-200">Periodo de datos</h2>
 
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Presets de periodo">
           {presets.map(p => (
             <button
               key={p.id}
               onClick={() => handlePreset(p.id)}
+              aria-pressed={preset === p.id}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 preset === p.id
                   ? 'bg-blue-600 text-white'
@@ -139,10 +140,11 @@ export default function VistaAnalytics({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400">
+            <label htmlFor="fecha-desde" className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400">
               Desde
             </label>
             <input
+              id="fecha-desde"
               type="date"
               value={desde}
               onChange={e => { setDesde(e.target.value); setPreset('personalizado') }}
@@ -150,10 +152,11 @@ export default function VistaAnalytics({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400">
+            <label htmlFor="fecha-hasta" className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400">
               Hasta
             </label>
             <input
+              id="fecha-hasta"
               type="date"
               value={hasta}
               onChange={e => { setHasta(e.target.value); setPreset('personalizado') }}
@@ -161,14 +164,14 @@ export default function VistaAnalytics({
             />
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Export card */}
-      <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-6">
+      <section className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-6" aria-labelledby="export-heading">
         <div className="flex items-start gap-4 mb-4">
-          <FileSpreadsheet className="w-10 h-10 text-green-600 dark:text-green-400 flex-shrink-0 mt-1" />
+          <FileSpreadsheet className="w-10 h-10 text-green-600 dark:text-green-400 flex-shrink-0 mt-1" aria-hidden="true" />
           <div>
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Exportar para Power BI</h2>
+            <h2 id="export-heading" className="text-lg font-semibold text-gray-800 dark:text-white">Exportar para Power BI</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Genera un archivo Excel con 7 hojas de datos denormalizados, listos para importar en Power BI
             </p>
@@ -192,19 +195,21 @@ export default function VistaAnalytics({
         </div>
 
         {/* Status messages */}
-        {error && (
-          <div className="flex items-center gap-2 p-3 mb-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-            <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
-            <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
-          </div>
-        )}
+        <div aria-live="polite">
+          {error && (
+            <div role="alert" className="flex items-center gap-2 p-3 mb-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" aria-hidden="true" />
+              <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+            </div>
+          )}
 
-        {exito && (
-          <div className="flex items-center gap-2 p-3 mb-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-            <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-            <p className="text-sm text-green-700 dark:text-green-300">Exportacion completada. Revisa tu carpeta de descargas.</p>
-          </div>
-        )}
+          {exito && (
+            <div role="status" className="flex items-center gap-2 p-3 mb-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" aria-hidden="true" />
+              <p className="text-sm text-green-700 dark:text-green-300">Exportacion completada. Revisa tu carpeta de descargas.</p>
+            </div>
+          )}
+        </div>
 
         {/* Export button */}
         <button
@@ -224,7 +229,7 @@ export default function VistaAnalytics({
             </>
           )}
         </button>
-      </div>
+      </section>
 
       {/* Power BI instructions */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-5">

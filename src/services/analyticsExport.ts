@@ -5,7 +5,7 @@
  * Cada función fetch retorna un array de objetos planos (una fila = un record).
  */
 import { supabase } from '../lib/supabase'
-import { createMultiSheetExcel, type SheetConfig } from '../utils/excel'
+import type { SheetConfig } from '../utils/excel'
 import { calculateMarketBasket } from '../utils/marketBasket'
 
 // ---------------------------------------------------------------------------
@@ -65,9 +65,9 @@ export async function fetchVentasDetallado(
   const rows: Record<string, unknown>[] = []
 
   for (const p of pedidos || []) {
-    const cliente = p.cliente as Record<string, unknown> | null
-    const preventista = p.preventista as Record<string, unknown> | null
-    const transportista = p.transportista as Record<string, unknown> | null
+    const cliente = p.cliente as unknown as Record<string, unknown> | null
+    const preventista = p.preventista as unknown as Record<string, unknown> | null
+    const transportista = p.transportista as unknown as Record<string, unknown> | null
     const items = (p.items || []) as Array<Record<string, unknown>>
 
     for (const item of items) {
@@ -213,7 +213,7 @@ export async function fetchProductosDimension(
     const existing = ventasPorProducto.get(item.producto_id) || { cantidad: 0, ingresos: 0, dias: new Set<string>() }
     existing.cantidad += item.cantidad || 0
     existing.ingresos += item.subtotal || (item.precio_unitario || 0) * (item.cantidad || 0)
-    const pedido = item.pedido as Record<string, unknown> | null
+    const pedido = item.pedido as unknown as Record<string, unknown> | null
     if (pedido?.created_at) {
       existing.dias.add(String(pedido.created_at).split('T')[0])
     }
@@ -285,7 +285,7 @@ export async function fetchComprasFact(
   const rows: Record<string, unknown>[] = []
 
   for (const compra of data || []) {
-    const proveedor = compra.proveedor as Record<string, unknown> | null
+    const proveedor = compra.proveedor as unknown as Record<string, unknown> | null
     const items = (compra.items || []) as Array<Record<string, unknown>>
 
     for (const item of items) {
@@ -336,7 +336,7 @@ export async function fetchCobranzasFact(
   if (error) throw new Error(`Error cargando cobranzas: ${error.message}`)
 
   return (data || []).map(pago => {
-    const cliente = pago.cliente as Record<string, unknown> | null
+    const cliente = pago.cliente as unknown as Record<string, unknown> | null
     return {
       pago_id: pago.id,
       fecha: new Date(pago.created_at).toLocaleDateString('es-AR'),
@@ -443,5 +443,6 @@ export async function exportarBI(desde: string, hasta: string): Promise<void> {
   ]
 
   const filename = `BI_Export_${desde}_${hasta}`
+  const { createMultiSheetExcel } = await import('../utils/excel')
   await createMultiSheetExcel(sheets, filename)
 }

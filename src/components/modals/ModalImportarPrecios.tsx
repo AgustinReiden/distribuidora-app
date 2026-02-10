@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
-import { readExcelFile, createTemplate } from '../../utils/excel';
+const loadExcelUtils = () => import('../../utils/excel');
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import { logger } from '../../utils/logger';
 import type { ProductoDB } from '../../types';
@@ -116,6 +116,7 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
 
   const parsearExcel = useCallback(async (file: File): Promise<void> => {
     try {
+      const { readExcelFile } = await loadExcelUtils();
       const jsonData = await readExcelFile(file) as ExcelRow[];
 
       // Validar y sanitizar datos
@@ -237,6 +238,7 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
         { Codigo: 'EJEMPLO001', 'Precio Neto': 1000, 'Imp Internos': 50, 'Precio Final': 1200 },
         { Codigo: 'EJEMPLO002', 'Precio Neto': 500, 'Imp Internos': 0, 'Precio Final': 600 }
       ];
+      const { createTemplate } = await loadExcelUtils();
       await createTemplate(plantilla, 'plantilla_precios', 'Precios');
     } catch (err) {
       const error = err as Error;

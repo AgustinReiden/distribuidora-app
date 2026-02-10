@@ -9,7 +9,10 @@
  */
 import React, { useState, memo, useContext } from 'react';
 import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle } from 'lucide-react';
-import { generarReciboPedido } from '../../lib/pdfExport';
+const generarReciboPedido = async (...args: Parameters<typeof import('../../lib/pdfExport').generarReciboPedido>) => {
+  const mod = await import('../../lib/pdfExport')
+  return mod.generarReciboPedido(...args)
+};
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
