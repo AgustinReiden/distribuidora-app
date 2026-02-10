@@ -374,37 +374,37 @@ export async function fetchCanastaProductos(
   desde: string,
   hasta: string
 ): Promise<Record<string, unknown>[]> {
-  const { data: pedidos, error } = await supabase
-    .from('pedidos')
-    .select('id, items:pedido_items(producto_id)')
-    .gte('created_at', `${desde}T00:00:00`)
-    .lte('created_at', `${hasta}T23:59:59`)
+  // Fetch pedidos and all productos in parallel
+  const [pedidosRes, productosRes] = await Promise.all([
+    supabase
+      .from('pedidos')
+      .select('id, items:pedido_items(producto_id)')
+      .gte('created_at', `${desde}T00:00:00`)
+      .lte('created_at', `${hasta}T23:59:59`),
+    supabase
+      .from('productos')
+      .select('id, nombre, codigo'),
+  ])
 
-  if (error) throw new Error(`Error cargando pedidos para canasta: ${error.message}`)
-  if (!pedidos || pedidos.length === 0) return []
+  if (pedidosRes.error) throw new Error(`Error cargando pedidos para canasta: ${pedidosRes.error.message}`)
+  if (!pedidosRes.data || pedidosRes.data.length === 0) return []
 
   const pairs = calculateMarketBasket(
-    pedidos.map(p => ({ items: (p.items || []) as Array<{ producto_id: string }> })),
+    pedidosRes.data.map(p => ({ items: (p.items || []) as Array<{ producto_id: string }> })),
     2
   )
 
   if (pairs.length === 0) return []
 
-  // Enriquecer con nombres
-  const productIds = new Set<string>()
-  pairs.forEach(p => { productIds.add(p.producto_a); productIds.add(p.producto_b) })
-
-  const { data: productos } = await supabase
-    .from('productos')
-    .select('id, nombre, codigo')
-    .in('id', Array.from(productIds))
-
-  const names = new Map((productos || []).map(p => [p.id, p]))
+  // Build name lookup from all productos
+  const names = new Map((productosRes.data || []).map(p => [p.id, p]))
 
   return pairs.map(pair => ({
-    producto_a_nombre: names.get(pair.producto_a)?.nombre || 'Desconocido',
+    producto_a_id: pair.producto_a,
+    producto_a_nombre: names.get(pair.producto_a)?.nombre || pair.producto_a,
     producto_a_codigo: names.get(pair.producto_a)?.codigo || '',
-    producto_b_nombre: names.get(pair.producto_b)?.nombre || 'Desconocido',
+    producto_b_id: pair.producto_b,
+    producto_b_nombre: names.get(pair.producto_b)?.nombre || pair.producto_b,
     producto_b_codigo: names.get(pair.producto_b)?.codigo || '',
     veces_comprados_juntos: pair.frecuencia,
     confianza_porcentaje: Number(pair.confianza.toFixed(1)),
