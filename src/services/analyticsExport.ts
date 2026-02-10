@@ -57,7 +57,6 @@ export async function fetchVentasDetallado(
     `)
     .gte('created_at', `${desde}T00:00:00`)
     .lte('created_at', `${hasta}T23:59:59`)
-    .is('deleted_at', null)
     .order('created_at', { ascending: false })
 
   if (error) throw new Error(`Error cargando ventas: ${error.message}`)
@@ -145,7 +144,6 @@ export async function fetchClientesDimension(
     supabase
       .from('pedidos')
       .select('id, cliente_id, total, created_at')
-      .is('deleted_at', null)
       .gte('created_at', `${desde}T00:00:00`)
       .lte('created_at', `${hasta}T23:59:59`),
   ])
@@ -379,7 +377,6 @@ export async function fetchCanastaProductos(
   const { data: pedidos, error } = await supabase
     .from('pedidos')
     .select('id, items:pedido_items(producto_id)')
-    .is('deleted_at', null)
     .gte('created_at', `${desde}T00:00:00`)
     .lte('created_at', `${hasta}T23:59:59`)
 
