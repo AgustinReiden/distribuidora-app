@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { createMultiSheetExcel } from '../../utils/excel'
+
 import { supabase } from './base'
 import type {
   BackupData,
@@ -241,6 +241,7 @@ export function useBackup(): UseBackupReturnExtended {
 
       const fecha = new Date().toISOString().split('T')[0]
 
+      const { createMultiSheetExcel } = await import('../../utils/excel')
       await createMultiSheetExcel([
         {
           name: 'Info Exportación',

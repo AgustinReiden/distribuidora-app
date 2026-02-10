@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
-  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle
+  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -56,6 +56,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
       { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
+      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin'] },
     ]
   },
   {
@@ -174,7 +175,8 @@ export default function TopNavigation({
             <button
               onClick={() => setMenuAbierto(!menuAbierto)}
               className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              aria-label="Abrir menu"
+              aria-label={menuAbierto ? 'Cerrar menu' : 'Abrir menu'}
+              aria-expanded={menuAbierto}
             >
               {menuAbierto ? (
                 <X className="w-6 h-6 text-gray-600 dark:text-gray-300" />
@@ -230,6 +232,8 @@ export default function TopNavigation({
                   >
                     <button
                       onClick={() => toggleDropdown(group.id)}
+                      aria-expanded={isOpen}
+                      aria-haspopup="true"
                       className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
                         isActive
                           ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
@@ -243,12 +247,13 @@ export default function TopNavigation({
 
                     {/* Dropdown */}
                     {isOpen && (
-                      <div className="absolute top-full left-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 z-50">
+                      <div role="menu" className="absolute top-full left-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 z-50">
                         {group.items.map(item => {
                           const ItemIcon = item.icon;
                           return (
                             <button
                               key={item.id}
+                              role="menuitem"
                               onClick={() => handleVistaChange(item.id)}
                               className={`w-full flex items-center space-x-3 px-4 py-2.5 transition-colors ${
                                 vista === item.id
@@ -287,6 +292,9 @@ export default function TopNavigation({
             <div className="relative" ref={userMenuRef}>
               <button
                 onClick={() => setUserMenuAbierto(!userMenuAbierto)}
+                aria-expanded={userMenuAbierto}
+                aria-haspopup="true"
+                aria-label="Menu de usuario"
                 className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
               >
                 <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
@@ -379,6 +387,7 @@ export default function TopNavigation({
         <div
           className="fixed inset-0 bg-black bg-opacity-25 z-30 lg:hidden"
           onClick={() => setMenuAbierto(false)}
+          aria-hidden="true"
         />
       )}
     </>
