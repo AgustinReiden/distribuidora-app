@@ -74,6 +74,7 @@ const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
 const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
 const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'));
 const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'));
+const AnalyticsContainer = lazy(() => import('./components/containers/AnalyticsContainer'));
 
 function LoadingVista(): ReactElement {
   return (
@@ -362,6 +363,11 @@ function MainApp(): ReactElement {
                 {/* Salvedades - solo admin */}
                 <Route path="/salvedades" element={
                   isAdmin ? <VistaSalvedades /> : <Navigate to="/pedidos" replace />
+                } />
+
+                {/* Centro de Análisis - solo admin */}
+                <Route path="/analytics" element={
+                  isAdmin ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />
                 } />
 
                 {/* Fallback */}
