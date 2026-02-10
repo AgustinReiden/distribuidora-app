@@ -31,7 +31,8 @@ import {
 } from './hooks/supabase';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider, useNotification } from './contexts/NotificationContext';
-import { AppDataProvider, type AppDataContextValue } from './contexts/AppDataContext';
+// AppDataContext removed — no consumers use it. Data flows through individual contexts
+// (ClientesContext, ProductosContext, PedidosContext, OperationsContext, AuthDataContext)
 import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext';
 import { ClientesProvider, type ClientesContextValue } from './contexts/ClientesContext';
 import { ProductosProvider, type ProductosContextValue } from './contexts/ProductosContext';
@@ -40,6 +41,7 @@ import { OperationsProvider, type OperationsContextValue } from './contexts/Oper
 import { HandlersProvider } from './contexts/HandlersContext';
 import { useOptimizarRuta } from './hooks/useOptimizarRuta';
 import { useOfflineSync } from './hooks/useOfflineSync';
+import { useRealtimeInvalidation } from './hooks/useRealtimeInvalidation';
 import { useAppState, useAppDerivedState } from './hooks/useAppState';
 import { useAppHandlers, type UseAppHandlersParams, type NotifyApi, type RutaOptimizadaData } from './hooks/useAppHandlers';
 import { useSyncManager, type SyncDependencies } from './hooks/useSyncManager';
@@ -108,7 +110,7 @@ function MainApp(): ReactElement {
   const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, actualizarItemsPedido, fetchHistorialPedido, fetchPedidosEliminados, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
   const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
-  const { metricas, reportePreventistas, reporteInicializado, calcularReportePreventistas, loading: loadingMetricas, loadingReporte, refetch: refetchMetricas, filtroPeriodo } = useDashboard(dashboardUsuarioId);
+  const { reportePreventistas, reporteInicializado, calcularReportePreventistas, loadingReporte, refetch: refetchMetricas } = useDashboard(dashboardUsuarioId);
   const { exportando, exportarPedidosExcel } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
@@ -118,6 +120,9 @@ function MainApp(): ReactElement {
   const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
   const { presentarRendicion } = useRendiciones();
   const { registrarSalvedad } = useSalvedades();
+
+  // Supabase Realtime: invalida TanStack Query cache cuando otros usuarios modifican datos
+  useRealtimeInvalidation({ enabled: isOnline });
 
   // Datos derivados
   const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
@@ -208,53 +213,6 @@ function MainApp(): ReactElement {
     notify.success(`Pedido #${pedidoId} entregado con salvedades registradas`, { persist: true });
   }, [cambiarEstado, refetchPedidos, refetchMetricas, notify]);
 
-  // Memoizar el valor del contexto de datos
-  const appDataValue = useMemo<AppDataContextValue>(() => ({
-    clientes,
-    productos,
-    pedidos,
-    pedidosFiltrados: pedidosFiltrados(),
-    usuarios,
-    transportistas,
-    proveedores: proveedores as ProveedorDB[],
-    compras: compras as CompraDB[],
-    mermas: mermas as MermaDB[],
-    recorridos: recorridos as RecorridoDB[],
-    metricas,
-    reportePreventistas,
-    reporteInicializado,
-    filtros,
-    filtroPeriodo,
-    categorias,
-    loading: {
-      clientes: loadingClientes,
-      productos: loadingProductos,
-      pedidos: loadingPedidos,
-      usuarios: loadingUsuarios,
-      compras: loadingCompras,
-      recorridos: loadingRecorridos,
-      metricas: loadingMetricas,
-      reporte: loadingReporte,
-      optimizacion: loadingOptimizacion
-    },
-    user,
-    perfil,
-    isAdmin,
-    isPreventista,
-    isTransportista,
-    isOnline,
-    rutaOptimizada,
-    errorOptimizacion
-  }), [
-    clientes, productos, pedidos, pedidosFiltrados, usuarios, transportistas,
-    proveedores, compras, mermas, recorridos, metricas, reportePreventistas,
-    reporteInicializado, filtros, filtroPeriodo, categorias,
-    loadingClientes, loadingProductos, loadingPedidos, loadingUsuarios,
-    loadingCompras, loadingRecorridos, loadingMetricas, loadingReporte, loadingOptimizacion,
-    user, perfil, isAdmin, isPreventista, isTransportista, isOnline,
-    rutaOptimizada, errorOptimizacion
-  ]);
-
   // Determinar la ruta por defecto
   const defaultRoute = (isAdmin || isPreventista) ? '/dashboard' : '/pedidos';
 
@@ -309,7 +267,6 @@ function MainApp(): ReactElement {
     <PedidosProvider value={pedidosValue}>
     <OperationsProvider value={operationsValue}>
     <HandlersProvider handlers={handlers}>
-    <AppDataProvider value={appDataValue}>
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
         <SkipLinks />
         <TopNavigation perfil={perfil} onLogout={handleLogout} />
@@ -446,7 +403,6 @@ function MainApp(): ReactElement {
         {/* PWA Prompt */}
         <PWAPrompt />
       </div>
-    </AppDataProvider>
     </HandlersProvider>
     </OperationsProvider>
     </PedidosProvider>

@@ -18,10 +18,60 @@ env:
   NODE_VERSION: '20'
 
 jobs:
-  deploy-staging:
-    name: Deploy to Staging
+  # ===========================================================================
+  # Deploy to Coolify (Primary - Hostinger)
+  # Requires secret: COOLIFY_WEBHOOK_URL
+  # Coolify pulls the repo and builds the Dockerfile automatically.
+  # ===========================================================================
+  deploy-coolify:
+    name: Deploy to Coolify
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production'
+    environment:
+      name: production
+
+    steps:
+      - name: Trigger Coolify deployment
+        id: coolify
+        run: |
+          if [ -z "${{ secrets.COOLIFY_WEBHOOK_URL }}" ]; then
+            echo "COOLIFY_WEBHOOK_URL not configured, skipping"
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${{ secrets.COOLIFY_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            --max-time 30)
+          if [ "$response" -ge 200 ] && [ "$response" -lt 300 ]; then
+            echo "Coolify deployment triggered successfully (HTTP $response)"
+            echo "skipped=false" >> $GITHUB_OUTPUT
+          else
+            echo "Coolify deployment failed (HTTP $response)"
+            exit 1
+          fi
+        continue-on-error: true
+
+      - name: Deployment summary
+        run: |
+          echo "## Coolify Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.coolify.outputs.skipped }}" = "true" ]; then
+            echo "- **Status:** Skipped (webhook not configured)" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.coolify.outcome }}" = "success" ]; then
+            echo "- **Status:** Triggered successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ===========================================================================
+  # Deploy to Vercel (Fallback / Staging)
+  # ===========================================================================
+  deploy-staging:
+    name: Deploy to Staging (Vercel)
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'staging'
     environment:
       name: staging
       url: ${{ steps.deploy.outputs.url }}
@@ -48,15 +98,10 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          VITE_GOOGLE_API_KEY: ${{ secrets.VITE_GOOGLE_API_KEY }}
+          VITE_N8N_WEBHOOK_URL: ${{ secrets.VITE_N8N_WEBHOOK_URL }}
           VITE_APP_VERSION: ${{ github.sha }}
 
-      # ============================================
-      # Deploy a Vercel (Staging - Preview)
-      # Requiere configurar los secrets:
-      # - VERCEL_TOKEN
-      # - VERCEL_ORG_ID
-      # - VERCEL_PROJECT_ID
-      # ============================================
       - name: Deploy to Vercel (Preview)
         id: deploy
         uses: amondnet/vercel-action@v25
@@ -67,7 +112,6 @@ jobs:
           working-directory: ./
         continue-on-error: true
 
-      # Fallback: Upload artifacts si Vercel no está configurado
       - name: Upload deployment artifacts (fallback)
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'skipped'
         uses: actions/upload-artifact@v4
@@ -78,69 +122,7 @@ jobs:
 
       - name: Deployment summary
         run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Staging Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment:** Staging" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build artifacts:** Available for 30 days" >> $GITHUB_STEP_SUMMARY
-
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    if: github.event.inputs.environment == 'production'
-    environment:
-      name: production
-      url: ${{ steps.deploy.outputs.url }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm run test:run
-
-      - name: Build for production
-        run: npm run build
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
-          VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          VITE_APP_VERSION: ${{ github.sha }}
-
-      # Deploy a Vercel (Production)
-      - name: Deploy to Vercel (Production)
-        id: deploy
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod'
-          working-directory: ./
-        continue-on-error: true
-
-      # Fallback: Upload artifacts si Vercel no está configurado
-      - name: Upload production artifacts (fallback)
-        if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'skipped'
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-build-${{ github.sha }}
-          path: dist/
-          retention-days: 90
-
-      - name: Deployment summary
-        run: |
-          echo "## Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
