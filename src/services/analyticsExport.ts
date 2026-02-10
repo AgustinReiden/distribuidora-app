@@ -44,6 +44,8 @@ export async function fetchVentasDetallado(
       estado_pago,
       forma_pago,
       total,
+      usuario_id,
+      transportista_id,
       cliente:clientes(id, nombre_fantasia, razon_social, zona, cuit),
       items:pedido_items(
         id,
@@ -51,9 +53,7 @@ export async function fetchVentasDetallado(
         precio_unitario,
         subtotal,
         producto:productos(id, nombre, codigo, categoria, costo_con_iva)
-      ),
-      preventista:perfiles!pedidos_preventista_id_fkey(id, nombre),
-      transportista:perfiles!pedidos_transportista_id_fkey(id, nombre)
+      )
     `)
     .gte('created_at', `${desde}T00:00:00`)
     .lte('created_at', `${hasta}T23:59:59`)
@@ -62,12 +62,28 @@ export async function fetchVentasDetallado(
 
   if (error) throw new Error(`Error cargando ventas: ${error.message}`)
 
+  // Fetch perfiles separately (FK join pedidos->perfiles doesn't work reliably)
+  const perfilIds = new Set<string>()
+  for (const p of pedidos || []) {
+    if (p.usuario_id) perfilIds.add(p.usuario_id as string)
+    if (p.transportista_id) perfilIds.add(p.transportista_id as string)
+  }
+
+  let perfilesMap: Record<string, string> = {}
+  if (perfilIds.size > 0) {
+    const { data: perfiles } = await supabase
+      .from('perfiles')
+      .select('id, nombre')
+      .in('id', Array.from(perfilIds))
+    if (perfiles) {
+      perfilesMap = Object.fromEntries(perfiles.map(p => [p.id, p.nombre]))
+    }
+  }
+
   const rows: Record<string, unknown>[] = []
 
   for (const p of pedidos || []) {
     const cliente = p.cliente as unknown as Record<string, unknown> | null
-    const preventista = p.preventista as unknown as Record<string, unknown> | null
-    const transportista = p.transportista as unknown as Record<string, unknown> | null
     const items = (p.items || []) as Array<Record<string, unknown>>
 
     for (const item of items) {
@@ -107,8 +123,8 @@ export async function fetchVentasDetallado(
         estado_pedido: p.estado,
         estado_pago: safe(p.estado_pago),
         forma_pago: safe(p.forma_pago),
-        preventista: safe(preventista?.nombre, 'N/A'),
-        transportista: safe(transportista?.nombre, 'Sin asignar'),
+        preventista: perfilesMap[p.usuario_id as string] || 'N/A',
+        transportista: perfilesMap[p.transportista_id as string] || 'Sin asignar',
       })
     }
   }
