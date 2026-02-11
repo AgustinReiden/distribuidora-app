@@ -7,6 +7,9 @@ import { test, expect } from '@playwright/test'
 test.describe('Accesibilidad', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
+    await page.waitForLoadState('networkidle')
+    // Wait for the React app to render (login form appears after auth check)
+    await page.waitForSelector('form', { timeout: 15000 })
   })
 
   test('la página debe tener un título', async ({ page }) => {
@@ -24,17 +27,13 @@ test.describe('Accesibilidad', () => {
   })
 
   test('los botones deben ser focuseables con teclado', async ({ page }) => {
-    // Buscar todos los botones visibles
-    const buttons = page.getByRole('button')
-    const count = await buttons.count()
+    // Buscar el botón de login (submit button inside the rendered form)
+    const loginButton = page.getByRole('button', { name: /ingresar/i })
+    await expect(loginButton).toBeVisible()
 
-    // Verificar que al menos hay un botón
-    expect(count).toBeGreaterThan(0)
-
-    // Verificar que el primer botón es focuseable
-    const firstButton = buttons.first()
-    await firstButton.focus()
-    await expect(firstButton).toBeFocused()
+    // Verificar que el botón es focuseable
+    await loginButton.focus()
+    await expect(loginButton).toBeFocused()
   })
 
   test('los inputs deben tener labels asociados', async ({ page }) => {
@@ -60,13 +59,12 @@ test.describe('Accesibilidad', () => {
   })
 
   test('no debe haber errores de contraste obvios', async ({ page }) => {
-    // Este es un test básico - verificar que el texto principal es visible
-    // Para tests completos de contraste, usar herramientas como axe-core
-    const bodyText = page.locator('body')
-    await expect(bodyText).toBeVisible()
+    // Verify the app has rendered visible content
+    const heading = page.getByRole('heading', { name: /distribuidora/i })
+    await expect(heading).toBeVisible()
 
     // Verificar que hay texto legible (no todo transparente o muy pequeño)
-    const fontSize = await bodyText.evaluate(el => {
+    const fontSize = await heading.evaluate(el => {
       return window.getComputedStyle(el).fontSize
     })
     const fontSizeNum = parseFloat(fontSize)
