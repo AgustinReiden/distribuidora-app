@@ -39,6 +39,7 @@ export interface ProductoDB {
   stock: number;
   stock_minimo?: number;
   categoria?: string | null;
+  proveedor_id?: string | null;
   costo_sin_iva?: number | null;
   costo_con_iva?: number | null;
   impuestos_internos?: number | null;
@@ -194,6 +195,7 @@ export interface ProductoFormInput {
   stock: number;
   stock_minimo?: number;
   categoria?: string;
+  proveedor_id?: string | null;
   costo_sin_iva?: number | string;
   costo_con_iva?: number | string;
   impuestos_internos?: number | string;

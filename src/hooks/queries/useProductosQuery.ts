@@ -60,6 +60,7 @@ async function createProducto(producto: ProductoFormInput): Promise<ProductoDB> 
       stock: producto.stock,
       stock_minimo: producto.stock_minimo ?? 10,
       categoria: producto.categoria || null,
+      proveedor_id: producto.proveedor_id || null,
       costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
       impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
@@ -80,6 +81,7 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.stock !== undefined) updateData.stock = producto.stock
   if (producto.stock_minimo !== undefined) updateData.stock_minimo = producto.stock_minimo
   if (producto.categoria !== undefined) updateData.categoria = producto.categoria || null
+  if (producto.proveedor_id !== undefined) updateData.proveedor_id = producto.proveedor_id || null
   if (producto.costo_sin_iva !== undefined) updateData.costo_sin_iva = producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null
   if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
   if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null

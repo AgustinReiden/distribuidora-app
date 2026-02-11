@@ -13,6 +13,7 @@ import {
   useEliminarProductoMutation
 } from '../../hooks/queries'
 import { useMermasQuery, useRegistrarMermaMutation } from '../../hooks/queries'
+import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended } from '../../types'
@@ -39,6 +40,7 @@ export default function ProductosContainer(): React.ReactElement {
   // Queries
   const { data: productos = [], isLoading } = useProductosQuery()
   const { data: mermas = [] } = useMermasQuery()
+  const { data: proveedores = [] } = useProveedoresActivosQuery()
 
   // Mutations
   const crearProducto = useCrearProductoMutation()
@@ -151,6 +153,7 @@ export default function ProductosContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaProductos
           productos={productos}
+          proveedores={proveedores}
           loading={isLoading}
           isAdmin={isAdmin}
           onNuevoProducto={handleNuevoProducto}
@@ -168,6 +171,7 @@ export default function ProductosContainer(): React.ReactElement {
           <ModalProducto
             producto={productoEditando}
             categorias={categorias}
+            proveedores={proveedores}
             onSave={handleGuardarProducto as Parameters<typeof ModalProducto>[0]['onSave']}
             onClose={() => {
               setModalProductoOpen(false)
