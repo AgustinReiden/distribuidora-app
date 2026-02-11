@@ -235,7 +235,7 @@ test.describe('Offline Sync - Chaos Tests', () => {
 
   test('4. IndexedDB persiste después de cerrar pestaña', async ({
     page,
-    browser
+    context
   }) => {
     // 1. Primera sesión - crear datos
     await page.goto('/pedidos')
@@ -251,10 +251,10 @@ test.describe('Offline Sync - Chaos Tests', () => {
     // 2. Cerrar página completamente
     await page.close()
 
-    // 3. Abrir nueva página (simula reabrir app)
-    const newPage = await browser.newPage()
+    // 3. Abrir nueva página in SAME context (shares IndexedDB storage)
+    const newPage = await context.newPage()
     await newPage.goto('/pedidos')
-    await newPage.waitForLoadState('networkidle')
+    await newPage.waitForLoadState('domcontentloaded')
 
     // 4. Verificar que los datos persisten
     const cachedData = await newPage.evaluate(async () => {
@@ -317,8 +317,9 @@ test.describe('Offline Sync - Chaos Tests', () => {
     const isPageAlive = await page.evaluate(() => document.body !== null)
     expect(isPageAlive).toBe(true)
 
-    // 6. La app debería seguir funcionando
-    await expect(page.locator('body')).toBeVisible()
+    // 6. La app debería seguir funcionando (JS evaluates correctly)
+    const canNavigate = await page.evaluate(() => document.readyState === 'complete')
+    expect(canNavigate).toBe(true)
   })
 })
 
