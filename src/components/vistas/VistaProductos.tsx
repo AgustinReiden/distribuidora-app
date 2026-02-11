@@ -3,7 +3,7 @@ import type { ChangeEvent } from 'react';
 import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
-import type { ProductoDB } from '../../types';
+import type { ProductoDB, ProveedorDBExtended } from '../../types';
 
 // =============================================================================
 // INTERFACES DE PROPS
@@ -11,6 +11,7 @@ import type { ProductoDB } from '../../types';
 
 export interface VistaProductosProps {
   productos: ProductoDB[];
+  proveedores?: ProveedorDBExtended[];
   loading: boolean;
   isAdmin: boolean;
   onNuevoProducto: () => void;
@@ -23,6 +24,7 @@ export interface VistaProductosProps {
 
 export default function VistaProductos({
   productos,
+  proveedores = [],
   loading,
   isAdmin,
   onNuevoProducto,
@@ -61,6 +63,11 @@ export default function VistaProductos({
       return matchBusqueda && matchCategoria && matchStockBajo;
     });
   }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo]);
+
+  // Mapa de proveedores para lookup rápido
+  const proveedoresMap = useMemo(() => {
+    return new Map(proveedores.map(p => [p.id, p.nombre]))
+  }, [proveedores])
 
   const getStockColor = (producto: ProductoDB): string => {
     const stockMinimo = producto.stock_minimo || 10;
@@ -195,6 +202,7 @@ export default function VistaProductos({
                 <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Código</th>
                 <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Producto</th>
                 <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Categoría</th>
+                <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Proveedor</th>
                 <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Precio</th>
                 <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Stock</th>
                 {isAdmin && <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Acciones</th>}
@@ -213,6 +221,9 @@ export default function VistaProductos({
                     <span className={producto.categoria ? 'px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}>
                       {producto.categoria || 'Sin categoría'}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                    {producto.proveedor_id ? (proveedoresMap.get(producto.proveedor_id) || '-') : '-'}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-blue-600 dark:text-blue-400">
                     {formatPrecio(producto.precio)}

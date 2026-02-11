@@ -5,7 +5,7 @@ import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProductoSchema } from '../../lib/schemas';
 import { calcularTotalConIva } from '../../utils/calculations';
-import type { ProductoDB } from '../../types';
+import type { ProductoDB, ProveedorDBExtended } from '../../types';
 
 // =============================================================================
 // TYPES
@@ -17,6 +17,7 @@ export interface ProductoFormData {
   nombre: string;
   codigo: string;
   categoria: string;
+  proveedor_id: string;
   stock: number | string;
   stock_minimo: number;
   porcentaje_iva: number;
@@ -48,6 +49,8 @@ export interface ModalProductoProps {
   producto: ProductoDB | null;
   /** Categorías disponibles (can be strings or objects) */
   categorias: string[] | CategoriaOption[];
+  /** Proveedores disponibles para el desplegable */
+  proveedores?: ProveedorDBExtended[];
   /** Callback al guardar */
   onSave: (data: ProductoFormData) => void | Promise<void>;
   /** Callback al cerrar */
@@ -73,7 +76,7 @@ const getCategoryKey = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : (cat.id || cat.nombre);
 };
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave, onClose, guardando }: ModalProductoProps) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -83,6 +86,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
     nombre: producto.nombre || '',
     codigo: producto.codigo || '',
     categoria: producto.categoria || '',
+    proveedor_id: producto.proveedor_id || '',
     stock: producto.stock ?? '',
     stock_minimo: producto.stock_minimo ?? 10,
     porcentaje_iva: 21,
@@ -95,6 +99,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
     nombre: '',
     codigo: '',
     categoria: '',
+    proveedor_id: '',
     stock: '',
     stock_minimo: 10,
     porcentaje_iva: 21,
@@ -254,6 +259,23 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, onSave
             </select>
           )}
         </div>
+
+        {/* Proveedor */}
+        {proveedores.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Proveedor</label>
+            <select
+              value={form.proveedor_id || ''}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, proveedor_id: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg"
+            >
+              <option value="">Sin proveedor</option>
+              {proveedores.map(prov => (
+                <option key={prov.id} value={prov.id}>{prov.nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Seccion de IVA */}
         <div className="border-t pt-4">
