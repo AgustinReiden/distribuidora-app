@@ -26,6 +26,7 @@ export interface ClienteDB {
   limite_credito?: number;
   dias_credito?: number;
   saldo_cuenta?: number;
+  preventista_id?: string | null;
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -186,6 +187,7 @@ export interface ClienteFormInput {
   notas?: string;
   limiteCredito?: string | number;
   diasCredito?: string | number;
+  preventistaId?: string | null;
 }
 
 export interface ProductoFormInput {
@@ -711,6 +713,7 @@ export interface CompraItemDBExtended {
   cantidad: number;
   costo_unitario: number;
   subtotal?: number;
+  bonificacion?: number;
 }
 
 export interface CompraDBExtended {
@@ -750,6 +753,7 @@ export interface CompraFormInputExtended {
     cantidad: number;
     costoUnitario?: number;
     subtotal?: number;
+    bonificacion?: number;
   }>;
 }
 

@@ -75,6 +75,7 @@ const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos')
 const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'));
 const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'));
 const AnalyticsContainer = lazy(() => import('./components/containers/AnalyticsContainer'));
+const RecorridoPreventistaContainer = lazy(() => import('./components/containers/RecorridoPreventistaContainer'));
 
 function LoadingVista(): ReactElement {
   return (
@@ -343,6 +344,11 @@ function MainApp(): ReactElement {
                       onFechaChange={async (fecha: string) => { setFechaRecorridos(fecha); const hoy = new Date().toISOString().split('T')[0]; if (fecha === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fecha); }}
                     />
                   ) : <Navigate to="/pedidos" replace />
+                } />
+
+                {/* Recorrido Preventista - solo admin */}
+                <Route path="/recorrido-preventista" element={
+                  isAdmin ? <RecorridoPreventistaContainer /> : <Navigate to="/pedidos" replace />
                 } />
 
                 {/* Compras - usa container con TanStack Query */}

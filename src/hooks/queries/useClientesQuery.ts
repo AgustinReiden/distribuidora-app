@@ -78,6 +78,7 @@ interface ClienteCreateInput {
   horarios_atencion?: string
   rubro?: string
   notas?: string
+  preventista_id?: string | null
 }
 
 // Mutation functions
@@ -99,6 +100,7 @@ async function createCliente(cliente: ClienteCreateInput): Promise<ClienteDB> {
       horarios_atencion: cliente.horarios_atencion || null,
       rubro: cliente.rubro || null,
       notas: cliente.notas || null,
+      preventista_id: cliente.preventista_id || null,
       activo: true
     }])
     .select()

@@ -30,6 +30,7 @@ interface CompraItem {
   producto_id: string;
   producto?: Producto;
   cantidad: number;
+  bonificacion?: number;
   costo_unitario: number;
   subtotal?: number;
   stock_anterior?: number;
@@ -68,7 +69,7 @@ export default function ModalDetalleCompra({
   if (!compra) return null
 
   const estado = ESTADOS_COMPRA[compra.estado] || ESTADOS_COMPRA.pendiente
-  const totalUnidades = (compra.items || []).reduce((sum, i) => sum + i.cantidad, 0)
+  const totalUnidades = (compra.items || []).reduce((sum, i) => sum + i.cantidad + (i.bonificacion || 0), 0)
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -170,6 +171,7 @@ export default function ModalDetalleCompra({
                   <tr>
                     <th className="text-left px-4 py-2 text-gray-600 dark:text-gray-400">Producto</th>
                     <th className="text-center px-4 py-2 text-gray-600 dark:text-gray-400">Cantidad</th>
+                    <th className="text-center px-4 py-2 text-gray-600 dark:text-gray-400">Bonif.</th>
                     <th className="text-right px-4 py-2 text-gray-600 dark:text-gray-400">Costo Unit.</th>
                     <th className="text-right px-4 py-2 text-gray-600 dark:text-gray-400">Subtotal</th>
                   </tr>
@@ -188,6 +190,9 @@ export default function ModalDetalleCompra({
                       </td>
                       <td className="px-4 py-3 text-center text-gray-800 dark:text-white">
                         {item.cantidad}
+                      </td>
+                      <td className="px-4 py-3 text-center text-gray-800 dark:text-white">
+                        {item.bonificacion || 0}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-800 dark:text-white">
                         {formatPrecio(item.costo_unitario)}

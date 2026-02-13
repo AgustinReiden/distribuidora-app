@@ -9,12 +9,14 @@ import {
   useComprasQuery,
   useProveedoresQuery,
   useRegistrarCompraMutation,
-  useAnularCompraMutation
+  useAnularCompraMutation,
+  useProductosQuery,
+  useCrearProductoMutation,
+  useCrearProveedorMutation
 } from '../../hooks/queries'
-import { useProductosQuery } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import type { CompraDBExtended, CompraFormInputExtended } from '../../types'
+import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
 
 // Lazy load de componentes
 const VistaCompras = lazy(() => import('../vistas/VistaCompras'))
@@ -41,6 +43,8 @@ export default function ComprasContainer(): React.ReactElement {
   // Mutations
   const registrarCompra = useRegistrarCompraMutation()
   const anularCompra = useAnularCompraMutation()
+  const crearProducto = useCrearProductoMutation()
+  const crearProveedor = useCrearProveedorMutation()
 
   // Estado de modales
   const [modalCompraOpen, setModalCompraOpen] = useState(false)
@@ -81,6 +85,24 @@ export default function ComprasContainer(): React.ReactElement {
     }
   }, [registrarCompra, notify])
 
+  const handleCrearProductoRapido = useCallback(async (data: { nombre: string; codigo: string; costoSinIva: number }) => {
+    const producto = await crearProducto.mutateAsync({
+      nombre: data.nombre,
+      codigo: data.codigo || undefined,
+      precio: data.costoSinIva * 1.21,
+      stock: 0,
+      costo_sin_iva: data.costoSinIva
+    })
+    notify.success(`Producto "${data.nombre}" creado`)
+    return producto
+  }, [crearProducto, notify])
+
+  const handleCrearProveedorDesdeCompra = useCallback(async (data: ProveedorFormInputExtended) => {
+    const proveedor = await crearProveedor.mutateAsync(data)
+    notify.success(`Proveedor "${data.nombre}" creado`)
+    return proveedor
+  }, [crearProveedor, notify])
+
   return (
     <>
       <Suspense fallback={<LoadingState />}>
@@ -103,6 +125,8 @@ export default function ComprasContainer(): React.ReactElement {
             proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
             onSave={handleGuardarCompra as unknown as Parameters<typeof ModalCompra>[0]['onSave']}
             onClose={() => setModalCompraOpen(false)}
+            onCrearProductoRapido={handleCrearProductoRapido}
+            onCrearProveedor={handleCrearProveedorDesdeCompra as unknown as Parameters<typeof ModalCompra>[0]['onCrearProveedor']}
           />
         </Suspense>
       )}

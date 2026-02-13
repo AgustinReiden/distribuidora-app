@@ -879,7 +879,8 @@ export const modalCompraSchema = z.object({
   items: z.array(z.object({
     productoId: z.string(),
     cantidad: z.number().positive({ message: 'La cantidad debe ser mayor a 0' }),
-    costoUnitario: z.number().nonnegative()
+    costoUnitario: z.number().nonnegative(),
+    bonificacion: z.number().int().nonnegative().default(0)
   })).min(1, { message: 'Debe agregar al menos un producto' })
 }).refine(
   (data) => {

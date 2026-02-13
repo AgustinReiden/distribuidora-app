@@ -1,9 +1,10 @@
 import { useState, memo, useRef } from 'react';
-import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, MapPinned } from 'lucide-react';
+import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, MapPinned, Users } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
+import { usePreventistasQuery } from '../../hooks/queries';
 import {
   formatCuitInput,
   formatDniInput,
@@ -33,6 +34,7 @@ export interface ClienteFormData {
   notas: string;
   limiteCredito: number;
   diasCredito: number;
+  preventista_id: string;
 }
 
 /** Datos para guardar cliente */
@@ -96,6 +98,7 @@ const RUBROS_OPCIONES = [
 const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }: ModalClienteProps) {
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
+  const { data: preventistas = [] } = usePreventistasQuery();
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -126,7 +129,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     rubro: cliente.rubro || '',
     notas: cliente.notas || '',
     limiteCredito: cliente.limite_credito || 0,
-    diasCredito: cliente.dias_credito || 30
+    diasCredito: cliente.dias_credito || 30,
+    preventista_id: cliente.preventista_id || ''
   } : {
     tipo_documento: 'CUIT',
     numero_documento: '',
@@ -142,7 +146,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     rubro: '',
     notas: '',
     limiteCredito: 0,
-    diasCredito: 30
+    diasCredito: 30,
+    preventista_id: ''
   });
 
   const handleAddressSelect = (result: AddressSelectResult): void => {
@@ -401,6 +406,26 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             </select>
           </div>
         </div>
+
+        {/* Preventista asignado */}
+        {isAdmin && preventistas.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+              <Users className="w-4 h-4" />
+              Preventista asignado
+            </label>
+            <select
+              value={form.preventista_id}
+              onChange={e => handleFieldChange('preventista_id', e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Sin asignar</option>
+              {preventistas.map(p => (
+                <option key={p.id} value={p.id}>{p.nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Horarios de Atención */}
         <div>
