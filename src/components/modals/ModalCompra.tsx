@@ -4,13 +4,16 @@
  * Refactorizado con useReducer para mejor gestión de estado
  * Validación con Zod
  */
-import React, { useReducer, useMemo, useCallback } from 'react'
+import React, { useReducer, useMemo, useCallback, useState, lazy, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search } from 'lucide-react'
+import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2 } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalCompraSchema } from '../../lib/schemas'
-import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended } from '../../types'
+import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
+
+const ModalProveedor = lazy(() => import('./ModalProveedor'))
+const ModalImportarCompra = lazy(() => import('./ModalImportarCompra'))
 
 // =============================================================================
 // TIPOS
@@ -22,6 +25,7 @@ export interface CompraItemForm {
   productoNombre: string;
   productoCodigo?: string | null;
   cantidad: number;
+  bonificacion: number;
   costoUnitario: number;
   impuestosInternos: number;
   porcentajeIva: number;
@@ -40,6 +44,7 @@ export interface CompraState {
   items: CompraItemForm[];
   busquedaProducto: string;
   mostrarBuscador: boolean;
+  modoItemRapido: boolean;
   guardando: boolean;
   error: string;
 }
@@ -60,7 +65,10 @@ type CompraActionType =
   | { type: 'AGREGAR_ITEM'; payload: ProductoDB & { porcentaje_iva?: number } }
   | { type: 'ACTUALIZAR_ITEM'; payload: { index: number; campo: keyof CompraItemForm; valor: number | string } }
   | { type: 'ELIMINAR_ITEM'; payload: number }
-  | { type: 'LIMPIAR_BUSQUEDA' };
+  | { type: 'LIMPIAR_BUSQUEDA' }
+  | { type: 'SET_MODO_ITEM_RAPIDO'; payload: boolean }
+  | { type: 'AGREGAR_ITEM_RAPIDO'; payload: { productoId: string; nombre: string; codigo: string; costoUnitario: number } }
+  | { type: 'IMPORTAR_ITEMS'; payload: CompraItemForm[] };
 
 /** Props del componente principal */
 export interface ModalCompraProps {
@@ -68,7 +76,8 @@ export interface ModalCompraProps {
   proveedores: ProveedorDBExtended[];
   onSave: (compra: CompraFormInputExtended) => Promise<void>;
   onClose: () => void;
-  onAgregarProveedor?: (proveedor: ProveedorDBExtended) => Promise<void>;
+  onCrearProductoRapido?: (data: { nombre: string; codigo: string; costoSinIva: number }) => Promise<ProductoDB>;
+  onCrearProveedor?: (data: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
 }
 
 /** Props de ProveedorSection */
@@ -76,6 +85,7 @@ interface ProveedorSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   proveedores: ProveedorDBExtended[];
+  onAgregarProveedor?: () => void;
 }
 
 /** Props de DatosCompraSection */
@@ -92,6 +102,8 @@ interface ProductosSectionProps {
   onAgregarItem: (producto: ProductoDB) => void;
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
   onEliminarItem: (index: number) => void;
+  onCrearProductoRapido?: (data: { nombre: string; codigo: string; costoSinIva: number }) => Promise<ProductoDB>;
+  onImportarExcel?: () => void;
 }
 
 /** Props de ItemsList */
@@ -150,6 +162,7 @@ const initialState: CompraState = {
   // UI
   busquedaProducto: '',
   mostrarBuscador: false,
+  modoItemRapido: false,
   guardando: false,
   error: ''
 }
@@ -204,6 +217,7 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
           productoNombre: producto.nombre,
           productoCodigo: producto.codigo,
           cantidad: 1,
+          bonificacion: 0,
           costoUnitario: producto.costo_sin_iva || 0,
           impuestosInternos: producto.impuestos_internos || 0,
           porcentajeIva: producto.porcentaje_iva ?? 21,
@@ -232,6 +246,36 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
 
     case 'LIMPIAR_BUSQUEDA':
       return { ...state, busquedaProducto: '', mostrarBuscador: false }
+
+    case 'SET_MODO_ITEM_RAPIDO':
+      return { ...state, modoItemRapido: action.payload }
+
+    case 'AGREGAR_ITEM_RAPIDO': {
+      const { productoId, nombre, codigo, costoUnitario } = action.payload
+      return {
+        ...state,
+        items: [...state.items, {
+          productoId,
+          productoNombre: nombre,
+          productoCodigo: codigo,
+          cantidad: 1,
+          bonificacion: 0,
+          costoUnitario,
+          impuestosInternos: 0,
+          porcentajeIva: 21,
+          stockActual: 0
+        }],
+        modoItemRapido: false,
+        busquedaProducto: '',
+        mostrarBuscador: false
+      }
+    }
+
+    case 'IMPORTAR_ITEMS':
+      return {
+        ...state,
+        items: [...state.items, ...action.payload]
+      }
 
     default:
       return state
@@ -263,8 +307,10 @@ function useCalculosImpuestos(items: CompraItemForm[]): CalculosImpuestos {
   return { subtotal, iva, impuestosInternos, total }
 }
 
-export default function ModalCompra({ productos, proveedores, onSave, onClose, onAgregarProveedor: _onAgregarProveedor }: ModalCompraProps) {
+export default function ModalCompra({ productos, proveedores, onSave, onClose, onCrearProductoRapido, onCrearProveedor }: ModalCompraProps) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
+  const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
+  const [modalImportarOpen, setModalImportarOpen] = useState(false)
   const { subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
 
   // Zod validation
@@ -307,7 +353,8 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
       items: state.items.map(item => ({
         productoId: item.productoId,
         cantidad: item.cantidad,
-        costoUnitario: item.costoUnitario
+        costoUnitario: item.costoUnitario,
+        bonificacion: item.bonificacion || 0
       }))
     }
 
@@ -336,7 +383,8 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
           productoId: item.productoId,
           cantidad: item.cantidad,
           costoUnitario: item.costoUnitario || 0,
-          subtotal: item.cantidad * item.costoUnitario
+          subtotal: item.cantidad * item.costoUnitario,
+          bonificacion: item.bonificacion || 0
         }))
       })
       onClose()
@@ -374,6 +422,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             state={state}
             dispatch={dispatch}
             proveedores={proveedores}
+            onAgregarProveedor={onCrearProveedor ? () => setModalProveedorOpen(true) : undefined}
           />
 
           {/* Datos de la compra */}
@@ -387,6 +436,8 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             onAgregarItem={handleAgregarItem}
             onActualizarItem={handleActualizarItem}
             onEliminarItem={handleEliminarItem}
+            onCrearProductoRapido={onCrearProductoRapido}
+            onImportarExcel={() => setModalImportarOpen(true)}
           />
 
           {/* Totales */}
@@ -450,13 +501,53 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
           </button>
         </div>
       </div>
+
+      {/* Modal Proveedor anidado */}
+      {modalProveedorOpen && onCrearProveedor && (
+        <Suspense fallback={null}>
+          <ModalProveedor
+            onSave={async (data) => {
+              const nuevoProveedor = await onCrearProveedor({
+                nombre: data.nombre,
+                cuit: data.cuit || null,
+                direccion: data.direccion || null,
+                latitud: data.latitud || null,
+                longitud: data.longitud || null,
+                telefono: data.telefono || null,
+                email: data.email || null,
+                contacto: data.contacto || null,
+                notas: data.notas || null,
+                activo: true
+              })
+              dispatch({ type: 'SET_PROVEEDOR_ID', payload: nuevoProveedor.id })
+              dispatch({ type: 'SET_USAR_PROVEEDOR_NUEVO', payload: false })
+              setModalProveedorOpen(false)
+            }}
+            onClose={() => setModalProveedorOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Importar Excel */}
+      {modalImportarOpen && (
+        <Suspense fallback={null}>
+          <ModalImportarCompra
+            productos={productos}
+            onImportar={(items) => {
+              dispatch({ type: 'IMPORTAR_ITEMS', payload: items })
+              setModalImportarOpen(false)
+            }}
+            onClose={() => setModalImportarOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }
 
 // Subcomponentes para mejor organización
 
-function ProveedorSection({ state, dispatch, proveedores }: ProveedorSectionProps) {
+function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: ProveedorSectionProps) {
   return (
     <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 space-y-3">
       <div className="flex items-center gap-2 mb-2">
@@ -464,47 +555,28 @@ function ProveedorSection({ state, dispatch, proveedores }: ProveedorSectionProp
         <h3 className="font-medium text-gray-800 dark:text-white">Proveedor</h3>
       </div>
 
-      <div className="flex items-center gap-4 mb-2">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="radio"
-            checked={!state.usarProveedorNuevo}
-            onChange={() => dispatch({ type: 'SET_USAR_PROVEEDOR_NUEVO', payload: false })}
-            className="text-green-600"
-          />
-          <span className="text-sm">Seleccionar existente</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="radio"
-            checked={state.usarProveedorNuevo}
-            onChange={() => dispatch({ type: 'SET_USAR_PROVEEDOR_NUEVO', payload: true })}
-            className="text-green-600"
-          />
-          <span className="text-sm">Ingresar nombre</span>
-        </label>
-      </div>
-
-      {!state.usarProveedorNuevo ? (
+      <div className="flex items-center gap-2">
         <select
           value={state.proveedorId}
           onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_PROVEEDOR_ID', payload: e.target.value })}
-          className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
         >
           <option value="">Seleccionar proveedor...</option>
           {proveedores.map(p => (
             <option key={p.id} value={p.id}>{p.nombre} {p.cuit ? `(${p.cuit})` : ''}</option>
           ))}
         </select>
-      ) : (
-        <input
-          type="text"
-          value={state.proveedorNombre}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_PROVEEDOR_NOMBRE', payload: e.target.value })}
-          placeholder="Nombre del proveedor"
-          className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
-        />
-      )}
+        {onAgregarProveedor && (
+          <button
+            type="button"
+            onClick={onAgregarProveedor}
+            className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            title="Agregar proveedor"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -554,7 +626,33 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, onActualizarItem, onEliminarItem }: ProductosSectionProps) {
+function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, onActualizarItem, onEliminarItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
+  const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
+  const [creandoItem, setCreandoItem] = useState(false)
+
+  const handleCrearProductoRapido = async () => {
+    if (!onCrearProductoRapido || !itemRapido.nombre.trim()) return
+    setCreandoItem(true)
+    try {
+      const producto = await onCrearProductoRapido({
+        nombre: itemRapido.nombre,
+        codigo: itemRapido.codigo,
+        costoSinIva: itemRapido.costo
+      })
+      dispatch({ type: 'AGREGAR_ITEM_RAPIDO', payload: {
+        productoId: producto.id,
+        nombre: producto.nombre,
+        codigo: producto.codigo || '',
+        costoUnitario: producto.costo_sin_iva || itemRapido.costo
+      }})
+      setItemRapido({ nombre: '', codigo: '', costo: 0 })
+    } catch {
+      // Error handled by container
+    } finally {
+      setCreandoItem(false)
+    }
+  }
+
   return (
     <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -562,6 +660,16 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
           <Package className="w-5 h-5 text-gray-500" />
           <h3 className="font-medium text-gray-800 dark:text-white">Productos</h3>
         </div>
+        {onImportarExcel && (
+          <button
+            type="button"
+            onClick={onImportarExcel}
+            className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          >
+            <FileText className="w-4 h-4" />
+            Importar Excel
+          </button>
+        )}
       </div>
 
       {/* Buscador de productos */}
@@ -602,7 +710,22 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
                 </button>
               ))
             ) : (
-              <p className="px-4 py-2 text-sm text-gray-500">No se encontraron productos</p>
+              <div className="px-4 py-2">
+                <p className="text-sm text-gray-500">No se encontraron productos</p>
+                {onCrearProductoRapido && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dispatch({ type: 'SET_MODO_ITEM_RAPIDO', payload: true })
+                      dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })
+                      setItemRapido(prev => ({ ...prev, nombre: state.busquedaProducto }))
+                    }}
+                    className="mt-1 text-green-600 hover:underline text-sm flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /> Crear producto rapido
+                  </button>
+                )}
+              </div>
             )}
             <button
               type="button"
@@ -614,6 +737,68 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
           </div>
         )}
       </div>
+
+      {/* Formulario de item rapido */}
+      {state.modoItemRapido && onCrearProductoRapido && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-blue-800 dark:text-blue-300">Crear producto rapido</p>
+            <button
+              type="button"
+              onClick={() => dispatch({ type: 'SET_MODO_ITEM_RAPIDO', payload: false })}
+              className="text-blue-400 hover:text-blue-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Nombre *</label>
+              <input
+                type="text"
+                value={itemRapido.nombre}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, nombre: e.target.value }))}
+                placeholder="Nombre del producto"
+                className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Codigo</label>
+              <input
+                type="text"
+                value={itemRapido.codigo}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, codigo: e.target.value }))}
+                placeholder="Codigo"
+                className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Costo neto</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={itemRapido.costo || ''}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, costo: parseFloat(e.target.value) || 0 }))}
+                placeholder="0.00"
+                className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleCrearProductoRapido}
+            disabled={!itemRapido.nombre.trim() || creandoItem}
+            className="w-full px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-blue-400 text-sm flex items-center justify-center gap-1"
+          >
+            {creandoItem ? (
+              <><Loader2 className="w-3 h-3 animate-spin" /> Creando...</>
+            ) : (
+              <><Plus className="w-3 h-3" /> Crear y Agregar</>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Lista de items */}
       {state.items.length > 0 ? (
@@ -634,8 +819,9 @@ function ItemsList({ items, onActualizarItem, onEliminarItem }: ItemsListProps) 
     <div className="space-y-2">
       {/* Header solo en desktop */}
       <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
-        <div className="col-span-4">Producto</div>
+        <div className="col-span-3">Producto</div>
         <div className="col-span-2 text-center">Cant.</div>
+        <div className="col-span-1 text-center">Bonif.</div>
         <div className="col-span-2 text-center">Neto</div>
         <div className="col-span-2 text-center">Imp.Int.</div>
         <div className="col-span-1 text-right">Subtot.</div>
@@ -672,7 +858,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Cant.</label>
             <input
@@ -680,6 +866,16 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
               min="1"
               value={item.cantidad}
               onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+              className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Bonif.</label>
+            <input
+              type="number"
+              min="0"
+              value={item.bonificacion}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseInt(e.target.value) || 0)}
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -714,7 +910,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
 
       {/* Desktop: Layout en grid */}
       <div className="hidden md:grid grid-cols-12 gap-2 items-center">
-        <div className="col-span-4">
+        <div className="col-span-3">
           <p className="font-medium text-gray-800 dark:text-white text-sm">{item.productoNombre}</p>
           <p className="text-xs text-gray-500">Stock: {item.stockActual} | IVA: {item.porcentajeIva}%</p>
         </div>
@@ -724,6 +920,15 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             min="1"
             value={item.cantidad}
             onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+            className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+          />
+        </div>
+        <div className="col-span-1">
+          <input
+            type="number"
+            min="0"
+            value={item.bonificacion}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseInt(e.target.value) || 0)}
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>

@@ -26,6 +26,7 @@ interface CompraItemRPC {
   cantidad: number
   costo_unitario: number
   subtotal: number
+  bonificacion: number
 }
 
 interface RPCResult {
@@ -90,7 +91,8 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     producto_id: item.productoId,
     cantidad: item.cantidad,
     costo_unitario: item.costoUnitario || 0,
-    subtotal: item.subtotal || (item.cantidad * (item.costoUnitario || 0))
+    subtotal: item.subtotal || (item.cantidad * (item.costoUnitario || 0)),
+    bonificacion: item.bonificacion || 0
   }))
 
   const { data, error } = await supabase.rpc('registrar_compra_completa', {

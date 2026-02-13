@@ -55,6 +55,7 @@ const menuGroups: MenuGroup[] = [
     roles: ['admin', 'preventista'],
     items: [
       { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
+      { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin'] },
       { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
       { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin'] },
     ]

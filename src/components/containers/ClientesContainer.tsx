@@ -98,7 +98,8 @@ export default function ClientesContainer(): React.ReactElement {
       contacto: data.contacto || undefined,
       horarios_atencion: data.horarios_atencion || undefined,
       rubro: data.rubro || undefined,
-      notas: data.notas || undefined
+      notas: data.notas || undefined,
+      preventista_id: data.preventista_id || null
     }
 
     try {
@@ -143,6 +144,7 @@ export default function ClientesContainer(): React.ReactElement {
               setClienteEditando(null)
             }}
             guardando={crearCliente.isPending || actualizarCliente.isPending}
+            isAdmin={isAdmin}
           />
         </Suspense>
       )}
