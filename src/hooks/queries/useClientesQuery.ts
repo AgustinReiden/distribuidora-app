@@ -100,8 +100,7 @@ async function createCliente(cliente: ClienteCreateInput): Promise<ClienteDB> {
       horarios_atencion: cliente.horarios_atencion || null,
       rubro: cliente.rubro || null,
       notas: cliente.notas || null,
-      preventista_id: cliente.preventista_id || null,
-      activo: true
+      ...(cliente.preventista_id ? { preventista_id: cliente.preventista_id } : {})
     }])
     .select()
     .single()
@@ -123,10 +122,9 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
 }
 
 async function deleteCliente(id: string): Promise<void> {
-  // Soft delete - marcar como inactivo
   const { error } = await supabase
     .from('clientes')
-    .update({ activo: false })
+    .delete()
     .eq('id', id)
 
   if (error) throw error

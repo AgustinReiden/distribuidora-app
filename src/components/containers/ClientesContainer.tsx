@@ -99,7 +99,7 @@ export default function ClientesContainer(): React.ReactElement {
       horarios_atencion: data.horarios_atencion || undefined,
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,
-      preventista_id: data.preventista_id || null
+      ...(data.preventista_id ? { preventista_id: data.preventista_id } : {})
     }
 
     try {
