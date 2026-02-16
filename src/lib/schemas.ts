@@ -874,7 +874,7 @@ export const modalCompraSchema = z.object({
   usarProveedorNuevo: z.boolean(),
   fechaCompra: z.string().min(1, { message: 'La fecha es obligatoria' }),
   formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
-    error: 'Forma de pago inválida'
+    message: 'Forma de pago inválida'
   }),
   items: z.array(z.object({
     productoId: z.string(),
@@ -882,15 +882,7 @@ export const modalCompraSchema = z.object({
     costoUnitario: z.number().nonnegative(),
     bonificacion: z.number().int().nonnegative().default(0)
   })).min(1, { message: 'Debe agregar al menos un producto' })
-}).refine(
-  (data) => {
-    if (data.usarProveedorNuevo) {
-      return data.proveedorNombre && data.proveedorNombre.trim().length > 0
-    }
-    return data.proveedorId && data.proveedorId.length > 0
-  },
-  { message: 'Debe seleccionar o ingresar un proveedor', path: ['proveedorId'] }
-)
+})
 
 export type ModalCompraFormData = z.infer<typeof modalCompraSchema>
 

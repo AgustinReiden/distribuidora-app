@@ -4,7 +4,7 @@
  * Refactorizado con useReducer para mejor gestión de estado
  * Validación con Zod
  */
-import React, { useReducer, useMemo, useCallback, useState, lazy, Suspense } from 'react'
+import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, lazy, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2 } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
@@ -343,10 +343,16 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
     e.preventDefault()
     dispatch({ type: 'SET_ERROR', payload: '' })
 
+    // Validación básica antes de Zod
+    if (state.items.length === 0) {
+      dispatch({ type: 'SET_ERROR', payload: 'Debe agregar al menos un producto' })
+      return
+    }
+
     // Validar con Zod
     const formData = {
-      proveedorId: state.proveedorId,
-      proveedorNombre: state.proveedorNombre,
+      proveedorId: state.proveedorId || undefined,
+      proveedorNombre: state.proveedorNombre || undefined,
       usarProveedorNuevo: state.usarProveedorNuevo,
       fechaCompra: state.fechaCompra,
       formaPago: state.formaPago,
@@ -360,7 +366,6 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
     const result = validate(formData)
     if (!result.success) {
-      // Obtener el primer error
       const firstError = Object.values(result.errors || {})[0] || 'Error de validación'
       dispatch({ type: 'SET_ERROR', payload: firstError })
       return
@@ -465,40 +470,43 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             />
           </div>
 
-          {/* Error */}
+        </form>
+
+        {/* Footer con botones */}
+        <div className="p-4 border-t dark:border-gray-700 shrink-0 space-y-3">
+          {/* Error visible junto al botón */}
           {state.error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
               <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
             </div>
           )}
-        </form>
-
-        {/* Footer con botones */}
-        <div className="flex gap-3 p-4 border-t dark:border-gray-700 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={state.guardando || state.items.length === 0}
-            className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
-          >
-            {state.guardando ? (
-              <>
-                <span className="animate-spin">...</span>
-                Registrando...
-              </>
-            ) : (
-              <>
-                <ShoppingCart className="w-4 h-4" />
-                Registrar Compra
-              </>
-            )}
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={state.guardando || state.items.length === 0}
+              className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              {state.guardando ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Registrando...
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="w-4 h-4" />
+                  Registrar Compra
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -561,7 +569,7 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
           onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_PROVEEDOR_ID', payload: e.target.value })}
           className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
         >
-          <option value="">Seleccionar proveedor...</option>
+          <option value="">Seleccionar proveedor (opcional)...</option>
           {proveedores.map(p => (
             <option key={p.id} value={p.id}>{p.nombre} {p.cuit ? `(${p.cuit})` : ''}</option>
           ))}
@@ -570,10 +578,11 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
           <button
             type="button"
             onClick={onAgregarProveedor}
-            className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            title="Agregar proveedor"
+            className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors whitespace-nowrap text-sm"
+            title="Agregar proveedor nuevo"
           >
             <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Nuevo</span>
           </button>
         )}
       </div>
@@ -629,6 +638,19 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
 function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, onActualizarItem, onEliminarItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
   const [creandoItem, setCreandoItem] = useState(false)
+  const buscadorRef = useRef<HTMLDivElement>(null)
+
+  // Cerrar dropdown al hacer click fuera
+  useEffect(() => {
+    if (!state.mostrarBuscador) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (buscadorRef.current && !buscadorRef.current.contains(e.target as Node)) {
+        dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [state.mostrarBuscador, dispatch])
 
   const handleCrearProductoRapido = async () => {
     if (!onCrearProductoRapido || !itemRapido.nombre.trim()) return
@@ -673,7 +695,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
       </div>
 
       {/* Buscador de productos */}
-      <div className="relative">
+      <div className="relative" ref={buscadorRef}>
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -682,10 +704,24 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
               value={state.busquedaProducto}
               onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_BUSQUEDA', payload: e.target.value })}
               onFocus={() => dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: true })}
+              onKeyDown={(e) => { if (e.key === 'Escape') dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false }) }}
               placeholder="Buscar producto por nombre o codigo..."
               className="w-full pl-10 pr-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
             />
           </div>
+          {onCrearProductoRapido && (
+            <button
+              type="button"
+              onClick={() => {
+                dispatch({ type: 'SET_MODO_ITEM_RAPIDO', payload: !state.modoItemRapido })
+                dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })
+              }}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              title="Crear producto nuevo"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Dropdown de resultados */}
@@ -727,13 +763,6 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
                 )}
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })}
-              className="w-full px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 border-t dark:border-gray-600"
-            >
-              Cerrar
-            </button>
           </div>
         )}
       </div>

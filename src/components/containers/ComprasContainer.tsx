@@ -77,11 +77,10 @@ export default function ComprasContainer(): React.ReactElement {
     try {
       await registrarCompra.mutateAsync(data)
       notify.success('Compra registrada')
-      setModalCompraOpen(false)
-      return { success: true }
-    } catch {
-      notify.error('Error al registrar compra')
-      return { success: false, error: 'Error al registrar compra' }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al registrar compra'
+      notify.error(msg)
+      throw err
     }
   }, [registrarCompra, notify])
 
