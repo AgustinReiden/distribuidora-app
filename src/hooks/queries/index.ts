@@ -88,6 +88,17 @@ export {
   useMermasResumen,
 } from './useMermasQuery'
 
+// Grupos de Precio Mayorista
+export {
+  gruposPrecioKeys,
+  useGruposPrecioQuery,
+  usePricingMapQuery,
+  useCrearGrupoPrecioMutation,
+  useActualizarGrupoPrecioMutation,
+  useEliminarGrupoPrecioMutation,
+  useToggleGrupoPrecioActivoMutation,
+} from './useGruposPrecioQuery'
+
 // Métricas
 export {
   metricasKeys,

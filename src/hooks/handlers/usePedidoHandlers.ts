@@ -6,6 +6,8 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { useLatestRef } from '../useLatestRef'
 import { calcularTotalPedido } from '../useAppState'
+import { usePricingMapQuery } from '../queries/useGruposPrecioQuery'
+import { resolverPreciosMayorista, aplicarPreciosMayorista } from '../../utils/precioMayorista'
 import type { User } from '@supabase/supabase-js'
 import type {
   ProductoDB,
@@ -270,6 +272,10 @@ export function usePedidoHandlers({
   const isOnlineRef = useLatestRef(isOnline)
   const rutaOptimizadaRef = useLatestRef(rutaOptimizada)
 
+  // Pricing map for wholesale prices
+  const { data: pricingMap } = usePricingMapQuery()
+  const pricingMapRef = useLatestRef(pricingMap)
+
   // ==========================================================================
   // HANDLERS - Usan refs para valores frecuentes, deps estables para funciones
   // ==========================================================================
@@ -344,11 +350,20 @@ export function usePedidoHandlers({
       return
     }
 
+    // Aplicar precios mayoristas si hay pricing map disponible
+    const currentPricingMap = pricingMapRef.current
+    let itemsFinales = nuevoPedido.items
+    if (currentPricingMap && currentPricingMap.size > 0) {
+      const preciosResueltos = resolverPreciosMayorista(nuevoPedido.items, currentPricingMap)
+      itemsFinales = aplicarPreciosMayorista(nuevoPedido.items, preciosResueltos)
+    }
+    const totalFinal = calcularTotalPedido(itemsFinales)
+
     if (!isOnline) {
       guardarPedidoOffline({
         clienteId: parseInt(nuevoPedido.clienteId),
-        items: nuevoPedido.items,
-        total: calcularTotalPedido(nuevoPedido.items),
+        items: itemsFinales,
+        total: totalFinal,
         usuarioId: user?.id ?? '',
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
@@ -370,8 +385,8 @@ export function usePedidoHandlers({
     try {
       const pedidoCreado = await crearPedido(
         parseInt(nuevoPedido.clienteId),
-        nuevoPedido.items,
-        calcularTotalPedido(nuevoPedido.items),
+        itemsFinales,
+        totalFinal,
         user?.id ?? '',
         descontarStock,
         nuevoPedido.notas,
@@ -400,7 +415,7 @@ export function usePedidoHandlers({
       notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [nuevoPedidoRef, userRef, isOnlineRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
+  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
   const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {

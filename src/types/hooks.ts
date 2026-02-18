@@ -1234,3 +1234,49 @@ export interface UseSalvedadesReturn {
   getEstadisticas: (desde?: string, hasta?: string) => Promise<EstadisticasSalvedades>;
   refetch: () => Promise<void>;
 }
+
+// =============================================================================
+// GRUPOS DE PRECIO MAYORISTA TYPES
+// =============================================================================
+
+export interface GrupoPrecioDB {
+  id: string;
+  nombre: string;
+  descripcion?: string | null;
+  activo?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GrupoPrecioProductoDB {
+  id: string;
+  grupo_precio_id: string;
+  producto_id: string;
+  created_at?: string;
+}
+
+export interface GrupoPrecioEscalaDB {
+  id: string;
+  grupo_precio_id: string;
+  cantidad_minima: number;
+  precio_unitario: number;
+  etiqueta?: string | null;
+  activo?: boolean;
+  created_at?: string;
+}
+
+export interface GrupoPrecioConDetalles extends GrupoPrecioDB {
+  productos: GrupoPrecioProductoDB[];
+  escalas: GrupoPrecioEscalaDB[];
+}
+
+export interface GrupoPrecioFormInput {
+  nombre: string;
+  descripcion?: string | null;
+  productoIds: string[];
+  escalas: Array<{
+    cantidadMinima: number;
+    precioUnitario: number;
+    etiqueta?: string | null;
+  }>;
+}

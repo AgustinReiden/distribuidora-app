@@ -64,7 +64,8 @@ import {
   ProductosContainer,
   ClientesContainer,
   ComprasContainer,
-  ProveedoresContainer
+  ProveedoresContainer,
+  GruposPrecioContainer
 } from './components/containers';
 
 // Vistas con lazy loading (rutas legacy que aún no tienen container)
@@ -359,6 +360,11 @@ function MainApp(): ReactElement {
                 {/* Proveedores - usa container con TanStack Query */}
                 <Route path="/proveedores" element={
                   isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />
+                } />
+
+                {/* Precios Mayoristas - solo admin */}
+                <Route path="/precios-mayoristas" element={
+                  isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />
                 } />
 
                 {/* Rendiciones - solo admin */}
