@@ -51,6 +51,19 @@ async function fetchProductosStockBajo(umbral: number): Promise<ProductoDB[]> {
 
 // Mutation functions
 async function createProducto(producto: ProductoFormInput): Promise<ProductoDB> {
+  // Validar código duplicado
+  if (producto.codigo) {
+    const { data: existente } = await supabase
+      .from('productos')
+      .select('id, nombre')
+      .eq('codigo', producto.codigo)
+      .limit(1)
+      .maybeSingle()
+    if (existente) {
+      throw new Error(`Ya existe un producto con código "${producto.codigo}": ${existente.nombre}`)
+    }
+  }
+
   const { data, error } = await supabase
     .from('productos')
     .insert([{

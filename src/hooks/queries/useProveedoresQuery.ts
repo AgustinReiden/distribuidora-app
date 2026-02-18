@@ -57,6 +57,31 @@ async function fetchProveedorById(id: string): Promise<ProveedorDBExtended | nul
 
 // Mutation functions
 async function createProveedor(proveedor: ProveedorFormInputExtended): Promise<ProveedorDBExtended> {
+  // Validar CUIT duplicado
+  if (proveedor.cuit) {
+    const cuitLimpio = proveedor.cuit.replace(/[-\s]/g, '')
+    const { data: existente } = await supabase
+      .from('proveedores')
+      .select('id, nombre')
+      .eq('cuit', proveedor.cuit)
+      .limit(1)
+      .maybeSingle()
+    if (!existente && cuitLimpio !== proveedor.cuit) {
+      // Buscar también sin guiones
+      const { data: existente2 } = await supabase
+        .from('proveedores')
+        .select('id, nombre, cuit')
+        .not('cuit', 'is', null)
+        .limit(100)
+      const match = existente2?.find(p => p.cuit?.replace(/[-\s]/g, '') === cuitLimpio)
+      if (match) {
+        throw new Error(`Ya existe un proveedor con CUIT "${proveedor.cuit}": ${match.nombre}`)
+      }
+    } else if (existente) {
+      throw new Error(`Ya existe un proveedor con CUIT "${proveedor.cuit}": ${existente.nombre}`)
+    }
+  }
+
   const { data, error } = await supabase
     .from('proveedores')
     .insert([{

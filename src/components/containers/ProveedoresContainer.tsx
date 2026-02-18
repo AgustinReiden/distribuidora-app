@@ -58,16 +58,17 @@ export default function ProveedoresContainer(): React.ReactElement {
     setModalProveedorOpen(true)
   }, [])
 
-  const handleEliminarProveedor = useCallback(async (proveedor: ProveedorDBExtended) => {
-    // En realidad no eliminamos, solo desactivamos
-    if (!window.confirm(`¿Desactivar proveedor "${proveedor.nombre}"?`)) return
+  const handleEliminarProveedor = useCallback(async (id: string) => {
+    const proveedor = proveedores.find(p => p.id === id)
+    const nombre = proveedor?.nombre || 'este proveedor'
+    if (!window.confirm(`¿Desactivar proveedor "${nombre}"?`)) return
     try {
-      await toggleActivo.mutateAsync({ id: proveedor.id, activo: false })
+      await toggleActivo.mutateAsync({ id, activo: false })
       notify.success('Proveedor desactivado')
     } catch {
       notify.error('Error al desactivar proveedor')
     }
-  }, [toggleActivo, notify])
+  }, [toggleActivo, notify, proveedores])
 
   const handleToggleActivo = useCallback(async (proveedor: ProveedorDBExtended) => {
     try {
@@ -106,7 +107,7 @@ export default function ProveedoresContainer(): React.ReactElement {
           isAdmin={isAdmin}
           onNuevoProveedor={handleNuevoProveedor}
           onEditarProveedor={handleEditarProveedor as Parameters<typeof VistaProveedores>[0]['onEditarProveedor']}
-          onEliminarProveedor={handleEliminarProveedor as unknown as Parameters<typeof VistaProveedores>[0]['onEliminarProveedor']}
+          onEliminarProveedor={handleEliminarProveedor}
           onToggleActivo={handleToggleActivo}
         />
       </Suspense>
