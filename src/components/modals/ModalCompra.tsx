@@ -6,8 +6,9 @@
  */
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, lazy, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2 } from 'lucide-react'
+import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import { supabase } from '../../lib/supabase'
 import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
 
 const ModalProveedor = lazy(() => import('./ModalProveedor'))
@@ -30,6 +31,27 @@ export interface CompraItemForm {
   stockActual: number;
 }
 
+/** Resultado del escaneo de factura via n8n */
+export interface FacturaEscaneada {
+  proveedorNombre: string | null;
+  proveedorCuit: string | null;
+  numeroFactura: string | null;
+  fechaCompra: string | null;
+  items: Array<{
+    codigo: string | null;
+    descripcion: string;
+    cantidad: number;
+    costoUnitario: number;
+    bonificacion: number;
+    iva: number;
+  }>;
+  subtotal: number | null;
+  iva: number | null;
+  total: number | null;
+  formaPago: string | null;
+  confianza: number;
+}
+
 /** Estado del reducer de compra */
 export interface CompraState {
   proveedorId: string;
@@ -45,6 +67,10 @@ export interface CompraState {
   modoItemRapido: boolean;
   guardando: boolean;
   error: string;
+  // Escaneo de factura
+  escaneando: boolean;
+  resultadoEscaneo: FacturaEscaneada | null;
+  errorEscaneo: string;
 }
 
 /** Tipos de acciones del reducer */
@@ -66,7 +92,11 @@ type CompraActionType =
   | { type: 'LIMPIAR_BUSQUEDA' }
   | { type: 'SET_MODO_ITEM_RAPIDO'; payload: boolean }
   | { type: 'AGREGAR_ITEM_RAPIDO'; payload: { productoId: string; nombre: string; codigo: string; costoUnitario: number } }
-  | { type: 'IMPORTAR_ITEMS'; payload: CompraItemForm[] };
+  | { type: 'IMPORTAR_ITEMS'; payload: CompraItemForm[] }
+  | { type: 'SET_ESCANEANDO'; payload: boolean }
+  | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
+  | { type: 'SET_ERROR_ESCANEO'; payload: string }
+  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[] } };
 
 /** Props del componente principal */
 export interface ModalCompraProps {
@@ -162,7 +192,11 @@ const initialState: CompraState = {
   mostrarBuscador: false,
   modoItemRapido: false,
   guardando: false,
-  error: ''
+  error: '',
+  // Escaneo
+  escaneando: false,
+  resultadoEscaneo: null,
+  errorEscaneo: ''
 }
 
 // Reducer
@@ -275,6 +309,31 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
         items: [...state.items, ...action.payload]
       }
 
+    case 'SET_ESCANEANDO':
+      return { ...state, escaneando: action.payload, errorEscaneo: '' }
+
+    case 'SET_RESULTADO_ESCANEO':
+      return { ...state, resultadoEscaneo: action.payload, escaneando: false }
+
+    case 'SET_ERROR_ESCANEO':
+      return { ...state, errorEscaneo: action.payload, escaneando: false }
+
+    case 'APLICAR_ESCANEO': {
+      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items } = action.payload
+      return {
+        ...state,
+        proveedorId,
+        proveedorNombre,
+        usarProveedorNuevo: !proveedorId && !!proveedorNombre,
+        numeroFactura,
+        fechaCompra: fechaCompra || state.fechaCompra,
+        formaPago: formaPago || state.formaPago,
+        items,
+        resultadoEscaneo: null,
+        errorEscaneo: ''
+      }
+    }
+
     default:
       return state
   }
@@ -305,11 +364,15 @@ function useCalculosImpuestos(items: CompraItemForm[]): CalculosImpuestos {
   return { subtotal, iva, impuestosInternos, total }
 }
 
+const N8N_FACTURA_WEBHOOK_URL: string = import.meta.env.VITE_N8N_FACTURA_WEBHOOK_URL || ''
+const MAX_IMAGE_SIZE = 8 * 1024 * 1024 // 8MB
+
 export default function ModalCompra({ productos, proveedores, onSave, onClose, onCrearProductoRapido, onCrearProveedor }: ModalCompraProps) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
   const { subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Productos filtrados
   const productosFiltrados = useMemo(() => {
@@ -333,6 +396,127 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const handleEliminarItem = useCallback((index: number) => {
     dispatch({ type: 'ELIMINAR_ITEM', payload: index })
   }, [])
+
+  // Escanear factura por foto
+  const handleEscanearFactura = useCallback(async (file: File) => {
+    if (!N8N_FACTURA_WEBHOOK_URL) {
+      dispatch({ type: 'SET_ERROR_ESCANEO', payload: 'Escaneo no configurado. Falta VITE_N8N_FACTURA_WEBHOOK_URL' })
+      return
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      dispatch({ type: 'SET_ERROR_ESCANEO', payload: 'La imagen es demasiado grande (máx 8MB)' })
+      return
+    }
+
+    dispatch({ type: 'SET_ESCANEANDO', payload: true })
+    try {
+      // 1. Upload a Supabase Storage
+      const fileName = `facturas/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      const { error: uploadError } = await supabase.storage
+        .from('facturas')
+        .upload(fileName, file)
+
+      if (uploadError) {
+        // Si el bucket no existe, dar mensaje claro
+        if (uploadError.message.includes('not found') || uploadError.message.includes('Bucket')) {
+          throw new Error('Bucket "facturas" no existe en Supabase Storage. Créalo desde el dashboard.')
+        }
+        throw uploadError
+      }
+
+      const { data: urlData } = supabase.storage.from('facturas').getPublicUrl(fileName)
+      const imageUrl = urlData.publicUrl
+
+      // 2. Enviar a n8n webhook
+      const response = await fetch(N8N_FACTURA_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`Error del servidor: ${response.status} - ${errorText}`)
+      }
+
+      const result = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'No se pudo procesar la factura')
+      }
+
+      dispatch({ type: 'SET_RESULTADO_ESCANEO', payload: result.data as FacturaEscaneada })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al escanear factura'
+      dispatch({ type: 'SET_ERROR_ESCANEO', payload: msg })
+    }
+  }, [])
+
+  // Aplicar resultado del escaneo al formulario
+  const handleAplicarEscaneo = useCallback(() => {
+    const scan = state.resultadoEscaneo
+    if (!scan) return
+
+    // Intentar matchear proveedor por CUIT
+    let proveedorIdMatch = ''
+    if (scan.proveedorCuit) {
+      const cuitNorm = scan.proveedorCuit.replace(/-/g, '')
+      const match = proveedores.find(p =>
+        p.cuit && p.cuit.replace(/-/g, '') === cuitNorm
+      )
+      if (match) proveedorIdMatch = match.id
+    }
+
+    // Matchear items por código de producto
+    const itemsConvertidos: CompraItemForm[] = scan.items.map(scanItem => {
+      let productoMatch: ProductoDB | undefined
+      if (scanItem.codigo) {
+        productoMatch = productos.find(p =>
+          p.codigo && p.codigo.toLowerCase() === scanItem.codigo!.toLowerCase()
+        )
+      }
+      if (!productoMatch) {
+        // Intentar match por nombre parcial
+        const descLower = scanItem.descripcion.toLowerCase()
+        productoMatch = productos.find(p =>
+          p.nombre.toLowerCase().includes(descLower) ||
+          descLower.includes(p.nombre.toLowerCase())
+        )
+      }
+
+      return {
+        productoId: productoMatch?.id || '',
+        productoNombre: productoMatch?.nombre || scanItem.descripcion,
+        productoCodigo: productoMatch?.codigo || scanItem.codigo,
+        cantidad: scanItem.cantidad || 1,
+        bonificacion: scanItem.bonificacion || 0,
+        costoUnitario: scanItem.costoUnitario || 0,
+        impuestosInternos: 0,
+        porcentajeIva: scanItem.iva || 21,
+        stockActual: productoMatch?.stock || 0
+      }
+    })
+
+    const formaPagoMap: Record<string, string> = {
+      'efectivo': 'efectivo',
+      'transferencia': 'transferencia',
+      'cheque': 'cheque',
+      'cuenta_corriente': 'cuenta_corriente',
+      'tarjeta': 'tarjeta'
+    }
+
+    dispatch({
+      type: 'APLICAR_ESCANEO',
+      payload: {
+        proveedorId: proveedorIdMatch,
+        proveedorNombre: proveedorIdMatch ? '' : (scan.proveedorNombre || ''),
+        numeroFactura: scan.numeroFactura || '',
+        fechaCompra: scan.fechaCompra || '',
+        formaPago: formaPagoMap[scan.formaPago || ''] || 'efectivo',
+        items: itemsConvertidos
+      }
+    })
+  }, [state.resultadoEscaneo, productos, proveedores])
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
@@ -398,10 +582,64 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
               <p className="text-sm text-gray-500">Registrar compra a proveedor</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {N8N_FACTURA_WEBHOOK_URL && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleEscanearFactura(file)
+                    e.target.value = ''
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={state.escaneando}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 text-sm transition-colors"
+                >
+                  {state.escaneando ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Escaneando...</>
+                  ) : (
+                    <><Camera className="w-4 h-4" /> Escanear Factura</>
+                  )}
+                </button>
+              </>
+            )}
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+
+        {/* Preview resultado escaneo */}
+        {state.resultadoEscaneo && (
+          <ScanPreview
+            resultado={state.resultadoEscaneo}
+            productos={productos}
+            proveedores={proveedores}
+            onAplicar={handleAplicarEscaneo}
+            onDescartar={() => dispatch({ type: 'SET_RESULTADO_ESCANEO', payload: null })}
+          />
+        )}
+
+        {/* Error de escaneo */}
+        {state.errorEscaneo && (
+          <div className="mx-4 mt-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm text-red-600 dark:text-red-400">{state.errorEscaneo}</p>
+            </div>
+            <button onClick={() => dispatch({ type: 'SET_ERROR_ESCANEO', payload: '' })} className="text-red-400 hover:text-red-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Contenido scrolleable */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -976,6 +1214,100 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** Preview del resultado del escaneo de factura */
+function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar }: {
+  resultado: FacturaEscaneada;
+  productos: ProductoDB[];
+  proveedores: ProveedorDBExtended[];
+  onAplicar: () => void;
+  onDescartar: () => void;
+}) {
+  // Contar items matcheados
+  const itemsMatcheados = resultado.items.filter(item => {
+    if (item.codigo) {
+      return productos.some(p => p.codigo?.toLowerCase() === item.codigo!.toLowerCase())
+    }
+    const desc = item.descripcion.toLowerCase()
+    return productos.some(p =>
+      p.nombre.toLowerCase().includes(desc) || desc.includes(p.nombre.toLowerCase())
+    )
+  }).length
+
+  // Verificar match de proveedor
+  const proveedorMatch = resultado.proveedorCuit
+    ? proveedores.find(p => p.cuit?.replace(/-/g, '') === resultado.proveedorCuit!.replace(/-/g, ''))
+    : null
+
+  const confianzaPct = Math.round((resultado.confianza || 0) * 100)
+  const confianzaColor = confianzaPct >= 80 ? 'text-green-600' : confianzaPct >= 50 ? 'text-yellow-600' : 'text-red-600'
+
+  return (
+    <div className="mx-4 mt-2 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <CheckCircle className="w-5 h-5 text-purple-600" />
+          <h4 className="font-medium text-purple-800 dark:text-purple-200">Factura escaneada</h4>
+          <span className={`text-xs font-medium ${confianzaColor}`}>
+            {confianzaPct}% confianza
+          </span>
+        </div>
+        <button onClick={onDescartar} className="text-purple-400 hover:text-purple-600">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+        {resultado.proveedorNombre && (
+          <div>
+            <span className="text-gray-500 text-xs">Proveedor</span>
+            <p className="font-medium dark:text-white">
+              {resultado.proveedorNombre}
+              {proveedorMatch && <span className="text-green-600 text-xs ml-1">(encontrado)</span>}
+            </p>
+          </div>
+        )}
+        {resultado.numeroFactura && (
+          <div>
+            <span className="text-gray-500 text-xs">N Factura</span>
+            <p className="font-medium dark:text-white">{resultado.numeroFactura}</p>
+          </div>
+        )}
+        {resultado.fechaCompra && (
+          <div>
+            <span className="text-gray-500 text-xs">Fecha</span>
+            <p className="font-medium dark:text-white">{resultado.fechaCompra}</p>
+          </div>
+        )}
+        {resultado.total != null && (
+          <div>
+            <span className="text-gray-500 text-xs">Total</span>
+            <p className="font-medium dark:text-white">{formatPrecio(resultado.total)}</p>
+          </div>
+        )}
+      </div>
+
+      <p className="text-xs text-gray-500 mb-3">
+        {resultado.items.length} items detectados, {itemsMatcheados} matcheados con productos existentes
+      </p>
+
+      <div className="flex gap-2">
+        <button
+          onClick={onAplicar}
+          className="flex-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors"
+        >
+          Aplicar datos
+        </button>
+        <button
+          onClick={onDescartar}
+          className="px-3 py-1.5 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 text-sm transition-colors"
+        >
+          Descartar
+        </button>
       </div>
     </div>
   )
