@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
-  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database
+  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Tag
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -69,6 +69,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista'] },
       { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin'] },
       { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
+      { id: 'precios-mayoristas', icon: Tag, label: 'Precios Mayoristas', roles: ['admin'] },
     ]
   },
   {

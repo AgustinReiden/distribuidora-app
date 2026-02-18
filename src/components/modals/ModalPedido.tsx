@@ -1,7 +1,8 @@
 import { useState, useMemo, memo } from 'react';
-import { X, Loader2, Search, MapPin } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
+import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -169,6 +170,9 @@ const ModalPedido = memo(function ModalPedido({
   };
 
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
+
+  // Precios mayoristas
+  const { preciosResueltos, faltantes, totalMayorista, totalOriginal, ahorro, hayMayorista } = usePrecioMayorista(nuevoPedido.items);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -380,18 +384,37 @@ const ModalPedido = memo(function ModalPedido({
                 {nuevoPedido.items.map(item => {
                   const prod = productos.find(p => p.id === item.productoId);
                   const warning = getStockWarning(item.productoId, item.cantidad);
+                  const precioInfo = preciosResueltos.get(item.productoId);
+                  const esMayorista = precioInfo?.esMayorista || false;
+                  const precioMostrar = esMayorista ? precioInfo!.precioResuelto : item.precioUnitario;
+                  const subtotal = precioMostrar * item.cantidad;
                   return (
                     <div key={item.productoId} className="p-3">
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="font-medium">{prod?.nombre}</p>
-                          <p className="text-sm text-gray-500">{formatPrecio(item.precioUnitario)} c/u</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{prod?.nombre}</p>
+                            {esMayorista && (
+                              <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">
+                                <Tag className="w-3 h-3" />
+                                {precioInfo?.etiqueta || 'Mayorista'}
+                              </span>
+                            )}
+                          </div>
+                          {esMayorista ? (
+                            <p className="text-sm">
+                              <span className="text-gray-400 line-through">{formatPrecio(item.precioUnitario)}</span>
+                              <span className="ml-1.5 text-green-600 font-medium">{formatPrecio(precioInfo!.precioResuelto)} c/u</span>
+                            </p>
+                          ) : (
+                            <p className="text-sm text-gray-500">{formatPrecio(item.precioUnitario)} c/u</p>
+                          )}
                         </div>
                         <div className="flex items-center space-x-3">
                           <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad - 1); }} className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300">-</button>
                           <span className="w-8 text-center font-medium">{item.cantidad}</span>
                           <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad + 1); }} className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300">+</button>
-                          <p className="w-24 text-right font-semibold">{formatPrecio(item.precioUnitario * item.cantidad)}</p>
+                          <p className="w-24 text-right font-semibold">{formatPrecio(subtotal)}</p>
                         </div>
                       </div>
                       {warning && <p className={`text-sm mt-1 ${warning.tipo === 'error' ? 'text-red-600' : 'text-yellow-600'}`}>{warning.mensaje}</p>}
@@ -399,6 +422,17 @@ const ModalPedido = memo(function ModalPedido({
                   );
                 })}
               </div>
+
+              {/* Nudges para alcanzar siguiente tier */}
+              {faltantes.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {faltantes.map((f, i) => (
+                    <p key={i} className="text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg">
+                      Agrega {f.faltante} mas de <strong>{f.grupoNombre}</strong> para precio {f.etiqueta || 'mayorista'} ({formatPrecio(f.precioTier)} c/u)
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -406,7 +440,17 @@ const ModalPedido = memo(function ModalPedido({
         <div className="border-t bg-gray-50 p-4">
           <div className="flex justify-between items-center mb-4">
             <span className="text-lg font-medium">Total</span>
-            <span className="text-2xl font-bold text-blue-600">{formatPrecio(calcularTotal())}</span>
+            <div className="text-right">
+              {hayMayorista ? (
+                <>
+                  <span className="text-sm text-gray-400 line-through mr-2">{formatPrecio(totalOriginal)}</span>
+                  <span className="text-2xl font-bold text-green-600">{formatPrecio(totalMayorista)}</span>
+                  <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(ahorro)}</p>
+                </>
+              ) : (
+                <span className="text-2xl font-bold text-blue-600">{formatPrecio(calcularTotal())}</span>
+              )}
+            </div>
           </div>
           <div className="flex justify-end space-x-3">
             <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
