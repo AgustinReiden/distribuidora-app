@@ -75,6 +75,7 @@ export {
   useCrearProveedorMutation,
   useActualizarProveedorMutation,
   useToggleProveedorActivoMutation,
+  useEliminarProveedorMutation,
 } from './useProveedoresQuery'
 
 // Mermas
