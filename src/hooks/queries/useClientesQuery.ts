@@ -83,6 +83,30 @@ interface ClienteCreateInput {
 
 // Mutation functions
 async function createCliente(cliente: ClienteCreateInput): Promise<ClienteDB> {
+  // Validar CUIT/DNI duplicado
+  if (cliente.cuit) {
+    const cuitLimpio = cliente.cuit.replace(/[-\s]/g, '')
+    const { data: existente } = await supabase
+      .from('clientes')
+      .select('id, nombre_fantasia, razon_social')
+      .eq('cuit', cliente.cuit)
+      .limit(1)
+      .maybeSingle()
+    if (!existente && cuitLimpio !== cliente.cuit) {
+      const { data: existentes } = await supabase
+        .from('clientes')
+        .select('id, nombre_fantasia, razon_social, cuit')
+        .not('cuit', 'is', null)
+        .limit(100)
+      const match = existentes?.find(c => c.cuit?.replace(/[-\s]/g, '') === cuitLimpio)
+      if (match) {
+        throw new Error(`Ya existe un cliente con CUIT "${cliente.cuit}": ${match.nombre_fantasia || match.razon_social}`)
+      }
+    } else if (existente) {
+      throw new Error(`Ya existe un cliente con CUIT "${cliente.cuit}": ${existente.nombre_fantasia || existente.razon_social}`)
+    }
+  }
+
   const { data, error } = await supabase
     .from('clientes')
     .insert([{
