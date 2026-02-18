@@ -10,7 +10,8 @@ import {
   useComprasQuery,
   useCrearProveedorMutation,
   useActualizarProveedorMutation,
-  useToggleProveedorActivoMutation
+  useToggleProveedorActivoMutation,
+  useEliminarProveedorMutation
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -40,6 +41,7 @@ export default function ProveedoresContainer(): React.ReactElement {
   const crearProveedor = useCrearProveedorMutation()
   const actualizarProveedor = useActualizarProveedorMutation()
   const toggleActivo = useToggleProveedorActivoMutation()
+  const eliminarProveedor = useEliminarProveedorMutation()
 
   // Estado de modales
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
@@ -61,14 +63,14 @@ export default function ProveedoresContainer(): React.ReactElement {
   const handleEliminarProveedor = useCallback(async (id: string) => {
     const proveedor = proveedores.find(p => p.id === id)
     const nombre = proveedor?.nombre || 'este proveedor'
-    if (!window.confirm(`¿Desactivar proveedor "${nombre}"?`)) return
+    if (!window.confirm(`¿Eliminar permanentemente al proveedor "${nombre}"?\n\nLas compras asociadas conservarán el nombre del proveedor.`)) return
     try {
-      await toggleActivo.mutateAsync({ id, activo: false })
-      notify.success('Proveedor desactivado')
+      await eliminarProveedor.mutateAsync(id)
+      notify.success(`Proveedor "${nombre}" eliminado`)
     } catch {
-      notify.error('Error al desactivar proveedor')
+      notify.error('Error al eliminar proveedor')
     }
-  }, [toggleActivo, notify, proveedores])
+  }, [eliminarProveedor, notify, proveedores])
 
   const handleToggleActivo = useCallback(async (proveedor: ProveedorDBExtended) => {
     try {

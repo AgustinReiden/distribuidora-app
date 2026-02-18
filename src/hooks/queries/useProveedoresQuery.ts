@@ -138,6 +138,25 @@ async function toggleProveedorActivo(id: string, activo: boolean): Promise<Prove
   return data as ProveedorDBExtended
 }
 
+interface EliminarProveedorResult {
+  success: boolean
+  nombre?: string
+  error?: string
+}
+
+async function deleteProveedor(id: string): Promise<void> {
+  const { data, error } = await supabase.rpc('eliminar_proveedor', {
+    p_proveedor_id: parseInt(id, 10)
+  })
+
+  if (error) throw error
+
+  const result = data as EliminarProveedorResult
+  if (!result.success) {
+    throw new Error(result.error || 'Error al eliminar proveedor')
+  }
+}
+
 // Hooks
 
 /**
@@ -253,6 +272,35 @@ export function useToggleProveedorActivoMutation() {
         return old.map(p => p.id === id ? { ...p, activo } : p)
       })
 
+      return { previousProveedores }
+    },
+    onError: (_, __, context) => {
+      if (context?.previousProveedores) {
+        queryClient.setQueryData(proveedoresKeys.lists(), context.previousProveedores)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos() })
+    },
+  })
+}
+
+/**
+ * Hook para eliminar un proveedor permanentemente (con auditoría)
+ */
+export function useEliminarProveedorMutation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: deleteProveedor,
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: proveedoresKeys.lists() })
+      const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists())
+      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(), (old) => {
+        if (!old) return old
+        return old.filter(p => p.id !== id)
+      })
       return { previousProveedores }
     },
     onError: (_, __, context) => {
