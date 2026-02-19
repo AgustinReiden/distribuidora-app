@@ -44,6 +44,7 @@ export interface OptimizarRutaRequestBody {
   deposito_lat: number;
   deposito_lng: number;
   pedidos: PedidoParaOptimizar[];
+  google_api_key?: string;
 }
 
 export interface UseOptimizarRutaReturn {
@@ -61,8 +62,8 @@ export interface UseOptimizarRutaReturn {
 // URL del webhook de n8n para optimizar rutas (desde variables de entorno)
 const N8N_WEBHOOK_URL: string = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
 
-// NOTA: La Google API Key ahora debe estar configurada en el servidor n8n
-// No se envia desde el cliente por razones de seguridad
+// Google API Key para el workflow de n8n (Routes API)
+const GOOGLE_API_KEY: string = import.meta.env.VITE_GOOGLE_API_KEY || '';
 
 // Coordenadas del depósito por defecto (se pueden configurar)
 const DEPOSITO_DEFAULT: DepositoCoords = {
@@ -176,7 +177,8 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       transportista_id: transportistaId,
       deposito_lat: deposito.lat,
       deposito_lng: deposito.lng,
-      pedidos: pedidosConCoordenadas
+      pedidos: pedidosConCoordenadas,
+      google_api_key: GOOGLE_API_KEY
     };
 
     try {
