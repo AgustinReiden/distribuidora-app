@@ -569,27 +569,26 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b dark:border-gray-700 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="p-1.5 sm:p-2 bg-green-100 dark:bg-green-900/30 rounded-lg shrink-0">
               <ShoppingCart className="w-5 h-5 text-green-600" />
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Nueva Compra</h2>
-              <p className="text-sm text-gray-500">Registrar compra a proveedor</p>
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-white truncate">Nueva Compra</h2>
+              <p className="text-sm text-gray-500 hidden sm:block">Registrar compra a proveedor</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {N8N_FACTURA_WEBHOOK_URL && (
               <>
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0]
@@ -601,12 +600,12 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={state.escaneando}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 text-sm transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 text-sm transition-colors"
                 >
                   {state.escaneando ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Escaneando...</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> <span className="hidden sm:inline">Escaneando...</span></>
                   ) : (
-                    <><Camera className="w-4 h-4" /> Escanear Factura</>
+                    <><Camera className="w-4 h-4" /> <span className="hidden sm:inline">Escanear Factura</span></>
                   )}
                 </button>
               </>
@@ -630,7 +629,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
         {/* Error de escaneo */}
         {state.errorEscaneo && (
-          <div className="mx-4 mt-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
+          <div className="mx-3 sm:mx-4 mt-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
             <div className="flex-1">
               <p className="text-sm text-red-600 dark:text-red-400">{state.errorEscaneo}</p>
@@ -642,7 +641,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         )}
 
         {/* Contenido scrolleable */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
           {/* Sección Proveedor */}
           <ProveedorSection
             state={state}
@@ -694,7 +693,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         </form>
 
         {/* Footer con botones */}
-        <div className="p-4 border-t dark:border-gray-700 shrink-0 space-y-3">
+        <div className="p-3 sm:p-4 border-t dark:border-gray-700 shrink-0 space-y-3">
           {/* Error visible junto al botón */}
           {state.error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -778,7 +777,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
 function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: ProveedorSectionProps) {
   return (
-    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 space-y-3">
+    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4 space-y-3">
       <div className="flex items-center gap-2 mb-2">
         <Building2 className="w-5 h-5 text-gray-500" />
         <h3 className="font-medium text-gray-800 dark:text-white">Proveedor</h3>
@@ -788,7 +787,7 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
         <select
           value={state.proveedorId}
           onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_PROVEEDOR_ID', payload: e.target.value })}
-          className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          className="flex-1 px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm sm:text-base"
         >
           <option value="">Seleccionar proveedor (opcional)...</option>
           {proveedores.map(p => (
@@ -813,7 +812,7 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
 
 function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           N Factura / Remito
@@ -823,7 +822,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
           value={state.numeroFactura}
           onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_NUMERO_FACTURA', payload: e.target.value })}
           placeholder="Ej: 0001-00012345"
-          className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          className="w-full px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm sm:text-base"
         />
       </div>
       <div>
@@ -834,7 +833,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
           type="date"
           value={state.fechaCompra}
           onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_FECHA_COMPRA', payload: e.target.value })}
-          className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          className="w-full px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm sm:text-base"
           required
         />
       </div>
@@ -845,7 +844,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
         <select
           value={state.formaPago}
           onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_FORMA_PAGO', payload: e.target.value })}
-          className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          className="w-full px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm sm:text-base"
         >
           {FORMAS_PAGO.map(fp => (
             <option key={fp.value} value={fp.value}>{fp.label}</option>
@@ -897,7 +896,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
   }
 
   return (
-    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 space-y-3">
+    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Package className="w-5 h-5 text-gray-500" />
@@ -1001,7 +1000,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Nombre *</label>
               <input
@@ -1247,7 +1246,7 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
   const confianzaColor = confianzaPct >= 80 ? 'text-green-600' : confianzaPct >= 50 ? 'text-yellow-600' : 'text-red-600'
 
   return (
-    <div className="mx-4 mt-2 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+    <div className="mx-3 sm:mx-4 mt-2 p-3 sm:p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
           <CheckCircle className="w-5 h-5 text-purple-600" />
