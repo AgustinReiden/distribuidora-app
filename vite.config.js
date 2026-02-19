@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
@@ -6,9 +6,43 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+/**
+ * Plugin Vite que inyecta dominios de webhooks n8n en el CSP connect-src.
+ * Lee las env vars VITE_N8N_* y extrae los orígenes para agregarlos al build.
+ */
+function cspConnectSrcPlugin() {
+  let resolvedEnv = {}
+  return {
+    name: 'inject-csp-connect-src',
+    configResolved(config) {
+      resolvedEnv = loadEnv(config.mode, config.root, 'VITE_N8N')
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        const extraDomains = new Set()
+        for (const [, val] of Object.entries(resolvedEnv)) {
+          if (val) {
+            try {
+              extraDomains.add(new URL(val).origin)
+            } catch { /* skip invalid URLs */ }
+          }
+        }
+        if (extraDomains.size === 0) return html
+        const domainsStr = [...extraDomains].join(' ')
+        return html.replace(
+          /connect-src 'self'/,
+          `connect-src 'self' ${domainsStr}`
+        )
+      }
+    }
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
+    cspConnectSrcPlugin(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',

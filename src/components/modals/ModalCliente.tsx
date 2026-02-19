@@ -165,22 +165,25 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     const result = validate(form);
 
     // Validación adicional específica de documento según tipo
+    // Solo validar longitud si el documento no está vacío (vacío es permitido por el schema)
     if (result.success) {
       const docLimpio = form.numero_documento.replace(/\D/g, '');
-      if (form.tipo_documento === 'CUIT' && docLimpio.length !== 11) {
-        // Error específico de CUIT
-        setTimeout(() => {
-          const primerError = formRef.current?.querySelector('.border-red-500');
-          if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 100);
-        return;
-      }
-      if (form.tipo_documento === 'DNI' && (docLimpio.length < 7 || docLimpio.length > 8)) {
-        setTimeout(() => {
-          const primerError = formRef.current?.querySelector('.border-red-500');
-          if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 100);
-        return;
+      if (docLimpio.length > 0) {
+        if (form.tipo_documento === 'CUIT' && docLimpio.length !== 11) {
+          // Error específico de CUIT
+          setTimeout(() => {
+            const primerError = formRef.current?.querySelector('.border-red-500');
+            if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+          return;
+        }
+        if (form.tipo_documento === 'DNI' && (docLimpio.length < 7 || docLimpio.length > 8)) {
+          setTimeout(() => {
+            const primerError = formRef.current?.querySelector('.border-red-500');
+            if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+          return;
+        }
       }
     }
 
