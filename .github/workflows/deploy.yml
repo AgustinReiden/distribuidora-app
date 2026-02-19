@@ -100,6 +100,7 @@ jobs:
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           VITE_GOOGLE_API_KEY: ${{ secrets.VITE_GOOGLE_API_KEY }}
           VITE_N8N_WEBHOOK_URL: ${{ secrets.VITE_N8N_WEBHOOK_URL }}
+          VITE_N8N_FACTURA_WEBHOOK_URL: ${{ secrets.VITE_N8N_FACTURA_WEBHOOK_URL }}
           VITE_APP_VERSION: ${{ github.sha }}
 
       - name: Deploy to Vercel (Preview)

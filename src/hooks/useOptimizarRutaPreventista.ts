@@ -50,6 +50,7 @@ export interface UseOptimizarRutaPreventistaReturn {
 // ============================================================================
 
 const N8N_WEBHOOK_URL: string = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
+const GOOGLE_API_KEY: string = import.meta.env.VITE_GOOGLE_API_KEY || '';
 
 // ============================================================================
 // HOOK
@@ -111,7 +112,8 @@ export function useOptimizarRutaPreventista(): UseOptimizarRutaPreventistaReturn
           transportista_id: preventistaId,  // reuse field for n8n
           deposito_lat: deposito.lat,
           deposito_lng: deposito.lng,
-          pedidos: clientesConCoords          // reuse field for n8n
+          pedidos: clientesConCoords,         // reuse field for n8n
+          google_api_key: GOOGLE_API_KEY
         })
       });
 

@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_APP_VERSION: string | undefined
   readonly VITE_GOOGLE_API_KEY: string | undefined
   readonly VITE_N8N_WEBHOOK_URL: string | undefined
+  readonly VITE_N8N_FACTURA_WEBHOOK_URL: string | undefined
   readonly PROD: boolean
   readonly DEV: boolean
   readonly MODE: string
