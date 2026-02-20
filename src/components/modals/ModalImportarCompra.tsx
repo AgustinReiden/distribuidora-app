@@ -130,7 +130,7 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
 
       const cantidad = Math.max(1, Math.round(normalizarNumero(encontrarValor(fila, COLUMNAS.cantidad))));
       const costoUnitario = normalizarNumero(encontrarValor(fila, COLUMNAS.costoUnitario));
-      const bonificacion = Math.max(0, Math.round(normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion))));
+      const bonificacion = Math.max(0, normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion)));
 
       resultados.push({
         fila: index + 2,
@@ -204,8 +204,8 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
   const descargarPlantilla = async (): Promise<void> => {
     try {
       const plantilla = [
-        { Codigo: 'EJEMPLO001', Cantidad: 10, Costo: 500, Bonificacion: 2 },
-        { Codigo: 'EJEMPLO002', Cantidad: 5, Costo: 1200, Bonificacion: 0 }
+        { Codigo: 'EJEMPLO001', Cantidad: 10, Costo: 500, 'Bonificacion%': 5.5 },
+        { Codigo: 'EJEMPLO002', Cantidad: 5, Costo: 1200, 'Bonificacion%': 0 }
       ];
       const { createTemplate } = await loadExcelUtils();
       await createTemplate(plantilla, 'plantilla_compra', 'Compra');
@@ -355,7 +355,7 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
                         <th className="px-3 py-2 text-left">Producto</th>
                         <th className="px-3 py-2 text-right">Cant.</th>
                         <th className="px-3 py-2 text-right">Costo</th>
-                        <th className="px-3 py-2 text-right">Bonif.</th>
+                        <th className="px-3 py-2 text-right">Bonif.%</th>
                         <th className="px-3 py-2 text-center">Estado</th>
                       </tr>
                     </thead>
@@ -370,7 +370,7 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
                           <td className="px-3 py-2 text-right font-medium text-blue-600">
                             ${item.costoUnitario.toLocaleString()}
                           </td>
-                          <td className="px-3 py-2 text-right dark:text-gray-300">{item.bonificacion || '-'}</td>
+                          <td className="px-3 py-2 text-right dark:text-gray-300">{item.bonificacion ? `${item.bonificacion}%` : '-'}</td>
                           <td className="px-3 py-2 text-center">
                             {item.estado === 'encontrado' ? (
                               <CheckCircle className="w-4 h-4 text-green-500 mx-auto" />

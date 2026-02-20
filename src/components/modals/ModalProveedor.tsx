@@ -4,6 +4,7 @@ import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProveedorSchema } from '../../lib/schemas';
 import { formatCuitInput } from '../../utils/formatters';
+import { useZonasEstandarizadasQuery } from '../../hooks/queries';
 import type { Proveedor } from '../../types';
 
 interface AddressResult {
@@ -22,11 +23,13 @@ interface ProveedorFormData {
   email: string;
   contacto: string;
   notas: string;
+  zona_id: string;
 }
 
-interface ProveedorSaveData extends ProveedorFormData {
+interface ProveedorSaveData extends Omit<ProveedorFormData, 'zona_id'> {
   id?: string;
   activo: boolean;
+  zona_id: string | null;
 }
 
 export interface ModalProveedorProps {
@@ -45,6 +48,9 @@ export default function ModalProveedor({
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalProveedorSchema);
 
+  // Zonas query
+  const { data: zonas } = useZonasEstandarizadasQuery();
+
   const [formData, setFormData] = useState<ProveedorFormData>({
     nombre: '',
     cuit: '',
@@ -54,7 +60,8 @@ export default function ModalProveedor({
     telefono: '',
     email: '',
     contacto: '',
-    notas: ''
+    notas: '',
+    zona_id: ''
   });
   const [error, setError] = useState<string>('');
 
@@ -69,7 +76,8 @@ export default function ModalProveedor({
         telefono: proveedor.telefono || '',
         email: proveedor.email || '',
         contacto: proveedor.contacto || '',
-        notas: proveedor.notas || ''
+        notas: proveedor.notas || '',
+        zona_id: (proveedor as Proveedor & { zona_id?: string | number }).zona_id ? String((proveedor as Proveedor & { zona_id?: string | number }).zona_id) : ''
       });
     }
   }, [proveedor]);
@@ -110,6 +118,7 @@ export default function ModalProveedor({
       await onSave({
         id: proveedor?.id,
         ...result.data,
+        zona_id: formData.zona_id || null,
         activo: proveedor?.activo !== false
       } as ProveedorSaveData);
     } catch (err) {
@@ -241,6 +250,24 @@ export default function ModalProveedor({
                 <span>Ubicacion capturada: {formData.latitud.toFixed(6)}, {formData.longitud.toFixed(6)}</span>
               </div>
             )}
+          </div>
+
+          {/* Zona */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <MapPin className="w-4 h-4 inline mr-1" />
+              Zona
+            </label>
+            <select
+              value={formData.zona_id}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => handleChange('zona_id', e.target.value)}
+              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+            >
+              <option value="">Sin zona asignada</option>
+              {zonas?.map(z => (
+                <option key={z.id} value={String(z.id)}>{z.nombre}</option>
+              ))}
+            </select>
           </div>
 
           {/* Notas */}

@@ -12,23 +12,23 @@
 // ============================================
 
 /**
- * Calcula el total con IVA e impuestos internos
- * Fórmula: neto + (neto * porcentajeIva / 100) + impuestosInternos
+ * Calcula el total con IVA e impuestos internos (ambos como porcentaje)
+ * Fórmula: neto + (neto * porcentajeIva / 100) + (neto * porcentajeImpInternos / 100)
  *
  * @param neto - Monto neto (sin IVA)
  * @param porcentajeIva - Porcentaje de IVA (ej: 21, 10.5, 0)
- * @param impuestosInternos - Monto fijo de impuestos internos
+ * @param porcentajeImpInternos - Porcentaje de impuestos internos (ej: 5, 8)
  * @returns Total calculado
  */
 export function calcularTotalConIva(
   neto: number | string,
   porcentajeIva: number | string = 21,
-  impuestosInternos: number | string = 0
+  porcentajeImpInternos: number | string = 0
 ): number {
   const montoNeto = parseFloat(String(neto)) || 0;
   const iva = montoNeto * (parseFloat(String(porcentajeIva)) || 0) / 100;
-  const internos = parseFloat(String(impuestosInternos)) || 0;
-  return montoNeto + iva + internos;
+  const impInternos = montoNeto * (parseFloat(String(porcentajeImpInternos)) || 0) / 100;
+  return montoNeto + iva + impInternos;
 }
 
 /**
@@ -42,25 +42,26 @@ export const calcularCostoTotal = calcularTotalConIva;
 export const calcularPrecioTotal = calcularTotalConIva;
 
 /**
- * Calcula el monto neto desde un total con IVA
- * Fórmula inversa: (total - impuestosInternos) / (1 + porcentajeIva/100)
+ * Calcula el monto neto desde un total con IVA e impuestos internos (ambos %)
+ * Fórmula inversa: total / (1 + porcentajeIva/100 + porcentajeImpInternos/100)
  *
  * @param total - Monto total (con IVA e impuestos)
  * @param porcentajeIva - Porcentaje de IVA
- * @param impuestosInternos - Monto fijo de impuestos internos
+ * @param porcentajeImpInternos - Porcentaje de impuestos internos
  * @returns Monto neto
  */
 export function calcularNetoDesdeTotal(
   total: number | string,
   porcentajeIva: number | string = 21,
-  impuestosInternos: number | string = 0
+  porcentajeImpInternos: number | string = 0
 ): number {
   const montoTotal = parseFloat(String(total)) || 0;
-  const internos = parseFloat(String(impuestosInternos)) || 0;
   const iva = parseFloat(String(porcentajeIva)) || 0;
+  const impInt = parseFloat(String(porcentajeImpInternos)) || 0;
 
-  if (iva === 0) return montoTotal - internos;
-  return (montoTotal - internos) / (1 + iva / 100);
+  const divisor = 1 + iva / 100 + impInt / 100;
+  if (divisor === 0) return montoTotal;
+  return montoTotal / divisor;
 }
 
 /**
