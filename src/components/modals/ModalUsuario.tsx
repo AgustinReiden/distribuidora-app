@@ -1,8 +1,9 @@
-import { useState, memo, useRef } from 'react';
+import { useState, useEffect, memo, useRef } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usuarioSchema } from '../../lib/schemas';
+import { useZonasEstandarizadasQuery, usePreventistaZonasQuery, useAsignarZonasPrevMutation } from '../../hooks/queries';
 import type { PerfilDB } from '../../types';
 
 /** Roles disponibles para usuarios */
@@ -28,15 +29,20 @@ export interface ModalUsuarioProps {
   onClose: () => void;
   /** Indica si está guardando */
   guardando: boolean;
-  /** Zonas disponibles para sugerencias */
+  /** @deprecated Zonas ahora vienen de useZonasEstandarizadasQuery */
   zonasDisponibles?: string[];
 }
 
-const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guardando, zonasDisponibles = [] }: ModalUsuarioProps) {
+const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guardando }: ModalUsuarioProps) {
   const formRef = useRef<HTMLDivElement>(null);
 
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit, getAriaProps, getErrorMessageProps } = useZodValidation(usuarioSchema);
+
+  // Zonas queries
+  const { data: zonas } = useZonasEstandarizadasQuery();
+  const { data: prevZonaIds } = usePreventistaZonasQuery(usuario?.id);
+  const asignarZonasMut = useAsignarZonasPrevMutation();
 
   const [form, setForm] = useState<UsuarioFormData>(usuario ? {
     id: usuario.id,
@@ -46,6 +52,16 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     activo: usuario.activo !== false,
     zona: usuario.zona || ''
   } : { nombre: '', rol: 'preventista', activo: true, zona: '' });
+
+  // Estado local para zonas seleccionadas (tabla pivot, separado del perfil)
+  const [zonaIds, setZonaIds] = useState<string[]>([]);
+
+  // Cargar zonas del preventista cuando llegan de la query
+  useEffect(() => {
+    if (prevZonaIds) {
+      setZonaIds(prevZonaIds);
+    }
+  }, [prevZonaIds]);
 
   // Mostrar campo de zona solo para preventistas
   const mostrarZona = form.rol === 'preventista';
@@ -57,7 +73,15 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     }
   };
 
-  const handleSubmit = (): void => {
+  const toggleZona = (zonaId: string): void => {
+    setZonaIds(prev =>
+      prev.includes(zonaId)
+        ? prev.filter(id => id !== zonaId)
+        : [...prev, zonaId]
+    );
+  };
+
+  const handleSubmit = async (): Promise<void> => {
     const result = validate({
       nombre: form.nombre,
       email: form.email || '',
@@ -74,7 +98,17 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
       return;
     }
 
-    onSave({ ...form, id: usuario?.id });
+    // Guardar perfil
+    await onSave({ ...form, id: usuario?.id });
+
+    // Guardar zonas del preventista en tabla pivot
+    if (usuario?.id && form.rol === 'preventista') {
+      try {
+        await asignarZonasMut.mutateAsync({ perfilId: usuario.id, zonaIds });
+      } catch {
+        // Si falla la asignación de zonas, el perfil ya se guardó
+      }
+    }
   };
 
   const inputClass = (field: string): string =>
@@ -124,32 +158,37 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           {errors.rol && <p {...getErrorMessageProps('rol')} className="text-red-500 text-xs mt-1">{errors.rol}</p>}
         </div>
 
-        {/* Campo de zona solo para preventistas */}
+        {/* Zonas asignadas — solo para preventistas */}
         {mostrarZona && (
           <div>
-            <label htmlFor="zona" className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
               <MapPin className="w-4 h-4" />
-              Zona Asignada
+              Zonas Asignadas
             </label>
-            <input
-              id="zona"
-              type="text"
-              value={form.zona || ''}
-              onChange={e => handleFieldChange('zona', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="Ej: 1, 2, Norte, Centro..."
-              list="zonas-list"
-            />
-            {/* Datalist con zonas existentes de clientes para sugerencias */}
-            {zonasDisponibles.length > 0 && (
-              <datalist id="zonas-list">
-                {zonasDisponibles.map(zona => (
-                  <option key={zona} value={zona} />
+            {zonas && zonas.length > 0 ? (
+              <div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-700">
+                {zonas.map(z => (
+                  <label key={z.id} className="flex items-center gap-2 text-sm dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 rounded px-1 py-0.5">
+                    <input
+                      type="checkbox"
+                      checked={zonaIds.includes(String(z.id))}
+                      onChange={() => toggleZona(String(z.id))}
+                      className="w-4 h-4 rounded"
+                    />
+                    {z.nombre}
+                  </label>
                 ))}
-              </datalist>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 italic">No hay zonas configuradas. Crealas desde el modal de clientes.</p>
+            )}
+            {zonaIds.length > 0 && (
+              <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                {zonaIds.length} zona{zonaIds.length !== 1 ? 's' : ''} seleccionada{zonaIds.length !== 1 ? 's' : ''}
+              </p>
             )}
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              El preventista solo verá clientes de esta zona
+              El preventista solo vera clientes de las zonas seleccionadas
             </p>
           </div>
         )}
@@ -174,10 +213,10 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
         </button>
         <button
           onClick={handleSubmit}
-          disabled={guardando}
+          disabled={guardando || asignarZonasMut.isPending}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
-          {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          {(guardando || asignarZonasMut.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           Guardar
         </button>
       </div>

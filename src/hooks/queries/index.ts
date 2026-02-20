@@ -99,6 +99,16 @@ export {
   useToggleGrupoPrecioActivoMutation,
 } from './useGruposPrecioQuery'
 
+// Zonas estandarizadas
+export {
+  zonasKeys,
+  useZonasEstandarizadasQuery,
+  usePreventistaZonasQuery,
+  useCrearZonaMutation,
+  useAsignarZonasPrevMutation,
+} from './useZonasQuery'
+export type { ZonaDB } from './useZonasQuery'
+
 // Métricas
 export {
   metricasKeys,

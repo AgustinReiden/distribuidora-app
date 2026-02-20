@@ -4,7 +4,7 @@ import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
-import { usePreventistasQuery } from '../../hooks/queries';
+import { usePreventistasQuery, useZonasEstandarizadasQuery, useCrearZonaMutation } from '../../hooks/queries';
 import {
   formatCuitInput,
   formatDniInput,
@@ -66,19 +66,7 @@ export interface ModalClienteProps {
   zonasExistentes?: string[];
 }
 
-// Opciones predefinidas de zonas
-const ZONAS_PREDEFINIDAS = [
-  'Centro',
-  'Norte',
-  'Sur',
-  'Este',
-  'Oeste',
-  'Yerba Buena',
-  'San Miguel de Tucumán',
-  'Banda del Río Salí',
-  'Las Talitas',
-  'Alderetes'
-];
+// Las zonas ahora vienen de la tabla `zonas` via useZonasEstandarizadasQuery
 
 // Opciones predefinidas de rubros
 const RUBROS_OPCIONES = [
@@ -95,10 +83,12 @@ const RUBROS_OPCIONES = [
   'Otro'
 ];
 
-const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, zonasExistentes = [] }: ModalClienteProps) {
+const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false }: ModalClienteProps) {
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
   const { data: preventistas = [] } = usePreventistasQuery();
+  const { data: zonasDB = [] } = useZonasEstandarizadasQuery();
+  const crearZonaMut = useCrearZonaMutation();
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -107,8 +97,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const tipoDocInicial = cliente ? (cliente.tipo_documento || detectDocumentType(cliente.cuit)) : 'CUIT';
   const numeroDocInicial = cliente ? (tipoDocInicial === 'DNI' ? extractDniFromStorage(cliente.cuit) : cliente.cuit) : '';
 
-  // Combinar zonas predefinidas con las existentes de la base de datos
-  const zonasUnicas = [...new Set([...ZONAS_PREDEFINIDAS, ...zonasExistentes.filter(Boolean)])].sort();
+  // Zonas de la tabla estandarizada
+  const zonasUnicas = zonasDB.map(z => z.nombre).sort();
 
   // Estado para nueva zona
   const [mostrarNuevaZona, setMostrarNuevaZona] = useState<boolean>(false);
@@ -206,8 +196,13 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       cuitFinal = form.numero_documento;
     }
 
-    // Usar zona nueva si corresponde
-    const zonaFinal = mostrarNuevaZona && nuevaZona.trim() ? nuevaZona.trim() : form.zona;
+    // Usar zona nueva si corresponde - persistir en tabla zonas si es nueva
+    let zonaFinal = form.zona;
+    if (mostrarNuevaZona && nuevaZona.trim()) {
+      zonaFinal = nuevaZona.trim();
+      // Crear la zona en la tabla estandarizada (ignora si ya existe)
+      crearZonaMut.mutate(zonaFinal);
+    }
 
     onSave({
       ...form,

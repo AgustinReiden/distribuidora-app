@@ -151,6 +151,8 @@ interface ItemRowProps {
 
 /** Props de ResumenSection */
 interface ResumenSectionProps {
+  subtotalBruto: number;
+  bonificacionTotal: number;
   subtotal: number;
   iva: number;
   impuestosInternos: number;
@@ -159,6 +161,8 @@ interface ResumenSectionProps {
 
 /** Return type del hook de cálculos */
 interface CalculosImpuestos {
+  subtotalBruto: number;
+  bonificacionTotal: number;
   subtotal: number;
   iva: number;
   impuestosInternos: number;
@@ -339,29 +343,28 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
   }
 }
 
-// Hook para cálculos de impuestos
+// Hook para cálculos de impuestos (bonificacion e imp. internos como porcentaje)
 function useCalculosImpuestos(items: CompraItemForm[]): CalculosImpuestos {
-  const subtotal = useMemo(() =>
-    items.reduce((sum, item) => sum + (item.cantidad * item.costoUnitario), 0),
-    [items]
-  )
+  return useMemo(() => {
+    let subtotalBruto = 0
+    let bonificacionTotal = 0
+    let iva = 0
+    let impuestosInternos = 0
 
-  const iva = useMemo(() =>
-    items.reduce((sum, item) => {
-      const porcentajeIva = item.porcentajeIva ?? 21
-      return sum + (item.cantidad * item.costoUnitario * porcentajeIva / 100)
-    }, 0),
-    [items]
-  )
+    for (const item of items) {
+      const bruto = item.cantidad * item.costoUnitario
+      const bonif = bruto * (item.bonificacion || 0) / 100
+      const neto = bruto - bonif
+      subtotalBruto += bruto
+      bonificacionTotal += bonif
+      iva += neto * ((item.porcentajeIva ?? 21) / 100)
+      impuestosInternos += neto * ((item.impuestosInternos || 0) / 100)
+    }
 
-  const impuestosInternos = useMemo(() =>
-    items.reduce((sum, item) => sum + (item.cantidad * (item.impuestosInternos || 0)), 0),
-    [items]
-  )
-
-  const total = useMemo(() => subtotal + iva + impuestosInternos, [subtotal, iva, impuestosInternos])
-
-  return { subtotal, iva, impuestosInternos, total }
+    const subtotal = subtotalBruto - bonificacionTotal
+    const total = subtotal + iva + impuestosInternos
+    return { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total }
+  }, [items])
 }
 
 const N8N_FACTURA_WEBHOOK_URL: string = import.meta.env.VITE_N8N_FACTURA_WEBHOOK_URL || ''
@@ -371,7 +374,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
-  const { subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
+  const { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Productos filtrados
@@ -551,13 +554,16 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         total,
         formaPago: state.formaPago,
         notas: state.notas,
-        items: state.items.map(item => ({
-          productoId: item.productoId,
-          cantidad: item.cantidad,
-          costoUnitario: item.costoUnitario || 0,
-          subtotal: item.cantidad * item.costoUnitario,
-          bonificacion: item.bonificacion || 0
-        }))
+        items: state.items.map(item => {
+          const costoConBonif = (item.costoUnitario || 0) * (1 - (item.bonificacion || 0) / 100)
+          return {
+            productoId: item.productoId,
+            cantidad: item.cantidad,
+            costoUnitario: item.costoUnitario || 0,
+            subtotal: item.cantidad * costoConBonif,
+            bonificacion: item.bonificacion || 0
+          }
+        })
       })
       onClose()
     } catch (err) {
@@ -668,6 +674,8 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
           {/* Totales */}
           {state.items.length > 0 && (
             <ResumenSection
+              subtotalBruto={subtotalBruto}
+              bonificacionTotal={bonificacionTotal}
               subtotal={subtotal}
               iva={iva}
               impuestosInternos={impuestosInternos}
@@ -1070,9 +1078,9 @@ function ItemsList({ items, onActualizarItem, onEliminarItem }: ItemsListProps) 
       <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
         <div className="col-span-3">Producto</div>
         <div className="col-span-2 text-center">Cant.</div>
-        <div className="col-span-1 text-center">Bonif.</div>
+        <div className="col-span-1 text-center">Bonif.%</div>
         <div className="col-span-2 text-center">Neto</div>
-        <div className="col-span-2 text-center">Imp.Int.</div>
+        <div className="col-span-2 text-center">Imp.Int.%</div>
         <div className="col-span-1 text-right">Subtot.</div>
         <div className="col-span-1"></div>
       </div>
@@ -1119,12 +1127,14 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Bonif.</label>
+            <label className="block text-xs text-gray-500 mb-1">Bonif.%</label>
             <input
               type="number"
               min="0"
+              max="100"
+              step="0.01"
               value={item.bonificacion}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseInt(e.target.value) || 0)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseFloat(e.target.value) || 0)}
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -1140,20 +1150,20 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Imp.Int.</label>
+            <label className="block text-xs text-gray-500 mb-1">II%</label>
             <input
               type="number"
               min="0"
               step="0.01"
               value={item.impuestosInternos || 0}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
-              className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+              readOnly
+              className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded bg-gray-100 dark:bg-gray-600 dark:text-gray-300 text-sm cursor-not-allowed"
             />
           </div>
         </div>
         <div className="flex justify-between items-center pt-2 border-t dark:border-gray-600">
           <span className="text-sm text-gray-500">Subtotal:</span>
-          <span className="font-semibold text-gray-800 dark:text-white">{formatPrecio(item.cantidad * item.costoUnitario)}</span>
+          <span className="font-semibold text-gray-800 dark:text-white">{formatPrecio(item.cantidad * item.costoUnitario * (1 - (item.bonificacion || 0) / 100))}</span>
         </div>
       </div>
 
@@ -1176,8 +1186,10 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
           <input
             type="number"
             min="0"
+            max="100"
+            step="0.01"
             value={item.bonificacion}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseInt(e.target.value) || 0)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseFloat(e.target.value) || 0)}
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
@@ -1197,12 +1209,12 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             min="0"
             step="0.01"
             value={item.impuestosInternos || 0}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'impuestosInternos', parseFloat(e.target.value) || 0)}
-            className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+            readOnly
+            className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded bg-gray-100 dark:bg-gray-600 dark:text-gray-300 text-sm cursor-not-allowed"
           />
         </div>
         <div className="col-span-1 text-right font-medium text-gray-800 dark:text-white text-sm">
-          {formatPrecio(item.cantidad * item.costoUnitario)}
+          {formatPrecio(item.cantidad * item.costoUnitario * (1 - (item.bonificacion || 0) / 100))}
         </div>
         <div className="col-span-1 text-right">
           <button
@@ -1312,7 +1324,7 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
   )
 }
 
-function ResumenSection({ subtotal, iva, impuestosInternos, total }: ResumenSectionProps) {
+function ResumenSection({ subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total }: ResumenSectionProps) {
   return (
     <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
       <div className="flex items-center gap-2 mb-3">
@@ -1321,6 +1333,18 @@ function ResumenSection({ subtotal, iva, impuestosInternos, total }: ResumenSect
       </div>
 
       <div className="space-y-2">
+        {bonificacionTotal > 0 && (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600 dark:text-gray-400">Subtotal Bruto:</span>
+              <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(subtotalBruto)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-orange-600">
+              <span>Bonificacion:</span>
+              <span className="font-medium">-{formatPrecio(bonificacionTotal)}</span>
+            </div>
+          </>
+        )}
         <div className="flex justify-between text-sm">
           <span className="text-gray-600 dark:text-gray-400">Subtotal Neto:</span>
           <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(subtotal)}</span>
@@ -1339,9 +1363,6 @@ function ResumenSection({ subtotal, iva, impuestosInternos, total }: ResumenSect
           <span className="text-gray-800 dark:text-white">Total:</span>
           <span className="text-green-600">{formatPrecio(total)}</span>
         </div>
-        <p className="text-xs text-gray-500 pt-1">
-          Costo real (neto + imp.int. sin IVA): {formatPrecio(subtotal + impuestosInternos)}
-        </p>
       </div>
     </div>
   )
