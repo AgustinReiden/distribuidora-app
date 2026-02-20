@@ -72,14 +72,14 @@ export function resolverPreciosMayorista(
   // Pre-calcular cantidades totales por grupo
   const cantidadesPorGrupo = new Map<string, number>()
   for (const item of items) {
-    const grupos = pricingMap.get(item.productoId)
+    const grupos = pricingMap.get(String(item.productoId))
     if (!grupos) continue
     for (const grupo of grupos) {
       const totalActual = cantidadesPorGrupo.get(grupo.grupoId) || 0
       // Sumar las cantidades de TODOS los items del pedido que pertenecen a este grupo
       let totalGrupo = 0
       for (const otroItem of items) {
-        if (grupo.productoIds.includes(otroItem.productoId)) {
+        if (grupo.productoIds.includes(String(otroItem.productoId))) {
           totalGrupo += otroItem.cantidad
         }
       }
@@ -92,10 +92,10 @@ export function resolverPreciosMayorista(
 
   // Resolver precio para cada item
   for (const item of items) {
-    const grupos = pricingMap.get(item.productoId)
+    const grupos = pricingMap.get(String(item.productoId))
 
     if (!grupos || grupos.length === 0) {
-      result.set(item.productoId, {
+      result.set(String(item.productoId), {
         precioOriginal: item.precioUnitario,
         precioResuelto: item.precioUnitario,
         esMayorista: false,
@@ -134,7 +134,7 @@ export function resolverPreciosMayorista(
       }
     }
 
-    result.set(item.productoId, {
+    result.set(String(item.productoId), {
       precioOriginal: item.precioUnitario,
       precioResuelto: mejorPrecio,
       esMayorista: mejorPrecio < item.precioUnitario,
@@ -165,13 +165,13 @@ export function calcularFaltanteParaTier(
   // Calcular cantidades totales por grupo
   const cantidadesPorGrupo = new Map<string, number>()
   for (const item of items) {
-    const grupos = pricingMap.get(item.productoId)
+    const grupos = pricingMap.get(String(item.productoId))
     if (!grupos) continue
     for (const grupo of grupos) {
       if (!cantidadesPorGrupo.has(grupo.grupoId)) {
         let totalGrupo = 0
         for (const otroItem of items) {
-          if (grupo.productoIds.includes(otroItem.productoId)) {
+          if (grupo.productoIds.includes(String(otroItem.productoId))) {
             totalGrupo += otroItem.cantidad
           }
         }
@@ -181,7 +181,7 @@ export function calcularFaltanteParaTier(
   }
 
   for (const item of items) {
-    const grupos = pricingMap.get(item.productoId)
+    const grupos = pricingMap.get(String(item.productoId))
     if (!grupos) continue
 
     for (const grupo of grupos) {
@@ -224,7 +224,7 @@ export function aplicarPreciosMayorista(
   preciosResueltos: Map<string, PrecioResuelto>
 ): ItemPedido[] {
   return items.map(item => {
-    const resuelto = preciosResueltos.get(item.productoId)
+    const resuelto = preciosResueltos.get(String(item.productoId))
     if (resuelto && resuelto.esMayorista) {
       return { ...item, precioUnitario: resuelto.precioResuelto }
     }

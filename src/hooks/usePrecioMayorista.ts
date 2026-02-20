@@ -68,7 +68,7 @@ export function usePrecioMayorista(items: ItemPedido[]): UsePrecioMayoristaRetur
     let original = 0
     for (const item of items) {
       original += item.precioUnitario * item.cantidad
-      const resuelto = preciosResueltos.get(item.productoId)
+      const resuelto = preciosResueltos.get(String(item.productoId))
       if (resuelto) {
         mayorista += resuelto.precioResuelto * item.cantidad
       } else {
