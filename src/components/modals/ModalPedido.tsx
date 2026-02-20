@@ -384,7 +384,7 @@ const ModalPedido = memo(function ModalPedido({
                 {nuevoPedido.items.map(item => {
                   const prod = productos.find(p => p.id === item.productoId);
                   const warning = getStockWarning(item.productoId, item.cantidad);
-                  const precioInfo = preciosResueltos.get(item.productoId);
+                  const precioInfo = preciosResueltos.get(String(item.productoId));
                   const esMayorista = precioInfo?.esMayorista || false;
                   const precioMostrar = esMayorista ? precioInfo!.precioResuelto : item.precioUnitario;
                   const subtotal = precioMostrar * item.cantidad;
