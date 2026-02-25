@@ -438,8 +438,7 @@ export default function PedidosContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaPedidos
           pedidos={pedidos}
-          pedidosParaMostrar={pedidos}
-          pedidosPaginados={pedidos}
+          totalCount={totalCount}
           paginaActual={paginaActual}
           totalPaginas={totalPaginas}
           busqueda={busqueda}
