@@ -2,7 +2,10 @@ import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
 import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map, FileText, Tag, Building2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import Paginacion from '../layout/Paginacion';
 import type { ClienteDB } from '../../types';
+
+const ITEMS_PER_PAGE = 18;
 
 // =============================================================================
 // INTERFACES DE PROPS
@@ -31,6 +34,7 @@ export default function VistaClientes({
 }: VistaClientesProps) {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroZona, setFiltroZona] = useState<string>('todas');
+  const [paginaActual, setPaginaActual] = useState(1);
 
   // Obtener zonas únicas
   const zonas = useMemo((): string[] => {
@@ -63,6 +67,18 @@ export default function VistaClientes({
     });
   }, [clientes, busqueda, filtroZona, filtroRubro]);
 
+  // Pagination
+  const totalPaginas = Math.ceil(clientesFiltrados.length / ITEMS_PER_PAGE);
+  const clientesPaginados = useMemo(() => {
+    const inicio = (paginaActual - 1) * ITEMS_PER_PAGE;
+    return clientesFiltrados.slice(inicio, inicio + ITEMS_PER_PAGE);
+  }, [clientesFiltrados, paginaActual]);
+
+  // Reset page when filters change
+  const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
+  const handleZona = (e: ChangeEvent<HTMLSelectElement>) => { setFiltroZona(e.target.value); setPaginaActual(1); };
+  const handleRubro = (e: ChangeEvent<HTMLSelectElement>) => { setFiltroRubro(e.target.value); setPaginaActual(1); };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -89,7 +105,7 @@ export default function VistaClientes({
           <input
             type="text"
             value={busqueda}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setBusqueda(e.target.value)}
+            onChange={handleBusqueda}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
             placeholder="Buscar por nombre, CUIT, dirección o teléfono..."
             aria-label="Buscar clientes por nombre, CUIT, dirección o teléfono"
@@ -101,7 +117,7 @@ export default function VistaClientes({
             <select
               id="filtro-zona-clientes"
               value={filtroZona}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroZona(e.target.value)}
+              onChange={handleZona}
               className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             >
               {zonas.map(zona => (
@@ -118,7 +134,7 @@ export default function VistaClientes({
             <select
               id="filtro-rubro-clientes"
               value={filtroRubro}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroRubro(e.target.value)}
+              onChange={handleRubro}
               className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             >
               {rubros.map(rubro => (
@@ -146,7 +162,7 @@ export default function VistaClientes({
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {clientesFiltrados.map(cliente => (
+          {clientesPaginados.map(cliente => (
             <div
               key={cliente.id}
               className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
@@ -242,6 +258,14 @@ export default function VistaClientes({
           ))}
         </div>
       )}
+
+      <Paginacion
+        paginaActual={paginaActual}
+        totalPaginas={totalPaginas}
+        onPageChange={setPaginaActual}
+        totalItems={clientesFiltrados.length}
+        itemsLabel="clientes"
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { useState, useMemo, ChangeEvent } from 'react';
 import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import Paginacion from '../layout/Paginacion';
 import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from '../../types';
 
 // =============================================================================
@@ -15,6 +16,8 @@ interface EstadoConfig {
   label: string;
   color: string;
 }
+
+const ITEMS_PER_PAGE = 15;
 
 const ESTADOS_COMPRA: Record<EstadoCompra, EstadoConfig> = {
   pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' },
@@ -71,6 +74,7 @@ export default function VistaCompras({
   const [filtroProveedor, setFiltroProveedor] = useState<string>('');
   const [filtroFechaDesde, setFiltroFechaDesde] = useState<string>('');
   const [filtroFechaHasta, setFiltroFechaHasta] = useState<string>('');
+  const [paginaActual, setPaginaActual] = useState(1);
 
   // Estadísticas
   const estadisticas = useMemo<EstadisticasCompras>(() => {
@@ -111,6 +115,13 @@ export default function VistaCompras({
     });
   }, [compras, busqueda, filtroEstado, filtroProveedor, filtroFechaDesde, filtroFechaHasta]);
 
+  // Pagination
+  const totalPaginas = Math.ceil(comprasFiltradas.length / ITEMS_PER_PAGE);
+  const comprasPaginadas = useMemo(() => {
+    const inicio = (paginaActual - 1) * ITEMS_PER_PAGE;
+    return comprasFiltradas.slice(inicio, inicio + ITEMS_PER_PAGE);
+  }, [comprasFiltradas, paginaActual]);
+
   // Limpiar filtros
   const limpiarFiltros = (): void => {
     setBusqueda('');
@@ -118,28 +129,34 @@ export default function VistaCompras({
     setFiltroProveedor('');
     setFiltroFechaDesde('');
     setFiltroFechaHasta('');
+    setPaginaActual(1);
   };
 
   const hayFiltrosActivos = busqueda || filtroEstado !== 'todos' || filtroProveedor || filtroFechaDesde || filtroFechaHasta;
 
   const handleBusquedaChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setBusqueda(e.target.value);
+    setPaginaActual(1);
   };
 
   const handleEstadoChange = (e: ChangeEvent<HTMLSelectElement>): void => {
     setFiltroEstado(e.target.value as FiltroEstado);
+    setPaginaActual(1);
   };
 
   const handleProveedorChange = (e: ChangeEvent<HTMLSelectElement>): void => {
     setFiltroProveedor(e.target.value);
+    setPaginaActual(1);
   };
 
   const handleFechaDesdeChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setFiltroFechaDesde(e.target.value);
+    setPaginaActual(1);
   };
 
   const handleFechaHastaChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setFiltroFechaHasta(e.target.value);
+    setPaginaActual(1);
   };
 
   return (
@@ -320,7 +337,7 @@ export default function VistaCompras({
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
-              {comprasFiltradas.map(compra => {
+              {comprasPaginadas.map(compra => {
                 const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
                 const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
                 const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
@@ -389,6 +406,14 @@ export default function VistaCompras({
           </table>
         </div>
       )}
+
+      <Paginacion
+        paginaActual={paginaActual}
+        totalPaginas={totalPaginas}
+        onPageChange={setPaginaActual}
+        totalItems={comprasFiltradas.length}
+        itemsLabel="compras"
+      />
     </div>
   );
 }
