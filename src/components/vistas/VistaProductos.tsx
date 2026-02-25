@@ -3,7 +3,10 @@ import type { ChangeEvent } from 'react';
 import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import Paginacion from '../layout/Paginacion';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
+
+const ITEMS_PER_PAGE = 20;
 
 // =============================================================================
 // INTERFACES DE PROPS
@@ -37,6 +40,7 @@ export default function VistaProductos({
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
   const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState<boolean>(false);
+  const [paginaActual, setPaginaActual] = useState(1);
 
   // Obtener categorías únicas
   const categorias = useMemo((): string[] => {
@@ -63,6 +67,18 @@ export default function VistaProductos({
       return matchBusqueda && matchCategoria && matchStockBajo;
     });
   }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo]);
+
+  // Pagination
+  const totalPaginas = Math.ceil(productosFiltrados.length / ITEMS_PER_PAGE);
+  const productosPaginados = useMemo(() => {
+    const inicio = (paginaActual - 1) * ITEMS_PER_PAGE;
+    return productosFiltrados.slice(inicio, inicio + ITEMS_PER_PAGE);
+  }, [productosFiltrados, paginaActual]);
+
+  // Reset page when filters change
+  const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
+  const handleCategoria = (cat: string) => { setFiltroCategoria(cat); setPaginaActual(1); };
+  const handleStockBajo = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
 
   // Mapa de proveedores para lookup rápido
   const proveedoresMap = useMemo(() => {
@@ -138,7 +154,7 @@ export default function VistaProductos({
                 )}
               </div>
               <button
-                onClick={() => setMostrarSoloStockBajo(!mostrarSoloStockBajo)}
+                onClick={handleStockBajo}
                 className="mt-2 text-sm text-red-600 dark:text-red-400 hover:underline"
               >
                 {mostrarSoloStockBajo ? 'Mostrar todos' : 'Ver solo productos con stock bajo'}
@@ -155,7 +171,7 @@ export default function VistaProductos({
           <input
             type="text"
             value={busqueda}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setBusqueda(e.target.value)}
+            onChange={handleBusqueda}
             className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
             placeholder="Buscar por nombre o código..."
             aria-label="Buscar productos"
@@ -166,7 +182,7 @@ export default function VistaProductos({
             {categorias.map(cat => (
               <button
                 key={cat}
-                onClick={() => setFiltroCategoria(cat)}
+                onClick={() => handleCategoria(cat)}
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   filtroCategoria === cat
                     ? 'bg-blue-600 text-white'
@@ -209,7 +225,7 @@ export default function VistaProductos({
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
-              {productosFiltrados.map(producto => (
+              {productosPaginados.map(producto => (
                 <tr key={producto.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-sm font-mono">
                     {producto.codigo || '-'}
@@ -271,6 +287,14 @@ export default function VistaProductos({
           </table>
         </div>
       )}
+
+      <Paginacion
+        paginaActual={paginaActual}
+        totalPaginas={totalPaginas}
+        onPageChange={setPaginaActual}
+        totalItems={productosFiltrados.length}
+        itemsLabel="productos"
+      />
     </div>
   );
 }
