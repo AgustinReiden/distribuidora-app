@@ -34,6 +34,7 @@ export {
 export {
   pedidosKeys,
   usePedidosQuery,
+  usePedidosPaginatedQuery,
   usePedidoQuery,
   usePedidosByTransportistaQuery,
   usePedidosByClienteQuery,
@@ -43,6 +44,7 @@ export {
   useAsignarTransportistaMutation,
   useEliminarPedidoMutation,
 } from './usePedidosQuery'
+export type { PaginatedResult } from './usePedidosQuery'
 
 // Usuarios
 export {
