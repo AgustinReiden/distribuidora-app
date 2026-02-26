@@ -510,7 +510,7 @@ export default function PedidosContainer(): React.ReactElement {
                 setNuevoPedido(prev => ({ ...prev, items: prev.items.map(i => i.productoId === productoId ? { ...i, cantidad } : i) }))
               }
             }}
-            onCrearCliente={async () => null as unknown}
+            onCrearCliente={async () => ({ id: '' as string | number })}
             onGuardar={handleGuardarPedido}
             guardando={guardando}
             isAdmin={isAdmin}

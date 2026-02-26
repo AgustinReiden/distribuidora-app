@@ -3,6 +3,7 @@
  */
 
 import { BaseService } from './baseService'
+import { escapePostgrestFilter } from '../../utils/sanitize'
 import type { Cliente } from '../../types'
 
 export interface ClienteWithPedidos extends Cliente {
@@ -73,13 +74,17 @@ class ClienteService extends BaseService<Cliente> {
   }
 
   /**
-   * Busca clientes por nombre o razón social
+   * Busca clientes por nombre o razón social.
+   * Sanitiza el término de búsqueda para prevenir inyección PostgREST.
    */
   async buscar(termino: string): Promise<Cliente[]> {
+    const safe = escapePostgrestFilter(termino)
+    if (!safe) return []
+
     return this.query(async (query) => {
       return query
         .select('*')
-        .or(`nombre_fantasia.ilike.%${termino}%,razon_social.ilike.%${termino}%`)
+        .or(`nombre_fantasia.ilike.%${safe}%,razon_social.ilike.%${safe}%`)
         .order('nombre_fantasia')
     }) as Promise<Cliente[]>
   }

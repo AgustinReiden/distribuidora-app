@@ -7,7 +7,7 @@
  *
  * Usa debounce de 300ms para agrupar cambios rápidos (ej: batch de stock).
  */
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRealtimeSubscription } from './useRealtimeSubscription'
 import { pedidosKeys } from './queries/usePedidosQuery'
@@ -45,6 +45,18 @@ export function useRealtimeInvalidation({
       queryClient.invalidateQueries({ queryKey: productosKeys.all })
     }, debounceMs)
   }, [queryClient, debounceMs])
+
+  // Limpiar timers de debounce al desmontar para prevenir memory leaks
+  useEffect(() => {
+    return () => {
+      if (pedidosTimerRef.current) {
+        clearTimeout(pedidosTimerRef.current)
+      }
+      if (productosTimerRef.current) {
+        clearTimeout(productosTimerRef.current)
+      }
+    }
+  }, [])
 
   const { status: pedidosStatus } = useRealtimeSubscription({
     table: 'pedidos',

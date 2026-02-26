@@ -59,6 +59,7 @@ async function fetchPedidos(): Promise<PedidoDB[]> {
     .from('pedidos')
     .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
     .order('created_at', { ascending: false })
+    .limit(500) // Limitar carga inicial para evitar consumo excesivo de memoria
 
   if (error) throw error
 
