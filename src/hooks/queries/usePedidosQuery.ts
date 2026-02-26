@@ -2,7 +2,7 @@
  * TanStack Query hooks para Pedidos
  * Reemplaza el hook usePedidos con mejor cache y gestión de estado
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState } from '../../types'
 import { productosKeys } from './useProductosQuery'
@@ -18,6 +18,8 @@ export const pedidosKeys = {
   byCliente: (clienteId: string) => [...pedidosKeys.all, 'cliente', clienteId] as const,
   historial: (pedidoId: string) => [...pedidosKeys.all, 'historial', pedidoId] as const,
   eliminados: () => [...pedidosKeys.all, 'eliminados'] as const,
+  paginated: (page: number, pageSize: number, filters: Partial<FiltrosPedidosState>) =>
+    [...pedidosKeys.all, 'paginated', page, pageSize, filters] as const,
 }
 
 // Types
@@ -125,6 +127,84 @@ async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
 
   if (error) throw error
   return (data || []) as PedidoDB[]
+}
+
+// Paginated fetch
+export interface PaginatedResult<T> {
+  data: T[]
+  totalCount: number
+}
+
+async function fetchPedidosPaginated(
+  page: number,
+  pageSize: number,
+  filters?: Partial<FiltrosPedidosState>,
+  search?: string
+): Promise<PaginatedResult<PedidoDB>> {
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+
+  let query = supabase
+    .from('pedidos')
+    .select('*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))', { count: 'exact' })
+    .order('created_at', { ascending: false })
+
+  // Apply server-side filters
+  if (filters?.estado && filters.estado !== 'todos') {
+    query = query.eq('estado', filters.estado)
+  }
+  if (filters?.estadoPago && filters.estadoPago !== 'todos') {
+    query = query.eq('estado_pago', filters.estadoPago)
+  }
+  if (filters?.transportistaId && filters.transportistaId !== 'todos') {
+    query = query.eq('transportista_id', filters.transportistaId)
+  }
+  if (filters?.fechaDesde) {
+    query = query.gte('created_at', filters.fechaDesde + 'T00:00:00')
+  }
+  if (filters?.fechaHasta) {
+    query = query.lte('created_at', filters.fechaHasta + 'T23:59:59')
+  }
+
+  // Search by client name (using the foreign key relationship)
+  if (search && search.trim().length > 0) {
+    query = query.or(`cliente.nombre_fantasia.ilike.%${search.trim()}%,cliente.cuit.ilike.%${search.trim()}%`)
+  }
+
+  query = query.range(from, to)
+
+  const { data, error, count } = await query
+
+  if (error) throw error
+
+  // Enrich with perfiles (same logic as fetchPedidos)
+  const perfilIds = new Set<string>()
+  for (const pedido of (data || [])) {
+    if (pedido.usuario_id) perfilIds.add(pedido.usuario_id as string)
+    if (pedido.transportista_id) perfilIds.add(pedido.transportista_id as string)
+  }
+
+  let perfilesMap: Record<string, PerfilDB> = {}
+  if (perfilIds.size > 0) {
+    const { data: perfiles } = await supabase
+      .from('perfiles')
+      .select('id, nombre, email')
+      .in('id', Array.from(perfilIds))
+
+    if (perfiles) {
+      perfilesMap = Object.fromEntries(
+        (perfiles as PerfilDB[]).map(p => [p.id, p])
+      )
+    }
+  }
+
+  const enrichedPedidos = (data || []).map(pedido => ({
+    ...pedido,
+    usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
+    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+  }))
+
+  return { data: enrichedPedidos as PedidoDB[], totalCount: count ?? 0 }
 }
 
 // Mutation functions
@@ -266,6 +346,23 @@ export function usePedidosByClienteQuery(clienteId: string) {
 }
 
 /**
+ * Hook para obtener pedidos paginados con filtros server-side
+ */
+export function usePedidosPaginatedQuery(
+  page: number,
+  pageSize: number,
+  filters?: Partial<FiltrosPedidosState>,
+  search?: string
+) {
+  return useQuery({
+    queryKey: pedidosKeys.paginated(page, pageSize, { ...filters, busqueda: search } as Partial<FiltrosPedidosState>),
+    queryFn: () => fetchPedidosPaginated(page, pageSize, filters, search),
+    staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/**
  * Hook para crear un pedido
  */
 export function useCrearPedidoMutation() {
@@ -274,8 +371,8 @@ export function useCrearPedidoMutation() {
   return useMutation({
     mutationFn: crearPedido,
     onSuccess: () => {
-      // Invalidar lista de pedidos
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.lists() })
+      // Invalidar todas las queries de pedidos (list + paginated)
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
       // Invalidar productos (por cambio de stock)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists() })
       queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
@@ -313,7 +410,7 @@ export function useCambiarEstadoMutation() {
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
     },
   })
 }
@@ -348,7 +445,7 @@ export function useActualizarPagoMutation() {
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
     },
   })
 }
@@ -363,7 +460,7 @@ export function useAsignarTransportistaMutation() {
     mutationFn: ({ pedidoId, transportistaId }: { pedidoId: string; transportistaId: string | null }) =>
       asignarTransportista(pedidoId, transportistaId),
     onSuccess: (_, { transportistaId }) => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
       if (transportistaId) {
         queryClient.invalidateQueries({ queryKey: pedidosKeys.byTransportista(transportistaId) })
       }
@@ -383,15 +480,15 @@ export function useEliminarPedidoMutation() {
     onSuccess: (_, { id }) => {
       // Remover de cache
       queryClient.removeQueries({ queryKey: pedidosKeys.detail(id) })
-      // Actualizar lista
+      // Actualizar lista (optimistic for legacy query)
       queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(), (old) => {
         if (!old) return []
         return old.filter(p => p.id !== id)
       })
+      // Invalidar todas las queries de pedidos (list + paginated)
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
       // Invalidar productos (stock restaurado)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists() })
-      // Invalidar eliminados
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.eliminados() })
     },
   })
 }

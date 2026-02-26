@@ -20,7 +20,6 @@ import {
   usePedidos,
   useUsuarios,
   useDashboard,
-  useBackup,
   usePagos,
   useMermas,
   useCompras,
@@ -100,7 +99,7 @@ function MainApp(): ReactElement {
 
   // Estado de la aplicacion (consolidado)
   const appState = useAppState(perfil);
-  const { fechaRecorridos, setFechaRecorridos, modales, guardando, cargandoHistorial, busqueda, paginaActual, setPaginaActual } = appState;
+  const { fechaRecorridos, setFechaRecorridos, modales, guardando, cargandoHistorial } = appState;
 
   // Configurar notificador de errores
   useEffect(() => {
@@ -114,7 +113,6 @@ function MainApp(): ReactElement {
   const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
   const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
   const { reportePreventistas, reporteInicializado, calcularReportePreventistas, loadingReporte, refetch: refetchMetricas } = useDashboard(dashboardUsuarioId);
-  const { exportando, exportarPedidosExcel } = useBackup();
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
   const { registrarPago, obtenerResumenCuenta } = usePagos();
   const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
@@ -128,7 +126,7 @@ function MainApp(): ReactElement {
   useRealtimeInvalidation({ enabled: isOnline });
 
   // Datos derivados
-  const { categorias, pedidosParaMostrar, totalPaginas, pedidosPaginados } = useAppDerivedState(productos, pedidosFiltrados, busqueda, paginaActual);
+  const { categorias } = useAppDerivedState(productos, pedidosFiltrados, appState.busqueda, appState.paginaActual);
 
   // Handlers (consolidados)
   const handlers = useAppHandlers({
@@ -288,21 +286,8 @@ function MainApp(): ReactElement {
                   ) : <Navigate to="/pedidos" replace />
                 } />
 
-                {/* Pedidos - usa container con TanStack Query */}
-                <Route path="/pedidos" element={
-                  <PedidosContainer
-                    onNuevoPedido={() => modales.pedido.setOpen(true)}
-                    onOptimizarRuta={() => modales.optimizarRuta.setOpen(true)}
-                    onExportarPDF={() => modales.exportarPDF.setOpen(true)}
-                    onExportarExcel={(pedidosList, filtrosExport) =>
-                      exportarPedidosExcel(pedidosList, { ...filtrosExport, fechaDesde: filtrosExport.fechaDesde ?? undefined, fechaHasta: filtrosExport.fechaHasta ?? undefined }, transportistas)
-                    }
-                    onModalFiltroFecha={() => modales.filtroFecha.setOpen(true)}
-                    onAsignarTransportista={(pedido) => { appState.setPedidoAsignando(pedido); modales.asignar.setOpen(true); }}
-                    onMarcarEntregadoConSalvedad={(pedido) => { appState.setPedidoParaSalvedad(pedido); modales.entregaConSalvedad.setOpen(true); }}
-                    onVerPedidosEliminados={() => modales.pedidosEliminados.setOpen(true)}
-                  />
-                } />
+                {/* Pedidos - usa container con TanStack Query + paginación server-side */}
+                <Route path="/pedidos" element={<PedidosContainer />} />
 
                 {/* Clientes - usa container con TanStack Query */}
                 <Route path="/clientes" element={<ClientesContainer />} />

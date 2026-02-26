@@ -1,14 +1,13 @@
 /**
- * Vista principal de pedidos (refactorizada)
+ * Vista principal de pedidos
  *
- * Soporta dos modos de renderizado:
- * - Paginación tradicional: para conjuntos pequeños de datos
- * - Virtual scrolling: para listas grandes (>50 items), mejor rendimiento
+ * Recibe datos ya paginados server-side desde PedidosContainer.
+ * Renderiza lista + controles de paginación.
  */
 import { ShoppingCart, Plus, Route, FileDown, Trash2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
-import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista, VirtualizedPedidoList } from '../pedidos';
+import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
 import type {
   PedidoDB,
   ClienteDB,
@@ -22,9 +21,10 @@ import type {
 // =============================================================================
 
 export interface VistaPedidosProps {
+  /** Pedidos de la página actual (ya paginados server-side) */
   pedidos: PedidoDB[];
-  pedidosParaMostrar: PedidoDB[];
-  pedidosPaginados: PedidoDB[];
+  /** Total de pedidos que coinciden con los filtros (para paginación) */
+  totalCount: number;
   paginaActual: number;
   totalPaginas: number;
   busqueda: string;
@@ -38,7 +38,6 @@ export interface VistaPedidosProps {
   transportistas?: PerfilDB[];
   loading: boolean;
   exportando: boolean;
-  useVirtualScrolling?: 'auto' | boolean;
   onBusquedaChange: (busqueda: string) => void;
   onFiltrosChange: (filtros: Partial<FiltrosPedidosState>) => void;
   onPageChange: (page: number) => void;
@@ -59,13 +58,9 @@ export interface VistaPedidosProps {
   onVerPedidosEliminados?: () => void;
 }
 
-// Umbral para activar virtual scrolling automáticamente
-const VIRTUAL_SCROLLING_THRESHOLD = 50;
-
 export default function VistaPedidos({
   pedidos,
-  pedidosParaMostrar,
-  pedidosPaginados,
+  totalCount,
   paginaActual,
   totalPaginas,
   busqueda,
@@ -79,7 +74,6 @@ export default function VistaPedidos({
   transportistas = [],
   loading,
   exportando,
-  useVirtualScrolling = 'auto',
   onBusquedaChange,
   onFiltrosChange,
   onPageChange,
@@ -99,10 +93,6 @@ export default function VistaPedidos({
   onEliminarPedido,
   onVerPedidosEliminados
 }: VistaPedidosProps) {
-  // Determinar si usar virtual scrolling
-  const shouldUseVirtualScrolling = useVirtualScrolling === true ||
-    (useVirtualScrolling === 'auto' && pedidosParaMostrar.length > VIRTUAL_SCROLLING_THRESHOLD);
-
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
     return (
@@ -184,46 +174,20 @@ export default function VistaPedidos({
       />
 
       {/* Resumen de estados */}
-      <PedidoStats pedidosParaMostrar={pedidosParaMostrar} />
+      <PedidoStats pedidosParaMostrar={pedidos} />
 
       {/* Lista de pedidos */}
       {loading ? (
         <LoadingSpinner />
-      ) : pedidosParaMostrar.length === 0 ? (
+      ) : pedidos.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>No hay pedidos</p>
         </div>
-      ) : shouldUseVirtualScrolling ? (
-        /* Virtual scrolling para listas grandes - mejor rendimiento */
-        <>
-          <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-            Mostrando {pedidosParaMostrar.length} pedidos
-          </div>
-          <VirtualizedPedidoList
-            pedidos={pedidosParaMostrar}
-            isAdmin={isAdmin}
-            isPreventista={isPreventista}
-            isTransportista={isTransportista}
-            onVerHistorial={onVerHistorial}
-            onEditarPedido={onEditarPedido}
-            onMarcarEnPreparacion={onMarcarEnPreparacion}
-            onVolverAPendiente={onVolverAPendiente}
-            onAsignarTransportista={onAsignarTransportista}
-            onMarcarEntregado={onMarcarEntregado}
-            onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
-            onDesmarcarEntregado={onDesmarcarEntregado}
-            onEliminarPedido={(pedidoId: string) => {
-              const pedido = pedidosParaMostrar.find(p => p.id === pedidoId);
-              if (pedido) onEliminarPedido(pedido);
-            }}
-          />
-        </>
       ) : (
-        /* Paginación tradicional para listas pequeñas */
         <>
           <div className="space-y-3">
-            {pedidosPaginados.map(pedido => (
+            {pedidos.map(pedido => (
               <PedidoCard
                 key={pedido.id}
                 pedido={pedido}
@@ -239,7 +203,7 @@ export default function VistaPedidos({
                 onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
                 onDesmarcarEntregado={onDesmarcarEntregado}
                 onEliminarPedido={(pedidoId: string) => {
-                  const p = pedidosPaginados.find(x => x.id === pedidoId);
+                  const p = pedidos.find(x => x.id === pedidoId);
                   if (p) onEliminarPedido(p);
                 }}
               />
@@ -250,7 +214,7 @@ export default function VistaPedidos({
             paginaActual={paginaActual}
             totalPaginas={totalPaginas}
             onPageChange={onPageChange}
-            totalItems={pedidosParaMostrar.length}
+            totalItems={totalCount}
             itemsLabel="pedidos"
           />
         </>
