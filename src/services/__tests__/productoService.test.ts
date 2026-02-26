@@ -154,50 +154,49 @@ describe('ProductoService', () => {
   // actualizarStock
   // ===========================================================================
   describe('actualizarStock', () => {
-    it('debe sumar stock correctamente', async () => {
-      const productoExistente = { id: 'p1', nombre: 'Prod', stock: 20 }
-      const productoActualizado = { ...productoExistente, stock: 30 }
+    it('debe sumar stock correctamente via RPC atómico', async () => {
+      const productoActualizado = { id: 'p1', nombre: 'Prod', stock: 30 }
 
-      // First call: getById (select.eq.single)
+      // RPC restaurar_stock_atomico succeeds
+      vi.mocked(supabase.rpc).mockResolvedValueOnce({
+        data: { success: true },
+        error: null
+      } as any)
+
+      // getById after stock update
       const getByIdQuery = createMockQuery({
-        single: vi.fn().mockResolvedValue({ data: productoExistente, error: null })
-      })
-
-      // Second call: update (update.eq.select.single)
-      const updateQuery = createMockQuery({
         single: vi.fn().mockResolvedValue({ data: productoActualizado, error: null })
       })
-
-      vi.mocked(supabase.from)
-        .mockReturnValueOnce(getByIdQuery as any)
-        .mockReturnValueOnce(updateQuery as any)
+      vi.mocked(supabase.from).mockReturnValue(getByIdQuery as any)
 
       const result = await productoService.actualizarStock('p1', 10)
 
-      expect(updateQuery.update).toHaveBeenCalledWith({ stock: 30 })
+      expect(supabase.rpc).toHaveBeenCalledWith('restaurar_stock_atomico', {
+        p_items: [{ producto_id: 'p1', cantidad: 10 }]
+      })
       expect(result).toEqual(productoActualizado)
     })
 
-    it('debe lanzar error si el producto no existe', async () => {
-      const mockQuery = createMockQuery({
-        single: vi.fn().mockResolvedValue({ data: null, error: new Error('Not found') })
-      })
-      vi.mocked(supabase.from).mockReturnValue(mockQuery as any)
+    it('debe lanzar error si la RPC falla (producto no existe)', async () => {
+      // RPC returns error
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: null,
+        error: { message: 'Producto no encontrado', code: 'P0001', details: null, hint: null }
+      } as any)
 
       await expect(productoService.actualizarStock('inexistente', 5))
-        .rejects.toThrow('Producto no encontrado')
+        .rejects.toThrow('Error en operación restaurar_stock_atomico')
     })
 
-    it('debe lanzar error si el stock resultante es negativo', async () => {
-      const productoExistente = { id: 'p1', nombre: 'Prod', stock: 3 }
-
-      const mockQuery = createMockQuery({
-        single: vi.fn().mockResolvedValue({ data: productoExistente, error: null })
-      })
-      vi.mocked(supabase.from).mockReturnValue(mockQuery as any)
+    it('debe lanzar error si el stock es insuficiente', async () => {
+      // RPC returns success: false (stock insuficiente)
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: { success: false, errores: ['Stock insuficiente para p1'] },
+        error: null
+      } as any)
 
       await expect(productoService.actualizarStock('p1', -10))
-        .rejects.toThrow('Stock insuficiente')
+        .rejects.toThrow('Stock insuficiente para p1')
     })
   })
 
@@ -205,23 +204,36 @@ describe('ProductoService', () => {
   // descontarStock
   // ===========================================================================
   describe('descontarStock', () => {
-    it('debe llamar RPC descontar_stock_atomico con items serializados', async () => {
+    it('debe llamar RPC descontar_stock_atomico con p_items', async () => {
       const items: StockItem[] = [
         { producto_id: 'p1', cantidad: 5 },
         { producto_id: 'p2', cantidad: 3 }
       ]
 
-      vi.mocked(supabase.rpc).mockResolvedValue({ data: true, error: null } as any)
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: { success: true },
+        error: null
+      } as any)
 
       const result = await productoService.descontarStock(items)
 
       expect(supabase.rpc).toHaveBeenCalledWith('descontar_stock_atomico', {
-        items: JSON.stringify(items)
+        p_items: items
       })
-      expect(result).toBe(true)
+      expect(result).toEqual({ success: true })
     })
 
-    it('debe lanzar error si la RPC falla', async () => {
+    it('debe lanzar error si la RPC retorna success: false', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: { success: false, errores: ['Stock insuficiente para p1'] },
+        error: null
+      } as any)
+
+      await expect(productoService.descontarStock([{ producto_id: 'p1', cantidad: 999 }]))
+        .rejects.toThrow('Stock insuficiente para p1')
+    })
+
+    it('debe lanzar error si la RPC falla a nivel DB', async () => {
       vi.mocked(supabase.rpc).mockResolvedValue({
         data: null,
         error: { message: 'Stock insuficiente', code: 'P0001', details: null, hint: null }
@@ -236,17 +248,30 @@ describe('ProductoService', () => {
   // restaurarStock
   // ===========================================================================
   describe('restaurarStock', () => {
-    it('debe llamar RPC restaurar_stock_atomico con items serializados', async () => {
+    it('debe llamar RPC restaurar_stock_atomico con p_items', async () => {
       const items: StockItem[] = [{ producto_id: 'p1', cantidad: 2 }]
 
-      vi.mocked(supabase.rpc).mockResolvedValue({ data: true, error: null } as any)
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: { success: true },
+        error: null
+      } as any)
 
       const result = await productoService.restaurarStock(items)
 
       expect(supabase.rpc).toHaveBeenCalledWith('restaurar_stock_atomico', {
-        items: JSON.stringify(items)
+        p_items: items
       })
-      expect(result).toBe(true)
+      expect(result).toEqual({ success: true })
+    })
+
+    it('debe lanzar error si la RPC retorna success: false', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: { success: false, errores: ['Error restaurando stock para p1'] },
+        error: null
+      } as any)
+
+      await expect(productoService.restaurarStock([{ producto_id: 'p1', cantidad: 2 }]))
+        .rejects.toThrow('Error restaurando stock para p1')
     })
   })
 
