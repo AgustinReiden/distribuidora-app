@@ -65,11 +65,11 @@ import {
   ClientesContainer,
   ComprasContainer,
   ProveedoresContainer,
-  GruposPrecioContainer
+  GruposPrecioContainer,
+  PedidosContainer
 } from './components/containers';
 
 // Vistas con lazy loading (rutas legacy que aún no tienen container)
-const VistaPedidos = lazy(() => import('./components/vistas/VistaPedidos'));
 const VistaReportes = lazy(() => import('./components/vistas/VistaReportes'));
 const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
 const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
@@ -288,30 +288,18 @@ function MainApp(): ReactElement {
                   ) : <Navigate to="/pedidos" replace />
                 } />
 
-                {/* Pedidos */}
+                {/* Pedidos - usa container con TanStack Query */}
                 <Route path="/pedidos" element={
-                  <VistaPedidos
-                    pedidos={pedidos} pedidosParaMostrar={pedidosParaMostrar} pedidosPaginados={pedidosPaginados}
-                    paginaActual={paginaActual} totalPaginas={totalPaginas} busqueda={busqueda} filtros={filtros}
-                    isAdmin={isAdmin} isPreventista={isPreventista} isTransportista={isTransportista} userId={user?.id ?? ''}
-                    clientes={clientes} productos={productos} transportistas={transportistas} loading={loadingPedidos} exportando={exportando}
-                    onBusquedaChange={handlers.handleBusquedaChange}
-                    onFiltrosChange={(nuevosFiltros: Partial<FiltrosPedidosState>) => handlers.handleFiltrosChange(nuevosFiltros, filtros, setFiltros)}
-                    onPageChange={setPaginaActual}
+                  <PedidosContainer
                     onNuevoPedido={() => modales.pedido.setOpen(true)}
                     onOptimizarRuta={() => modales.optimizarRuta.setOpen(true)}
                     onExportarPDF={() => modales.exportarPDF.setOpen(true)}
-                    onExportarExcel={() => exportarPedidosExcel(pedidosParaMostrar, { ...filtros, busqueda, fechaDesde: filtros.fechaDesde ?? undefined, fechaHasta: filtros.fechaHasta ?? undefined }, transportistas)}
+                    onExportarExcel={(pedidosList, filtrosExport) =>
+                      exportarPedidosExcel(pedidosList, { ...filtrosExport, fechaDesde: filtrosExport.fechaDesde ?? undefined, fechaHasta: filtrosExport.fechaHasta ?? undefined }, transportistas)
+                    }
                     onModalFiltroFecha={() => modales.filtroFecha.setOpen(true)}
-                    onVerHistorial={handlers.handleVerHistorial}
-                    onEditarPedido={handlers.handleEditarPedido}
-                    onMarcarEnPreparacion={handlers.handleMarcarEnPreparacion}
-                    onVolverAPendiente={handlers.handleVolverAPendiente}
                     onAsignarTransportista={(pedido) => { appState.setPedidoAsignando(pedido); modales.asignar.setOpen(true); }}
-                    onMarcarEntregado={handlers.handleMarcarEntregado}
                     onMarcarEntregadoConSalvedad={(pedido) => { appState.setPedidoParaSalvedad(pedido); modales.entregaConSalvedad.setOpen(true); }}
-                    onDesmarcarEntregado={handlers.handleDesmarcarEntregado}
-                    onEliminarPedido={(pedido: PedidoDB) => handlers.handleEliminarPedido(pedido.id)}
                     onVerPedidosEliminados={() => modales.pedidosEliminados.setOpen(true)}
                   />
                 } />

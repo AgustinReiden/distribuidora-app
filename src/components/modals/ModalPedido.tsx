@@ -63,7 +63,7 @@ export interface ModalPedidoProps {
   /** Callback al actualizar cantidad */
   onActualizarCantidad: (productoId: string, cantidad: number) => void;
   /** Callback al crear cliente */
-  onCrearCliente: (cliente: any) => Promise<any>;
+  onCrearCliente: (cliente: Record<string, unknown>) => Promise<{ id: string | number }>;
   /** Callback al guardar pedido */
   onGuardar: () => void | Promise<void>;
   /** Indica si está guardando */

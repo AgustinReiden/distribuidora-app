@@ -128,7 +128,9 @@ class PedidoService extends BaseService<Pedido> {
         q = q.eq('metodo_pago', metodoPago)
       }
 
-      // Filtrar por zona requiere join con clientes
+      // TODO: Filtrar por zona en embedded resource no funciona con eq directo.
+      // PostgREST requiere usar !inner en el select para filtrar joins.
+      // Por ahora se filtra client-side; migrar a TanStack Query con server-side filter.
       if (zona) {
         q = q.eq('cliente.zona', zona)
       }
@@ -143,6 +145,11 @@ class PedidoService extends BaseService<Pedido> {
    * Usa la RPC 'crear_pedido_completo' que es una transacción atómica.
    * Si falla, es por una razón válida (stock insuficiente, constraint, etc.)
    * y NO se debe intentar crear manualmente.
+   *
+   * @deprecated Usar useCrearPedidoMutation de usePedidosQuery.ts que envía
+   * los parámetros correctos (p_usuario_id, p_forma_pago, p_estado_pago, p_monto_pagado).
+   * Este método envía parámetros incorrectos (p_preventista_id, p_metodo_pago, p_descuento)
+   * que no existen en la función RPC actual.
    */
   async crearPedidoCompleto(pedidoData: PedidoData, items: PedidoItemInput[], _descontarStock = true): Promise<Pedido> {
     return this.rpc<Pedido>('crear_pedido_completo', {

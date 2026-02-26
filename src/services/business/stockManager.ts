@@ -254,13 +254,24 @@ class StockManager {
   }
 
   /**
-   * Registra una merma de stock
+   * Registra una merma de stock.
+   *
+   * Orden de operaciones (para consistencia):
+   * 1. Descontar stock atómicamente (con FOR UPDATE lock via RPC)
+   * 2. Insertar registro de merma
+   *
+   * Si el descuento falla (stock insuficiente), no se crea registro huérfano.
+   * Si el INSERT falla después del descuento, se restaura el stock.
    */
   async registrarMerma(merma: MermaInput): Promise<Merma> {
     const { producto_id, cantidad, motivo, fecha } = merma
 
     try {
-      // Registrar en tabla de mermas
+      // Paso 1: Descontar stock atómicamente PRIMERO
+      // Si falla por stock insuficiente, no se crea merma huérfana
+      await productoService.actualizarStock(producto_id, -cantidad)
+
+      // Paso 2: Registrar en tabla de mermas
       const { data, error } = await supabase
         .from('mermas_stock')
         .insert({
@@ -272,10 +283,16 @@ class StockManager {
         .select()
         .single()
 
-      if (error) throw error
-
-      // Descontar del stock
-      await productoService.actualizarStock(producto_id, -cantidad)
+      if (error) {
+        // Rollback: restaurar stock si falla el INSERT de merma
+        logger.error('Error insertando merma, restaurando stock:', error)
+        try {
+          await productoService.actualizarStock(producto_id, cantidad)
+        } catch (rollbackError) {
+          logger.error('Error en rollback de stock tras fallo de merma:', rollbackError)
+        }
+        throw error
+      }
 
       return data as Merma
     } catch (error) {
