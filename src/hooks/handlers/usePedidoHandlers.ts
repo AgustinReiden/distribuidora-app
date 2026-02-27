@@ -329,9 +329,14 @@ export function usePedidoHandlers({
   }, [setNuevoPedido])
 
   const handleCrearClienteEnPedido = useCallback(async (nuevoCliente: ClienteFormInput): Promise<ClienteDB> => {
-    const cliente = await agregarCliente(nuevoCliente)
-    notify.success('Cliente creado correctamente')
-    return cliente
+    try {
+      const cliente = await agregarCliente(nuevoCliente)
+      notify.success(`Cliente "${cliente.nombre_fantasia}" creado`)
+      return cliente
+    } catch (e) {
+      notify.error((e as Error).message || 'Error al crear cliente')
+      throw e
+    }
   }, [agregarCliente, notify])
 
   // Main order creation - optimizado con refs para reducir deps de 15 a 9
