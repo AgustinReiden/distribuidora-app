@@ -17,4 +17,12 @@ SELECT setval('clientes_codigo_seq', COALESCE((SELECT MAX(codigo) FROM clientes)
 ALTER TABLE clientes
   ALTER COLUMN codigo SET DEFAULT nextval('clientes_codigo_seq'),
   ALTER COLUMN codigo SET NOT NULL;
-ALTER TABLE clientes ADD CONSTRAINT clientes_codigo_unique UNIQUE (codigo);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'clientes_codigo_unique'
+  ) THEN
+    ALTER TABLE clientes ADD CONSTRAINT clientes_codigo_unique UNIQUE (codigo);
+  END IF;
+END $$;
