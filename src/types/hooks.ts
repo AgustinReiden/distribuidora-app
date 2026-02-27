@@ -10,6 +10,7 @@ import type { Dispatch, SetStateAction } from 'react'
 
 export interface ClienteDB {
   id: string;
+  codigo?: number;
   cuit?: string | null;
   razon_social?: string | null;
   nombre_fantasia: string;
