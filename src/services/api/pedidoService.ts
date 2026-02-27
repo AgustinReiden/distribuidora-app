@@ -27,11 +27,10 @@ export interface PedidoData {
   cliente_id: string;
   total: number;
   usuario_id: string;
-  preventista_id?: string;
   transportista_id?: string | null;
+  notas?: string;
   forma_pago?: string;
   estado_pago?: string;
-  notas?: string;
 }
 
 export interface PedidoItemInput {
@@ -148,10 +147,7 @@ class PedidoService extends BaseService<Pedido> {
    * Si falla, es por una razón válida (stock insuficiente, constraint, etc.)
    * y NO se debe intentar crear manualmente.
    *
-   * @deprecated Usar useCrearPedidoMutation de usePedidosQuery.ts que envía
-   * los parámetros correctos (p_usuario_id, p_forma_pago, p_estado_pago, p_monto_pagado).
-   * Este método envía parámetros incorrectos (p_preventista_id, p_metodo_pago, p_descuento)
-   * que no existen en la función RPC actual.
+   * Parámetros DB: p_cliente_id, p_total, p_usuario_id, p_items, p_notas, p_forma_pago, p_estado_pago
    */
   async crearPedidoCompleto(pedidoData: PedidoData, items: PedidoItemInput[], _descontarStock = true): Promise<Pedido> {
     return this.rpc<Pedido>('crear_pedido_completo', {
@@ -172,10 +168,11 @@ class PedidoService extends BaseService<Pedido> {
    * Restaura el stock de items anteriores y descuenta el de los nuevos
    * en una sola transacción.
    */
-  async actualizarItems(pedidoId: string, nuevosItems: PedidoItemInput[]): Promise<Pedido | null> {
+  async actualizarItems(pedidoId: string, nuevosItems: PedidoItemInput[], usuarioId?: string | null): Promise<Pedido | null> {
     return this.rpc<Pedido | null>('actualizar_pedido_items', {
       p_pedido_id: pedidoId,
-      p_items: JSON.stringify(nuevosItems)
+      p_items_nuevos: JSON.stringify(nuevosItems),
+      p_usuario_id: usuarioId || null
     })
   }
 

@@ -193,7 +193,6 @@ describe('PedidoService', () => {
       cliente_id: 'client-1',
       total: 1000,
       usuario_id: 'user-1',
-      preventista_id: 'prev-1',
       notas: 'Entregar por la tarde',
       forma_pago: 'efectivo',
       estado_pago: 'pendiente' as const
@@ -425,7 +424,8 @@ describe('PedidoService', () => {
 
       expect(supabase.rpc).toHaveBeenCalledWith('actualizar_pedido_items', {
         p_pedido_id: 'ped-1',
-        p_items: JSON.stringify(nuevosItems)
+        p_items_nuevos: JSON.stringify(nuevosItems),
+        p_usuario_id: null
       })
       expect(result).toEqual(updatedPedido)
     })

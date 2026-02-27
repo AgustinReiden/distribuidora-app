@@ -282,8 +282,9 @@ async function asignarTransportista(pedidoId: string, transportistaId: string | 
 }
 
 async function eliminarPedido(id: string, motivo?: string, usuarioId?: string): Promise<void> {
-  const { data, error } = await supabase.rpc('eliminar_pedido_seguro', {
+  const { data, error } = await supabase.rpc('eliminar_pedido_completo', {
     p_pedido_id: id,
+    p_restaurar_stock: true,
     p_usuario_id: usuarioId || null,
     p_motivo: motivo || null
   })
