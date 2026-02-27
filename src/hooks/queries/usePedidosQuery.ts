@@ -136,13 +136,12 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
 
   const { data, error } = await supabase.rpc('crear_pedido_completo', {
     p_cliente_id: input.clienteId,
-    p_items: itemsParaRPC,
     p_total: input.total,
     p_usuario_id: input.usuarioId,
+    p_items: itemsParaRPC,
     p_notas: input.notas || null,
     p_forma_pago: input.formaPago || 'efectivo',
-    p_estado_pago: input.estadoPago || 'pendiente',
-    p_monto_pagado: input.montoPagado || 0
+    p_estado_pago: input.estadoPago || 'pendiente'
   })
 
   if (error) throw error

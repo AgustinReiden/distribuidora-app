@@ -191,10 +191,12 @@ describe('PedidoService', () => {
   describe('crearPedidoCompleto', () => {
     const pedidoData = {
       cliente_id: 'client-1',
+      total: 1000,
+      usuario_id: 'user-1',
       preventista_id: 'prev-1',
       notas: 'Entregar por la tarde',
-      metodo_pago: 'efectivo',
-      descuento: 10
+      forma_pago: 'efectivo',
+      estado_pago: 'pendiente' as const
     }
 
     const items = [
@@ -210,11 +212,12 @@ describe('PedidoService', () => {
 
       expect(supabase.rpc).toHaveBeenCalledWith('crear_pedido_completo', {
         p_cliente_id: 'client-1',
-        p_preventista_id: 'prev-1',
+        p_total: 1000,
+        p_usuario_id: 'user-1',
         p_items: JSON.stringify(items),
         p_notas: 'Entregar por la tarde',
-        p_metodo_pago: 'efectivo',
-        p_descuento: 10
+        p_forma_pago: 'efectivo',
+        p_estado_pago: 'pendiente'
       })
       expect(result).toEqual(createdPedido)
     })
@@ -230,14 +233,14 @@ describe('PedidoService', () => {
     it('should use default values for optional pedidoData fields', async () => {
       mockRpcSuccess({ id: 'ped-2' })
 
-      await pedidoService.crearPedidoCompleto({ cliente_id: 'c-1' }, items)
+      await pedidoService.crearPedidoCompleto({ cliente_id: 'c-1', total: 0, usuario_id: 'u-1' }, items)
 
       expect(supabase.rpc).toHaveBeenCalledWith(
         'crear_pedido_completo',
         expect.objectContaining({
           p_notas: '',
-          p_metodo_pago: 'efectivo',
-          p_descuento: 0
+          p_forma_pago: 'efectivo',
+          p_estado_pago: 'pendiente'
         })
       )
     })

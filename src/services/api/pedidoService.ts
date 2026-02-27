@@ -25,11 +25,13 @@ export interface PedidoFiltros {
 
 export interface PedidoData {
   cliente_id: string;
+  total: number;
+  usuario_id: string;
   preventista_id?: string;
   transportista_id?: string | null;
-  metodo_pago?: string;
+  forma_pago?: string;
+  estado_pago?: string;
   notas?: string;
-  descuento?: number;
 }
 
 export interface PedidoItemInput {
@@ -147,11 +149,12 @@ class PedidoService extends BaseService<Pedido> {
   async crearPedidoCompleto(pedidoData: PedidoData, items: PedidoItemInput[], _descontarStock = true): Promise<Pedido> {
     return this.rpc<Pedido>('crear_pedido_completo', {
       p_cliente_id: pedidoData.cliente_id,
-      p_preventista_id: pedidoData.preventista_id,
+      p_total: pedidoData.total,
+      p_usuario_id: pedidoData.usuario_id,
       p_items: JSON.stringify(items),
       p_notas: pedidoData.notas || '',
-      p_metodo_pago: pedidoData.metodo_pago || 'efectivo',
-      p_descuento: pedidoData.descuento || 0
+      p_forma_pago: pedidoData.forma_pago || 'efectivo',
+      p_estado_pago: pedidoData.estado_pago || 'pendiente'
     })
   }
 
