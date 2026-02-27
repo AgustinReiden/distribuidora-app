@@ -20,6 +20,7 @@ import {
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
+import { usePrecioMayorista } from '../../hooks/usePrecioMayorista'
 import { supabase } from '../../hooks/supabase/base'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
@@ -136,6 +137,9 @@ export default function PedidosContainer(): React.ReactElement {
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
     })
   }, [])
+
+  // Resolve wholesale prices for current pedido items
+  const { itemsConPrecioMayorista, totalMayorista } = usePrecioMayorista(nuevoPedido.items)
 
   // =========================================================================
   // VistaPedidos handlers
@@ -338,11 +342,11 @@ export default function PedidosContainer(): React.ReactElement {
     }
     setGuardando(true)
     try {
-      const total = nuevoPedido.items.reduce((sum, i) => sum + i.cantidad * i.precioUnitario, 0)
+      // Use wholesale-resolved items and total (falls back to original if no mayorista applies)
       await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
-        items: nuevoPedido.items,
-        total,
+        items: itemsConPrecioMayorista,
+        total: totalMayorista,
         usuarioId: user?.id ?? null,
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
@@ -356,7 +360,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, crearPedido, user, resetNuevoPedido, notify])
+  }, [nuevoPedido, itemsConPrecioMayorista, totalMayorista, crearPedido, user, resetNuevoPedido, notify])
 
   // ModalFiltroFecha: onApply({ fechaDesde, fechaHasta })
   const handleFiltroFechaApply = useCallback((f: { fechaDesde: string | null; fechaHasta: string | null }) => {
