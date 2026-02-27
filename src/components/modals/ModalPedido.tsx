@@ -153,8 +153,8 @@ const ModalPedido = memo(function ModalPedido({
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
       setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
-    } catch {
-      // Error handled by parent
+    } catch (err) {
+      console.error('Error al crear cliente rápido:', err)
     }
     setGuardandoCliente(false);
   };
