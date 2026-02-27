@@ -58,7 +58,8 @@ export default function VistaClientes({
         c.razon_social?.toLowerCase().includes(busqueda.toLowerCase()) ||
         c.direccion?.toLowerCase().includes(busqueda.toLowerCase()) ||
         c.telefono?.includes(busqueda) ||
-        c.cuit?.includes(busqueda.replace(/-/g, ''));
+        c.cuit?.includes(busqueda.replace(/-/g, '')) ||
+        (c.codigo != null && String(c.codigo).includes(busqueda));
 
       const matchZona = filtroZona === 'todas' || c.zona === filtroZona;
       const matchRubro = filtroRubro === 'todos' || c.rubro === filtroRubro;
@@ -170,6 +171,11 @@ export default function VistaClientes({
               <div className="flex justify-between items-start">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
+                    {cliente.codigo != null && (
+                      <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs font-mono font-semibold">
+                        #{cliente.codigo}
+                      </span>
+                    )}
                     <h3 className="font-semibold text-lg text-gray-800 dark:text-white truncate">
                       {cliente.nombre_fantasia}
                     </h3>

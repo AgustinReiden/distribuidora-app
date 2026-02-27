@@ -83,27 +83,24 @@ interface ClienteCreateInput {
 
 // Mutation functions
 async function createCliente(cliente: ClienteCreateInput): Promise<ClienteDB> {
-  // Validar CUIT/DNI duplicado
-  if (cliente.cuit) {
-    const cuitLimpio = cliente.cuit.replace(/[-\s]/g, '')
-    const { data: existente } = await supabase
+  // Detección de duplicados por ubicación (~22 metros de tolerancia)
+  if (cliente.latitud != null && cliente.longitud != null) {
+    const TOLERANCE = 0.0002 // ~22 metros
+    const { data: cercanos } = await supabase
       .from('clientes')
       .select('id, nombre_fantasia, razon_social')
-      .eq('cuit', cliente.cuit)
+      .gte('latitud', cliente.latitud - TOLERANCE)
+      .lte('latitud', cliente.latitud + TOLERANCE)
+      .gte('longitud', cliente.longitud - TOLERANCE)
+      .lte('longitud', cliente.longitud + TOLERANCE)
       .limit(1)
-      .maybeSingle()
-    if (!existente && cuitLimpio !== cliente.cuit) {
-      const { data: existentes } = await supabase
-        .from('clientes')
-        .select('id, nombre_fantasia, razon_social, cuit')
-        .not('cuit', 'is', null)
-        .limit(100)
-      const match = existentes?.find(c => c.cuit?.replace(/[-\s]/g, '') === cuitLimpio)
-      if (match) {
-        throw new Error(`Ya existe un cliente con CUIT "${cliente.cuit}": ${match.nombre_fantasia || match.razon_social}`)
-      }
-    } else if (existente) {
-      throw new Error(`Ya existe un cliente con CUIT "${cliente.cuit}": ${existente.nombre_fantasia || existente.razon_social}`)
+
+    if (cercanos && cercanos.length > 0) {
+      const nombre = cercanos[0].nombre_fantasia || cercanos[0].razon_social
+      throw new Error(
+        `Ya existe un cliente en esta ubicación: ${nombre}. ` +
+        `Si necesitás crear otro, modificá ligeramente la dirección.`
+      )
     }
   }
 

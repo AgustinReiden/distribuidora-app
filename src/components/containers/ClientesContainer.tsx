@@ -113,7 +113,7 @@ export default function ClientesContainer(): React.ReactElement {
       setModalClienteOpen(false)
       setClienteEditando(null)
     } catch (error) {
-      notify.error('Error al guardar cliente')
+      notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
   }, [clienteEditando, actualizarCliente, crearCliente, notify])

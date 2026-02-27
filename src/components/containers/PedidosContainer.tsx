@@ -16,6 +16,7 @@ import {
   useClientesQuery,
   useProductosQuery,
   useTransportistasQuery,
+  useCrearClienteMutation,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -88,6 +89,7 @@ export default function PedidosContainer(): React.ReactElement {
   const cambiarEstado = useCambiarEstadoMutation()
   const asignarTransportistaMut = useAsignarTransportistaMutation()
   const eliminarPedido = useEliminarPedidoMutation()
+  const crearClienteMut = useCrearClienteMutation()
 
   // Route optimization
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta()
@@ -514,7 +516,25 @@ export default function PedidosContainer(): React.ReactElement {
                 setNuevoPedido(prev => ({ ...prev, items: prev.items.map(i => i.productoId === productoId ? { ...i, cantidad } : i) }))
               }
             }}
-            onCrearCliente={async () => ({ id: '' as string | number })}
+            onCrearCliente={async (clienteData: Record<string, unknown>) => {
+              try {
+                const dbData = {
+                  razon_social: (clienteData.razonSocial as string) || (clienteData.nombreFantasia as string) || '',
+                  nombre_fantasia: (clienteData.nombreFantasia as string) || (clienteData.nombre as string) || '',
+                  direccion: (clienteData.direccion as string) || '',
+                  telefono: (clienteData.telefono as string) || undefined,
+                  zona: (clienteData.zona as string) || undefined,
+                  latitud: (clienteData.latitud as number | null) ?? null,
+                  longitud: (clienteData.longitud as number | null) ?? null,
+                }
+                const newCliente = await crearClienteMut.mutateAsync(dbData)
+                notify.success(`Cliente "${newCliente.nombre_fantasia}" creado`)
+                return { id: newCliente.id }
+              } catch (e) {
+                notify.error((e as Error).message || 'Error al crear cliente')
+                throw e
+              }
+            }}
             onGuardar={handleGuardarPedido}
             guardando={guardando}
             isAdmin={isAdmin}
