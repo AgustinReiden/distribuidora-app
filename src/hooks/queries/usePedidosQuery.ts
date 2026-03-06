@@ -40,6 +40,7 @@ interface CrearPedidoInput {
   formaPago?: string
   estadoPago?: string
   montoPagado?: number
+  fecha?: string
 }
 
 interface ActualizarEstadoInput {
@@ -160,10 +161,10 @@ async function fetchPedidosPaginated(
     query = query.eq('transportista_id', filters.transportistaId)
   }
   if (filters?.fechaDesde) {
-    query = query.gte('created_at', filters.fechaDesde + 'T00:00:00')
+    query = query.gte('fecha', filters.fechaDesde)
   }
   if (filters?.fechaHasta) {
-    query = query.lte('created_at', filters.fechaHasta + 'T23:59:59')
+    query = query.lte('fecha', filters.fechaHasta)
   }
 
   // Search by client name (using the foreign key relationship)
@@ -222,7 +223,8 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     p_items: itemsParaRPC,
     p_notas: input.notas || null,
     p_forma_pago: input.formaPago || 'efectivo',
-    p_estado_pago: input.estadoPago || 'pendiente'
+    p_estado_pago: input.estadoPago || 'pendiente',
+    ...(input.fecha ? { p_fecha: input.fecha } : {})
   })
 
   if (error) throw error

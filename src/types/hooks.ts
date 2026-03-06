@@ -97,6 +97,7 @@ export interface PedidoDB {
   items?: PedidoItemDB[];
   salvedades?: PedidoSalvedadResumen[];
   stock_descontado?: boolean;
+  fecha?: string;
   fecha_entrega?: string | null;
   created_at?: string;
   updated_at?: string;
