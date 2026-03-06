@@ -32,6 +32,7 @@ interface PedidoWithRelations {
   estado_pago?: string
   total: number
   monto_pagado?: number
+  fecha?: string
   created_at?: string
   items?: Array<{
     producto_id: string
@@ -112,10 +113,10 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
 
   let pedidosFiltrados = pedidosTyped
   if (fechaInicioStr) {
-    pedidosFiltrados = pedidosTyped.filter(p => (p.created_at?.split('T')[0] ?? '') >= fechaInicioStr!)
+    pedidosFiltrados = pedidosTyped.filter(p => (p.fecha ?? p.created_at?.split('T')[0] ?? '') >= fechaInicioStr!)
   }
   if (periodo === 'personalizado' && fechaHasta) {
-    pedidosFiltrados = pedidosFiltrados.filter(p => (p.created_at?.split('T')[0] ?? '') <= fechaHasta)
+    pedidosFiltrados = pedidosFiltrados.filter(p => (p.fecha ?? p.created_at?.split('T')[0] ?? '') <= fechaHasta)
   }
 
   // Productos más vendidos
@@ -152,7 +153,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     const fecha = new Date()
     fecha.setDate(fecha.getDate() - i)
     const fechaStr = fecha.toISOString().split('T')[0]
-    const pedidosDia = pedidosTyped.filter(p => p.created_at?.split('T')[0] === fechaStr)
+    const pedidosDia = pedidosTyped.filter(p => (p.fecha ?? p.created_at?.split('T')[0]) === fechaStr)
     ventasPorDia.push({
       dia: fecha.toLocaleDateString('es-AR', { weekday: 'short' }),
       ventas: pedidosDia.reduce((s, p) => s + (p.total || 0), 0),
@@ -185,10 +186,10 @@ async function calcularReportePreventistas(
   let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
 
   if (fechaDesde) {
-    query = query.gte('created_at', `${fechaDesde}T00:00:00`)
+    query = query.gte('fecha', fechaDesde)
   }
   if (fechaHasta) {
-    query = query.lte('created_at', `${fechaHasta}T23:59:59`)
+    query = query.lte('fecha', fechaHasta)
   }
 
   const { data: pedidos, error } = await query

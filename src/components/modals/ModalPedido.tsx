@@ -1,5 +1,5 @@
 import { useState, useMemo, memo } from 'react';
-import { X, Loader2, Search, MapPin, Tag } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
@@ -20,6 +20,7 @@ export interface NuevoPedidoState {
   formaPago?: string;
   estadoPago?: string;
   montoPagado?: number;
+  fecha?: string;
 }
 
 /** Datos del cliente a crear */
@@ -80,6 +81,8 @@ export interface ModalPedidoProps {
   onEstadoPagoChange?: (estadoPago: string) => void;
   /** Callback al cambiar monto pagado */
   onMontoPagadoChange?: (monto: number) => void;
+  /** Callback al cambiar fecha del pedido */
+  onFechaChange?: (fecha: string) => void;
   /** Si está offline */
   isOffline?: boolean;
 }
@@ -102,7 +105,8 @@ const ModalPedido = memo(function ModalPedido({
   onNotasChange,
   onFormaPagoChange,
   onEstadoPagoChange,
-  onMontoPagadoChange
+  onMontoPagadoChange,
+  onFechaChange
 }: ModalPedidoProps) {
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
@@ -241,6 +245,24 @@ const ModalPedido = memo(function ModalPedido({
                   </div>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* Fecha del pedido */}
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">
+              <Calendar className="w-4 h-4 inline mr-1" />
+              Fecha del pedido
+            </label>
+            <input
+              type="date"
+              value={nuevoPedido.fecha || new Date().toISOString().split('T')[0]}
+              onChange={e => onFechaChange && onFechaChange(e.target.value)}
+              max={new Date().toISOString().split('T')[0]}
+              className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+            {nuevoPedido.fecha && nuevoPedido.fecha !== new Date().toISOString().split('T')[0] && (
+              <p className="text-xs text-amber-600 mt-1">Se registrará con fecha distinta a hoy</p>
             )}
           </div>
 

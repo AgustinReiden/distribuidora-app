@@ -131,12 +131,14 @@ export default function PedidosContainer(): React.ReactElement {
     formaPago: 'efectivo',
     estadoPago: 'pendiente',
     montoPagado: 0,
+    fecha: new Date().toISOString().split('T')[0],
   })
 
   const resetNuevoPedido = useCallback(() => {
     setNuevoPedido({
       clienteId: '', items: [], notas: '',
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
+      fecha: new Date().toISOString().split('T')[0],
     })
   }, [])
 
@@ -276,7 +278,8 @@ export default function PedidosContainer(): React.ReactElement {
       const rows = pedidos.map(p => [
         p.id,
         (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
-        p.estado, p.total, p.forma_pago, p.estado_pago, p.created_at,
+        p.estado, p.total, p.forma_pago, p.estado_pago,
+        (p as unknown as { fecha?: string }).fecha || p.created_at,
       ].join(','))
       const csv = ['ID,Cliente,Estado,Total,FormaPago,EstadoPago,Fecha', ...rows].join('\n')
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -354,6 +357,7 @@ export default function PedidosContainer(): React.ReactElement {
         formaPago: nuevoPedido.formaPago,
         estadoPago: nuevoPedido.estadoPago,
         montoPagado: nuevoPedido.montoPagado,
+        fecha: nuevoPedido.fecha,
       })
       resetNuevoPedido()
       setModalPedidoOpen(false)
@@ -543,6 +547,7 @@ export default function PedidosContainer(): React.ReactElement {
             onFormaPagoChange={(fp: string) => setNuevoPedido(prev => ({ ...prev, formaPago: fp }))}
             onEstadoPagoChange={(ep: string) => setNuevoPedido(prev => ({ ...prev, estadoPago: ep }))}
             onMontoPagadoChange={(m: number) => setNuevoPedido(prev => ({ ...prev, montoPagado: m }))}
+            onFechaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fecha }))}
             isOffline={!isOnline}
           />
         </Suspense>

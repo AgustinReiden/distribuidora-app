@@ -174,8 +174,8 @@ function PedidoCard({
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">{pedido.cliente?.direccion}</p>
               <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-2">
-                <span>#{pedido.id} - {formatFecha(pedido.created_at)}</span>
-                <BadgeAntiguedad dias={calcularDiasAntiguedad(pedido.created_at)} estado={pedido.estado} />
+                <span>#{pedido.id} - {formatFecha(pedido.fecha || pedido.created_at)}</span>
+                <BadgeAntiguedad dias={calcularDiasAntiguedad(pedido.fecha || pedido.created_at)} estado={pedido.estado} />
               </p>
             </div>
           </div>
