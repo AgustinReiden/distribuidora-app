@@ -7,6 +7,10 @@ import type { ClienteDB } from '../../types';
 
 const ITEMS_PER_PAGE = 18;
 
+/** Normalizar texto: colapsar espacios (incluyendo non-breaking space), trim, lowercase */
+const normalizeSearch = (s: string | null | undefined): string =>
+  s?.replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase() ?? '';
+
 // =============================================================================
 // INTERFACES DE PROPS
 // =============================================================================
@@ -52,14 +56,15 @@ export default function VistaClientes({
 
   // Filtrar clientes
   const clientesFiltrados = useMemo((): ClienteDB[] => {
+    const busquedaNorm = normalizeSearch(busqueda);
     return clientes.filter((c: ClienteDB) => {
-      const matchBusqueda = !busqueda ||
-        c.nombre_fantasia?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.razon_social?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.direccion?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.telefono?.includes(busqueda) ||
-        c.cuit?.includes(busqueda.replace(/-/g, '')) ||
-        (c.codigo != null && String(c.codigo).includes(busqueda));
+      const matchBusqueda = !busquedaNorm ||
+        normalizeSearch(c.nombre_fantasia).includes(busquedaNorm) ||
+        normalizeSearch(c.razon_social).includes(busquedaNorm) ||
+        normalizeSearch(c.direccion).includes(busquedaNorm) ||
+        c.telefono?.includes(busqueda.trim()) ||
+        c.cuit?.includes(busqueda.replace(/[-\s]/g, '')) ||
+        (c.codigo != null && String(c.codigo).includes(busqueda.trim()));
 
       const matchZona = filtroZona === 'todas' || c.zona === filtroZona;
       const matchRubro = filtroRubro === 'todos' || c.rubro === filtroRubro;
