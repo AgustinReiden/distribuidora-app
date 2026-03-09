@@ -114,6 +114,7 @@ const ModalPedido = memo(function ModalPedido({
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
   const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
   const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
+  const [errorCliente, setErrorCliente] = useState<string>('');
 
   const productosFiltrados = useMemo(() => {
     return productos.filter(p => {
@@ -126,13 +127,17 @@ const ModalPedido = memo(function ModalPedido({
 
   const clientesFiltrados = useMemo(() => {
     if (busquedaCliente.length < 2) return [];
-    const busquedaLower = busquedaCliente.toLowerCase();
-    return clientes.filter(c =>
-      c.nombre_fantasia?.toLowerCase().includes(busquedaLower) ||
-      c.razon_social?.toLowerCase().includes(busquedaLower) ||
-      c.direccion?.toLowerCase().includes(busquedaLower) ||
-      c.cuit?.includes(busquedaCliente.replace(/-/g, ''))
-    ).slice(0, 8);
+    // Normalizar: trim, colapsar espacios, reemplazar non-breaking spaces
+    const busquedaNorm = busquedaCliente.replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase();
+    if (!busquedaNorm) return [];
+    return clientes.filter(c => {
+      const norm = (s: string | null | undefined) => s?.replace(/[\s\u00A0]+/g, ' ').trim().toLowerCase() ?? '';
+      return norm(c.nombre_fantasia).includes(busquedaNorm) ||
+        norm(c.razon_social).includes(busquedaNorm) ||
+        norm(c.direccion).includes(busquedaNorm) ||
+        c.cuit?.includes(busquedaCliente.replace(/[-\s]/g, '')) ||
+        (c.codigo != null && String(c.codigo).includes(busquedaCliente.trim()));
+    }).slice(0, 8);
   }, [clientes, busquedaCliente]);
 
   const clienteSeleccionado = useMemo(() => {
@@ -145,7 +150,18 @@ const ModalPedido = memo(function ModalPedido({
     const nombre = nuevoCliente.nombre?.trim();
     const nombreFantasia = nuevoCliente.nombreFantasia?.trim();
     const direccion = nuevoCliente.direccion?.trim();
-    if (!nombre || !nombreFantasia || !direccion) return;
+
+    // Validación con feedback al usuario
+    const camposFaltantes: string[] = [];
+    if (!nombreFantasia) camposFaltantes.push('Nombre fantasía');
+    if (!nombre) camposFaltantes.push('Nombre completo');
+    if (!direccion) camposFaltantes.push('Dirección');
+    if (camposFaltantes.length > 0) {
+      setErrorCliente(`Completá: ${camposFaltantes.join(', ')}`);
+      return;
+    }
+    setErrorCliente('');
+
     setGuardandoCliente(true);
     try {
       // Usar "nombre" como razonSocial (requerido por la DB)
@@ -158,7 +174,8 @@ const ModalPedido = memo(function ModalPedido({
       setMostrarNuevoCliente(false);
       setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
     } catch (err) {
-      console.error('Error al crear cliente rápido:', err)
+      const errorMsg = err instanceof Error ? err.message : 'Error al crear cliente';
+      setErrorCliente(errorMsg);
     }
     setGuardandoCliente(false);
   };
@@ -192,7 +209,7 @@ const ModalPedido = memo(function ModalPedido({
             <div className="flex justify-between items-center mb-1">
               <label className="block text-sm font-medium dark:text-gray-200">Cliente *</label>
               {(isAdmin || isPreventista) && (
-                <button onClick={() => setMostrarNuevoCliente(!mostrarNuevoCliente)} className="text-sm text-blue-600">
+                <button onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); }} className="text-sm text-blue-600">
                   {mostrarNuevoCliente ? 'Cancelar' : '+ Nuevo'}
                 </button>
               )}
@@ -215,6 +232,9 @@ const ModalPedido = memo(function ModalPedido({
                     <MapPin className="w-3 h-3 mr-1" />
                     <span>Ubicación guardada</span>
                   </div>
+                )}
+                {errorCliente && (
+                  <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 px-3 py-2 rounded-lg">{errorCliente}</p>
                 )}
                 <button onClick={handleCrearClienteRapido} disabled={guardandoCliente} className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400">
                   {guardandoCliente ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Crear y seleccionar'}
