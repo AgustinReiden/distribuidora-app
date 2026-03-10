@@ -22,6 +22,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
 import { usePrecioMayorista } from '../../hooks/usePrecioMayorista'
+import { useDebounce } from '../../hooks/useAsync'
 import { supabase } from '../../hooks/supabase/base'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
@@ -74,11 +75,12 @@ export default function PedidosContainer(): React.ReactElement {
   // Pagination state
   const [paginaActual, setPaginaActual] = useState(1)
   const [busqueda, setBusqueda] = useState('')
+  const debouncedBusqueda = useDebounce(busqueda, 350)
   const [filtros, setFiltros] = useState<FiltrosPedidosState>(DEFAULT_FILTROS)
 
-  // Queries
+  // Queries - use debounced search to avoid firing on every keystroke
   const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
-    paginaActual, ITEMS_PER_PAGE, filtros, busqueda
+    paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda
   )
   const { data: clientes = [] } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()

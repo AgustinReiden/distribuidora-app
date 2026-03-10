@@ -145,9 +145,16 @@ async function fetchPedidosPaginated(
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
+  const hasSearch = search && search.trim().length > 0
+
+  // Use !inner join when searching so PostgREST filters parent rows by client fields
+  const selectStr = hasSearch
+    ? '*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(*))'
+    : '*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))'
+
   let query = supabase
     .from('pedidos')
-    .select('*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))', { count: 'exact' })
+    .select(selectStr, { count: 'exact' })
     .order('created_at', { ascending: false })
 
   // Apply server-side filters
@@ -167,9 +174,13 @@ async function fetchPedidosPaginated(
     query = query.lte('fecha', filters.fechaHasta)
   }
 
-  // Search by client name (using the foreign key relationship)
-  if (search && search.trim().length > 0) {
-    query = query.or(`cliente.nombre_fantasia.ilike.%${search.trim()}%,cliente.cuit.ilike.%${search.trim()}%`)
+  // Search by client fields using referencedTable for related table filtering
+  if (hasSearch) {
+    const trimmed = search!.trim()
+    query = query.or(
+      `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
+      { referencedTable: 'clientes' }
+    )
   }
 
   query = query.range(from, to)
