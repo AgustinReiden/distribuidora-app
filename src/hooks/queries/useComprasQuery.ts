@@ -27,6 +27,8 @@ interface CompraItemRPC {
   costo_unitario: number
   subtotal: number
   bonificacion: number
+  porcentaje_iva: number
+  impuestos_internos: number
 }
 
 interface RPCResult {
@@ -92,7 +94,9 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     cantidad: item.cantidad,
     costo_unitario: item.costoUnitario || 0,
     subtotal: item.subtotal || (item.cantidad * (item.costoUnitario || 0)),
-    bonificacion: item.bonificacion || 0
+    bonificacion: item.bonificacion || 0,
+    porcentaje_iva: item.porcentajeIva ?? 21,
+    impuestos_internos: item.impuestosInternos ?? 0
   }))
 
   const { data, error } = await supabase.rpc('registrar_compra_completa', {

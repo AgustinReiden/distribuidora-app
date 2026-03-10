@@ -756,6 +756,8 @@ export interface CompraFormInputExtended {
     costoUnitario?: number;
     subtotal?: number;
     bonificacion?: number;
+    porcentajeIva?: number;
+    impuestosInternos?: number;
   }>;
 }
 
