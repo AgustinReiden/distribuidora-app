@@ -561,7 +561,9 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             cantidad: item.cantidad,
             costoUnitario: item.costoUnitario || 0,
             subtotal: item.cantidad * costoConBonif,
-            bonificacion: item.bonificacion || 0
+            bonificacion: item.bonificacion || 0,
+            porcentajeIva: item.porcentajeIva ?? 21,
+            impuestosInternos: item.impuestosInternos ?? 0
           }
         })
       })
