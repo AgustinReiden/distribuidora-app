@@ -217,13 +217,13 @@ const ModalPedido = memo(function ModalPedido({
 
             {mostrarNuevoCliente ? (
               <div className="border rounded-lg p-3 space-y-3 bg-blue-50 dark:bg-gray-700 dark:border-gray-600">
-                <input type="text" value={nuevoCliente.nombreFantasia} onChange={e => setNuevoCliente({ ...nuevoCliente, nombreFantasia: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre fantasia *" />
-                <input type="text" value={nuevoCliente.nombre} onChange={e => setNuevoCliente({ ...nuevoCliente, nombre: e.target.value })} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre completo *" />
+                <input type="text" value={nuevoCliente.nombreFantasia} onChange={e => setNuevoCliente(prev => ({ ...prev, nombreFantasia: e.target.value }))} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre fantasia *" />
+                <input type="text" value={nuevoCliente.nombre} onChange={e => setNuevoCliente(prev => ({ ...prev, nombre: e.target.value }))} className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-white" placeholder="Nombre completo *" />
                 <AddressAutocomplete
                   value={nuevoCliente.direccion}
-                  onChange={(val: string) => setNuevoCliente({ ...nuevoCliente, direccion: val })}
+                  onChange={(val: string) => setNuevoCliente(prev => ({ ...prev, direccion: val }))}
                   onSelect={(result) => {
-                    setNuevoCliente({ ...nuevoCliente, direccion: result.direccion, latitud: result.latitud, longitud: result.longitud });
+                    setNuevoCliente(prev => ({ ...prev, direccion: result.direccion, latitud: result.latitud, longitud: result.longitud }));
                   }}
                   placeholder="Buscar dirección..."
                 />

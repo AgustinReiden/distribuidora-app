@@ -164,6 +164,9 @@ export const AddressAutocomplete = ({
   const handleSelectPrediction = useCallback((prediction: PlacePrediction): void => {
     if (!placesServiceRef.current) return;
 
+    // Guardar el input original del usuario para intentar preservar el número de calle
+    const originalInput = inputRef.current?.value || '';
+
     setLoading(true);
     setShowDropdown(false);
     onChange(prediction.description);
@@ -178,12 +181,31 @@ export const AddressAutocomplete = ({
         setLoading(false);
 
         if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
+          const components = (place.address_components as AddressComponent[]) || [];
+          let direccion = place.formatted_address || prediction.description;
+
+          // Si Google no devolvió número de calle, intentar extraerlo del input original
+          const tieneStreetNumber = components.some(c => c.types.includes('street_number'));
+          if (!tieneStreetNumber) {
+            const route = components.find(c => c.types.includes('route'))?.long_name;
+            // Extraer número del input original del usuario (ej: "eudoro araos 2135" → "2135")
+            const numberMatch = originalInput.match(/\b(\d{1,5})\b/);
+            if (route && numberMatch) {
+              const streetNumber = numberMatch[1];
+              // Insertar el número después del nombre de la calle
+              direccion = direccion.replace(route, `${route} ${streetNumber}`);
+            }
+          }
+
           const result: AddressSelectResult = {
-            direccion: place.formatted_address || prediction.description,
+            direccion,
             latitud: place.geometry?.location?.lat() || null,
             longitud: place.geometry?.location?.lng() || null,
-            componentes: (place.address_components as AddressComponent[]) || []
+            componentes: components
           };
+
+          // Actualizar el input con la dirección final (incluyendo número si se recuperó)
+          onChange(direccion);
           onSelect(result);
 
           // Crear nuevo session token para la próxima búsqueda
