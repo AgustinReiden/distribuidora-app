@@ -62,7 +62,11 @@ interface EstadoConfig {
 // Funcion para calcular dias de antiguedad de un pedido
 function calcularDiasAntiguedad(fechaCreacion: string | undefined): number {
   if (!fechaCreacion) return 0;
-  const fecha = new Date(fechaCreacion);
+  // Para fechas date-only (YYYY-MM-DD), agregar T12:00:00 para evitar
+  // que JS las interprete como UTC medianoche (causa dia anterior en UTC-)
+  const fecha = typeof fechaCreacion === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaCreacion)
+    ? new Date(fechaCreacion + 'T12:00:00')
+    : new Date(fechaCreacion);
   const hoy = new Date();
   const diffTime = hoy.getTime() - fecha.getTime();
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));

@@ -67,7 +67,7 @@ BEGIN
       COALESCE((v_item->>'subtotal')::DECIMAL, 0),
       v_stock_anterior,
       v_stock_nuevo,
-      COALESCE((v_item->>'bonificacion')::INTEGER, 0)
+      COALESCE((v_item->>'bonificacion')::DECIMAL, 0)
     );
 
     -- Calcular costos netos para actualizar el producto

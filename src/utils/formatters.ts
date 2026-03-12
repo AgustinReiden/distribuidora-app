@@ -50,13 +50,30 @@ export function formatCurrencyCompact(amount: number | null | undefined): string
 // FORMATEO DE FECHAS
 // ============================================
 
-export const formatFecha = (f: string | Date | null | undefined): string =>
-  f ? new Date(f).toLocaleDateString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }) : '';
+/**
+ * Parsea un string de fecha de forma segura.
+ * Para strings date-only (YYYY-MM-DD), agrega T12:00:00 para evitar
+ * que JavaScript los interprete como UTC medianoche (lo cual causa
+ * que se muestre el día anterior en zonas UTC-).
+ */
+function parseDateSafe(f: string | Date): Date {
+  if (typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f)) {
+    return new Date(f + 'T12:00:00')
+  }
+  return new Date(f)
+}
+
+export const formatFecha = (f: string | Date | null | undefined): string => {
+  if (!f) return ''
+  const date = parseDateSafe(f)
+  // For date-only values, don't show time
+  const isDateOnly = typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f)
+  return date.toLocaleDateString('es-AR', {
+    day: 'numeric',
+    month: 'numeric',
+    ...(isDateOnly ? {} : { hour: '2-digit', minute: '2-digit' })
+  })
+}
 
 /**
  * Formatea una fecha en formato local
@@ -64,7 +81,7 @@ export const formatFecha = (f: string | Date | null | undefined): string =>
 export function formatDate(date: string | Date | null | undefined, options: Intl.DateTimeFormatOptions = {}): string {
   if (!date) return ''
 
-  const dateObj = typeof date === 'string' ? new Date(date) : date
+  const dateObj = parseDateSafe(date)
 
   if (isNaN(dateObj.getTime())) return ''
 
@@ -84,7 +101,7 @@ export function formatDate(date: string | Date | null | undefined, options: Intl
 export function formatDateTime(date: string | Date | null | undefined): string {
   if (!date) return ''
 
-  const dateObj = typeof date === 'string' ? new Date(date) : date
+  const dateObj = parseDateSafe(date)
 
   if (isNaN(dateObj.getTime())) return ''
 
@@ -103,7 +120,7 @@ export function formatDateTime(date: string | Date | null | undefined): string {
 export function formatTimeAgo(date: string | Date | null | undefined): string {
   if (!date) return ''
 
-  const dateObj = typeof date === 'string' ? new Date(date) : date
+  const dateObj = parseDateSafe(date)
 
   if (isNaN(dateObj.getTime())) return ''
 
