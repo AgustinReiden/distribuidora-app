@@ -4,6 +4,7 @@ import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
+import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
 import type { PedidoDB, ProductoDB } from '../../types';
 
 /** Item del pedido para edición */
@@ -86,10 +87,29 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }
   }, [pedido]);
 
-  // Calcular total basado en items
-  const totalCalculado = useMemo(() => {
-    return items.reduce((sum, item) => sum + (item.cantidad * item.precioUnitario), 0);
-  }, [items]);
+  // Recalcular precios mayorista/minorista según cantidades actuales
+  // Usamos el precio base (retail) de cada producto para que la resolución sea correcta
+  const itemsConPrecioBase = useMemo(() => {
+    return items.map(item => {
+      const producto = productos.find(p => p.id === item.productoId);
+      return {
+        productoId: item.productoId,
+        cantidad: item.cantidad,
+        precioUnitario: producto?.precio || item.precioUnitario
+      };
+    });
+  }, [items, productos]);
+
+  const { itemsConPrecioMayorista, totalMayorista: totalCalculado } = usePrecioMayorista(itemsConPrecioBase);
+
+  // Mapa de precios resueltos para mostrar en cada item
+  const preciosResueltosMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of itemsConPrecioMayorista) {
+      map.set(item.productoId, item.precioUnitario);
+    }
+    return map;
+  }, [itemsConPrecioMayorista]);
 
   const total = itemsModificados ? totalCalculado : (pedido?.total || 0);
   const saldoPendiente = total - montoPagado;
@@ -198,9 +218,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }
 
     try {
-      // Si hay cambios en items y es admin, guardar items primero
+      // Si hay cambios en items y es admin, guardar items con precios mayoristas resueltos
       if (itemsModificados && isAdmin && onSaveItems) {
-        await onSaveItems(items);
+        const itemsParaGuardar = items.map(item => ({
+          ...item,
+          precioUnitario: preciosResueltosMap.get(item.productoId) ?? item.precioUnitario
+        }));
+        await onSaveItems(itemsParaGuardar);
       }
       // Guardar el resto de los datos
       await onSave({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
@@ -343,6 +367,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 items.map(item => {
                   const stockDisponible = getStockDisponible(item.productoId);
                   const cambio = item.cantidad - (item.cantidadOriginal || 0);
+                  const precioResuelto = preciosResueltosMap.get(item.productoId) ?? item.precioUnitario;
 
                   return (
                     <div
@@ -355,7 +380,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       <div className="flex-1">
                         <p className="font-medium text-sm dark:text-white">{item.nombre}</p>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
-                          <span>{formatPrecio(item.precioUnitario)} c/u</span>
+                          <span>{formatPrecio(precioResuelto)} c/u</span>
                           <span>-</span>
                           <span>Stock disp: {stockDisponible}</span>
                           {item.esNuevo && (
@@ -393,7 +418,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
                         {/* Subtotal */}
                         <span className="font-semibold text-blue-600 min-w-[80px] text-right">
-                          {formatPrecio(item.cantidad * item.precioUnitario)}
+                          {formatPrecio(item.cantidad * precioResuelto)}
                         </span>
 
                         {/* Eliminar */}

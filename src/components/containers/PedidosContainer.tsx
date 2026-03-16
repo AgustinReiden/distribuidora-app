@@ -6,6 +6,7 @@
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
   usePedidosPaginatedQuery,
@@ -25,6 +26,7 @@ import { usePrecioMayorista } from '../../hooks/usePrecioMayorista'
 import { useDebounce } from '../../hooks/useAsync'
 import { supabase } from '../../hooks/supabase/base'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
+import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 
 // Lazy load de componentes
 const VistaPedidos = lazy(() => import('../vistas/VistaPedidos'))
@@ -69,6 +71,7 @@ interface ConfirmConfig {
 }
 
 export default function PedidosContainer(): React.ReactElement {
+  const queryClient = useQueryClient()
   const { user, isAdmin, isPreventista, isTransportista, isOnline } = useAuthData()
   const notify = useNotification()
 
@@ -341,6 +344,28 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pedidoEditando, notify])
 
+  // ModalEditarPedido: onSaveItems - guardar cambios de items via RPC
+  const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[]) => {
+    if (!pedidoEditando) return
+    const itemsParaRPC = items.map(item => ({
+      producto_id: item.productoId,
+      cantidad: item.cantidad,
+      precio_unitario: item.precioUnitario
+    }))
+    const { data, error } = await supabase.rpc('actualizar_pedido_items', {
+      p_pedido_id: pedidoEditando.id,
+      p_items_nuevos: itemsParaRPC,
+      p_usuario_id: user?.id ?? null
+    })
+    if (error) throw error
+    const response = data as { success: boolean; errores?: string[] }
+    if (!response.success) {
+      throw new Error(response.errores?.join(', ') || 'Error al actualizar items')
+    }
+    // Invalidar cache de pedidos para refrescar datos
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+  }, [pedidoEditando, user, queryClient])
+
   // ModalPedido handlers
   const handleGuardarPedido = useCallback(async () => {
     if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
@@ -588,6 +613,7 @@ export default function PedidosContainer(): React.ReactElement {
             productos={productos}
             isAdmin={isAdmin}
             onSave={handleGuardarEdicion}
+            onSaveItems={handleGuardarItemsEdicion}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}
             guardando={guardando}
           />
