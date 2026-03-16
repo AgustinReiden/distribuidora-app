@@ -7,6 +7,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storageKey: 'distribuidora_v2',
     persistSession: true,
+    autoRefreshToken: true,
     detectSessionInUrl: true,
   }
 })
