@@ -5,17 +5,20 @@ import { supabase } from './base'
 import { logger } from '../../utils/logger'
 import type { RolUsuario } from '../../types'
 
-// Tiempo de inactividad antes de cerrar sesión automáticamente (15 minutos)
-const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000
+// Tiempo de inactividad antes de cerrar sesión automáticamente (8 horas)
+const INACTIVITY_TIMEOUT_MS = 8 * 60 * 60 * 1000
 
 // Eventos que reinician el timer de inactividad
-type ActivityEventName = 'mousedown' | 'keydown' | 'touchstart' | 'scroll' | 'mousemove'
+type ActivityEventName = 'mousedown' | 'keydown' | 'touchstart' | 'scroll' | 'mousemove' | 'click' | 'input' | 'touchmove'
 const ACTIVITY_EVENTS: ActivityEventName[] = [
   'mousedown',
   'keydown',
   'touchstart',
+  'touchmove',
   'scroll',
-  'mousemove'
+  'mousemove',
+  'click',
+  'input'
 ]
 
 // Tipo para el perfil de usuario
