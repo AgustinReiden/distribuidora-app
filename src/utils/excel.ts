@@ -268,10 +268,151 @@ export async function createMultiSheetExcel(sheets: SheetConfig[], filename: str
   downloadBuffer(buffer as ArrayBuffer, `${filename}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 }
 
+/**
+ * Exporta planilla de control de stock para inventario físico
+ * Incluye fórmula de diferencia y formato condicional
+ */
+export async function exportControlStock(
+  productos: { codigo?: string | null; nombre: string; categoria?: string | null; stock: number }[]
+): Promise<void> {
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = 'Distribuidora App'
+  workbook.created = new Date()
+
+  const ws = workbook.addWorksheet('Control de Stock')
+
+  // Título
+  ws.mergeCells('A1:F1')
+  const titleCell = ws.getCell('A1')
+  titleCell.value = 'Control de Stock'
+  titleCell.font = { size: 16, bold: true }
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+  ws.getRow(1).height = 30
+
+  // Fecha de generación
+  ws.mergeCells('A2:F2')
+  const dateCell = ws.getCell('A2')
+  dateCell.value = `Fecha: ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
+  dateCell.font = { size: 10, italic: true }
+  dateCell.alignment = { horizontal: 'right' }
+
+  // Headers en fila 4
+  const headerRow = ws.getRow(4)
+  const headers = ['Código', 'Producto', 'Categoría', 'Stock Sistema', 'Stock Real', 'Diferencia']
+  headers.forEach((h, i) => {
+    const cell = headerRow.getCell(i + 1)
+    cell.value = h
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } }
+    cell.alignment = { horizontal: i >= 3 ? 'center' : 'left', vertical: 'middle' }
+    cell.border = {
+      top: { style: 'thin' }, bottom: { style: 'thin' },
+      left: { style: 'thin' }, right: { style: 'thin' }
+    }
+  })
+  headerRow.height = 22
+
+  // Anchos de columna
+  ws.getColumn(1).width = 12  // Código
+  ws.getColumn(2).width = 35  // Producto
+  ws.getColumn(3).width = 18  // Categoría
+  ws.getColumn(4).width = 15  // Stock Sistema
+  ws.getColumn(5).width = 15  // Stock Real
+  ws.getColumn(6).width = 15  // Diferencia
+
+  // Datos
+  const sortedProducts = [...productos].sort((a, b) => (a.categoria || '').localeCompare(b.categoria || '') || a.nombre.localeCompare(b.nombre))
+
+  sortedProducts.forEach((p, idx) => {
+    const rowNum = 5 + idx
+    const row = ws.getRow(rowNum)
+
+    row.getCell(1).value = p.codigo || '-'
+    row.getCell(2).value = p.nombre
+    row.getCell(3).value = p.categoria || 'Sin categoría'
+    row.getCell(4).value = p.stock
+    row.getCell(5).value = null // Stock Real - vacío para llenar
+    // Fórmula: Stock Real - Stock Sistema
+    row.getCell(6).value = { formula: `E${rowNum}-D${rowNum}` } as ExcelJS.CellValue
+
+    // Estilo de las celdas
+    for (let col = 1; col <= 6; col++) {
+      const cell = row.getCell(col)
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        right: { style: 'thin', color: { argb: 'FFD9D9D9' } }
+      }
+      if (col >= 4) cell.alignment = { horizontal: 'center' }
+    }
+
+    // Fondo alterno
+    if (idx % 2 === 1) {
+      for (let col = 1; col <= 6; col++) {
+        row.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
+      }
+    }
+
+    // Columna Stock Real con fondo amarillo claro para indicar que hay que llenar
+    row.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9E6' } }
+    row.getCell(5).font = { bold: true }
+  })
+
+  // Formato condicional en columna Diferencia: rojo si negativo, verde si positivo
+  const lastDataRow = 4 + sortedProducts.length
+  ws.addConditionalFormatting({
+    ref: `F5:F${lastDataRow}`,
+    rules: [
+      {
+        type: 'cellIs',
+        operator: 'lessThan',
+        priority: 1,
+        formulae: ['0'],
+        style: { font: { color: { argb: 'FF9C0006' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFFC7CE' } } }
+      },
+      {
+        type: 'cellIs',
+        operator: 'greaterThan',
+        priority: 2,
+        formulae: ['0'],
+        style: { font: { color: { argb: 'FF006100' }, bold: true }, fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFC6EFCE' } } }
+      }
+    ]
+  })
+
+  // Proteger columnas de datos (A-D) pero dejar E editable
+  ws.getColumn(4).eachCell({ includeEmpty: false }, (cell, rowNumber) => {
+    if (rowNumber >= 5) {
+      cell.protection = { locked: true }
+    }
+  })
+
+  // Fila de totales
+  const totalRow = ws.getRow(lastDataRow + 2)
+  totalRow.getCell(3).value = 'TOTALES:'
+  totalRow.getCell(3).font = { bold: true }
+  totalRow.getCell(3).alignment = { horizontal: 'right' }
+  totalRow.getCell(4).value = { formula: `SUM(D5:D${lastDataRow})` } as ExcelJS.CellValue
+  totalRow.getCell(4).font = { bold: true }
+  totalRow.getCell(4).alignment = { horizontal: 'center' }
+  totalRow.getCell(5).value = { formula: `SUM(E5:E${lastDataRow})` } as ExcelJS.CellValue
+  totalRow.getCell(5).font = { bold: true }
+  totalRow.getCell(5).alignment = { horizontal: 'center' }
+  totalRow.getCell(6).value = { formula: `SUM(F5:F${lastDataRow})` } as ExcelJS.CellValue
+  totalRow.getCell(6).font = { bold: true }
+  totalRow.getCell(6).alignment = { horizontal: 'center' }
+
+  const fecha = new Date().toISOString().slice(0, 10)
+  const buffer = await workbook.xlsx.writeBuffer()
+  downloadBuffer(buffer as ArrayBuffer, `Control_Stock_${fecha}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+}
+
 export default {
   readExcelFile,
   createAndDownloadExcel,
   createTemplate,
   exportReport,
-  createMultiSheetExcel
+  createMultiSheetExcel,
+  exportControlStock
 }
