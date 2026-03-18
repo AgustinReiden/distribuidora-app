@@ -365,13 +365,15 @@ export function usePedidosPaginatedQuery(
   page: number,
   pageSize: number,
   filters?: Partial<FiltrosPedidosState>,
-  search?: string
+  search?: string,
+  enabled = true
 ) {
   return useQuery({
     queryKey: pedidosKeys.paginated(page, pageSize, { ...filters, busqueda: search } as Partial<FiltrosPedidosState>),
     queryFn: () => fetchPedidosPaginated(page, pageSize, filters, search),
     staleTime: 2 * 60 * 1000,
     placeholderData: keepPreviousData,
+    enabled,
   })
 }
 

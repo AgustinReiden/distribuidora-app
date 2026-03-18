@@ -90,7 +90,7 @@ function LoadingVista(): ReactElement {
 // =============================================================================
 
 function MainApp(): ReactElement {
-  const { user, perfil, logout, isAdmin, isPreventista, isTransportista } = useAuth();
+  const { user, perfil, logout, isAdmin, isPreventista, isTransportista, authReady } = useAuth();
   const notify = useNotification();
   const location = useLocation();
 
@@ -221,12 +221,13 @@ function MainApp(): ReactElement {
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
     user,
     perfil,
+    authReady,
     isAdmin,
     isPreventista,
     isTransportista,
     isOnline,
     logout: handleLogout
-  }), [user, perfil, isAdmin, isPreventista, isTransportista, isOnline, handleLogout]);
+  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isOnline, handleLogout]);
 
   // Contextos separados para evitar re-renders innecesarios
   const clientesValue = useMemo<ClientesContextValue>(() => ({

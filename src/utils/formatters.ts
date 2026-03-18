@@ -71,6 +71,7 @@ export const formatFecha = (f: string | Date | null | undefined): string => {
   return date.toLocaleDateString('es-AR', {
     day: 'numeric',
     month: 'numeric',
+    timeZone: 'America/Argentina/Buenos_Aires',
     ...(isDateOnly ? {} : { hour: '2-digit', minute: '2-digit' })
   })
 }
@@ -89,6 +90,7 @@ export function formatDate(date: string | Date | null | undefined, options: Intl
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    timeZone: 'America/Argentina/Buenos_Aires',
     ...options
   }
 
@@ -110,7 +112,8 @@ export function formatDateTime(date: string | Date | null | undefined): string {
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZone: 'America/Argentina/Buenos_Aires'
   })
 }
 

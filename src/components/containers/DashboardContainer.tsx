@@ -21,7 +21,7 @@ function LoadingState() {
 }
 
 export default function DashboardContainer(): React.ReactElement {
-  const { user, isAdmin, isPreventista } = useAuthData()
+  const { user, isAdmin, isPreventista, authReady } = useAuthData()
 
   // Determinar si debe filtrar por usuario
   const usuarioFiltro = isPreventista && !isAdmin ? user?.id : null
@@ -36,7 +36,7 @@ export default function DashboardContainer(): React.ReactElement {
     data: metricas,
     isLoading: loadingMetricas,
     refetch: refetchMetricas
-  } = useMetricasQuery(filtroPeriodo, usuarioFiltro, fechaDesde, fechaHasta)
+  } = useMetricasQuery(filtroPeriodo, usuarioFiltro, fechaDesde, fechaHasta, authReady)
 
   // Cargar clientes solo para el contador
   const { data: clientes = [] } = useClientesQuery()

@@ -72,7 +72,7 @@ interface ConfirmConfig {
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
-  const { user, isAdmin, isPreventista, isTransportista, isOnline } = useAuthData()
+  const { user, isAdmin, isPreventista, isTransportista, isOnline, authReady } = useAuthData()
   const notify = useNotification()
 
   // Pagination state
@@ -83,7 +83,7 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Queries - use debounced search to avoid firing on every keystroke
   const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
-    paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda
+    paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
   )
   const { data: clientes = [] } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()

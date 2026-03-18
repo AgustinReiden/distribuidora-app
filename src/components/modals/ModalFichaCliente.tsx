@@ -118,11 +118,6 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                       )}
                     </span>
                   )}
-                  {cliente.zona && (
-                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">
-                      {cliente.zona}
-                    </span>
-                  )}
                 </div>
                 {cliente.horarios_atencion && (
                   <div className="flex items-center gap-1 mt-2 text-sm text-gray-500 dark:text-gray-400">

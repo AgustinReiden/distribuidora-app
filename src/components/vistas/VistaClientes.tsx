@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
-import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, Map, FileText, Tag, Building2 } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import type { ClienteDB } from '../../types';
@@ -37,14 +37,7 @@ export default function VistaClientes({
   onVerFichaCliente
 }: VistaClientesProps) {
   const [busqueda, setBusqueda] = useState<string>('');
-  const [filtroZona, setFiltroZona] = useState<string>('todas');
   const [paginaActual, setPaginaActual] = useState(1);
-
-  // Obtener zonas únicas
-  const zonas = useMemo((): string[] => {
-    const zonasSet = new Set<string>(clientes.map(c => c.zona).filter((z): z is string => Boolean(z)));
-    return ['todas', ...Array.from(zonasSet).sort()];
-  }, [clientes]);
 
   // Obtener rubros únicos
   const rubros = useMemo((): string[] => {
@@ -66,12 +59,11 @@ export default function VistaClientes({
         c.cuit?.includes(busqueda.replace(/[-\s]/g, '')) ||
         (c.codigo != null && String(c.codigo).includes(busqueda.trim()));
 
-      const matchZona = filtroZona === 'todas' || c.zona === filtroZona;
       const matchRubro = filtroRubro === 'todos' || c.rubro === filtroRubro;
 
-      return matchBusqueda && matchZona && matchRubro;
+      return matchBusqueda && matchRubro;
     });
-  }, [clientes, busqueda, filtroZona, filtroRubro]);
+  }, [clientes, busqueda, filtroRubro]);
 
   // Pagination
   const totalPaginas = Math.ceil(clientesFiltrados.length / ITEMS_PER_PAGE);
@@ -82,7 +74,6 @@ export default function VistaClientes({
 
   // Reset page when filters change
   const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
-  const handleZona = (e: ChangeEvent<HTMLSelectElement>) => { setFiltroZona(e.target.value); setPaginaActual(1); };
   const handleRubro = (e: ChangeEvent<HTMLSelectElement>) => { setFiltroRubro(e.target.value); setPaginaActual(1); };
 
   return (
@@ -117,23 +108,6 @@ export default function VistaClientes({
             aria-label="Buscar clientes por nombre, CUIT, dirección o teléfono"
           />
         </div>
-        {zonas.length > 1 && (
-          <div>
-            <label htmlFor="filtro-zona-clientes" className="sr-only">Filtrar clientes por zona</label>
-            <select
-              id="filtro-zona-clientes"
-              value={filtroZona}
-              onChange={handleZona}
-              className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            >
-              {zonas.map(zona => (
-                <option key={zona} value={zona}>
-                  {zona === 'todas' ? 'Todas las zonas' : zona}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
         {rubros.length > 1 && (
           <div>
             <label htmlFor="filtro-rubro-clientes" className="sr-only">Filtrar clientes por rubro</label>
@@ -154,7 +128,7 @@ export default function VistaClientes({
       </div>
 
       {/* Contador de resultados */}
-      {(busqueda || filtroZona !== 'todas' || filtroRubro !== 'todos') && (
+      {(busqueda || filtroRubro !== 'todos') && (
         <div className="text-sm text-gray-600 dark:text-gray-400">
           Mostrando {clientesFiltrados.length} de {clientes.length} clientes
         </div>
@@ -164,7 +138,7 @@ export default function VistaClientes({
       {loading ? <LoadingSpinner /> : clientesFiltrados.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>{busqueda || filtroZona !== 'todas' ? 'No se encontraron clientes con esos criterios' : 'No hay clientes'}</p>
+          <p>{busqueda || filtroRubro !== 'todos' ? 'No se encontraron clientes con esos criterios' : 'No hay clientes'}</p>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -233,14 +207,6 @@ export default function VistaClientes({
                     >
                       {cliente.telefono}
                     </a>
-                  </div>
-                )}
-                {cliente.zona && (
-                  <div className="flex items-center space-x-2">
-                    <Map className="w-4 h-4 flex-shrink-0 text-gray-400" />
-                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-full text-xs">
-                      {cliente.zona}
-                    </span>
                   </div>
                 )}
               </div>

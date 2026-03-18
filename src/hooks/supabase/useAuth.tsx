@@ -38,6 +38,7 @@ export interface AuthContextValue {
   user: User | null;
   perfil: Perfil | null;
   loading: boolean;
+  authReady: boolean;
   login: (email: string, password: string) => Promise<{ user: User | null; session: unknown }>;
   logout: () => Promise<void>;
   isAdmin: boolean;
@@ -78,13 +79,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     let mounted = true
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (mounted && data?.session?.user) {
         setUser(data.session.user)
-        void fetchPerfil(data.session.user.id)
+        await fetchPerfil(data.session.user.id)
       }
+      if (mounted) setLoading(false)
     }).catch((err) => {
       logger.error('[useAuth] Error getting session:', err)
+      if (mounted) setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -95,7 +98,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Usar perfilRef.current para evitar race condition con estado stale
           const currentPerfil = perfilRef.current
           if (!currentPerfil || currentPerfil.id !== session.user.id) {
-            void fetchPerfil(session.user.id)
+            await fetchPerfil(session.user.id)
           }
         }
         setLoading(false)
@@ -104,7 +107,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setPerfil(null)
         setLoading(false)
       } else if (event === 'INITIAL_SESSION') {
-        setLoading(false)
+        // No setear loading=false aquí - getSession ya lo maneja
       }
     })
 
@@ -173,10 +176,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [user, logout])
 
+  // authReady: true cuando auth terminó de cargar y el perfil está disponible (o no hay usuario)
+  const authReady = !loading && (user === null || perfil !== null)
+
   const value: AuthContextValue = {
     user,
     perfil,
     loading,
+    authReady,
     login,
     logout,
     isAdmin: perfil?.rol === 'admin',

@@ -255,13 +255,15 @@ export function useMetricasQuery(
   periodo: FiltroPeriodo | string = 'mes',
   usuarioId?: string | null,
   fechaDesde?: string | null,
-  fechaHasta?: string | null
+  fechaHasta?: string | null,
+  enabled = true
 ) {
   return useQuery({
     queryKey: metricasKeys.dashboard(periodo, usuarioId),
     queryFn: () => calcularMetricas({ periodo, fechaDesde, fechaHasta, usuarioId }),
     staleTime: 2 * 60 * 1000, // 2 minutos - métricas cambian frecuentemente
     gcTime: 10 * 60 * 1000,
+    enabled,
   })
 }
 
