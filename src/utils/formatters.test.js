@@ -93,7 +93,8 @@ describe('Formatters de Fecha', () => {
     })
 
     it('maneja Date objects', () => {
-      const date = new Date(2024, 5, 15)
+      // Usar mediodía para evitar que el cambio de timezone muestre el día anterior
+      const date = new Date(2024, 5, 15, 12, 0, 0)
       const result = formatDate(date)
       expect(result).toMatch(/15\/06\/2024/)
     })
