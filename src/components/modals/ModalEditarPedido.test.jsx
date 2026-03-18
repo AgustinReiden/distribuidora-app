@@ -1,12 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import ModalEditarPedido from './ModalEditarPedido'
+
+// Mock supabase client before importing component (avoids supabaseUrl is required error)
+vi.mock('../../lib/supabase', () => ({
+  supabase: {
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({ data: [], error: null })),
+    })),
+    auth: {
+      getSession: vi.fn(() => Promise.resolve({ data: { session: null } })),
+      onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+    },
+  },
+}))
+
+// Mock TanStack Query hooks used by usePrecioMayorista
+vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
+  usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
+}))
 
 // Mock formatPrecio
 vi.mock('../../utils/formatters', () => ({
   formatPrecio: (value) => `$${Number(value).toFixed(2)}`
 }))
+
+import ModalEditarPedido from './ModalEditarPedido'
 
 describe('ModalEditarPedido', () => {
   const mockPedido = {
