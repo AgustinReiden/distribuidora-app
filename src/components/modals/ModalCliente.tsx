@@ -1,10 +1,10 @@
 import { useState, memo, useRef } from 'react';
-import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, MapPinned, Users } from 'lucide-react';
+import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
-import { usePreventistasQuery, useZonasEstandarizadasQuery, useCrearZonaMutation } from '../../hooks/queries';
+import { usePreventistasQuery } from '../../hooks/queries';
 import {
   formatCuitInput,
   formatDniInput,
@@ -87,8 +87,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
   const { data: preventistas = [] } = usePreventistasQuery();
-  const { data: zonasDB = [] } = useZonasEstandarizadasQuery();
-  const crearZonaMut = useCrearZonaMutation();
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -96,13 +94,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   // Detectar tipo de documento y extraer numero si es edicion
   const tipoDocInicial = cliente ? (cliente.tipo_documento || detectDocumentType(cliente.cuit)) : 'CUIT';
   const numeroDocInicial = cliente ? (tipoDocInicial === 'DNI' ? extractDniFromStorage(cliente.cuit) : cliente.cuit) : '';
-
-  // Zonas de la tabla estandarizada
-  const zonasUnicas = zonasDB.map(z => z.nombre).sort();
-
-  // Estado para nueva zona
-  const [mostrarNuevaZona, setMostrarNuevaZona] = useState<boolean>(false);
-  const [nuevaZona, setNuevaZona] = useState<string>('');
 
   const [form, setForm] = useState<ClienteFormData>(cliente ? {
     tipo_documento: tipoDocInicial,
@@ -196,17 +187,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       cuitFinal = form.numero_documento;
     }
 
-    // Usar zona nueva si corresponde - persistir en tabla zonas si es nueva
-    let zonaFinal = form.zona;
-    if (mostrarNuevaZona && nuevaZona.trim()) {
-      zonaFinal = nuevaZona.trim();
-      // Crear la zona en la tabla estandarizada (ignora si ya existe)
-      crearZonaMut.mutate(zonaFinal);
-    }
-
     onSave({
       ...form,
-      zona: zonaFinal,
       cuit: cuitFinal,
       tipo_documento: form.tipo_documento,
       id: cliente?.id
@@ -347,46 +329,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           </div>
         </div>
 
-        {/* Zona y Rubro */}
+        {/* Rubro */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <label className="text-sm font-medium dark:text-gray-200 flex items-center gap-1">
-                <MapPinned className="w-4 h-4" />
-                Zona
-              </label>
-              <button
-                type="button"
-                onClick={() => {
-                  setMostrarNuevaZona(!mostrarNuevaZona);
-                  if (!mostrarNuevaZona) setNuevaZona('');
-                }}
-                className="text-sm text-blue-600 hover:text-blue-700"
-              >
-                {mostrarNuevaZona ? 'Elegir existente' : '+ Nueva zona'}
-              </button>
-            </div>
-            {mostrarNuevaZona ? (
-              <input
-                type="text"
-                value={nuevaZona}
-                onChange={e => setNuevaZona(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                placeholder="Escribir nueva zona..."
-              />
-            ) : (
-              <select
-                value={form.zona}
-                onChange={e => handleFieldChange('zona', e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              >
-                <option value="">Seleccionar zona...</option>
-                {zonasUnicas.map(zona => (
-                  <option key={zona} value={zona}>{zona}</option>
-                ))}
-              </select>
-            )}
-          </div>
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
               <Tag className="w-4 h-4" />

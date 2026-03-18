@@ -14,6 +14,7 @@ import type { PerfilDB } from '../types'
 export interface AuthDataContextValue {
   user: { id: string; email?: string } | null
   perfil: PerfilDB | null
+  authReady: boolean
   isAdmin: boolean
   isPreventista: boolean
   isTransportista: boolean
