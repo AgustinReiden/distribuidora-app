@@ -276,26 +276,73 @@ export default function PedidosContainer(): React.ReactElement {
     setModalEntregaSalvedadOpen(true)
   }, [])
 
-  // Excel/CSV export
-  const handleExportarExcel = useCallback(() => {
+  // Excel export (multi-sheet con ExcelJS)
+  const handleExportarExcel = useCallback(async () => {
     setExportando(true)
     try {
-      const rows = pedidos.map(p => [
-        p.id,
-        (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
-        p.estado, p.total, p.forma_pago, p.estado_pago,
-        (p as unknown as { fecha?: string }).fecha || p.created_at,
-      ].join(','))
-      const csv = ['ID,Cliente,Estado,Total,FormaPago,EstadoPago,Fecha', ...rows].join('\n')
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `pedidos-${new Date().toISOString().split('T')[0]}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
+      const { createMultiSheetExcel } = await import('../../utils/excel')
+
+      // Hoja 1: Pedidos
+      const pedidosData = pedidos.map(p => ({
+        ID: p.id,
+        Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
+        Direccion: (p.cliente as { direccion?: string })?.direccion || '',
+        Telefono: (p.cliente as { telefono?: string })?.telefono || '',
+        Estado: p.estado,
+        'Forma Pago': p.forma_pago || '',
+        'Estado Pago': p.estado_pago || '',
+        Total: p.total,
+        'Monto Pagado': p.monto_pagado || 0,
+        Transportista: (p.transportista as { nombre?: string })?.nombre || '',
+        Preventista: (p.usuario as { nombre?: string })?.nombre || '',
+        Notas: p.notas || '',
+        Fecha: p.fecha || p.created_at || '',
+      }))
+
+      // Hoja 2: Detalle Items
+      const itemsData = pedidos.flatMap(p =>
+        (p.items || []).map(item => ({
+          'Pedido ID': p.id,
+          Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
+          Producto: (item.producto as { nombre?: string })?.nombre || '',
+          Codigo: (item.producto as { codigo?: string })?.codigo || '',
+          Cantidad: item.cantidad,
+          'Precio Unit.': item.precio_unitario,
+          Subtotal: item.cantidad * item.precio_unitario,
+        }))
+      )
+
+      // Hoja 3: Resumen Estados
+      const estadosCounts: Record<string, number> = {}
+      pedidos.forEach(p => { estadosCounts[p.estado] = (estadosCounts[p.estado] || 0) + 1 })
+      const estadosData = Object.entries(estadosCounts).map(([estado, cantidad]) => ({
+        Estado: estado,
+        Cantidad: cantidad,
+        Porcentaje: `${((cantidad / pedidos.length) * 100).toFixed(1)}%`,
+      }))
+
+      // Hoja 4: Resumen Pagos
+      const pagosCounts: Record<string, { cantidad: number; total: number }> = {}
+      pedidos.forEach(p => {
+        const ep = p.estado_pago || 'pendiente'
+        if (!pagosCounts[ep]) pagosCounts[ep] = { cantidad: 0, total: 0 }
+        pagosCounts[ep].cantidad++
+        pagosCounts[ep].total += p.total
+      })
+      const pagosData = Object.entries(pagosCounts).map(([estado, info]) => ({
+        'Estado Pago': estado,
+        Cantidad: info.cantidad,
+        'Total $': info.total,
+      }))
+
+      await createMultiSheetExcel([
+        { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18] },
+        { name: 'Detalle Items', data: itemsData, columnWidths: [10, 25, 35, 12, 10, 12, 12] },
+        { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12] },
+        { name: 'Resumen Pagos', data: pagosData, columnWidths: [20, 12, 15] },
+      ], `pedidos-${new Date().toISOString().split('T')[0]}`)
     } catch {
-      notify.error('Error al exportar')
+      notify.error('Error al exportar Excel')
     }
     setExportando(false)
   }, [pedidos, notify])
@@ -413,8 +460,8 @@ export default function PedidosContainer(): React.ReactElement {
   const handleExportarHojaRuta = useCallback(async (transportista: PerfilDB | undefined, pedidosExport: PedidoDB[]) => {
     if (!transportista) return
     try {
-      const { generarHojaRuta } = await import('../../lib/pdfExport')
-      generarHojaRuta(transportista, pedidosExport)
+      const { generarHojaRutaOptimizada } = await import('../../lib/pdfExport')
+      generarHojaRutaOptimizada(transportista, pedidosExport)
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
 
@@ -445,8 +492,24 @@ export default function PedidosContainer(): React.ReactElement {
   const handleSaveSalvedades = useCallback(async (salvedades: RegistrarSalvedadInput[]): Promise<RegistrarSalvedadResult[]> => {
     const results: RegistrarSalvedadResult[] = []
     for (const salvedad of salvedades) {
-      const { error } = await supabase.from('salvedades').insert(salvedad)
-      results.push({ success: !error, error: error?.message })
+      const { data, error } = await supabase.rpc('registrar_salvedad', {
+        p_pedido_id: parseInt(String(salvedad.pedidoId), 10),
+        p_pedido_item_id: parseInt(String(salvedad.pedidoItemId), 10),
+        p_cantidad_afectada: salvedad.cantidadAfectada,
+        p_motivo: salvedad.motivo,
+        p_descripcion: salvedad.descripcion || null,
+        p_foto_url: salvedad.fotoUrl || null,
+        p_devolver_stock: salvedad.devolverStock !== false
+      })
+      if (error) {
+        results.push({ success: false, error: error.message })
+      } else {
+        const result = data as Record<string, unknown> | null
+        results.push({
+          success: !!result?.success,
+          error: result?.success ? undefined : String(result?.error || 'Error desconocido')
+        })
+      }
     }
     return results
   }, [])
