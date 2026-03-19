@@ -63,16 +63,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Mantener ref sincronizado con el estado
   perfilRef.current = perfil
 
-  const fetchPerfil = async (userId: string) => {
+  const fetchPerfil = async (userId: string): Promise<boolean> => {
     try {
       const { data, error } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle()
       if (error) {
         logger.error('[useAuth] Error fetching perfil:', error)
-        return
+        return false
       }
-      if (data) setPerfil(data as Perfil)
+      if (data) {
+        setPerfil(data as Perfil)
+        return true
+      }
+      return false
     } catch (err) {
       logger.error('[useAuth] Exception fetching perfil:', err)
+      return false
     }
   }
 
@@ -122,6 +127,41 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Detect stuck state: user authenticated but perfil failed to load
+  useEffect(() => {
+    if (loading || !user || perfil) return
+
+    const retryTimeout = setTimeout(async () => {
+      // Re-check: user may have logged out or perfil may have loaded meanwhile
+      if (!user || perfilRef.current) return
+
+      logger.warn('[useAuth] User authenticated but perfil is null, retrying fetch...')
+      try {
+        const { data, error } = await supabase
+          .from('perfiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        if (error || !data) {
+          logger.error('[useAuth] Perfil retry failed, forcing logout:', error)
+          setUser(null)
+          setPerfil(null)
+          await supabase.auth.signOut({ scope: 'local' })
+        } else {
+          setPerfil(data as Perfil)
+        }
+      } catch (err) {
+        logger.error('[useAuth] Perfil retry exception, forcing logout:', err)
+        setUser(null)
+        setPerfil(null)
+        await supabase.auth.signOut({ scope: 'local' })
+      }
+    }, 2000)
+
+    return () => clearTimeout(retryTimeout)
+  }, [loading, user, perfil])
+
   const login = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
@@ -129,10 +169,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }
 
   const logout = useCallback(async () => {
-    const { error } = await supabase.auth.signOut()
-    if (error) throw error
+    // Clear local state FIRST to guarantee UI recovery even if signOut fails
     setUser(null)
     setPerfil(null)
+    // Use scope: 'local' to avoid server API call that fails with expired tokens
+    await supabase.auth.signOut({ scope: 'local' })
   }, [])
 
   // Session timeout por inactividad (15 minutos)
