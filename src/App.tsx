@@ -409,9 +409,11 @@ function MainApp(): ReactElement {
 // =============================================================================
 
 function AppContent(): ReactElement {
-  const { user, perfil, authReady } = useAuth();
-  // Show spinner while auth is initializing OR while perfil is being fetched for an authenticated user
-  if (!authReady) {
+  const { user, perfil, loading } = useAuth();
+  // Show spinner only while auth is initializing (loading=true).
+  // login() guarantees user+perfil are both set before returning.
+  // initAuth clears user if perfil fetch fails, so loading=false always leads to a valid state.
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center transition-colors">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" aria-label="Cargando" />
