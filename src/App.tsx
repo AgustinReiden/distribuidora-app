@@ -409,16 +409,16 @@ function MainApp(): ReactElement {
 // =============================================================================
 
 function AppContent(): ReactElement {
-  const { user, perfil, loading } = useAuth();
-  if (loading) {
+  const { user, perfil, authReady } = useAuth();
+  // Show spinner while auth is initializing OR while perfil is being fetched for an authenticated user
+  if (!authReady) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center transition-colors">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" aria-label="Cargando" />
       </div>
     );
   }
-  // Only render MainApp when BOTH user and perfil are loaded.
-  // This prevents the "Usuario" stuck state where user exists but perfil is null.
+  // authReady guarantees: either no user, or user WITH perfil loaded
   return (user && perfil) ? <MainApp /> : <LoginScreen />;
 }
 

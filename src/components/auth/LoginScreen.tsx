@@ -15,8 +15,11 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await login(email, password);
-    } catch {
-      setError('Email o contraseña incorrectos');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      setError(message.includes('perfil')
+        ? message
+        : 'Email o contraseña incorrectos');
     }
     setLoading(false);
   };
