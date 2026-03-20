@@ -8,6 +8,7 @@ import App from './App'
 import { initSentry } from './lib/sentry'
 import { initWebVitals } from './lib/webVitals'
 import { initAccessibilityAudit } from './lib/accessibility'
+import { applyAuthRuntimeHotfix } from './utils/pwaAuthHotfix'
 
 // Configurar TanStack Query con retry inteligente y backoff exponencial
 const queryClient = new QueryClient({
@@ -43,22 +44,31 @@ const queryClient = new QueryClient({
   },
 })
 
-// Inicializar Sentry antes de renderizar la app
-initSentry()
+async function bootstrapApp(): Promise<void> {
+  const reloadedForHotfix = await applyAuthRuntimeHotfix()
+  if (reloadedForHotfix) {
+    return
+  }
 
-// Inicializar Web Vitals para monitoreo de performance
-initWebVitals()
+  // Inicializar Sentry antes de renderizar la app
+  initSentry()
 
-// Inicializar auditoría de accesibilidad (solo en desarrollo)
-if (import.meta.env.DEV) {
-  initAccessibilityAudit()
+  // Inicializar Web Vitals para monitoreo de performance
+  initWebVitals()
+
+  // Inicializar auditoría de accesibilidad (solo en desarrollo)
+  if (import.meta.env.DEV) {
+    initAccessibilityAudit()
+  }
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <App />
+        {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+      </QueryClientProvider>
+    </StrictMode>,
+  )
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
-    </QueryClientProvider>
-  </StrictMode>,
-)
+void bootstrapApp()

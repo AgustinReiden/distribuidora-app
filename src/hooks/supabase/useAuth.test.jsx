@@ -132,6 +132,27 @@ describe('useAuth', () => {
     expect(supabase.auth.signOut).not.toHaveBeenCalled()
   })
 
+  it('procesa onAuthStateChange fuera del callback para evitar bloqueos de Supabase', async () => {
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    const callbackResult = authCallback?.('SIGNED_IN', { user: mockUser })
+
+    expect(callbackResult).toBeUndefined()
+    expect(maybeSingleMock).toHaveBeenCalledTimes(0)
+
+    await waitFor(() => {
+      expect(maybeSingleMock).toHaveBeenCalledTimes(1)
+      expect(result.current.user?.id).toBe(mockUser.id)
+      expect(result.current.perfil?.id).toBe(mockPerfil.id)
+    })
+  })
+
   it('mantiene loading=true durante bootstrap hasta que termina el perfil', async () => {
     const perfilDeferred = createDeferred()
 

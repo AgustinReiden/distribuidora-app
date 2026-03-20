@@ -7,6 +7,7 @@ import { beginAuthTrace, logAuthEvent, logAuthTiming, resetAuthTrace } from '../
 import type { RolUsuario } from '../../types'
 
 const INACTIVITY_TIMEOUT_MS = 8 * 60 * 60 * 1000
+const AUTH_REQUEST_TIMEOUT_MS = 15000
 
 type ActivityEventName =
   | 'mousedown'
@@ -65,6 +66,25 @@ function now(): number {
     : Date.now()
 }
 
+function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timeoutId)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timeoutId)
+        reject(error)
+      }
+    )
+  })
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUserState] = useState<User | null>(null)
   const [perfil, setPerfilState] = useState<Perfil | null>(null)
@@ -77,6 +97,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const bootstrapLoadingRef = useRef(true)
   const perfilRequestsRef = useRef<Map<string, Promise<Perfil | null>>>(new Map())
   const signOutPromiseRef = useRef<Promise<void> | null>(null)
+  const authEventTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  const authEventChainRef = useRef<Promise<void>>(Promise.resolve())
 
   const setUser = useCallback((nextUser: User | null) => {
     userIdRef.current = nextUser?.id ?? null
@@ -130,11 +152,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const request = (async (): Promise<Perfil | null> => {
       try {
-        const { data, error } = await supabase
-          .from('perfiles')
-          .select('*')
-          .eq('id', userId)
-          .maybeSingle()
+        const { data, error } = await withTimeout(
+          supabase
+            .from('perfiles')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle(),
+          AUTH_REQUEST_TIMEOUT_MS,
+          'fetchPerfil'
+        )
 
         if (error) {
           logger.error('[useAuth] Error fetching perfil:', error)
@@ -196,7 +222,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     beginAuthTrace(`${source}:refresh`)
 
     const refreshStartedAt = now()
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+    const { data: refreshData, error: refreshError } = await withTimeout(
+      supabase.auth.refreshSession(),
+      AUTH_REQUEST_TIMEOUT_MS,
+      'refreshSession'
+    )
     logAuthTiming('refreshSession', now() - refreshStartedAt, { source })
 
     if (refreshError || !refreshData.session?.user) {
@@ -252,6 +282,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (!resolvedPerfil) {
         await signOutLocal(`${event}:missing-profile`)
       }
+    } catch (err) {
+      logger.error(`[useAuth] Error handling auth event ${event}:`, err)
+      await signOutLocal(`${event}:handler-error`)
     } finally {
       if (mountedRef.current) {
         setAuthTransitionLoading(false)
@@ -259,15 +292,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [clearLocalAuthState, handleSessionResolved, signOutLocal])
 
+  const scheduleAuthStateChange = useCallback((event: string, session: Session | null) => {
+    const timerId = setTimeout(() => {
+      authEventTimersRef.current.delete(timerId)
+
+      authEventChainRef.current = authEventChainRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (!mountedRef.current) {
+            return
+          }
+
+          await handleAuthStateChange(event, session)
+        })
+    }, 0)
+
+    authEventTimersRef.current.add(timerId)
+  }, [handleAuthStateChange])
+
   useEffect(() => {
     mountedRef.current = true
+    const authEventTimers = authEventTimersRef.current
 
     const initAuth = async () => {
       beginAuthTrace('bootstrap')
       const getSessionStartedAt = now()
 
       try {
-        const { data } = await supabase.auth.getSession()
+        const { data } = await withTimeout(
+          supabase.auth.getSession(),
+          AUTH_REQUEST_TIMEOUT_MS,
+          'getSession'
+        )
         logAuthTiming('getSession', now() - getSessionStartedAt)
         if (!mountedRef.current) {
           return
@@ -286,8 +342,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     void initAuth()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      await handleAuthStateChange(event, session)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      scheduleAuthStateChange(event, session)
     })
 
     const safetyTimer = setTimeout(() => {
@@ -300,10 +356,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => {
       mountedRef.current = false
       clearTimeout(safetyTimer)
+      authEventTimers.forEach(clearTimeout)
+      authEventTimers.clear()
+      authEventChainRef.current = Promise.resolve()
       resetAuthTrace()
       subscription.unsubscribe()
     }
-  }, [clearLocalAuthState, handleAuthStateChange, handleSessionResolved])
+  }, [clearLocalAuthState, handleSessionResolved, scheduleAuthStateChange])
 
   const login = async (email: string, password: string) => {
     beginAuthTrace('login')
@@ -312,7 +371,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      const { data, error } = await withTimeout(
+        supabase.auth.signInWithPassword({ email, password }),
+        AUTH_REQUEST_TIMEOUT_MS,
+        'signInWithPassword'
+      )
       if (error) {
         throw error
       }
