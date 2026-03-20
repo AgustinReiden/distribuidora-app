@@ -46,7 +46,9 @@ export default defineConfig({
     cspConnectSrcPlugin(),
     react(),
     VitePWA({
+      injectRegister: false,
       registerType: 'prompt',
+      selfDestroying: true,
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
       manifest: {
         name: 'Distribuidora App',

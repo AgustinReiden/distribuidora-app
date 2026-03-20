@@ -1,8 +1,19 @@
 import { logger } from './logger'
 
-const AUTH_RUNTIME_HOTFIX_VERSION = '2026-03-20-auth-refresh-v1'
+export const AUTH_RUNTIME_HOTFIX_VERSION = '2026-03-20-brave-recovery-v2'
 const AUTH_RUNTIME_HOTFIX_KEY = 'auth-runtime-hotfix-version'
 const AUTH_RUNTIME_HOTFIX_RELOAD_KEY = `auth-runtime-hotfix-reload:${AUTH_RUNTIME_HOTFIX_VERSION}`
+
+function logRecoveryEvent(message: string, context: Record<string, unknown> = {}): void {
+  logger.info(message, context)
+
+  if (typeof console !== 'undefined' && typeof console.info === 'function') {
+    console.info(message, {
+      recoveryVersion: AUTH_RUNTIME_HOTFIX_VERSION,
+      ...context
+    })
+  }
+}
 
 async function unregisterServiceWorkers(): Promise<number> {
   if (!('serviceWorker' in navigator) || typeof navigator.serviceWorker.getRegistrations !== 'function') {
@@ -53,7 +64,10 @@ export async function applyAuthRuntimeHotfix(): Promise<boolean> {
     return false
   }
 
+  logRecoveryEvent('[pwa-hotfix] Starting recovery bootstrap')
+
   if (localStorage.getItem(AUTH_RUNTIME_HOTFIX_KEY) === AUTH_RUNTIME_HOTFIX_VERSION) {
+    logRecoveryEvent('[pwa-hotfix] Recovery hotfix already applied')
     return false
   }
 
@@ -67,12 +81,18 @@ export async function applyAuthRuntimeHotfix(): Promise<boolean> {
   const shouldReload = (unregisteredCount > 0 || deletedCacheCount > 0) &&
     sessionStorage.getItem(AUTH_RUNTIME_HOTFIX_RELOAD_KEY) !== '1'
 
+  logRecoveryEvent('[pwa-hotfix] Recovery cleanup completed', {
+    unregisteredCount,
+    deletedCacheCount,
+    shouldReload
+  })
+
   if (!shouldReload) {
     return false
   }
 
   sessionStorage.setItem(AUTH_RUNTIME_HOTFIX_RELOAD_KEY, '1')
-  logger.warn('[pwa-hotfix] Resetting service workers and caches after auth stability hotfix', {
+  logger.warn('[pwa-hotfix] Resetting service workers and caches after Brave recovery release', {
     unregisteredCount,
     deletedCacheCount
   })

@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 
 const { maybeSingleMock, unsubscribeMock, mockSupabase } = vi.hoisted(() => {
@@ -92,6 +92,10 @@ describe('useAuth', () => {
     })
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('deduplica login() y SIGNED_IN del mismo usuario sin hacer signOut', async () => {
     const perfilDeferred = createDeferred()
     maybeSingleMock.mockImplementationOnce(() => perfilDeferred.promise)
@@ -176,6 +180,50 @@ describe('useAuth', () => {
       expect(result.current.user?.id).toBe(mockUser.id)
       expect(result.current.perfil?.id).toBe(mockPerfil.id)
     })
+  })
+
+  it('sale a login limpio si getSession expira durante bootstrap', async () => {
+    vi.useFakeTimers()
+    supabase.auth.getSession.mockImplementation(() => new Promise(() => {}))
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    expect(result.current.loading).toBe(true)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15001)
+    })
+
+    expect(result.current.loading).toBe(false)
+    expect(result.current.user).toBeNull()
+    expect(result.current.perfil).toBeNull()
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+  })
+
+  it('sale a login limpio si fetchPerfil expira durante bootstrap', async () => {
+    vi.useFakeTimers()
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockImplementation(() => new Promise(() => {}))
+    supabase.auth.refreshSession.mockResolvedValue({
+      data: { session: null },
+      error: new Error('refresh failed')
+    })
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    expect(result.current.loading).toBe(true)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15001)
+    })
+
+    expect(result.current.loading).toBe(false)
+    expect(result.current.user).toBeNull()
+    expect(result.current.perfil).toBeNull()
+    expect(supabase.auth.refreshSession).toHaveBeenCalledTimes(1)
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
   })
 
   it('refresca la sesion expirada y entra si el refresh recupera perfil', async () => {
