@@ -102,7 +102,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (data?.session?.user) {
           setUser(data.session.user)
           // AWAIT perfil before setting loading=false
-          await fetchPerfil(data.session.user.id)
+          const perfilLoaded = await fetchPerfil(data.session.user.id)
+
+          if (!perfilLoaded && mounted) {
+            // Perfil fetch failed (likely expired token) — try refreshing session
+            logger.warn('[useAuth] Perfil fetch failed, attempting session refresh...')
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+
+            if (refreshError || !refreshData.session) {
+              // Session is dead — clear state so user sees LoginScreen
+              logger.warn('[useAuth] Session refresh failed, clearing auth state')
+              setUser(null)
+              setPerfil(null)
+              await supabase.auth.signOut({ scope: 'local' })
+            } else {
+              // Token refreshed — retry perfil fetch
+              setUser(refreshData.session.user)
+              const retryOk = await fetchPerfil(refreshData.session.user.id)
+              if (!retryOk && mounted) {
+                logger.error('[useAuth] Perfil fetch failed even after session refresh')
+                setUser(null)
+                setPerfil(null)
+                await supabase.auth.signOut({ scope: 'local' })
+              }
+            }
+          }
         }
       } catch (err) {
         logger.error('[useAuth] Error initializing auth:', err)
