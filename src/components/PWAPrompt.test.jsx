@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 
 // Test state
 let mockNeedRefresh = false
@@ -44,6 +44,7 @@ describe('PWAPrompt', () => {
 
   afterEach(() => {
     window.matchMedia = originalMatchMedia
+    Reflect.deleteProperty(window, 'caches')
     vi.restoreAllMocks()
   })
 
@@ -93,6 +94,28 @@ describe('PWAPrompt', () => {
 
     // Component should render a fragment
     expect(container).toBeInTheDocument()
+  })
+
+  it('cleans up legacy supabase runtime caches from previous installs', async () => {
+    const keysMock = vi.fn().mockResolvedValue(['images-cache', 'supabase-api-cache'])
+    const deleteMock = vi.fn().mockResolvedValue(true)
+
+    Object.defineProperty(window, 'caches', {
+      configurable: true,
+      value: {
+        keys: keysMock,
+        delete: deleteMock
+      }
+    })
+
+    render(<PWAPrompt />)
+
+    await waitFor(() => {
+      expect(keysMock).toHaveBeenCalled()
+    })
+
+    expect(deleteMock).toHaveBeenCalledTimes(1)
+    expect(deleteMock).toHaveBeenCalledWith('supabase-api-cache')
   })
 })
 

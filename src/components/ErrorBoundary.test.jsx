@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ErrorBoundary, CompactErrorBoundary } from './ErrorBoundary'
+import { getRecoveryInfo } from '../utils/errorUtils'
 
 // Mock Sentry
 vi.mock('../lib/sentry', () => ({
@@ -40,11 +41,41 @@ const ThrowCustomError = ({ message }) => {
   throw new Error(message)
 }
 
+const originalLocation = window.location
+const defaultRecoveryInfo = {
+  title: 'Error',
+  message: 'Something went wrong',
+  iconName: 'Bug',
+  canRetry: true,
+  action: 'reload',
+  retryDelay: 1000,
+  maxRetries: 3
+}
+
 describe('ErrorBoundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getRecoveryInfo).mockReturnValue(defaultRecoveryInfo)
     // Suprimir errores de consola durante tests
     vi.spyOn(console, 'error').mockImplementation(() => {})
+    localStorage.clear()
+    sessionStorage.clear()
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        assign: vi.fn(),
+        reload: vi.fn()
+      }
+    })
+  })
+
+  afterAll(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation
+    })
   })
 
   it('renders children when no error', () => {
@@ -113,10 +144,26 @@ describe('ErrorBoundary', () => {
   })
 
   it('reloads page when reload button clicked', () => {
-    const reloadMock = vi.fn()
-    Object.defineProperty(window, 'location', {
-      value: { reload: reloadMock },
-      writable: true
+    render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /recargar página/i }))
+    expect(window.location.reload).toHaveBeenCalled()
+  })
+
+  it('clears persisted auth storage and redirects to root on relogin', () => {
+    const sessionStorageRemoveSpy = vi.spyOn(window.sessionStorage.__proto__, 'removeItem')
+
+    vi.mocked(getRecoveryInfo).mockReturnValue({
+      ...defaultRecoveryInfo,
+      title: 'Sesión expirada',
+      message: 'Tenés que iniciar sesión nuevamente',
+      iconName: 'Lock',
+      canRetry: false,
+      action: 'relogin'
     })
 
     render(
@@ -125,14 +172,20 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /recargar página/i }))
-    expect(reloadMock).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /iniciar sesión/i }))
+
+    expect(localStorage.removeItem).toHaveBeenCalledWith('distribuidora_v2')
+    expect(localStorage.removeItem).toHaveBeenCalledWith('distribuidora_v2-code-verifier')
+    expect(sessionStorageRemoveSpy).toHaveBeenCalledWith('distribuidora_v2')
+    expect(sessionStorageRemoveSpy).toHaveBeenCalledWith('distribuidora_v2-code-verifier')
+    expect(window.location.assign).toHaveBeenCalledWith('/')
   })
 })
 
 describe('CompactErrorBoundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getRecoveryInfo).mockReturnValue(defaultRecoveryInfo)
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
