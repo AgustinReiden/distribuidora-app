@@ -161,6 +161,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const login = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
+    // Set user and fetch perfil HERE, don't rely solely on onAuthStateChange.
+    // This guarantees both user + perfil are set before login() returns,
+    // so AppContent renders MainApp immediately instead of flashing LoginScreen.
+    if (data.user) {
+      setUser(data.user)
+      const perfilLoaded = await fetchPerfil(data.user.id)
+      if (!perfilLoaded) {
+        // Auth succeeded but perfil load failed — clean up and surface error
+        await supabase.auth.signOut({ scope: 'local' })
+        setUser(null)
+        throw new Error('No se pudo cargar el perfil del usuario. Intentá de nuevo.')
+      }
+    }
     return data
   }
 
