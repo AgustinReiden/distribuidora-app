@@ -1,4 +1,5 @@
 import { logger } from './logger'
+import { AUTH_RUNTIME_HOTFIX_VERSION } from './pwaAuthHotfix'
 
 interface AuthTrace {
   source: string;
@@ -9,6 +10,17 @@ interface AuthTrace {
 }
 
 let currentTrace: AuthTrace | null = null
+
+function emitAuthPerfLog(message: string, context: Record<string, unknown> = {}): void {
+  logger.info(message, context)
+
+  if (typeof console !== 'undefined' && typeof console.info === 'function') {
+    console.info(message, {
+      recoveryVersion: AUTH_RUNTIME_HOTFIX_VERSION,
+      ...context
+    })
+  }
+}
 
 function now(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -37,15 +49,15 @@ export function beginAuthTrace(source: string): void {
     requestWindowTimer: null
   }
 
-  logger.info('[auth-perf] auth transition started', { source })
+  emitAuthPerfLog('[auth-perf] auth transition started', { source })
 }
 
 export function logAuthEvent(event: string, context: Record<string, unknown> = {}): void {
-  logger.info('[auth-perf] auth event', { event, ...context })
+  emitAuthPerfLog('[auth-perf] auth event', { event, ...context })
 }
 
 export function logAuthTiming(label: string, durationMs: number, context: Record<string, unknown> = {}): void {
-  logger.info('[auth-perf] timing', {
+  emitAuthPerfLog('[auth-perf] timing', {
     label,
     durationMs: Math.round(durationMs),
     ...context
@@ -71,7 +83,7 @@ export function trackFirstAuthenticatedRender(route: string): void {
 
     const requestCount = Math.max(0, getResourceCount() - currentTrace.resourceBaseline)
 
-    logger.info('[auth-perf] first window summary', {
+    emitAuthPerfLog('[auth-perf] first window summary', {
       source: currentTrace.source,
       route,
       requestCount5s: requestCount

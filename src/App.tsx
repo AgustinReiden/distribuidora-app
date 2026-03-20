@@ -21,7 +21,6 @@ import LoginScreen from './components/auth/LoginScreen'
 import ErrorBoundary from './components/ErrorBoundary'
 import TopNavigation from './components/layout/TopNavigation'
 import OfflineIndicator from './components/layout/OfflineIndicator'
-import PWAPrompt from './components/PWAPrompt'
 import SyncStatusBanner from './components/SyncStatusBanner'
 import SkipLinks from './components/a11y/SkipLinks'
 import {
@@ -261,7 +260,6 @@ function MainApp(): ReactElement {
         )}
 
         <SyncStatusBanner onRetrySync={handleRetrySync} />
-        <PWAPrompt />
       </div>
     </AuthDataProvider>
   )

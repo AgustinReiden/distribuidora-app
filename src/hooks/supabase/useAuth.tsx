@@ -8,6 +8,7 @@ import type { RolUsuario } from '../../types'
 
 const INACTIVITY_TIMEOUT_MS = 8 * 60 * 60 * 1000
 const AUTH_REQUEST_TIMEOUT_MS = 15000
+const AUTH_BOOTSTRAP_FAILSAFE_TIMEOUT_MS = AUTH_REQUEST_TIMEOUT_MS + 3000
 
 type ActivityEventName =
   | 'mousedown'
@@ -332,7 +333,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         await handleSessionResolved('initAuth', data?.session?.user ?? null, { allowRefresh: true })
       } catch (err) {
         logger.error('[useAuth] Error initializing auth:', err)
-        clearLocalAuthState()
+        await signOutLocal('initAuth:error')
       } finally {
         if (mountedRef.current) {
           setBootstrapLoading(false)
@@ -347,11 +348,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     })
 
     const safetyTimer = setTimeout(() => {
-      if (mountedRef.current && bootstrapLoadingRef.current) {
-        logger.warn('[useAuth] Safety timer: forcing bootstrap loading=false after 5s')
-        setBootstrapLoading(false)
+      if (!mountedRef.current || !bootstrapLoadingRef.current) {
+        return
       }
-    }, 5000)
+
+      logger.warn(
+        `[useAuth] Bootstrap failsafe reached after ${AUTH_BOOTSTRAP_FAILSAFE_TIMEOUT_MS}ms, clearing local auth state`
+      )
+
+      void signOutLocal('bootstrap:failsafe-timeout').finally(() => {
+        if (mountedRef.current) {
+          setBootstrapLoading(false)
+        }
+      })
+    }, AUTH_BOOTSTRAP_FAILSAFE_TIMEOUT_MS)
 
     return () => {
       mountedRef.current = false
@@ -362,7 +372,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       resetAuthTrace()
       subscription.unsubscribe()
     }
-  }, [clearLocalAuthState, handleSessionResolved, scheduleAuthStateChange])
+  }, [clearLocalAuthState, handleSessionResolved, scheduleAuthStateChange, signOutLocal])
 
   const login = async (email: string, password: string) => {
     beginAuthTrace('login')
@@ -389,6 +399,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       return data
+    } catch (err) {
+      await signOutLocal('login:error')
+      throw err
     } finally {
       if (mountedRef.current) {
         setAuthTransitionLoading(false)

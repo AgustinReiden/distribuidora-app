@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('./logger', () => ({
   logger: {
+    info: vi.fn(),
     warn: vi.fn()
   }
 }))
@@ -112,7 +113,7 @@ describe('applyAuthRuntimeHotfix', () => {
   })
 
   it('no hace nada si el hotfix ya fue aplicado', async () => {
-    vi.mocked(window.localStorage.getItem).mockReturnValue('2026-03-20-auth-refresh-v1')
+    vi.mocked(window.localStorage.getItem).mockReturnValue('2026-03-20-brave-recovery-v2')
 
     const reloaded = await applyAuthRuntimeHotfix()
 
@@ -135,10 +136,10 @@ describe('applyAuthRuntimeHotfix', () => {
     expect(deleteMock).toHaveBeenCalledTimes(2)
     expect(window.localStorage.setItem).toHaveBeenCalledWith(
       'auth-runtime-hotfix-version',
-      '2026-03-20-auth-refresh-v1'
+      '2026-03-20-brave-recovery-v2'
     )
     expect(window.sessionStorage.setItem).toHaveBeenCalledWith(
-      'auth-runtime-hotfix-reload:2026-03-20-auth-refresh-v1',
+      'auth-runtime-hotfix-reload:2026-03-20-brave-recovery-v2',
       '1'
     )
     expect(replaceMock).toHaveBeenCalledWith('https://example.com/pedidos')
@@ -150,8 +151,23 @@ describe('applyAuthRuntimeHotfix', () => {
     expect(reloaded).toBe(false)
     expect(window.localStorage.setItem).toHaveBeenCalledWith(
       'auth-runtime-hotfix-version',
-      '2026-03-20-auth-refresh-v1'
+      '2026-03-20-brave-recovery-v2'
     )
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it('no recarga de nuevo si ya hizo el recovery una vez para esta version', async () => {
+    const unregisterMock = vi.fn().mockResolvedValue(true)
+
+    getRegistrationsMock.mockResolvedValue([{ unregister: unregisterMock }])
+    keysMock.mockResolvedValue(['workbox-precache'])
+    vi.mocked(window.sessionStorage.getItem).mockReturnValue('1')
+
+    const reloaded = await applyAuthRuntimeHotfix()
+
+    expect(reloaded).toBe(false)
+    expect(unregisterMock).toHaveBeenCalledTimes(1)
+    expect(deleteMock).toHaveBeenCalledTimes(1)
     expect(replaceMock).not.toHaveBeenCalled()
   })
 })
