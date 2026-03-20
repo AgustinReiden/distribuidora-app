@@ -86,6 +86,9 @@ const iconMap: Record<IconName, LucideIcon> = {
   Bug
 };
 
+const AUTH_STORAGE_KEY = 'distribuidora_v2';
+const AUTH_CODE_VERIFIER_STORAGE_KEY = `${AUTH_STORAGE_KEY}-code-verifier`;
+
 /**
  * Obtiene el componente de icono basado en el nombre
  */
@@ -144,9 +147,12 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   };
 
   handleRelogin = (): void => {
-    // Limpiar sesión y redirigir al login
-    localStorage.removeItem('supabase.auth.token');
-    window.location.href = '/login';
+    // Limpiar sesión persistida y volver al gating raíz de auth
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(AUTH_CODE_VERIFIER_STORAGE_KEY);
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    sessionStorage.removeItem(AUTH_CODE_VERIFIER_STORAGE_KEY);
+    window.location.assign('/');
   };
 
   handleRetry = async (): Promise<void> => {

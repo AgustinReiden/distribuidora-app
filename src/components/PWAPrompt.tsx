@@ -41,6 +41,23 @@ export interface PWAPromptProps {
   // No props currently
 }
 
+const LEGACY_RUNTIME_CACHES = ['supabase-api-cache']
+
+async function cleanupLegacyRuntimeCaches(): Promise<void> {
+  if (typeof window === 'undefined' || !window.caches) {
+    return
+  }
+
+  try {
+    const cacheNames = await window.caches.keys()
+    const staleCaches = cacheNames.filter(cacheName => LEGACY_RUNTIME_CACHES.includes(cacheName))
+
+    await Promise.all(staleCaches.map(cacheName => window.caches.delete(cacheName)))
+  } catch (error) {
+    logger.warn('Legacy runtime cache cleanup failed', error)
+  }
+}
+
 export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
   const [showInstallPrompt, setShowInstallPrompt] = useState<boolean>(false)
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
@@ -51,7 +68,7 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
   const swUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const installPromptTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Registro del Service Worker con auto-update
+  // Registro del Service Worker con actualización confirmada por usuario
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     offlineReady: [offlineReady, setOfflineReady],
@@ -86,6 +103,10 @@ export function PWAPrompt(_props: PWAPromptProps): ReactElement | null {
         installPromptTimeoutRef.current = null
       }
     }
+  }, [])
+
+  useEffect(() => {
+    void cleanupLegacyRuntimeCaches()
   }, [])
 
   useEffect(() => {
