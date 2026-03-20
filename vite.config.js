@@ -6,12 +6,9 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-/**
- * Plugin Vite que inyecta dominios de webhooks n8n en el CSP connect-src.
- * Lee las env vars VITE_N8N_* y extrae los orígenes para agregarlos al build.
- */
 function cspConnectSrcPlugin() {
   let resolvedEnv = {}
+
   return {
     name: 'inject-csp-connect-src',
     configResolved(config) {
@@ -21,14 +18,19 @@ function cspConnectSrcPlugin() {
       order: 'post',
       handler(html) {
         const extraDomains = new Set()
+
         for (const [, val] of Object.entries(resolvedEnv)) {
           if (val) {
             try {
               extraDomains.add(new URL(val).origin)
-            } catch { /* skip invalid URLs */ }
+            } catch {
+              // Ignore invalid URLs
+            }
           }
         }
+
         if (extraDomains.size === 0) return html
+
         const domainsStr = [...extraDomains].join(' ')
         return html.replace(
           /connect-src 'self'/,
@@ -39,18 +41,17 @@ function cspConnectSrcPlugin() {
   }
 }
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [
     cspConnectSrcPlugin(),
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
       manifest: {
         name: 'Distribuidora App',
         short_name: 'Distribuidora',
-        description: 'Sistema de gestión para distribuidora de alimentos',
+        description: 'Sistema de gestion para distribuidora de alimentos',
         theme_color: '#2563eb',
         background_color: '#f3f4f6',
         display: 'standalone',
@@ -95,7 +96,7 @@ export default defineConfig({
             sizes: '640x1136',
             type: 'image/png',
             form_factor: 'narrow',
-            label: 'Vista móvil de pedidos'
+            label: 'Vista movil de pedidos'
           }
         ],
         shortcuts: [
@@ -116,79 +117,54 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // Estrategias de caché
         runtimeCaching: [
           {
-            // API de Supabase - Network First
-            urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-api-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 // 1 hora
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              },
-              networkTimeoutSeconds: 10
-            }
-          },
-          {
-            // Imágenes - Cache First
             urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'images-cache',
               expiration: {
                 maxEntries: 60,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 días
+                maxAgeSeconds: 60 * 60 * 24 * 30
               }
             }
           },
           {
-            // Fuentes - Cache First
             urlPattern: /\.(?:woff|woff2|ttf|eot)$/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'fonts-cache',
               expiration: {
                 maxEntries: 20,
-                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 año
+                maxAgeSeconds: 60 * 60 * 24 * 365
               }
             }
           },
           {
-            // JS/CSS - Stale While Revalidate
             urlPattern: /\.(?:js|css)$/i,
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'static-resources',
               expiration: {
                 maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 * 7 // 7 días
+                maxAgeSeconds: 60 * 60 * 24 * 7
               }
             }
           }
         ],
-        // Precache de recursos estáticos
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        // No incluir source maps
         globIgnores: ['**/*.map'],
-        // Limpiar caches obsoletos
         cleanupOutdatedCaches: true,
-        // Skip waiting para actualizaciones inmediatas
-        skipWaiting: true,
-        clientsClaim: true
+        skipWaiting: false,
+        clientsClaim: false
       },
       devOptions: {
-        enabled: false, // Deshabilitado en desarrollo
+        enabled: false,
         type: 'module'
       }
     })
   ],
 
-  // Alias para imports más limpios
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -200,61 +176,47 @@ export default defineConfig({
     }
   },
 
-  // Configuración de build optimizada
   build: {
-    // Límite de advertencia de chunk (500KB)
     chunkSizeWarningLimit: 500,
-
-    // Opciones de Rollup para code splitting
     rollupOptions: {
       output: {
-        // Estrategia de chunks manuales (función para mayor control)
         manualChunks(id) {
-          // Vendor: React core
           if (id.includes('node_modules/react/') ||
               id.includes('node_modules/react-dom/')) {
-            return 'vendor-react';
+            return 'vendor-react'
           }
 
-          // UI Libraries (Radix + Lucide)
           if (id.includes('node_modules/@radix-ui/') ||
               id.includes('node_modules/lucide-react/')) {
-            return 'vendor-ui';
+            return 'vendor-ui'
           }
 
-          // Supabase client
           if (id.includes('node_modules/@supabase/')) {
-            return 'vendor-supabase';
+            return 'vendor-supabase'
           }
 
-          // Sentry (monitoring)
           if (id.includes('node_modules/@sentry/')) {
-            return 'vendor-sentry';
+            return 'vendor-sentry'
           }
 
-          // PDF generation (lazy loaded)
           if (id.includes('node_modules/jspdf/')) {
-            return 'lib-pdf';
+            return 'lib-pdf'
           }
 
-          // Excel processing (lazy loaded)
           if (id.includes('node_modules/exceljs/')) {
-            return 'lib-excel';
+            return 'lib-excel'
           }
 
-          // Data validation & sanitization
           if (id.includes('node_modules/zod/') ||
               id.includes('node_modules/dompurify/')) {
-            return 'lib-validation';
+            return 'lib-validation'
           }
 
-          // Virtualization (for large lists)
           if (id.includes('node_modules/react-window/')) {
-            return 'lib-virtual';
+            return 'lib-virtual'
           }
         },
 
-        // Naming pattern for chunks
         chunkFileNames: (chunkInfo) => {
           const facadeModuleId = chunkInfo.facadeModuleId
             ? chunkInfo.facadeModuleId.split('/').pop()
@@ -263,18 +225,11 @@ export default defineConfig({
         }
       }
     },
-
-    // Minificación
     minify: 'esbuild',
-
-    // Source maps en producción (solo para debugging)
     sourcemap: false,
-
-    // Target browsers
     target: 'es2020'
   },
 
-  // Optimización de dependencias en desarrollo
   optimizeDeps: {
     include: [
       'react',
@@ -285,12 +240,11 @@ export default defineConfig({
       'dompurify'
     ],
     exclude: [
-      'jspdf', // Lazy loaded
-      'exceljs' // Lazy loaded
+      'jspdf',
+      'exceljs'
     ]
   },
 
-  // Configuración de tests
   test: {
     globals: true,
     environment: 'jsdom',
@@ -306,9 +260,7 @@ export default defineConfig({
         'src/vite-env.d.ts',
         'src/main.jsx'
       ],
-      // Thresholds de cobertura mínima
       thresholds: {
-        // Thresholds globales
         statements: 50,
         branches: 40,
         functions: 45,

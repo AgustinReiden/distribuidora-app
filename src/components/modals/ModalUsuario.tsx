@@ -153,6 +153,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           >
             <option value="preventista">Preventista</option>
             <option value="transportista">Transportista</option>
+            <option value="deposito">Deposito</option>
             <option value="admin">Administrador</option>
           </select>
           {errors.rol && <p {...getErrorMessageProps('rol')} className="text-red-500 text-xs mt-1">{errors.rol}</p>}

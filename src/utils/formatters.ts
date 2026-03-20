@@ -305,13 +305,17 @@ export const getEstadoLabel = (e: EstadoPedido | string | null | undefined): str
 
 export const getRolColor = (r: RolUsuario | string | null | undefined): string =>
   r === 'admin' ? 'bg-purple-100 text-purple-700' :
+  r === 'deposito' ? 'bg-emerald-100 text-emerald-700' :
   r === 'transportista' ? 'bg-orange-100 text-orange-700' :
-  'bg-blue-100 text-blue-700';
+  r === 'preventista' ? 'bg-blue-100 text-blue-700' :
+  'bg-gray-100 text-gray-700';
 
 export const getRolLabel = (r: RolUsuario | string | null | undefined): string =>
   r === 'admin' ? 'Admin' :
+  r === 'deposito' ? 'Deposito' :
   r === 'transportista' ? 'Transportista' :
-  'Preventista';
+  r === 'preventista' ? 'Preventista' :
+  'Sin rol';
 
 export const getEstadoPagoColor = (estado: EstadoPago | string | null | undefined): string =>
   estado === 'pagado' ? 'bg-green-100 text-green-800' :

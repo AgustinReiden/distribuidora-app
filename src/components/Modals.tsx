@@ -13,4 +13,4 @@ export {
   ModalExportarPDF,
   ModalOptimizarRuta,
   ModalGestionRutas
-} from './modals';
+} from './modals/index';
