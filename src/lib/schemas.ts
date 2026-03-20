@@ -369,8 +369,8 @@ export const usuarioSchema = z.object({
     .email({ message: 'Email inválido' })
     .min(1, { message: 'El email es obligatorio' }),
 
-  rol: z.enum(['admin', 'preventista', 'transportista'], {
-    error: 'Rol inválido'
+  rol: z.enum(['admin', 'preventista', 'transportista', 'deposito'], {
+    error: 'Rol invalido'
   }),
 
   zona: z.string().optional(),
@@ -382,7 +382,7 @@ export const usuarioSchema = z.object({
 export type UsuarioFormData = z.infer<typeof usuarioSchema>
 
 /** Valid user roles */
-export type RolUsuario = 'admin' | 'preventista' | 'transportista'
+export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito'
 
 // ============================================
 // SCHEMAS DE PROVEEDOR

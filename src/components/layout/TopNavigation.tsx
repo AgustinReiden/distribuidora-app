@@ -17,7 +17,7 @@ import type { PerfilDB, RolUsuario } from '../../types';
 
 export interface TopNavigationProps {
   perfil: PerfilDB | null;
-  onLogout: () => void;
+  onLogout: () => void | Promise<void>;
 }
 
 interface MenuItem {
@@ -45,7 +45,7 @@ const menuGroups: MenuGroup[] = [
     label: null, // Items sin grupo (se muestran directo)
     items: [
       { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
-      { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista'] },
+      { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista', 'deposito'] },
     ]
   },
   {
@@ -64,9 +64,9 @@ const menuGroups: MenuGroup[] = [
     id: 'inventario',
     label: 'Inventario',
     icon: Package,
-    roles: ['admin', 'preventista'],
+    roles: ['admin', 'preventista', 'deposito'],
     items: [
-      { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista'] },
+      { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista', 'deposito'] },
       { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin'] },
       { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
       { id: 'precios-mayoristas', icon: Tag, label: 'Precios Mayoristas', roles: ['admin'] },

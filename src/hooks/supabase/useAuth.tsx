@@ -1,15 +1,23 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, createContext, useContext, useRef, useCallback, ReactNode } from 'react'
-import { User } from '@supabase/supabase-js'
+import { Session, User } from '@supabase/supabase-js'
 import { supabase } from './base'
 import { logger } from '../../utils/logger'
+import { beginAuthTrace, logAuthEvent, logAuthTiming, resetAuthTrace } from '../../utils/authPerformance'
 import type { RolUsuario } from '../../types'
 
-// Tiempo de inactividad antes de cerrar sesión automáticamente (8 horas)
 const INACTIVITY_TIMEOUT_MS = 8 * 60 * 60 * 1000
 
-// Eventos que reinician el timer de inactividad
-type ActivityEventName = 'mousedown' | 'keydown' | 'touchstart' | 'scroll' | 'mousemove' | 'click' | 'input' | 'touchmove'
+type ActivityEventName =
+  | 'mousedown'
+  | 'keydown'
+  | 'touchstart'
+  | 'scroll'
+  | 'mousemove'
+  | 'click'
+  | 'input'
+  | 'touchmove'
+
 const ACTIVITY_EVENTS: ActivityEventName[] = [
   'mousedown',
   'keydown',
@@ -21,7 +29,6 @@ const ACTIVITY_EVENTS: ActivityEventName[] = [
   'input'
 ]
 
-// Tipo para el perfil de usuario
 export interface Perfil {
   id: string;
   nombre: string;
@@ -33,7 +40,6 @@ export interface Perfil {
   updated_at?: string;
 }
 
-// Tipo para el contexto de autenticación
 export interface AuthContextValue {
   user: User | null;
   perfil: Perfil | null;
@@ -53,173 +59,302 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+function now(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(null)
-  const [perfil, setPerfil] = useState<Perfil | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUserState] = useState<User | null>(null)
+  const [perfil, setPerfilState] = useState<Perfil | null>(null)
+  const [bootstrapLoading, setBootstrapLoading] = useState(true)
+  const [authTransitionLoading, setAuthTransitionLoading] = useState(false)
 
-  // Ref para evitar race conditions al verificar el perfil actual
+  const mountedRef = useRef(true)
+  const userIdRef = useRef<string | null>(null)
   const perfilRef = useRef<Perfil | null>(null)
-  // Track in-flight perfil fetches to avoid duplicates
-  const fetchInFlightRef = useRef<string | null>(null)
+  const bootstrapLoadingRef = useRef(true)
+  const perfilRequestsRef = useRef<Map<string, Promise<Perfil | null>>>(new Map())
+  const signOutPromiseRef = useRef<Promise<void> | null>(null)
 
-  // Mantener ref sincronizado con el estado
+  const setUser = useCallback((nextUser: User | null) => {
+    userIdRef.current = nextUser?.id ?? null
+    setUserState(nextUser)
+  }, [])
+
+  const setPerfil = useCallback((nextPerfil: Perfil | null) => {
+    perfilRef.current = nextPerfil
+    setPerfilState(nextPerfil)
+  }, [])
+
   perfilRef.current = perfil
+  bootstrapLoadingRef.current = bootstrapLoading
 
-  const fetchPerfil = async (userId: string): Promise<boolean> => {
-    // Avoid duplicate concurrent fetches for the same user
-    if (fetchInFlightRef.current === userId) return false
-    fetchInFlightRef.current = userId
-    try {
-      const { data, error } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle()
-      if (error) {
-        logger.error('[useAuth] Error fetching perfil:', error)
-        return false
-      }
-      if (data) {
-        setPerfil(data as Perfil)
-        return true
-      }
-      logger.warn('[useAuth] No perfil found for user:', userId)
-      return false
-    } catch (err) {
-      logger.error('[useAuth] Exception fetching perfil:', err)
-      return false
-    } finally {
-      fetchInFlightRef.current = null
+  const clearLocalAuthState = useCallback(() => {
+    setUser(null)
+    setPerfil(null)
+  }, [setPerfil, setUser])
+
+  const signOutLocal = useCallback(async (reason: string) => {
+    if (signOutPromiseRef.current) {
+      return signOutPromiseRef.current
     }
-  }
+
+    const signOutPromise = (async () => {
+      logger.warn('[useAuth] Clearing local auth state:', reason)
+      clearLocalAuthState()
+      if (mountedRef.current) {
+        setAuthTransitionLoading(false)
+      }
+      try {
+        await supabase.auth.signOut({ scope: 'local' })
+      } catch (err) {
+        logger.error('[useAuth] Error during local signOut:', err)
+      } finally {
+        signOutPromiseRef.current = null
+      }
+    })()
+
+    signOutPromiseRef.current = signOutPromise
+    return signOutPromise
+  }, [clearLocalAuthState])
+
+  const fetchPerfil = useCallback(async (userId: string): Promise<Perfil | null> => {
+    const existingRequest = perfilRequestsRef.current.get(userId)
+    if (existingRequest) {
+      return existingRequest
+    }
+
+    const startedAt = now()
+
+    const request = (async (): Promise<Perfil | null> => {
+      try {
+        const { data, error } = await supabase
+          .from('perfiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle()
+
+        if (error) {
+          logger.error('[useAuth] Error fetching perfil:', error)
+          return null
+        }
+
+        if (!data) {
+          logger.warn('[useAuth] No perfil found for user:', userId)
+          return null
+        }
+
+        const nextPerfil = data as Perfil
+        if (mountedRef.current && userIdRef.current === userId) {
+          setPerfil(nextPerfil)
+        }
+        return nextPerfil
+      } catch (err) {
+        logger.error('[useAuth] Exception fetching perfil:', err)
+        return null
+      } finally {
+        perfilRequestsRef.current.delete(userId)
+        logAuthTiming('fetchPerfil', now() - startedAt, { userId })
+      }
+    })()
+
+    perfilRequestsRef.current.set(userId, request)
+    return request
+  }, [setPerfil])
+
+  const hydrateAuthenticatedUser = useCallback(async (nextUser: User, source: string): Promise<Perfil | null> => {
+    setUser(nextUser)
+    const nextPerfil = await fetchPerfil(nextUser.id)
+    if (nextPerfil) {
+      logAuthEvent('perfil-loaded', {
+        source,
+        userId: nextUser.id,
+        rol: nextPerfil.rol
+      })
+    }
+    return nextPerfil
+  }, [fetchPerfil, setUser])
+
+  const handleSessionResolved = useCallback(async (
+    source: string,
+    sessionUser: User | null,
+    options: { allowRefresh?: boolean } = {}
+  ): Promise<Perfil | null> => {
+    if (!sessionUser) {
+      clearLocalAuthState()
+      return null
+    }
+
+    const resolvedPerfil = await hydrateAuthenticatedUser(sessionUser, source)
+    if (resolvedPerfil || !options.allowRefresh) {
+      return resolvedPerfil
+    }
+
+    logger.warn('[useAuth] Perfil fetch failed, attempting session refresh...')
+    beginAuthTrace(`${source}:refresh`)
+
+    const refreshStartedAt = now()
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+    logAuthTiming('refreshSession', now() - refreshStartedAt, { source })
+
+    if (refreshError || !refreshData.session?.user) {
+      logger.warn('[useAuth] Session refresh failed, clearing auth state')
+      await signOutLocal(`${source}:refresh-failed`)
+      return null
+    }
+
+    return hydrateAuthenticatedUser(refreshData.session.user, `${source}:refresh`)
+  }, [clearLocalAuthState, hydrateAuthenticatedUser, signOutLocal])
+
+  const handleAuthStateChange = useCallback(async (event: string, session: Session | null) => {
+    if (!mountedRef.current || event === 'INITIAL_SESSION') {
+      return
+    }
+
+    const nextUser = session?.user ?? null
+
+    logAuthEvent(`auth-state:${event}`, {
+      hasSession: Boolean(nextUser),
+      userId: nextUser?.id
+    })
+
+    if (event === 'SIGNED_OUT') {
+      resetAuthTrace()
+      clearLocalAuthState()
+      if (mountedRef.current) {
+        setAuthTransitionLoading(false)
+        setBootstrapLoading(false)
+      }
+      return
+    }
+
+    if (!nextUser) {
+      return
+    }
+
+    const alreadyHydrated = userIdRef.current === nextUser.id && perfilRef.current?.id === nextUser.id
+    if (alreadyHydrated && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+      if (mountedRef.current) {
+        setAuthTransitionLoading(false)
+      }
+      return
+    }
+
+    beginAuthTrace(event)
+    if (mountedRef.current) {
+      setAuthTransitionLoading(true)
+    }
+
+    try {
+      const resolvedPerfil = await handleSessionResolved(event, nextUser)
+      if (!resolvedPerfil) {
+        await signOutLocal(`${event}:missing-profile`)
+      }
+    } finally {
+      if (mountedRef.current) {
+        setAuthTransitionLoading(false)
+      }
+    }
+  }, [clearLocalAuthState, handleSessionResolved, signOutLocal])
 
   useEffect(() => {
-    let mounted = true
+    mountedRef.current = true
 
-    // Single initialization flow: get session, fetch perfil, THEN set loading=false
     const initAuth = async () => {
+      beginAuthTrace('bootstrap')
+      const getSessionStartedAt = now()
+
       try {
         const { data } = await supabase.auth.getSession()
-        if (!mounted) return
-
-        if (data?.session?.user) {
-          setUser(data.session.user)
-          // AWAIT perfil before setting loading=false
-          const perfilLoaded = await fetchPerfil(data.session.user.id)
-
-          if (!perfilLoaded && mounted) {
-            // Perfil fetch failed (likely expired token) — try refreshing session
-            logger.warn('[useAuth] Perfil fetch failed, attempting session refresh...')
-            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
-
-            if (refreshError || !refreshData.session) {
-              // Session is dead — clear state so user sees LoginScreen
-              logger.warn('[useAuth] Session refresh failed, clearing auth state')
-              setUser(null)
-              setPerfil(null)
-              await supabase.auth.signOut({ scope: 'local' })
-            } else {
-              // Token refreshed — retry perfil fetch
-              setUser(refreshData.session.user)
-              const retryOk = await fetchPerfil(refreshData.session.user.id)
-              if (!retryOk && mounted) {
-                logger.error('[useAuth] Perfil fetch failed even after session refresh')
-                setUser(null)
-                setPerfil(null)
-                await supabase.auth.signOut({ scope: 'local' })
-              }
-            }
-          }
+        logAuthTiming('getSession', now() - getSessionStartedAt)
+        if (!mountedRef.current) {
+          return
         }
+
+        await handleSessionResolved('initAuth', data?.session?.user ?? null, { allowRefresh: true })
       } catch (err) {
         logger.error('[useAuth] Error initializing auth:', err)
+        clearLocalAuthState()
       } finally {
-        if (mounted) setLoading(false)
+        if (mountedRef.current) {
+          setBootstrapLoading(false)
+        }
       }
     }
 
     void initAuth()
 
-    // Listen for subsequent auth changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return
-
-      if (event === 'SIGNED_IN') {
-        if (session?.user) {
-          setUser(session.user)
-          const currentPerfil = perfilRef.current
-          if (!currentPerfil || currentPerfil.id !== session.user.id) {
-            await fetchPerfil(session.user.id)
-          }
-        }
-        // setLoading(false) is handled by initAuth for initial load;
-        // for subsequent sign-ins (re-login), ensure loading is false
-        if (mounted) setLoading(false)
-      } else if (event === 'TOKEN_REFRESHED') {
-        // Token refreshed — user & perfil already set, nothing to do
-        // Only refetch perfil if it's somehow missing
-        if (session?.user && !perfilRef.current) {
-          await fetchPerfil(session.user.id)
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null)
-        setPerfil(null)
-        setLoading(false)
-      }
-      // INITIAL_SESSION is handled by initAuth, ignore here
+      await handleAuthStateChange(event, session)
     })
 
-    // Safety timer: if initAuth hangs (network down), don't stay on spinner forever
     const safetyTimer = setTimeout(() => {
-      if (mounted && loading) {
-        logger.warn('[useAuth] Safety timer: forcing loading=false after 5s')
-        setLoading(false)
+      if (mountedRef.current && bootstrapLoadingRef.current) {
+        logger.warn('[useAuth] Safety timer: forcing bootstrap loading=false after 5s')
+        setBootstrapLoading(false)
       }
     }, 5000)
 
     return () => {
-      mounted = false
+      mountedRef.current = false
       clearTimeout(safetyTimer)
+      resetAuthTrace()
       subscription.unsubscribe()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [clearLocalAuthState, handleAuthStateChange, handleSessionResolved])
 
   const login = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
-    // Set user and fetch perfil HERE, don't rely solely on onAuthStateChange.
-    // This guarantees both user + perfil are set before login() returns,
-    // so AppContent renders MainApp immediately instead of flashing LoginScreen.
-    if (data.user) {
-      setUser(data.user)
-      const perfilLoaded = await fetchPerfil(data.user.id)
-      if (!perfilLoaded) {
-        // Auth succeeded but perfil load failed — clean up and surface error
-        await supabase.auth.signOut({ scope: 'local' })
-        setUser(null)
-        throw new Error('No se pudo cargar el perfil del usuario. Intentá de nuevo.')
+    beginAuthTrace('login')
+    if (mountedRef.current) {
+      setAuthTransitionLoading(true)
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        throw error
+      }
+
+      if (data.user) {
+        const resolvedPerfil = await handleSessionResolved('login', data.user)
+        if (!resolvedPerfil) {
+          await signOutLocal('login:missing-profile')
+          throw new Error('No se pudo cargar el perfil del usuario. Intenta de nuevo.')
+        }
+      }
+
+      return data
+    } finally {
+      if (mountedRef.current) {
+        setAuthTransitionLoading(false)
       }
     }
-    return data
   }
 
   const logout = useCallback(async () => {
-    // Clear local state FIRST to guarantee UI recovery even if signOut fails
-    setUser(null)
-    setPerfil(null)
-    // Use scope: 'local' to avoid server API call that fails with expired tokens
-    await supabase.auth.signOut({ scope: 'local' })
-  }, [])
+    logAuthEvent('logout-requested')
+    resetAuthTrace()
+    clearLocalAuthState()
+    setBootstrapLoading(false)
+    setAuthTransitionLoading(false)
 
-  // Session timeout por inactividad (15 minutos)
+    try {
+      await supabase.auth.signOut({ scope: 'local' })
+    } catch (err) {
+      logger.error('[useAuth] Error during logout:', err)
+    }
+  }, [clearLocalAuthState])
+
   useEffect(() => {
-    // Solo activar si hay un usuario autenticado
     if (!user) return
 
     let timeoutId: ReturnType<typeof setTimeout>
 
     const handleInactivityLogout = () => {
-      logger.info('[useAuth] Sesión cerrada por inactividad')
+      logger.info('[useAuth] Session closed due to inactivity')
       void logout()
-      // Mostrar mensaje al usuario (dispatch custom event)
       window.dispatchEvent(new CustomEvent('session-timeout', {
         detail: { reason: 'inactivity' }
       }))
@@ -230,15 +365,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       timeoutId = setTimeout(handleInactivityLogout, INACTIVITY_TIMEOUT_MS)
     }
 
-    // Iniciar el timer
     resetInactivityTimer()
 
-    // Agregar listeners de actividad
     ACTIVITY_EVENTS.forEach(event => {
       window.addEventListener(event, resetInactivityTimer, { passive: true })
     })
 
-    // Cleanup
     return () => {
       clearTimeout(timeoutId)
       ACTIVITY_EVENTS.forEach(event => {
@@ -247,7 +379,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [user, logout])
 
-  // authReady: true cuando auth terminó de cargar y el perfil está disponible (o no hay usuario)
+  const loading = bootstrapLoading || authTransitionLoading
   const authReady = !loading && (user === null || perfil !== null)
 
   const value: AuthContextValue = {

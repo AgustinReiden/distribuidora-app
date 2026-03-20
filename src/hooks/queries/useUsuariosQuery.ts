@@ -22,7 +22,7 @@ export const usuariosKeys = {
 interface UsuarioUpdateInput {
   nombre?: string
   rol?: string
-  zona?: string
+  zona?: string | null
   activo?: boolean
 }
 

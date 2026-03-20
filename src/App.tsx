@@ -1,174 +1,78 @@
-/**
- * App.tsx
- *
- * Componente principal de la aplicacion.
- * Usa React Router para navegacion URL y Contexts para estado global.
- *
- * ARQUITECTURA OPTIMIZADA:
- * - Los containers cargan datos bajo demanda usando TanStack Query
- * - Solo las rutas visitadas cargan sus datos
- * - El App ya no es un "God Component"
- */
-import { useEffect, lazy, Suspense, ReactElement, useMemo, useCallback } from 'react';
-import { BrowserRouter, useLocation, Navigate, Routes, Route } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { useEffect, lazy, Suspense, ReactElement, useCallback, useMemo } from 'react'
+import { BrowserRouter, useLocation, Navigate, Route, Routes } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
 import {
   AuthProvider,
+  setErrorNotifier,
   useAuth,
-  useClientes,
-  useProductos,
-  usePedidos,
-  useUsuarios,
-  useDashboard,
-  usePagos,
   useMermas,
-  useCompras,
-  useRecorridos,
-  useRendiciones,
-  useSalvedades,
-  setErrorNotifier
-} from './hooks/supabase';
-import { ThemeProvider } from './contexts/ThemeContext';
-import { NotificationProvider, useNotification } from './contexts/NotificationContext';
-// AppDataContext removed — no consumers use it. Data flows through individual contexts
-// (ClientesContext, ProductosContext, PedidosContext, OperationsContext, AuthDataContext)
-import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext';
-import { ClientesProvider, type ClientesContextValue } from './contexts/ClientesContext';
-import { ProductosProvider, type ProductosContextValue } from './contexts/ProductosContext';
-import { PedidosProvider, type PedidosContextValue } from './contexts/PedidosContext';
-import { OperationsProvider, type OperationsContextValue } from './contexts/OperationsContext';
-import { HandlersProvider } from './contexts/HandlersContext';
-import { useOptimizarRuta } from './hooks/useOptimizarRuta';
-import { useOfflineSync } from './hooks/useOfflineSync';
-import { useRealtimeInvalidation } from './hooks/useRealtimeInvalidation';
-import { useAppState, useAppDerivedState } from './hooks/useAppState';
-import { useAppHandlers, type UseAppHandlersParams, type NotifyApi, type RutaOptimizadaData } from './hooks/useAppHandlers';
-import { useSyncManager, type SyncDependencies } from './hooks/useSyncManager';
-import type { FiltrosPedidosState, PerfilDB, PedidoDB, EstadisticasRecorridos, RegistrarSalvedadInput, CompraDB, ProveedorDB, MermaDB, RecorridoDB, ProveedorDBExtended, MermaDBExtended, RutaOptimizada } from './types/hooks';
-import type { AppModalsAppState, AppModalsHandlers } from './components/AppModals';
-
-// Componentes base
-import LoginScreen from './components/auth/LoginScreen';
-import ErrorBoundary from './components/ErrorBoundary';
-import TopNavigation from './components/layout/TopNavigation';
-import OfflineIndicator from './components/layout/OfflineIndicator';
-import AppModals from './components/AppModals';
-import PWAPrompt from './components/PWAPrompt';
-import SyncStatusBanner from './components/SyncStatusBanner';
-import SkipLinks from './components/a11y/SkipLinks';
-
-// Containers (cargan datos bajo demanda)
+  usePedidos,
+  useProductos
+} from './hooks/supabase'
+import { useInvalidateMetricas } from './hooks/queries'
+import { ThemeProvider } from './contexts/ThemeContext'
+import { NotificationProvider, useNotification } from './contexts/NotificationContext'
+import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext'
+import { useOfflineSync, type UseOfflineSyncReturn } from './hooks/useOfflineSync'
+import { useRealtimeInvalidation } from './hooks/useRealtimeInvalidation'
+import { useSyncManager, type SyncDependencies } from './hooks/useSyncManager'
+import { trackFirstAuthenticatedRender } from './utils/authPerformance'
+import LoginScreen from './components/auth/LoginScreen'
+import ErrorBoundary from './components/ErrorBoundary'
+import TopNavigation from './components/layout/TopNavigation'
+import OfflineIndicator from './components/layout/OfflineIndicator'
+import PWAPrompt from './components/PWAPrompt'
+import SyncStatusBanner from './components/SyncStatusBanner'
+import SkipLinks from './components/a11y/SkipLinks'
 import {
-  DashboardContainer,
-  ProductosContainer,
+  AnalyticsContainer,
   ClientesContainer,
   ComprasContainer,
-  ProveedoresContainer,
+  DashboardContainer,
   GruposPrecioContainer,
-  PedidosContainer
-} from './components/containers';
+  PedidosContainer,
+  ProductosContainer,
+  ProveedoresContainer,
+  RecorridoPreventistaContainer,
+  RecorridosContainer,
+  ReportesContainer,
+  UsuariosContainer
+} from './components/containers'
 
-// Vistas con lazy loading (rutas legacy que aún no tienen container)
-const VistaReportes = lazy(() => import('./components/vistas/VistaReportes'));
-const VistaUsuarios = lazy(() => import('./components/vistas/VistaUsuarios'));
-const VistaRecorridos = lazy(() => import('./components/vistas/VistaRecorridos'));
-const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'));
-const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'));
-const AnalyticsContainer = lazy(() => import('./components/containers/AnalyticsContainer'));
-const RecorridoPreventistaContainer = lazy(() => import('./components/containers/RecorridoPreventistaContainer'));
+const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'))
+const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'))
 
 function LoadingVista(): ReactElement {
   return (
     <div className="flex items-center justify-center py-20">
       <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
     </div>
-  );
+  )
 }
 
-// =============================================================================
-// MAIN APP COMPONENT
-// =============================================================================
+type PendingSyncRuntimeProps = Pick<
+  UseOfflineSyncReturn,
+  'isOnline' | 'pedidosPendientes' | 'mermasPendientes' | 'sincronizando' | 'sincronizarPedidos' | 'sincronizarMermas'
+>
 
-function MainApp(): ReactElement {
-  const { user, perfil, logout, isAdmin, isPreventista, isTransportista, authReady } = useAuth();
-  const notify = useNotification();
-  const location = useLocation();
+function PendingSyncRuntime({
+  isOnline,
+  pedidosPendientes,
+  mermasPendientes,
+  sincronizando,
+  sincronizarPedidos,
+  sincronizarMermas
+}: PendingSyncRuntimeProps): ReactElement {
+  const notify = useNotification()
+  const { productos, descontarStock, refetch: refetchProductos } = useProductos()
+  const { crearPedido, refetch: refetchPedidos } = usePedidos()
+  const { registrarMerma, refetch: refetchMermas } = useMermas()
+  const invalidateMetricas = useInvalidateMetricas()
 
-  // Obtener vista actual desde la URL
-  const vista = location.pathname.replace('/', '') || 'dashboard';
+  const refetchMetricas = useCallback(async () => {
+    invalidateMetricas()
+  }, [invalidateMetricas])
 
-  // Estado de la aplicacion (consolidado)
-  const appState = useAppState(perfil);
-  const { fechaRecorridos, setFechaRecorridos, modales, guardando, cargandoHistorial } = appState;
-
-  // Configurar notificador de errores
-  useEffect(() => {
-    setErrorNotifier((message: string) => notify.error(message));
-  }, [notify]);
-
-  // Hooks de datos
-  const { clientes, agregarCliente, actualizarCliente, eliminarCliente, loading: loadingClientes } = useClientes();
-  const { productos, agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock, actualizarPreciosMasivo, loading: loadingProductos, refetch: refetchProductos } = useProductos();
-  const { pedidos, pedidosFiltrados, crearPedido, cambiarEstado, asignarTransportista, eliminarPedido, actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago, actualizarOrdenEntrega, actualizarItemsPedido, fetchHistorialPedido, fetchPedidosEliminados, filtros, setFiltros, loading: loadingPedidos, refetch: refetchPedidos } = usePedidos();
-  const { usuarios, transportistas, actualizarUsuario, loading: loadingUsuarios } = useUsuarios();
-  const dashboardUsuarioId = isPreventista && !isAdmin ? user?.id : null;
-  const { reportePreventistas, reporteInicializado, calcularReportePreventistas, loadingReporte, refetch: refetchMetricas } = useDashboard(dashboardUsuarioId);
-  const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta();
-  const { registrarPago, obtenerResumenCuenta } = usePagos();
-  const { mermas, registrarMerma, refetch: refetchMermas } = useMermas();
-  const { compras, proveedores, registrarCompra, anularCompra, agregarProveedor, actualizarProveedor, loading: loadingCompras, refetch: refetchCompras, refetchProveedores } = useCompras();
-  const { recorridos, loading: loadingRecorridos, fetchRecorridosHoy, fetchRecorridosPorFecha, crearRecorrido } = useRecorridos();
-  const { isOnline, pedidosPendientes, mermasPendientes, sincronizando, guardarPedidoOffline, guardarMermaOffline, sincronizarPedidos, sincronizarMermas } = useOfflineSync();
-  const { presentarRendicion } = useRendiciones();
-  const { registrarSalvedad } = useSalvedades();
-
-  // Supabase Realtime: invalida TanStack Query cache cuando otros usuarios modifican datos
-  useRealtimeInvalidation({ enabled: isOnline });
-
-  // Datos derivados
-  const { categorias } = useAppDerivedState(productos, pedidosFiltrados, appState.busqueda, appState.paginaActual);
-
-  // Handlers (consolidados)
-  const handlers = useAppHandlers({
-    clientes, productos, pedidos, proveedores,
-    agregarCliente, actualizarCliente, eliminarCliente,
-    agregarProducto, actualizarProducto, eliminarProducto, validarStock, descontarStock, restaurarStock,
-    crearPedido,
-    cambiarEstado,
-    asignarTransportista,
-    eliminarPedido,
-    actualizarNotasPedido, actualizarEstadoPago, actualizarFormaPago,
-    actualizarOrdenEntrega,
-    actualizarItemsPedido,
-    fetchHistorialPedido,
-    actualizarUsuario,
-    registrarPago,
-    obtenerResumenCuenta,
-    registrarMerma,
-    registrarCompra,
-    anularCompra, agregarProveedor, actualizarProveedor,
-    crearRecorrido,
-    limpiarRuta,
-    refetchProductos, refetchPedidos, refetchMetricas, refetchMermas, refetchCompras, refetchProveedores,
-    appState,
-    notify: notify as NotifyApi,
-    user, rutaOptimizada: rutaOptimizada as RutaOptimizadaData | null,
-    isOnline,
-    guardarPedidoOffline,
-    guardarMermaOffline
-  });
-
-  // Cargar recorridos cuando se cambia a la vista
-  useEffect(() => {
-    if (vista === 'recorridos' && isAdmin) {
-      const hoy = new Date().toISOString().split('T')[0];
-      if (fechaRecorridos === hoy) fetchRecorridosHoy();
-      else fetchRecorridosPorFecha(fechaRecorridos);
-    }
-  }, [vista, fechaRecorridos, isAdmin, fetchRecorridosHoy, fetchRecorridosPorFecha]);
-
-  // Hook de sincronización (maneja auto-sync y sync manual)
-  // Pasa productos para validar stock antes de sincronizar (previene overselling)
   const { handleSincronizar } = useSyncManager({
     isOnline,
     pedidosPendientes,
@@ -184,40 +88,73 @@ function MainApp(): ReactElement {
     refetchProductos,
     refetchMermas,
     refetchMetricas,
-    notify: notify as NotifyApi
-  });
+    notify: notify as SyncDependencies['notify']
+  })
+
+  return (
+    <OfflineIndicator
+      isOnline={isOnline}
+      pedidosPendientes={pedidosPendientes.map(pedido => ({
+        offlineId: pedido.offlineId,
+        clienteId: String(pedido.clienteId),
+        items: pedido.items.map(item => ({
+          producto_id: item.productoId,
+          cantidad: item.cantidad
+        })),
+        total: pedido.total,
+        creadoOffline: pedido.creadoOffline
+      }))}
+      mermasPendientes={mermasPendientes.map(merma => ({
+        offlineId: merma.offlineId,
+        productoNombre: productos.find(producto => producto.id === merma.productoId)?.nombre,
+        cantidad: merma.cantidad,
+        motivo: merma.motivo
+      }))}
+      sincronizando={sincronizando}
+      onSincronizar={handleSincronizar}
+    />
+  )
+}
+
+function MainApp(): ReactElement {
+  const { user, perfil, logout, isAdmin, isPreventista, isTransportista, authReady } = useAuth()
+  const notify = useNotification()
+  const location = useLocation()
+  const offlineSync = useOfflineSync()
+  const {
+    isOnline,
+    pedidosPendientes,
+    mermasPendientes,
+    sincronizando,
+    refreshPendingOperations,
+    sincronizarPedidos,
+    sincronizarMermas
+  } = offlineSync
+
+  const hasPendingSync = pedidosPendientes.length > 0 || mermasPendientes.length > 0
+
+  useEffect(() => {
+    setErrorNotifier((message: string) => notify.error(message))
+  }, [notify])
+
+  useEffect(() => {
+    if (user && perfil) {
+      trackFirstAuthenticatedRender(location.pathname || '/')
+    }
+  }, [location.pathname, perfil, user])
+
+  useRealtimeInvalidation({ enabled: isOnline })
 
   const handleLogout = useCallback(async (): Promise<void> => {
-    try { await logout(); } catch (err) { console.error('Error during logout:', err); }
-  }, [logout]);
-
-  // Handlers para modales de rendición y salvedad
-  const handlePresentarRendicion = useCallback(async (data: Parameters<typeof presentarRendicion>[0]) => {
-    const result = await presentarRendicion(data);
-    if (result.success) {
-      notify.success('Rendicion presentada correctamente');
+    try {
+      await logout()
+    } catch (err) {
+      console.error('Error during logout:', err)
     }
-    return result;
-  }, [presentarRendicion, notify]);
+  }, [logout])
 
-  const handleRegistrarSalvedades = useCallback(async (salvedades: RegistrarSalvedadInput[]) => {
-    const results = await Promise.all(
-      salvedades.map(s => registrarSalvedad(s))
-    );
-    return results;
-  }, [registrarSalvedad]);
+  const defaultRoute = (isAdmin || isPreventista) ? '/dashboard' : '/pedidos'
 
-  const handleMarcarEntregadoConSalvedad = useCallback(async (pedidoId: string) => {
-    await cambiarEstado(pedidoId, 'entregado');
-    await refetchPedidos();
-    refetchMetricas();
-    notify.success(`Pedido #${pedidoId} entregado con salvedades registradas`, { persist: true });
-  }, [cambiarEstado, refetchPedidos, refetchMetricas, notify]);
-
-  // Determinar la ruta por defecto
-  const defaultRoute = (isAdmin || isPreventista) ? '/dashboard' : '/pedidos';
-
-  // Valor para AuthDataContext (usado por containers)
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
     user,
     perfil,
@@ -227,48 +164,14 @@ function MainApp(): ReactElement {
     isTransportista,
     isOnline,
     logout: handleLogout
-  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isOnline, handleLogout]);
+  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isOnline, handleLogout])
 
-  // Contextos separados para evitar re-renders innecesarios
-  const clientesValue = useMemo<ClientesContextValue>(() => ({
-    clientes,
-    loading: loadingClientes
-  }), [clientes, loadingClientes]);
-
-  const productosValue = useMemo<ProductosContextValue>(() => ({
-    productos,
-    categorias,
-    loading: loadingProductos
-  }), [productos, categorias, loadingProductos]);
-
-  const pedidosValue = useMemo<PedidosContextValue>(() => ({
-    pedidos,
-    pedidosFiltrados: pedidosFiltrados(),
-    filtros,
-    loading: loadingPedidos
-  }), [pedidos, pedidosFiltrados, filtros, loadingPedidos]);
-
-  const operationsValue = useMemo<OperationsContextValue>(() => ({
-    compras: compras as CompraDB[],
-    proveedores: proveedores as ProveedorDB[],
-    mermas: mermas as MermaDB[],
-    recorridos: recorridos as RecorridoDB[],
-    usuarios,
-    transportistas,
-    loading: {
-      compras: loadingCompras,
-      recorridos: loadingRecorridos,
-      usuarios: loadingUsuarios
-    }
-  }), [compras, proveedores, mermas, recorridos, usuarios, transportistas, loadingCompras, loadingRecorridos, loadingUsuarios]);
+  const handleRetrySync = useCallback(async () => {
+    await refreshPendingOperations()
+  }, [refreshPendingOperations])
 
   return (
     <AuthDataProvider value={authDataValue}>
-    <ClientesProvider value={clientesValue}>
-    <ProductosProvider value={productosValue}>
-    <PedidosProvider value={pedidosValue}>
-    <OperationsProvider value={operationsValue}>
-    <HandlersProvider handlers={handlers}>
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors">
         <SkipLinks />
         <TopNavigation perfil={perfil} onLogout={handleLogout} />
@@ -277,156 +180,106 @@ function MainApp(): ReactElement {
           <div className="max-w-7xl mx-auto">
             <Suspense fallback={<LoadingVista />}>
               <Routes>
-                {/* Ruta raíz - redirige según rol */}
                 <Route path="/" element={<Navigate to={defaultRoute} replace />} />
 
-                {/* Dashboard - usa container con TanStack Query */}
-                <Route path="/dashboard" element={
-                  (isAdmin || isPreventista) ? (
-                    <DashboardContainer />
-                  ) : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/dashboard"
+                  element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Pedidos - usa container con TanStack Query + paginación server-side */}
                 <Route path="/pedidos" element={<PedidosContainer />} />
-
-                {/* Clientes - usa container con TanStack Query */}
                 <Route path="/clientes" element={<ClientesContainer />} />
-
-                {/* Productos - usa container con TanStack Query */}
                 <Route path="/productos" element={<ProductosContainer />} />
 
-                {/* Reportes - solo admin */}
-                <Route path="/reportes" element={
-                  isAdmin ? (
-                    <VistaReportes reportePreventistas={reportePreventistas} reporteInicializado={reporteInicializado} loading={loadingReporte} onCalcularReporte={calcularReportePreventistas} onVerFichaCliente={handlers.handleVerFichaCliente} />
-                  ) : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/reportes"
+                  element={isAdmin ? <ReportesContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Usuarios - solo admin */}
-                <Route path="/usuarios" element={
-                  isAdmin ? (
-                    <VistaUsuarios usuarios={usuarios} loading={loadingUsuarios} onEditarUsuario={(usuario: PerfilDB) => { appState.setUsuarioEditando(usuario); modales.usuario.setOpen(true); }} />
-                  ) : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/usuarios"
+                  element={isAdmin ? <UsuariosContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Recorridos - solo admin */}
-                <Route path="/recorridos" element={
-                  isAdmin ? (
-                    <VistaRecorridos
-                      recorridos={recorridos} loading={loadingRecorridos} fechaSeleccionada={fechaRecorridos} estadisticas={appState.estadisticasRecorridos as EstadisticasRecorridos}
-                      onRefresh={async () => { const hoy = new Date().toISOString().split('T')[0]; if (fechaRecorridos === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fechaRecorridos); }}
-                      onFechaChange={async (fecha: string) => { setFechaRecorridos(fecha); const hoy = new Date().toISOString().split('T')[0]; if (fecha === hoy) await fetchRecorridosHoy(); else await fetchRecorridosPorFecha(fecha); }}
-                    />
-                  ) : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/recorridos"
+                  element={isAdmin ? <RecorridosContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Recorrido Preventista - solo admin */}
-                <Route path="/recorrido-preventista" element={
-                  isAdmin ? <RecorridoPreventistaContainer /> : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/recorrido-preventista"
+                  element={isAdmin ? <RecorridoPreventistaContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Compras - usa container con TanStack Query */}
-                <Route path="/compras" element={
-                  isAdmin ? <ComprasContainer /> : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/compras"
+                  element={isAdmin ? <ComprasContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Proveedores - usa container con TanStack Query */}
-                <Route path="/proveedores" element={
-                  isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/proveedores"
+                  element={isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Precios Mayoristas - solo admin */}
-                <Route path="/precios-mayoristas" element={
-                  isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/precios-mayoristas"
+                  element={isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Rendiciones - solo admin */}
-                <Route path="/rendiciones" element={
-                  isAdmin ? <VistaRendiciones /> : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/rendiciones"
+                  element={isAdmin ? <VistaRendiciones /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Salvedades - solo admin */}
-                <Route path="/salvedades" element={
-                  isAdmin ? <VistaSalvedades /> : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/salvedades"
+                  element={isAdmin ? <VistaSalvedades /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Centro de Análisis - solo admin */}
-                <Route path="/analytics" element={
-                  isAdmin ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />
-                } />
+                <Route
+                  path="/analytics"
+                  element={isAdmin ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />}
+                />
 
-                {/* Fallback */}
                 <Route path="*" element={<Navigate to={defaultRoute} replace />} />
               </Routes>
             </Suspense>
           </div>
         </main>
 
-        {/* Modales */}
-        <AppModals
-          appState={{ ...appState, filtros, setFiltros } as AppModalsAppState}
-          handlers={{
-            ...handlers,
-            handlePresentarRendicion,
-            handleRegistrarSalvedades,
-            handleMarcarEntregadoConSalvedad
-          } as unknown as AppModalsHandlers}
-          clientes={clientes} productos={productos} pedidos={pedidos} usuarios={usuarios}
-          transportistas={transportistas} proveedores={proveedores as ProveedorDBExtended[]} mermas={mermas as MermaDBExtended[]} categorias={categorias}
-          fetchPedidosEliminados={fetchPedidosEliminados} actualizarItemsPedido={actualizarItemsPedido} actualizarPreciosMasivo={actualizarPreciosMasivo} optimizarRuta={optimizarRuta}
-          guardando={guardando} cargandoHistorial={cargandoHistorial} loadingOptimizacion={loadingOptimizacion} rutaOptimizada={rutaOptimizada as RutaOptimizada | null} errorOptimizacion={errorOptimizacion}
-          user={user} isAdmin={isAdmin} isPreventista={isPreventista} isOnline={isOnline}
-        />
+        {hasPendingSync ? (
+          <PendingSyncRuntime
+            isOnline={isOnline}
+            pedidosPendientes={pedidosPendientes}
+            mermasPendientes={mermasPendientes}
+            sincronizando={sincronizando}
+            sincronizarPedidos={sincronizarPedidos}
+            sincronizarMermas={sincronizarMermas}
+          />
+        ) : (
+          !isOnline && <OfflineIndicator isOnline={isOnline} />
+        )}
 
-        {/* Indicador de estado offline */}
-        <OfflineIndicator
-          isOnline={isOnline}
-          pedidosPendientes={pedidosPendientes.map(p => ({ offlineId: p.offlineId, clienteId: String(p.clienteId), items: p.items.map(i => ({ producto_id: i.productoId, cantidad: i.cantidad })), total: p.total, creadoOffline: p.creadoOffline }))}
-          mermasPendientes={mermasPendientes.map(m => ({ offlineId: m.offlineId, productoNombre: productos.find(p => p.id === m.productoId)?.nombre, cantidad: m.cantidad, motivo: m.motivo }))}
-          sincronizando={sincronizando}
-          onSincronizar={handleSincronizar}
-          clientes={clientes.map(c => ({ id: c.id, nombre: c.nombre_fantasia, activo: c.activo ?? true }))}
-        />
-
-        {/* Banner de estado de sincronización */}
-        <SyncStatusBanner onRetrySync={handleSincronizar} />
-
-        {/* PWA Prompt */}
+        <SyncStatusBanner onRetrySync={handleRetrySync} />
         <PWAPrompt />
       </div>
-    </HandlersProvider>
-    </OperationsProvider>
-    </PedidosProvider>
-    </ProductosProvider>
-    </ClientesProvider>
     </AuthDataProvider>
-  );
+  )
 }
 
-// =============================================================================
-// APP CONTENT (Authentication Check)
-// =============================================================================
-
 function AppContent(): ReactElement {
-  const { user, perfil, loading } = useAuth();
-  // Show spinner only while auth is initializing (loading=true).
-  // login() guarantees user+perfil are both set before returning.
-  // initAuth clears user if perfil fetch fails, so loading=false always leads to a valid state.
+  const { user, perfil, loading } = useAuth()
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center transition-colors">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" aria-label="Cargando" />
       </div>
-    );
+    )
   }
-  // authReady guarantees: either no user, or user WITH perfil loaded
-  return (user && perfil) ? <MainApp /> : <LoginScreen />;
-}
 
-// =============================================================================
-// ROOT APP
-// =============================================================================
+  return (user && perfil) ? <MainApp /> : <LoginScreen />
+}
 
 export default function App(): ReactElement {
   return (
@@ -441,5 +294,5 @@ export default function App(): ReactElement {
         </ThemeProvider>
       </BrowserRouter>
     </ErrorBoundary>
-  );
+  )
 }

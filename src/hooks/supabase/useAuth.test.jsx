@@ -1,58 +1,62 @@
+import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 
-// Mock de supabase con factory inline
-vi.mock('./base', () => {
+const { maybeSingleMock, unsubscribeMock, mockSupabase } = vi.hoisted(() => {
+  const maybeSingleMock = vi.fn()
+  const unsubscribeMock = vi.fn()
+
   return {
-    supabase: {
+    maybeSingleMock,
+    unsubscribeMock,
+    mockSupabase: {
       auth: {
-        getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+        getSession: vi.fn(),
         signInWithPassword: vi.fn(),
-        signOut: vi.fn().mockResolvedValue({ error: null }),
-        onAuthStateChange: vi.fn().mockReturnValue({
-          data: { subscription: { unsubscribe: vi.fn() } }
-        })
+        signOut: vi.fn(),
+        refreshSession: vi.fn(),
+        onAuthStateChange: vi.fn()
       },
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            maybeSingle: vi.fn().mockResolvedValue({ data: null })
-          })
-        })
-      })
+      from: vi.fn()
     }
   }
 })
 
+vi.mock('./base', () => ({
+  supabase: mockSupabase
+}))
+
 import { AuthProvider, useAuth } from './useAuth'
 import { supabase } from './base'
 
-const mockUserData = {
+const mockUser = {
   id: 'user-123',
   email: 'test@example.com'
 }
 
-const mockPerfilData = {
+const mockPerfil = {
   id: 'user-123',
   nombre: 'Usuario Test',
   email: 'test@example.com',
   rol: 'admin',
-  zona: 'norte'
+  zona: 'norte',
+  activo: true
 }
 
-function TestComponent() {
-  const { user, perfil, loading, isAdmin, isPreventista } = useAuth()
+function createDeferred() {
+  let resolve
+  let reject
 
-  if (loading) return <div data-testid="loading">Cargando...</div>
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
 
-  return (
-    <div>
-      <div data-testid="user">{user?.email || 'no user'}</div>
-      <div data-testid="perfil">{perfil?.nombre || 'no perfil'}</div>
-      <div data-testid="is-admin">{isAdmin ? 'admin' : 'not admin'}</div>
-      <div data-testid="is-preventista">{isPreventista ? 'preventista' : 'not preventista'}</div>
-    </div>
-  )
+  return { promise, resolve, reject }
+}
+
+function Wrapper({ children }) {
+  return <AuthProvider>{children}</AuthProvider>
 }
 
 describe('useAuth', () => {
@@ -62,143 +66,168 @@ describe('useAuth', () => {
     vi.clearAllMocks()
     authCallback = null
 
-    supabase.auth.onAuthStateChange.mockImplementation((callback) => {
-      authCallback = callback
-      // Trigger INITIAL_SESSION immediately
-      setTimeout(() => callback('INITIAL_SESSION', null), 0)
-      return { data: { subscription: { unsubscribe: vi.fn() } } }
-    })
+    maybeSingleMock.mockResolvedValue({ data: null, error: null })
+
+    supabase.from.mockImplementation(() => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: maybeSingleMock
+        })
+      })
+    }))
 
     supabase.auth.getSession.mockResolvedValue({ data: { session: null } })
-  })
-
-  it('muestra no user cuando no hay sesión', async () => {
-    render(
-      <AuthProvider>
-        <TestComponent />
-      </AuthProvider>
-    )
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('loading')).not.toBeInTheDocument()
-    }, { timeout: 3000 })
-
-    expect(screen.getByTestId('user')).toHaveTextContent('no user')
-  })
-
-  it('actualiza usuario en SIGNED_IN', async () => {
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          maybeSingle: vi.fn().mockResolvedValue({ data: mockPerfilData })
-        })
-      })
+    supabase.auth.signInWithPassword.mockResolvedValue({
+      data: { user: mockUser, session: { user: mockUser } },
+      error: null
     })
-
-    render(
-      <AuthProvider>
-        <TestComponent />
-      </AuthProvider>
-    )
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('loading')).not.toBeInTheDocument()
-    }, { timeout: 3000 })
-
-    // Simular SIGNED_IN
-    await act(async () => {
-      if (authCallback) {
-        authCallback('SIGNED_IN', { user: mockUserData })
-      }
+    supabase.auth.signOut.mockResolvedValue({ error: null })
+    supabase.auth.refreshSession.mockResolvedValue({
+      data: { session: null },
+      error: new Error('refresh failed')
     })
-
-    await waitFor(() => {
-      expect(screen.getByTestId('user')).toHaveTextContent(mockUserData.email)
+    supabase.auth.onAuthStateChange.mockImplementation((callback) => {
+      authCallback = callback
+      return { data: { subscription: { unsubscribe: unsubscribeMock } } }
     })
   })
 
-  it('detecta rol admin correctamente', async () => {
-    const adminPerfil = { ...mockPerfilData, rol: 'admin' }
+  it('deduplica login() y SIGNED_IN del mismo usuario sin hacer signOut', async () => {
+    const perfilDeferred = createDeferred()
+    maybeSingleMock.mockImplementationOnce(() => perfilDeferred.promise)
 
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          maybeSingle: vi.fn().mockResolvedValue({ data: adminPerfil })
-        })
-      })
-    })
-
-    render(
-      <AuthProvider>
-        <TestComponent />
-      </AuthProvider>
-    )
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
 
     await waitFor(() => {
-      expect(screen.queryByTestId('loading')).not.toBeInTheDocument()
-    }, { timeout: 3000 })
+      expect(result.current.loading).toBe(false)
+    })
+
+    let loginPromise
+
+    act(() => {
+      loginPromise = result.current.login('test@example.com', 'secret')
+    })
+
+    act(() => {
+      void authCallback?.('SIGNED_IN', { user: mockUser })
+    })
+
+    await waitFor(() => {
+      expect(maybeSingleMock).toHaveBeenCalledTimes(1)
+      expect(result.current.loading).toBe(true)
+    })
+
+    perfilDeferred.resolve({ data: mockPerfil, error: null })
 
     await act(async () => {
-      if (authCallback) {
-        authCallback('SIGNED_IN', { user: mockUserData })
-      }
+      await loginPromise
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('is-admin')).toHaveTextContent('admin')
+      expect(result.current.loading).toBe(false)
+      expect(result.current.user?.email).toBe(mockUser.email)
+      expect(result.current.perfil?.id).toBe(mockPerfil.id)
+    })
+
+    expect(supabase.auth.signOut).not.toHaveBeenCalled()
+  })
+
+  it('mantiene loading=true durante bootstrap hasta que termina el perfil', async () => {
+    const perfilDeferred = createDeferred()
+
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockImplementationOnce(() => perfilDeferred.promise)
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(maybeSingleMock).toHaveBeenCalledTimes(1)
+    })
+
+    expect(result.current.loading).toBe(true)
+
+    perfilDeferred.resolve({ data: mockPerfil, error: null })
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+      expect(result.current.user?.id).toBe(mockUser.id)
+      expect(result.current.perfil?.id).toBe(mockPerfil.id)
     })
   })
 
-  it('limpia estado en SIGNED_OUT', async () => {
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          maybeSingle: vi.fn().mockResolvedValue({ data: mockPerfilData })
-        })
-      })
+  it('refresca la sesion expirada y entra si el refresh recupera perfil', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: mockPerfil, error: null })
+    supabase.auth.refreshSession.mockResolvedValue({
+      data: { session: { user: mockUser } },
+      error: null
     })
 
-    render(
-      <AuthProvider>
-        <TestComponent />
-      </AuthProvider>
-    )
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
 
     await waitFor(() => {
-      expect(screen.queryByTestId('loading')).not.toBeInTheDocument()
-    }, { timeout: 3000 })
-
-    // Login
-    await act(async () => {
-      if (authCallback) authCallback('SIGNED_IN', { user: mockUserData })
+      expect(result.current.loading).toBe(false)
+      expect(result.current.user?.id).toBe(mockUser.id)
+      expect(result.current.perfil?.id).toBe(mockPerfil.id)
     })
 
-    await waitFor(() => {
-      expect(screen.getByTestId('user')).toHaveTextContent(mockUserData.email)
-    })
-
-    // Logout
-    await act(async () => {
-      if (authCallback) authCallback('SIGNED_OUT', null)
-    })
-
-    await waitFor(() => {
-      expect(screen.getByTestId('user')).toHaveTextContent('no user')
-    })
+    expect(supabase.auth.refreshSession).toHaveBeenCalledTimes(1)
+    expect(supabase.auth.signOut).not.toHaveBeenCalled()
   })
 
-  it('limpia suscripciones al desmontar', async () => {
-    const unsubscribeMock = vi.fn()
-
-    supabase.auth.onAuthStateChange.mockReturnValue({
-      data: { subscription: { unsubscribe: unsubscribeMock } }
+  it('limpia la sesion cuando el refresh falla', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: null, error: null })
+    supabase.auth.refreshSession.mockResolvedValue({
+      data: { session: null },
+      error: new Error('expired')
     })
 
-    const { unmount } = render(
-      <AuthProvider>
-        <TestComponent />
-      </AuthProvider>
-    )
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+      expect(result.current.user).toBeNull()
+      expect(result.current.perfil).toBeNull()
+    })
+
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+  })
+
+  it('logout limpia el estado local aunque falle el signOut remoto', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+    supabase.auth.signOut.mockRejectedValueOnce(new Error('network error'))
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+      expect(result.current.user?.id).toBe(mockUser.id)
+      expect(result.current.perfil?.id).toBe(mockPerfil.id)
+    })
+
+    await act(async () => {
+      await result.current.logout()
+    })
+
+    expect(result.current.user).toBeNull()
+    expect(result.current.perfil).toBeNull()
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+  })
+
+  it('libera la suscripcion al desmontar', () => {
+    const { unmount } = renderHook(() => useAuth(), { wrapper: Wrapper })
 
     unmount()
 

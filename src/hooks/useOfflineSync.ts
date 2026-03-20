@@ -124,6 +124,7 @@ export interface UseOfflineSyncReturn {
   ) => Promise<SyncResult>;
   sincronizarMermas: (registrarMermaFn: RegistrarMermaFunction) => Promise<SyncResult>;
   limpiarPedidosOffline: () => void;
+  refreshPendingOperations: () => Promise<void>;
   cantidadPendientes: number;
 }
 
@@ -631,6 +632,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     sincronizarPedidos,
     sincronizarMermas,
     limpiarPedidosOffline,
+    refreshPendingOperations: loadPendingOperations,
     cantidadPendientes: pedidosPendientes.length + mermasPendientes.length
   }
 }
