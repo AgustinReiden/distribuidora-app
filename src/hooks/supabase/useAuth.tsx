@@ -60,11 +60,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Ref para evitar race conditions al verificar el perfil actual
   const perfilRef = useRef<Perfil | null>(null)
+  // Track in-flight perfil fetches to avoid duplicates
+  const fetchInFlightRef = useRef<string | null>(null)
 
   // Mantener ref sincronizado con el estado
   perfilRef.current = perfil
 
   const fetchPerfil = async (userId: string): Promise<boolean> => {
+    // Avoid duplicate concurrent fetches for the same user
+    if (fetchInFlightRef.current === userId) return false
+    fetchInFlightRef.current = userId
     try {
       const { data, error } = await supabase.from('perfiles').select('*').eq('id', userId).maybeSingle()
       if (error) {
@@ -75,52 +80,75 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setPerfil(data as Perfil)
         return true
       }
+      logger.warn('[useAuth] No perfil found for user:', userId)
       return false
     } catch (err) {
       logger.error('[useAuth] Exception fetching perfil:', err)
       return false
+    } finally {
+      fetchInFlightRef.current = null
     }
   }
 
   useEffect(() => {
     let mounted = true
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (mounted && data?.session?.user) {
-        setUser(data.session.user)
-        await fetchPerfil(data.session.user.id)
-      }
-      if (mounted) setLoading(false)
-    }).catch((err) => {
-      logger.error('[useAuth] Error getting session:', err)
-      if (mounted) setLoading(false)
-    })
 
+    // Single initialization flow: get session, fetch perfil, THEN set loading=false
+    const initAuth = async () => {
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (!mounted) return
+
+        if (data?.session?.user) {
+          setUser(data.session.user)
+          // AWAIT perfil before setting loading=false
+          await fetchPerfil(data.session.user.id)
+        }
+      } catch (err) {
+        logger.error('[useAuth] Error initializing auth:', err)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+
+    void initAuth()
+
+    // Listen for subsequent auth changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+
+      if (event === 'SIGNED_IN') {
         if (session?.user) {
           setUser(session.user)
-          // Usar perfilRef.current para evitar race condition con estado stale
           const currentPerfil = perfilRef.current
           if (!currentPerfil || currentPerfil.id !== session.user.id) {
             await fetchPerfil(session.user.id)
           }
         }
-        setLoading(false)
+        // setLoading(false) is handled by initAuth for initial load;
+        // for subsequent sign-ins (re-login), ensure loading is false
+        if (mounted) setLoading(false)
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Token refreshed — user & perfil already set, nothing to do
+        // Only refetch perfil if it's somehow missing
+        if (session?.user && !perfilRef.current) {
+          await fetchPerfil(session.user.id)
+        }
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setPerfil(null)
         setLoading(false)
-      } else if (event === 'INITIAL_SESSION') {
-        // No setear loading=false aquí - getSession ya lo maneja
       }
+      // INITIAL_SESSION is handled by initAuth, ignore here
     })
 
+    // Safety timer: if initAuth hangs (network down), don't stay on spinner forever
     const safetyTimer = setTimeout(() => {
       if (mounted && loading) {
+        logger.warn('[useAuth] Safety timer: forcing loading=false after 5s')
         setLoading(false)
       }
-    }, 2000)
+    }, 5000)
 
     return () => {
       mounted = false
@@ -129,41 +157,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Detect stuck state: user authenticated but perfil failed to load
-  useEffect(() => {
-    if (loading || !user || perfil) return
-
-    const retryTimeout = setTimeout(async () => {
-      // Re-check: user may have logged out or perfil may have loaded meanwhile
-      if (!user || perfilRef.current) return
-
-      logger.warn('[useAuth] User authenticated but perfil is null, retrying fetch...')
-      try {
-        const { data, error } = await supabase
-          .from('perfiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle()
-
-        if (error || !data) {
-          logger.error('[useAuth] Perfil retry failed, forcing logout:', error)
-          setUser(null)
-          setPerfil(null)
-          await supabase.auth.signOut({ scope: 'local' })
-        } else {
-          setPerfil(data as Perfil)
-        }
-      } catch (err) {
-        logger.error('[useAuth] Perfil retry exception, forcing logout:', err)
-        setUser(null)
-        setPerfil(null)
-        await supabase.auth.signOut({ scope: 'local' })
-      }
-    }, 2000)
-
-    return () => clearTimeout(retryTimeout)
-  }, [loading, user, perfil])
 
   const login = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })

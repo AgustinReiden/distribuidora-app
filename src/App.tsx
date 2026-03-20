@@ -409,7 +409,7 @@ function MainApp(): ReactElement {
 // =============================================================================
 
 function AppContent(): ReactElement {
-  const { user, loading } = useAuth();
+  const { user, perfil, loading } = useAuth();
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center transition-colors">
@@ -417,7 +417,9 @@ function AppContent(): ReactElement {
       </div>
     );
   }
-  return user ? <MainApp /> : <LoginScreen />;
+  // Only render MainApp when BOTH user and perfil are loaded.
+  // This prevents the "Usuario" stuck state where user exists but perfil is null.
+  return (user && perfil) ? <MainApp /> : <LoginScreen />;
 }
 
 // =============================================================================
