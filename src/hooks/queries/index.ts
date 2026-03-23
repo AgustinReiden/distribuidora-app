@@ -46,6 +46,8 @@ export {
   usePedidosNoEntregadosQuery,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
+  usePedidosNoPagadosQuery,
+  usePagosMasivosMutation,
 } from './usePedidosQuery'
 export type { PaginatedResult } from './usePedidosQuery'
 

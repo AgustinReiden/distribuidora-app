@@ -4,7 +4,7 @@
  * Recibe datos ya paginados server-side desde PedidosContainer.
  * Renderiza lista + controles de paginación.
  */
-import { ShoppingCart, Plus, Route, FileDown, Trash2, PackageCheck } from 'lucide-react';
+import { ShoppingCart, Plus, Route, FileDown, Trash2, PackageCheck, Banknote } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
@@ -57,6 +57,7 @@ export interface VistaPedidosProps {
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onEliminarPedido: (pedido: PedidoDB) => void;
   onEntregasMasivas?: () => void;
+  onPagosMasivos?: () => void;
   onVerPedidosEliminados?: () => void;
 }
 
@@ -95,6 +96,7 @@ export default function VistaPedidos({
   onCancelarPedido,
   onEliminarPedido,
   onEntregasMasivas,
+  onPagosMasivos,
   onVerPedidosEliminados
 }: VistaPedidosProps) {
   // Si es transportista, mostrar vista especial de ruta
@@ -151,6 +153,15 @@ export default function VistaPedidos({
             >
               <PackageCheck className="w-5 h-5" />
               <span className="hidden sm:inline">Entregas Masivas</span>
+            </button>
+          )}
+          {isAdmin && onPagosMasivos && (
+            <button
+              onClick={onPagosMasivos}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Banknote className="w-5 h-5" />
+              <span className="hidden sm:inline">Pagos Masivos</span>
             </button>
           )}
           {isAdmin && onVerPedidosEliminados && (

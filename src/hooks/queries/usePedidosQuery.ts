@@ -633,3 +633,106 @@ export function useCancelarPedidoMutation() {
     },
   })
 }
+
+// =========================================================================
+// Pagos Masivos
+// =========================================================================
+
+async function fetchPedidosNoPagados(): Promise<PedidoDB[]> {
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
+    .neq('estado_pago', 'pagado')
+    .neq('estado', 'cancelado')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+
+  // Enrich with transportista names
+  const transportistaIds = new Set<string>()
+  for (const pedido of (data || [])) {
+    if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
+  }
+
+  let perfilesMap: Record<string, PerfilDB> = {}
+  if (transportistaIds.size > 0) {
+    const { data: perfiles } = await supabase
+      .from('perfiles')
+      .select('id, nombre, email')
+      .in('id', Array.from(transportistaIds))
+
+    if (perfiles) {
+      perfilesMap = Object.fromEntries(
+        (perfiles as PerfilDB[]).map(p => [p.id, p])
+      )
+    }
+  }
+
+  return (data || []).map(pedido => ({
+    ...pedido,
+    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+  })) as PedidoDB[]
+}
+
+/**
+ * Hook para obtener todos los pedidos no pagados (sin paginacion)
+ * Se habilita solo cuando enabled=true (modal abierto)
+ */
+export function usePedidosNoPagadosQuery(enabled = false) {
+  return useQuery({
+    queryKey: [...pedidosKeys.all, 'no-pagados'] as const,
+    queryFn: fetchPedidosNoPagados,
+    enabled,
+    staleTime: 30 * 1000,
+  })
+}
+
+async function marcarPagosMasivo(pedidoIds: string[], formaPago: string): Promise<void> {
+  // First get the totals for each pedido to set monto_pagado correctly
+  const { data: pedidos, error: fetchError } = await supabase
+    .from('pedidos')
+    .select('id, total')
+    .in('id', pedidoIds)
+
+  if (fetchError) throw fetchError
+
+  // Update each pedido with its own total as monto_pagado
+  for (const pedido of (pedidos || [])) {
+    const { error } = await supabase
+      .from('pedidos')
+      .update({
+        estado_pago: 'pagado',
+        monto_pagado: pedido.total,
+        forma_pago: formaPago,
+      })
+      .eq('id', pedido.id)
+
+    if (error) throw error
+  }
+
+  // Registrar historial best-effort
+  const ahora = new Date().toISOString()
+  const historialEntries = pedidoIds.map(pedidoId => ({
+    pedido_id: pedidoId,
+    accion: 'pago_registrado',
+    descripcion: `Pago masivo - Forma: ${formaPago}`,
+    fecha: ahora,
+  }))
+
+  await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
+}
+
+/**
+ * Hook para marcar multiples pedidos como pagados
+ */
+export function usePagosMasivosMutation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ pedidoIds, formaPago }: { pedidoIds: string[]; formaPago: string }) =>
+      marcarPagosMasivo(pedidoIds, formaPago),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+    },
+  })
+}
