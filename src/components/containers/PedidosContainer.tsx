@@ -16,6 +16,7 @@ import {
   useEliminarPedidoMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
+  usePagosMasivosMutation,
   useClientesQuery,
   useProductosQuery,
   useTransportistasQuery,
@@ -44,6 +45,7 @@ const ModalPedidosEliminados = lazy(() => import('../modals/ModalPedidosEliminad
 const ModalEntregaConSalvedad = lazy(() => import('../modals/ModalEntregaConSalvedad'))
 const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas'))
 const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
+const ModalPagosMasivos = lazy(() => import('../modals/ModalPagosMasivos'))
 
 const ITEMS_PER_PAGE = 15
 
@@ -100,6 +102,7 @@ export default function PedidosContainer(): React.ReactElement {
   const eliminarPedido = useEliminarPedidoMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
+  const pagosMasivos = usePagosMasivosMutation()
   const crearClienteMut = useCrearClienteMutation()
 
   // Route optimization
@@ -125,6 +128,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalEntregaSalvedadOpen, setModalEntregaSalvedadOpen] = useState(false)
   const [modalEntregasMasivasOpen, setModalEntregasMasivasOpen] = useState(false)
   const [modalCancelarOpen, setModalCancelarOpen] = useState(false)
+  const [modalPagosMasivosOpen, setModalPagosMasivosOpen] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // Pedido-specific state for modals
@@ -311,6 +315,16 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error('Error en entregas masivas: ' + (e as Error).message) }
     setGuardando(false)
   }, [entregasMasivas, notify])
+
+  const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[]) => {
+    setGuardando(true)
+    try {
+      await pagosMasivos.mutateAsync({ pedidoIds, formaPago })
+      setModalPagosMasivosOpen(false)
+      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como pagado${pedidoIds.length !== 1 ? 's' : ''}`)
+    } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
+    setGuardando(false)
+  }, [pagosMasivos, notify])
 
   // Excel export (multi-sheet con ExcelJS)
   const handleExportarExcel = useCallback(async () => {
@@ -607,6 +621,7 @@ export default function PedidosContainer(): React.ReactElement {
           onCancelarPedido={handleCancelarPedido}
           onEliminarPedido={handleEliminarPedido}
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
+          onPagosMasivos={() => setModalPagosMasivosOpen(true)}
           onVerPedidosEliminados={() => setModalPedidosEliminadosOpen(true)}
         />
       </Suspense>
@@ -804,6 +819,17 @@ export default function PedidosContainer(): React.ReactElement {
             pedido={pedidoCancelando}
             onConfirm={handleConfirmarCancelacion}
             onClose={() => { setModalCancelarOpen(false); setPedidoCancelando(null) }}
+            guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Pagos Masivos */}
+      {modalPagosMasivosOpen && (
+        <Suspense fallback={null}>
+          <ModalPagosMasivos
+            onConfirm={handlePagosMasivos}
+            onClose={() => setModalPagosMasivosOpen(false)}
             guardando={guardando}
           />
         </Suspense>
