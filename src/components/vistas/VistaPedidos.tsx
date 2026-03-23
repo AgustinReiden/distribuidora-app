@@ -4,7 +4,7 @@
  * Recibe datos ya paginados server-side desde PedidosContainer.
  * Renderiza lista + controles de paginación.
  */
-import { ShoppingCart, Plus, Route, FileDown, Trash2 } from 'lucide-react';
+import { ShoppingCart, Plus, Route, FileDown, Trash2, PackageCheck } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
@@ -54,7 +54,9 @@ export interface VistaPedidosProps {
   onMarcarEntregado: (pedido: PedidoDB) => void;
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado: (pedido: PedidoDB) => void;
+  onCancelarPedido?: (pedido: PedidoDB) => void;
   onEliminarPedido: (pedido: PedidoDB) => void;
+  onEntregasMasivas?: () => void;
   onVerPedidosEliminados?: () => void;
 }
 
@@ -90,7 +92,9 @@ export default function VistaPedidos({
   onMarcarEntregado,
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
+  onCancelarPedido,
   onEliminarPedido,
+  onEntregasMasivas,
   onVerPedidosEliminados
 }: VistaPedidosProps) {
   // Si es transportista, mostrar vista especial de ruta
@@ -138,6 +142,15 @@ export default function VistaPedidos({
             >
               <FileDown className="w-5 h-5" />
               <span>Excel</span>
+            </button>
+          )}
+          {isAdmin && onEntregasMasivas && (
+            <button
+              onClick={onEntregasMasivas}
+              className="flex items-center space-x-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
+            >
+              <PackageCheck className="w-5 h-5" />
+              <span className="hidden sm:inline">Entregas Masivas</span>
             </button>
           )}
           {isAdmin && onVerPedidosEliminados && (
@@ -202,6 +215,7 @@ export default function VistaPedidos({
                 onMarcarEntregado={onMarcarEntregado}
                 onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
                 onDesmarcarEntregado={onDesmarcarEntregado}
+                onCancelarPedido={onCancelarPedido}
                 onEliminarPedido={(pedidoId: string) => {
                   const p = pedidos.find(x => x.id === pedidoId);
                   if (p) onEliminarPedido(p);

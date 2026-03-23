@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2, RotateCcw, AlertCircle, LucideIcon } from 'lucide-react';
+import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2, RotateCcw, AlertCircle, XCircle, LucideIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -36,6 +36,7 @@ export interface AccionesDropdownProps {
   onEntregado?: (pedido: PedidoDB) => void;
   onEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
+  onCancelarPedido?: (pedido: PedidoDB) => void;
   onEliminar?: (pedidoId: string) => void;
 }
 
@@ -64,6 +65,7 @@ function AccionesDropdown({
   onEntregado,
   onEntregadoConSalvedad,
   onRevertir,
+  onCancelarPedido,
   onEliminar
 }: AccionesDropdownProps): React.ReactElement {
   // Memoizar acciones para evitar recalculos innecesarios
@@ -150,6 +152,17 @@ function AccionesDropdown({
       });
     }
 
+    // Admin puede cancelar si no esta entregado ni cancelado
+    if (isAdmin && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
+      items.push({
+        label: 'Cancelar Pedido',
+        icon: XCircle,
+        onClick: () => onCancelarPedido(pedido),
+        className: 'text-red-600 dark:text-red-400',
+        divider: true
+      });
+    }
+
     // Admin puede eliminar (con separador)
     if (isAdmin && onEliminar) {
       items.push({
@@ -162,7 +175,7 @@ function AccionesDropdown({
     }
 
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onEliminar]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onEliminar]);
 
   return (
     <DropdownMenu>

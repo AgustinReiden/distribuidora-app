@@ -507,3 +507,129 @@ export function useEliminarPedidoMutation() {
     },
   })
 }
+
+// =========================================================================
+// Entregas Masivas
+// =========================================================================
+
+async function fetchPedidosNoEntregados(): Promise<PedidoDB[]> {
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
+    .not('estado', 'in', '("entregado","cancelado")')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+
+  // Enrich with transportista names
+  const transportistaIds = new Set<string>()
+  for (const pedido of (data || [])) {
+    if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
+  }
+
+  let perfilesMap: Record<string, PerfilDB> = {}
+  if (transportistaIds.size > 0) {
+    const { data: perfiles } = await supabase
+      .from('perfiles')
+      .select('id, nombre, email')
+      .in('id', Array.from(transportistaIds))
+
+    if (perfiles) {
+      perfilesMap = Object.fromEntries(
+        (perfiles as PerfilDB[]).map(p => [p.id, p])
+      )
+    }
+  }
+
+  return (data || []).map(pedido => ({
+    ...pedido,
+    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+  })) as PedidoDB[]
+}
+
+/**
+ * Hook para obtener todos los pedidos no entregados/cancelados (sin paginacion)
+ * Se habilita solo cuando enabled=true (modal abierto)
+ */
+export function usePedidosNoEntregadosQuery(enabled = false) {
+  return useQuery({
+    queryKey: [...pedidosKeys.all, 'no-entregados'] as const,
+    queryFn: fetchPedidosNoEntregados,
+    enabled,
+    staleTime: 30 * 1000, // 30 segundos
+  })
+}
+
+async function entregarPedidosMasivo(pedidoIds: string[], transportistaId: string): Promise<void> {
+  const ahora = new Date().toISOString()
+
+  const { error } = await supabase
+    .from('pedidos')
+    .update({
+      transportista_id: transportistaId,
+      estado: 'entregado',
+      fecha_entrega: ahora,
+    })
+    .in('id', pedidoIds)
+
+  if (error) throw error
+
+  // Registrar historial best-effort
+  const historialEntries = pedidoIds.map(pedidoId => ({
+    pedido_id: pedidoId,
+    accion: 'entregado',
+    descripcion: `Entrega masiva - Transportista: ${transportistaId}`,
+    fecha: ahora,
+  }))
+
+  await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
+}
+
+/**
+ * Hook para marcar multiples pedidos como entregados
+ */
+export function useEntregasMasivasMutation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ pedidoIds, transportistaId }: { pedidoIds: string[]; transportistaId: string }) =>
+      entregarPedidosMasivo(pedidoIds, transportistaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+    },
+  })
+}
+
+// =========================================================================
+// Cancelar Pedido
+// =========================================================================
+
+async function cancelarPedido(pedidoId: string, motivo: string): Promise<PedidoDB> {
+  const { data, error } = await supabase
+    .from('pedidos')
+    .update({
+      estado: 'cancelado',
+      motivo_cancelacion: motivo,
+    })
+    .eq('id', pedidoId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data as PedidoDB
+}
+
+/**
+ * Hook para cancelar un pedido con motivo
+ */
+export function useCancelarPedidoMutation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ pedidoId, motivo }: { pedidoId: string; motivo: string }) =>
+      cancelarPedido(pedidoId, motivo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+    },
+  })
+}

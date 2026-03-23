@@ -43,6 +43,9 @@ export {
   useActualizarPagoMutation,
   useAsignarTransportistaMutation,
   useEliminarPedidoMutation,
+  usePedidosNoEntregadosQuery,
+  useEntregasMasivasMutation,
+  useCancelarPedidoMutation,
 } from './usePedidosQuery'
 export type { PaginatedResult } from './usePedidosQuery'
 
