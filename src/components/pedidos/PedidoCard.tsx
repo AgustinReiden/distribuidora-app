@@ -46,6 +46,7 @@ export interface PedidoCardProps {
   onMarcarEntregado?: (pedido: PedidoDB) => void;
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
+  onCancelarPedido?: (pedido: PedidoDB) => void;
   onEliminarPedido?: (pedidoId: string) => void;
 }
 
@@ -149,6 +150,7 @@ function PedidoCard({
   onMarcarEntregado,
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
+  onCancelarPedido,
   onEliminarPedido
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
@@ -189,6 +191,12 @@ function PedidoCard({
               {pedido.transportista.nombre}
             </div>
           )}
+          {pedido.estado === 'cancelado' && pedido.motivo_cancelacion && (
+            <div className="mt-2 inline-flex items-center px-2 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-full text-sm">
+              <AlertTriangle className="w-3 h-3 mr-1" />
+              <span className="truncate max-w-xs">{pedido.motivo_cancelacion}</span>
+            </div>
+          )}
         </div>
 
         {/* Acciones */}
@@ -214,6 +222,7 @@ function PedidoCard({
             onEntregado={handleMarcarEntregado}
             onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
             onRevertir={handleDesmarcarEntregado}
+            onCancelarPedido={onCancelarPedido}
             onEliminar={handleEliminarPedido}
           />
         </div>
@@ -373,6 +382,17 @@ function PedidoCard({
                   </p>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Motivo de cancelacion */}
+          {pedido.estado === 'cancelado' && pedido.motivo_cancelacion && (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <h4 className="text-sm font-semibold text-red-700 dark:text-red-300 mb-1 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Motivo de cancelacion
+              </h4>
+              <p className="text-sm text-red-800 dark:text-red-200 whitespace-pre-wrap">{pedido.motivo_cancelacion}</p>
             </div>
           )}
 

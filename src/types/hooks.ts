@@ -93,6 +93,7 @@ export interface PedidoDB {
   total: number;
   monto_pagado?: number;
   notas?: string | null;
+  motivo_cancelacion?: string | null;
   orden_entrega?: number | null;
   items?: PedidoItemDB[];
   salvedades?: PedidoSalvedadResumen[];
