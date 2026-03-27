@@ -46,9 +46,9 @@ export default function VistaGruposPrecio({
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold dark:text-white">Precios Mayoristas</h1>
+          <h1 className="text-2xl font-bold dark:text-white">Condiciones Mayoristas</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Configura grupos de productos con precios por volumen
+            Configura precios por volumen y cantidades minimas de pedido
           </p>
         </div>
         <button
@@ -64,9 +64,9 @@ export default function VistaGruposPrecio({
       {grupos.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
           <Tag className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Sin grupos de precio</h3>
+          <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Sin condiciones mayoristas</h3>
           <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Crea un grupo para definir precios mayoristas por volumen
+            Crea una condicion para definir precios y cantidades minimas
           </p>
           <button
             onClick={onNuevoGrupo}
@@ -141,6 +141,11 @@ export default function VistaGruposPrecio({
                       className="text-xs px-2.5 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-full"
                     >
                       {getProductoNombre(gpp.producto_id)}
+                      {gpp.cantidad_minima_pedido && gpp.cantidad_minima_pedido > 0 && (
+                        <span className="ml-1 text-amber-600 dark:text-amber-400 font-medium">
+                          (min {gpp.cantidad_minima_pedido})
+                        </span>
+                      )}
                     </span>
                   ))}
                   {grupo.productos.length === 0 && (

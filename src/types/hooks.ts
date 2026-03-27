@@ -1257,6 +1257,7 @@ export interface GrupoPrecioProductoDB {
   id: string;
   grupo_precio_id: string;
   producto_id: string;
+  cantidad_minima_pedido?: number | null;
   created_at?: string;
 }
 
@@ -1279,6 +1280,7 @@ export interface GrupoPrecioFormInput {
   nombre: string;
   descripcion?: string | null;
   productoIds: string[];
+  cantidadesMinimas?: Record<string, number | null>;
   escalas: Array<{
     cantidadMinima: number;
     precioUnitario: number;

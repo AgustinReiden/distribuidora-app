@@ -100,7 +100,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     });
   }, [items, productos]);
 
-  const { itemsConPrecioMayorista, totalMayorista: totalCalculado } = usePrecioMayorista(itemsConPrecioBase);
+  const { itemsConPrecioMayorista, totalMayorista: totalCalculado, moqMap } = usePrecioMayorista(itemsConPrecioBase);
 
   // Mapa de precios resueltos para mostrar en cada item
   const preciosResueltosMap = useMemo(() => {
@@ -172,7 +172,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setErrorStock(null);
     setItems(prev => prev.map(item => {
       if (item.productoId === productoId) {
-        const nuevaCantidad = Math.max(1, item.cantidad + delta);
+        const moq = moqMap.get(String(productoId));
+        const minCantidad = moq && moq > 1 ? moq : 1;
+        const nuevaCantidad = Math.max(minCantidad, item.cantidad + delta);
         // Verificar stock disponible
         const producto = productos.find(p => p.id === productoId);
         const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
@@ -193,10 +195,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   };
 
   const handleAgregarProducto = (producto: ProductoDB): void => {
+    const moq = moqMap.get(String(producto.id));
+    const cantidadInicial = moq && moq > 1 ? moq : 1;
     setItems(prev => [...prev, {
       productoId: producto.id,
       nombre: producto.nombre,
-      cantidad: 1,
+      cantidad: cantidadInicial,
       precioUnitario: producto.precio,
       cantidadOriginal: 0,
       esNuevo: true
@@ -399,7 +403,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                         <div className="flex items-center border dark:border-gray-600 rounded-lg">
                           <button
                             onClick={() => handleCantidadChange(item.productoId, -1)}
-                            disabled={item.cantidad <= 1}
+                            disabled={item.cantidad <= (moqMap.get(String(item.productoId)) || 1)}
                             className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 rounded-l-lg"
                           >
                             <Minus className="w-4 h-4" />
