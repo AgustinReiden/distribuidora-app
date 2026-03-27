@@ -192,8 +192,8 @@ const ModalPedido = memo(function ModalPedido({
 
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
-  // Precios mayoristas
-  const { preciosResueltos, faltantes, totalMayorista, totalOriginal, ahorro, hayMayorista } = usePrecioMayorista(nuevoPedido.items);
+  // Precios mayoristas y cantidades mínimas
+  const { preciosResueltos, faltantes, totalMayorista, totalOriginal, ahorro, hayMayorista, moqMap, violacionesMOQ } = usePrecioMayorista(nuevoPedido.items);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -400,21 +400,25 @@ const ModalPedido = memo(function ModalPedido({
             {productosFiltrados.length === 0 ? (
               <p className="p-4 text-center text-gray-500">No se encontraron productos</p>
             ) : (
-              productosFiltrados.map(p => (
-                <div key={p.id} className="flex justify-between items-center p-3 hover:bg-gray-50 border-b cursor-pointer" onClick={() => onAgregarItem(p.id)}>
-                  <div>
-                    <p className="font-medium">{p.nombre}</p>
-                    <p className="text-sm text-gray-500">
-                      Stock: {p.stock}
-                      {p.categoria && <span className="ml-2 px-2 py-0.5 bg-gray-100 rounded text-xs">{p.categoria}</span>}
-                    </p>
+              productosFiltrados.map(p => {
+                const moq = moqMap.get(String(p.id))
+                return (
+                  <div key={p.id} className="flex justify-between items-center p-3 hover:bg-gray-50 border-b cursor-pointer" onClick={() => onAgregarItem(p.id, moq || 1)}>
+                    <div>
+                      <p className="font-medium">{p.nombre}</p>
+                      <p className="text-sm text-gray-500">
+                        Stock: {p.stock}
+                        {p.categoria && <span className="ml-2 px-2 py-0.5 bg-gray-100 rounded text-xs">{p.categoria}</span>}
+                        {moq && moq > 1 && <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">Min: {moq}</span>}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-blue-600">{formatPrecio(p.precio)}</p>
+                      <span className="text-sm text-blue-500">+ Agregar</span>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-blue-600">{formatPrecio(p.precio)}</p>
-                    <span className="text-sm text-blue-500">+ Agregar</span>
-                  </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
 
@@ -430,6 +434,8 @@ const ModalPedido = memo(function ModalPedido({
                   const esMayorista = precioInfo?.esMayorista || false;
                   const precioMostrar = esMayorista ? precioInfo!.precioResuelto : item.precioUnitario;
                   const subtotal = precioMostrar * item.cantidad;
+                  const itemMoq = moqMap.get(String(item.productoId));
+                  const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
                   return (
                     <div key={item.productoId} className="p-3">
                       <div className="flex justify-between items-center">
@@ -451,9 +457,12 @@ const ModalPedido = memo(function ModalPedido({
                           ) : (
                             <p className="text-sm text-gray-500">{formatPrecio(item.precioUnitario)} c/u</p>
                           )}
+                          {itemMoq && itemMoq > 1 && (
+                            <p className="text-xs text-amber-600 mt-0.5">Pedido minimo: {itemMoq} unidades</p>
+                          )}
                         </div>
                         <div className="flex items-center space-x-3">
-                          <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad - 1); }} className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300">-</button>
+                          <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, Math.max(item.cantidad - 1, minCantidad)); }} className={`w-8 h-8 rounded-full ${item.cantidad <= minCantidad ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}`} disabled={item.cantidad <= minCantidad}>-</button>
                           <span className="w-8 text-center font-medium">{item.cantidad}</span>
                           <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad + 1); }} className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300">+</button>
                           <p className="w-24 text-right font-semibold">{formatPrecio(subtotal)}</p>
@@ -496,7 +505,7 @@ const ModalPedido = memo(function ModalPedido({
           </div>
           <div className="flex justify-end space-x-3">
             <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
-            <button onClick={onGuardar} disabled={guardando} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center">
+            <button onClick={onGuardar} disabled={guardando || violacionesMOQ.length > 0} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 flex items-center">
               {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Confirmar
             </button>
           </div>

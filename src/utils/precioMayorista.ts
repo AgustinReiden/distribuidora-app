@@ -24,6 +24,7 @@ export interface GrupoPrecioInfo {
   grupoNombre: string
   escalas: EscalaPrecio[]
   productoIds: string[]
+  moqPorProducto: Map<string, number>
 }
 
 /** Mapa de productoId → grupos a los que pertenece */
@@ -230,4 +231,70 @@ export function aplicarPreciosMayorista(
     }
     return item
   })
+}
+
+// =============================================================================
+// CANTIDAD MÍNIMA DE PEDIDO (MOQ)
+// =============================================================================
+
+export interface ViolacionMOQ {
+  productoId: string
+  cantidadActual: number
+  cantidadMinima: number
+  grupoNombre: string
+}
+
+/**
+ * Obtiene el MOQ efectivo de un producto.
+ * Si pertenece a varios grupos, toma el más restrictivo (máximo).
+ * Retorna 1 si no tiene MOQ configurado.
+ */
+export function obtenerMOQ(productoId: string, pricingMap: PricingMap): number {
+  const grupos = pricingMap.get(String(productoId))
+  if (!grupos) return 1
+  let maxMoq = 1
+  for (const grupo of grupos) {
+    const moq = grupo.moqPorProducto.get(String(productoId))
+    if (moq && moq > maxMoq) maxMoq = moq
+  }
+  return maxMoq
+}
+
+/**
+ * Construye un mapa de productoId → MOQ efectivo para una lista de items.
+ */
+export function construirMOQMap(items: ItemPedido[], pricingMap: PricingMap): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const item of items) {
+    const moq = obtenerMOQ(item.productoId, pricingMap)
+    if (moq > 1) {
+      map.set(String(item.productoId), moq)
+    }
+  }
+  return map
+}
+
+/**
+ * Valida que todos los items cumplan con su cantidad mínima de pedido.
+ * Retorna las violaciones encontradas.
+ */
+export function validarMOQPedido(items: ItemPedido[], pricingMap: PricingMap): ViolacionMOQ[] {
+  const violaciones: ViolacionMOQ[] = []
+  for (const item of items) {
+    const grupos = pricingMap.get(String(item.productoId))
+    if (!grupos) continue
+    for (const grupo of grupos) {
+      const moq = grupo.moqPorProducto.get(String(item.productoId))
+      if (moq && item.cantidad < moq) {
+        violaciones.push({
+          productoId: String(item.productoId),
+          cantidadActual: item.cantidad,
+          cantidadMinima: moq,
+          grupoNombre: grupo.grupoNombre,
+        })
+        break // Una violación por producto es suficiente
+      }
+    }
+  }
+  return violaciones
 }

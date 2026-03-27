@@ -69,7 +69,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista', 'deposito'] },
       { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin'] },
       { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
-      { id: 'precios-mayoristas', icon: Tag, label: 'Precios Mayoristas', roles: ['admin'] },
+      { id: 'condiciones-mayoristas', icon: Tag, label: 'Condiciones Mayoristas', roles: ['admin'] },
     ]
   },
   {

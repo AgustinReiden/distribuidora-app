@@ -10,9 +10,12 @@ import {
   resolverPreciosMayorista,
   calcularFaltanteParaTier,
   aplicarPreciosMayorista,
+  construirMOQMap,
+  validarMOQPedido,
   type ItemPedido,
   type PrecioResuelto,
   type FaltanteParaTier,
+  type ViolacionMOQ,
   type PricingMap
 } from '../utils/precioMayorista'
 
@@ -33,6 +36,10 @@ interface UsePrecioMayoristaReturn {
   hayMayorista: boolean
   /** Si el pricing map está cargando */
   isLoading: boolean
+  /** Mapa de productoId → cantidad mínima de pedido (solo productos con MOQ > 1) */
+  moqMap: Map<string, number>
+  /** Items que no cumplen la cantidad mínima de pedido */
+  violacionesMOQ: ViolacionMOQ[]
 }
 
 /**
@@ -85,6 +92,16 @@ export function usePrecioMayorista(items: ItemPedido[]): UsePrecioMayoristaRetur
     return false
   }, [preciosResueltos])
 
+  const moqMap = useMemo(() => {
+    if (!pricingMap || pricingMap.size === 0) return new Map<string, number>()
+    return construirMOQMap(items, pricingMap)
+  }, [items, pricingMap])
+
+  const violacionesMOQ = useMemo(() => {
+    if (!pricingMap || pricingMap.size === 0 || items.length === 0) return []
+    return validarMOQPedido(items, pricingMap)
+  }, [items, pricingMap])
+
   return {
     preciosResueltos,
     faltantes,
@@ -94,5 +111,7 @@ export function usePrecioMayorista(items: ItemPedido[]): UsePrecioMayoristaRetur
     ahorro: totalOriginal - totalMayorista,
     hayMayorista,
     isLoading,
+    moqMap,
+    violacionesMOQ,
   }
 }

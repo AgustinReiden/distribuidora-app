@@ -1,11 +1,11 @@
 /**
  * ModalGrupoPrecio
  *
- * Modal para crear/editar un grupo de precio mayorista.
- * Incluye: nombre, descripción, selector de productos, editor de escalas.
+ * Modal para crear/editar una condición mayorista.
+ * Incluye: nombre, descripción, selector de productos con cantidad mínima, editor de escalas.
  */
 import { useState, useMemo } from 'react'
-import { X, Plus, Trash2, Search } from 'lucide-react'
+import { X, Plus, Trash2, Search, Copy } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
 
@@ -42,6 +42,18 @@ export default function ModalGrupoPrecio({
       etiqueta: e.etiqueta || '',
     })) || [{ cantidadMinima: '', precioUnitario: '', etiqueta: '' }]
   )
+  const [moqPorProducto, setMoqPorProducto] = useState<Map<string, string>>(() => {
+    const map = new Map<string, string>()
+    if (grupo?.productos) {
+      for (const p of grupo.productos) {
+        if (p.cantidad_minima_pedido && p.cantidad_minima_pedido > 0) {
+          map.set(String(p.producto_id), String(p.cantidad_minima_pedido))
+        }
+      }
+    }
+    return map
+  })
+  const [moqGlobal, setMoqGlobal] = useState('')
   const [busquedaProducto, setBusquedaProducto] = useState('')
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -63,8 +75,32 @@ export default function ModalGrupoPrecio({
       const next = new Set(prev)
       if (next.has(id)) {
         next.delete(id)
+        setMoqPorProducto(prev => { const m = new Map(prev); m.delete(id); return m })
       } else {
         next.add(id)
+      }
+      return next
+    })
+  }
+
+  const actualizarMoqProducto = (productoId: string, value: string) => {
+    setMoqPorProducto(prev => {
+      const next = new Map(prev)
+      if (!value || value === '0') {
+        next.delete(productoId)
+      } else {
+        next.set(productoId, value)
+      }
+      return next
+    })
+  }
+
+  const aplicarMoqATodos = () => {
+    if (!moqGlobal || parseInt(moqGlobal) <= 0) return
+    setMoqPorProducto(() => {
+      const next = new Map<string, string>()
+      for (const pid of productoIds) {
+        next.set(pid, moqGlobal)
       }
       return next
     })
@@ -122,10 +158,17 @@ export default function ModalGrupoPrecio({
 
     setGuardando(true)
     try {
+      const cantidadesMinimas: Record<string, number | null> = {}
+      for (const [pid, val] of moqPorProducto) {
+        const parsed = parseInt(val)
+        cantidadesMinimas[pid] = !isNaN(parsed) && parsed > 0 ? parsed : null
+      }
+
       const result = await onSave({
         nombre: nombre.trim(),
         descripcion: descripcion.trim() || null,
         productoIds: Array.from(productoIds),
+        cantidadesMinimas,
         escalas: escalasValidas.map(e => ({
           cantidadMinima: parseInt(e.cantidadMinima),
           precioUnitario: parseFloat(e.precioUnitario),
@@ -148,7 +191,7 @@ export default function ModalGrupoPrecio({
         {/* Header */}
         <div className="flex justify-between items-center p-4 border-b dark:border-gray-700">
           <h2 className="text-xl font-semibold dark:text-white">
-            {isEditing ? 'Editar Grupo de Precio' : 'Nuevo Grupo de Precio'}
+            {isEditing ? 'Editar Condicion Mayorista' : 'Nueva Condicion Mayorista'}
           </h2>
           <button onClick={onClose}>
             <X className="w-6 h-6 text-gray-500 dark:text-gray-400" />
@@ -205,15 +248,14 @@ export default function ModalGrupoPrecio({
                   return (
                     <div
                       key={p.id}
-                      onClick={() => toggleProducto(String(p.id))}
-                      className={`flex items-center justify-between p-2.5 border-b dark:border-gray-700 cursor-pointer transition-colors ${
+                      className={`flex items-center justify-between p-2.5 border-b dark:border-gray-700 transition-colors ${
                         isSelected
                           ? 'bg-blue-50 dark:bg-blue-900/20'
                           : 'hover:bg-gray-50 dark:hover:bg-gray-700'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${
+                      <div className="flex items-center gap-2 cursor-pointer flex-1" onClick={() => toggleProducto(String(p.id))}>
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
                           isSelected
                             ? 'bg-blue-600 border-blue-600'
                             : 'border-gray-300 dark:border-gray-500'
@@ -227,12 +269,48 @@ export default function ModalGrupoPrecio({
                           )}
                         </div>
                       </div>
-                      <span className="text-sm text-gray-500">{formatPrecio(p.precio)}</span>
+                      <div className="flex items-center gap-2">
+                        {isSelected && (
+                          <input
+                            type="number"
+                            min="1"
+                            value={moqPorProducto.get(String(p.id)) || ''}
+                            onChange={e => actualizarMoqProducto(String(p.id), e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            className="w-16 px-2 py-1 border rounded text-xs text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            placeholder="Min"
+                            title="Cantidad minima de pedido"
+                          />
+                        )}
+                        <span className="text-sm text-gray-500 w-20 text-right">{formatPrecio(p.precio)}</span>
+                      </div>
                     </div>
                   )
                 })
               )}
             </div>
+
+            {/* Aplicar cantidad mínima a todos */}
+            {productoIds.size > 0 && (
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="number"
+                  min="1"
+                  value={moqGlobal}
+                  onChange={e => setMoqGlobal(e.target.value)}
+                  className="w-24 px-2 py-1.5 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="Cant. min"
+                />
+                <button
+                  onClick={aplicarMoqATodos}
+                  disabled={!moqGlobal || parseInt(moqGlobal) <= 0}
+                  className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400"
+                >
+                  <Copy className="w-3 h-3" /> Aplicar a todos
+                </button>
+                <span className="text-xs text-gray-400">Cantidad minima de pedido</span>
+              </div>
+            )}
           </div>
 
           {/* Editor de escalas */}
@@ -335,7 +413,7 @@ export default function ModalGrupoPrecio({
               {guardando && (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               )}
-              {isEditing ? 'Guardar cambios' : 'Crear grupo'}
+              {isEditing ? 'Guardar cambios' : 'Crear condicion'}
             </button>
           </div>
         </div>

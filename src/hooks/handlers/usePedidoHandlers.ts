@@ -7,7 +7,7 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { useLatestRef } from '../useLatestRef'
 import { calcularTotalPedido } from '../useAppState'
 import { usePricingMapQuery } from '../queries/useGruposPrecioQuery'
-import { resolverPreciosMayorista, aplicarPreciosMayorista } from '../../utils/precioMayorista'
+import { resolverPreciosMayorista, aplicarPreciosMayorista, validarMOQPedido } from '../../utils/precioMayorista'
 import type { User } from '@supabase/supabase-js'
 import type {
   ProductoDB,
@@ -355,8 +355,18 @@ export function usePedidoHandlers({
       return
     }
 
-    // Aplicar precios mayoristas si hay pricing map disponible
+    // Validar cantidades mínimas de pedido
     const currentPricingMap = pricingMapRef.current
+    if (currentPricingMap && currentPricingMap.size > 0) {
+      const violaciones = validarMOQPedido(nuevoPedido.items, currentPricingMap)
+      if (violaciones.length > 0) {
+        const mensajes = violaciones.map(v => `${productosRef.current.find(p => p.id === v.productoId)?.nombre || 'Producto'}: mínimo ${v.cantidadMinima} unidades`)
+        notify.error(`Cantidad mínima no alcanzada:\n${mensajes.join('\n')}`, 5000)
+        return
+      }
+    }
+
+    // Aplicar precios mayoristas si hay pricing map disponible
     let itemsFinales = nuevoPedido.items
     if (currentPricingMap && currentPricingMap.size > 0) {
       const preciosResueltos = resolverPreciosMayorista(nuevoPedido.items, currentPricingMap)
@@ -420,7 +430,7 @@ export function usePedidoHandlers({
       notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
+  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, productosRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
   const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {

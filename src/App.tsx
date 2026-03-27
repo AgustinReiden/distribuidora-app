@@ -221,7 +221,7 @@ function MainApp(): ReactElement {
                 />
 
                 <Route
-                  path="/precios-mayoristas"
+                  path="/condiciones-mayoristas"
                   element={isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
