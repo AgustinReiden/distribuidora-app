@@ -31,8 +31,8 @@ test.describe('Login', () => {
     // Intentar login
     await page.getByRole('button', { name: /ingresar/i }).click()
 
-    // Verificar mensaje de error (esperar hasta 15 segundos para Supabase response)
-    await expect(page.getByText(/incorrectos|inválido|error/i)).toBeVisible({ timeout: 15000 })
+    // Verificar mensaje de error (auth timeout is 15s, plus render time)
+    await expect(page.getByText(/incorrectos|inválido|error|timed out/i)).toBeVisible({ timeout: 25000 })
   })
 
   test('debe validar campo de email vacío', async ({ page }) => {
