@@ -376,9 +376,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = async (email: string, password: string) => {
     beginAuthTrace('login')
-    if (mountedRef.current) {
-      setAuthTransitionLoading(true)
-    }
+    // NOTE: Don't set authTransitionLoading here. It causes AppContent to
+    // show the global spinner which unmounts LoginScreen. If signIn fails,
+    // the remounted LoginScreen loses the error state. Instead, we only
+    // set it after signIn succeeds (before profile fetch).
 
     try {
       const { data, error } = await withTimeout(
@@ -388,6 +389,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       )
       if (error) {
         throw error
+      }
+
+      // Only show global loading transition after successful auth
+      if (mountedRef.current) {
+        setAuthTransitionLoading(true)
       }
 
       if (data.user) {
