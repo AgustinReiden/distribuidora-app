@@ -400,7 +400,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       return data
     } catch (err) {
-      await signOutLocal('login:error')
+      // Fire-and-forget: don't block error propagation if signOut hangs
+      // (e.g. Supabase unreachable in CI)
+      signOutLocal('login:error').catch(() => {})
       throw err
     } finally {
       if (mountedRef.current) {
