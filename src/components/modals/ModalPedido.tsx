@@ -1,5 +1,5 @@
 import { useState, useMemo, memo } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
@@ -462,6 +462,7 @@ const ModalPedido = memo(function ModalPedido({
                           )}
                         </div>
                         <div className="flex items-center space-x-3">
+                          <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, 0); }} className="p-1.5 text-red-500 hover:bg-red-50 rounded" title="Eliminar producto"><Trash2 className="w-4 h-4" /></button>
                           <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, Math.max(item.cantidad - 1, minCantidad)); }} className={`w-8 h-8 rounded-full ${item.cantidad <= minCantidad ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}`} disabled={item.cantidad <= minCantidad}>-</button>
                           <span className="w-8 text-center font-medium">{item.cantidad}</span>
                           <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad + 1); }} className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300">+</button>
