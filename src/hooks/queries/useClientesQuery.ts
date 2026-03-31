@@ -83,9 +83,9 @@ interface ClienteCreateInput {
 
 // Mutation functions
 async function createCliente(cliente: ClienteCreateInput): Promise<ClienteDB> {
-  // Detección de duplicados por ubicación (~22 metros de tolerancia)
+  // Detección de duplicados por ubicación (~0.2 metros de tolerancia)
   if (cliente.latitud != null && cliente.longitud != null) {
-    const TOLERANCE = 0.0002 // ~22 metros
+    const TOLERANCE = 0.000002 // ~0.2 metros (6 decimales de precisión)
     const { data: cercanos } = await supabase
       .from('clientes')
       .select('id, nombre_fantasia, razon_social')

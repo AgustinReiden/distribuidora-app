@@ -116,6 +116,16 @@ export {
 } from './useZonasQuery'
 export type { ZonaDB } from './useZonasQuery'
 
+// Transferencias y Sucursales
+export {
+  transferenciasKeys,
+  sucursalesKeys,
+  useTransferenciasQuery,
+  useSucursalesQuery,
+  useCrearSucursalMutation,
+  useRegistrarTransferenciaMutation,
+} from './useTransferenciasQuery'
+
 // Métricas
 export {
   metricasKeys,
@@ -123,3 +133,10 @@ export {
   useReportePreventistasQuery,
   useInvalidateMetricas,
 } from './useMetricasQuery'
+
+// Notas de Crédito
+export {
+  notasCreditoKeys,
+  useNotasCreditoByCompraQuery,
+  useRegistrarNotaCreditoMutation,
+} from './useNotasCreditoQuery'
