@@ -808,6 +808,106 @@ export interface UseComprasReturnExtended {
 }
 
 // =============================================================================
+// NOTAS DE CREDITO TYPES
+// =============================================================================
+
+export interface NotaCreditoItemDB {
+  id: string;
+  nota_credito_id: string;
+  producto_id: string;
+  producto?: ProductoDB | null;
+  cantidad: number;
+  costo_unitario: number;
+  subtotal: number;
+  stock_anterior: number;
+  stock_nuevo: number;
+  created_at?: string;
+}
+
+export interface NotaCreditoDB {
+  id: string;
+  compra_id: string;
+  numero_nota?: string | null;
+  fecha: string;
+  subtotal: number;
+  iva: number;
+  total: number;
+  motivo?: string | null;
+  usuario_id?: string | null;
+  usuario?: { id: string; nombre: string } | null;
+  items?: NotaCreditoItemDB[];
+  created_at?: string;
+}
+
+export interface NotaCreditoFormInput {
+  compraId: string;
+  numeroNota?: string | null;
+  motivo?: string | null;
+  subtotal: number;
+  iva: number;
+  total: number;
+  usuarioId?: string | null;
+  items: Array<{
+    productoId: string;
+    cantidad: number;
+    costoUnitario: number;
+    subtotal: number;
+  }>;
+}
+
+// =============================================================================
+// SUCURSALES Y TRANSFERENCIAS TYPES
+// =============================================================================
+
+export interface SucursalDB {
+  id: string;
+  nombre: string;
+  direccion?: string | null;
+  activa?: boolean;
+  created_at?: string;
+}
+
+export interface TransferenciaItemDB {
+  id: string;
+  transferencia_id: string;
+  producto_id: string;
+  producto?: ProductoDB | null;
+  cantidad: number;
+  costo_unitario: number;
+  subtotal: number;
+  stock_anterior: number;
+  stock_nuevo: number;
+  created_at?: string;
+}
+
+export interface TransferenciaDB {
+  id: string;
+  sucursal_id: string;
+  sucursal?: SucursalDB | null;
+  fecha: string;
+  notas?: string | null;
+  total_costo: number;
+  usuario_id?: string | null;
+  usuario?: { id: string; nombre: string } | null;
+  items?: TransferenciaItemDB[];
+  created_at?: string;
+}
+
+export interface TransferenciaFormInput {
+  sucursalId: string;
+  fecha?: string;
+  notas?: string | null;
+  totalCosto: number;
+  usuarioId?: string | null;
+  items: Array<{
+    productoId: string;
+    cantidad: number;
+    costoUnitario: number;
+    subtotal: number;
+  }>;
+}
+
+// =============================================================================
 // RECORRIDOS TYPES
 // =============================================================================
 

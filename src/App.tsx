@@ -26,7 +26,9 @@ import SkipLinks from './components/a11y/SkipLinks'
 import {
   AnalyticsContainer,
   ClientesContainer,
+  ComisionesContainer,
   ComprasContainer,
+  TransferenciasContainer,
   DashboardContainer,
   GruposPrecioContainer,
   PedidosContainer,
@@ -226,6 +228,11 @@ function MainApp(): ReactElement {
                 />
 
                 <Route
+                  path="/transferencias"
+                  element={isAdmin ? <TransferenciasContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                <Route
                   path="/rendiciones"
                   element={isAdmin ? <VistaRendiciones /> : <Navigate to="/pedidos" replace />}
                 />
@@ -238,6 +245,11 @@ function MainApp(): ReactElement {
                 <Route
                   path="/analytics"
                   element={isAdmin ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                <Route
+                  path="/comisiones"
+                  element={isAdmin ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="*" element={<Navigate to={defaultRoute} replace />} />

@@ -59,12 +59,14 @@ export interface ModalDetalleCompraProps {
   compra: CompraDetalle | null;
   onClose: () => void;
   onAnular?: (compraId: string) => void;
+  onNotaCredito?: (compra: any) => void;
 }
 
 export default function ModalDetalleCompra({
   compra,
   onClose,
-  onAnular
+  onAnular,
+  onNotaCredito
 }: ModalDetalleCompraProps): React.ReactElement | null {
   if (!compra) return null
 
@@ -252,6 +254,15 @@ export default function ModalDetalleCompra({
 
         {/* Footer */}
         <div className="flex gap-3 p-4 border-t dark:border-gray-700">
+          {compra.estado !== 'cancelada' && onNotaCredito && (
+            <button
+              onClick={() => onNotaCredito(compra)}
+              className="px-4 py-2 text-blue-600 border border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors flex items-center gap-2"
+            >
+              <FileText className="w-4 h-4" />
+              Nota de Credito
+            </button>
+          )}
           {compra.estado !== 'cancelada' && onAnular && (
             <button
               onClick={() => onAnular(compra.id)}

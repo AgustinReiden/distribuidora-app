@@ -12,16 +12,19 @@ import {
   useAnularCompraMutation,
   useProductosQuery,
   useCrearProductoMutation,
-  useCrearProveedorMutation
+  useCrearProveedorMutation,
+  useNotasCreditoByCompraQuery,
+  useRegistrarNotaCreditoMutation,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
+import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
 
 // Lazy load de componentes
 const VistaCompras = lazy(() => import('../vistas/VistaCompras'))
 const ModalCompra = lazy(() => import('../modals/ModalCompra'))
 const ModalDetalleCompra = lazy(() => import('../modals/ModalDetalleCompra'))
+const ModalNotaCredito = lazy(() => import('../modals/ModalNotaCredito'))
 
 function LoadingState() {
   return (
@@ -45,13 +48,19 @@ export default function ComprasContainer(): React.ReactElement {
   const anularCompra = useAnularCompraMutation()
   const crearProducto = useCrearProductoMutation()
   const crearProveedor = useCrearProveedorMutation()
+  const registrarNC = useRegistrarNotaCreditoMutation()
 
   // Estado de modales
   const [modalCompraOpen, setModalCompraOpen] = useState(false)
   const [modalDetalleOpen, setModalDetalleOpen] = useState(false)
+  const [modalNotaCreditoOpen, setModalNotaCreditoOpen] = useState(false)
 
   // Estado de detalle
   const [compraDetalle, setCompraDetalle] = useState<CompraDBExtended | null>(null)
+  const [compraParaNC, setCompraParaNC] = useState<CompraDBExtended | null>(null)
+
+  // Query notas de credito for selected compra
+  const notasCreditoQuery = useNotasCreditoByCompraQuery(compraParaNC?.id, !!compraParaNC)
 
   // Handlers
   const handleNuevaCompra = useCallback(() => {
@@ -96,6 +105,24 @@ export default function ComprasContainer(): React.ReactElement {
     return producto
   }, [crearProducto, notify])
 
+  const handleNotaCredito = useCallback((compra: CompraDBExtended) => {
+    setCompraParaNC(compra)
+    setModalNotaCreditoOpen(true)
+  }, [])
+
+  const handleGuardarNC = useCallback(async (data: NotaCreditoFormInput) => {
+    try {
+      await registrarNC.mutateAsync(data)
+      notify.success('Nota de credito registrada')
+      setModalNotaCreditoOpen(false)
+      setCompraParaNC(null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al registrar nota de credito'
+      notify.error(msg)
+      throw err
+    }
+  }, [registrarNC, notify])
+
   const handleCrearProveedorDesdeCompra = useCallback(async (data: ProveedorFormInputExtended) => {
     const proveedor = await crearProveedor.mutateAsync(data)
     notify.success(`Proveedor "${data.nombre}" creado`)
@@ -138,6 +165,23 @@ export default function ComprasContainer(): React.ReactElement {
             onClose={() => {
               setModalDetalleOpen(false)
               setCompraDetalle(null)
+            }}
+            onAnular={handleAnularCompra}
+            onNotaCredito={(c) => handleNotaCredito(c as CompraDBExtended)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Nota de Credito */}
+      {modalNotaCreditoOpen && compraParaNC && (
+        <Suspense fallback={null}>
+          <ModalNotaCredito
+            compra={compraParaNC as Parameters<typeof ModalNotaCredito>[0]['compra']}
+            notasExistentes={notasCreditoQuery.data || []}
+            onSave={handleGuardarNC}
+            onClose={() => {
+              setModalNotaCreditoOpen(false)
+              setCompraParaNC(null)
             }}
           />
         </Suspense>
