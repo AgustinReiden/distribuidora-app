@@ -7,14 +7,47 @@ import { supabase } from '../supabase/base'
 import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import { comprasKeys } from './useComprasQuery'
 
+// Resumen ligero de NCs por compra (para badges en lista)
+export interface NCResumen {
+  compra_id: string
+  cantidad: number
+  total: number
+}
+
 // Query keys
 export const notasCreditoKeys = {
   all: ['notas_credito'] as const,
   lists: () => [...notasCreditoKeys.all, 'list'] as const,
+  resumen: () => [...notasCreditoKeys.all, 'resumen'] as const,
   byCompra: (compraId: string) => [...notasCreditoKeys.all, 'compra', compraId] as const,
 }
 
 // Fetch functions
+async function fetchNotasCreditoResumen(): Promise<NCResumen[]> {
+  const { data, error } = await supabase
+    .from('notas_credito')
+    .select('compra_id, total')
+
+  if (error) {
+    if (error.message.includes('does not exist')) return []
+    throw error
+  }
+
+  // Agrupar por compra_id
+  const map = new Map<string, NCResumen>()
+  for (const row of data || []) {
+    const key = String(row.compra_id)
+    const existing = map.get(key)
+    if (existing) {
+      existing.cantidad += 1
+      existing.total += Number(row.total) || 0
+    } else {
+      map.set(key, { compra_id: key, cantidad: 1, total: Number(row.total) || 0 })
+    }
+  }
+  return Array.from(map.values())
+}
+
 async function fetchNotasCreditoByCompra(compraId: string): Promise<NotaCreditoDB[]> {
   const { data, error } = await supabase
     .from('notas_credito')
@@ -71,6 +104,17 @@ export function useNotasCreditoByCompraQuery(compraId: string | undefined, enabl
     queryKey: notasCreditoKeys.byCompra(compraId || ''),
     queryFn: () => fetchNotasCreditoByCompra(compraId!),
     enabled: !!compraId && enabled,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/**
+ * Hook para obtener resumen de NCs por compra (para badges en lista)
+ */
+export function useNotasCreditoResumenQuery() {
+  return useQuery({
+    queryKey: notasCreditoKeys.resumen(),
+    queryFn: fetchNotasCreditoResumen,
     staleTime: 5 * 60 * 1000,
   })
 }
