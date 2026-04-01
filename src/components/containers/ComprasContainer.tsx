@@ -14,6 +14,7 @@ import {
   useCrearProductoMutation,
   useCrearProveedorMutation,
   useNotasCreditoByCompraQuery,
+  useNotasCreditoResumenQuery,
   useRegistrarNotaCreditoMutation,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -59,8 +60,12 @@ export default function ComprasContainer(): React.ReactElement {
   const [compraDetalle, setCompraDetalle] = useState<CompraDBExtended | null>(null)
   const [compraParaNC, setCompraParaNC] = useState<CompraDBExtended | null>(null)
 
-  // Query notas de credito for selected compra
-  const notasCreditoQuery = useNotasCreditoByCompraQuery(compraParaNC?.id, !!compraParaNC)
+  // NC resumen for badges in list
+  const { data: ncResumen = [] } = useNotasCreditoResumenQuery()
+
+  // Query notas de credito for selected compra (detail or NC modal)
+  const compraConNCId = compraParaNC?.id || compraDetalle?.id
+  const notasCreditoQuery = useNotasCreditoByCompraQuery(compraConNCId, !!compraConNCId)
 
   // Handlers
   const handleNuevaCompra = useCallback(() => {
@@ -140,6 +145,8 @@ export default function ComprasContainer(): React.ReactElement {
           onNuevaCompra={handleNuevaCompra}
           onVerDetalle={handleVerDetalle}
           onAnularCompra={handleAnularCompra}
+          onNotaCredito={handleNotaCredito}
+          ncResumen={ncResumen}
         />
       </Suspense>
 
@@ -168,6 +175,7 @@ export default function ComprasContainer(): React.ReactElement {
             }}
             onAnular={handleAnularCompra}
             onNotaCredito={(c) => handleNotaCredito(c as CompraDBExtended)}
+            notasCredito={notasCreditoQuery.data as any}
           />
         </Suspense>
       )}

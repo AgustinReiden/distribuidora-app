@@ -55,18 +55,35 @@ interface CompraDetalle {
   usuario?: Usuario;
 }
 
+interface NotaCreditoResumen {
+  id: string;
+  numero_nota?: string | null;
+  fecha: string;
+  total: number;
+  motivo?: string | null;
+  items?: Array<{
+    producto_id: string;
+    cantidad: number;
+    costo_unitario: number;
+    subtotal: number;
+    producto?: { nombre: string } | null;
+  }>;
+}
+
 export interface ModalDetalleCompraProps {
   compra: CompraDetalle | null;
   onClose: () => void;
   onAnular?: (compraId: string) => void;
   onNotaCredito?: (compra: any) => void;
+  notasCredito?: NotaCreditoResumen[];
 }
 
 export default function ModalDetalleCompra({
   compra,
   onClose,
   onAnular,
-  onNotaCredito
+  onNotaCredito,
+  notasCredito = []
 }: ModalDetalleCompraProps): React.ReactElement | null {
   if (!compra) return null
 
@@ -232,6 +249,50 @@ export default function ModalDetalleCompra({
               </div>
             </div>
           </div>
+
+          {/* Notas de Crédito asociadas */}
+          {notasCredito.length > 0 && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <FileText className="w-5 h-5 text-blue-600" />
+                <h3 className="font-medium text-gray-800 dark:text-white">
+                  Notas de Credito ({notasCredito.length})
+                </h3>
+              </div>
+              <div className="space-y-3">
+                {notasCredito.map((nc) => (
+                  <div key={nc.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <span className="text-sm font-medium text-gray-800 dark:text-white">
+                          {nc.numero_nota || `NC #${nc.id}`}
+                        </span>
+                        <span className="ml-2 text-xs text-gray-500">
+                          {new Date(nc.fecha).toLocaleDateString('es-AR')}
+                        </span>
+                      </div>
+                      <span className="text-sm font-bold text-blue-600">
+                        -{formatPrecio(nc.total)}
+                      </span>
+                    </div>
+                    {nc.motivo && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{nc.motivo}</p>
+                    )}
+                    {nc.items && nc.items.length > 0 && (
+                      <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                        {nc.items.map((item, idx) => (
+                          <div key={idx} className="flex justify-between">
+                            <span>{item.producto?.nombre || 'Producto'} x{item.cantidad}</span>
+                            <span>{formatPrecio(item.subtotal)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Notas */}
           {compra.notas && (

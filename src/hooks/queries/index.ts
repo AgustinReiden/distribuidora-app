@@ -138,5 +138,7 @@ export {
 export {
   notasCreditoKeys,
   useNotasCreditoByCompraQuery,
+  useNotasCreditoResumenQuery,
   useRegistrarNotaCreditoMutation,
 } from './useNotasCreditoQuery'
+export type { NCResumen } from './useNotasCreditoQuery'

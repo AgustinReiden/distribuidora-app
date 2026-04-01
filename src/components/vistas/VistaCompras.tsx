@@ -1,5 +1,6 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
-import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle } from 'lucide-react';
+import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle, FileText } from 'lucide-react';
+import type { NCResumen } from '../../hooks/queries';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
@@ -38,6 +39,8 @@ export interface VistaComprasProps {
   onNuevaCompra: () => void;
   onVerDetalle: (compra: CompraDBExtended) => void;
   onAnularCompra: (compraId: string) => void;
+  onNotaCredito?: (compra: CompraDBExtended) => void;
+  ncResumen?: NCResumen[];
   resumen?: ResumenCompras | null;
 }
 
@@ -67,8 +70,18 @@ export default function VistaCompras({
   onNuevaCompra,
   onVerDetalle,
   onAnularCompra,
+  onNotaCredito,
+  ncResumen = [],
   resumen: _resumen
 }: VistaComprasProps): React.ReactElement {
+  // Map NC resumen by compra_id for quick lookup
+  const ncMap = useMemo(() => {
+    const map = new Map<string, NCResumen>();
+    for (const nc of ncResumen) {
+      map.set(nc.compra_id, nc);
+    }
+    return map;
+  }, [ncResumen]);
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todos');
   const [filtroProveedor, setFiltroProveedor] = useState<string>('');
@@ -341,6 +354,7 @@ export default function VistaCompras({
                 const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
                 const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
                 const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
+                const nc = ncMap.get(String(compra.id));
 
                 return (
                   <tr key={compra.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
@@ -370,14 +384,29 @@ export default function VistaCompras({
                       </div>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${estado.color}`}>
-                        {estado.label}
-                      </span>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${estado.color}`}>
+                          {estado.label}
+                        </span>
+                        {nc && (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            {nc.cantidad} NC
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className="font-semibold text-green-600 dark:text-green-400">
-                        {formatPrecio(compra.total)}
-                      </span>
+                      <div>
+                        <span className="font-semibold text-green-600 dark:text-green-400">
+                          {formatPrecio(compra.total)}
+                        </span>
+                        {nc && (
+                          <p className="text-xs text-blue-600 dark:text-blue-400">
+                            NC: -{formatPrecio(nc.total)}
+                          </p>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1">
@@ -388,6 +417,15 @@ export default function VistaCompras({
                         >
                           <Eye className="w-4 h-4" />
                         </button>
+                        {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
+                          <button
+                            onClick={() => onNotaCredito(compra)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                            title="Nota de Credito"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        )}
                         {isAdmin && compra.estado !== 'cancelada' && (
                           <button
                             onClick={() => onAnularCompra(compra.id)}
