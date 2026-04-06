@@ -26,8 +26,9 @@ function calcularAltura(pedidos) {
   pedidos.forEach(pedido => {
     totalHeight += 22 // Info básica del pedido
     const itemsCount = pedido.items?.length || 0
-    totalHeight += Math.ceil(itemsCount * 4) // Productos con nombre completo
+    totalHeight += Math.ceil(itemsCount * 5) // Productos con nombre completo + precio
     if (pedido.notas) totalHeight += 5
+    totalHeight += 5 // Total del pedido
   })
   totalHeight += 35 // Cierre de jornada
   return Math.max(totalHeight, 100)
@@ -129,13 +130,30 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
     doc.text(`${formatPrecio(pedido.total)} - ${estadoPago}`, margin, y)
     y += 3
 
-    // Productos con nombre completo
+    // Productos con nombre completo, precio y subtotal
     setNormalStyle(doc, 6)
     pedido.items?.forEach(item => {
       const productoNombre = item.producto?.nombre || 'Producto'
-      doc.text(`  ${item.cantidad}x ${productoNombre}`, margin, y)
-      y += 2.5
+      const subtotal = (item.precio_unitario || 0) * item.cantidad
+      // Nombre completo del producto (sin truncar)
+      const nombreLines = doc.splitTextToSize(`  ${item.cantidad}x ${productoNombre}`, contentWidth - 25)
+      nombreLines.forEach((line, idx) => {
+        doc.text(line, margin, y)
+        // Mostrar precio alineado a la derecha solo en la primera línea
+        if (idx === 0) {
+          doc.text(formatPrecio(subtotal), ticketWidth - margin, y, { align: 'right' })
+        }
+        y += 2.5
+      })
     })
+
+    // Total del pedido destacado
+    y += 1
+    setHeaderStyle(doc, 7)
+    doc.text('Total pedido:', margin + 2, y)
+    doc.text(formatPrecio(pedido.total), ticketWidth - margin, y, { align: 'right' })
+    y += 3
+    setNormalStyle(doc, 6)
 
     // Notas
     if (pedido.notas) {

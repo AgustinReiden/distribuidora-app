@@ -326,14 +326,67 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pagosMasivos, notify])
 
+  // Fetch todos los pedidos con filtros actuales (sin paginación) para export
+  const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
+    const hasSearch = debouncedBusqueda && debouncedBusqueda.trim().length > 0
+    const selectStr = hasSearch
+      ? '*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(*))'
+      : '*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))'
+
+    let query = supabase
+      .from('pedidos')
+      .select(selectStr)
+      .order('created_at', { ascending: false })
+
+    if (filtros.estado && filtros.estado !== 'todos') query = query.eq('estado', filtros.estado)
+    if (filtros.estadoPago && filtros.estadoPago !== 'todos') query = query.eq('estado_pago', filtros.estadoPago)
+    if (filtros.transportistaId && filtros.transportistaId !== 'todos') query = query.eq('transportista_id', filtros.transportistaId)
+    if (filtros.fechaDesde) query = query.gte('fecha', filtros.fechaDesde)
+    if (filtros.fechaHasta) query = query.lte('fecha', filtros.fechaHasta)
+    if (hasSearch) {
+      const trimmed = debouncedBusqueda!.trim()
+      query = query.or(
+        `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
+        { referencedTable: 'clientes' }
+      )
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+
+    // Enrich with perfiles
+    const perfilIds = new Set<string>()
+    for (const pedido of (data || [])) {
+      if (pedido.usuario_id) perfilIds.add(pedido.usuario_id as string)
+      if (pedido.transportista_id) perfilIds.add(pedido.transportista_id as string)
+    }
+    let perfilesMap: Record<string, PerfilDB> = {}
+    if (perfilIds.size > 0) {
+      const { data: perfiles } = await supabase
+        .from('perfiles').select('id, nombre, email').in('id', Array.from(perfilIds))
+      if (perfiles) {
+        perfilesMap = Object.fromEntries((perfiles as PerfilDB[]).map(p => [p.id, p]))
+      }
+    }
+
+    return (data || []).map(pedido => ({
+      ...pedido,
+      usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
+      transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+    })) as PedidoDB[]
+  }, [debouncedBusqueda, filtros])
+
   // Excel export (multi-sheet con ExcelJS)
-  const handleExportarExcel = useCallback(async () => {
+  const handleExportarExcel = useCallback(async (modo: 'pagina' | 'filtro' = 'pagina') => {
     setExportando(true)
     try {
       const { createMultiSheetExcel } = await import('../../utils/excel')
 
+      // Determinar qué datos exportar
+      const pedidosExport = modo === 'filtro' ? await fetchAllFilteredPedidos() : pedidos
+
       // Hoja 1: Pedidos
-      const pedidosData = pedidos.map(p => ({
+      const pedidosData = pedidosExport.map(p => ({
         ID: p.id,
         Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
         Direccion: (p.cliente as { direccion?: string })?.direccion || '',
@@ -350,7 +403,7 @@ export default function PedidosContainer(): React.ReactElement {
       }))
 
       // Hoja 2: Detalle Items
-      const itemsData = pedidos.flatMap(p =>
+      const itemsData = pedidosExport.flatMap(p =>
         (p.items || []).map(item => ({
           'Pedido ID': p.id,
           Cliente: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || '',
@@ -364,16 +417,16 @@ export default function PedidosContainer(): React.ReactElement {
 
       // Hoja 3: Resumen Estados
       const estadosCounts: Record<string, number> = {}
-      pedidos.forEach(p => { estadosCounts[p.estado] = (estadosCounts[p.estado] || 0) + 1 })
+      pedidosExport.forEach(p => { estadosCounts[p.estado] = (estadosCounts[p.estado] || 0) + 1 })
       const estadosData = Object.entries(estadosCounts).map(([estado, cantidad]) => ({
         Estado: estado,
         Cantidad: cantidad,
-        Porcentaje: `${((cantidad / pedidos.length) * 100).toFixed(1)}%`,
+        Porcentaje: `${((cantidad / pedidosExport.length) * 100).toFixed(1)}%`,
       }))
 
       // Hoja 4: Resumen Pagos
       const pagosCounts: Record<string, { cantidad: number; total: number }> = {}
-      pedidos.forEach(p => {
+      pedidosExport.forEach(p => {
         const ep = p.estado_pago || 'pendiente'
         if (!pagosCounts[ep]) pagosCounts[ep] = { cantidad: 0, total: 0 }
         pagosCounts[ep].cantidad++
@@ -385,17 +438,20 @@ export default function PedidosContainer(): React.ReactElement {
         'Total $': info.total,
       }))
 
+      const suffix = modo === 'filtro' ? 'completo' : 'pagina'
       await createMultiSheetExcel([
         { name: 'Pedidos', data: pedidosData, columnWidths: [8, 25, 30, 15, 12, 15, 12, 12, 12, 20, 20, 30, 18] },
         { name: 'Detalle Items', data: itemsData, columnWidths: [10, 25, 35, 12, 10, 12, 12] },
         { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12] },
         { name: 'Resumen Pagos', data: pagosData, columnWidths: [20, 12, 15] },
-      ], `pedidos-${new Date().toISOString().split('T')[0]}`)
+      ], `pedidos-${suffix}-${new Date().toISOString().split('T')[0]}`)
+
+      notify.success(`Excel exportado: ${pedidosExport.length} pedidos`)
     } catch {
       notify.error('Error al exportar Excel')
     }
     setExportando(false)
-  }, [pedidos, notify])
+  }, [pedidos, notify, fetchAllFilteredPedidos])
 
   // Fetch pedidos eliminados
   const fetchPedidosEliminados = useCallback(async () => {
