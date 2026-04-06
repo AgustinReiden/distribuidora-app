@@ -51,6 +51,7 @@ export interface ItemPedido {
   productoId: string
   cantidad: number
   precioUnitario: number
+  precioOverride?: boolean
 }
 
 // =============================================================================
@@ -93,6 +94,20 @@ export function resolverPreciosMayorista(
 
   // Resolver precio para cada item
   for (const item of items) {
+    // Si el precio fue overrideado manualmente, respetar el precio manual
+    if (item.precioOverride) {
+      result.set(String(item.productoId), {
+        precioOriginal: item.precioUnitario,
+        precioResuelto: item.precioUnitario,
+        esMayorista: false,
+        grupoNombre: null,
+        etiqueta: null,
+        cantidadEnGrupo: item.cantidad,
+        cantidadMinima: null
+      })
+      continue
+    }
+
     const grupos = pricingMap.get(String(item.productoId))
 
     if (!grupos || grupos.length === 0) {
@@ -225,6 +240,7 @@ export function aplicarPreciosMayorista(
   preciosResueltos: Map<string, PrecioResuelto>
 ): ItemPedido[] {
   return items.map(item => {
+    if (item.precioOverride) return item
     const resuelto = preciosResueltos.get(String(item.productoId))
     if (resuelto && resuelto.esMayorista) {
       return { ...item, precioUnitario: resuelto.precioResuelto }
