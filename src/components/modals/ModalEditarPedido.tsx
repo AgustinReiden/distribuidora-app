@@ -1,5 +1,5 @@
 import { useState, memo, useEffect, useMemo } from 'react';
-import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart } from 'lucide-react';
+import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
@@ -15,6 +15,7 @@ export interface PedidoEditItem {
   precioUnitario: number;
   cantidadOriginal: number;
   esNuevo?: boolean;
+  precioOverride?: boolean;
 }
 
 /** Datos a guardar del pedido */
@@ -68,6 +69,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [itemsModificados, setItemsModificados] = useState<boolean>(false);
   const [errorStock, setErrorStock] = useState<string | null>(null);
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [editingPriceValue, setEditingPriceValue] = useState<string>('');
 
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
@@ -91,6 +94,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Usamos el precio base (retail) de cada producto para que la resolución sea correcta
   const itemsConPrecioBase = useMemo(() => {
     return items.map(item => {
+      // Si tiene override, usar el precio manual; si no, usar precio base del producto
+      if (item.precioOverride) {
+        return {
+          productoId: item.productoId,
+          cantidad: item.cantidad,
+          precioUnitario: item.precioUnitario,
+          precioOverride: true
+        };
+      }
       const producto = productos.find(p => p.id === item.productoId);
       return {
         productoId: item.productoId,
@@ -106,10 +118,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const preciosResueltosMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of itemsConPrecioMayorista) {
-      map.set(item.productoId, item.precioUnitario);
+      // Si el item tiene override, usar su precio manual en vez del resuelto
+      const originalItem = items.find(i => i.productoId === item.productoId);
+      if (originalItem?.precioOverride) {
+        map.set(item.productoId, originalItem.precioUnitario);
+      } else {
+        map.set(item.productoId, item.precioUnitario);
+      }
     }
     return map;
-  }, [itemsConPrecioMayorista]);
+  }, [itemsConPrecioMayorista, items]);
 
   const total = itemsModificados ? totalCalculado : (pedido?.total || 0);
   const saldoPendiente = total - montoPagado;
@@ -192,6 +210,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   const handleEliminarItem = (productoId: string): void => {
     setItems(prev => prev.filter(item => item.productoId !== productoId));
+  };
+
+  const handlePrecioChange = (productoId: string, nuevoPrecio: number): void => {
+    if (nuevoPrecio <= 0) return;
+    setItems(prev => prev.map(item =>
+      item.productoId === productoId
+        ? { ...item, precioUnitario: nuevoPrecio, precioOverride: true }
+        : item
+    ));
   };
 
   const handleAgregarProducto = (producto: ProductoDB): void => {
@@ -382,9 +409,59 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       }`}
                     >
                       <div className="flex-1">
-                        <p className="font-medium text-sm dark:text-white">{item.nombre}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-medium text-sm dark:text-white">{item.nombre}</p>
+                          {item.precioOverride && (
+                            <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium shrink-0">
+                              <Pencil className="w-3 h-3" />
+                              Manual
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
-                          <span>{formatPrecio(precioResuelto)} c/u</span>
+                          {editingPriceId === item.productoId ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-orange-600">$</span>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                step="0.01"
+                                min="0.01"
+                                value={editingPriceValue}
+                                onChange={e => setEditingPriceValue(e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') {
+                                    const newPrice = parseFloat(editingPriceValue);
+                                    if (newPrice > 0) handlePrecioChange(item.productoId, newPrice);
+                                    setEditingPriceId(null);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingPriceId(null);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  const newPrice = parseFloat(editingPriceValue);
+                                  if (newPrice > 0) handlePrecioChange(item.productoId, newPrice);
+                                  setEditingPriceId(null);
+                                }}
+                                className="w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                                autoFocus
+                              />
+                              <span className="text-orange-600">c/u</span>
+                            </div>
+                          ) : (
+                            <span
+                              className={`${item.precioOverride ? 'text-orange-600 font-medium' : ''} ${isAdmin ? 'cursor-pointer hover:underline' : ''}`}
+                              onClick={() => {
+                                if (isAdmin) {
+                                  setEditingPriceId(item.productoId);
+                                  setEditingPriceValue(String(precioResuelto));
+                                }
+                              }}
+                            >
+                              {formatPrecio(precioResuelto)} c/u
+                              {isAdmin && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
+                            </span>
+                          )}
                           <span>-</span>
                           <span>Stock disp: {stockDisponible}</span>
                           {item.esNuevo && (

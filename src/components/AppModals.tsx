@@ -180,6 +180,7 @@ export interface AppModalsHandlers {
   handleClienteChange: (clienteId: string) => void;
   agregarItemPedido: (productoId: string) => void;
   actualizarCantidadItem: (productoId: string, cantidad: number) => void;
+  actualizarPrecioItem: (productoId: string, precio: number) => void;
   handleCrearClienteEnPedido: (clienteData: ClienteFormInput) => Promise<ClienteDB>;
   handleGuardarPedidoConOffline: () => Promise<void>;
   handleNotasChange: (notas: string) => void;
@@ -421,6 +422,7 @@ export default function AppModals({
               onClienteChange={handlers.handleClienteChange}
               onAgregarItem={handlers.agregarItemPedido as any}
               onActualizarCantidad={handlers.actualizarCantidadItem}
+              onActualizarPrecio={handlers.actualizarPrecioItem}
               onCrearCliente={handlers.handleCrearClienteEnPedido as any}
               onGuardar={handlers.handleGuardarPedidoConOffline}
               isOffline={!isOnline}

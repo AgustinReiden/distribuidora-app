@@ -1,5 +1,5 @@
 import { useState, useMemo, memo } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2 } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
@@ -10,6 +10,7 @@ export interface PedidoItem {
   productoId: string;
   cantidad: number;
   precioUnitario: number;
+  precioOverride?: boolean;
 }
 
 /** Estado del nuevo pedido */
@@ -83,6 +84,8 @@ export interface ModalPedidoProps {
   onMontoPagadoChange?: (monto: number) => void;
   /** Callback al cambiar fecha del pedido */
   onFechaChange?: (fecha: string) => void;
+  /** Callback al actualizar precio (solo admin) */
+  onActualizarPrecio?: (productoId: string, precio: number) => void;
   /** Si está offline */
   isOffline?: boolean;
 }
@@ -106,10 +109,13 @@ const ModalPedido = memo(function ModalPedido({
   onFormaPagoChange,
   onEstadoPagoChange,
   onMontoPagadoChange,
-  onFechaChange
+  onFechaChange,
+  onActualizarPrecio
 }: ModalPedidoProps) {
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [editingPriceValue, setEditingPriceValue] = useState<string>('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
   const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
@@ -374,17 +380,25 @@ const ModalPedido = memo(function ModalPedido({
                   const prod = productos.find(p => p.id === item.productoId);
                   const warning = getStockWarning(item.productoId, item.cantidad);
                   const precioInfo = preciosResueltos.get(String(item.productoId));
-                  const esMayorista = precioInfo?.esMayorista || false;
-                  const precioMostrar = esMayorista ? precioInfo!.precioResuelto : item.precioUnitario;
+                  const esOverride = item.precioOverride || false;
+                  const esMayorista = !esOverride && (precioInfo?.esMayorista || false);
+                  const precioMostrar = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
                   const subtotal = precioMostrar * item.cantidad;
                   const itemMoq = moqMap.get(String(item.productoId));
                   const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
+                  const isEditingPrice = editingPriceId === item.productoId;
                   return (
                     <div key={item.productoId} className="px-3 py-2.5">
                       <div className="flex justify-between items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <p className="font-medium text-sm dark:text-white truncate">{prod?.nombre}</p>
+                            {esOverride && (
+                              <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium shrink-0">
+                                <Pencil className="w-3 h-3" />
+                                Manual
+                              </span>
+                            )}
                             {esMayorista && (
                               <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium shrink-0">
                                 <Tag className="w-3 h-3" />
@@ -392,13 +406,72 @@ const ModalPedido = memo(function ModalPedido({
                               </span>
                             )}
                           </div>
-                          {esMayorista ? (
-                            <p className="text-xs">
+                          {isEditingPrice && isAdmin && onActualizarPrecio ? (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-xs text-orange-600">$</span>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                step="0.01"
+                                min="0.01"
+                                value={editingPriceValue}
+                                onChange={e => setEditingPriceValue(e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') {
+                                    const newPrice = parseFloat(editingPriceValue);
+                                    if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
+                                    setEditingPriceId(null);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingPriceId(null);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  const newPrice = parseFloat(editingPriceValue);
+                                  if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
+                                  setEditingPriceId(null);
+                                }}
+                                className="w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                                autoFocus
+                              />
+                              <span className="text-xs text-orange-600">c/u</span>
+                            </div>
+                          ) : esOverride ? (
+                            <p
+                              className={`text-xs text-orange-600 font-medium ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
+                              onClick={() => {
+                                if (isAdmin && onActualizarPrecio) {
+                                  setEditingPriceId(item.productoId);
+                                  setEditingPriceValue(String(item.precioUnitario));
+                                }
+                              }}
+                            >
+                              {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5" />}
+                            </p>
+                          ) : esMayorista ? (
+                            <p className={`text-xs ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
+                              onClick={() => {
+                                if (isAdmin && onActualizarPrecio) {
+                                  setEditingPriceId(item.productoId);
+                                  setEditingPriceValue(String(precioInfo!.precioResuelto));
+                                }
+                              }}
+                            >
                               <span className="text-gray-400 line-through">{formatPrecio(item.precioUnitario)}</span>
                               <span className="ml-1 text-green-600 font-medium">{formatPrecio(precioInfo!.precioResuelto)} c/u</span>
+                              {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-1 text-gray-400" />}
                             </p>
                           ) : (
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{formatPrecio(item.precioUnitario)} c/u</p>
+                            <p
+                              className={`text-xs text-gray-500 dark:text-gray-400 ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
+                              onClick={() => {
+                                if (isAdmin && onActualizarPrecio) {
+                                  setEditingPriceId(item.productoId);
+                                  setEditingPriceValue(String(item.precioUnitario));
+                                }
+                              }}
+                            >
+                              {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
+                            </p>
                           )}
                           {itemMoq && itemMoq > 1 && (
                             <p className="text-xs text-amber-600 mt-0.5">Min: {itemMoq} uds</p>

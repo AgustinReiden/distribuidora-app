@@ -33,6 +33,7 @@ export interface NuevoPedidoItem {
   productoId: string;
   cantidad: number;
   precioUnitario: number;
+  precioOverride?: boolean;
 }
 
 export interface NuevoPedidoState {
@@ -193,6 +194,7 @@ export interface UsePedidoHandlersReturn {
   // Item management
   agregarItemPedido: (productoId: string) => void;
   actualizarCantidadItem: (productoId: string, cantidad: number) => void;
+  actualizarPrecioItem: (productoId: string, precio: number) => void;
   handleClienteChange: (clienteId: string) => void;
   handleNotasChange: (notas: string) => void;
   handleFormaPagoChange: (formaPago: string) => void;
@@ -305,6 +307,17 @@ export function usePedidoHandlers({
     } else {
       setNuevoPedido(prev => ({ ...prev, items: prev.items.map(i => i.productoId === productoId ? { ...i, cantidad } : i) }))
     }
+  }, [setNuevoPedido])
+
+  const actualizarPrecioItem = useCallback((productoId: string, precio: number): void => {
+    setNuevoPedido(prev => ({
+      ...prev,
+      items: prev.items.map(i =>
+        i.productoId === productoId
+          ? { ...i, precioUnitario: precio, precioOverride: true }
+          : i
+      )
+    }))
   }, [setNuevoPedido])
 
   // Form field handlers
@@ -669,6 +682,7 @@ export function usePedidoHandlers({
     // Item management
     agregarItemPedido,
     actualizarCantidadItem,
+    actualizarPrecioItem,
     handleClienteChange,
     handleNotasChange,
     handleFormaPagoChange,

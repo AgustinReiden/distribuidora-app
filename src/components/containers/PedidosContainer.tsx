@@ -663,6 +663,16 @@ export default function PedidosContainer(): React.ReactElement {
                 setNuevoPedido(prev => ({ ...prev, items: prev.items.map(i => i.productoId === productoId ? { ...i, cantidad } : i) }))
               }
             }}
+            onActualizarPrecio={(productoId: string, precio: number) => {
+              setNuevoPedido(prev => ({
+                ...prev,
+                items: prev.items.map(i =>
+                  i.productoId === productoId
+                    ? { ...i, precioUnitario: precio, precioOverride: true }
+                    : i
+                )
+              }))
+            }}
             onCrearCliente={async (clienteData: Record<string, unknown>) => {
               try {
                 const dbData = {
