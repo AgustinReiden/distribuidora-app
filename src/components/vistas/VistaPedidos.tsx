@@ -4,7 +4,8 @@
  * Recibe datos ya paginados server-side desde PedidosContainer.
  * Renderiza lista + controles de paginación.
  */
-import { ShoppingCart, Plus, Route, FileDown, Trash2, PackageCheck, Banknote } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { ShoppingCart, Plus, Route, FileDown, Trash2, PackageCheck, Banknote, ChevronDown } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
@@ -44,7 +45,7 @@ export interface VistaPedidosProps {
   onNuevoPedido: () => void;
   onOptimizarRuta: () => void;
   onExportarPDF: () => void;
-  onExportarExcel: () => void;
+  onExportarExcel: (modo: 'pagina' | 'filtro') => void;
   onModalFiltroFecha: () => void;
   onVerHistorial: (pedido: PedidoDB) => void;
   onEditarPedido: (pedido: PedidoDB) => void;
@@ -137,14 +138,7 @@ export default function VistaPedidos({
             </button>
           )}
           {isAdmin && (
-            <button
-              onClick={onExportarExcel}
-              disabled={exportando}
-              className="flex items-center space-x-2 px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors"
-            >
-              <FileDown className="w-5 h-5" />
-              <span>Excel</span>
-            </button>
+            <ExcelExportDropdown exportando={exportando} onExportarExcel={onExportarExcel} totalCount={totalCount} />
           )}
           {isAdmin && onEntregasMasivas && (
             <button
@@ -243,6 +237,63 @@ export default function VistaPedidos({
             itemsLabel="pedidos"
           />
         </>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// EXCEL EXPORT DROPDOWN
+// =============================================================================
+
+function ExcelExportDropdown({
+  exportando,
+  onExportarExcel,
+  totalCount
+}: {
+  exportando: boolean;
+  onExportarExcel: (modo: 'pagina' | 'filtro') => void;
+  totalCount: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={exportando}
+        className="flex items-center space-x-2 px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50"
+      >
+        <FileDown className="w-5 h-5" />
+        <span>{exportando ? 'Exportando...' : 'Excel'}</span>
+        <ChevronDown className="w-4 h-4" />
+      </button>
+      {open && !exportando && (
+        <div className="absolute right-0 mt-1 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border dark:border-gray-700 z-50 overflow-hidden">
+          <button
+            onClick={() => { onExportarExcel('pagina'); setOpen(false); }}
+            className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white border-b dark:border-gray-700"
+          >
+            <p className="font-medium">Página actual</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Solo los pedidos visibles en pantalla</p>
+          </button>
+          <button
+            onClick={() => { onExportarExcel('filtro'); setOpen(false); }}
+            className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white"
+          >
+            <p className="font-medium">Filtro actual ({totalCount} pedidos)</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Todos los pedidos que coinciden con el filtro</p>
+          </button>
+        </div>
       )}
     </div>
   );

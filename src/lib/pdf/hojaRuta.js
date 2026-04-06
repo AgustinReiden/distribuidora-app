@@ -26,7 +26,7 @@ function calcularAltura(pedidos) {
   pedidos.forEach(pedido => {
     totalHeight += 30 // Info básica del pedido
     const itemsCount = pedido.items?.length || 0
-    totalHeight += Math.ceil(itemsCount * 4) // Productos resumidos
+    totalHeight += Math.ceil(itemsCount * 5) // Productos con nombre completo + precio
     if (pedido.notas) totalHeight += 6
   })
   totalHeight += 25 // Pie de página
@@ -117,15 +117,19 @@ export function generarHojaRuta(transportista, pedidos) {
     doc.text(`${formaPagoTexto} | ${estadoPago.label}`, margin, y)
     y += 3
 
-    // Productos (formato compacto)
+    // Productos con nombre completo y precio
     doc.setFontSize(6)
-    const productosTexto = pedido.items?.map(i =>
-      `${i.cantidad}x${truncate(i.producto?.nombre || '?', 12)}`
-    ).join(', ') || ''
-    const prodLines = doc.splitTextToSize(productosTexto, ticketWidth - (margin * 2))
-    prodLines.slice(0, 2).forEach(line => {
-      doc.text(line, margin, y)
-      y += 3
+    pedido.items?.forEach(item => {
+      const productoNombre = item.producto?.nombre || 'Producto'
+      const subtotal = (item.precio_unitario || 0) * item.cantidad
+      const nombreLines = doc.splitTextToSize(`  ${item.cantidad}x ${productoNombre}`, ticketWidth - (margin * 2) - 20)
+      nombreLines.forEach((line, idx) => {
+        doc.text(line, margin, y)
+        if (idx === 0) {
+          doc.text(formatPrecio(subtotal), ticketWidth - margin, y, { align: 'right' })
+        }
+        y += 2.5
+      })
     })
 
     // Notas

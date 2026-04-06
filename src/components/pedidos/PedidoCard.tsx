@@ -9,9 +9,9 @@
  */
 import React, { useState, memo, useContext } from 'react';
 import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle } from 'lucide-react';
-const generarReciboPedido = async (...args: Parameters<typeof import('../../lib/pdfExport').generarReciboPedido>) => {
-  const mod = await import('../../lib/pdfExport')
-  return mod.generarReciboPedido(...args)
+const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda' } = {}) => {
+  const mod = await import('../../lib/pdfExport') as any
+  return mod.generarReciboPedido(pedido, _empresa, options)
 };
 import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
@@ -253,14 +253,7 @@ function PedidoCard({
           </div>
           <div className="flex items-center gap-2">
             {pedido.estado_pago === 'pagado' && (
-              <button
-                onClick={() => pedido.cliente && generarReciboPedido(pedido, pedido.cliente)}
-                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
-                title="Descargar recibo PDF"
-              >
-                <FileDown className="w-4 h-4" />
-                <span className="hidden sm:inline">Recibo PDF</span>
-              </button>
+              <ReciboDropdown pedido={pedido} />
             )}
             <button
               onClick={() => setExpandido(!expandido)}
@@ -424,6 +417,59 @@ function PedidoCard({
               </p>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Dropdown para elegir formato de recibo
+function ReciboDropdown({ pedido }: { pedido: PedidoDB }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const handleExport = async (formato: 'a4' | 'comanda') => {
+    setOpen(false);
+    if (pedido.cliente) {
+      await generarReciboPedido(pedido, pedido.cliente, { formato });
+    }
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
+        title="Descargar recibo PDF"
+      >
+        <FileDown className="w-4 h-4" />
+        <span className="hidden sm:inline">Recibo</span>
+        <ChevronDown className="w-3 h-3" />
+      </button>
+      {open && (
+        <div className="absolute right-0 bottom-full mb-1 w-44 bg-white dark:bg-gray-800 rounded-lg shadow-lg border dark:border-gray-700 z-50 overflow-hidden">
+          <button
+            onClick={() => handleExport('a4')}
+            className="w-full px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white border-b dark:border-gray-700"
+          >
+            <p className="font-medium">Hoja A4</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Formato profesional</p>
+          </button>
+          <button
+            onClick={() => handleExport('comanda')}
+            className="w-full px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white"
+          >
+            <p className="font-medium">Comanda</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Ticket 75mm</p>
+          </button>
         </div>
       )}
     </div>
