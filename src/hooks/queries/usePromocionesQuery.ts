@@ -34,6 +34,7 @@ export interface PromocionFormInput {
   fechaInicio: string
   fechaFin?: string | null
   productoIds: string[]
+  productoRegaloId?: string | null
   reglas: { clave: string; valor: number }[]
 }
 
@@ -103,6 +104,7 @@ async function fetchPromoMap(): Promise<PromoMap> {
       tipo: promo.tipo,
       productoIds,
       reglas: reglasMap,
+      productoRegaloId: promo.producto_regalo_id ? String(promo.producto_regalo_id) : undefined,
     }
 
     for (const productoId of productoIds) {
@@ -164,6 +166,7 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
       tipo: input.tipo,
       fecha_inicio: input.fechaInicio,
       fecha_fin: input.fechaFin || null,
+      producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
     }])
     .select()
     .single()
@@ -221,6 +224,7 @@ async function updatePromocion(
       tipo: input.tipo,
       fecha_inicio: input.fechaInicio,
       fecha_fin: input.fechaFin || null,
+      producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
     })
     .eq('id', id)
     .select()

@@ -30,6 +30,7 @@ import {
 export interface ItemPedidoConPromo extends ItemPedido {
   esBonificacion?: boolean
   promoNombre?: string
+  promoId?: string
 }
 
 interface UsePromocionPedidoReturn {
@@ -124,6 +125,7 @@ export function usePromocionPedido(items: ItemPedido[]): UsePromocionPedidoRetur
         precioUnitario: 0,
         esBonificacion: true,
         promoNombre: bonif.promoNombre,
+        promoId: bonif.promoId,
       })
     }
 

@@ -2,13 +2,21 @@
 --
 -- Cambios:
 --   1. Agregar columna promocion_id a pedido_items para trazabilidad
---   2. Actualizar RPCs para incluir promocion_id en INSERT y usar v_cantidad en contador
+--   2. Agregar columna producto_regalo_id a promociones (producto que se regala)
+--   3. Actualizar RPCs para incluir promocion_id en INSERT y usar v_cantidad en contador
 
 -- =============================================================================
 -- 1. Agregar promocion_id a pedido_items
 -- =============================================================================
 
 ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS promocion_id BIGINT REFERENCES promociones(id) ON DELETE SET NULL;
+
+-- =============================================================================
+-- 2. Agregar producto_regalo_id a promociones
+-- =============================================================================
+
+ALTER TABLE promociones ADD COLUMN IF NOT EXISTS producto_regalo_id BIGINT REFERENCES productos(id) ON DELETE SET NULL;
+COMMENT ON COLUMN promociones.producto_regalo_id IS 'Producto específico que se regala en la bonificación (si NULL, se usa el primer producto del pedido)';
 
 -- =============================================================================
 -- 2. RPC crear_pedido_completo — incluir promocion_id + contador por cantidad

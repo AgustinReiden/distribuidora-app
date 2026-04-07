@@ -5,7 +5,7 @@
  * Incluye: nombre, fechas, selector de productos, reglas (cantidad_compra, cantidad_bonificacion).
  */
 import { useState, useMemo } from 'react'
-import { X, Search } from 'lucide-react'
+import { X, Search, Gift } from 'lucide-react'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 
@@ -42,7 +42,11 @@ export default function ModalPromocion({
       return regla ? String(Number(regla.valor)) : ''
     }
   )
+  const [productoRegaloId, setProductoRegaloId] = useState<string>(
+    promocion?.producto_regalo_id ? String(promocion.producto_regalo_id) : ''
+  )
   const [busqueda, setBusqueda] = useState('')
+  const [busquedaRegalo, setBusquedaRegalo] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -54,6 +58,15 @@ export default function ModalPromocion({
       p.codigo?.toLowerCase().includes(q)
     )
   }, [productos, busqueda])
+
+  const productosRegaloFiltrados = useMemo(() => {
+    if (!busquedaRegalo.trim()) return productos
+    const q = busquedaRegalo.toLowerCase()
+    return productos.filter(p =>
+      p.nombre.toLowerCase().includes(q) ||
+      p.codigo?.toLowerCase().includes(q)
+    )
+  }, [productos, busquedaRegalo])
 
   const handleToggleProducto = (id: string) => {
     setProductoIds(prev => {
@@ -97,6 +110,7 @@ export default function ModalPromocion({
       fechaInicio,
       fechaFin: fechaFin || null,
       productoIds: Array.from(productoIds),
+      productoRegaloId: productoRegaloId || null,
       reglas: [
         { clave: 'cantidad_compra', valor: compra },
         { clave: 'cantidad_bonificacion', valor: bonif },
@@ -192,10 +206,63 @@ export default function ModalPromocion({
             )}
           </div>
 
-          {/* Selector de productos */}
+          {/* Producto regalo */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Productos ({productoIds.size} seleccionados)
+              Producto de regalo
+            </label>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+              El producto que se entrega gratis al cumplir la condicion
+            </p>
+            {productoRegaloId && (
+              <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />
+                <span className="text-sm text-green-700 dark:text-green-300 font-medium flex-1">
+                  {productos.find(p => String(p.id) === productoRegaloId)?.nombre || `Producto #${productoRegaloId}`}
+                </span>
+                <button
+                  onClick={() => setProductoRegaloId('')}
+                  className="text-green-600 hover:text-green-800 text-xs underline"
+                >
+                  Quitar
+                </button>
+              </div>
+            )}
+            <div className="relative mb-2">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={busquedaRegalo}
+                onChange={e => setBusquedaRegalo(e.target.value)}
+                placeholder="Buscar producto de regalo..."
+                className="w-full pl-9 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-green-500 focus:outline-none text-sm"
+              />
+            </div>
+            {busquedaRegalo.trim() && (
+              <div className="max-h-32 overflow-y-auto border dark:border-gray-600 rounded-lg divide-y dark:divide-gray-700">
+                {productosRegaloFiltrados.map(prod => (
+                  <button
+                    key={prod.id}
+                    onClick={() => { setProductoRegaloId(String(prod.id)); setBusquedaRegalo('') }}
+                    className={`w-full text-left flex items-center gap-2 px-3 py-2 hover:bg-green-50 dark:hover:bg-green-900/20 text-sm ${
+                      String(prod.id) === productoRegaloId ? 'bg-green-50 dark:bg-green-900/20' : ''
+                    }`}
+                  >
+                    <Gift className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                    <span className="dark:text-white truncate">{prod.nombre}</span>
+                  </button>
+                ))}
+                {productosRegaloFiltrados.length === 0 && (
+                  <p className="text-sm text-gray-400 px-3 py-4 text-center">Sin resultados</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Selector de productos (que activan la promo) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Productos que activan la promo ({productoIds.size} seleccionados)
             </label>
             <div className="relative mb-2">
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
