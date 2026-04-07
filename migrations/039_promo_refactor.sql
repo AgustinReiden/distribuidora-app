@@ -5,7 +5,8 @@
 --   2. Agregar columna usos_pendientes para contador de uso de promos
 --   3. Agregar motivo 'promociones' al CHECK de mermas_stock
 --   4. Tabla promo_ajustes para historial de ajustes de stock
---   5. RPCs: bonificaciones NO descuentan stock + incrementan usos_pendientes
+--   5. Drop old integer-signature RPC (from migration 008) to avoid ambiguity
+--   6. RPCs: bonificaciones NO descuentan stock + incrementan usos_pendientes
 
 -- =============================================================================
 -- 1. Simplificar CHECK de tipo (solo bonificacion)
@@ -56,7 +57,13 @@ CREATE POLICY "Users can view promo_ajustes" ON promo_ajustes
 CREATE INDEX IF NOT EXISTS idx_promo_ajustes_promocion ON promo_ajustes(promocion_id);
 
 -- =============================================================================
--- 5. RPC crear_pedido_completo — bonificaciones NO descuentan stock
+-- 5. Drop old integer-signature RPC to avoid ambiguous function call
+-- =============================================================================
+
+DROP FUNCTION IF EXISTS public.crear_pedido_completo(integer, numeric, uuid, jsonb, text, text, text, date);
+
+-- =============================================================================
+-- 6. RPC crear_pedido_completo — bonificaciones NO descuentan stock
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.crear_pedido_completo(

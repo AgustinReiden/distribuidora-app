@@ -4,6 +4,9 @@
  * Tipos de promoción soportados:
  *   1. bonificacion: Compra X, lleva Y gratis (acumulable)
  *
+ * La cantidad se acumula entre TODOS los productos de la misma promo.
+ * Ejemplo: promo "Manaos 2+2" con 3 sabores → 1 de cada uno = 3 total → aplica 1 vez.
+ *
  * Las promociones tienen prioridad sobre los precios mayoristas:
  * si un producto tiene promo activa, se usa la promo en vez del mayorista.
  */
@@ -44,9 +47,9 @@ export interface PromoResolucion {
 /**
  * Resuelve todas las promociones activas para los items del pedido.
  *
- * @param items - Items del pedido actual
- * @param promoMap - Mapa de productoId → promos activas
- * @returns Bonificaciones a agregar y set de productos con promo
+ * La bonificación se calcula sumando cantidades de TODOS los productos
+ * que pertenecen a la misma promo (igual que las escalas mayoristas por grupo).
+ * La bonificación se asigna al primer producto del pedido que pertenece a la promo.
  */
 export function resolverPromociones(
   items: ItemPedido[],
@@ -55,6 +58,9 @@ export function resolverPromociones(
   const bonificaciones: BonificacionResult[] = []
   const productosConPromo = new Set<string>()
 
+  // Recolectar todas las promos únicas que aplican a items del pedido
+  const promosVistas = new Map<string, { promo: PromocionActiva; totalQty: number; primerProductoId: string }>()
+
   for (const item of items) {
     if (item.precioOverride) continue
 
@@ -62,45 +68,43 @@ export function resolverPromociones(
     if (!promos) continue
 
     for (const promo of promos) {
-      if (promo.tipo === 'bonificacion') {
-        const result = resolverBonificacion(item, promo)
-        if (result) {
-          bonificaciones.push(result)
-          productosConPromo.add(String(item.productoId))
-        }
+      if (promo.tipo !== 'bonificacion') continue
+
+      const existing = promosVistas.get(promo.id)
+      if (existing) {
+        existing.totalQty += item.cantidad
+      } else {
+        promosVistas.set(promo.id, {
+          promo,
+          totalQty: item.cantidad,
+          primerProductoId: String(item.productoId),
+        })
       }
+
+      // Marcar este producto como parte de una promo
+      productosConPromo.add(String(item.productoId))
     }
   }
 
-  return { bonificaciones, productosConPromo }
-}
+  // Resolver bonificación para cada promo usando el total acumulado
+  for (const [, { promo, totalQty, primerProductoId }] of promosVistas) {
+    const cantCompra = promo.reglas['cantidad_compra']
+    const cantBonif = promo.reglas['cantidad_bonificacion']
 
-// =============================================================================
-// RESOLUCIÓN POR TIPO
-// =============================================================================
+    if (!cantCompra || !cantBonif || cantCompra <= 0) continue
 
-/**
- * Resuelve una promo de bonificación para un item.
- * Acumulable: cada N unidades compradas se bonifican M.
- */
-function resolverBonificacion(
-  item: ItemPedido,
-  promo: PromocionActiva
-): BonificacionResult | null {
-  const cantCompra = promo.reglas['cantidad_compra']
-  const cantBonif = promo.reglas['cantidad_bonificacion']
+    const bloques = Math.floor(totalQty / cantCompra)
+    if (bloques <= 0) continue
 
-  if (!cantCompra || !cantBonif || cantCompra <= 0) return null
-
-  const bloques = Math.floor(item.cantidad / cantCompra)
-  if (bloques <= 0) return null
-
-  return {
-    productoId: String(item.productoId),
-    promoId: promo.id,
-    promoNombre: promo.nombre,
-    cantidadBonificacion: bloques * cantBonif,
+    bonificaciones.push({
+      productoId: primerProductoId,
+      promoId: promo.id,
+      promoNombre: promo.nombre,
+      cantidadBonificacion: bloques * cantBonif,
+    })
   }
+
+  return { bonificaciones, productosConPromo }
 }
 
 // =============================================================================
@@ -109,13 +113,16 @@ function resolverBonificacion(
 
 /**
  * Calcula cuánto falta para activar una bonificación.
- * Útil para nudges tipo "agrega X más para recibir Y gratis".
+ * Usa cantidad acumulada de todos los productos de la promo.
  */
 export function calcularFaltanteParaBonificacion(
   items: ItemPedido[],
   promoMap: PromoMap
 ): Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }> {
   const faltantes: Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }> = []
+
+  // Acumular cantidades por promo
+  const promosAcumuladas = new Map<string, { promo: PromocionActiva; totalQty: number; primerProductoId: string }>()
 
   for (const item of items) {
     const promos = promoMap.get(String(item.productoId))
@@ -124,23 +131,36 @@ export function calcularFaltanteParaBonificacion(
     for (const promo of promos) {
       if (promo.tipo !== 'bonificacion') continue
 
-      const cantCompra = promo.reglas['cantidad_compra']
-      const cantBonif = promo.reglas['cantidad_bonificacion']
-      if (!cantCompra || !cantBonif) continue
-
-      const resto = item.cantidad % cantCompra
-      if (resto === 0) continue // Ya califica exacto
-
-      const faltante = cantCompra - resto
-      // Solo mostrar nudge si falta poco (menos del 50%)
-      if (faltante <= Math.ceil(cantCompra * 0.5)) {
-        faltantes.push({
-          productoId: String(item.productoId),
-          promoNombre: promo.nombre,
-          faltante,
-          bonificacion: cantBonif,
+      const existing = promosAcumuladas.get(promo.id)
+      if (existing) {
+        existing.totalQty += item.cantidad
+      } else {
+        promosAcumuladas.set(promo.id, {
+          promo,
+          totalQty: item.cantidad,
+          primerProductoId: String(item.productoId),
         })
       }
+    }
+  }
+
+  for (const [, { promo, totalQty, primerProductoId }] of promosAcumuladas) {
+    const cantCompra = promo.reglas['cantidad_compra']
+    const cantBonif = promo.reglas['cantidad_bonificacion']
+    if (!cantCompra || !cantBonif) continue
+
+    const resto = totalQty % cantCompra
+    if (resto === 0) continue // Ya califica exacto
+
+    const faltante = cantCompra - resto
+    // Solo mostrar nudge si falta poco (menos del 50%)
+    if (faltante <= Math.ceil(cantCompra * 0.5)) {
+      faltantes.push({
+        productoId: primerProductoId,
+        promoNombre: promo.nombre,
+        faltante,
+        bonificacion: cantBonif,
+      })
     }
   }
 
