@@ -1,8 +1,8 @@
 import { useState, useMemo, memo } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
-import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
+import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -189,7 +189,10 @@ const ModalPedido = memo(function ModalPedido({
   const getStockWarning = (productoId: string, cantidadEnPedido: number): StockWarning | null => {
     const producto = productos.find(p => p.id === productoId);
     if (!producto) return null;
-    const stockDisponible = producto.stock - cantidadEnPedido;
+    // Sumar cantidad de bonificación al cálculo de stock
+    const bonif = promoResolucion.bonificaciones.find(b => b.productoId === productoId);
+    const cantidadTotal = cantidadEnPedido + (bonif?.cantidadBonificacion || 0);
+    const stockDisponible = producto.stock - cantidadTotal;
     const stockMinimo = producto.stock_minimo || 10;
     if (stockDisponible < 0) return { tipo: 'error', mensaje: `Sin stock! Disponible: ${producto.stock}` };
     if (stockDisponible < stockMinimo) return { tipo: 'warning', mensaje: `Stock bajo: quedaran ${stockDisponible}` };
@@ -198,8 +201,8 @@ const ModalPedido = memo(function ModalPedido({
 
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
-  // Precios mayoristas y cantidades mínimas
-  const { preciosResueltos, faltantes, totalMayorista, totalOriginal, ahorro, hayMayorista, moqMap, violacionesMOQ } = usePrecioMayorista(nuevoPedido.items);
+  // Precios mayoristas, promociones y cantidades mínimas
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, totalFinal, totalOriginal, ahorro, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -380,10 +383,12 @@ const ModalPedido = memo(function ModalPedido({
                   const prod = productos.find(p => p.id === item.productoId);
                   const warning = getStockWarning(item.productoId, item.cantidad);
                   const precioInfo = preciosResueltos.get(String(item.productoId));
+                  const precioParInfo = promoResolucion.preciosPar.get(String(item.productoId));
                   const esOverride = item.precioOverride || false;
-                  const esMayorista = !esOverride && (precioInfo?.esMayorista || false);
+                  const esMayorista = !esOverride && !precioParInfo && (precioInfo?.esMayorista || false);
+                  const esPromoPar = !esOverride && !!precioParInfo;
                   const precioMostrar = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
-                  const subtotal = precioMostrar * item.cantidad;
+                  const subtotal = esPromoPar ? precioParInfo!.subtotalPromo : precioMostrar * item.cantidad;
                   const itemMoq = moqMap.get(String(item.productoId));
                   const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
                   const isEditingPrice = editingPriceId === item.productoId;
@@ -403,6 +408,12 @@ const ModalPedido = memo(function ModalPedido({
                               <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium shrink-0">
                                 <Tag className="w-3 h-3" />
                                 {precioInfo?.etiqueta || 'Mayorista'}
+                              </span>
+                            )}
+                            {esPromoPar && (
+                              <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full font-medium shrink-0">
+                                <Tag className="w-3 h-3" />
+                                Promo
                               </span>
                             )}
                           </div>
@@ -460,6 +471,11 @@ const ModalPedido = memo(function ModalPedido({
                               <span className="ml-1 text-green-600 font-medium">{formatPrecio(precioInfo!.precioResuelto)} c/u</span>
                               {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-1 text-gray-400" />}
                             </p>
+                          ) : esPromoPar ? (
+                            <p className="text-xs">
+                              <span className="text-gray-400 line-through">{formatPrecio(precioParInfo!.precioEfectivo !== item.precioUnitario ? item.precioUnitario : 0)}</span>
+                              <span className="ml-1 text-purple-600 font-medium">{formatPrecio(precioParInfo!.precioEfectivo)} c/u</span>
+                            </p>
                           ) : (
                             <p
                               className={`text-xs text-gray-500 dark:text-gray-400 ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
@@ -472,6 +488,9 @@ const ModalPedido = memo(function ModalPedido({
                             >
                               {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
                             </p>
+                          )}
+                          {esPromoPar && (
+                            <p className="text-xs text-purple-600 mt-0.5">{precioParInfo!.detalle}</p>
                           )}
                           {itemMoq && itemMoq > 1 && (
                             <p className="text-xs text-amber-600 mt-0.5">Min: {itemMoq} uds</p>
@@ -489,6 +508,30 @@ const ModalPedido = memo(function ModalPedido({
                     </div>
                   );
                 })}
+                {/* Items de bonificación (gratis) */}
+                {promoResolucion.bonificaciones.map(bonif => {
+                  const prod = productos.find(p => p.id === bonif.productoId);
+                  return (
+                    <div key={`bonif-${bonif.productoId}`} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-medium text-sm text-green-700 dark:text-green-400 truncate">{prod?.nombre}</p>
+                            <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-200 text-green-800 rounded-full font-medium shrink-0">
+                              <Gift className="w-3 h-3" />
+                              Bonificacion
+                            </span>
+                          </div>
+                          <p className="text-xs text-green-600 dark:text-green-400">{bonif.promoNombre}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="w-6 text-center font-medium text-sm text-green-700 dark:text-green-400">{bonif.cantidadBonificacion}</span>
+                          <p className="w-20 text-right font-semibold text-sm text-green-600">GRATIS</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Nudges para alcanzar siguiente tier */}
@@ -499,6 +542,20 @@ const ModalPedido = memo(function ModalPedido({
                       Agrega {f.faltante} mas de <strong>{f.grupoNombre}</strong> para precio {f.etiqueta || 'mayorista'} ({formatPrecio(f.precioTier)} c/u)
                     </p>
                   ))}
+                </div>
+              )}
+
+              {/* Nudges para alcanzar bonificación */}
+              {faltantesBonificacion.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {faltantesBonificacion.map((f, i) => {
+                    const prod = productos.find(p => p.id === f.productoId);
+                    return (
+                      <p key={`bonif-nudge-${i}`} className="text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-1.5 rounded-lg">
+                        Agrega {f.faltante} mas de <strong>{prod?.nombre || f.promoNombre}</strong> y te llevas {f.bonificacion} gratis!
+                      </p>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -577,10 +634,10 @@ const ModalPedido = memo(function ModalPedido({
           <div className="flex justify-between items-center mb-4">
             <span className="text-lg font-medium">Total</span>
             <div className="text-right">
-              {hayMayorista ? (
+              {hayDescuento ? (
                 <>
                   <span className="text-sm text-gray-400 line-through mr-2">{formatPrecio(totalOriginal)}</span>
-                  <span className="text-2xl font-bold text-green-600">{formatPrecio(totalMayorista)}</span>
+                  <span className="text-2xl font-bold text-green-600">{formatPrecio(totalFinal)}</span>
                   <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(ahorro)}</p>
                 </>
               ) : (

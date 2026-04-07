@@ -5,9 +5,10 @@
  */
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { useLatestRef } from '../useLatestRef'
-import { calcularTotalPedido } from '../useAppState'
 import { usePricingMapQuery } from '../queries/useGruposPrecioQuery'
+import { usePromoMapQuery } from '../queries/usePromocionesQuery'
 import { resolverPreciosMayorista, aplicarPreciosMayorista, validarMOQPedido } from '../../utils/precioMayorista'
+import { resolverPromociones } from '../../utils/promociones'
 import type { User } from '@supabase/supabase-js'
 import type {
   ProductoDB,
@@ -278,6 +279,10 @@ export function usePedidoHandlers({
   const { data: pricingMap } = usePricingMapQuery()
   const pricingMapRef = useLatestRef(pricingMap)
 
+  // Promo map for active promotions
+  const { data: promoMap } = usePromoMapQuery()
+  const promoMapRef = useLatestRef(promoMap)
+
   // ==========================================================================
   // HANDLERS - Usan refs para valores frecuentes, deps estables para funciones
   // ==========================================================================
@@ -379,18 +384,58 @@ export function usePedidoHandlers({
       }
     }
 
-    // Aplicar precios mayoristas si hay pricing map disponible
+    // Resolver promociones activas
+    const currentPromoMap = promoMapRef.current
+    let promoResolucion = { bonificaciones: [] as Array<{ productoId: string; promoNombre: string; cantidadBonificacion: number }>, preciosPar: new Map<string, { subtotalPromo: number }>(), productosConPromo: new Set<string>() }
+    if (currentPromoMap && currentPromoMap.size > 0) {
+      promoResolucion = resolverPromociones(nuevoPedido.items, currentPromoMap)
+    }
+
+    // Aplicar precios mayoristas (excluyendo productos con promo)
     let itemsFinales = nuevoPedido.items
     if (currentPricingMap && currentPricingMap.size > 0) {
-      const preciosResueltos = resolverPreciosMayorista(nuevoPedido.items, currentPricingMap)
-      itemsFinales = aplicarPreciosMayorista(nuevoPedido.items, preciosResueltos)
+      const itemsSinPromo = nuevoPedido.items.filter(i => !promoResolucion.productosConPromo.has(String(i.productoId)))
+      if (itemsSinPromo.length > 0) {
+        const preciosResueltos = resolverPreciosMayorista(itemsSinPromo, currentPricingMap)
+        itemsFinales = aplicarPreciosMayorista(nuevoPedido.items, preciosResueltos)
+      }
     }
-    const totalFinal = calcularTotalPedido(itemsFinales)
+
+    // Aplicar subtotal override para items con precio por pares
+    const itemsConPromo = itemsFinales.map(item => {
+      const precioPar = promoResolucion.preciosPar.get(String(item.productoId))
+      if (precioPar) {
+        return { ...item, subtotalOverride: precioPar.subtotalPromo }
+      }
+      return item
+    })
+
+    // Agregar items de bonificación
+    const itemsBonificacion = promoResolucion.bonificaciones.map(b => ({
+      productoId: b.productoId,
+      cantidad: b.cantidadBonificacion,
+      precioUnitario: 0,
+      esBonificacion: true as const,
+    }))
+
+    const todosLosItems = [...itemsConPromo, ...itemsBonificacion]
+
+    // Calcular total (solo items no bonificados, usando subtotalOverride cuando existe)
+    let totalFinal = 0
+    for (const item of todosLosItems) {
+      if ('esBonificacion' in item && item.esBonificacion) continue
+      const override = (item as { subtotalOverride?: number }).subtotalOverride
+      if (override != null) {
+        totalFinal += override
+      } else {
+        totalFinal += item.precioUnitario * item.cantidad
+      }
+    }
 
     if (!isOnline) {
       guardarPedidoOffline({
         clienteId: parseInt(nuevoPedido.clienteId),
-        items: itemsFinales,
+        items: todosLosItems,
         total: totalFinal,
         usuarioId: user?.id ?? '',
         notas: nuevoPedido.notas,
@@ -413,7 +458,7 @@ export function usePedidoHandlers({
     try {
       const pedidoCreado = await crearPedido(
         parseInt(nuevoPedido.clienteId),
-        itemsFinales,
+        todosLosItems,
         totalFinal,
         user?.id ?? '',
         descontarStock,
@@ -443,7 +488,7 @@ export function usePedidoHandlers({
       notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, productosRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
+  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, promoMapRef, productosRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
   const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {
