@@ -175,11 +175,23 @@ export default function VistaPromociones({
                   <div className="mb-3 px-3 py-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
                     <p className="text-sm font-medium text-purple-700 dark:text-purple-300">
                       <Gift className="w-4 h-4 inline mr-1" />
-                      Compra {cantCompra} → Lleva {cantBonif} gratis
+                      Comprando {cantCompra} fardos → {cantBonif} {promo.producto_regalo_id ? getProductoNombre(String(promo.producto_regalo_id)) : 'del mismo producto'} gratis
                       <span className="text-xs text-purple-500 ml-2">(acumulable)</span>
                     </p>
                   </div>
                 )}
+
+                {/* Contador de usos */}
+                <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center justify-between">
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    <span className="font-medium">Unidades regaladas:</span> {promo.usos_pendientes} pendientes de ajuste
+                  </p>
+                  {promo.usos_pendientes > 0 && (
+                    <span className="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded-full font-medium">
+                      Ajustar stock
+                    </span>
+                  )}
+                </div>
 
                 {/* Productos */}
                 <div className="mb-3">

@@ -23,6 +23,7 @@ export interface PromocionActiva {
   tipo: 'bonificacion'
   productoIds: string[]
   reglas: Record<string, number>
+  productoRegaloId?: string
 }
 
 /** Mapa de productoId → promos activas que aplican */
@@ -97,7 +98,7 @@ export function resolverPromociones(
     if (bloques <= 0) continue
 
     bonificaciones.push({
-      productoId: primerProductoId,
+      productoId: promo.productoRegaloId || primerProductoId,
       promoId: promo.id,
       promoNombre: promo.nombre,
       cantidadBonificacion: bloques * cantBonif,

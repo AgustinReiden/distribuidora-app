@@ -1403,6 +1403,8 @@ export interface PromocionDB {
   activo: boolean;
   fecha_inicio: string;
   fecha_fin: string | null;
+  producto_regalo_id?: string | null;
+  usos_pendientes?: number;
   created_at: string;
   updated_at: string;
 }

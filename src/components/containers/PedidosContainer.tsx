@@ -25,7 +25,7 @@ import {
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
-import { usePrecioMayorista } from '../../hooks/usePrecioMayorista'
+import { usePromocionPedido } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { supabase } from '../../hooks/supabase/base'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
@@ -161,7 +161,7 @@ export default function PedidosContainer(): React.ReactElement {
   }, [])
 
   // Resolve wholesale prices for current pedido items
-  const { itemsConPrecioMayorista, totalMayorista } = usePrecioMayorista(nuevoPedido.items)
+  const { itemsFinales, totalFinal } = usePromocionPedido(nuevoPedido.items)
 
   // =========================================================================
   // VistaPedidos handlers
@@ -527,11 +527,18 @@ export default function PedidosContainer(): React.ReactElement {
     }
     setGuardando(true)
     try {
-      // Use wholesale-resolved items and total (falls back to original if no mayorista applies)
+      // Use promo+wholesale-resolved items and total (includes bonificaciones)
+      const itemsParaCrear = itemsFinales.map(item => ({
+        productoId: String(item.productoId),
+        cantidad: item.cantidad,
+        precioUnitario: item.precioUnitario,
+        ...(item.esBonificacion ? { esBonificacion: true as const } : {}),
+        ...(item.promoId ? { promocionId: item.promoId } : {}),
+      }))
       await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
-        items: itemsConPrecioMayorista,
-        total: totalMayorista,
+        items: itemsParaCrear,
+        total: totalFinal,
         usuarioId: user?.id ?? null,
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
@@ -546,7 +553,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsConPrecioMayorista, totalMayorista, crearPedido, user, resetNuevoPedido, notify])
+  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify])
 
   // ModalFiltroFecha: onApply({ fechaDesde, fechaHasta })
   const handleFiltroFechaApply = useCallback((f: { fechaDesde: string | null; fechaHasta: string | null }) => {
