@@ -2,7 +2,7 @@
  * Vista de ruta para transportista
  */
 import React, { useState, useMemo, memo } from 'react';
-import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Banknote } from 'lucide-react';
+import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Banknote, Gift } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
 import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
@@ -137,11 +137,13 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad 
             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">PRODUCTOS:</p>
             <div className="space-y-2">
               {pedido.items?.map(item => (
-                <div key={item.id} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-700 p-2 rounded gap-2">
-                  <span className="text-gray-700 dark:text-gray-300 flex-1">
+                <div key={item.id} className={`flex items-center justify-between text-sm p-2 rounded gap-2 ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800' : 'bg-gray-50 dark:bg-gray-700'}`}>
+                  <span className="text-gray-700 dark:text-gray-300 flex-1 flex items-center gap-1.5">
+                    {item.es_bonificacion && <Gift className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />}
                     {item.cantidad}x {item.producto?.nombre || 'Producto sin nombre'}
+                    {item.es_bonificacion && <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1 py-0.5 rounded font-medium">REGALO</span>}
                   </span>
-                  <span className="text-gray-500">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</span>
+                  {!item.es_bonificacion && <span className="text-gray-500">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</span>}
                   {pedido.estado === 'asignado' && onReportarSalvedad && (
                     <button
                       onClick={(e) => {

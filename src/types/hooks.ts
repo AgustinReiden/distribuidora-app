@@ -59,6 +59,8 @@ export interface PedidoItemDB {
   cantidad: number;
   precio_unitario: number;
   subtotal?: number;
+  es_bonificacion?: boolean;
+  promocion_id?: string;
 }
 
 export interface PerfilDB {
