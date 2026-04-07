@@ -295,7 +295,7 @@ export function usePedidos(): UsePedidosHookReturn {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId || item.producto_id,
       cantidad: item.cantidad,
-      precio_unitario: item.precioUnitario || item.precio_unitario,
+      precio_unitario: item.precioUnitario ?? item.precio_unitario ?? 0,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
     }))
@@ -491,7 +491,7 @@ export function usePedidos(): UsePedidosHookReturn {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId || item.producto_id,
       cantidad: item.cantidad,
-      precio_unitario: item.precioUnitario || item.precio_unitario,
+      precio_unitario: item.precioUnitario ?? item.precio_unitario ?? 0,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
     }))
