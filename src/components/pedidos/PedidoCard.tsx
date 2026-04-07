@@ -8,7 +8,7 @@
  * Esto permite una migración gradual hacia el uso de contextos.
  */
 import React, { useState, memo, useContext } from 'react';
-import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle } from 'lucide-react';
+import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle, Gift } from 'lucide-react';
 const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda' } = {}) => {
   const mod = await import('../../lib/pdfExport') as any
   return mod.generarReciboPedido(pedido, _empresa, options)
@@ -314,14 +314,19 @@ function PedidoCard({
             </h4>
             <div className="space-y-2">
               {pedido.items?.map(item => (
-                <div key={item.id} className="flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0">
+                <div key={item.id} className={`flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0 ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/20 rounded px-2 -mx-1' : ''}`}>
                   <div className="flex-1">
-                    <p className="font-medium text-gray-900 dark:text-white">{item.producto?.nombre || 'Producto'}</p>
-                    <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>
+                    <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5">
+                      {item.es_bonificacion && <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />}
+                      {item.producto?.nombre || 'Producto'}
+                      {item.es_bonificacion && <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full font-medium">REGALO</span>}
+                    </p>
+                    {!item.es_bonificacion && <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>}
                   </div>
                   <div className="text-right">
                     <p className="font-semibold text-gray-700 dark:text-gray-300">x{item.cantidad}</p>
-                    <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>
+                    {!item.es_bonificacion && <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
+                    {item.es_bonificacion && <p className="text-sm font-bold text-green-600">$0</p>}
                   </div>
                 </div>
               ))}
