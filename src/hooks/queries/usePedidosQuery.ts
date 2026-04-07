@@ -30,7 +30,7 @@ interface PedidoItemInput {
   precioUnitario?: number
   precio_unitario?: number
   esBonificacion?: boolean
-  subtotalOverride?: number
+  promocionId?: string
 }
 
 interface CrearPedidoInput {
@@ -228,7 +228,7 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     cantidad: item.cantidad,
     precio_unitario: item.precioUnitario || item.precio_unitario,
     ...(item.esBonificacion ? { es_bonificacion: true } : {}),
-    ...(item.subtotalOverride != null ? { subtotal: item.subtotalOverride } : {}),
+    ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
   }))
 
   const { data, error } = await supabase.rpc('crear_pedido_completo', {

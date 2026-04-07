@@ -2,7 +2,7 @@
  * Hook reactivo para resolución de promociones + precios mayoristas
  *
  * Orquesta:
- * 1. Promos activas (bonificación, precio por pares)
+ * 1. Promos activas (bonificación)
  * 2. Precios mayoristas (excluyendo productos con promo)
  * 3. Genera items finales con bonificaciones incluidas
  * 4. Calcula totales correctos
@@ -25,13 +25,10 @@ import {
   calcularFaltanteParaBonificacion,
   type PromoResolucion,
   type BonificacionResult,
-  type PrecioParResult,
 } from '../utils/promociones'
 
 export interface ItemPedidoConPromo extends ItemPedido {
   esBonificacion?: boolean
-  subtotalOverride?: number
-  promoDetalle?: string
   promoNombre?: string
 }
 
@@ -44,7 +41,7 @@ interface UsePromocionPedidoReturn {
   promoResolucion: PromoResolucion
   /** Nudges de bonificación */
   faltantesBonificacion: Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }>
-  /** Items finales con bonificaciones añadidas y precios ajustados */
+  /** Items finales con bonificaciones añadidas */
   itemsFinales: ItemPedidoConPromo[]
   /** Total calculado correctamente con promos */
   totalFinal: number
@@ -69,7 +66,7 @@ export function usePromocionPedido(items: ItemPedido[]): UsePromocionPedidoRetur
   // 1. Resolver promociones
   const promoResolucion = useMemo((): PromoResolucion => {
     if (!promoMap || promoMap.size === 0 || items.length === 0) {
-      return { bonificaciones: [], preciosPar: new Map(), productosConPromo: new Set() }
+      return { bonificaciones: [], productosConPromo: new Set() }
     }
     return resolverPromociones(items, promoMap)
   }, [items, promoMap])
@@ -79,7 +76,6 @@ export function usePromocionPedido(items: ItemPedido[]): UsePromocionPedidoRetur
     if (!pricingMap || pricingMap.size === 0 || items.length === 0) {
       return new Map<string, PrecioResuelto>()
     }
-    // Filtrar items que NO tienen promo para resolver mayorista
     const itemsSinPromo = items.filter(
       i => !promoResolucion.productosConPromo.has(String(i.productoId))
     )
@@ -108,19 +104,9 @@ export function usePromocionPedido(items: ItemPedido[]): UsePromocionPedidoRetur
 
     for (const item of items) {
       const pid = String(item.productoId)
-      const precioParResult = promoResolucion.preciosPar.get(pid)
       const precioMayorista = preciosResueltos.get(pid)
 
-      if (precioParResult) {
-        // Producto con promo de precio por pares
-        result.push({
-          ...item,
-          subtotalOverride: precioParResult.subtotalPromo,
-          promoDetalle: precioParResult.detalle,
-          promoNombre: precioParResult.promoNombre,
-        })
-      } else if (precioMayorista && precioMayorista.esMayorista && !item.precioOverride) {
-        // Producto con precio mayorista (sin promo)
+      if (precioMayorista && precioMayorista.esMayorista && !item.precioOverride) {
         result.push({
           ...item,
           precioUnitario: precioMayorista.precioResuelto,
@@ -153,12 +139,6 @@ export function usePromocionPedido(items: ItemPedido[]): UsePromocionPedidoRetur
       const pid = String(item.productoId)
       original += item.precioUnitario * item.cantidad
 
-      const precioParResult = promoResolucion.preciosPar.get(pid)
-      if (precioParResult) {
-        total += precioParResult.subtotalPromo
-        continue
-      }
-
       const precioMayorista = preciosResueltos.get(pid)
       if (precioMayorista) {
         total += precioMayorista.precioResuelto * item.cantidad
@@ -168,7 +148,7 @@ export function usePromocionPedido(items: ItemPedido[]): UsePromocionPedidoRetur
     }
 
     return { totalFinal: total, totalOriginal: original }
-  }, [items, promoResolucion.preciosPar, preciosResueltos])
+  }, [items, preciosResueltos])
 
   // 7. Hay descuento?
   const hayDescuento = useMemo(() => {

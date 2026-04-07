@@ -189,10 +189,8 @@ const ModalPedido = memo(function ModalPedido({
   const getStockWarning = (productoId: string, cantidadEnPedido: number): StockWarning | null => {
     const producto = productos.find(p => p.id === productoId);
     if (!producto) return null;
-    // Sumar cantidad de bonificación al cálculo de stock
-    const bonif = promoResolucion.bonificaciones.find(b => b.productoId === productoId);
-    const cantidadTotal = cantidadEnPedido + (bonif?.cantidadBonificacion || 0);
-    const stockDisponible = producto.stock - cantidadTotal;
+    // Bonificaciones NO descuentan stock — solo items comprados
+    const stockDisponible = producto.stock - cantidadEnPedido;
     const stockMinimo = producto.stock_minimo || 10;
     if (stockDisponible < 0) return { tipo: 'error', mensaje: `Sin stock! Disponible: ${producto.stock}` };
     if (stockDisponible < stockMinimo) return { tipo: 'warning', mensaje: `Stock bajo: quedaran ${stockDisponible}` };
@@ -383,12 +381,10 @@ const ModalPedido = memo(function ModalPedido({
                   const prod = productos.find(p => p.id === item.productoId);
                   const warning = getStockWarning(item.productoId, item.cantidad);
                   const precioInfo = preciosResueltos.get(String(item.productoId));
-                  const precioParInfo = promoResolucion.preciosPar.get(String(item.productoId));
                   const esOverride = item.precioOverride || false;
-                  const esMayorista = !esOverride && !precioParInfo && (precioInfo?.esMayorista || false);
-                  const esPromoPar = !esOverride && !!precioParInfo;
+                  const esMayorista = !esOverride && (precioInfo?.esMayorista || false);
                   const precioMostrar = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
-                  const subtotal = esPromoPar ? precioParInfo!.subtotalPromo : precioMostrar * item.cantidad;
+                  const subtotal = precioMostrar * item.cantidad;
                   const itemMoq = moqMap.get(String(item.productoId));
                   const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
                   const isEditingPrice = editingPriceId === item.productoId;
@@ -408,12 +404,6 @@ const ModalPedido = memo(function ModalPedido({
                               <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium shrink-0">
                                 <Tag className="w-3 h-3" />
                                 {precioInfo?.etiqueta || 'Mayorista'}
-                              </span>
-                            )}
-                            {esPromoPar && (
-                              <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full font-medium shrink-0">
-                                <Tag className="w-3 h-3" />
-                                Promo
                               </span>
                             )}
                           </div>
@@ -471,11 +461,6 @@ const ModalPedido = memo(function ModalPedido({
                               <span className="ml-1 text-green-600 font-medium">{formatPrecio(precioInfo!.precioResuelto)} c/u</span>
                               {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-1 text-gray-400" />}
                             </p>
-                          ) : esPromoPar ? (
-                            <p className="text-xs">
-                              <span className="text-gray-400 line-through">{formatPrecio(precioParInfo!.precioEfectivo !== item.precioUnitario ? item.precioUnitario : 0)}</span>
-                              <span className="ml-1 text-purple-600 font-medium">{formatPrecio(precioParInfo!.precioEfectivo)} c/u</span>
-                            </p>
                           ) : (
                             <p
                               className={`text-xs text-gray-500 dark:text-gray-400 ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
@@ -488,9 +473,6 @@ const ModalPedido = memo(function ModalPedido({
                             >
                               {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
                             </p>
-                          )}
-                          {esPromoPar && (
-                            <p className="text-xs text-purple-600 mt-0.5">{precioParInfo!.detalle}</p>
                           )}
                           {itemMoq && itemMoq > 1 && (
                             <p className="text-xs text-amber-600 mt-0.5">Min: {itemMoq} uds</p>
