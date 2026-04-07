@@ -1,5 +1,5 @@
 import { useState, memo, useEffect, useMemo } from 'react';
-import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil } from 'lucide-react';
+import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
@@ -16,6 +16,8 @@ export interface PedidoEditItem {
   cantidadOriginal: number;
   esNuevo?: boolean;
   precioOverride?: boolean;
+  esBonificacion?: boolean;
+  promocionId?: string;
 }
 
 /** Datos a guardar del pedido */
@@ -83,7 +85,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         nombre: item.producto?.nombre || 'Producto desconocido',
         cantidad: item.cantidad,
         precioUnitario: item.precio_unitario,
-        cantidadOriginal: item.cantidad
+        cantidadOriginal: item.cantidad,
+        esBonificacion: item.es_bonificacion || false,
+        promocionId: item.promocion_id || undefined,
       }));
       setItems(itemsFormateados);
       setItemsOriginales(JSON.parse(JSON.stringify(itemsFormateados)));
@@ -399,6 +403,22 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   const stockDisponible = getStockDisponible(item.productoId);
                   const cambio = item.cantidad - (item.cantidadOriginal || 0);
                   const precioResuelto = preciosResueltosMap.get(item.productoId) ?? item.precioUnitario;
+
+                  // Bonificacion items: show as read-only
+                  if (item.esBonificacion) {
+                    return (
+                      <div key={item.productoId} className="p-3 flex items-center justify-between bg-green-50 dark:bg-green-900/20">
+                        <div className="flex items-center gap-2 flex-1">
+                          <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />
+                          <div>
+                            <p className="font-medium text-sm dark:text-white">{item.nombre}</p>
+                            <p className="text-xs text-green-600 font-medium">REGALO x{item.cantidad}</p>
+                          </div>
+                        </div>
+                        <span className="text-sm font-bold text-green-600">$0</span>
+                      </div>
+                    )
+                  }
 
                   return (
                     <div
