@@ -4,6 +4,7 @@
 --   1. Agregar columna promocion_id a pedido_items para trazabilidad
 --   2. Agregar columna producto_regalo_id a promociones (producto que se regala)
 --   3. Actualizar RPCs para incluir promocion_id en INSERT y usar v_cantidad en contador
+--   4. Actualizar eliminar_pedido_completo: no restaurar stock para bonificados, revertir usos_pendientes
 
 -- =============================================================================
 -- 1. Agregar promocion_id a pedido_items
@@ -315,3 +316,91 @@ $function$;
 
 COMMENT ON COLUMN pedido_items.promocion_id IS 'Referencia a la promoción que generó este item bonificado';
 COMMENT ON COLUMN promociones.usos_pendientes IS 'Cantidad de unidades bonificadas pendientes de ajuste de stock (merma)';
+
+-- =============================================================================
+-- 5. RPC eliminar_pedido_completo — no restaurar stock para bonificados + revertir usos
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION eliminar_pedido_completo(
+  p_pedido_id BIGINT,
+  p_restaurar_stock BOOLEAN DEFAULT TRUE,
+  p_usuario_id UUID DEFAULT NULL,
+  p_motivo TEXT DEFAULT NULL
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_pedido RECORD;
+  v_items JSONB;
+  v_cliente_nombre TEXT;
+  v_cliente_direccion TEXT;
+  v_usuario_creador_nombre TEXT;
+  v_transportista_nombre TEXT := NULL;
+  v_eliminador_nombre TEXT := NULL;
+  v_item RECORD;
+BEGIN
+  SELECT * INTO v_pedido FROM pedidos WHERE id = p_pedido_id;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Pedido no encontrado');
+  END IF;
+
+  SELECT jsonb_agg(jsonb_build_object(
+    'producto_id', pi.producto_id, 'producto_nombre', pr.nombre,
+    'producto_codigo', pr.codigo, 'cantidad', pi.cantidad,
+    'precio_unitario', pi.precio_unitario, 'subtotal', pi.subtotal,
+    'es_bonificacion', COALESCE(pi.es_bonificacion, false),
+    'promocion_id', pi.promocion_id
+  )) INTO v_items
+  FROM pedido_items pi LEFT JOIN productos pr ON pr.id = pi.producto_id
+  WHERE pi.pedido_id = p_pedido_id;
+
+  SELECT nombre_fantasia, direccion INTO v_cliente_nombre, v_cliente_direccion
+  FROM clientes WHERE id = v_pedido.cliente_id;
+  SELECT nombre INTO v_usuario_creador_nombre FROM perfiles WHERE id = v_pedido.usuario_id;
+  IF v_pedido.transportista_id IS NOT NULL THEN
+    SELECT nombre INTO v_transportista_nombre FROM perfiles WHERE id = v_pedido.transportista_id;
+  END IF;
+  IF p_usuario_id IS NOT NULL THEN
+    SELECT nombre INTO v_eliminador_nombre FROM perfiles WHERE id = p_usuario_id;
+  END IF;
+
+  INSERT INTO pedidos_eliminados (
+    pedido_id, cliente_id, cliente_nombre, cliente_direccion,
+    total, estado, estado_pago, forma_pago, monto_pagado, notas,
+    items, usuario_creador_id, usuario_creador_nombre,
+    transportista_id, transportista_nombre,
+    fecha_pedido, fecha_entrega,
+    eliminado_por_id, eliminado_por_nombre,
+    motivo_eliminacion, stock_restaurado
+  ) VALUES (
+    p_pedido_id, v_pedido.cliente_id, v_cliente_nombre, v_cliente_direccion,
+    v_pedido.total, v_pedido.estado, v_pedido.estado_pago, v_pedido.forma_pago,
+    v_pedido.monto_pagado, v_pedido.notas, COALESCE(v_items, '[]'::jsonb),
+    v_pedido.usuario_id, v_usuario_creador_nombre,
+    v_pedido.transportista_id, v_transportista_nombre,
+    v_pedido.created_at, v_pedido.fecha_entrega,
+    p_usuario_id, v_eliminador_nombre, p_motivo, p_restaurar_stock
+  );
+
+  IF p_restaurar_stock THEN
+    FOR v_item IN
+      SELECT producto_id, cantidad, COALESCE(es_bonificacion, false) as es_bonificacion, promocion_id
+      FROM pedido_items WHERE pedido_id = p_pedido_id
+    LOOP
+      IF NOT v_item.es_bonificacion THEN
+        UPDATE productos SET stock = stock + v_item.cantidad WHERE id = v_item.producto_id;
+      ELSE
+        IF v_item.promocion_id IS NOT NULL THEN
+          UPDATE promociones SET usos_pendientes = GREATEST(usos_pendientes - v_item.cantidad, 0)
+          WHERE id = v_item.promocion_id;
+        END IF;
+      END IF;
+    END LOOP;
+  END IF;
+
+  DELETE FROM pedido_items WHERE pedido_id = p_pedido_id;
+  DELETE FROM pedido_historial WHERE pedido_id = p_pedido_id;
+  DELETE FROM pedidos WHERE id = p_pedido_id;
+
+  RETURN jsonb_build_object('success', true, 'mensaje', 'Pedido eliminado y registrado correctamente');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;

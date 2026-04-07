@@ -503,7 +503,9 @@ export default function PedidosContainer(): React.ReactElement {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId,
       cantidad: item.cantidad,
-      precio_unitario: item.precioUnitario
+      precio_unitario: item.precioUnitario,
+      ...(item.esBonificacion ? { es_bonificacion: true } : {}),
+      ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
     }))
     const { data, error } = await supabase.rpc('actualizar_pedido_items', {
       p_pedido_id: pedidoEditando.id,
