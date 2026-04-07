@@ -1392,7 +1392,7 @@ export interface GrupoPrecioFormInput {
 // PROMOCIONES TYPES
 // =============================================================================
 
-export type TipoPromocion = 'bonificacion' | 'precio_par';
+export type TipoPromocion = 'bonificacion';
 
 export interface PromocionDB {
   id: string;

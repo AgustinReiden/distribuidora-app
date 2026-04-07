@@ -4,7 +4,7 @@ import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalMermaSchema } from '../../lib/schemas'
 import type { Producto } from '../../types'
 
-type MotivoMermaValue = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'otro';
+type MotivoMermaValue = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'promociones' | 'otro';
 
 interface MotivoMermaOption {
   value: MotivoMermaValue;
@@ -20,6 +20,7 @@ const MOTIVOS_MERMA: MotivoMermaOption[] = [
   { value: 'devolucion', label: 'Devolucion defectuosa', icon: '<-' },
   { value: 'error_inventario', label: 'Error de inventario', icon: '#' },
   { value: 'muestra', label: 'Muestra/Degustacion', icon: '*' },
+  { value: 'promociones', label: 'Promociones', icon: '%' },
   { value: 'otro', label: 'Otro motivo', icon: '?' }
 ]
 

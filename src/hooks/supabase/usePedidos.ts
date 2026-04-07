@@ -47,7 +47,7 @@ interface PedidoItemInput {
   precioUnitario?: number;
   precio_unitario?: number;
   esBonificacion?: boolean;
-  subtotalOverride?: number;
+  promocionId?: string;
 }
 
 interface OrdenEntregaItem {
@@ -297,7 +297,7 @@ export function usePedidos(): UsePedidosHookReturn {
       cantidad: item.cantidad,
       precio_unitario: item.precioUnitario || item.precio_unitario,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
-      ...(item.subtotalOverride != null ? { subtotal: item.subtotalOverride } : {}),
+      ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
     }))
 
     const { data, error } = await supabase.rpc('crear_pedido_completo', {
@@ -493,7 +493,7 @@ export function usePedidos(): UsePedidosHookReturn {
       cantidad: item.cantidad,
       precio_unitario: item.precioUnitario || item.precio_unitario,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
-      ...(item.subtotalOverride != null ? { subtotal: item.subtotalOverride } : {}),
+      ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
     }))
 
     const { data, error } = await supabase.rpc('actualizar_pedido_items', {

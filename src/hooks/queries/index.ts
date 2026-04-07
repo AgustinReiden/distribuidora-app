@@ -134,6 +134,19 @@ export {
   useInvalidateMetricas,
 } from './useMetricasQuery'
 
+// Promociones
+export {
+  promocionesKeys,
+  usePromoMapQuery,
+  usePromocionesListQuery,
+  useCrearPromocionMutation,
+  useActualizarPromocionMutation,
+  useEliminarPromocionMutation,
+  useTogglePromocionActivaMutation,
+  useAjustarStockPromoMutation,
+} from './usePromocionesQuery'
+export type { PromocionConDetalles, PromocionFormInput } from './usePromocionesQuery'
+
 // Notas de Crédito
 export {
   notasCreditoKeys,

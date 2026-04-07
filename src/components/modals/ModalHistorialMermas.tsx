@@ -2,7 +2,7 @@ import React, { useState, ChangeEvent } from 'react'
 import { X, Package, Calendar, User, FileText, TrendingDown } from 'lucide-react'
 import type { Producto, Usuario } from '../../types'
 
-type MotivoMerma = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'otro';
+type MotivoMerma = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'promociones' | 'otro';
 
 interface Merma {
   id: string;
@@ -58,6 +58,7 @@ export default function ModalHistorialMermas({
       devolucion: '<-',
       error_inventario: '#',
       muestra: '*',
+      promociones: '%',
       otro: '?'
     }
     return emojis[motivo] || '?'
@@ -72,6 +73,7 @@ export default function ModalHistorialMermas({
       devolucion: 'Devolucion',
       error_inventario: 'Error inventario',
       muestra: 'Muestra',
+      promociones: 'Promociones',
       otro: 'Otro'
     }
     return labels[motivo] || motivo

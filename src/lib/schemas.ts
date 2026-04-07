@@ -340,7 +340,7 @@ export const mermaSchema = z.object({
 
   cantidad: cantidadSchema,
 
-  motivo: z.enum(['vencimiento', 'rotura', 'deterioro', 'robo', 'otro'], {
+  motivo: z.enum(['vencimiento', 'rotura', 'deterioro', 'robo', 'promociones', 'otro'], {
     error: 'Motivo inválido'
   }),
 

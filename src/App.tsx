@@ -31,6 +31,7 @@ import {
   TransferenciasContainer,
   DashboardContainer,
   GruposPrecioContainer,
+  PromocionesContainer,
   PedidosContainer,
   ProductosContainer,
   ProveedoresContainer,
@@ -225,6 +226,11 @@ function MainApp(): ReactElement {
                 <Route
                   path="/condiciones-mayoristas"
                   element={isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                <Route
+                  path="/promociones"
+                  element={isAdmin ? <PromocionesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route

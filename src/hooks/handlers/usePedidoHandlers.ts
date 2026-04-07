@@ -386,7 +386,7 @@ export function usePedidoHandlers({
 
     // Resolver promociones activas
     const currentPromoMap = promoMapRef.current
-    let promoResolucion = { bonificaciones: [] as Array<{ productoId: string; promoNombre: string; cantidadBonificacion: number }>, preciosPar: new Map<string, { subtotalPromo: number }>(), productosConPromo: new Set<string>() }
+    let promoResolucion = { bonificaciones: [] as Array<{ productoId: string; promoId: string; promoNombre: string; cantidadBonificacion: number }>, productosConPromo: new Set<string>() }
     if (currentPromoMap && currentPromoMap.size > 0) {
       promoResolucion = resolverPromociones(nuevoPedido.items, currentPromoMap)
     }
@@ -401,35 +401,22 @@ export function usePedidoHandlers({
       }
     }
 
-    // Aplicar subtotal override para items con precio por pares
-    const itemsConPromo = itemsFinales.map(item => {
-      const precioPar = promoResolucion.preciosPar.get(String(item.productoId))
-      if (precioPar) {
-        return { ...item, subtotalOverride: precioPar.subtotalPromo }
-      }
-      return item
-    })
-
     // Agregar items de bonificación
     const itemsBonificacion = promoResolucion.bonificaciones.map(b => ({
       productoId: b.productoId,
       cantidad: b.cantidadBonificacion,
       precioUnitario: 0,
       esBonificacion: true as const,
+      promocionId: b.promoId,
     }))
 
-    const todosLosItems = [...itemsConPromo, ...itemsBonificacion]
+    const todosLosItems = [...itemsFinales, ...itemsBonificacion]
 
-    // Calcular total (solo items no bonificados, usando subtotalOverride cuando existe)
+    // Calcular total (solo items no bonificados)
     let totalFinal = 0
     for (const item of todosLosItems) {
       if ('esBonificacion' in item && item.esBonificacion) continue
-      const override = (item as { subtotalOverride?: number }).subtotalOverride
-      if (override != null) {
-        totalFinal += override
-      } else {
-        totalFinal += item.precioUnitario * item.cantidad
-      }
+      totalFinal += item.precioUnitario * item.cantidad
     }
 
     if (!isOnline) {
