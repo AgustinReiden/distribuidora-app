@@ -1387,3 +1387,33 @@ export interface GrupoPrecioFormInput {
     etiqueta?: string | null;
   }>;
 }
+
+// =============================================================================
+// PROMOCIONES TYPES
+// =============================================================================
+
+export type TipoPromocion = 'bonificacion' | 'precio_par';
+
+export interface PromocionDB {
+  id: string;
+  nombre: string;
+  tipo: TipoPromocion;
+  activo: boolean;
+  fecha_inicio: string;
+  fecha_fin: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromocionProductoDB {
+  id: string;
+  promocion_id: string;
+  producto_id: string;
+}
+
+export interface PromocionReglaDB {
+  id: string;
+  promocion_id: string;
+  clave: string;
+  valor: number;
+}
