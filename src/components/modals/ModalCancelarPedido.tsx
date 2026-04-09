@@ -29,10 +29,8 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
           <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-medium text-red-800 dark:text-red-300">
-              Esta accion cancelara el pedido. El pedido permanecera visible con estado "Cancelado".
-            </p>
-            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-              Si necesitas restaurar el stock, usa "Eliminar" en su lugar.
+              Esta accion cancelara el pedido y restaurara el stock de los productos.
+              El pedido permanecera visible con estado "Cancelado".
             </p>
           </div>
         </div>

@@ -9,3 +9,4 @@ export function generarHojaRuta(transportista: PerfilDB, pedidos: PedidoDB[]): P
 export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: PedidoDB[], distancia?: number, duracion?: number): Promise<void>;
 export function generarReciboPago(pago: unknown, cliente: unknown): Promise<void>;
 export function generarReciboPedido(pedido: PedidoDB, cliente: ClienteDB): Promise<void>;
+export function generarComandasMultiples(pedidos: PedidoDB[]): void;

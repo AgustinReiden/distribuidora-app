@@ -44,46 +44,46 @@ const menuGroups: MenuGroup[] = [
     id: 'principal',
     label: null, // Items sin grupo (se muestran directo)
     items: [
-      { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
-      { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'preventista', 'transportista', 'deposito'] },
+      { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'encargado', 'preventista'] },
+      { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'] },
     ]
   },
   {
     id: 'comercial',
     label: 'Comercial',
     icon: Users,
-    roles: ['admin', 'preventista'],
+    roles: ['admin', 'encargado', 'preventista'],
     items: [
-      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'preventista'] },
-      { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin'] },
-      { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
-      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin'] },
-      { id: 'comisiones', icon: Percent, label: 'Comisiones', roles: ['admin'] },
+      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'] },
+      { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin', 'encargado'] },
+      { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin', 'encargado'] },
+      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin', 'encargado'] },
+      { id: 'comisiones', icon: Percent, label: 'Comisiones', roles: ['admin', 'encargado'] },
     ]
   },
   {
     id: 'inventario',
     label: 'Inventario',
     icon: Package,
-    roles: ['admin', 'preventista', 'deposito'],
+    roles: ['admin', 'encargado', 'preventista', 'deposito'],
     items: [
-      { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'preventista', 'deposito'] },
-      { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin'] },
-      { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
-      { id: 'condiciones-mayoristas', icon: Tag, label: 'Condiciones Mayoristas', roles: ['admin'] },
-      { id: 'promociones', icon: Gift, label: 'Promociones', roles: ['admin'] },
-      { id: 'transferencias', icon: ArrowRightLeft, label: 'Envios a Sucursal', roles: ['admin'] },
+      { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'encargado', 'preventista', 'deposito'] },
+      { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin', 'encargado'] },
+      { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin', 'encargado'] },
+      { id: 'condiciones-mayoristas', icon: Tag, label: 'Condiciones Mayoristas', roles: ['admin', 'encargado'] },
+      { id: 'promociones', icon: Gift, label: 'Promociones', roles: ['admin', 'encargado'] },
+      { id: 'transferencias', icon: ArrowRightLeft, label: 'Envios a Sucursal', roles: ['admin', 'encargado'] },
     ]
   },
   {
     id: 'operaciones',
     label: 'Operaciones',
     icon: Route,
-    roles: ['admin'],
+    roles: ['admin', 'encargado'],
     items: [
-      { id: 'recorridos', icon: Route, label: 'Recorridos', roles: ['admin'] },
-      { id: 'rendiciones', icon: Banknote, label: 'Rendiciones', roles: ['admin'] },
-      { id: 'salvedades', icon: AlertTriangle, label: 'Salvedades', roles: ['admin'] },
+      { id: 'recorridos', icon: Route, label: 'Recorridos', roles: ['admin', 'encargado'] },
+      { id: 'rendiciones', icon: Banknote, label: 'Rendiciones', roles: ['admin', 'encargado'] },
+      { id: 'salvedades', icon: AlertTriangle, label: 'Salvedades', roles: ['admin', 'encargado'] },
       { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
     ]
   }

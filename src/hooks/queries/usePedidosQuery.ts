@@ -175,6 +175,9 @@ async function fetchPedidosPaginated(
   if (filters?.fechaHasta) {
     query = query.lte('fecha', filters.fechaHasta)
   }
+  if (filters?.ocultarCancelados) {
+    query = query.neq('estado', 'cancelado')
+  }
 
   // Search by client fields using referencedTable for related table filtering
   if (hasSearch) {
@@ -608,32 +611,33 @@ export function useEntregasMasivasMutation() {
 // Cancelar Pedido
 // =========================================================================
 
-async function cancelarPedido(pedidoId: string, motivo: string): Promise<PedidoDB> {
-  const { data, error } = await supabase
-    .from('pedidos')
-    .update({
-      estado: 'cancelado',
-      motivo_cancelacion: motivo,
-    })
-    .eq('id', pedidoId)
-    .select()
-    .single()
+async function cancelarPedido(pedidoId: string, motivo: string, usuarioId?: string): Promise<void> {
+  const { data, error } = await supabase.rpc('cancelar_pedido_con_stock', {
+    p_pedido_id: pedidoId,
+    p_motivo: motivo,
+    p_usuario_id: usuarioId || null,
+  })
 
   if (error) throw error
-  return data as PedidoDB
+
+  const result = data as { success: boolean; error?: string }
+  if (!result.success) {
+    throw new Error(result.error || 'Error al cancelar pedido')
+  }
 }
 
 /**
- * Hook para cancelar un pedido con motivo
+ * Hook para cancelar un pedido con motivo (restaura stock automaticamente)
  */
 export function useCancelarPedidoMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ pedidoId, motivo }: { pedidoId: string; motivo: string }) =>
-      cancelarPedido(pedidoId, motivo),
+    mutationFn: ({ pedidoId, motivo, usuarioId }: { pedidoId: string; motivo: string; usuarioId?: string }) =>
+      cancelarPedido(pedidoId, motivo, usuarioId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: productosKeys.all })
     },
   })
 }

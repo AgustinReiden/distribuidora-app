@@ -12,6 +12,7 @@ interface FiltrosPedido {
   fechaDesde?: string | null;
   fechaHasta?: string | null;
   conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
+  ocultarCancelados?: boolean;
 }
 
 interface FiltrosChange {
@@ -21,6 +22,7 @@ interface FiltrosChange {
   fechaDesde?: string | null;
   fechaHasta?: string | null;
   conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
+  ocultarCancelados?: boolean;
 }
 
 export interface PedidoFiltersProps {
@@ -72,6 +74,15 @@ function PedidoFilters({
             <option value="entregado">Entregados</option>
           </select>
         </div>
+        <label className="flex items-center gap-2 px-3 py-2 border rounded-lg cursor-pointer select-none dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">
+          <input
+            type="checkbox"
+            checked={filtros.ocultarCancelados || false}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onFiltrosChange({ ocultarCancelados: e.target.checked })}
+            className="w-4 h-4 rounded text-blue-600"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">Ocultar cancelados</span>
+        </label>
         <button
           onClick={onModalFiltroFecha}
           aria-label="Filtrar pedidos por rango de fechas"

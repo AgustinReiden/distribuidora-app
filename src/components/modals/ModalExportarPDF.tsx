@@ -1,6 +1,6 @@
 import { useState, useMemo, memo } from 'react';
 import type { ChangeEvent } from 'react';
-import { FileDown, Package, Truck } from 'lucide-react';
+import { FileDown, Package, Truck, Printer } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB } from '../../types';
@@ -10,7 +10,7 @@ import type { PedidoDB, PerfilDB } from '../../types';
 // =============================================================================
 
 /** Tipo de exportacion */
-type TipoExport = 'preparacion' | 'ruta';
+type TipoExport = 'preparacion' | 'ruta' | 'comanda';
 
 /** Props del componente principal */
 export interface ModalExportarPDFProps {
@@ -18,6 +18,7 @@ export interface ModalExportarPDFProps {
   transportistas: PerfilDB[];
   onExportarOrdenPreparacion: (pedidos: PedidoDB[]) => void;
   onExportarHojaRuta: (transportista: PerfilDB | undefined, pedidos: PedidoDB[]) => void;
+  onImprimirComandas?: (pedidos: PedidoDB[]) => void;
   onClose: () => void;
 }
 
@@ -26,6 +27,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   transportistas,
   onExportarOrdenPreparacion,
   onExportarHojaRuta,
+  onImprimirComandas,
   onClose
 }: ModalExportarPDFProps) {
   const [tipoExport, setTipoExport] = useState<TipoExport>('preparacion');
@@ -36,10 +38,11 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   // Filtrar pedidos segun el tipo de exportacion
   const pedidosFiltrados = useMemo((): PedidoDB[] => {
     if (tipoExport === 'preparacion') {
-      // Para orden de preparacion: pedidos pendientes o en preparacion (no entregados ni en camino)
       return pedidos.filter(p => p.estado === 'pendiente' || p.estado === 'en_preparacion');
+    } else if (tipoExport === 'comanda') {
+      // Para comandas: todos los pedidos no entregados y no cancelados
+      return pedidos.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
     } else {
-      // Para hoja de ruta: pedidos del transportista seleccionado que esten asignados
       if (!transportistaSeleccionado) return [];
       return pedidos.filter(p =>
         p.transportista_id === transportistaSeleccionado &&
@@ -98,6 +101,8 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
     if (tipoExport === 'preparacion') {
       onExportarOrdenPreparacion(pedidosAExportar);
+    } else if (tipoExport === 'comanda') {
+      onImprimirComandas?.(pedidosAExportar);
     } else {
       const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
       onExportarHojaRuta(transportista, pedidosAExportar);
@@ -114,33 +119,47 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
         {/* Selector de tipo de exportacion */}
         <div>
           <label className="block text-sm font-medium mb-2">Tipo de documento</label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <button
               onClick={() => handleTipoChange('preparacion')}
               className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
                 tipoExport === 'preparacion'
-                  ? 'border-orange-500 bg-orange-50 text-orange-700'
-                  : 'border-gray-200 hover:border-gray-300'
+                  ? 'border-orange-500 bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400'
+                  : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
               }`}
             >
               <Package className="w-6 h-6" />
               <div className="text-left">
                 <p className="font-medium">Orden de Preparacion</p>
-                <p className="text-xs text-gray-500">Para el deposito</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Para el deposito</p>
               </div>
             </button>
             <button
               onClick={() => handleTipoChange('ruta')}
               className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
                 tipoExport === 'ruta'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-200 hover:border-gray-300'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
+                  : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
               }`}
             >
               <Truck className="w-6 h-6" />
               <div className="text-left">
                 <p className="font-medium">Hoja de Ruta</p>
-                <p className="text-xs text-gray-500">Para el transportista</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Para el transportista</p>
+              </div>
+            </button>
+            <button
+              onClick={() => handleTipoChange('comanda')}
+              className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
+                tipoExport === 'comanda'
+                  ? 'border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-900/20 dark:text-purple-400'
+                  : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+              }`}
+            >
+              <Printer className="w-6 h-6" />
+              <div className="text-left">
+                <p className="font-medium">Imprimir Comandas</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Duplicado por pedido</p>
               </div>
             </button>
           </div>
@@ -264,10 +283,14 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           <button
             onClick={handleExportar}
             disabled={pedidosSeleccionados.length === 0}
-            className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`flex items-center space-x-2 px-4 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+              tipoExport === 'comanda'
+                ? 'bg-purple-600 hover:bg-purple-700'
+                : 'bg-green-600 hover:bg-green-700'
+            }`}
           >
-            <FileDown className="w-4 h-4" />
-            <span>Exportar PDF</span>
+            {tipoExport === 'comanda' ? <Printer className="w-4 h-4" /> : <FileDown className="w-4 h-4" />}
+            <span>{tipoExport === 'comanda' ? 'Imprimir Comandas' : 'Exportar PDF'}</span>
           </button>
         </div>
       </div>

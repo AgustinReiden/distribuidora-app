@@ -13,7 +13,6 @@ import {
   useCrearPedidoMutation,
   useCambiarEstadoMutation,
   useAsignarTransportistaMutation,
-  useEliminarPedidoMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
   usePagosMasivosMutation,
@@ -41,7 +40,6 @@ const ModalEditarPedido = lazy(() => import('../modals/ModalEditarPedido'))
 const ModalFiltroFecha = lazy(() => import('../modals/ModalFiltroFecha'))
 const ModalExportarPDF = lazy(() => import('../modals/ModalExportarPDF'))
 const ModalGestionRutas = lazy(() => import('../modals/ModalGestionRutas'))
-const ModalPedidosEliminados = lazy(() => import('../modals/ModalPedidosEliminados'))
 const ModalEntregaConSalvedad = lazy(() => import('../modals/ModalEntregaConSalvedad'))
 const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas'))
 const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
@@ -78,7 +76,7 @@ interface ConfirmConfig {
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
-  const { user, isAdmin, isPreventista, isTransportista, isOnline, authReady } = useAuthData()
+  const { user, isAdmin, isPreventista, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
   const notify = useNotification()
 
   // Pagination state
@@ -99,7 +97,6 @@ export default function PedidosContainer(): React.ReactElement {
   const crearPedido = useCrearPedidoMutation()
   const cambiarEstado = useCambiarEstadoMutation()
   const asignarTransportistaMut = useAsignarTransportistaMutation()
-  const eliminarPedido = useEliminarPedidoMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
   const pagosMasivos = usePagosMasivosMutation()
@@ -124,7 +121,6 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalFiltroFechaOpen, setModalFiltroFechaOpen] = useState(false)
   const [modalExportarPDFOpen, setModalExportarPDFOpen] = useState(false)
   const [modalOptimizarRutaOpen, setModalOptimizarRutaOpen] = useState(false)
-  const [modalPedidosEliminadosOpen, setModalPedidosEliminadosOpen] = useState(false)
   const [modalEntregaSalvedadOpen, setModalEntregaSalvedadOpen] = useState(false)
   const [modalEntregasMasivasOpen, setModalEntregasMasivasOpen] = useState(false)
   const [modalCancelarOpen, setModalCancelarOpen] = useState(false)
@@ -244,20 +240,6 @@ export default function PedidosContainer(): React.ReactElement {
     })
   }, [cambiarEstado, asignarTransportistaMut, notify])
 
-  const handleEliminarPedido = useCallback((pedido: PedidoDB) => {
-    setConfirmConfig({
-      visible: true, titulo: 'Eliminar pedido',
-      mensaje: '¿Eliminar este pedido? El stock será restaurado.', tipo: 'danger',
-      onConfirm: async () => {
-        try {
-          await eliminarPedido.mutateAsync({ id: pedido.id, usuarioId: user?.id })
-          notify.success('Pedido eliminado')
-        } catch (e) { notify.error((e as Error).message) }
-        setConfirmConfig({ visible: false })
-      },
-    })
-  }, [eliminarPedido, user, notify])
-
   const handleAsignarTransportista = useCallback((pedido: PedidoDB) => {
     setPedidoAsignando(pedido)
     setModalAsignarOpen(true)
@@ -298,13 +280,13 @@ export default function PedidosContainer(): React.ReactElement {
     if (!pedidoCancelando) return
     setGuardando(true)
     try {
-      await cancelarPedidoMut.mutateAsync({ pedidoId: pedidoCancelando.id, motivo })
+      await cancelarPedidoMut.mutateAsync({ pedidoId: pedidoCancelando.id, motivo, usuarioId: user?.id })
       setModalCancelarOpen(false)
       setPedidoCancelando(null)
-      notify.success('Pedido cancelado')
+      notify.success('Pedido cancelado y stock restaurado')
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
-  }, [pedidoCancelando, cancelarPedidoMut, notify])
+  }, [pedidoCancelando, cancelarPedidoMut, user, notify])
 
   const handleEntregasMasivas = useCallback(async (transportistaId: string, pedidoIds: string[]) => {
     setGuardando(true)
@@ -453,14 +435,6 @@ export default function PedidosContainer(): React.ReactElement {
     setExportando(false)
   }, [pedidos, notify, fetchAllFilteredPedidos])
 
-  // Fetch pedidos eliminados
-  const fetchPedidosEliminados = useCallback(async () => {
-    const { data } = await supabase
-      .from('pedidos_eliminados').select('*')
-      .order('deleted_at', { ascending: false }).limit(50)
-    return (data || []) as PedidoDB[]
-  }, [])
-
   // =========================================================================
   // Modal-specific handlers
   // =========================================================================
@@ -580,6 +554,13 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
 
+  const handleImprimirComandas = useCallback(async (pedidosExport: PedidoDB[]) => {
+    try {
+      const { generarComandasMultiples } = await import('../../lib/pdfExport')
+      generarComandasMultiples(pedidosExport)
+    } catch (e) { notify.error((e as Error).message) }
+  }, [notify])
+
   // ModalGestionRutas handlers
   const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null }) => {
     setGuardando(true)
@@ -661,6 +642,7 @@ export default function PedidosContainer(): React.ReactElement {
           isAdmin={isAdmin}
           isPreventista={isPreventista}
           isTransportista={isTransportista}
+          isEncargado={isEncargado}
           userId={user?.id ?? ''}
           clientes={clientes}
           productos={productos}
@@ -684,10 +666,8 @@ export default function PedidosContainer(): React.ReactElement {
           onMarcarEntregadoConSalvedad={handleMarcarEntregadoConSalvedad}
           onDesmarcarEntregado={handleDesmarcarEntregado}
           onCancelarPedido={handleCancelarPedido}
-          onEliminarPedido={handleEliminarPedido}
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
-          onVerPedidosEliminados={() => setModalPedidosEliminadosOpen(true)}
         />
       </Suspense>
 
@@ -830,6 +810,7 @@ export default function PedidosContainer(): React.ReactElement {
             transportistas={transportistas}
             onExportarOrdenPreparacion={handleExportarOrdenPreparacion}
             onExportarHojaRuta={handleExportarHojaRuta}
+            onImprimirComandas={handleImprimirComandas}
             onClose={() => setModalExportarPDFOpen(false)}
           />
         </Suspense>
@@ -849,16 +830,6 @@ export default function PedidosContainer(): React.ReactElement {
             guardando={guardando}
             rutaOptimizada={rutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['rutaOptimizada']}
             error={errorOptimizacion}
-          />
-        </Suspense>
-      )}
-
-      {/* Modal Pedidos Eliminados */}
-      {modalPedidosEliminadosOpen && (
-        <Suspense fallback={null}>
-          <ModalPedidosEliminados
-            onFetch={fetchPedidosEliminados as unknown as Parameters<typeof ModalPedidosEliminados>[0]['onFetch']}
-            onClose={() => setModalPedidosEliminadosOpen(false)}
           />
         </Suspense>
       )}

@@ -26,7 +26,6 @@ export interface VirtualizedListHandlers {
   onMarcarEntregado?: (pedido: PedidoDB) => void
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void
   onDesmarcarEntregado?: (pedido: PedidoDB) => void
-  onEliminarPedido?: (pedidoId: string) => void
 }
 
 export interface VirtualizedListPermissions {

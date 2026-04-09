@@ -7,7 +7,7 @@ import { useZonasEstandarizadasQuery, usePreventistaZonasQuery, useAsignarZonasP
 import type { PerfilDB } from '../../types';
 
 /** Roles disponibles para usuarios */
-export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito';
+export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
 
 /** Datos del formulario de usuario */
 export interface UsuarioFormData {
@@ -154,6 +154,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
             <option value="preventista">Preventista</option>
             <option value="transportista">Transportista</option>
             <option value="deposito">Deposito</option>
+            <option value="encargado">Encargado</option>
             <option value="admin">Administrador</option>
           </select>
           {errors.rol && <p {...getErrorMessageProps('rol')} className="text-red-500 text-xs mt-1">{errors.rol}</p>}
