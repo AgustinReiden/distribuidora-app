@@ -52,6 +52,8 @@ export interface AuthContextValue {
   isAdmin: boolean;
   isPreventista: boolean;
   isTransportista: boolean;
+  isEncargado: boolean;
+  isAdminOrEncargado: boolean;
   zonaUsuario: string | undefined;
 }
 
@@ -476,6 +478,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isAdmin: perfil?.rol === 'admin',
     isPreventista: perfil?.rol === 'preventista',
     isTransportista: perfil?.rol === 'transportista',
+    isEncargado: perfil?.rol === 'encargado',
+    isAdminOrEncargado: perfil?.rol === 'admin' || perfil?.rol === 'encargado',
     zonaUsuario: perfil?.zona
   }
 

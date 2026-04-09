@@ -12,5 +12,6 @@ export {
   generarHojaRutaOptimizada,
   generarReciboPago,
   generarEstadoCuenta,
-  generarReciboPedido
+  generarReciboPedido,
+  generarComandasMultiples
 } from './pdf'

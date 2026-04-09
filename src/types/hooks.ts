@@ -67,7 +67,7 @@ export interface PerfilDB {
   id: string;
   nombre: string;
   email: string;
-  rol?: 'admin' | 'preventista' | 'transportista' | 'deposito';
+  rol?: 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
   zona?: string;
   activo?: boolean;
 }
@@ -258,6 +258,7 @@ export interface FiltrosPedidosState {
   transportistaId: string;
   busqueda: string;
   conSalvedad: 'todos' | 'con_salvedad' | 'sin_salvedad';
+  ocultarCancelados?: boolean;
 }
 
 // =============================================================================

@@ -38,6 +38,7 @@ export interface PedidoCardProps {
   isAdmin?: boolean;
   isPreventista?: boolean;
   isTransportista?: boolean;
+  isEncargado?: boolean;
   onVerHistorial?: (pedido: PedidoDB) => void;
   onEditarPedido?: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
@@ -47,7 +48,6 @@ export interface PedidoCardProps {
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
-  onEliminarPedido?: (pedidoId: string) => void;
 }
 
 interface EstadoConfig {
@@ -142,6 +142,7 @@ function PedidoCard({
   isAdmin,
   isPreventista,
   isTransportista,
+  isEncargado,
   onVerHistorial,
   onEditarPedido,
   onMarcarEnPreparacion,
@@ -151,7 +152,6 @@ function PedidoCard({
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onCancelarPedido,
-  onEliminarPedido
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
   const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
@@ -166,8 +166,6 @@ function PedidoCard({
   const handleVolverAPendiente = onVolverAPendiente ?? pedidoActions?.handleVolverAPendiente;
   const handleMarcarEntregado = onMarcarEntregado ?? pedidoActions?.handleMarcarEntregado;
   const handleDesmarcarEntregado = onDesmarcarEntregado ?? pedidoActions?.handleDesmarcarEntregado;
-  const handleEliminarPedido = onEliminarPedido ?? (pedidoActions?.handleEliminarPedido ? (id: string) => pedidoActions.handleEliminarPedido(id) : undefined);
-
   return (
     <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
       {/* Header del pedido */}
@@ -214,6 +212,7 @@ function PedidoCard({
             isAdmin={isAdmin}
             isPreventista={isPreventista}
             isTransportista={isTransportista}
+            isEncargado={isEncargado}
             onHistorial={handleVerHistorial}
             onEditar={handleEditarPedido}
             onPreparar={handleMarcarEnPreparacion}
@@ -223,7 +222,6 @@ function PedidoCard({
             onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
             onRevertir={handleDesmarcarEntregado}
             onCancelarPedido={onCancelarPedido}
-            onEliminar={handleEliminarPedido}
           />
         </div>
       </div>

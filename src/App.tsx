@@ -119,7 +119,7 @@ function PendingSyncRuntime({
 }
 
 function MainApp(): ReactElement {
-  const { user, perfil, logout, isAdmin, isPreventista, isTransportista, authReady } = useAuth()
+  const { user, perfil, logout, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, authReady } = useAuth()
   const notify = useNotification()
   const location = useLocation()
   const offlineSync = useOfflineSync()
@@ -155,7 +155,7 @@ function MainApp(): ReactElement {
     }
   }, [logout])
 
-  const defaultRoute = (isAdmin || isPreventista) ? '/dashboard' : '/pedidos'
+  const defaultRoute = (isAdmin || isPreventista || isEncargado) ? '/dashboard' : '/pedidos'
 
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
     user,
@@ -164,9 +164,11 @@ function MainApp(): ReactElement {
     isAdmin,
     isPreventista,
     isTransportista,
+    isEncargado,
+    isAdminOrEncargado,
     isOnline,
     logout: handleLogout
-  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isOnline, handleLogout])
+  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, isOnline, handleLogout])
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()
@@ -186,7 +188,7 @@ function MainApp(): ReactElement {
 
                 <Route
                   path="/dashboard"
-                  element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                  element={(isAdminOrEncargado || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="/pedidos" element={<PedidosContainer />} />
@@ -195,7 +197,7 @@ function MainApp(): ReactElement {
 
                 <Route
                   path="/reportes"
-                  element={isAdmin ? <ReportesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <ReportesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
@@ -205,57 +207,57 @@ function MainApp(): ReactElement {
 
                 <Route
                   path="/recorridos"
-                  element={isAdmin ? <RecorridosContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <RecorridosContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/recorrido-preventista"
-                  element={isAdmin ? <RecorridoPreventistaContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <RecorridoPreventistaContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/compras"
-                  element={isAdmin ? <ComprasContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <ComprasContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/proveedores"
-                  element={isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/condiciones-mayoristas"
-                  element={isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/promociones"
-                  element={isAdmin ? <PromocionesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <PromocionesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/transferencias"
-                  element={isAdmin ? <TransferenciasContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <TransferenciasContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/rendiciones"
-                  element={isAdmin ? <VistaRendiciones /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <VistaRendiciones /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/salvedades"
-                  element={isAdmin ? <VistaSalvedades /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <VistaSalvedades /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/analytics"
-                  element={isAdmin ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/comisiones"
-                  element={isAdmin ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="*" element={<Navigate to={defaultRoute} replace />} />

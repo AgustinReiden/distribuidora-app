@@ -305,6 +305,7 @@ export const getEstadoLabel = (e: EstadoPedido | string | null | undefined): str
 
 export const getRolColor = (r: RolUsuario | string | null | undefined): string =>
   r === 'admin' ? 'bg-purple-100 text-purple-700' :
+  r === 'encargado' ? 'bg-indigo-100 text-indigo-700' :
   r === 'deposito' ? 'bg-emerald-100 text-emerald-700' :
   r === 'transportista' ? 'bg-orange-100 text-orange-700' :
   r === 'preventista' ? 'bg-blue-100 text-blue-700' :
@@ -312,6 +313,7 @@ export const getRolColor = (r: RolUsuario | string | null | undefined): string =
 
 export const getRolLabel = (r: RolUsuario | string | null | undefined): string =>
   r === 'admin' ? 'Admin' :
+  r === 'encargado' ? 'Encargado' :
   r === 'deposito' ? 'Deposito' :
   r === 'transportista' ? 'Transportista' :
   r === 'preventista' ? 'Preventista' :

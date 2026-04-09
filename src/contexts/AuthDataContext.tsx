@@ -18,6 +18,8 @@ export interface AuthDataContextValue {
   isAdmin: boolean
   isPreventista: boolean
   isTransportista: boolean
+  isEncargado: boolean
+  isAdminOrEncargado: boolean
   isOnline: boolean
   logout: () => Promise<void>
 }
@@ -66,8 +68,8 @@ export function useAuthData(): AuthDataContextValue {
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useUserPermissions() {
-  const { user, perfil, isAdmin, isPreventista, isTransportista } = useAuthData()
-  return { user, perfil, isAdmin, isPreventista, isTransportista }
+  const { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado } = useAuthData()
+  return { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado }
 }
 
 export default AuthDataContext

@@ -5,7 +5,7 @@
  * Renderiza lista + controles de paginación.
  */
 import { useState, useRef, useEffect } from 'react';
-import { ShoppingCart, Plus, Route, FileDown, Trash2, PackageCheck, Banknote, ChevronDown } from 'lucide-react';
+import { ShoppingCart, Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
@@ -33,6 +33,7 @@ export interface VistaPedidosProps {
   isAdmin: boolean;
   isPreventista: boolean;
   isTransportista: boolean;
+  isEncargado?: boolean;
   userId: string;
   clientes: ClienteDB[];
   productos: ProductoDB[];
@@ -56,10 +57,8 @@ export interface VistaPedidosProps {
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
-  onEliminarPedido: (pedido: PedidoDB) => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
-  onVerPedidosEliminados?: () => void;
 }
 
 export default function VistaPedidos({
@@ -72,6 +71,7 @@ export default function VistaPedidos({
   isAdmin,
   isPreventista,
   isTransportista,
+  isEncargado,
   userId,
   clientes,
   productos,
@@ -95,10 +95,8 @@ export default function VistaPedidos({
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onCancelarPedido,
-  onEliminarPedido,
   onEntregasMasivas,
   onPagosMasivos,
-  onVerPedidosEliminados
 }: VistaPedidosProps) {
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
@@ -119,7 +117,7 @@ export default function VistaPedidos({
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Pedidos</h1>
         <div className="flex flex-wrap gap-2">
-          {isAdmin && (
+          {(isAdmin || isEncargado) && (
             <button
               onClick={onOptimizarRuta}
               className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -128,7 +126,7 @@ export default function VistaPedidos({
               <span>Optimizar Ruta</span>
             </button>
           )}
-          {isAdmin && (
+          {(isAdmin || isEncargado) && (
             <button
               onClick={onExportarPDF}
               className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
@@ -137,10 +135,10 @@ export default function VistaPedidos({
               <span>Exportar PDF</span>
             </button>
           )}
-          {isAdmin && (
+          {(isAdmin || isEncargado) && (
             <ExcelExportDropdown exportando={exportando} onExportarExcel={onExportarExcel} totalCount={totalCount} />
           )}
-          {isAdmin && onEntregasMasivas && (
+          {(isAdmin || isEncargado) && onEntregasMasivas && (
             <button
               onClick={onEntregasMasivas}
               className="flex items-center space-x-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
@@ -149,7 +147,7 @@ export default function VistaPedidos({
               <span className="hidden sm:inline">Entregas Masivas</span>
             </button>
           )}
-          {isAdmin && onPagosMasivos && (
+          {(isAdmin || isEncargado) && onPagosMasivos && (
             <button
               onClick={onPagosMasivos}
               className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -158,17 +156,7 @@ export default function VistaPedidos({
               <span className="hidden sm:inline">Pagos Masivos</span>
             </button>
           )}
-          {isAdmin && onVerPedidosEliminados && (
-            <button
-              onClick={onVerPedidosEliminados}
-              className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              aria-label="Ver historial de pedidos eliminados"
-            >
-              <Trash2 className="w-5 h-5" aria-hidden="true" />
-              <span className="hidden sm:inline">Eliminados</span>
-            </button>
-          )}
-          {(isAdmin || isPreventista) && (
+          {(isAdmin || isEncargado || isPreventista) && (
             <button
               onClick={onNuevoPedido}
               className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -212,6 +200,7 @@ export default function VistaPedidos({
                 isAdmin={isAdmin}
                 isPreventista={isPreventista}
                 isTransportista={isTransportista}
+                isEncargado={isEncargado}
                 onVerHistorial={onVerHistorial}
                 onEditarPedido={onEditarPedido}
                 onMarcarEnPreparacion={onMarcarEnPreparacion}
@@ -221,10 +210,6 @@ export default function VistaPedidos({
                 onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
                 onDesmarcarEntregado={onDesmarcarEntregado}
                 onCancelarPedido={onCancelarPedido}
-                onEliminarPedido={(pedidoId: string) => {
-                  const p = pedidos.find(x => x.id === pedidoId);
-                  if (p) onEliminarPedido(p);
-                }}
               />
             ))}
           </div>

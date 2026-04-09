@@ -287,12 +287,9 @@ function generarReciboA4(pedido) {
 }
 
 /**
- * Genera recibo en formato Comanda (75mm ticket)
+ * Calcula la altura dinamica de una comanda para un pedido
  */
-function generarReciboComanda(pedido) {
-  const { width: ticketWidth, margin, contentWidth } = TICKET
-
-  // Calcular altura dinámica
+function calcularAlturaComanda(pedido) {
   const items = pedido.items || []
   let height = 30 // header
   height += 20 // cliente
@@ -301,9 +298,17 @@ function generarReciboComanda(pedido) {
   height += 25 // total + pago
   if (pedido.notas) height += 12
   height += 20 // pie
-  height = Math.max(height, 80)
+  return Math.max(height, 80)
+}
 
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [ticketWidth, height] })
+/**
+ * Dibuja el contenido de una comanda en el documento jsPDF actual
+ * @param {jsPDF} doc - Documento jsPDF
+ * @param {Object} pedido - Datos del pedido
+ * @returns {void}
+ */
+function dibujarComanda(doc, pedido) {
+  const { width: ticketWidth, margin, contentWidth } = TICKET
   let y = margin
 
   // === HEADER ===
@@ -349,7 +354,7 @@ function generarReciboComanda(pedido) {
   y += 3
 
   // === PRODUCTOS ===
-  // Header
+  const items = pedido.items || []
   setHeaderStyle(doc, 6)
   doc.text('PRODUCTO', margin, y)
   doc.text('SUBT.', ticketWidth - margin, y, { align: 'right' })
@@ -360,7 +365,6 @@ function generarReciboComanda(pedido) {
     const productoNombre = item.producto?.nombre || 'Producto'
     const subtotal = item.subtotal || item.precio_unitario * item.cantidad
 
-    // Nombre completo con cantidad
     const nombreLines = doc.splitTextToSize(`${item.cantidad}x ${productoNombre}`, contentWidth - 22)
     nombreLines.forEach((line, idx) => {
       doc.text(line, margin, y)
@@ -421,8 +425,52 @@ function generarReciboComanda(pedido) {
   doc.text('Crecer Distribuciones', ticketWidth / 2, y, { align: 'center' })
   y += 2
   doc.text('Comprobante valido de operacion', ticketWidth / 2, y, { align: 'center' })
+}
 
+/**
+ * Genera recibo en formato Comanda (75mm ticket) - pedido individual
+ */
+function generarReciboComanda(pedido) {
+  const { width: ticketWidth } = TICKET
+  const height = calcularAlturaComanda(pedido)
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [ticketWidth, height] })
+  dibujarComanda(doc, pedido)
   doc.save(generateFilename('recibo-comanda', pedido.id?.toString()))
+}
+
+/**
+ * Genera multiples comandas para impresion en comandera con corte automatico.
+ * Cada pedido se imprime por duplicado, cada copia en pagina separada.
+ * La impresora termica corta en cada salto de pagina.
+ * @param {Array} pedidos - Array de pedidos con items y cliente
+ */
+export function generarComandasMultiples(pedidos) {
+  if (!pedidos || pedidos.length === 0) return
+
+  const { width: ticketWidth } = TICKET
+  let isFirstPage = true
+  let doc = null
+
+  pedidos.forEach(pedido => {
+    const height = calcularAlturaComanda(pedido)
+
+    // Cada pedido se imprime 2 veces (duplicado)
+    for (let copia = 0; copia < 2; copia++) {
+      if (isFirstPage) {
+        doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [ticketWidth, height] })
+        isFirstPage = false
+      } else {
+        doc.addPage([ticketWidth, height])
+      }
+      dibujarComanda(doc, pedido)
+    }
+  })
+
+  if (doc) {
+    doc.autoPrint()
+    window.open(doc.output('bloburl'), '_blank')
+  }
 }
 
 /**

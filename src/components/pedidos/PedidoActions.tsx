@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, Trash2, RotateCcw, AlertCircle, XCircle, LucideIcon } from 'lucide-react';
+import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, LucideIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -28,6 +28,7 @@ export interface AccionesDropdownProps {
   isAdmin?: boolean;
   isPreventista?: boolean;
   isTransportista?: boolean;
+  isEncargado?: boolean;
   onHistorial?: (pedido: PedidoDB) => void;
   onEditar?: (pedido: PedidoDB) => void;
   onPreparar?: (pedido: PedidoDB) => void;
@@ -37,7 +38,6 @@ export interface AccionesDropdownProps {
   onEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
-  onEliminar?: (pedidoId: string) => void;
 }
 
 interface AccionItem {
@@ -57,6 +57,7 @@ function AccionesDropdown({
   isAdmin,
   isPreventista,
   isTransportista,
+  isEncargado,
   onHistorial,
   onEditar,
   onPreparar,
@@ -66,7 +67,6 @@ function AccionesDropdown({
   onEntregadoConSalvedad,
   onRevertir,
   onCancelarPedido,
-  onEliminar
 }: AccionesDropdownProps): React.ReactElement {
   // Memoizar acciones para evitar recalculos innecesarios
   const acciones = useMemo((): AccionItem[] => {
@@ -82,8 +82,8 @@ function AccionesDropdown({
       });
     }
 
-    // Admin o preventista pueden editar
-    if ((isAdmin || isPreventista) && onEditar) {
+    // Admin, encargado o preventista pueden editar
+    if ((isAdmin || isEncargado || isPreventista) && onEditar) {
       items.push({
         label: 'Editar',
         icon: Edit2,
@@ -92,8 +92,8 @@ function AccionesDropdown({
       });
     }
 
-    // Admin puede preparar si esta pendiente
-    if (isAdmin && pedido.estado === 'pendiente' && onPreparar) {
+    // Admin o encargado puede preparar si esta pendiente
+    if ((isAdmin || isEncargado) && pedido.estado === 'pendiente' && onPreparar) {
       items.push({
         label: 'Marcar en Preparacion',
         icon: Package,
@@ -102,8 +102,8 @@ function AccionesDropdown({
       });
     }
 
-    // Admin puede volver a pendiente si esta en preparacion o asignado
-    if (isAdmin && (pedido.estado === 'en_preparacion' || pedido.estado === 'asignado') && onVolverAPendiente) {
+    // Admin o encargado puede volver a pendiente si esta en preparacion o asignado
+    if ((isAdmin || isEncargado) && (pedido.estado === 'en_preparacion' || pedido.estado === 'asignado') && onVolverAPendiente) {
       items.push({
         label: 'Volver a Pendiente',
         icon: RotateCcw,
@@ -112,8 +112,8 @@ function AccionesDropdown({
       });
     }
 
-    // Admin puede asignar si no esta entregado
-    if (isAdmin && pedido.estado !== 'entregado' && onAsignar) {
+    // Admin o encargado puede asignar si no esta entregado
+    if ((isAdmin || isEncargado) && pedido.estado !== 'entregado' && onAsignar) {
       items.push({
         label: pedido.transportista ? 'Reasignar Transportista' : 'Asignar Transportista',
         icon: User,
@@ -122,8 +122,8 @@ function AccionesDropdown({
       });
     }
 
-    // Transportista o admin pueden marcar entregado
-    if ((isTransportista || isAdmin) && pedido.estado === 'asignado' && onEntregado) {
+    // Transportista, admin o encargado pueden marcar entregado
+    if ((isTransportista || isAdmin || isEncargado) && pedido.estado === 'asignado' && onEntregado) {
       items.push({
         label: 'Marcar Entregado',
         icon: Check,
@@ -132,8 +132,8 @@ function AccionesDropdown({
       });
     }
 
-    // Transportista o admin pueden marcar entregado con salvedad
-    if ((isTransportista || isAdmin) && pedido.estado === 'asignado' && onEntregadoConSalvedad && pedido.items && pedido.items.length > 0) {
+    // Transportista, admin o encargado pueden marcar entregado con salvedad
+    if ((isTransportista || isAdmin || isEncargado) && pedido.estado === 'asignado' && onEntregadoConSalvedad && pedido.items && pedido.items.length > 0) {
       items.push({
         label: 'Entrega con Salvedad',
         icon: AlertCircle,
@@ -142,8 +142,8 @@ function AccionesDropdown({
       });
     }
 
-    // Admin puede revertir si esta entregado
-    if (isAdmin && pedido.estado === 'entregado' && onRevertir) {
+    // Admin o encargado puede revertir si esta entregado
+    if ((isAdmin || isEncargado) && pedido.estado === 'entregado' && onRevertir) {
       items.push({
         label: 'Revertir Entrega',
         icon: AlertTriangle,
@@ -152,8 +152,8 @@ function AccionesDropdown({
       });
     }
 
-    // Admin puede cancelar si no esta entregado ni cancelado
-    if (isAdmin && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
+    // Admin o encargado puede cancelar si no esta entregado ni cancelado
+    if ((isAdmin || isEncargado) && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
       items.push({
         label: 'Cancelar Pedido',
         icon: XCircle,
@@ -163,19 +163,8 @@ function AccionesDropdown({
       });
     }
 
-    // Admin puede eliminar (con separador)
-    if (isAdmin && onEliminar) {
-      items.push({
-        label: 'Eliminar',
-        icon: Trash2,
-        onClick: () => onEliminar(pedido.id),
-        className: 'text-red-600 dark:text-red-400',
-        divider: true
-      });
-    }
-
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onEliminar]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido]);
 
   return (
     <DropdownMenu>
