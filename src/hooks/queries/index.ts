@@ -124,6 +124,7 @@ export {
   useSucursalesQuery,
   useCrearSucursalMutation,
   useRegistrarTransferenciaMutation,
+  useRegistrarIngresoMutation,
 } from './useTransferenciasQuery'
 
 // Métricas

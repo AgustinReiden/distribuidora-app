@@ -72,7 +72,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin', 'encargado'] },
       { id: 'condiciones-mayoristas', icon: Tag, label: 'Condiciones Mayoristas', roles: ['admin', 'encargado'] },
       { id: 'promociones', icon: Gift, label: 'Promociones', roles: ['admin', 'encargado'] },
-      { id: 'transferencias', icon: ArrowRightLeft, label: 'Envios a Sucursal', roles: ['admin', 'encargado'] },
+      { id: 'transferencias', icon: ArrowRightLeft, label: 'Mov. Sucursales', roles: ['admin', 'encargado'] },
     ]
   },
   {
