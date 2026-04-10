@@ -78,13 +78,17 @@ interface RPCResult {
   error?: string
 }
 
-async function registrarTransferencia(formData: TransferenciaFormInput): Promise<{ success: boolean; transferenciaId: string }> {
-  const itemsParaRPC = formData.items.map(item => ({
+function buildItemsParaRPC(items: TransferenciaFormInput['items']) {
+  return items.map(item => ({
     producto_id: item.productoId,
     cantidad: item.cantidad,
     costo_unitario: item.costoUnitario,
     subtotal: item.subtotal,
   }))
+}
+
+async function registrarTransferencia(formData: TransferenciaFormInput): Promise<{ success: boolean; transferenciaId: string }> {
+  const itemsParaRPC = buildItemsParaRPC(formData.items)
 
   const { data, error } = await supabase.rpc('registrar_transferencia', {
     p_sucursal_id: formData.sucursalId,
@@ -100,6 +104,28 @@ async function registrarTransferencia(formData: TransferenciaFormInput): Promise
   const result = data as RPCResult
   if (!result.success) {
     throw new Error(result.error || 'Error al registrar transferencia')
+  }
+
+  return { success: true, transferenciaId: result.transferencia_id }
+}
+
+async function registrarIngresoSucursal(formData: TransferenciaFormInput): Promise<{ success: boolean; transferenciaId: string }> {
+  const itemsParaRPC = buildItemsParaRPC(formData.items)
+
+  const { data, error } = await supabase.rpc('registrar_ingreso_sucursal', {
+    p_sucursal_id: formData.sucursalId,
+    p_fecha: formData.fecha || new Date().toISOString().split('T')[0],
+    p_notas: formData.notas || null,
+    p_total_costo: formData.totalCosto,
+    p_usuario_id: formData.usuarioId || null,
+    p_items: itemsParaRPC,
+  })
+
+  if (error) throw error
+
+  const result = data as RPCResult
+  if (!result.success) {
+    throw new Error(result.error || 'Error al registrar ingreso')
   }
 
   return { success: true, transferenciaId: result.transferencia_id }
@@ -144,13 +170,28 @@ export function useCrearSucursalMutation() {
 }
 
 /**
- * Hook para registrar una transferencia
+ * Hook para registrar una transferencia (salida)
  */
 export function useRegistrarTransferenciaMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: registrarTransferencia,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: transferenciasKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: ['productos'] })
+    },
+  })
+}
+
+/**
+ * Hook para registrar un ingreso desde sucursal
+ */
+export function useRegistrarIngresoMutation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: registrarIngresoSucursal,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: transferenciasKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ['productos'] })

@@ -2,6 +2,7 @@
  * TransferenciasContainer
  *
  * Container que carga transferencias, sucursales y productos bajo demanda usando TanStack Query.
+ * Soporta salidas e ingresos entre sucursales.
  */
 import React, { lazy, Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -9,16 +10,18 @@ import {
   useTransferenciasQuery,
   useSucursalesQuery,
   useRegistrarTransferenciaMutation,
+  useRegistrarIngresoMutation,
   useCrearSucursalMutation,
   useProductosQuery,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import type { TransferenciaFormInput } from '../../types'
+import type { TransferenciaFormInput, TransferenciaDB, TipoTransferencia } from '../../types'
 
 // Lazy load de componentes
 const VistaTransferencias = lazy(() => import('../vistas/VistaTransferencias'))
 const ModalTransferencia = lazy(() => import('../modals/ModalTransferencia'))
+const ModalDetalleTransferencia = lazy(() => import('../modals/ModalDetalleTransferencia'))
 
 function LoadingState() {
   return (
@@ -39,29 +42,47 @@ export default function TransferenciasContainer(): React.ReactElement {
 
   // Mutations
   const registrarTransferencia = useRegistrarTransferenciaMutation()
+  const registrarIngreso = useRegistrarIngresoMutation()
   const crearSucursal = useCrearSucursalMutation()
 
-  // Estado de modal
-  const [modalOpen, setModalOpen] = useState(false)
+  // Estado de modales
+  const [modalTipo, setModalTipo] = useState<TipoTransferencia | null>(null)
+  const [detalleTransferencia, setDetalleTransferencia] = useState<TransferenciaDB | null>(null)
 
   // Handlers
-  const handleNuevaTransferencia = useCallback(() => {
-    setModalOpen(true)
+  const handleNuevaSalida = useCallback(() => {
+    setModalTipo('salida')
+  }, [])
+
+  const handleNuevoIngreso = useCallback(() => {
+    setModalTipo('ingreso')
+  }, [])
+
+  const handleVerDetalle = useCallback((transferencia: TransferenciaDB) => {
+    setDetalleTransferencia(transferencia)
   }, [])
 
   const handleGuardarTransferencia = useCallback(async (data: TransferenciaFormInput) => {
     try {
-      await registrarTransferencia.mutateAsync({
-        ...data,
-        usuarioId: user?.id || null,
-      })
-      notify.success('Envio registrado correctamente')
+      if (data.tipo === 'ingreso') {
+        await registrarIngreso.mutateAsync({
+          ...data,
+          usuarioId: user?.id || null,
+        })
+        notify.success('Ingreso registrado correctamente')
+      } else {
+        await registrarTransferencia.mutateAsync({
+          ...data,
+          usuarioId: user?.id || null,
+        })
+        notify.success('Salida registrada correctamente')
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al registrar envio'
+      const msg = err instanceof Error ? err.message : 'Error al registrar movimiento'
       notify.error(msg)
       throw err
     }
-  }, [registrarTransferencia, notify, user])
+  }, [registrarTransferencia, registrarIngreso, notify, user])
 
   const handleCrearSucursal = useCallback(async (data: { nombre: string; direccion?: string }) => {
     const nueva = await crearSucursal.mutateAsync(data)
@@ -75,19 +96,32 @@ export default function TransferenciasContainer(): React.ReactElement {
         <VistaTransferencias
           transferencias={transferencias}
           loading={isLoading}
-          onNuevaTransferencia={handleNuevaTransferencia}
+          onNuevaSalida={handleNuevaSalida}
+          onNuevoIngreso={handleNuevoIngreso}
+          onVerDetalle={handleVerDetalle}
         />
       </Suspense>
 
-      {/* Modal Nueva Transferencia */}
-      {modalOpen && (
+      {/* Modal Nueva Salida / Nuevo Ingreso */}
+      {modalTipo && (
         <Suspense fallback={null}>
           <ModalTransferencia
+            tipo={modalTipo}
             productos={productos}
             sucursales={sucursales}
             onSave={handleGuardarTransferencia}
             onCrearSucursal={handleCrearSucursal}
-            onClose={() => setModalOpen(false)}
+            onClose={() => setModalTipo(null)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Detalle */}
+      {detalleTransferencia && (
+        <Suspense fallback={null}>
+          <ModalDetalleTransferencia
+            transferencia={detalleTransferencia}
+            onClose={() => setDetalleTransferencia(null)}
           />
         </Suspense>
       )}

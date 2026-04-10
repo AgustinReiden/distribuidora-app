@@ -883,11 +883,14 @@ export interface TransferenciaItemDB {
   created_at?: string;
 }
 
+export type TipoTransferencia = 'salida' | 'ingreso';
+
 export interface TransferenciaDB {
   id: string;
   sucursal_id: string;
   sucursal?: SucursalDB | null;
   fecha: string;
+  tipo: TipoTransferencia;
   notas?: string | null;
   total_costo: number;
   usuario_id?: string | null;
@@ -902,6 +905,7 @@ export interface TransferenciaFormInput {
   notas?: string | null;
   totalCosto: number;
   usuarioId?: string | null;
+  tipo?: TipoTransferencia;
   items: Array<{
     productoId: string;
     cantidad: number;

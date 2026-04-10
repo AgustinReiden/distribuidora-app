@@ -5,7 +5,7 @@
  */
 import React, { useState, useCallback } from 'react'
 import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck } from 'lucide-react'
-import { MOTIVOS_SALVEDAD_LABELS, itemSalvedadSchema } from '../../lib/schemas'
+import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
 interface MotivoOption {
@@ -79,23 +79,24 @@ export default function ModalEntregaConSalvedad({
     for (const itemSalv of itemsConSalvedad) {
       const productoNombre = itemSalv.item.producto?.nombre || 'Producto'
 
-      // Validar con Zod schema
-      const result = itemSalvedadSchema.safeParse({
-        itemId: itemSalv.item.id,
-        cantidadAfectada: itemSalv.cantidadAfectada,
-        motivo: itemSalv.motivo || undefined,
-        descripcion: itemSalv.descripcion
-      })
-
-      if (!result.success) {
-        const firstError = result.error.issues[0]?.message || 'Error de validación'
-        setError(`${productoNombre}: ${firstError}`)
+      // Validaciones explícitas antes de Zod (Zod 4 da mensajes genéricos para enum/undefined)
+      if (!itemSalv.motivo) {
+        setError(`${productoNombre}: Debe seleccionar un motivo`)
         return false
       }
 
-      // Validación adicional: cantidad no puede exceder la cantidad del item
+      if (!itemSalv.cantidadAfectada || itemSalv.cantidadAfectada <= 0 || !Number.isInteger(itemSalv.cantidadAfectada)) {
+        setError(`${productoNombre}: La cantidad debe ser un número entero mayor a 0`)
+        return false
+      }
+
       if (itemSalv.cantidadAfectada > itemSalv.item.cantidad) {
-        setError(`La cantidad no puede exceder ${itemSalv.item.cantidad} para "${productoNombre}"`)
+        setError(`${productoNombre}: La cantidad no puede exceder ${itemSalv.item.cantidad}`)
+        return false
+      }
+
+      if (itemSalv.motivo === 'otro' && (!itemSalv.descripcion || itemSalv.descripcion.trim().length < 10)) {
+        setError(`${productoNombre}: Debe especificar una descripción (mínimo 10 caracteres)`)
         return false
       }
     }

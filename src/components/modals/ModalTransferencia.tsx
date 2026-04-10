@@ -7,9 +7,10 @@
 import React, { useState, useMemo } from 'react'
 import { X, Search, Trash2, Plus, ArrowRightLeft } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
-import type { ProductoDB, SucursalDB, TransferenciaFormInput } from '../../types'
+import type { ProductoDB, SucursalDB, TransferenciaFormInput, TipoTransferencia } from '../../types'
 
 interface ModalTransferenciaProps {
+  tipo: TipoTransferencia
   productos: ProductoDB[]
   sucursales: SucursalDB[]
   onSave: (data: TransferenciaFormInput) => Promise<void>
@@ -30,12 +31,14 @@ function getCosto(producto: ProductoDB): number {
 }
 
 export default function ModalTransferencia({
+  tipo,
   productos,
   sucursales,
   onSave,
   onCrearSucursal,
   onClose,
 }: ModalTransferenciaProps): React.ReactElement {
+  const esIngreso = tipo === 'ingreso'
   // Form state
   const [sucursalId, setSucursalId] = useState('')
   const [fecha, setFecha] = useState(() => new Date().toISOString().split('T')[0])
@@ -61,13 +64,13 @@ export default function ModalTransferencia({
     return productos
       .filter(p =>
         !idsAgregados.has(p.id) &&
-        p.stock > 0 &&
+        (esIngreso || p.stock > 0) &&
         (p.nombre.toLowerCase().includes(termino) ||
          (p.categoria && p.categoria.toLowerCase().includes(termino)) ||
          (p.codigo && p.codigo.toLowerCase().includes(termino)))
       )
       .slice(0, 20)
-  }, [busqueda, productos, idsAgregados])
+  }, [busqueda, productos, idsAgregados, esIngreso])
 
   // Total
   const totalCosto = useMemo(
@@ -95,7 +98,7 @@ export default function ModalTransferencia({
     setItems(prev =>
       prev.map(item =>
         item.productoId === productoId
-          ? { ...item, cantidad: Math.max(1, Math.min(cantidad, item.stockDisponible)) }
+          ? { ...item, cantidad: esIngreso ? Math.max(1, cantidad) : Math.max(1, Math.min(cantidad, item.stockDisponible)) }
           : item
       )
     )
@@ -136,7 +139,7 @@ export default function ModalTransferencia({
       setError('Agrega al menos un producto')
       return
     }
-    const itemInvalido = items.find(i => i.cantidad <= 0 || i.cantidad > i.stockDisponible)
+    const itemInvalido = items.find(i => i.cantidad <= 0 || (!esIngreso && i.cantidad > i.stockDisponible))
     if (itemInvalido) {
       setError(`Cantidad invalida para "${itemInvalido.nombre}"`)
       return
@@ -149,6 +152,7 @@ export default function ModalTransferencia({
         fecha,
         notas: notas.trim() || null,
         totalCosto,
+        tipo,
         items: items.map(item => ({
           productoId: item.productoId,
           cantidad: item.cantidad,
@@ -172,7 +176,9 @@ export default function ModalTransferencia({
         <div className="flex items-center justify-between px-6 py-4 border-b dark:border-gray-700">
           <div className="flex items-center gap-3">
             <ArrowRightLeft className="w-5 h-5 text-blue-600" />
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Envio a Sucursal</h2>
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
+              {esIngreso ? 'Ingreso desde Sucursal' : 'Salida a Sucursal'}
+            </h2>
           </div>
           <button
             onClick={onClose}
@@ -194,7 +200,7 @@ export default function ModalTransferencia({
           {/* Sucursal selector */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Sucursal destino
+              {esIngreso ? 'Sucursal origen' : 'Sucursal destino'}
             </label>
             <div className="flex gap-2">
               <select
@@ -308,7 +314,7 @@ export default function ModalTransferencia({
           {items.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Productos a enviar ({items.length})
+                {esIngreso ? 'Productos a ingresar' : 'Productos a enviar'} ({items.length})
               </label>
               <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
                 <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
@@ -335,7 +341,7 @@ export default function ModalTransferencia({
                       <input
                         type="number"
                         min={1}
-                        max={item.stockDisponible}
+                        max={esIngreso ? undefined : item.stockDisponible}
                         value={item.cantidad}
                         onChange={e => handleCantidadChange(item.productoId, parseInt(e.target.value) || 1)}
                         className="w-20 text-center border dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-800 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
@@ -399,7 +405,7 @@ export default function ModalTransferencia({
               disabled={guardando || items.length === 0 || !sucursalId}
               className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
             >
-              {guardando ? 'Registrando...' : 'Registrar Envio'}
+              {guardando ? 'Registrando...' : esIngreso ? 'Registrar Ingreso' : 'Registrar Salida'}
             </button>
           </div>
         </div>
