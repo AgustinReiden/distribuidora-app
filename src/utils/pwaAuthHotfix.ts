@@ -1,6 +1,6 @@
 import { logger } from './logger'
 
-export const AUTH_RUNTIME_HOTFIX_VERSION = '2026-03-20-brave-recovery-v2'
+export const AUTH_RUNTIME_HOTFIX_VERSION = '2026-04-10-merge-deploy-v1'
 const AUTH_RUNTIME_HOTFIX_KEY = 'auth-runtime-hotfix-version'
 const AUTH_RUNTIME_HOTFIX_RELOAD_KEY = `auth-runtime-hotfix-reload:${AUTH_RUNTIME_HOTFIX_VERSION}`
 
