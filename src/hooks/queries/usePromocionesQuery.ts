@@ -27,6 +27,7 @@ export interface PromocionConDetalles extends PromocionDB {
   productos: PromocionProductoDB[]
   reglas: PromocionReglaDB[]
   usos_pendientes: number
+  limite_usos?: number | null
 }
 
 export interface PromocionFormInput {

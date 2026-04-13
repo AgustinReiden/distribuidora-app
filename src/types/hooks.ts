@@ -1136,6 +1136,7 @@ export interface RendicionAjusteDB {
 
 export interface RendicionDBExtended extends RendicionDB {
   transportista?: PerfilDB | null;
+  transportista_nombre?: string;
   revisada_por_perfil?: PerfilDB | null;
   recorrido?: RecorridoDBExtended | null;
   items?: RendicionItemDB[];

@@ -337,13 +337,16 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       for (const pedidoId of pedidoIds) {
-        await asignarTransportistaMut.mutateAsync({ pedidoId, transportistaId, cambiarEstado: marcarListo })
+        await asignarTransportistaMut.mutateAsync({ pedidoId, transportistaId })
+        if (marcarListo) {
+          await cambiarEstado.mutateAsync({ pedidoId, nuevoEstado: 'asignado' })
+        }
       }
       setModalAsignarMasivoOpen(false)
       notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} asignado${pedidoIds.length !== 1 ? 's' : ''} al transportista`)
     } catch (e) { notify.error('Error al asignar transportista: ' + (e as Error).message) }
     setGuardando(false)
-  }, [asignarTransportistaMut, notify])
+  }, [asignarTransportistaMut, cambiarEstado, notify])
 
   // Fetch todos los pedidos con filtros actuales (sin paginación) para export
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
