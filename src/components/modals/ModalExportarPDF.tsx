@@ -1,6 +1,6 @@
 import { useState, useMemo, memo } from 'react';
 import type { ChangeEvent } from 'react';
-import { FileDown, Package, Truck, Printer } from 'lucide-react';
+import { FileDown, Package, Truck, Printer, Eye } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB } from '../../types';
@@ -10,7 +10,7 @@ import type { PedidoDB, PerfilDB } from '../../types';
 // =============================================================================
 
 /** Tipo de exportacion */
-type TipoExport = 'preparacion' | 'ruta' | 'comanda';
+type TipoExport = 'preparacion' | 'ruta' | 'comanda' | 'vista_actual';
 
 /** Props del componente principal */
 export interface ModalExportarPDFProps {
@@ -37,11 +37,19 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
   // Filtrar pedidos segun el tipo de exportacion
   const pedidosFiltrados = useMemo((): PedidoDB[] => {
-    if (tipoExport === 'preparacion') {
+    if (tipoExport === 'vista_actual') {
+      // Muestra todos los pedidos tal como los paso el padre (respeta filtros existentes)
+      return pedidos;
+    } else if (tipoExport === 'preparacion') {
       return pedidos.filter(p => p.estado === 'pendiente' || p.estado === 'en_preparacion');
     } else if (tipoExport === 'comanda') {
       // Para comandas: todos los pedidos no entregados y no cancelados
-      return pedidos.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
+      let resultado = pedidos.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
+      // Filtrar por transportista si se selecciono uno
+      if (transportistaSeleccionado) {
+        resultado = resultado.filter(p => p.transportista_id === transportistaSeleccionado);
+      }
+      return resultado;
     } else {
       if (!transportistaSeleccionado) return [];
       return pedidos.filter(p =>
@@ -83,7 +91,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     setTipoExport(tipo);
     setPedidosSeleccionados([]);
     setSeleccionarTodos(false);
-    if (tipo === 'preparacion') {
+    if (tipo !== 'ruta' && tipo !== 'comanda') {
       setTransportistaSeleccionado('');
     }
   };
@@ -99,7 +107,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     const pedidosAExportar = pedidos.filter(p => pedidosSeleccionados.includes(p.id));
     if (pedidosAExportar.length === 0) return;
 
-    if (tipoExport === 'preparacion') {
+    if (tipoExport === 'vista_actual') {
+      onImprimirComandas?.(pedidosAExportar);
+    } else if (tipoExport === 'preparacion') {
       onExportarOrdenPreparacion(pedidosAExportar);
     } else if (tipoExport === 'comanda') {
       onImprimirComandas?.(pedidosAExportar);
@@ -119,7 +129,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
         {/* Selector de tipo de exportacion */}
         <div>
           <label className="block text-sm font-medium mb-2">Tipo de documento</label>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <button
               onClick={() => handleTipoChange('preparacion')}
               className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
@@ -162,19 +172,35 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 <p className="text-xs text-gray-500 dark:text-gray-400">Duplicado por pedido</p>
               </div>
             </button>
+            <button
+              onClick={() => handleTipoChange('vista_actual')}
+              className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
+                tipoExport === 'vista_actual'
+                  ? 'border-slate-500 bg-slate-50 text-slate-700 dark:bg-slate-900/20 dark:text-slate-400'
+                  : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+              }`}
+            >
+              <Eye className="w-6 h-6" />
+              <div className="text-left">
+                <p className="font-medium">Vista Actual</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Pedidos filtrados</p>
+              </div>
+            </button>
           </div>
         </div>
 
-        {/* Selector de transportista (solo para hoja de ruta) */}
-        {tipoExport === 'ruta' && (
+        {/* Selector de transportista (para hoja de ruta y comandas) */}
+        {(tipoExport === 'ruta' || tipoExport === 'comanda') && (
           <div>
-            <label className="block text-sm font-medium mb-1">Transportista</label>
+            <label className="block text-sm font-medium mb-1">
+              {tipoExport === 'comanda' ? 'Filtrar por transportista (opcional)' : 'Transportista'}
+            </label>
             <select
               value={transportistaSeleccionado}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => handleTransportistaChange(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg"
             >
-              <option value="">Seleccionar transportista...</option>
+              <option value="">{tipoExport === 'comanda' ? 'Todos los transportistas' : 'Seleccionar transportista...'}</option>
               {transportistas.map(t => {
                 const pedidosTransportista = pedidos.filter(p =>
                   p.transportista_id === t.id &&

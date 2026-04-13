@@ -6,6 +6,7 @@
  */
 import React, { useState } from 'react'
 import { Database, Download, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, Info } from 'lucide-react'
+import { fechaLocalISO } from '../../utils/formatters'
 
 export interface VistaAnalyticsProps {
   onExportBI: (desde: string, hasta: string) => Promise<void>
@@ -18,7 +19,7 @@ type PresetId = 'ultimo_mes' | 'ultimos_3_meses' | 'este_ano' | 'personalizado'
 
 function getPresetDates(preset: PresetId): { desde: string; hasta: string } {
   const now = new Date()
-  const hasta = now.toISOString().split('T')[0]
+  const hasta = fechaLocalISO(now)
   let desde: Date
 
   switch (preset) {
@@ -35,7 +36,7 @@ function getPresetDates(preset: PresetId): { desde: string; hasta: string } {
       desde = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
   }
 
-  return { desde: desde.toISOString().split('T')[0], hasta }
+  return { desde: fechaLocalISO(desde), hasta }
 }
 
 const datasets = [

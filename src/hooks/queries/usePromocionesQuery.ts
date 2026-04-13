@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   PromocionDB,
   PromocionProductoDB,
@@ -33,6 +34,7 @@ export interface PromocionFormInput {
   tipo: 'bonificacion'
   fechaInicio: string
   fechaFin?: string | null
+  limiteUsos?: number | null
   productoIds: string[]
   productoRegaloId?: string | null
   reglas: { clave: string; valor: number }[]
@@ -47,7 +49,7 @@ export interface PromocionFormInput {
  * Solo trae promociones activas dentro de su rango de fechas.
  */
 async function fetchPromoMap(): Promise<PromoMap> {
-  const hoy = new Date().toISOString().split('T')[0]
+  const hoy = fechaLocalISO()
 
   const { data: promos, error: errorPromos } = await supabase
     .from('promociones')
@@ -166,6 +168,7 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
       tipo: input.tipo,
       fecha_inicio: input.fechaInicio,
       fecha_fin: input.fechaFin || null,
+      limite_usos: input.limiteUsos ?? null,
       producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
     }])
     .select()
@@ -224,6 +227,7 @@ async function updatePromocion(
       tipo: input.tipo,
       fecha_inicio: input.fechaInicio,
       fecha_fin: input.fechaFin || null,
+      limite_usos: input.limiteUsos ?? null,
       producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
     })
     .eq('id', id)

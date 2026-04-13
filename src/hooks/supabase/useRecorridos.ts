@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { supabase } from './base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   RecorridoDBExtended,
   PedidoOrdenado,
@@ -54,7 +55,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
   // Obtener recorridos del dia
   const fetchRecorridosHoy = useCallback(async (): Promise<RecorridoDBExtended[]> => {
     setLoading(true)
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaLocalISO()
 
     try {
       const query = supabase

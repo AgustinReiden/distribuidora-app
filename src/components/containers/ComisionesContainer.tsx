@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { fechaLocalISO } from '../../utils/formatters'
 import { useReportePreventistasQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 
@@ -19,7 +20,7 @@ function getPrimerDiaMes(): string {
 }
 
 function getHoy(): string {
-  return new Date().toISOString().split('T')[0]
+  return fechaLocalISO()
 }
 
 export default function ComisionesContainer(): React.ReactElement {

@@ -6,6 +6,7 @@
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
+import { fechaLocalISO } from '../../utils/formatters'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
@@ -37,6 +38,7 @@ const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalAsignarTransportista = lazy(() => import('../modals/ModalAsignarTransportista'))
 const ModalHistorialPedido = lazy(() => import('../modals/ModalHistorialPedido'))
 const ModalEditarPedido = lazy(() => import('../modals/ModalEditarPedido'))
+const ModalEditarNotas = lazy(() => import('../modals/ModalEditarNotas'))
 const ModalFiltroFecha = lazy(() => import('../modals/ModalFiltroFecha'))
 const ModalExportarPDF = lazy(() => import('../modals/ModalExportarPDF'))
 const ModalGestionRutas = lazy(() => import('../modals/ModalGestionRutas'))
@@ -44,6 +46,7 @@ const ModalEntregaConSalvedad = lazy(() => import('../modals/ModalEntregaConSalv
 const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas'))
 const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
 const ModalPagosMasivos = lazy(() => import('../modals/ModalPagosMasivos'))
+const ModalAsignarTransportistaMasivo = lazy(() => import('../modals/ModalAsignarTransportistaMasivo'))
 
 const ITEMS_PER_PAGE = 15
 
@@ -125,6 +128,8 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalEntregasMasivasOpen, setModalEntregasMasivasOpen] = useState(false)
   const [modalCancelarOpen, setModalCancelarOpen] = useState(false)
   const [modalPagosMasivosOpen, setModalPagosMasivosOpen] = useState(false)
+  const [modalAsignarMasivoOpen, setModalAsignarMasivoOpen] = useState(false)
+  const [modalNotasOpen, setModalNotasOpen] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // Pedido-specific state for modals
@@ -135,6 +140,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [pedidoEditando, setPedidoEditando] = useState<PedidoDB | null>(null)
   const [pedidoParaSalvedad, setPedidoParaSalvedad] = useState<PedidoDB | null>(null)
   const [pedidoCancelando, setPedidoCancelando] = useState<PedidoDB | null>(null)
+  const [pedidoNotasEditando, setPedidoNotasEditando] = useState<PedidoDB | null>(null)
   const [guardando, setGuardando] = useState(false)
 
   // Nuevo pedido form state
@@ -145,14 +151,14 @@ export default function PedidosContainer(): React.ReactElement {
     formaPago: 'efectivo',
     estadoPago: 'pendiente',
     montoPagado: 0,
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: fechaLocalISO(),
   })
 
   const resetNuevoPedido = useCallback(() => {
     setNuevoPedido({
       clienteId: '', items: [], notas: '',
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: fechaLocalISO(),
     })
   }, [])
 
@@ -266,6 +272,25 @@ export default function PedidosContainer(): React.ReactElement {
     setModalEditarOpen(true)
   }, [])
 
+  const handleEditarNotas = useCallback((pedido: PedidoDB) => {
+    setPedidoNotasEditando(pedido)
+    setModalNotasOpen(true)
+  }, [])
+
+  const handleGuardarNotas = useCallback(async (notas: string) => {
+    if (!pedidoNotasEditando) return
+    setGuardando(true)
+    try {
+      const { error } = await supabase.from('pedidos').update({ notas }).eq('id', pedidoNotasEditando.id)
+      if (error) throw error
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      setModalNotasOpen(false)
+      setPedidoNotasEditando(null)
+      notify.success('Observaciones actualizadas')
+    } catch (e) { notify.error((e as Error).message) }
+    setGuardando(false)
+  }, [pedidoNotasEditando, notify, queryClient])
+
   const handleMarcarEntregadoConSalvedad = useCallback((pedido: PedidoDB) => {
     setPedidoParaSalvedad(pedido)
     setModalEntregaSalvedadOpen(true)
@@ -307,6 +332,18 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [pagosMasivos, notify])
+
+  const handleAsignarTransportistaMasivo = useCallback(async (transportistaId: string, pedidoIds: string[], marcarListo: boolean) => {
+    setGuardando(true)
+    try {
+      for (const pedidoId of pedidoIds) {
+        await asignarTransportistaMut.mutateAsync({ pedidoId, transportistaId, cambiarEstado: marcarListo })
+      }
+      setModalAsignarMasivoOpen(false)
+      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} asignado${pedidoIds.length !== 1 ? 's' : ''} al transportista`)
+    } catch (e) { notify.error('Error al asignar transportista: ' + (e as Error).message) }
+    setGuardando(false)
+  }, [asignarTransportistaMut, notify])
 
   // Fetch todos los pedidos con filtros actuales (sin paginación) para export
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
@@ -426,7 +463,7 @@ export default function PedidosContainer(): React.ReactElement {
         { name: 'Detalle Items', data: itemsData, columnWidths: [10, 25, 35, 12, 10, 12, 12] },
         { name: 'Resumen Estados', data: estadosData, columnWidths: [20, 12, 12] },
         { name: 'Resumen Pagos', data: pagosData, columnWidths: [20, 12, 15] },
-      ], `pedidos-${suffix}-${new Date().toISOString().split('T')[0]}`)
+      ], `pedidos-${suffix}-${fechaLocalISO()}`)
 
       notify.success(`Excel exportado: ${pedidosExport.length} pedidos`)
     } catch {
@@ -460,16 +497,19 @@ export default function PedidosContainer(): React.ReactElement {
     if (!pedidoEditando) return
     setGuardando(true)
     try {
-      await supabase.from('pedidos').update({
+      const { error } = await supabase.from('pedidos').update({
         notas: data.notas, forma_pago: data.formaPago,
         estado_pago: data.estadoPago, monto_pagado: data.montoPagado ?? 0,
       }).eq('id', pedidoEditando.id)
+      if (error) throw error
+      // Invalidar cache para que los cambios se reflejen en la UI
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalEditarOpen(false)
       setPedidoEditando(null)
       notify.success('Pedido actualizado')
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
-  }, [pedidoEditando, notify])
+  }, [pedidoEditando, notify, queryClient])
 
   // ModalEditarPedido: onSaveItems - guardar cambios de items via RPC
   const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[]) => {
@@ -659,6 +699,7 @@ export default function PedidosContainer(): React.ReactElement {
           onModalFiltroFecha={() => setModalFiltroFechaOpen(true)}
           onVerHistorial={handleVerHistorial}
           onEditarPedido={handleEditarPedido}
+          onEditarNotas={handleEditarNotas}
           onMarcarEnPreparacion={handleMarcarEnPreparacion}
           onVolverAPendiente={handleVolverAPendiente}
           onAsignarTransportista={handleAsignarTransportista}
@@ -668,6 +709,7 @@ export default function PedidosContainer(): React.ReactElement {
           onCancelarPedido={handleCancelarPedido}
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
+          onAsignarTransportistaMasivo={() => setModalAsignarMasivoOpen(true)}
         />
       </Suspense>
 
@@ -791,6 +833,18 @@ export default function PedidosContainer(): React.ReactElement {
         </Suspense>
       )}
 
+      {/* Modal Editar Notas (preventista) */}
+      {modalNotasOpen && pedidoNotasEditando && (
+        <Suspense fallback={null}>
+          <ModalEditarNotas
+            pedido={pedidoNotasEditando}
+            onSave={handleGuardarNotas}
+            onClose={() => { setModalNotasOpen(false); setPedidoNotasEditando(null) }}
+            guardando={guardando}
+          />
+        </Suspense>
+      )}
+
       {/* Modal Filtro Fecha */}
       {modalFiltroFechaOpen && (
         <Suspense fallback={null}>
@@ -853,6 +907,18 @@ export default function PedidosContainer(): React.ReactElement {
             transportistas={transportistas}
             onConfirm={handleEntregasMasivas}
             onClose={() => setModalEntregasMasivasOpen(false)}
+            guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Asignar Transportista Masivo */}
+      {modalAsignarMasivoOpen && (
+        <Suspense fallback={null}>
+          <ModalAsignarTransportistaMasivo
+            transportistas={transportistas}
+            onConfirm={handleAsignarTransportistaMasivo}
+            onClose={() => setModalAsignarMasivoOpen(false)}
             guardando={guardando}
           />
         </Suspense>

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Percent, TrendingUp, Calendar } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
-import { formatPrecio } from '../../utils/formatters';
+import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import type { ReportePreventista } from '../../types';
 
 type PeriodoComision = 'mes' | 'personalizado';
@@ -20,7 +20,7 @@ function getPrimerDiaMes(): string {
 }
 
 function getHoy(): string {
-  return new Date().toISOString().split('T')[0];
+  return fechaLocalISO();
 }
 
 export default function VistaComisiones({

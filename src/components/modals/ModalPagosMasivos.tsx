@@ -26,18 +26,25 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   const [selectedFormaPago, setSelectedFormaPago] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busqueda, setBusqueda] = useState('')
+  const [fechaDesde, setFechaDesde] = useState('')
+  const [fechaHasta, setFechaHasta] = useState('')
 
   const { data: pedidos = [], isLoading } = usePedidosNoPagadosQuery(true)
 
   const pedidosFiltrados = useMemo(() => {
-    if (!busqueda.trim()) return pedidos
-    const term = busqueda.toLowerCase()
-    return pedidos.filter(p =>
-      p.cliente?.nombre_fantasia?.toLowerCase().includes(term) ||
-      p.cliente?.direccion?.toLowerCase().includes(term) ||
-      String(p.id).includes(term)
-    )
-  }, [pedidos, busqueda])
+    let resultado = pedidos
+    if (fechaDesde) resultado = resultado.filter(p => (p.fecha || p.created_at?.split('T')[0] || '') >= fechaDesde)
+    if (fechaHasta) resultado = resultado.filter(p => (p.fecha || p.created_at?.split('T')[0] || '') <= fechaHasta)
+    if (busqueda.trim()) {
+      const term = busqueda.toLowerCase()
+      resultado = resultado.filter(p =>
+        p.cliente?.nombre_fantasia?.toLowerCase().includes(term) ||
+        p.cliente?.direccion?.toLowerCase().includes(term) ||
+        String(p.id).includes(term)
+      )
+    }
+    return resultado
+  }, [pedidos, busqueda, fechaDesde, fechaHasta])
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -84,6 +91,20 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
               <option key={fp.value} value={fp.value}>{fp.label}</option>
             ))}
           </select>
+        </div>
+
+        {/* Filtro por fechas */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Desde</label>
+            <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
+              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Hasta</label>
+            <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
+              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+          </div>
         </div>
 
         {/* Busqueda */}

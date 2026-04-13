@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   CompraDBExtended,
   CompraItemDBExtended,
@@ -118,7 +119,7 @@ export function useCompras(): UseComprasReturnExtended {
       p_proveedor_id: compraData.proveedorId || null,
       p_proveedor_nombre: compraData.proveedorNombre || null,
       p_numero_factura: compraData.numeroFactura || null,
-      p_fecha_compra: compraData.fechaCompra || new Date().toISOString().split('T')[0],
+      p_fecha_compra: compraData.fechaCompra || fechaLocalISO(),
       p_subtotal: compraData.subtotal || 0,
       p_iva: compraData.iva || 0,
       p_otros_impuestos: compraData.otrosImpuestos || 0,

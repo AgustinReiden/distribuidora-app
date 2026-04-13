@@ -1,6 +1,6 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
 import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
-import { formatPrecio, formatFecha } from '../../utils/formatters';
+import { formatPrecio, formatFecha, fechaLocalISO } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import type {
   RecorridoDBExtended,
@@ -336,9 +336,9 @@ export default function VistaRecorridos({
   const [fechaDesde, setFechaDesde] = useState<string>(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
-    return d.toISOString().split('T')[0];
+    return fechaLocalISO(d);
   });
-  const [fechaHasta, setFechaHasta] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [fechaHasta, setFechaHasta] = useState<string>(() => fechaLocalISO());
 
   // Resumen del dia
   const resumenDia = useMemo<ResumenDia | null>(() => {
@@ -359,7 +359,7 @@ export default function VistaRecorridos({
     });
   }, [recorridos]);
 
-  const hoy = new Date().toISOString().split('T')[0];
+  const hoy = fechaLocalISO();
   const esHoy = fechaSeleccionada === hoy;
 
   const handleFechaChange = (e: ChangeEvent<HTMLInputElement>): void => {

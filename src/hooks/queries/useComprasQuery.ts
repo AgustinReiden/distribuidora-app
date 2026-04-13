@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   CompraDBExtended,
   CompraFormInputExtended,
@@ -103,7 +104,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     p_proveedor_id: compraData.proveedorId || null,
     p_proveedor_nombre: compraData.proveedorNombre || null,
     p_numero_factura: compraData.numeroFactura || null,
-    p_fecha_compra: compraData.fechaCompra || new Date().toISOString().split('T')[0],
+    p_fecha_compra: compraData.fechaCompra || fechaLocalISO(),
     p_subtotal: compraData.subtotal || 0,
     p_iva: compraData.iva || 0,
     p_otros_impuestos: compraData.otrosImpuestos || 0,

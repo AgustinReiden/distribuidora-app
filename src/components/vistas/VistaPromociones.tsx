@@ -6,6 +6,7 @@
  */
 import React, { useState } from 'react'
 import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, AlertTriangle, Check } from 'lucide-react'
+import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
 
@@ -49,7 +50,7 @@ export default function VistaPromociones({
 
   const isPromoVigente = (promo: PromocionConDetalles): boolean => {
     if (!promo.activo) return false
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaLocalISO()
     if (promo.fecha_inicio > hoy) return false
     if (promo.fecha_fin && promo.fecha_fin < hoy) return false
     return true
@@ -133,6 +134,15 @@ export default function VistaPromociones({
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium">
                           <AlertTriangle className="w-3 h-3" />
                           {promo.usos_pendientes} uso{promo.usos_pendientes !== 1 ? 's' : ''} pendiente{promo.usos_pendientes !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {promo.limite_usos && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          promo.usos_pendientes >= promo.limite_usos
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {promo.usos_pendientes}/{promo.limite_usos} usos
                         </span>
                       )}
                     </div>

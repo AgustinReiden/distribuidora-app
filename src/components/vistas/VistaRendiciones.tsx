@@ -19,6 +19,7 @@ import {
   Plus,
   X
 } from 'lucide-react'
+import { fechaLocalISO } from '../../utils/formatters'
 import { useRendiciones, useUsuarios, useRecorridos } from '../../hooks/supabase'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { RendicionDBExtended, EstadoRendicion, PerfilDB } from '../../types'
@@ -86,7 +87,7 @@ function RendicionCard({ rendicion, onAprobar, onRechazar, onObservar, onVerDeta
               <div className="flex items-center gap-2">
                 <User className="w-4 h-4 text-gray-400" />
                 <span className="font-medium text-gray-800 dark:text-white">
-                  {rendicion.transportista?.nombre || 'Transportista'}
+                  {rendicion.transportista_nombre || 'Transportista'}
                 </span>
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -323,7 +324,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const { transportistas } = useUsuarios()
   const { fetchRecorridosPorFecha, recorridos } = useRecorridos()
 
-  const [fechaFiltro, setFechaFiltro] = useState<string>(new Date().toISOString().split('T')[0])
+  const [fechaFiltro, setFechaFiltro] = useState<string>(fechaLocalISO())
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoRendicion | 'todas'>('todas')
   const [modalCrearOpen, setModalCrearOpen] = useState(false)
   const [creandoRendicion, setCreandoRendicion] = useState(false)

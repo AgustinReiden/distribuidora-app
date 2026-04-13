@@ -4,6 +4,7 @@
  */
 import { useState, useCallback } from 'react'
 import { supabase, notifyError } from './base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   RendicionDBExtended,
   RendicionAjusteInput,
@@ -28,7 +29,8 @@ export function useRendiciones(): UseRendicionesReturn {
         .from('rendiciones')
         .select(`
           *,
-          recorrido:recorridos!recorrido_id(id, total_pedidos, pedidos_entregados, total_facturado, total_cobrado)
+          recorrido:recorridos!recorrido_id(id, total_pedidos, pedidos_entregados, total_facturado, total_cobrado),
+          ajustes:rendicion_ajustes(id)
         `)
         .eq('fecha', fecha)
         .order('created_at', { ascending: false })
@@ -55,7 +57,8 @@ export function useRendiciones(): UseRendicionesReturn {
         total_pedidos: r.recorrido?.total_pedidos || 0,
         pedidos_entregados: r.recorrido?.pedidos_entregados || 0,
         total_facturado: r.recorrido?.total_facturado || 0,
-        total_cobrado: r.recorrido?.total_cobrado || 0
+        total_cobrado: r.recorrido?.total_cobrado || 0,
+        total_ajustes: Array.isArray(r.ajustes) ? r.ajustes.length : 0
       })) as RendicionDBExtended[]
 
       setRendiciones(rendicionesData)
@@ -73,7 +76,7 @@ export function useRendiciones(): UseRendicionesReturn {
   const fetchRendicionActual = useCallback(async (transportistaId: string): Promise<RendicionDBExtended | null> => {
     setLoading(true)
     try {
-      const hoy = new Date().toISOString().split('T')[0]
+      const hoy = fechaLocalISO()
       const { data, error } = await supabase
         .from('rendiciones')
         .select(`
@@ -295,7 +298,7 @@ export function useRendiciones(): UseRendicionesReturn {
 
   // Refetch del día actual
   const refetch = useCallback(async () => {
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaLocalISO()
     await fetchRendicionesPorFecha(hoy)
   }, [fetchRendicionesPorFecha])
 

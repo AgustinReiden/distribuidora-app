@@ -1,5 +1,5 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
-import { X, DollarSign, FileText, AlertCircle, Check } from 'lucide-react'
+import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2 } from 'lucide-react'
 import { formatPrecio as formatCurrency } from '../../utils/formatters'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalPagoSchema } from '../../lib/schemas'
@@ -34,6 +34,11 @@ interface PagoRegistrado extends Pago {
   monto: number;
 }
 
+interface PagoDividido {
+  monto: string;
+  formaPago: string;
+}
+
 export interface ModalRegistrarPagoProps {
   cliente: Cliente | null;
   saldoPendiente: number;
@@ -63,6 +68,28 @@ export default function ModalRegistrarPago({
   const [pagoRegistrado, setPagoRegistrado] = useState<PagoRegistrado | null>(null)
   const [error, setError] = useState<string>('')
 
+  // Pago dividido
+  const [pagoDividido, setPagoDividido] = useState<boolean>(false)
+  const [pagos, setPagos] = useState<PagoDividido[]>([
+    { monto: '', formaPago: 'efectivo' },
+    { monto: '', formaPago: 'transferencia' },
+  ])
+
+  const totalDividido = pagos.reduce((sum, p) => sum + (parseFloat(p.monto) || 0), 0)
+
+  const handleAddPago = () => {
+    setPagos(prev => [...prev, { monto: '', formaPago: 'efectivo' }])
+  }
+
+  const handleRemovePago = (index: number) => {
+    if (pagos.length <= 2) return
+    setPagos(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handlePagoChange = (index: number, field: keyof PagoDividido, value: string) => {
+    setPagos(prev => prev.map((p, i) => i === index ? { ...p, [field]: value } : p))
+  }
+
   // Filter pending payment orders
   const pedidosPendientes = (pedidos || []).filter(p =>
     p.cliente_id === cliente?.id && p.estado_pago !== 'pagado'
@@ -72,29 +99,59 @@ export default function ModalRegistrarPago({
     e.preventDefault()
     setError('')
 
-    // Validar con Zod
-    const result = validate({ monto: parseFloat(monto) || 0, formaPago, referencia, notas, pedidoSeleccionado })
-    if (!result.success) {
-      setError(getFirstError() || 'Error de validacion')
-      return
-    }
+    if (pagoDividido) {
+      // Validar pagos divididos
+      const pagosValidos = pagos.filter(p => parseFloat(p.monto) > 0)
+      if (pagosValidos.length < 2) {
+        setError('Ingresa al menos 2 formas de pago con monto mayor a 0')
+        return
+      }
 
-    setLoading(true)
-    try {
-      const pago = await onConfirmar({
-        clienteId: cliente!.id,
-        pedidoId: pedidoSeleccionado || null,
-        monto: result.data.monto,
-        formaPago,
-        referencia,
-        notas
-      })
-      setPagoRegistrado(pago)
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
-      setError(errorMessage)
-    } finally {
-      setLoading(false)
+      setLoading(true)
+      try {
+        let ultimoPago: PagoRegistrado | null = null
+        for (const pago of pagosValidos) {
+          ultimoPago = await onConfirmar({
+            clienteId: cliente!.id,
+            pedidoId: pedidoSeleccionado || null,
+            monto: parseFloat(pago.monto),
+            formaPago: pago.formaPago,
+            referencia: '',
+            notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`
+          })
+        }
+        if (ultimoPago) setPagoRegistrado(ultimoPago)
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
+        setError(errorMessage)
+      } finally {
+        setLoading(false)
+      }
+    } else {
+      // Pago simple (comportamiento original)
+      const result = validate({ monto: parseFloat(monto) || 0, formaPago, referencia, notas, pedidoSeleccionado })
+      if (!result.success) {
+        setError(getFirstError() || 'Error de validacion')
+        return
+      }
+
+      setLoading(true)
+      try {
+        const pago = await onConfirmar({
+          clienteId: cliente!.id,
+          pedidoId: pedidoSeleccionado || null,
+          monto: result.data.monto,
+          formaPago,
+          referencia,
+          notas
+        })
+        setPagoRegistrado(pago)
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
+        setError(errorMessage)
+      } finally {
+        setLoading(false)
+      }
     }
   }
 
@@ -181,112 +238,191 @@ export default function ModalRegistrarPago({
             </div>
           )}
 
-          {/* Monto */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Monto *
-            </label>
-            <div className="relative">
-              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={monto}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setMonto(e.target.value)}
-                placeholder="0.00"
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg font-semibold"
-                required
-              />
-            </div>
-            {saldoPendiente > 0 && (
-              <div className="flex gap-2 mt-2">
+          {/* Toggle pago dividido */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={pagoDividido}
+              onChange={e => setPagoDividido(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-blue-600"
+            />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Pago dividido (multiples formas de pago)
+            </span>
+          </label>
+
+          {pagoDividido ? (
+            <>
+              {/* Pagos divididos */}
+              <div className="space-y-3">
+                {pagos.map((pago, index) => (
+                  <div key={index} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={pago.monto}
+                          onChange={e => handlePagoChange(index, 'monto', e.target.value)}
+                          placeholder="0.00"
+                          className="w-full pl-7 pr-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold"
+                        />
+                      </div>
+                    </div>
+                    <select
+                      value={pago.formaPago}
+                      onChange={e => handlePagoChange(index, 'formaPago', e.target.value)}
+                      className="px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                    >
+                      {FORMAS_PAGO.map(fp => (
+                        <option key={fp.value} value={fp.value}>{fp.label}</option>
+                      ))}
+                    </select>
+                    {pagos.length > 2 && (
+                      <button type="button" onClick={() => handleRemovePago(index)} className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
                 <button
                   type="button"
-                  onClick={() => handleMontoPreset(100)}
-                  className="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded"
+                  onClick={handleAddPago}
+                  className="w-full flex items-center justify-center gap-1 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg border border-dashed border-blue-300 dark:border-blue-700"
                 >
-                  Total
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMontoPreset(50)}
-                  className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"
-                >
-                  50%
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMontoPreset(25)}
-                  className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"
-                >
-                  25%
+                  <Plus className="w-4 h-4" />
+                  Agregar forma de pago
                 </button>
               </div>
-            )}
-          </div>
 
-          {/* Forma de pago */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Forma de Pago
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {FORMAS_PAGO.slice(0, 3).map(fp => (
-                <button
-                  key={fp.value}
-                  type="button"
-                  onClick={() => setFormaPago(fp.value)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    formaPago === fp.value
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  {fp.label}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              {FORMAS_PAGO.slice(3).map(fp => (
-                <button
-                  key={fp.value}
-                  type="button"
-                  onClick={() => setFormaPago(fp.value)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    formaPago === fp.value
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  {fp.label}
-                </button>
-              ))}
-            </div>
-          </div>
+              {/* Total dividido */}
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-blue-700 dark:text-blue-300">Total a pagar:</span>
+                  <span className="text-lg font-bold text-blue-700 dark:text-blue-400">
+                    {formatCurrency(totalDividido)}
+                  </span>
+                </div>
+                {saldoPendiente > 0 && totalDividido !== saldoPendiente && (
+                  <p className="text-xs text-blue-500 mt-1">
+                    Saldo pendiente: {formatCurrency(saldoPendiente)}
+                    {totalDividido > saldoPendiente && ' (excede el saldo)'}
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Monto (pago simple) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Monto *
+                </label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={monto}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setMonto(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg font-semibold"
+                    required
+                  />
+                </div>
+                {saldoPendiente > 0 && (
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleMontoPreset(100)}
+                      className="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded"
+                    >
+                      Total
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMontoPreset(50)}
+                      className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"
+                    >
+                      50%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMontoPreset(25)}
+                      className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"
+                    >
+                      25%
+                    </button>
+                  </div>
+                )}
+              </div>
 
-          {/* Referencia */}
-          {(formaPago === 'transferencia' || formaPago === 'cheque') && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {formaPago === 'cheque' ? 'Numero de Cheque *' : 'Referencia/Comprobante'}
-              </label>
-              <input
-                type="text"
-                value={referencia}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setReferencia(e.target.value)}
-                placeholder={formaPago === 'cheque' ? 'Ej: 12345678' : 'Ej: TRF-001234'}
-                className={`w-full px-4 py-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
-                  formaPago === 'cheque' && !referencia.trim()
-                    ? 'border-yellow-400 dark:border-yellow-600'
-                    : 'border-gray-300 dark:border-gray-600'
-                }`}
-                required={formaPago === 'cheque'}
-              />
-              {formaPago === 'cheque' && !referencia.trim() && (
-                <p className="text-xs text-yellow-600 mt-1">Campo obligatorio para pagos con cheque</p>
+              {/* Forma de pago */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Forma de Pago
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {FORMAS_PAGO.slice(0, 3).map(fp => (
+                    <button
+                      key={fp.value}
+                      type="button"
+                      onClick={() => setFormaPago(fp.value)}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        formaPago === fp.value
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {fp.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {FORMAS_PAGO.slice(3).map(fp => (
+                    <button
+                      key={fp.value}
+                      type="button"
+                      onClick={() => setFormaPago(fp.value)}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        formaPago === fp.value
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {fp.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Referencia */}
+              {(formaPago === 'transferencia' || formaPago === 'cheque') && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    {formaPago === 'cheque' ? 'Numero de Cheque *' : 'Referencia/Comprobante'}
+                  </label>
+                  <input
+                    type="text"
+                    value={referencia}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setReferencia(e.target.value)}
+                    placeholder={formaPago === 'cheque' ? 'Ej: 12345678' : 'Ej: TRF-001234'}
+                    className={`w-full px-4 py-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+                      formaPago === 'cheque' && !referencia.trim()
+                        ? 'border-yellow-400 dark:border-yellow-600'
+                        : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                    required={formaPago === 'cheque'}
+                  />
+                  {formaPago === 'cheque' && !referencia.trim() && (
+                    <p className="text-xs text-yellow-600 mt-1">Campo obligatorio para pagos con cheque</p>
+                  )}
+                </div>
               )}
-            </div>
+            </>
           )}
 
           {/* Aplicar a pedido especifico */}
@@ -335,7 +471,7 @@ export default function ModalRegistrarPago({
             </button>
             <button
               type="submit"
-              disabled={loading || !monto}
+              disabled={loading || (pagoDividido ? totalDividido <= 0 : !monto)}
               className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium flex items-center justify-center gap-2"
             >
               {loading ? (

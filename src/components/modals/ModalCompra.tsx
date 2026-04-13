@@ -7,7 +7,7 @@
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, lazy, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle } from 'lucide-react'
-import { formatPrecio } from '../../utils/formatters'
+import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { supabase } from '../../lib/supabase'
 import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
 
@@ -186,7 +186,7 @@ const initialState: CompraState = {
   usarProveedorNuevo: false,
   // Datos de compra
   numeroFactura: '',
-  fechaCompra: new Date().toISOString().split('T')[0],
+  fechaCompra: fechaLocalISO(),
   formaPago: 'efectivo',
   notas: '',
   // Items

@@ -3,7 +3,7 @@
  * Usa useReducer para modales y estados de edición para evitar re-renders innecesarios
  */
 import { useState, useReducer, useMemo, useCallback, Dispatch, SetStateAction } from 'react';
-import { ITEMS_PER_PAGE } from '../utils/formatters';
+import { ITEMS_PER_PAGE, fechaLocalISO } from '../utils/formatters';
 import type {
   ClienteDB,
   ProductoDB,
@@ -301,7 +301,7 @@ export function useAppState(perfil: PerfilDB | null): UseAppStateReturn {
   const [vista, setVista] = useState<string>(perfil?.rol === 'admin' ? 'dashboard' : 'pedidos');
 
   // Estado para recorridos
-  const [fechaRecorridos, setFechaRecorridos] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [fechaRecorridos, setFechaRecorridos] = useState<string>(() => fechaLocalISO());
   const [estadisticasRecorridos, setEstadisticasRecorridos] = useState<unknown>(null);
 
   // Reducer para modales (un solo dispatch para todos)

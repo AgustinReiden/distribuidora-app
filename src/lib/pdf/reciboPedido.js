@@ -294,7 +294,7 @@ function calcularAlturaComanda(pedido) {
   let height = 30 // header
   height += 20 // cliente
   height += 6 // divider + header tabla
-  height += items.length * 6 // productos
+  height += items.length * 9 // productos (nombre + detalle precio)
   height += 25 // total + pago
   if (pedido.notas) height += 12
   height += 20 // pie
@@ -373,6 +373,13 @@ function dibujarComanda(doc, pedido) {
       }
       y += 2.8
     })
+    // Detalle: cantidad x precio unitario
+    doc.setFontSize(5)
+    doc.setTextColor(100, 100, 100)
+    doc.text(`${item.cantidad} x ${formatPrecio(item.precio_unitario)}`, margin + 2, y)
+    doc.setTextColor(0, 0, 0)
+    doc.setFontSize(6)
+    y += 2.5
   })
 
   y += 1

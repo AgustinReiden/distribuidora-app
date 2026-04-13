@@ -1,24 +1,25 @@
 import { useState, useMemo, memo } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import { Loader2, Search, Truck } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { usePedidosNoEntregadosQuery } from '../../hooks/queries'
 import { getEstadoColor, getEstadoLabel, formatPrecio } from '../../utils/formatters'
 import type { PerfilDB } from '../../types'
 
-export interface ModalEntregasMasivasProps {
+export interface ModalAsignarTransportistaMasivoProps {
   transportistas: PerfilDB[]
-  onConfirm: (transportistaId: string, pedidoIds: string[]) => Promise<void>
+  onConfirm: (transportistaId: string, pedidoIds: string[], marcarListo: boolean) => Promise<void>
   onClose: () => void
   guardando: boolean
 }
 
-const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
+const ModalAsignarTransportistaMasivo = memo(function ModalAsignarTransportistaMasivo({
   transportistas,
   onConfirm,
   onClose,
   guardando,
-}: ModalEntregasMasivasProps) {
+}: ModalAsignarTransportistaMasivoProps) {
   const [selectedTransportista, setSelectedTransportista] = useState('')
+  const [marcarListo, setMarcarListo] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
@@ -26,8 +27,9 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
 
   const { data: pedidos = [], isLoading } = usePedidosNoEntregadosQuery(true)
 
+  // Filtrar pedidos sin transportista asignado
   const pedidosFiltrados = useMemo(() => {
-    let resultado = pedidos
+    let resultado = pedidos.filter(p => !p.transportista_id)
     if (fechaDesde) resultado = resultado.filter(p => (p.fecha || p.created_at?.split('T')[0] || '') >= fechaDesde)
     if (fechaHasta) resultado = resultado.filter(p => (p.fecha || p.created_at?.split('T')[0] || '') <= fechaHasta)
     if (busqueda.trim()) {
@@ -62,12 +64,12 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   const canConfirm = selectedTransportista && selectedIds.size > 0 && !guardando
 
   return (
-    <ModalBase title="Entregas Masivas" onClose={onClose} maxWidth="max-w-3xl">
+    <ModalBase title="Asignar Transportista Masivo" onClose={onClose} maxWidth="max-w-3xl">
       <div className="p-4 space-y-4">
-        {/* Selector de transportista */}
+        {/* Selector de transportista destino */}
         <div>
           <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Transportista
+            Asignar a transportista
           </label>
           <select
             value={selectedTransportista}
@@ -80,6 +82,19 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
             ))}
           </select>
         </div>
+
+        {/* Marcar como listo */}
+        <label className="flex items-center space-x-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={marcarListo}
+            onChange={e => setMarcarListo(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">
+            Marcar como listo para entregar
+          </span>
+        </label>
 
         {/* Filtro por fechas */}
         <div className="grid grid-cols-2 gap-3">
@@ -131,14 +146,14 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
             </div>
           ) : pedidosFiltrados.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              No hay pedidos disponibles para entregar
+              No hay pedidos sin transportista asignado
             </div>
           ) : (
             pedidosFiltrados.map(pedido => (
               <label
                 key={pedido.id}
                 className={`flex items-center p-3 border-b last:border-b-0 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
-                  selectedIds.has(pedido.id) ? 'bg-teal-50 dark:bg-teal-900/20' : ''
+                  selectedIds.has(pedido.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                 }`}
               >
                 <input
@@ -153,6 +168,9 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoColor(pedido.estado)}`}>
                       {getEstadoLabel(pedido.estado)}
                     </span>
+                    {pedido.fecha && (
+                      <span className="text-xs text-gray-400">{pedido.fecha}</span>
+                    )}
                   </div>
                   <p className="font-medium text-gray-800 dark:text-white truncate">
                     {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
@@ -163,9 +181,6 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
                 </div>
                 <div className="text-right ml-3 flex-shrink-0">
                   <p className="font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
-                  {pedido.transportista && (
-                    <p className="text-xs text-orange-600">{pedido.transportista.nombre}</p>
-                  )}
                 </div>
               </label>
             ))
@@ -186,12 +201,13 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
             Cancelar
           </button>
           <button
-            onClick={() => canConfirm && onConfirm(selectedTransportista, Array.from(selectedIds))}
+            onClick={() => canConfirm && onConfirm(selectedTransportista, Array.from(selectedIds), marcarListo)}
             disabled={!canConfirm}
-            className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
             {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Marcar como Entregados
+            <Truck className="w-4 h-4 mr-2" />
+            Asignar Transportista
           </button>
         </div>
       </div>
@@ -199,4 +215,4 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   )
 })
 
-export default ModalEntregasMasivas
+export default ModalAsignarTransportistaMasivo

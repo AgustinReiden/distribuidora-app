@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   TransferenciaDB,
   TransferenciaFormInput,
@@ -92,7 +93,7 @@ async function registrarTransferencia(formData: TransferenciaFormInput): Promise
 
   const { data, error } = await supabase.rpc('registrar_transferencia', {
     p_sucursal_id: formData.sucursalId,
-    p_fecha: formData.fecha || new Date().toISOString().split('T')[0],
+    p_fecha: formData.fecha || fechaLocalISO(),
     p_notas: formData.notas || null,
     p_total_costo: formData.totalCosto,
     p_usuario_id: formData.usuarioId || null,
@@ -114,7 +115,7 @@ async function registrarIngresoSucursal(formData: TransferenciaFormInput): Promi
 
   const { data, error } = await supabase.rpc('registrar_ingreso_sucursal', {
     p_sucursal_id: formData.sucursalId,
-    p_fecha: formData.fecha || new Date().toISOString().split('T')[0],
+    p_fecha: formData.fecha || fechaLocalISO(),
     p_notas: formData.notas || null,
     p_total_costo: formData.totalCosto,
     p_usuario_id: formData.usuarioId || null,

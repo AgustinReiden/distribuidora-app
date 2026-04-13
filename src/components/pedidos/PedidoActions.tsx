@@ -31,6 +31,7 @@ export interface AccionesDropdownProps {
   isEncargado?: boolean;
   onHistorial?: (pedido: PedidoDB) => void;
   onEditar?: (pedido: PedidoDB) => void;
+  onEditarNotas?: (pedido: PedidoDB) => void;
   onPreparar?: (pedido: PedidoDB) => void;
   onVolverAPendiente?: (pedido: PedidoDB) => void;
   onAsignar?: (pedido: PedidoDB) => void;
@@ -60,6 +61,7 @@ function AccionesDropdown({
   isEncargado,
   onHistorial,
   onEditar,
+  onEditarNotas,
   onPreparar,
   onVolverAPendiente,
   onAsignar,
@@ -82,12 +84,22 @@ function AccionesDropdown({
       });
     }
 
-    // Admin, encargado o preventista pueden editar
-    if ((isAdmin || isEncargado || isPreventista) && onEditar) {
+    // Admin o encargado pueden editar completamente
+    if ((isAdmin || isEncargado) && onEditar) {
       items.push({
         label: 'Editar',
         icon: Edit2,
         onClick: () => onEditar(pedido),
+        className: 'text-blue-700 dark:text-blue-400'
+      });
+    }
+
+    // Preventista solo puede editar observaciones
+    if (isPreventista && !isAdmin && !isEncargado && onEditarNotas) {
+      items.push({
+        label: 'Editar Observaciones',
+        icon: Edit2,
+        onClick: () => onEditarNotas(pedido),
         className: 'text-blue-700 dark:text-blue-400'
       });
     }
@@ -164,7 +176,7 @@ function AccionesDropdown({
     }
 
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, onHistorial, onEditar, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido]);
 
   return (
     <DropdownMenu>

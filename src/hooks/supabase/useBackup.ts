@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { supabase } from './base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   BackupData,
   FiltrosExportacion,
@@ -114,7 +115,7 @@ export function useBackup(): UseBackupReturnExtended {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `backup_${tipo}_${new Date().toISOString().split('T')[0]}.json`
+    a.download = `backup_${tipo}_${fechaLocalISO()}.json`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -239,7 +240,7 @@ export function useBackup(): UseBackupReturnExtended {
         { 'Estado Pago': 'Pagado', 'Cantidad': pedidos.filter(p => p.estado_pago === 'pagado').length, 'Total': pedidos.filter(p => p.estado_pago === 'pagado').reduce((s, p) => s + (p.total || 0), 0) }
       ]
 
-      const fecha = new Date().toISOString().split('T')[0]
+      const fecha = fechaLocalISO()
 
       const { createMultiSheetExcel } = await import('../../utils/excel')
       await createMultiSheetExcel([

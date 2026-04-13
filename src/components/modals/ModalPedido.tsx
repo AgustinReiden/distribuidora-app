@@ -1,6 +1,6 @@
 import { useState, useMemo, memo } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift } from 'lucide-react';
-import { formatPrecio } from '../../utils/formatters';
+import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import type { ProductoDB, ClienteDB } from '../../types';
@@ -283,12 +283,12 @@ const ModalPedido = memo(function ModalPedido({
             </label>
             <input
               type="date"
-              value={nuevoPedido.fecha || new Date().toISOString().split('T')[0]}
+              value={nuevoPedido.fecha || fechaLocalISO()}
               onChange={e => onFechaChange && onFechaChange(e.target.value)}
-              max={new Date().toISOString().split('T')[0]}
+              max={fechaLocalISO()}
               className="flex-1 px-3 py-1.5 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
             />
-            {nuevoPedido.fecha && nuevoPedido.fecha !== new Date().toISOString().split('T')[0] && (
+            {nuevoPedido.fecha && nuevoPedido.fecha !== fechaLocalISO() && (
               <p className="text-xs text-amber-600 whitespace-nowrap">Fecha distinta a hoy</p>
             )}
           </div>

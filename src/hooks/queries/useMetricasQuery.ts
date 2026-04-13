@@ -4,6 +4,7 @@
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   DashboardMetricasExtended,
   ReportePreventista,
@@ -76,10 +77,10 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     }
   }
 
-  const pedidosTyped = todosPedidos as PedidoWithRelations[]
+  const pedidosTyped = (todosPedidos as PedidoWithRelations[]).filter(p => p.estado !== 'cancelado')
 
   const hoy = new Date()
-  const hoyStr = hoy.toISOString().split('T')[0]
+  const hoyStr = fechaLocalISO(hoy)
   let fechaInicioStr: string | null = null
 
   switch (periodo) {
@@ -89,17 +90,17 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     case 'semana': {
       const hace7Dias = new Date()
       hace7Dias.setDate(hace7Dias.getDate() - 7)
-      fechaInicioStr = hace7Dias.toISOString().split('T')[0]
+      fechaInicioStr = fechaLocalISO(hace7Dias)
       break
     }
     case 'mes': {
       const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
-      fechaInicioStr = inicioMes.toISOString().split('T')[0]
+      fechaInicioStr = fechaLocalISO(inicioMes)
       break
     }
     case 'anio': {
       const inicioAnio = new Date(hoy.getFullYear(), 0, 1)
-      fechaInicioStr = inicioAnio.toISOString().split('T')[0]
+      fechaInicioStr = fechaLocalISO(inicioAnio)
       break
     }
     case 'personalizado':
@@ -152,7 +153,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   for (let i = 6; i >= 0; i--) {
     const fecha = new Date()
     fecha.setDate(fecha.getDate() - i)
-    const fechaStr = fecha.toISOString().split('T')[0]
+    const fechaStr = fechaLocalISO(fecha)
     const pedidosDia = pedidosTyped.filter(p => (p.fecha ?? p.created_at?.split('T')[0]) === fechaStr)
     ventasPorDia.push({
       dia: fecha.toLocaleDateString('es-AR', { weekday: 'short' }),
@@ -199,7 +200,7 @@ async function calcularReportePreventistas(
     return []
   }
 
-  const pedidosTyped = pedidos as PedidoDB[]
+  const pedidosTyped = (pedidos as PedidoDB[]).filter(p => p.estado !== 'cancelado')
   const usuarioIds = Array.from(new Set(pedidosTyped.map(p => p.usuario_id).filter(Boolean))) as string[]
 
   const { data: usuarios } = await supabase.from('perfiles').select('id, nombre, email').in('id', usuarioIds)

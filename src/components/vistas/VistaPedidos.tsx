@@ -5,7 +5,7 @@
  * Renderiza lista + controles de paginación.
  */
 import { useState, useRef, useEffect } from 'react';
-import { ShoppingCart, Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown } from 'lucide-react';
+import { ShoppingCart, Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown, Truck } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
@@ -50,6 +50,7 @@ export interface VistaPedidosProps {
   onModalFiltroFecha: () => void;
   onVerHistorial: (pedido: PedidoDB) => void;
   onEditarPedido: (pedido: PedidoDB) => void;
+  onEditarNotas?: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion: (pedido: PedidoDB) => void;
   onVolverAPendiente: (pedido: PedidoDB) => void;
   onAsignarTransportista: (pedido: PedidoDB) => void;
@@ -59,6 +60,7 @@ export interface VistaPedidosProps {
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
+  onAsignarTransportistaMasivo?: () => void;
 }
 
 export default function VistaPedidos({
@@ -88,6 +90,7 @@ export default function VistaPedidos({
   onModalFiltroFecha,
   onVerHistorial,
   onEditarPedido,
+  onEditarNotas,
   onMarcarEnPreparacion,
   onVolverAPendiente,
   onAsignarTransportista,
@@ -97,6 +100,7 @@ export default function VistaPedidos({
   onCancelarPedido,
   onEntregasMasivas,
   onPagosMasivos,
+  onAsignarTransportistaMasivo,
 }: VistaPedidosProps) {
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
@@ -145,6 +149,15 @@ export default function VistaPedidos({
             >
               <PackageCheck className="w-5 h-5" />
               <span className="hidden sm:inline">Entregas Masivas</span>
+            </button>
+          )}
+          {(isAdmin || isEncargado) && onAsignarTransportistaMasivo && (
+            <button
+              onClick={onAsignarTransportistaMasivo}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Truck className="w-5 h-5" />
+              <span className="hidden sm:inline">Asignar Transportista</span>
             </button>
           )}
           {(isAdmin || isEncargado) && onPagosMasivos && (
@@ -203,6 +216,7 @@ export default function VistaPedidos({
                 isEncargado={isEncargado}
                 onVerHistorial={onVerHistorial}
                 onEditarPedido={onEditarPedido}
+                onEditarNotas={onEditarNotas}
                 onMarcarEnPreparacion={onMarcarEnPreparacion}
                 onVolverAPendiente={onVolverAPendiente}
                 onAsignarTransportista={onAsignarTransportista}

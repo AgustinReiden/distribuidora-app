@@ -41,6 +41,7 @@ export interface PedidoCardProps {
   isEncargado?: boolean;
   onVerHistorial?: (pedido: PedidoDB) => void;
   onEditarPedido?: (pedido: PedidoDB) => void;
+  onEditarNotas?: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
   onVolverAPendiente?: (pedido: PedidoDB) => void;
   onAsignarTransportista?: (pedido: PedidoDB) => void;
@@ -145,6 +146,7 @@ function PedidoCard({
   isEncargado,
   onVerHistorial,
   onEditarPedido,
+  onEditarNotas,
   onMarcarEnPreparacion,
   onVolverAPendiente,
   onAsignarTransportista,
@@ -215,6 +217,7 @@ function PedidoCard({
             isEncargado={isEncargado}
             onHistorial={handleVerHistorial}
             onEditar={handleEditarPedido}
+            onEditarNotas={onEditarNotas}
             onPreparar={handleMarcarEnPreparacion}
             onVolverAPendiente={handleVolverAPendiente}
             onAsignar={onAsignarTransportista}

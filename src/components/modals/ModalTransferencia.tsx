@@ -6,7 +6,7 @@
  */
 import React, { useState, useMemo } from 'react'
 import { X, Search, Trash2, Plus, ArrowRightLeft } from 'lucide-react'
-import { formatPrecio } from '../../utils/formatters'
+import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB, SucursalDB, TransferenciaFormInput, TipoTransferencia } from '../../types'
 
 interface ModalTransferenciaProps {
@@ -41,7 +41,7 @@ export default function ModalTransferencia({
   const esIngreso = tipo === 'ingreso'
   // Form state
   const [sucursalId, setSucursalId] = useState('')
-  const [fecha, setFecha] = useState(() => new Date().toISOString().split('T')[0])
+  const [fecha, setFecha] = useState(() => fechaLocalISO())
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<ItemTransferencia[]>([])
   const [busqueda, setBusqueda] = useState('')

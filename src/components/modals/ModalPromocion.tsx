@@ -6,6 +6,7 @@
  */
 import { useState, useMemo } from 'react'
 import { X, Search, Gift } from 'lucide-react'
+import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 
@@ -25,7 +26,7 @@ export default function ModalPromocion({
   const isEditing = !!promocion
 
   const [nombre, setNombre] = useState(promocion?.nombre || '')
-  const [fechaInicio, setFechaInicio] = useState(promocion?.fecha_inicio || new Date().toISOString().split('T')[0])
+  const [fechaInicio, setFechaInicio] = useState(promocion?.fecha_inicio || fechaLocalISO())
   const [fechaFin, setFechaFin] = useState(promocion?.fecha_fin || '')
   const [productoIds, setProductoIds] = useState<Set<string>>(
     new Set(promocion?.productos.map(p => String(p.producto_id)) || [])
@@ -44,6 +45,9 @@ export default function ModalPromocion({
   )
   const [productoRegaloId, setProductoRegaloId] = useState<string>(
     promocion?.producto_regalo_id ? String(promocion.producto_regalo_id) : ''
+  )
+  const [limiteUsos, setLimiteUsos] = useState<string>(
+    promocion?.limite_usos ? String(promocion.limite_usos) : ''
   )
   const [busqueda, setBusqueda] = useState('')
   const [busquedaRegalo, setBusquedaRegalo] = useState('')
@@ -104,11 +108,13 @@ export default function ModalPromocion({
     }
 
     setSaving(true)
+    const limite = limiteUsos ? parseInt(limiteUsos) : null
     const result = await onSave({
       nombre: nombre.trim(),
       tipo: 'bonificacion',
       fechaInicio,
       fechaFin: fechaFin || null,
+      limiteUsos: limite && limite > 0 ? limite : null,
       productoIds: Array.from(productoIds),
       productoRegaloId: productoRegaloId || null,
       reglas: [
@@ -170,6 +176,24 @@ export default function ModalPromocion({
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none"
               />
             </div>
+          </div>
+
+          {/* Limite de usos (hasta agotar stock) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Limite de usos (opcional)
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={limiteUsos}
+              onChange={e => setLimiteUsos(e.target.value)}
+              placeholder="Sin limite"
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Se desactiva automaticamente al alcanzar este numero de bonificaciones entregadas. Dejar vacio para sin limite.
+            </p>
           </div>
 
           {/* Reglas de bonificacion */}

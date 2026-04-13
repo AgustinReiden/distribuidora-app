@@ -51,6 +51,20 @@ export function formatCurrencyCompact(amount: number | null | undefined): string
 // ============================================
 
 /**
+ * Retorna la fecha actual (o la proporcionada) en formato YYYY-MM-DD
+ * usando la zona horaria de Argentina (America/Argentina/Buenos_Aires).
+ *
+ * Reemplaza el patron `new Date().toISOString().split('T')[0]` que
+ * retorna UTC y causa que pedidos hechos a la tarde/noche aparezcan
+ * como del dia siguiente.
+ */
+export function fechaLocalISO(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/Argentina/Buenos_Aires'
+  }).format(date)
+}
+
+/**
  * Parsea un string de fecha de forma segura.
  * Para strings date-only (YYYY-MM-DD), agrega T12:00:00 para evitar
  * que JavaScript los interprete como UTC medianoche (lo cual causa
@@ -397,6 +411,7 @@ export default {
   formatPrecio,
   formatCurrency,
   formatCurrencyCompact,
+  fechaLocalISO,
   formatFecha,
   formatDate,
   formatDateTime,

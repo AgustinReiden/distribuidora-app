@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Image
 } from 'lucide-react'
+import { fechaLocalISO } from '../../utils/formatters'
 import { useSalvedades } from '../../hooks/supabase'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import ModalResolverSalvedad from '../modals/ModalResolverSalvedad'
@@ -201,9 +202,9 @@ export default function VistaSalvedades(): React.ReactElement {
   const [fechaDesde, setFechaDesde] = useState<string>(() => {
     const d = new Date()
     d.setDate(d.getDate() - 7)
-    return d.toISOString().split('T')[0]
+    return fechaLocalISO(d)
   })
-  const [fechaHasta, setFechaHasta] = useState<string>(new Date().toISOString().split('T')[0])
+  const [fechaHasta, setFechaHasta] = useState<string>(fechaLocalISO())
 
   const [salvedadResolver, setSalvedadResolver] = useState<SalvedadItemDBExtended | null>(null)
   const [estadisticas, setEstadisticas] = useState<{

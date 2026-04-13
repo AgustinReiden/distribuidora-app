@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { fechaLocalISO } from '../../utils/formatters'
 import { useRecorridos } from '../../hooks/supabase'
 import type { EstadisticasRecorridos } from '../../types'
 
@@ -14,7 +15,7 @@ function LoadingState(): React.ReactElement {
 }
 
 function getToday(): string {
-  return new Date().toISOString().split('T')[0]
+  return fechaLocalISO()
 }
 
 export default function RecorridosContainer(): React.ReactElement {
