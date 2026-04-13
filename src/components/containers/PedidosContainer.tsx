@@ -868,6 +868,7 @@ export default function PedidosContainer(): React.ReactElement {
             onExportarOrdenPreparacion={handleExportarOrdenPreparacion}
             onExportarHojaRuta={handleExportarHojaRuta}
             onImprimirComandas={handleImprimirComandas}
+            fetchAllFilteredPedidos={fetchAllFilteredPedidos}
             onClose={() => setModalExportarPDFOpen(false)}
           />
         </Suspense>

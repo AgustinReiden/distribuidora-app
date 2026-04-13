@@ -65,80 +65,83 @@ const ModalAsignarTransportistaMasivo = memo(function ModalAsignarTransportistaM
 
   return (
     <ModalBase title="Asignar Transportista Masivo" onClose={onClose} maxWidth="max-w-3xl">
-      <div className="p-4 space-y-4">
-        {/* Selector de transportista destino */}
-        <div>
-          <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Asignar a transportista
-          </label>
-          <select
-            value={selectedTransportista}
-            onChange={e => setSelectedTransportista(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            <option value="">Seleccionar transportista...</option>
-            {transportistas.map(t => (
-              <option key={t.id} value={t.id}>{t.nombre}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Marcar como listo */}
-        <label className="flex items-center space-x-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={marcarListo}
-            onChange={e => setMarcarListo(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300"
-          />
-          <span className="text-sm text-gray-700 dark:text-gray-300">
-            Marcar como listo para entregar
-          </span>
-        </label>
-
-        {/* Filtro por fechas */}
-        <div className="grid grid-cols-2 gap-3">
+      <div className="flex flex-col max-h-[calc(80vh-4rem)]">
+        {/* Controles superiores (no scrollean) */}
+        <div className="p-4 space-y-4 flex-shrink-0">
+          {/* Selector de transportista destino */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Desde</label>
-            <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+              Asignar a transportista
+            </label>
+            <select
+              value={selectedTransportista}
+              onChange={e => setSelectedTransportista(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Seleccionar transportista...</option>
+              {transportistas.map(t => (
+                <option key={t.id} value={t.id}>{t.nombre}</option>
+              ))}
+            </select>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Hasta</label>
-            <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-          </div>
-        </div>
 
-        {/* Busqueda */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Buscar por cliente, direccion o #pedido..."
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          />
-        </div>
-
-        {/* Seleccionar todos */}
-        {pedidosFiltrados.length > 0 && (
+          {/* Marcar como listo */}
           <label className="flex items-center space-x-2 cursor-pointer">
             <input
               type="checkbox"
-              checked={allSelected}
-              onChange={toggleAll}
+              checked={marcarListo}
+              onChange={e => setMarcarListo(e.target.checked)}
               className="w-4 h-4 rounded border-gray-300"
             />
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Seleccionar todos ({pedidosFiltrados.length})
+            <span className="text-sm text-gray-700 dark:text-gray-300">
+              Marcar como listo para entregar
             </span>
           </label>
-        )}
 
-        {/* Lista de pedidos */}
-        <div className="max-h-96 overflow-y-auto border rounded-lg dark:border-gray-600">
+          {/* Filtro por fechas */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Desde</label>
+              <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
+                className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Hasta</label>
+              <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
+                className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+            </div>
+          </div>
+
+          {/* Busqueda */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por cliente, direccion o #pedido..."
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+          </div>
+
+          {/* Seleccionar todos */}
+          {pedidosFiltrados.length > 0 && (
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Seleccionar todos ({pedidosFiltrados.length})
+              </span>
+            </label>
+          )}
+        </div>
+
+        {/* Lista de pedidos (scrollable) */}
+        <div className="flex-1 overflow-y-auto border-t border-b dark:border-gray-600 min-h-0">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
@@ -186,29 +189,29 @@ const ModalAsignarTransportistaMasivo = memo(function ModalAsignarTransportistaM
             ))
           )}
         </div>
-      </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <span className="text-sm text-gray-600 dark:text-gray-400">
-          {selectedIds.size} pedido{selectedIds.size !== 1 ? 's' : ''} seleccionado{selectedIds.size !== 1 ? 's' : ''}
-        </span>
-        <div className="flex space-x-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={() => canConfirm && onConfirm(selectedTransportista, Array.from(selectedIds), marcarListo)}
-            disabled={!canConfirm}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-          >
-            {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            <Truck className="w-4 h-4 mr-2" />
-            Asignar Transportista
-          </button>
+        {/* Footer (siempre visible) */}
+        <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            {selectedIds.size} pedido{selectedIds.size !== 1 ? 's' : ''} seleccionado{selectedIds.size !== 1 ? 's' : ''}
+          </span>
+          <div className="flex space-x-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => canConfirm && onConfirm(selectedTransportista, Array.from(selectedIds), marcarListo)}
+              disabled={!canConfirm}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              <Truck className="w-4 h-4 mr-2" />
+              Asignar Transportista
+            </button>
+          </div>
         </div>
       </div>
     </ModalBase>

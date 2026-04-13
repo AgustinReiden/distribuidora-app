@@ -431,7 +431,7 @@ function dibujarComanda(doc, pedido) {
   setItalicStyle(doc, 5)
   doc.text('Crecer Distribuciones', ticketWidth / 2, y, { align: 'center' })
   y += 2
-  doc.text('Comprobante valido de operacion', ticketWidth / 2, y, { align: 'center' })
+  doc.text('DOCUMENTO NO VALIDO COMO FACTURA', ticketWidth / 2, y, { align: 'center' })
 }
 
 /**

@@ -891,7 +891,7 @@ export type ModalCompraFormData = z.infer<typeof modalCompraSchema>
  */
 export const modalEditarPedidoSchema = z.object({
   notas: z.string().optional(),
-  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta', 'combinado'], {
     error: 'Forma de pago inválida'
   }),
   estadoPago: z.enum(['pendiente', 'pagado', 'parcial'], {

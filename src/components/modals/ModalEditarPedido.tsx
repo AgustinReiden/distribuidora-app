@@ -56,10 +56,26 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   guardando
 }: ModalEditarPedidoProps) {
   const [notas, setNotas] = useState<string>(pedido?.notas || "");
-  const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago || "efectivo");
+  const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago === 'combinado' ? 'combinado' : (pedido?.forma_pago || "efectivo"));
   const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
   const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
   const [errorValidacion, setErrorValidacion] = useState<string>('');
+
+  // Pago combinado
+  const [pagoCombinado, setPagoCombinado] = useState<boolean>(pedido?.forma_pago === 'combinado');
+  const [pagosCombinados, setPagosCombinados] = useState<{ monto: string; formaPago: string }[]>(() => {
+    if (pedido?.forma_pago === 'combinado' && pedido?.notas) {
+      // Intentar parsear los pagos del notas (formato: "[Pago combinado: Efectivo $X + Transferencia $Y]")
+      return [
+        { monto: '', formaPago: 'efectivo' },
+        { monto: '', formaPago: 'transferencia' },
+      ];
+    }
+    return [
+      { monto: '', formaPago: 'efectivo' },
+      { monto: '', formaPago: 'transferencia' },
+    ];
+  });
 
   // Zod validation
   const { validate } = useZodValidation(modalEditarPedidoSchema);
@@ -244,8 +260,34 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setErrorValidacion('');
     setErrorStock(null);
 
+    // Preparar datos de pago
+    let formaPagoFinal = formaPago;
+    let montoPagadoFinal = montoPagado || 0;
+    let notasFinal = notas;
+
+    if (pagoCombinado) {
+      const pagosValidos = pagosCombinados.filter(p => parseFloat(p.monto) > 0);
+      if (pagosValidos.length < 2) {
+        setErrorValidacion('Ingresa al menos 2 formas de pago con monto mayor a 0');
+        return;
+      }
+      formaPagoFinal = 'combinado';
+      montoPagadoFinal = pagosValidos.reduce((sum, p) => sum + parseFloat(p.monto), 0);
+      // Agregar detalle de pagos combinados a las notas
+      const formasPagoLabels: Record<string, string> = {
+        efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque',
+        tarjeta: 'Tarjeta', cuenta_corriente: 'Cuenta Corriente'
+      };
+      const detalle = pagosValidos.map(p =>
+        `${formasPagoLabels[p.formaPago] || p.formaPago} $${parseFloat(p.monto).toLocaleString('es-AR')}`
+      ).join(' + ');
+      // Reemplazar detalle previo si existe, o agregar
+      const notaSinDetalle = notas.replace(/\s*\[Pago combinado:.*?\]/g, '').trim();
+      notasFinal = notaSinDetalle ? `${notaSinDetalle} [Pago combinado: ${detalle}]` : `[Pago combinado: ${detalle}]`;
+    }
+
     // Validar con Zod
-    const result = validate({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
+    const result = validate({ notas: notasFinal, formaPago: formaPagoFinal, estadoPago, montoPagado: montoPagadoFinal });
     if (!result.success) {
       const firstError = Object.values(result.errors || {})[0] || 'Error de validación';
       setErrorValidacion(firstError);
@@ -262,7 +304,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         await onSaveItems(itemsParaGuardar);
       }
       // Guardar el resto de los datos
-      await onSave({ notas, formaPago, estadoPago, montoPagado: montoPagado || 0 });
+      await onSave({ notas: notasFinal, formaPago: formaPagoFinal, estadoPago, montoPagado: montoPagadoFinal });
     } catch (err) {
       const error = err as Error;
       setErrorValidacion(error.message || 'Error al guardar los cambios');
@@ -567,18 +609,95 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
         {/* Forma de Pago */}
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200">Forma de Pago</label>
-          <select
-            value={formaPago}
-            onChange={e => setFormaPago(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            <option value="efectivo">Efectivo</option>
-            <option value="transferencia">Transferencia</option>
-            <option value="cheque">Cheque</option>
-            <option value="cuenta_corriente">Cuenta Corriente</option>
-            <option value="tarjeta">Tarjeta</option>
-          </select>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium dark:text-gray-200">Forma de Pago</label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={pagoCombinado}
+                onChange={e => {
+                  setPagoCombinado(e.target.checked);
+                  if (!e.target.checked) {
+                    setFormaPago('efectivo');
+                  }
+                }}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-xs text-gray-500 dark:text-gray-400">Pago combinado</span>
+            </label>
+          </div>
+
+          {pagoCombinado ? (
+            <div className="space-y-2">
+              {pagosCombinados.map((pago, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <select
+                    value={pago.formaPago}
+                    onChange={e => setPagosCombinados(prev => prev.map((p, i) => i === index ? { ...p, formaPago: e.target.value } : p))}
+                    className="flex-1 px-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  >
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="cuenta_corriente">Cuenta Corriente</option>
+                    <option value="tarjeta">Tarjeta</option>
+                  </select>
+                  <div className="relative flex-1">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={pago.monto}
+                      onChange={e => {
+                        const nuevos = pagosCombinados.map((p, i) => i === index ? { ...p, monto: e.target.value } : p);
+                        setPagosCombinados(nuevos);
+                        const totalComb = nuevos.reduce((sum, p) => sum + (parseFloat(p.monto) || 0), 0);
+                        setMontoPagado(totalComb);
+                        if (totalComb >= total) setEstadoPago('pagado');
+                        else if (totalComb > 0) setEstadoPago('parcial');
+                        else setEstadoPago('pendiente');
+                      }}
+                      placeholder="0.00"
+                      className="w-full pl-6 pr-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-semibold"
+                    />
+                  </div>
+                  {pagosCombinados.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => setPagosCombinados(prev => prev.filter((_, i) => i !== index))}
+                      className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setPagosCombinados(prev => [...prev, { monto: '', formaPago: 'efectivo' }])}
+                className="w-full flex items-center justify-center gap-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg border border-dashed border-blue-300 dark:border-blue-700"
+              >
+                <Plus className="w-3 h-3" />
+                Agregar forma de pago
+              </button>
+              <div className="text-right text-sm text-gray-500 dark:text-gray-400">
+                Total combinado: <span className="font-bold text-gray-800 dark:text-white">{formatPrecio(pagosCombinados.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0))}</span>
+              </div>
+            </div>
+          ) : (
+            <select
+              value={formaPago}
+              onChange={e => setFormaPago(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="cheque">Cheque</option>
+              <option value="cuenta_corriente">Cuenta Corriente</option>
+              <option value="tarjeta">Tarjeta</option>
+            </select>
+          )}
         </div>
 
         {/* Sección de pago */}

@@ -1,6 +1,6 @@
-import { useState, useMemo, memo } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import type { ChangeEvent } from 'react';
-import { FileDown, Package, Truck, Printer, Eye } from 'lucide-react';
+import { FileDown, Package, Truck, Printer, Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB } from '../../types';
@@ -10,7 +10,10 @@ import type { PedidoDB, PerfilDB } from '../../types';
 // =============================================================================
 
 /** Tipo de exportacion */
-type TipoExport = 'preparacion' | 'ruta' | 'comanda' | 'vista_actual';
+type TipoExport = 'preparacion' | 'ruta' | 'comanda';
+
+/** Alcance: pagina actual vs todos con filtros */
+type AlcanceExport = 'pagina' | 'todos';
 
 /** Props del componente principal */
 export interface ModalExportarPDFProps {
@@ -19,6 +22,8 @@ export interface ModalExportarPDFProps {
   onExportarOrdenPreparacion: (pedidos: PedidoDB[]) => void;
   onExportarHojaRuta: (transportista: PerfilDB | undefined, pedidos: PedidoDB[]) => void;
   onImprimirComandas?: (pedidos: PedidoDB[]) => void;
+  /** Funcion para obtener TODOS los pedidos con los filtros actuales (sin paginacion) */
+  fetchAllFilteredPedidos?: () => Promise<PedidoDB[]>;
   onClose: () => void;
 }
 
@@ -28,36 +33,60 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   onExportarOrdenPreparacion,
   onExportarHojaRuta,
   onImprimirComandas,
+  fetchAllFilteredPedidos,
   onClose
 }: ModalExportarPDFProps) {
   const [tipoExport, setTipoExport] = useState<TipoExport>('preparacion');
+  const [alcance, setAlcance] = useState<AlcanceExport>('pagina');
   const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
   const [pedidosSeleccionados, setPedidosSeleccionados] = useState<string[]>([]);
   const [seleccionarTodos, setSeleccionarTodos] = useState<boolean>(false);
+  const [todosLosPedidos, setTodosLosPedidos] = useState<PedidoDB[] | null>(null);
+  const [cargandoTodos, setCargandoTodos] = useState(false);
+
+  // Pedidos base: pagina actual o todos cargados
+  const pedidosBase = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
 
   // Filtrar pedidos segun el tipo de exportacion
   const pedidosFiltrados = useMemo((): PedidoDB[] => {
-    if (tipoExport === 'vista_actual') {
-      // Muestra todos los pedidos tal como los paso el padre (respeta filtros existentes)
-      return pedidos;
-    } else if (tipoExport === 'preparacion') {
-      return pedidos.filter(p => p.estado === 'pendiente' || p.estado === 'en_preparacion');
+    if (tipoExport === 'preparacion') {
+      return pedidosBase.filter(p => p.estado === 'pendiente' || p.estado === 'en_preparacion');
     } else if (tipoExport === 'comanda') {
-      // Para comandas: todos los pedidos no entregados y no cancelados
-      let resultado = pedidos.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
-      // Filtrar por transportista si se selecciono uno
+      let resultado = pedidosBase.filter(p => p.estado !== 'entregado' && p.estado !== 'cancelado');
       if (transportistaSeleccionado) {
         resultado = resultado.filter(p => p.transportista_id === transportistaSeleccionado);
       }
       return resultado;
     } else {
+      // ruta
       if (!transportistaSeleccionado) return [];
-      return pedidos.filter(p =>
+      return pedidosBase.filter(p =>
         p.transportista_id === transportistaSeleccionado &&
         (p.estado === 'asignado' || p.estado === 'en_preparacion')
       );
     }
-  }, [pedidos, tipoExport, transportistaSeleccionado]);
+  }, [pedidosBase, tipoExport, transportistaSeleccionado]);
+
+  // Cargar todos los pedidos cuando se selecciona "todos"
+  const handleAlcanceChange = useCallback(async (nuevoAlcance: AlcanceExport) => {
+    setAlcance(nuevoAlcance);
+    setPedidosSeleccionados([]);
+    setSeleccionarTodos(false);
+
+    if (nuevoAlcance === 'todos' && !todosLosPedidos && fetchAllFilteredPedidos) {
+      setCargandoTodos(true);
+      try {
+        const todos = await fetchAllFilteredPedidos();
+        setTodosLosPedidos(todos);
+      } catch {
+        // Fallback: usar pedidos de la pagina
+        setTodosLosPedidos(null);
+        setAlcance('pagina');
+      } finally {
+        setCargandoTodos(false);
+      }
+    }
+  }, [todosLosPedidos, fetchAllFilteredPedidos]);
 
   // Manejar seleccion de todos
   const handleSeleccionarTodos = (checked: boolean): void => {
@@ -94,6 +123,18 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     if (tipo !== 'ruta' && tipo !== 'comanda') {
       setTransportistaSeleccionado('');
     }
+    // Comandas siempre cargan todos
+    if (tipo === 'comanda' && !todosLosPedidos && fetchAllFilteredPedidos) {
+      setAlcance('todos');
+      setCargandoTodos(true);
+      fetchAllFilteredPedidos().then(todos => {
+        setTodosLosPedidos(todos);
+      }).catch(() => {
+        setTodosLosPedidos(null);
+      }).finally(() => {
+        setCargandoTodos(false);
+      });
+    }
   };
 
   const handleTransportistaChange = (id: string): void => {
@@ -104,12 +145,11 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
   // Exportar
   const handleExportar = (): void => {
-    const pedidosAExportar = pedidos.filter(p => pedidosSeleccionados.includes(p.id));
+    const fuente = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
+    const pedidosAExportar = fuente.filter(p => pedidosSeleccionados.includes(p.id));
     if (pedidosAExportar.length === 0) return;
 
-    if (tipoExport === 'vista_actual') {
-      onImprimirComandas?.(pedidosAExportar);
-    } else if (tipoExport === 'preparacion') {
+    if (tipoExport === 'preparacion') {
       onExportarOrdenPreparacion(pedidosAExportar);
     } else if (tipoExport === 'comanda') {
       onImprimirComandas?.(pedidosAExportar);
@@ -123,13 +163,15 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   const getEstadoLabel = (e: string): string => e === 'pendiente' ? 'Pendiente' : e === 'en_preparacion' ? 'En preparacion' : e === 'asignado' ? 'En camino' : 'Entregado';
   const getEstadoColor = (e: string): string => e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' : e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' : e === 'asignado' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
 
+  const mostrarAlcance = tipoExport !== 'comanda' && fetchAllFilteredPedidos;
+
   return (
     <ModalBase title="Exportar Pedidos a PDF" onClose={onClose} maxWidth="max-w-2xl">
       <div className="p-4 space-y-4">
         {/* Selector de tipo de exportacion */}
         <div>
           <label className="block text-sm font-medium mb-2">Tipo de documento</label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <button
               onClick={() => handleTipoChange('preparacion')}
               className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
@@ -172,22 +214,41 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 <p className="text-xs text-gray-500 dark:text-gray-400">Duplicado por pedido</p>
               </div>
             </button>
-            <button
-              onClick={() => handleTipoChange('vista_actual')}
-              className={`flex items-center justify-center space-x-2 p-4 rounded-lg border-2 transition-colors ${
-                tipoExport === 'vista_actual'
-                  ? 'border-slate-500 bg-slate-50 text-slate-700 dark:bg-slate-900/20 dark:text-slate-400'
-                  : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
-              }`}
-            >
-              <Eye className="w-6 h-6" />
-              <div className="text-left">
-                <p className="font-medium">Vista Actual</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Pedidos filtrados</p>
-              </div>
-            </button>
           </div>
         </div>
+
+        {/* Alcance: pagina actual vs todos (para preparacion y ruta) */}
+        {mostrarAlcance && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Alcance</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleAlcanceChange('pagina')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  alcance === 'pagina'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+              >
+                Pagina actual
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAlcanceChange('todos')}
+                disabled={cargandoTodos}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                  alcance === 'todos'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+              >
+                {cargandoTodos && <Loader2 className="w-4 h-4 animate-spin" />}
+                Todos los pedidos (con filtros)
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Selector de transportista (para hoja de ruta y comandas) */}
         {(tipoExport === 'ruta' || tipoExport === 'comanda') && (
@@ -198,13 +259,14 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
             <select
               value={transportistaSeleccionado}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => handleTransportistaChange(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg"
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             >
               <option value="">{tipoExport === 'comanda' ? 'Todos los transportistas' : 'Seleccionar transportista...'}</option>
               {transportistas.map(t => {
-                const pedidosTransportista = pedidos.filter(p =>
+                const fuente = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
+                const pedidosTransportista = fuente.filter(p =>
                   p.transportista_id === t.id &&
-                  (p.estado === 'asignado' || p.estado === 'en_preparacion')
+                  p.estado !== 'entregado' && p.estado !== 'cancelado'
                 ).length;
                 return (
                   <option key={t.id} value={t.id}>
@@ -235,7 +297,12 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
             )}
           </div>
 
-          {pedidosFiltrados.length === 0 ? (
+          {cargandoTodos ? (
+            <div className="flex items-center justify-center py-8 bg-gray-50 dark:bg-gray-900 rounded-lg">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+              <span className="text-gray-500">Cargando pedidos...</span>
+            </div>
+          ) : pedidosFiltrados.length === 0 ? (
             <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
               {tipoExport === 'ruta' && !transportistaSeleccionado ? (
                 <>
@@ -295,7 +362,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           {pedidosSeleccionados.length > 0 && (
             <>
               Total: {formatPrecio(
-                pedidos
+                pedidosFiltrados
                   .filter(p => pedidosSeleccionados.includes(p.id))
                   .reduce((sum, p) => sum + (p.total || 0), 0)
               )}
