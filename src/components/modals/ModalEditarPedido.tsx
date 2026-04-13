@@ -26,6 +26,7 @@ export interface PedidoSaveData {
   formaPago: string;
   estadoPago: string;
   montoPagado: number;
+  fecha?: string;
 }
 
 /** Props del componente ModalEditarPedido */
@@ -56,6 +57,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   guardando
 }: ModalEditarPedidoProps) {
   const [notas, setNotas] = useState<string>(pedido?.notas || "");
+  const [fecha, setFecha] = useState<string>(pedido?.fecha || "");
   const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago === 'combinado' ? 'combinado' : (pedido?.forma_pago || "efectivo"));
   const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
   const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
@@ -189,7 +191,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   }, [estadoPago, total]);
 
   const handleMontoPagadoChange = (valor: string): void => {
-    const monto = parseFloat(valor) || 0;
+    const monto = Math.min(parseFloat(valor) || 0, total);
     setMontoPagado(monto);
     if (monto >= total) {
       setEstadoPago('pagado');
@@ -272,7 +274,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         return;
       }
       formaPagoFinal = 'combinado';
-      montoPagadoFinal = pagosValidos.reduce((sum, p) => sum + parseFloat(p.monto), 0);
+      montoPagadoFinal = Math.min(pagosValidos.reduce((sum, p) => sum + parseFloat(p.monto), 0), total);
+      if (pagosValidos.reduce((sum, p) => sum + parseFloat(p.monto), 0) > total) {
+        setErrorValidacion(`El total combinado no puede superar el total del pedido (${formatPrecio(total)})`);
+        return;
+      }
       // Agregar detalle de pagos combinados a las notas
       const formasPagoLabels: Record<string, string> = {
         efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque',
@@ -304,7 +310,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         await onSaveItems(itemsParaGuardar);
       }
       // Guardar el resto de los datos
-      await onSave({ notas: notasFinal, formaPago: formaPagoFinal, estadoPago, montoPagado: montoPagadoFinal });
+      await onSave({ notas: notasFinal, formaPago: formaPagoFinal, estadoPago, montoPagado: montoPagadoFinal, ...(isAdmin && fecha ? { fecha } : {}) });
     } catch (err) {
       const error = err as Error;
       setErrorValidacion(error.message || 'Error al guardar los cambios');
@@ -595,6 +601,19 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         </div>
 
+        {/* Fecha del pedido (solo admin) */}
+        {isAdmin && (
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">Fecha del Pedido</label>
+            <input
+              type="date"
+              value={fecha}
+              onChange={e => setFecha(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+          </div>
+        )}
+
         {/* Notas */}
         <div>
           <label className="block text-sm font-medium mb-1 dark:text-gray-200">Notas / Observaciones</label>
@@ -681,9 +700,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 <Plus className="w-3 h-3" />
                 Agregar forma de pago
               </button>
-              <div className="text-right text-sm text-gray-500 dark:text-gray-400">
-                Total combinado: <span className="font-bold text-gray-800 dark:text-white">{formatPrecio(pagosCombinados.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0))}</span>
-              </div>
+              {(() => {
+                const totalComb = pagosCombinados.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
+                const excede = totalComb > total;
+                return (
+                  <div className={`text-right text-sm ${excede ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                    Total combinado: <span className={`font-bold ${excede ? 'text-red-600 dark:text-red-400' : 'text-gray-800 dark:text-white'}`}>{formatPrecio(totalComb)}</span>
+                    {excede && <span className="block text-xs">Excede el total del pedido ({formatPrecio(total)})</span>}
+                  </div>
+                );
+              })()}
             </div>
           ) : (
             <select

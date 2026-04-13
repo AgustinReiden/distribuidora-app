@@ -496,14 +496,16 @@ export default function PedidosContainer(): React.ReactElement {
   }, [pedidoAsignando, asignarTransportistaMut, cambiarEstado, notify])
 
   // ModalEditarPedido: onSave({ notas, formaPago, estadoPago, montoPagado })
-  const handleGuardarEdicion = useCallback(async (data: { notas: string; formaPago: string; estadoPago: string; montoPagado: number }) => {
+  const handleGuardarEdicion = useCallback(async (data: { notas: string; formaPago: string; estadoPago: string; montoPagado: number; fecha?: string }) => {
     if (!pedidoEditando) return
     setGuardando(true)
     try {
-      const { error } = await supabase.from('pedidos').update({
+      const updateData: Record<string, unknown> = {
         notas: data.notas, forma_pago: data.formaPago,
         estado_pago: data.estadoPago, monto_pagado: data.montoPagado ?? 0,
-      }).eq('id', pedidoEditando.id)
+      }
+      if (data.fecha) updateData.fecha = data.fecha
+      const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoEditando.id)
       if (error) throw error
       // Invalidar cache para que los cambios se reflejen en la UI
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
