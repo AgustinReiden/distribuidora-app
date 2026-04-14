@@ -1,5 +1,5 @@
 import { useState, useMemo, memo } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck } from 'lucide-react';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
@@ -23,6 +23,7 @@ export interface NuevoPedidoState {
   montoPagado?: number;
   fecha?: string;
   tipoFactura?: 'ZZ' | 'FC';
+  fechaEntregaProgramada?: string;
 }
 
 /** Datos del cliente a crear */
@@ -87,6 +88,8 @@ export interface ModalPedidoProps {
   onFechaChange?: (fecha: string) => void;
   /** Callback al cambiar tipo de factura */
   onTipoFacturaChange?: (tipo: 'ZZ' | 'FC') => void;
+  /** Callback al cambiar fecha de entrega programada */
+  onFechaEntregaProgramadaChange?: (fecha: string) => void;
   /** Callback al actualizar precio (solo admin) */
   onActualizarPrecio?: (productoId: string, precio: number) => void;
   /** Si está offline */
@@ -114,6 +117,7 @@ const ModalPedido = memo(function ModalPedido({
   onMontoPagadoChange,
   onFechaChange,
   onTipoFacturaChange,
+  onFechaEntregaProgramadaChange,
   onActualizarPrecio
 }: ModalPedidoProps) {
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
@@ -289,19 +293,39 @@ const ModalPedido = memo(function ModalPedido({
             )}
           </div>
 
-          {/* Fecha del pedido - compact inline */}
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium dark:text-gray-200 whitespace-nowrap flex items-center gap-1">
-              <Calendar className="w-4 h-4" />
-              Fecha
-            </label>
-            <input
-              type="date"
-              value={nuevoPedido.fecha || fechaLocalISO()}
-              onChange={e => onFechaChange && onFechaChange(e.target.value)}
-              max={fechaLocalISO()}
-              className="flex-1 px-3 py-1.5 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
-            />
+          {/* Fechas - pedido y entrega programada */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium dark:text-gray-200 whitespace-nowrap flex items-center gap-1">
+                <Calendar className="w-4 h-4" />
+                Fecha
+              </label>
+              <input
+                type="date"
+                value={nuevoPedido.fecha || fechaLocalISO()}
+                onChange={e => onFechaChange && onFechaChange(e.target.value)}
+                max={fechaLocalISO()}
+                className="px-3 py-1.5 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium dark:text-gray-200 whitespace-nowrap flex items-center gap-1">
+                <Truck className="w-4 h-4" />
+                Entrega
+              </label>
+              <input
+                type="date"
+                value={nuevoPedido.fechaEntregaProgramada || (() => {
+                  const base = nuevoPedido.fecha || fechaLocalISO();
+                  const d = new Date(base + 'T12:00:00');
+                  d.setDate(d.getDate() + 1);
+                  return d.toISOString().split('T')[0];
+                })()}
+                onChange={e => onFechaEntregaProgramadaChange && onFechaEntregaProgramadaChange(e.target.value)}
+                min={nuevoPedido.fecha || fechaLocalISO()}
+                className="px-3 py-1.5 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+              />
+            </div>
             {nuevoPedido.fecha && nuevoPedido.fecha !== fechaLocalISO() && (
               <p className="text-xs text-amber-600 whitespace-nowrap">Fecha distinta a hoy</p>
             )}

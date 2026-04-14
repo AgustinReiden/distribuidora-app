@@ -154,6 +154,7 @@ export default function PedidosContainer(): React.ReactElement {
     montoPagado: 0,
     fecha: fechaLocalISO(),
     tipoFactura: 'ZZ' as 'ZZ' | 'FC',
+    fechaEntregaProgramada: undefined as string | undefined,
   })
 
   const resetNuevoPedido = useCallback(() => {
@@ -162,6 +163,7 @@ export default function PedidosContainer(): React.ReactElement {
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
       fecha: fechaLocalISO(),
       tipoFactura: 'ZZ' as 'ZZ' | 'FC',
+      fechaEntregaProgramada: undefined,
     })
   }, [])
 
@@ -597,6 +599,7 @@ export default function PedidosContainer(): React.ReactElement {
         tipoFactura,
         totalNeto,
         totalIva,
+        fechaEntregaProgramada: nuevoPedido.fechaEntregaProgramada,
       })
       resetNuevoPedido()
       setModalPedidoOpen(false)
@@ -828,6 +831,7 @@ export default function PedidosContainer(): React.ReactElement {
             onMontoPagadoChange={(m: number) => setNuevoPedido(prev => ({ ...prev, montoPagado: m }))}
             onFechaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fecha }))}
             onTipoFacturaChange={(tipo: 'ZZ' | 'FC') => setNuevoPedido(prev => ({ ...prev, tipoFactura: tipo }))}
+            onFechaEntregaProgramadaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fechaEntregaProgramada: fecha }))}
             isOffline={!isOnline}
           />
         </Suspense>

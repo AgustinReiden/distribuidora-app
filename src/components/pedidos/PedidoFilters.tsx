@@ -2,7 +2,8 @@
  * Componente de filtros para la vista de pedidos
  */
 import React, { memo, ChangeEvent } from 'react';
-import { Search, Calendar, X } from 'lucide-react';
+import { Search, Calendar, X, Truck } from 'lucide-react';
+import { fechaLocalISO } from '../../utils/formatters';
 import type { Usuario, EstadoPedido, EstadoPago } from '../../types';
 
 interface FiltrosPedido {
@@ -13,6 +14,7 @@ interface FiltrosPedido {
   fechaHasta?: string | null;
   conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
   ocultarCancelados?: boolean;
+  fechaEntregaProgramada?: string | null;
 }
 
 interface FiltrosChange {
@@ -23,6 +25,7 @@ interface FiltrosChange {
   fechaHasta?: string | null;
   conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
   ocultarCancelados?: boolean;
+  fechaEntregaProgramada?: string | null;
 }
 
 export interface PedidoFiltersProps {
@@ -153,6 +156,57 @@ function PedidoFilters({
               <option value="con_salvedad">Con salvedad</option>
               <option value="sin_salvedad">Sin salvedad</option>
             </select>
+          </div>
+          <div className="flex items-center gap-1">
+            <Truck className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+            {(() => {
+              const hoy = fechaLocalISO();
+              const manana = (() => { const d = new Date(hoy + 'T12:00:00'); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0]; })();
+              const activa = filtros.fechaEntregaProgramada;
+              return (
+                <>
+                  <button
+                    onClick={() => onFiltrosChange({ fechaEntregaProgramada: activa === hoy ? null : hoy })}
+                    className={`px-2 py-1 text-xs rounded-lg border transition-colors ${
+                      activa === hoy
+                        ? 'bg-orange-100 border-orange-400 text-orange-700 dark:bg-orange-900/40 dark:border-orange-600 dark:text-orange-300'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    Hoy
+                  </button>
+                  <button
+                    onClick={() => onFiltrosChange({ fechaEntregaProgramada: activa === manana ? null : manana })}
+                    className={`px-2 py-1 text-xs rounded-lg border transition-colors ${
+                      activa === manana
+                        ? 'bg-orange-100 border-orange-400 text-orange-700 dark:bg-orange-900/40 dark:border-orange-600 dark:text-orange-300'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    Mañana
+                  </button>
+                  <input
+                    type="date"
+                    value={activa || ''}
+                    onChange={(e) => onFiltrosChange({ fechaEntregaProgramada: e.target.value || null })}
+                    className={`px-2 py-1 text-xs border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+                      activa && activa !== hoy && activa !== manana
+                        ? 'bg-orange-50 border-orange-300 dark:bg-orange-900/30 dark:border-orange-600'
+                        : ''
+                    }`}
+                  />
+                  {activa && (
+                    <button
+                      onClick={() => onFiltrosChange({ fechaEntregaProgramada: null })}
+                      className="text-red-500 hover:text-red-700"
+                      aria-label="Limpiar filtro de entrega"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

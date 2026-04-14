@@ -24,6 +24,7 @@ interface PedidoExportacion {
   total: number;
   notas?: string | null;
   fecha_entrega?: string | null;
+  fecha_entrega_programada?: string | null;
   created_at?: string;
   items?: Array<{
     cantidad: number;
@@ -206,6 +207,7 @@ export function useBackup(): UseBackupReturnExtended {
         'Cantidad Items': p.items?.reduce((sum, i) => sum + i.cantidad, 0) || 0,
         'Total': p.total || 0,
         'Notas': p.notas || '-',
+        'Entrega Programada': p.fecha_entrega_programada ? new Date(p.fecha_entrega_programada + 'T12:00:00').toLocaleDateString('es-AR') : '-',
         'Fecha Entrega': p.fecha_entrega ? new Date(p.fecha_entrega).toLocaleDateString('es-AR') : '-'
       }))
 
