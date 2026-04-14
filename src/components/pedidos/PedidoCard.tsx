@@ -208,6 +208,11 @@ function PedidoCard({
                 {getEstadoPagoLabel(pedido.estado_pago)}
               </span>
             )}
+            {pedido.tipo_factura === 'FC' && (
+              <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                FC
+              </span>
+            )}
           </div>
           <AccionesDropdown
             pedido={pedido}

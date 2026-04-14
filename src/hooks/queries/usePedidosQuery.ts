@@ -31,6 +31,10 @@ interface PedidoItemInput {
   precio_unitario?: number
   esBonificacion?: boolean
   promocionId?: string
+  neto_unitario?: number
+  iva_unitario?: number
+  impuestos_internos_unitario?: number
+  porcentaje_iva?: number
 }
 
 interface CrearPedidoInput {
@@ -43,6 +47,9 @@ interface CrearPedidoInput {
   estadoPago?: string
   montoPagado?: number
   fecha?: string
+  tipoFactura?: 'ZZ' | 'FC'
+  totalNeto?: number
+  totalIva?: number
 }
 
 interface ActualizarEstadoInput {
@@ -232,6 +239,10 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     precio_unitario: item.precioUnitario ?? item.precio_unitario ?? 0,
     ...(item.esBonificacion ? { es_bonificacion: true } : {}),
     ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+    ...(item.neto_unitario != null ? { neto_unitario: item.neto_unitario } : {}),
+    ...(item.iva_unitario != null ? { iva_unitario: item.iva_unitario } : {}),
+    ...(item.impuestos_internos_unitario != null ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
+    ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
   }))
 
   const { data, error } = await supabase.rpc('crear_pedido_completo', {
@@ -242,7 +253,10 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     p_notas: input.notas || null,
     p_forma_pago: input.formaPago || 'efectivo',
     p_estado_pago: input.estadoPago || 'pendiente',
-    ...(input.fecha ? { p_fecha: input.fecha } : {})
+    ...(input.fecha ? { p_fecha: input.fecha } : {}),
+    p_tipo_factura: input.tipoFactura || 'ZZ',
+    p_total_neto: input.totalNeto ?? input.total,
+    p_total_iva: input.totalIva ?? 0
   })
 
   if (error) throw error

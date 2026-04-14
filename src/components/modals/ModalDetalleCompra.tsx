@@ -53,6 +53,7 @@ interface CompraDetalle {
   total: number;
   notas?: string;
   usuario?: Usuario;
+  tipo_factura?: 'ZZ' | 'FC';
 }
 
 interface NotaCreditoResumen {
@@ -156,8 +157,17 @@ export default function ModalDetalleCompra({
                 <Hash className="w-4 h-4" />
                 <span className="text-xs">N Factura</span>
               </div>
-              <p className="font-medium text-gray-800 dark:text-white">
+              <p className="font-medium text-gray-800 dark:text-white flex items-center gap-2">
                 {compra.numero_factura || 'Sin especificar'}
+                {compra.tipo_factura && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                    compra.tipo_factura === 'FC'
+                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                      : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                  }`}>
+                    {compra.tipo_factura}
+                  </span>
+                )}
               </p>
             </div>
             <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">

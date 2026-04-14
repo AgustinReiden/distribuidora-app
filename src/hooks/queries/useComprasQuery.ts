@@ -112,7 +112,8 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     p_forma_pago: compraData.formaPago || 'efectivo',
     p_notas: compraData.notas || null,
     p_usuario_id: compraData.usuarioId || null,
-    p_items: itemsParaRPC
+    p_items: itemsParaRPC,
+    p_tipo_factura: compraData.tipoFactura || 'FC'
   })
 
   if (error) throw error

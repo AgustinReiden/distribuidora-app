@@ -46,6 +46,7 @@ export interface ProductoDB {
   costo_con_iva?: number | null;
   impuestos_internos?: number | null;
   precio_sin_iva?: number | null;
+  porcentaje_iva?: number | null;
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -61,6 +62,10 @@ export interface PedidoItemDB {
   subtotal?: number;
   es_bonificacion?: boolean;
   promocion_id?: string;
+  neto_unitario?: number;
+  iva_unitario?: number;
+  impuestos_internos_unitario?: number;
+  porcentaje_iva?: number;
 }
 
 export interface PerfilDB {
@@ -93,6 +98,9 @@ export interface PedidoDB {
   estado_pago?: 'pendiente' | 'parcial' | 'pagado';
   forma_pago?: string;
   total: number;
+  total_neto?: number;
+  total_iva?: number;
+  tipo_factura?: 'ZZ' | 'FC';
   monto_pagado?: number;
   notas?: string | null;
   motivo_cancelacion?: string | null;
@@ -738,6 +746,7 @@ export interface CompraDBExtended {
   forma_pago?: string;
   estado?: 'activa' | 'cancelada';
   notas?: string | null;
+  tipo_factura?: 'ZZ' | 'FC';
   items?: CompraItemDBExtended[];
   created_at?: string;
 }
@@ -754,6 +763,7 @@ export interface CompraFormInputExtended {
   formaPago?: string;
   notas?: string | null;
   usuarioId?: string | null;
+  tipoFactura?: 'ZZ' | 'FC';
   items: Array<{
     productoId: string;
     cantidad: number;
@@ -1050,6 +1060,10 @@ export interface TotalesRentabilidad {
   margenTotal: number;
   cantidadPedidos: number;
   margenPorcentaje: number;
+  ventasBrutas: number;
+  ivaDiscriminado: number;
+  impuestosInternos: number;
+  ventasNetas: number;
 }
 
 export interface ReporteRentabilidad {

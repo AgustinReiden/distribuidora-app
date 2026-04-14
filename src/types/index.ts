@@ -95,6 +95,8 @@ export type FormaPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'cuenta_corri
 
 export type EstadoPago = 'pendiente' | 'parcial' | 'pagado';
 
+export type TipoFactura = 'ZZ' | 'FC';
+
 export interface PedidoItem {
   id?: string;
   producto_id: string;
@@ -102,6 +104,8 @@ export interface PedidoItem {
   cantidad: number;
   precio_unitario: number;
   subtotal: number;
+  neto_unitario?: number;
+  iva_unitario?: number;
 }
 
 export interface Pedido extends BaseEntity {
@@ -114,6 +118,9 @@ export interface Pedido extends BaseEntity {
   estado_pago: EstadoPago;
   forma_pago: FormaPago;
   total: number;
+  total_neto?: number;
+  total_iva?: number;
+  tipo_factura?: TipoFactura;
   monto_pagado: number;
   notas?: string;
   fecha_entrega?: string;
@@ -132,6 +139,7 @@ export interface PedidoInput {
   forma_pago?: FormaPago;
   estado_pago?: EstadoPago;
   monto_pagado?: number;
+  tipo_factura?: TipoFactura;
 }
 
 // =============================================================================

@@ -146,7 +146,14 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
 
       const productoStats: ProductoStatsMap = {}
+      let ventasBrutas = 0
+      let ivaDiscriminado = 0
+      let impuestosInternosTotales = 0
+      let ventasNetas = 0
+
       pedidosTyped.forEach(p => {
+        const tipoFactura = (p as unknown as Record<string, unknown>).tipo_factura as string || 'ZZ'
+
         p.items?.forEach(item => {
           const prod = item.producto
           if (!prod) return
@@ -163,9 +170,26 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
               margenPorcentaje: 0
             }
           }
+          const subtotalItem = item.subtotal || (item.cantidad * item.precio_unitario)
           productoStats[id].cantidadVendida += item.cantidad
-          productoStats[id].ingresos += item.subtotal || (item.cantidad * item.precio_unitario)
-          const costoUnitario = prod.costo_con_iva || prod.costo_sin_iva || 0
+          ventasBrutas += subtotalItem
+
+          // Usar neto_unitario si existe (pedidos nuevos), sino calcular
+          if (tipoFactura === 'FC' && (item as Record<string, unknown>).neto_unitario != null) {
+            const netoItem = ((item as Record<string, unknown>).neto_unitario as number) * item.cantidad
+            const ivaItem = ((item as Record<string, unknown>).iva_unitario as number || 0) * item.cantidad
+            const impIntItem = ((item as Record<string, unknown>).impuestos_internos_unitario as number || 0) * item.cantidad
+            productoStats[id].ingresos += netoItem
+            ivaDiscriminado += ivaItem
+            impuestosInternosTotales += impIntItem
+            ventasNetas += netoItem
+          } else {
+            // Pedidos ZZ o legacy sin desglose: neto = total
+            productoStats[id].ingresos += subtotalItem
+            ventasNetas += subtotalItem
+          }
+
+          const costoUnitario = prod.costo_sin_iva || 0
           productoStats[id].costos += costoUnitario * item.cantidad
         })
       })
@@ -181,7 +205,11 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
         costosTotales: reporteProductos.reduce((s, p) => s + p.costos, 0),
         margenTotal: reporteProductos.reduce((s, p) => s + p.margen, 0),
         cantidadPedidos: pedidosTyped.length,
-        margenPorcentaje: 0
+        margenPorcentaje: 0,
+        ventasBrutas,
+        ivaDiscriminado,
+        impuestosInternos: impuestosInternosTotales,
+        ventasNetas
       }
       totales.margenPorcentaje = totales.ingresosTotales > 0
         ? (totales.margenTotal / totales.ingresosTotales * 100)
@@ -197,7 +225,11 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
           costosTotales: 0,
           margenTotal: 0,
           cantidadPedidos: 0,
-          margenPorcentaje: 0
+          margenPorcentaje: 0,
+          ventasBrutas: 0,
+          ivaDiscriminado: 0,
+          impuestosInternos: 0,
+          ventasNetas: 0
         }
       }
     } finally {

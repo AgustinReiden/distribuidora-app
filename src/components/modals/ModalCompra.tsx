@@ -60,6 +60,7 @@ export interface CompraState {
   numeroFactura: string;
   fechaCompra: string;
   formaPago: string;
+  tipoFactura: 'ZZ' | 'FC';
   notas: string;
   items: CompraItemForm[];
   busquedaProducto: string;
@@ -81,12 +82,13 @@ type CompraActionType =
   | { type: 'SET_NUMERO_FACTURA'; payload: string }
   | { type: 'SET_FECHA_COMPRA'; payload: string }
   | { type: 'SET_FORMA_PAGO'; payload: string }
+  | { type: 'SET_TIPO_FACTURA'; payload: 'ZZ' | 'FC' }
   | { type: 'SET_NOTAS'; payload: string }
   | { type: 'SET_BUSQUEDA'; payload: string }
   | { type: 'SET_MOSTRAR_BUSCADOR'; payload: boolean }
   | { type: 'SET_GUARDANDO'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string }
-  | { type: 'AGREGAR_ITEM'; payload: ProductoDB & { porcentaje_iva?: number } }
+  | { type: 'AGREGAR_ITEM'; payload: ProductoDB }
   | { type: 'ACTUALIZAR_ITEM'; payload: { index: number; campo: keyof CompraItemForm; valor: number | string } }
   | { type: 'ELIMINAR_ITEM'; payload: number }
   | { type: 'LIMPIAR_BUSQUEDA' }
@@ -188,6 +190,7 @@ const initialState: CompraState = {
   numeroFactura: '',
   fechaCompra: fechaLocalISO(),
   formaPago: 'efectivo',
+  tipoFactura: 'FC',
   notas: '',
   // Items
   items: [],
@@ -218,6 +221,8 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
       return { ...state, fechaCompra: action.payload }
     case 'SET_FORMA_PAGO':
       return { ...state, formaPago: action.payload }
+    case 'SET_TIPO_FACTURA':
+      return { ...state, tipoFactura: action.payload }
     case 'SET_NOTAS':
       return { ...state, notas: action.payload }
     case 'SET_BUSQUEDA':
@@ -344,7 +349,7 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
 }
 
 // Hook para cálculos de impuestos (bonificacion e imp. internos como porcentaje)
-function useCalculosImpuestos(items: CompraItemForm[]): CalculosImpuestos {
+function useCalculosImpuestos(items: CompraItemForm[], tipoFactura: 'ZZ' | 'FC' = 'FC'): CalculosImpuestos {
   return useMemo(() => {
     let subtotalBruto = 0
     let bonificacionTotal = 0
@@ -357,14 +362,17 @@ function useCalculosImpuestos(items: CompraItemForm[]): CalculosImpuestos {
       const neto = bruto - bonif
       subtotalBruto += bruto
       bonificacionTotal += bonif
-      iva += neto * ((item.porcentajeIva ?? 21) / 100)
+      // ZZ: no hay IVA discriminado
+      if (tipoFactura === 'FC') {
+        iva += neto * ((item.porcentajeIva ?? 21) / 100)
+      }
       impuestosInternos += neto * ((item.impuestosInternos || 0) / 100)
     }
 
     const subtotal = subtotalBruto - bonificacionTotal
     const total = subtotal + iva + impuestosInternos
     return { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total }
-  }, [items])
+  }, [items, tipoFactura])
 }
 
 const N8N_FACTURA_WEBHOOK_URL: string = import.meta.env.VITE_N8N_FACTURA_WEBHOOK_URL || ''
@@ -374,7 +382,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
-  const { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items)
+  const { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items, state.tipoFactura)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Productos filtrados
@@ -554,6 +562,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         total,
         formaPago: state.formaPago,
         notas: state.notas,
+        tipoFactura: state.tipoFactura,
         items: state.items.map(item => {
           const costoConBonif = (item.costoUnitario || 0) * (1 - (item.bonificacion || 0) / 100)
           return {
@@ -822,6 +831,38 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
 
 function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   return (
+    <>
+    {/* Tipo de Comprobante */}
+    <div className="mb-3">
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        Tipo de Comprobante
+      </label>
+      <div className="flex rounded-lg overflow-hidden border dark:border-gray-600">
+        <button
+          type="button"
+          onClick={() => dispatch({ type: 'SET_TIPO_FACTURA', payload: 'FC' })}
+          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+            state.tipoFactura === 'FC'
+              ? 'bg-blue-600 text-white dark:bg-blue-500'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+          }`}
+        >
+          FC Con Factura / IVA
+        </button>
+        <button
+          type="button"
+          onClick={() => dispatch({ type: 'SET_TIPO_FACTURA', payload: 'ZZ' })}
+          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+            state.tipoFactura === 'ZZ'
+              ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+          }`}
+        >
+          ZZ Sin Factura
+        </button>
+      </div>
+    </div>
+
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -862,6 +903,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
         </select>
       </div>
     </div>
+    </>
   )
 }
 

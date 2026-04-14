@@ -232,7 +232,9 @@ export const pedidoSchema = z.object({
 
   notas: z.string().optional(),
 
-  fecha_entrega: z.string().optional()
+  fecha_entrega: z.string().optional(),
+
+  tipo_factura: z.enum(['ZZ', 'FC']).default('ZZ')
 }).refine(
   (data) => {
     const total = data.items.reduce((sum, item) => {
@@ -319,7 +321,9 @@ export const compraSchema = z.object({
     .array(itemCompraSchema)
     .min(1, { message: 'Debe agregar al menos un producto' }),
 
-  notas: z.string().optional()
+  notas: z.string().optional(),
+
+  tipo_factura: z.enum(['ZZ', 'FC']).default('FC')
 }).refine(
   (data) => {
     // Debe tener proveedor_id O proveedor_nombre
@@ -876,6 +880,7 @@ export const modalCompraSchema = z.object({
   formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
     message: 'Forma de pago inválida'
   }),
+  tipoFactura: z.enum(['ZZ', 'FC']).default('FC'),
   items: z.array(z.object({
     productoId: z.string(),
     cantidad: z.number().positive({ message: 'La cantidad debe ser mayor a 0' }),
