@@ -110,6 +110,7 @@ export interface PedidoDB {
   stock_descontado?: boolean;
   fecha?: string;
   fecha_entrega?: string | null;
+  fecha_entrega_programada?: string | null;
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
@@ -267,6 +268,7 @@ export interface FiltrosPedidosState {
   busqueda: string;
   conSalvedad: 'todos' | 'con_salvedad' | 'sin_salvedad';
   ocultarCancelados?: boolean;
+  fechaEntregaProgramada?: string | null;
 }
 
 // =============================================================================

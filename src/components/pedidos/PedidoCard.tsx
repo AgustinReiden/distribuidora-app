@@ -179,8 +179,14 @@ function PedidoCard({
                 {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">{pedido.cliente?.direccion}</p>
-              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-2">
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                 <span>#{pedido.id} - {formatFecha(pedido.fecha || pedido.created_at)}</span>
+                {pedido.fecha_entrega_programada && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && (
+                  <span className="inline-flex items-center gap-0.5 text-xs text-orange-600 dark:text-orange-400">
+                    <Truck className="w-3 h-3" />
+                    {formatFecha(pedido.fecha_entrega_programada)}
+                  </span>
+                )}
                 <BadgeAntiguedad dias={calcularDiasAntiguedad(pedido.fecha || pedido.created_at)} estado={pedido.estado} />
               </p>
             </div>
@@ -319,23 +325,40 @@ function PedidoCard({
               Productos ({pedido.items?.length || 0})
             </h4>
             <div className="space-y-2">
-              {pedido.items?.map(item => (
-                <div key={item.id} className={`flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0 ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/20 rounded px-2 -mx-1' : ''}`}>
+              {pedido.items?.map(item => {
+                const salvedadItem = pedido.salvedades?.find(s => String(s.producto_id) === String(item.producto_id));
+                const cantidadOriginal = salvedadItem ? item.cantidad + salvedadItem.cantidad_afectada : item.cantidad;
+                return (
+                <div key={item.id} className={`flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0 ${salvedadItem ? 'border-l-2 border-l-amber-400 pl-2 -ml-1' : ''} ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/20 rounded px-2 -mx-1' : ''}`}>
                   <div className="flex-1">
-                    <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5">
+                    <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                       {item.es_bonificacion && <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />}
                       {item.producto?.nombre || 'Producto'}
                       {item.es_bonificacion && <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full font-medium">REGALO</span>}
+                      {salvedadItem && (
+                        <span className="text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-medium">
+                          {MOTIVOS_SALVEDAD_LABELS[salvedadItem.motivo as MotivoSalvedad] || salvedadItem.motivo}
+                        </span>
+                      )}
                     </p>
                     {!item.es_bonificacion && <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>}
+                    {salvedadItem && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        Pedido: {cantidadOriginal} → Entregado: {item.cantidad} ({salvedadItem.cantidad_afectada} no entregadas)
+                      </p>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="font-semibold text-gray-700 dark:text-gray-300">x{item.cantidad}</p>
                     {!item.es_bonificacion && <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
                     {item.es_bonificacion && <p className="text-sm font-bold text-green-600">$0</p>}
+                    {salvedadItem && (
+                      <p className="text-xs text-red-500 dark:text-red-400">-{formatPrecio(salvedadItem.monto_afectado)}</p>
+                    )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
               <div className="flex justify-between items-center pt-2 border-t-2 dark:border-gray-600">
                 <p className="font-bold text-gray-900 dark:text-white">Total</p>
                 <p className="text-xl font-bold text-blue-600">{formatPrecio(pedido.total)}</p>

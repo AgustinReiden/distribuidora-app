@@ -4,7 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
-import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState } from '../../types'
+import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen } from '../../types'
 import { productosKeys } from './useProductosQuery'
 
 // Query keys
@@ -50,6 +50,7 @@ interface CrearPedidoInput {
   tipoFactura?: 'ZZ' | 'FC'
   totalNeto?: number
   totalIva?: number
+  fechaEntregaProgramada?: string
 }
 
 interface ActualizarEstadoInput {
@@ -61,6 +62,37 @@ interface ActualizarPagoInput {
   pedidoId: string
   estadoPago: string
   montoPagado?: number | null
+}
+
+// Helper: cargar salvedades para un conjunto de pedidos
+async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise<Record<string, PedidoSalvedadResumen[]>> {
+  const pedidosEntregadosIds = pedidos
+    .filter(p => p.estado === 'entregado')
+    .map(p => p.id)
+
+  if (pedidosEntregadosIds.length === 0) return {}
+
+  const { data: salvedades } = await supabase
+    .from('salvedades_items')
+    .select('id, pedido_id, motivo, cantidad_afectada, monto_afectado, estado_resolucion, producto_id')
+    .in('pedido_id', pedidosEntregadosIds)
+
+  const salvedadesMap: Record<string, PedidoSalvedadResumen[]> = {}
+  if (salvedades) {
+    for (const s of salvedades) {
+      const pedidoId = String(s.pedido_id)
+      if (!salvedadesMap[pedidoId]) salvedadesMap[pedidoId] = []
+      salvedadesMap[pedidoId].push({
+        id: String(s.id),
+        motivo: s.motivo,
+        cantidad_afectada: s.cantidad_afectada,
+        monto_afectado: Number(s.monto_afectado),
+        estado_resolucion: s.estado_resolucion,
+        producto_id: String(s.producto_id),
+      })
+    }
+  }
+  return salvedadesMap
 }
 
 // Fetch functions
@@ -94,11 +126,15 @@ async function fetchPedidos(): Promise<PedidoDB[]> {
     }
   }
 
-  // Enrich pedidos with perfil data
+  // Enrich with salvedades
+  const salvedadesMap = await enrichWithSalvedades(data || [])
+
+  // Enrich pedidos with perfil data + salvedades
   const enrichedPedidos = (data || []).map(pedido => ({
     ...pedido,
     usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
     transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+    salvedades: salvedadesMap[String(pedido.id)] || [],
   }))
 
   return enrichedPedidos as PedidoDB[]
@@ -185,6 +221,9 @@ async function fetchPedidosPaginated(
   if (filters?.ocultarCancelados) {
     query = query.neq('estado', 'cancelado')
   }
+  if (filters?.fechaEntregaProgramada) {
+    query = query.eq('fecha_entrega_programada', filters.fechaEntregaProgramada)
+  }
 
   // Search by client fields using referencedTable for related table filtering
   if (hasSearch) {
@@ -222,10 +261,14 @@ async function fetchPedidosPaginated(
     }
   }
 
+  // Enrich with salvedades
+  const salvedadesMap = await enrichWithSalvedades(data || [])
+
   const enrichedPedidos = (data || []).map(pedido => ({
     ...pedido,
     usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
     transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+    salvedades: salvedadesMap[String(pedido.id)] || [],
   }))
 
   return { data: enrichedPedidos as PedidoDB[], totalCount: count ?? 0 }
@@ -256,7 +299,8 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     ...(input.fecha ? { p_fecha: input.fecha } : {}),
     p_tipo_factura: input.tipoFactura || 'ZZ',
     p_total_neto: input.totalNeto ?? input.total,
-    p_total_iva: input.totalIva ?? 0
+    p_total_iva: input.totalIva ?? 0,
+    ...(input.fechaEntregaProgramada ? { p_fecha_entrega_programada: input.fechaEntregaProgramada } : {})
   })
 
   if (error) throw error

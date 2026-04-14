@@ -124,6 +124,7 @@ export interface Pedido extends BaseEntity {
   monto_pagado: number;
   notas?: string;
   fecha_entrega?: string;
+  fecha_entrega_programada?: string;
   orden_entrega?: number;
   items?: PedidoItem[];
 }
