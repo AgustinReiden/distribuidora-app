@@ -196,6 +196,23 @@ export function useRendiciones(): UseRendicionesReturn {
     return rendicionId
   }
 
+  // Crear rendición por transportista + fecha (sin recorrido)
+  const crearRendicionPorFecha = async (transportistaId: string, fecha: string): Promise<string> => {
+    const { data, error } = await supabase.rpc('crear_rendicion_por_fecha', {
+      p_transportista_id: transportistaId,
+      p_fecha: fecha
+    })
+
+    if (error) {
+      notifyError('Error al crear rendición: ' + error.message)
+      throw error
+    }
+
+    const rendicionId = String(data)
+    await fetchRendicionActual(transportistaId)
+    return rendicionId
+  }
+
   // Presentar rendición
   const presentarRendicion = async (input: PresentarRendicionInput): Promise<{ success: boolean; diferencia: number }> => {
     const { data, error } = await supabase.rpc('presentar_rendicion', {
@@ -307,6 +324,7 @@ export function useRendiciones(): UseRendicionesReturn {
     rendicionActual,
     loading,
     crearRendicion,
+    crearRendicionPorFecha,
     presentarRendicion,
     agregarAjuste,
     revisarRendicion,

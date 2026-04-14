@@ -683,8 +683,11 @@ export default function PedidosContainer(): React.ReactElement {
         })
       }
     }
+    // Invalidar cache de productos y pedidos para reflejar cambios de stock y totales
+    queryClient.invalidateQueries({ queryKey: ['productos'] })
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
     return results
-  }, [])
+  }, [queryClient])
 
   const handleMarcarEntregadoConSalvedadConfirm = useCallback(async () => {
     if (!pedidoParaSalvedad) return
