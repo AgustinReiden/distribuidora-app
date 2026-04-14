@@ -22,6 +22,7 @@ export interface NuevoPedidoState {
   estadoPago?: string;
   montoPagado?: number;
   fecha?: string;
+  tipoFactura?: 'ZZ' | 'FC';
 }
 
 /** Datos del cliente a crear */
@@ -84,6 +85,8 @@ export interface ModalPedidoProps {
   onMontoPagadoChange?: (monto: number) => void;
   /** Callback al cambiar fecha del pedido */
   onFechaChange?: (fecha: string) => void;
+  /** Callback al cambiar tipo de factura */
+  onTipoFacturaChange?: (tipo: 'ZZ' | 'FC') => void;
   /** Callback al actualizar precio (solo admin) */
   onActualizarPrecio?: (productoId: string, precio: number) => void;
   /** Si está offline */
@@ -110,6 +113,7 @@ const ModalPedido = memo(function ModalPedido({
   onEstadoPagoChange,
   onMontoPagadoChange,
   onFechaChange,
+  onTipoFacturaChange,
   onActualizarPrecio
 }: ModalPedidoProps) {
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
@@ -543,8 +547,37 @@ const ModalPedido = memo(function ModalPedido({
             </div>
           )}
 
-          {/* Seccion Forma de Pago y Observaciones - al fondo */}
+          {/* Seccion Tipo Factura, Forma de Pago y Observaciones - al fondo */}
           <div className="border-t dark:border-gray-600 pt-4 space-y-3">
+            {/* Tipo de Factura */}
+            <div>
+              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Tipo de Comprobante</label>
+              <div className="flex rounded-lg overflow-hidden border dark:border-gray-600">
+                <button
+                  type="button"
+                  onClick={() => onTipoFacturaChange && onTipoFacturaChange('ZZ')}
+                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                    (nuevoPedido.tipoFactura || 'ZZ') === 'ZZ'
+                      ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  ZZ Sin Factura
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onTipoFacturaChange && onTipoFacturaChange('FC')}
+                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                    nuevoPedido.tipoFactura === 'FC'
+                      ? 'bg-blue-600 text-white dark:bg-blue-500'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  FC Con Factura
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Forma de Pago</label>

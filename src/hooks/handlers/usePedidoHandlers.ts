@@ -9,6 +9,7 @@ import { usePricingMapQuery } from '../queries/useGruposPrecioQuery'
 import { usePromoMapQuery } from '../queries/usePromocionesQuery'
 import { resolverPreciosMayorista, aplicarPreciosMayorista, validarMOQPedido } from '../../utils/precioMayorista'
 import { resolverPromociones } from '../../utils/promociones'
+import { calcularNetoVenta } from '../../utils/calculations'
 import type { User } from '@supabase/supabase-js'
 import type {
   ProductoDB,
@@ -44,6 +45,7 @@ export interface NuevoPedidoState {
   formaPago?: string;
   estadoPago?: string;
   montoPagado?: number;
+  tipoFactura?: 'ZZ' | 'FC';
 }
 
 // =============================================================================
@@ -86,6 +88,7 @@ export interface PedidoOfflineData {
   formaPago?: string;
   estadoPago?: string;
   montoPagado?: number;
+  tipoFactura?: 'ZZ' | 'FC';
 }
 
 // =============================================================================
@@ -143,7 +146,10 @@ export interface UsePedidoHandlersProps {
     descontarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
     notas?: string,
     formaPago?: string,
-    estadoPago?: string
+    estadoPago?: string,
+    tipoFactura?: 'ZZ' | 'FC',
+    totalNeto?: number,
+    totalIva?: number
   ) => Promise<PedidoDB>;
   cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
   asignarTransportista: (pedidoId: string, transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
@@ -199,6 +205,7 @@ export interface UsePedidoHandlersReturn {
   handleClienteChange: (clienteId: string) => void;
   handleNotasChange: (notas: string) => void;
   handleFormaPagoChange: (formaPago: string) => void;
+  handleTipoFacturaChange: (tipo: 'ZZ' | 'FC') => void;
   handleEstadoPagoChange: (estadoPago: string) => void;
   handleMontoPagadoChange: (montoPagado: number) => void;
   handleCrearClienteEnPedido: (nuevoCliente: ClienteFormInput) => Promise<ClienteDB>;
@@ -338,6 +345,10 @@ export function usePedidoHandlers({
     setNuevoPedido(prev => ({ ...prev, formaPago }))
   }, [setNuevoPedido])
 
+  const handleTipoFacturaChange = useCallback((tipoFactura: 'ZZ' | 'FC'): void => {
+    setNuevoPedido(prev => ({ ...prev, tipoFactura }))
+  }, [setNuevoPedido])
+
   const handleEstadoPagoChange = useCallback((estadoPago: string): void => {
     setNuevoPedido(prev => ({ ...prev, estadoPago, montoPagado: estadoPago === 'parcial' ? prev.montoPagado : 0 }))
   }, [setNuevoPedido])
@@ -419,6 +430,30 @@ export function usePedidoHandlers({
       totalFinal += item.precioUnitario * item.cantidad
     }
 
+    // Calcular desglose neto/IVA por item según tipo de factura
+    const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
+    let totalNeto = 0
+    let totalIva = 0
+    const itemsConDesglose = todosLosItems.map(item => {
+      const esBonif = 'esBonificacion' in item && item.esBonificacion
+      if (esBonif) {
+        return { ...item, neto_unitario: 0, iva_unitario: 0, impuestos_internos_unitario: 0, porcentaje_iva: 0 }
+      }
+      const producto = productosRef.current.find(p => String(p.id) === String(item.productoId))
+      const pctIva = producto?.porcentaje_iva ?? 21
+      const pctImpInt = producto?.impuestos_internos ?? 0
+      const desglose = calcularNetoVenta(item.precioUnitario, pctIva, pctImpInt, tipoFactura)
+      totalNeto += desglose.neto * item.cantidad
+      totalIva += desglose.iva * item.cantidad
+      return {
+        ...item,
+        neto_unitario: desglose.neto,
+        iva_unitario: desglose.iva,
+        impuestos_internos_unitario: desglose.impuestosInternos,
+        porcentaje_iva: pctIva,
+      }
+    })
+
     if (!isOnline) {
       guardarPedidoOffline({
         clienteId: parseInt(nuevoPedido.clienteId),
@@ -428,7 +463,8 @@ export function usePedidoHandlers({
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
         estadoPago: nuevoPedido.estadoPago,
-        montoPagado: nuevoPedido.montoPagado
+        montoPagado: nuevoPedido.montoPagado,
+        tipoFactura
       })
       resetNuevoPedido()
       modales.pedido.setOpen(false)
@@ -445,13 +481,16 @@ export function usePedidoHandlers({
     try {
       const pedidoCreado = await crearPedido(
         parseInt(nuevoPedido.clienteId),
-        todosLosItems,
+        itemsConDesglose,
         totalFinal,
         user?.id ?? '',
         descontarStock,
         nuevoPedido.notas,
         nuevoPedido.formaPago,
-        nuevoPedido.estadoPago
+        nuevoPedido.estadoPago,
+        tipoFactura,
+        totalNeto,
+        totalIva
       )
 
       if (nuevoPedido.estadoPago === 'parcial' && nuevoPedido.montoPagado && nuevoPedido.montoPagado > 0 && pedidoCreado?.id) {
@@ -718,6 +757,7 @@ export function usePedidoHandlers({
     handleClienteChange,
     handleNotasChange,
     handleFormaPagoChange,
+    handleTipoFacturaChange,
     handleEstadoPagoChange,
     handleMontoPagadoChange,
     handleCrearClienteEnPedido,

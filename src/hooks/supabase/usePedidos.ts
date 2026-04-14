@@ -48,6 +48,10 @@ interface PedidoItemInput {
   precio_unitario?: number;
   esBonificacion?: boolean;
   promocionId?: string;
+  neto_unitario?: number;
+  iva_unitario?: number;
+  impuestos_internos_unitario?: number;
+  porcentaje_iva?: number;
 }
 
 interface OrdenEntregaItem {
@@ -111,7 +115,10 @@ export interface UsePedidosHookReturn {
     descontarStockFn: ((items: PedidoItemInput[]) => Promise<void>) | null,
     notas?: string,
     formaPago?: string,
-    estadoPago?: string
+    estadoPago?: string,
+    tipoFactura?: 'ZZ' | 'FC',
+    totalNeto?: number,
+    totalIva?: number
   ) => Promise<{ id: string }>;
   cambiarEstado: (id: string, nuevoEstado: string) => Promise<void>;
   asignarTransportista: (pedidoId: string, transportistaId: string | null, cambiarEstadoFlag?: boolean) => Promise<void>;
@@ -290,7 +297,10 @@ export function usePedidos(): UsePedidosHookReturn {
     _descontarStockFn: ((items: PedidoItemInput[]) => Promise<void>) | null,
     notas: string = '',
     formaPago: string = 'efectivo',
-    estadoPago: string = 'pendiente'
+    estadoPago: string = 'pendiente',
+    tipoFactura: 'ZZ' | 'FC' = 'ZZ',
+    totalNeto?: number,
+    totalIva?: number
   ): Promise<{ id: string }> => {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId || item.producto_id,
@@ -298,6 +308,10 @@ export function usePedidos(): UsePedidosHookReturn {
       precio_unitario: item.precioUnitario ?? item.precio_unitario ?? 0,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+      ...(item.neto_unitario != null ? { neto_unitario: item.neto_unitario } : {}),
+      ...(item.iva_unitario != null ? { iva_unitario: item.iva_unitario } : {}),
+      ...(item.impuestos_internos_unitario != null ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
+      ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
     }))
 
     const { data, error } = await supabase.rpc('crear_pedido_completo', {
@@ -307,7 +321,10 @@ export function usePedidos(): UsePedidosHookReturn {
       p_items: itemsParaRPC,
       p_notas: notas || null,
       p_forma_pago: formaPago || 'efectivo',
-      p_estado_pago: estadoPago || 'pendiente'
+      p_estado_pago: estadoPago || 'pendiente',
+      p_tipo_factura: tipoFactura || 'ZZ',
+      p_total_neto: totalNeto ?? total,
+      p_total_iva: totalIva ?? 0
     })
 
     if (error) {

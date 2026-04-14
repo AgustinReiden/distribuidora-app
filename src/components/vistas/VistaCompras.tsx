@@ -375,7 +375,18 @@ export default function VistaCompras({
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 font-mono text-sm">
-                      {compra.numero_factura || '-'}
+                      <span className="flex items-center gap-1.5">
+                        {compra.numero_factura || '-'}
+                        {compra.tipo_factura && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                            compra.tipo_factura === 'FC'
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                          }`}>
+                            {compra.tipo_factura}
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-1">

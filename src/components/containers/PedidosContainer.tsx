@@ -6,6 +6,7 @@
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
+import { calcularNetoVenta } from '../../utils/calculations'
 import { fechaLocalISO } from '../../utils/formatters'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
@@ -152,6 +153,7 @@ export default function PedidosContainer(): React.ReactElement {
     estadoPago: 'pendiente',
     montoPagado: 0,
     fecha: fechaLocalISO(),
+    tipoFactura: 'ZZ' as 'ZZ' | 'FC',
   })
 
   const resetNuevoPedido = useCallback(() => {
@@ -159,6 +161,7 @@ export default function PedidosContainer(): React.ReactElement {
       clienteId: '', items: [], notas: '',
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
       fecha: fechaLocalISO(),
+      tipoFactura: 'ZZ' as 'ZZ' | 'FC',
     })
   }, [])
 
@@ -549,13 +552,38 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
-      const itemsParaCrear = itemsFinales.map(item => ({
-        productoId: String(item.productoId),
-        cantidad: item.cantidad,
-        precioUnitario: item.precioUnitario,
-        ...(item.esBonificacion ? { esBonificacion: true as const } : {}),
-        ...(item.promoId ? { promocionId: item.promoId } : {}),
-      }))
+      const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
+      let totalNeto = 0
+      let totalIva = 0
+      const itemsParaCrear = itemsFinales.map(item => {
+        const esBonif = !!item.esBonificacion
+        if (esBonif) {
+          return {
+            productoId: String(item.productoId),
+            cantidad: item.cantidad,
+            precioUnitario: item.precioUnitario,
+            esBonificacion: true as const,
+            ...(item.promoId ? { promocionId: item.promoId } : {}),
+            neto_unitario: 0, iva_unitario: 0, impuestos_internos_unitario: 0, porcentaje_iva: 0,
+          }
+        }
+        const producto = productos.find(p => String(p.id) === String(item.productoId))
+        const pctIva = producto?.porcentaje_iva ?? 21
+        const pctImpInt = producto?.impuestos_internos ?? 0
+        const desglose = calcularNetoVenta(item.precioUnitario, pctIva, pctImpInt, tipoFactura)
+        totalNeto += desglose.neto * item.cantidad
+        totalIva += desglose.iva * item.cantidad
+        return {
+          productoId: String(item.productoId),
+          cantidad: item.cantidad,
+          precioUnitario: item.precioUnitario,
+          ...(item.promoId ? { promocionId: item.promoId } : {}),
+          neto_unitario: desglose.neto,
+          iva_unitario: desglose.iva,
+          impuestos_internos_unitario: desglose.impuestosInternos,
+          porcentaje_iva: pctIva,
+        }
+      })
       await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
@@ -566,6 +594,9 @@ export default function PedidosContainer(): React.ReactElement {
         estadoPago: nuevoPedido.estadoPago,
         montoPagado: nuevoPedido.montoPagado,
         fecha: nuevoPedido.fecha,
+        tipoFactura,
+        totalNeto,
+        totalIva,
       })
       resetNuevoPedido()
       setModalPedidoOpen(false)
@@ -574,7 +605,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify])
+  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos])
 
   // ModalFiltroFecha: onApply({ fechaDesde, fechaHasta })
   const handleFiltroFechaApply = useCallback((f: { fechaDesde: string | null; fechaHasta: string | null }) => {
@@ -793,6 +824,7 @@ export default function PedidosContainer(): React.ReactElement {
             onEstadoPagoChange={(ep: string) => setNuevoPedido(prev => ({ ...prev, estadoPago: ep }))}
             onMontoPagadoChange={(m: number) => setNuevoPedido(prev => ({ ...prev, montoPagado: m }))}
             onFechaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fecha }))}
+            onTipoFacturaChange={(tipo: 'ZZ' | 'FC') => setNuevoPedido(prev => ({ ...prev, tipoFactura: tipo }))}
             isOffline={!isOnline}
           />
         </Suspense>

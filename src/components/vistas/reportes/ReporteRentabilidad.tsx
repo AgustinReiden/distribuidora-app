@@ -23,29 +23,57 @@ export function ReporteRentabilidadSection({
 
   return (
     <div className="space-y-4">
-      {/* Resumen */}
+      {/* Desglose Ventas */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg">
+          <p className="text-sm text-indigo-600 dark:text-indigo-400">Ventas Brutas</p>
+          <p className="text-xl font-bold text-indigo-700 dark:text-indigo-300">
+            {formatPrecio(totales.ventasBrutas || 0)}
+          </p>
+        </div>
+        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
+          <p className="text-sm text-orange-600 dark:text-orange-400">IVA Discriminado</p>
+          <p className="text-xl font-bold text-orange-700 dark:text-orange-300">
+            {formatPrecio(totales.ivaDiscriminado || 0)}
+          </p>
+        </div>
+        <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-lg">
+          <p className="text-sm text-amber-600 dark:text-amber-400">Imp. Internos</p>
+          <p className="text-xl font-bold text-amber-700 dark:text-amber-300">
+            {formatPrecio(totales.impuestosInternos || 0)}
+          </p>
+        </div>
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+          <p className="text-sm text-blue-600 dark:text-blue-400">Ventas Netas</p>
+          <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
+            {formatPrecio(totales.ventasNetas || 0)}
+          </p>
+        </div>
+      </div>
+
+      {/* Resumen Rentabilidad */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-          <p className="text-sm text-blue-600">Ingresos</p>
-          <p className="text-xl font-bold text-blue-700">
+          <p className="text-sm text-blue-600 dark:text-blue-400">Ingresos Netos</p>
+          <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
             {formatPrecio(totales.ingresosTotales || 0)}
           </p>
         </div>
         <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
-          <p className="text-sm text-red-600">Costos</p>
-          <p className="text-xl font-bold text-red-700">
+          <p className="text-sm text-red-600 dark:text-red-400">Costos</p>
+          <p className="text-xl font-bold text-red-700 dark:text-red-300">
             {formatPrecio(totales.costosTotales || 0)}
           </p>
         </div>
         <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-          <p className="text-sm text-green-600">Margen</p>
-          <p className="text-xl font-bold text-green-700">
+          <p className="text-sm text-green-600 dark:text-green-400">Margen</p>
+          <p className="text-xl font-bold text-green-700 dark:text-green-300">
             {formatPrecio(totales.margenTotal || 0)}
           </p>
         </div>
         <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
-          <p className="text-sm text-purple-600">% Margen</p>
-          <p className="text-xl font-bold text-purple-700">
+          <p className="text-sm text-purple-600 dark:text-purple-400">% Margen</p>
+          <p className="text-xl font-bold text-purple-700 dark:text-purple-300">
             {(totales.margenPorcentaje || 0).toFixed(1)}%
           </p>
         </div>
