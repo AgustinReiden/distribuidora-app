@@ -137,6 +137,7 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
     setLoading(true)
     try {
       let query = supabase.from('pedidos').select(`*, items:pedido_items(*, producto:productos(*))`)
+        .neq('estado', 'cancelado')
       if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
       if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
 

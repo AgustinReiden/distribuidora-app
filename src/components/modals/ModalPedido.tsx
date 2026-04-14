@@ -210,7 +210,17 @@ const ModalPedido = memo(function ModalPedido({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b dark:border-gray-700">
-          <h2 className="text-xl font-semibold dark:text-white">Nuevo Pedido</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold dark:text-white">Nuevo Pedido</h2>
+            <select
+              value={nuevoPedido.tipoFactura || 'ZZ'}
+              onChange={(e) => onTipoFacturaChange?.(e.target.value as 'ZZ' | 'FC')}
+              className="px-2 py-1 text-xs font-medium border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="ZZ">ZZ</option>
+              <option value="FC">FC</option>
+            </select>
+          </div>
           <button onClick={onClose}><X className="w-6 h-6 text-gray-500 dark:text-gray-400" /></button>
         </div>
 
@@ -549,35 +559,6 @@ const ModalPedido = memo(function ModalPedido({
 
           {/* Seccion Tipo Factura, Forma de Pago y Observaciones - al fondo */}
           <div className="border-t dark:border-gray-600 pt-4 space-y-3">
-            {/* Tipo de Factura */}
-            <div>
-              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Tipo de Comprobante</label>
-              <div className="flex rounded-lg overflow-hidden border dark:border-gray-600">
-                <button
-                  type="button"
-                  onClick={() => onTipoFacturaChange && onTipoFacturaChange('ZZ')}
-                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-                    (nuevoPedido.tipoFactura || 'ZZ') === 'ZZ'
-                      ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  ZZ Sin Factura
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onTipoFacturaChange && onTipoFacturaChange('FC')}
-                  className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-                    nuevoPedido.tipoFactura === 'FC'
-                      ? 'bg-blue-600 text-white dark:bg-blue-500'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  FC Con Factura
-                </button>
-              </div>
-            </div>
-
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Forma de Pago</label>

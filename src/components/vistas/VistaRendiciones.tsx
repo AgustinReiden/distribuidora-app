@@ -20,16 +20,22 @@ import {
   X
 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
-import { useRendiciones, useUsuarios, useRecorridos } from '../../hooks/supabase'
+import { useRendiciones, useUsuarios } from '../../hooks/supabase'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { RendicionDBExtended, EstadoRendicion, PerfilDB } from '../../types'
+
+interface RendicionItemDetalle {
+  pedido_id: string | number;
+  monto_cobrado: number;
+  forma_pago: string;
+}
 
 interface RendicionCardProps {
   rendicion: RendicionDBExtended;
   onAprobar: (id: string) => void;
   onRechazar: (id: string, observaciones: string) => void;
   onObservar: (id: string, observaciones: string) => void;
-  onVerDetalle: (rendicion: RendicionDBExtended) => void;
+  onLoadDetalle: (rendicionId: string) => Promise<RendicionItemDetalle[]>;
 }
 
 const ESTADO_CONFIG: Record<EstadoRendicion, { label: string; color: string; icon: React.ElementType }> = {
@@ -40,10 +46,12 @@ const ESTADO_CONFIG: Record<EstadoRendicion, { label: string; color: string; ico
   con_observaciones: { label: 'Con Observaciones', color: 'amber', icon: AlertTriangle }
 }
 
-function RendicionCard({ rendicion, onAprobar, onRechazar, onObservar, onVerDetalle }: RendicionCardProps) {
+function RendicionCard({ rendicion, onAprobar, onRechazar, onObservar, onLoadDetalle }: RendicionCardProps) {
   const [expandido, setExpandido] = useState(false)
   const [observaciones, setObservaciones] = useState('')
   const [accionando, setAccionando] = useState(false)
+  const [items, setItems] = useState<RendicionItemDetalle[]>([])
+  const [cargandoItems, setCargandoItems] = useState(false)
 
   const estadoConfig = ESTADO_CONFIG[rendicion.estado]
   const Icon = estadoConfig.icon
@@ -71,12 +79,25 @@ function RendicionCard({ rendicion, onAprobar, onRechazar, onObservar, onVerDeta
     }
   }
 
+  const handleToggleExpand = async () => {
+    const nuevoEstado = !expandido
+    setExpandido(nuevoEstado)
+    if (nuevoEstado && items.length === 0 && !cargandoItems) {
+      setCargandoItems(true)
+      try {
+        const detalle = await onLoadDetalle(rendicion.id)
+        setItems(detalle)
+      } catch { /* error ya notificado */ }
+      finally { setCargandoItems(false) }
+    }
+  }
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 overflow-hidden">
       {/* Header */}
       <div
         className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750"
-        onClick={() => setExpandido(!expandido)}
+        onClick={handleToggleExpand}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -209,14 +230,46 @@ function RendicionCard({ rendicion, onAprobar, onRechazar, onObservar, onVerDeta
             </div>
           )}
 
-          {/* Boton ver detalle */}
-          <button
-            onClick={() => onVerDetalle(rendicion)}
-            className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm flex items-center justify-center gap-1"
-          >
-            <Eye className="w-4 h-4" />
-            Ver detalle completo
-          </button>
+          {/* Detalle de pedidos */}
+          {cargandoItems ? (
+            <div className="flex items-center justify-center py-4">
+              <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
+              <span className="ml-2 text-sm text-gray-500">Cargando detalle...</span>
+            </div>
+          ) : items.length > 0 ? (
+            <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-900">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-gray-500">Pedido</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Monto</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Forma de pago</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y dark:divide-gray-700">
+                  {items.map((item) => (
+                    <tr key={item.pedido_id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-3 py-2 text-gray-800 dark:text-gray-200">#{item.pedido_id}</td>
+                      <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-200">
+                        {formatMoney(item.monto_cobrado)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          item.forma_pago === 'efectivo'
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                            : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                        }`}>
+                          {item.forma_pago}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-center text-sm text-gray-500 py-2">Sin pedidos en esta rendición</p>
+          )}
         </div>
       )}
     </div>
@@ -317,12 +370,12 @@ export default function VistaRendiciones(): React.ReactElement {
     rendiciones,
     loading,
     fetchRendicionesPorFecha,
+    fetchRendicionById,
     revisarRendicion,
-    crearRendicion,
+    crearRendicionPorFecha,
     getEstadisticas
   } = useRendiciones()
   const { transportistas } = useUsuarios()
-  const { fetchRecorridosPorFecha, recorridos } = useRecorridos()
 
   const [fechaFiltro, setFechaFiltro] = useState<string>(fechaLocalISO())
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoRendicion | 'todas'>('todas')
@@ -338,31 +391,20 @@ export default function VistaRendiciones(): React.ReactElement {
   } | null>(null)
 
   const cargarDatos = useCallback(async () => {
-    await Promise.all([
-      fetchRendicionesPorFecha(fechaFiltro),
-      fetchRecorridosPorFecha(fechaFiltro)
-    ])
-  }, [fechaFiltro, fetchRendicionesPorFecha, fetchRecorridosPorFecha])
+    await fetchRendicionesPorFecha(fechaFiltro)
+  }, [fechaFiltro, fetchRendicionesPorFecha])
 
   const handleCrearRendicion = async (transportistaId: string) => {
     setCreandoRendicion(true)
     try {
-      // Buscar recorrido del transportista en esta fecha
-      const recorrido = recorridos.find(r => r.transportista_id === transportistaId)
-
-      if (!recorrido) {
-        notify.error('No hay recorrido para este transportista en la fecha seleccionada')
-        return
-      }
-
-      // Verificar si ya existe una rendicion para este recorrido
-      const yaExiste = rendiciones.some(r => r.recorrido_id === recorrido.id)
+      // Verificar si ya existe rendición para este transportista/fecha
+      const yaExiste = rendiciones.some(r => r.transportista_id === transportistaId)
       if (yaExiste) {
         notify.warning('Ya existe una rendicion para este transportista en esta fecha')
         return
       }
 
-      await crearRendicion(String(recorrido.id), transportistaId)
+      await crearRendicionPorFecha(transportistaId, fechaFiltro)
       notify.success('Rendicion creada correctamente')
       setModalCrearOpen(false)
       await cargarDatos()
@@ -514,7 +556,14 @@ export default function VistaRendiciones(): React.ReactElement {
               onAprobar={handleAprobar}
               onRechazar={handleRechazar}
               onObservar={handleObservar}
-              onVerDetalle={() => {}}
+              onLoadDetalle={async (rendicionId) => {
+                const detalle = await fetchRendicionById(rendicionId)
+                return (detalle?.items || []).map((item) => ({
+                  pedido_id: item.pedido_id,
+                  monto_cobrado: item.monto_cobrado || 0,
+                  forma_pago: item.forma_pago || 'efectivo',
+                }))
+              }}
             />
           ))}
         </div>

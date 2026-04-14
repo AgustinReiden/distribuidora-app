@@ -1206,6 +1206,7 @@ export interface UseRendicionesReturn {
   loading: boolean;
   // Crear y presentar (transportista o admin)
   crearRendicion: (recorridoId: string, transportistaId?: string) => Promise<string>;
+  crearRendicionPorFecha: (transportistaId: string, fecha: string) => Promise<string>;
   presentarRendicion: (input: PresentarRendicionInput) => Promise<{ success: boolean; diferencia: number }>;
   agregarAjuste: (rendicionId: string, ajuste: RendicionAjusteInput) => Promise<void>;
   // Admin
