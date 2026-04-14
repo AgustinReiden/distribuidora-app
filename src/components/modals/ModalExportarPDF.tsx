@@ -357,7 +357,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
         </div>
       </div>
 
-      <div className="flex justify-between items-center p-4 border-t bg-gray-50">
+      <div className="flex justify-between items-center p-4 border-t bg-gray-50 dark:bg-gray-800 sticky bottom-0">
         <p className="text-sm text-gray-600">
           {pedidosSeleccionados.length > 0 && (
             <>
