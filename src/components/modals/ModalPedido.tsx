@@ -622,7 +622,7 @@ const ModalPedido = memo(function ModalPedido({
                     type="number"
                     min="0"
                     step="0.01"
-                    max={calcularTotal()}
+                    max={hayDescuento ? totalFinal : calcularTotal()}
                     value={nuevoPedido.montoPagado || ''}
                     onChange={e => onMontoPagadoChange && onMontoPagadoChange(parseFloat(e.target.value) || 0)}
                     className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
@@ -631,7 +631,7 @@ const ModalPedido = memo(function ModalPedido({
                 </div>
                 {(nuevoPedido.montoPagado ?? 0) > 0 && (
                   <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">
-                    Resta por pagar: {formatPrecio(calcularTotal() - (nuevoPedido.montoPagado ?? 0))}
+                    Resta por pagar: {formatPrecio((hayDescuento ? totalFinal : calcularTotal()) - (nuevoPedido.montoPagado ?? 0))}
                   </p>
                 )}
               </div>

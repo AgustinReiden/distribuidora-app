@@ -48,6 +48,14 @@ export function useCompras(): UseComprasReturnExtended {
   const [compras, setCompras] = useState<CompraDBExtended[]>([])
   const [proveedores, setProveedores] = useState<ProveedorDBExtended[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  const [usuarioId, setUsuarioId] = useState<string | null>(null)
+
+  // Get current user ID for RPC calls
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUsuarioId(data.user?.id ?? null)
+    })
+  }, [])
 
   const fetchCompras = async (): Promise<void> => {
     setLoading(true)
@@ -239,39 +247,19 @@ export function useCompras(): UseComprasReturnExtended {
   }
 
   const anularCompra = async (compraId: string): Promise<void> => {
-    const compra = compras.find(c => c.id === compraId)
-    if (!compra) throw new Error('Compra no encontrada')
-
-    // Obtener stock ACTUAL de todos los productos afectados
-    const productIds = (compra.items || []).map(i => i.producto_id).filter(Boolean)
-    if (productIds.length > 0) {
-      const { data: productosActuales } = await supabase
-        .from('productos')
-        .select('id, stock')
-        .in('id', productIds)
-
-      const stockMap: Record<string, number> = Object.fromEntries(
-        ((productosActuales || []) as Array<{ id: string; stock: number }>).map(p => [p.id, p.stock || 0])
-      )
-
-      // Revertir stock de cada item (restar del stock ACTUAL, no del guardado)
-      for (const item of (compra.items || [])) {
-        const stockActual = stockMap[item.producto_id] || 0
-        const nuevoStock = stockActual - item.cantidad
-        await supabase
-          .from('productos')
-          .update({ stock: Math.max(0, nuevoStock) })
-          .eq('id', item.producto_id)
-      }
-    }
-
-    // Marcar compra como cancelada
-    const { error } = await supabase
-      .from('compras')
-      .update({ estado: 'cancelada' })
-      .eq('id', compraId)
+    // Use atomic RPC to revert stock in a single transaction (BUG-1 fix)
+    const { data, error } = await supabase.rpc('anular_compra_atomica', {
+      p_compra_id: compraId,
+      p_usuario_id: usuarioId
+    })
 
     if (error) throw error
+
+    const response = data as { success: boolean; error?: string; mensaje?: string }
+    if (!response.success) {
+      throw new Error(response.error || 'Error al anular compra')
+    }
+
     await fetchCompras()
   }
 

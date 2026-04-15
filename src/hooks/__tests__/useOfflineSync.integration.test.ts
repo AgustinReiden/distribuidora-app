@@ -101,9 +101,9 @@ describe('useOfflineSync Integration Tests', () => {
         usuarioId: 'user1'
       }
 
-      let saveResult: ReturnType<typeof result.current.guardarPedidoOffline>
-      act(() => {
-        saveResult = result.current.guardarPedidoOffline(pedidoData, {
+      let saveResult: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>>
+      await act(async () => {
+        saveResult = await result.current.guardarPedidoOffline(pedidoData, {
           productos: mockProductos,
           validarStock: true
         })
@@ -160,14 +160,12 @@ describe('useOfflineSync Integration Tests', () => {
         total: 200
       }
 
-      act(() => {
-        result.current.guardarPedidoOffline(pedidoData)
+      await act(async () => {
+        await result.current.guardarPedidoOffline(pedidoData)
       })
 
       // Verificar que se llamó a queueOperation
-      await waitFor(() => {
-        expect(mockQueueOperation).toHaveBeenCalled()
-      })
+      expect(mockQueueOperation).toHaveBeenCalled()
 
       const lastCall = mockQueueOperation.mock.calls.at(-1)
       expect(lastCall?.[0]).toBe('CREATE_PEDIDO')
@@ -197,9 +195,9 @@ describe('useOfflineSync Integration Tests', () => {
         total: 2000
       }
 
-      let saveResult: ReturnType<typeof result.current.guardarPedidoOffline>
-      act(() => {
-        saveResult = result.current.guardarPedidoOffline(pedidoData, {
+      let saveResult: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>>
+      await act(async () => {
+        saveResult = await result.current.guardarPedidoOffline(pedidoData, {
           productos: mockProductos,
           validarStock: true
         })
@@ -225,8 +223,8 @@ describe('useOfflineSync Integration Tests', () => {
       })
 
       // Primer pedido: usa 3 de 5 unidades disponibles
-      act(() => {
-        result.current.guardarPedidoOffline(
+      await act(async () => {
+        await result.current.guardarPedidoOffline(
           {
             clienteId: '1',
             items: [{ productoId: 'p2', cantidad: 3, precioUnitario: 200 }],
@@ -239,9 +237,9 @@ describe('useOfflineSync Integration Tests', () => {
       expect(result.current.pedidosPendientes).toHaveLength(1)
 
       // Segundo pedido: intenta usar 4 más (solo quedan 2)
-      let saveResult: ReturnType<typeof result.current.guardarPedidoOffline>
-      act(() => {
-        saveResult = result.current.guardarPedidoOffline(
+      let saveResult: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>>
+      await act(async () => {
+        saveResult = await result.current.guardarPedidoOffline(
           {
             clienteId: '2',
             items: [{ productoId: 'p2', cantidad: 4, precioUnitario: 200 }],
@@ -272,9 +270,9 @@ describe('useOfflineSync Integration Tests', () => {
         total: 200
       }
 
-      let saveResult: ReturnType<typeof result.current.guardarPedidoOffline>
-      act(() => {
-        saveResult = result.current.guardarPedidoOffline(pedidoData, {
+      let saveResult: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>>
+      await act(async () => {
+        saveResult = await result.current.guardarPedidoOffline(pedidoData, {
           productos: mockProductos,
           validarStock: true
         })
@@ -447,8 +445,8 @@ describe('useOfflineSync Integration Tests', () => {
         .mockResolvedValue([]) // After second sync
 
       // Guardar segundo pedido (updates local state)
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
+      await act(async () => {
+        await result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
       })
 
       // Segunda sincronización (debe funcionar)
@@ -559,9 +557,9 @@ describe('useOfflineSync Integration Tests', () => {
       })
 
       // Agregar pedidos
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
-        result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
+      await act(async () => {
+        await result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+        await result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
       })
 
       expect(result.current.cantidadPendientes).toBe(2)
@@ -651,9 +649,9 @@ describe('useOfflineSync Integration Tests', () => {
       })
 
       // Agregar pedidos
-      act(() => {
-        result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
-        result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
+      await act(async () => {
+        await result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+        await result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
       })
 
       expect(result.current.pedidosPendientes).toHaveLength(2)
@@ -681,9 +679,9 @@ describe('useOfflineSync Integration Tests', () => {
       let pedido1: PedidoOffline | undefined
       let pedido2: PedidoOffline | undefined
 
-      act(() => {
-        const result1 = result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
-        const result2 = result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
+      await act(async () => {
+        const result1 = await result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+        const result2 = await result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
         pedido1 = result1.pedido
         pedido2 = result2.pedido
       })

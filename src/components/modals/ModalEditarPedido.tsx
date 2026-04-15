@@ -5,6 +5,7 @@ import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
+import { calcularNetoVenta } from '../../utils/calculations';
 import type { PedidoDB, ProductoDB } from '../../types';
 
 /** Item del pedido para edición */
@@ -182,13 +183,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   }, [productos, items, busquedaProducto]);
 
   // Cuando cambia el estado de pago, ajustar el monto
+  // NOTE: Only react to estadoPago changes, NOT total changes.
+  // If total is in deps, editing items while estadoPago='pagado' silently overwrites montoPagado.
   useEffect(() => {
     if (estadoPago === 'pagado') {
       setMontoPagado(total);
     } else if (estadoPago === 'pendiente') {
       setMontoPagado(0);
     }
-  }, [estadoPago, total]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estadoPago]);
 
   const handleMontoPagadoChange = (valor: string): void => {
     const monto = Math.min(parseFloat(valor) || 0, total);
@@ -301,12 +305,30 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }
 
     try {
-      // Si hay cambios en items y es admin, guardar items con precios mayoristas resueltos
+      // Si hay cambios en items y es admin, guardar items con precios mayoristas resueltos y desglose fiscal
       if (itemsModificados && isAdmin && onSaveItems) {
-        const itemsParaGuardar = items.map(item => ({
-          ...item,
-          precioUnitario: preciosResueltosMap.get(item.productoId) ?? item.precioUnitario
-        }));
+        const tipoFactura = pedido?.tipo_factura || 'ZZ';
+        const itemsParaGuardar = items.map(item => {
+          const precioFinal = preciosResueltosMap.get(item.productoId) ?? item.precioUnitario;
+          const producto = productos.find(p => p.id === item.productoId);
+          const pctIva = producto?.porcentaje_iva ?? 21;
+          const pctImpInt = producto?.impuestos_internos ?? 0;
+          const esBonif = item.esBonificacion || false;
+
+          if (esBonif) {
+            return { ...item, precioUnitario: 0, neto_unitario: 0, iva_unitario: 0, impuestos_internos_unitario: 0, porcentaje_iva: 0 };
+          }
+
+          const desglose = calcularNetoVenta(precioFinal, pctIva, pctImpInt, tipoFactura as 'ZZ' | 'FC');
+          return {
+            ...item,
+            precioUnitario: precioFinal,
+            neto_unitario: desglose.neto,
+            iva_unitario: desglose.iva,
+            impuestos_internos_unitario: desglose.impuestosInternos,
+            porcentaje_iva: pctIva,
+          };
+        });
         await onSaveItems(itemsParaGuardar);
       }
       // Guardar el resto de los datos
@@ -638,6 +660,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   setPagoCombinado(e.target.checked);
                   if (!e.target.checked) {
                     setFormaPago('efectivo');
+                    setMontoPagado(pedido?.monto_pagado || 0);
+                    setEstadoPago(pedido?.estado_pago || 'pendiente');
                   }
                 }}
                 className="w-4 h-4 rounded border-gray-300 text-blue-600"

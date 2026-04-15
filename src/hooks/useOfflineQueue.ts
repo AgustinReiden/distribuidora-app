@@ -296,11 +296,14 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
   // Efectos: Listeners de conectividad
   // -------------------------------------------------------------------------
   useEffect(() => {
+    let initialSyncTimeout: ReturnType<typeof setTimeout> | undefined
+    let onlineTimeout: ReturnType<typeof setTimeout> | undefined
+
     const handleOnline = () => {
       logger.info('[OfflineQueue] Conexión restaurada')
       setSyncState(prev => ({ ...prev, isOnline: true, status: 'online' }))
       // Sincronizar después de un pequeño delay
-      setTimeout(() => syncNow(), 1000)
+      onlineTimeout = setTimeout(() => syncNow(), 1000)
     }
 
     const handleOffline = () => {
@@ -316,7 +319,7 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
 
     // Si hay operaciones pendientes y estamos online, sincronizar
     if (navigator.onLine) {
-      setTimeout(() => syncNow(), 2000)
+      initialSyncTimeout = setTimeout(() => syncNow(), 2000)
     }
 
     // Limpieza periódica (cada hora)
@@ -326,6 +329,8 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
       clearInterval(cleanupInterval)
+      clearTimeout(initialSyncTimeout)
+      clearTimeout(onlineTimeout)
       if (syncTimeoutRef.current) {
         clearTimeout(syncTimeoutRef.current)
       }

@@ -511,6 +511,10 @@ export function usePedidos(): UsePedidosHookReturn {
       precio_unitario: item.precioUnitario ?? item.precio_unitario ?? 0,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+      ...(item.neto_unitario != null ? { neto_unitario: item.neto_unitario } : {}),
+      ...(item.iva_unitario != null ? { iva_unitario: item.iva_unitario } : {}),
+      ...(item.impuestos_internos_unitario != null ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
+      ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
     }))
 
     const { data, error } = await supabase.rpc('actualizar_pedido_items', {
