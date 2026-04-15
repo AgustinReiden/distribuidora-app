@@ -113,7 +113,7 @@ export interface UseOfflineSyncReturn {
   guardarPedidoOffline: (
     pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
     options?: GuardarPedidoOptions
-  ) => GuardarPedidoResult;
+  ) => Promise<GuardarPedidoResult>;
   guardarMermaOffline: (mermaData: MermaFormInput) => MermaOffline;
   eliminarPedidoOffline: (offlineId: string) => void;
   eliminarMermaOffline: (offlineId: string) => void;
