@@ -36,7 +36,7 @@ function LoadingState() {
 }
 
 export default function ComprasContainer(): React.ReactElement {
-  const { isAdmin } = useAuthData()
+  const { isAdmin, user } = useAuthData()
   const notify = useNotification()
 
   // Queries
@@ -89,14 +89,14 @@ export default function ComprasContainer(): React.ReactElement {
 
   const handleGuardarCompra = useCallback(async (data: CompraFormInputExtended) => {
     try {
-      await registrarCompra.mutateAsync(data)
+      await registrarCompra.mutateAsync({ ...data, usuarioId: user?.id ?? null })
       notify.success('Compra registrada')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al registrar compra'
       notify.error(msg)
       throw err
     }
-  }, [registrarCompra, notify])
+  }, [registrarCompra, notify, user])
 
   const handleCrearProductoRapido = useCallback(async (data: { nombre: string; codigo: string; costoSinIva: number }) => {
     const producto = await crearProducto.mutateAsync({
