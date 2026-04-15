@@ -153,8 +153,7 @@ export function useSyncManager({
     if (isOnline && (pedidosPendientes.length > 0 || mermasPendientes.length > 0)) {
       ejecutarSincronizacion()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline])
+  }, [isOnline, ejecutarSincronizacion, pedidosPendientes.length, mermasPendientes.length])
 
   // Handler para sincronización manual
   const handleSincronizar = useCallback(async (): Promise<void> => {

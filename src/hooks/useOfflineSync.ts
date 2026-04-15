@@ -260,10 +260,10 @@ export function useOfflineSync(): UseOfflineSyncReturn {
    * Ahora usa IndexedDB via queueOperation
    * Usa pedidosPendientesRef para evitar re-renders innecesarios
    */
-  const guardarPedidoOffline = useCallback((
+  const guardarPedidoOffline = useCallback(async (
     pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
     options: GuardarPedidoOptions = {}
-  ): GuardarPedidoResult => {
+  ): Promise<GuardarPedidoResult> => {
     const { productos = [], validarStock = true } = options
 
     // Validar stock si se proporciona lista de productos
@@ -325,33 +325,32 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       sincronizado: false
     }
 
-    // Encolar en IndexedDB (async, no bloqueante)
-    queueOperation('CREATE_PEDIDO' as OperationType, {
-      ...pedidoData,
-      tempOfflineId,
-      timestamp: Date.now()
-    }, pedidoData.usuarioId)
-      .then((opId) => {
-        if (opId !== null) {
-          logger.info(`[useOfflineSync] Pedido encolado con ID: ${opId}`)
-          // Actualizar lista local (void para indicar que no esperamos el resultado)
-          void loadPendingOperations()
-        } else {
-          logger.warn('[useOfflineSync] Pedido duplicado detectado, no se encoló')
-        }
-      })
-      .catch((err) => {
-        logger.error('[useOfflineSync] Error crítico al encolar pedido:', err)
-        window.dispatchEvent(new CustomEvent('offline-storage-error', {
-          detail: { type: 'pedido', error: err.message }
-        }))
-      })
+    // Encolar en IndexedDB - await to ensure persistence before reporting success (BUG-11 fix)
+    try {
+      const opId = await queueOperation('CREATE_PEDIDO' as OperationType, {
+        ...pedidoData,
+        tempOfflineId,
+        timestamp: Date.now()
+      }, pedidoData.usuarioId)
 
-    // Actualizar estado local inmediatamente para UI responsive
+      if (opId !== null) {
+        logger.info(`[useOfflineSync] Pedido encolado con ID: ${opId}`)
+      } else {
+        logger.warn('[useOfflineSync] Pedido duplicado detectado, no se encoló')
+      }
+    } catch (err) {
+      logger.error('[useOfflineSync] Error crítico al encolar pedido:', err)
+      window.dispatchEvent(new CustomEvent('offline-storage-error', {
+        detail: { type: 'pedido', error: (err as Error).message }
+      }))
+      return { success: false, pedido: nuevoPedido }
+    }
+
+    // Actualizar estado local after confirmed IndexedDB write
     setPedidosPendientes(prev => [...prev, nuevoPedido])
 
     return { success: true, pedido: nuevoPedido }
-  }, [loadPendingOperations]) // pedidosPendientes removido, usamos ref
+  }, []) // pedidosPendientes removido, usamos ref
 
   /**
    * Guarda una merma en modo offline

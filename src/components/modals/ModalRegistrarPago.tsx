@@ -107,6 +107,13 @@ export default function ModalRegistrarPago({
         return
       }
 
+      // Validate total does not exceed outstanding balance (BUG-10 fix)
+      const totalDividido = pagosValidos.reduce((s, p) => s + parseFloat(p.monto), 0)
+      if (saldoPendiente > 0 && totalDividido > saldoPendiente + 0.01) {
+        setError(`El total de pagos ($${totalDividido.toLocaleString('es-AR')}) excede el saldo pendiente ($${saldoPendiente.toLocaleString('es-AR')})`)
+        return
+      }
+
       setLoading(true)
       try {
         let ultimoPago: PagoRegistrado | null = null

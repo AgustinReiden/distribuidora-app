@@ -51,9 +51,13 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const pedidosPagados = pedidosData.filter(p => p.estado_pago === 'pagado')
       const pedidosPendientes = pedidosData.filter(p => p.estado_pago !== 'pagado')
 
-      // Calcular montos considerando monto_pagado (pagos parciales y directos)
-      const totalPagadoEnPedidos = pedidosData.reduce((s, p) => s + (p.monto_pagado || 0), 0)
-      const totalPendienteReal = pedidosData.reduce((s, p) => s + ((p.total || 0) - (p.monto_pagado || 0)), 0)
+      // Fetch pagos from the pagos table (source of truth for payments)
+      const { data: pagosCliente } = await supabase
+        .from('pagos')
+        .select('monto')
+        .eq('cliente_id', clienteId)
+      const totalPagosRegistrados = (pagosCliente || []).reduce((s: number, p: { monto: number }) => s + (p.monto || 0), 0)
+      const totalPendienteReal = totalCompras - totalPagosRegistrados
 
       const productosFrecuencia: ProductosFrecuenciaMap = {}
       pedidosData.forEach(p => {
@@ -87,7 +91,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         totalPedidos: pedidosData.length,
         totalCompras,
         pedidosPagados: pedidosPagados.length,
-        montoPagado: totalPagadoEnPedidos,
+        montoPagado: totalPagosRegistrados,
         pedidosPendientes: pedidosPendientes.length,
         montoPendiente: totalPendienteReal,
         ticketPromedio,

@@ -100,11 +100,14 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
           const fechaVencimiento = new Date(fechaPedido)
           fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito)
           const diasVencido = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24))
+          // Use outstanding balance per order, not full total (BUG-9 fix)
+          const saldoPedido = (p.total || 0) - (p.monto_pagado || 0)
+          if (saldoPedido <= 0) return // Skip fully paid orders
 
-          if (diasVencido <= 0) corriente += p.total || 0
-          else if (diasVencido <= 30) vencido30 += p.total || 0
-          else if (diasVencido <= 60) vencido60 += p.total || 0
-          else vencido90 += p.total || 0
+          if (diasVencido <= 0) corriente += saldoPedido
+          else if (diasVencido <= 30) vencido30 += saldoPedido
+          else if (diasVencido <= 60) vencido60 += saldoPedido
+          else vencido90 += saldoPedido
         })
 
         const aging: AgingDeuda = { corriente, vencido30, vencido60, vencido90 }
