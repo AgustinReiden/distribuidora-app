@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
+import { supabase, setSucursalHeader } from '../lib/supabase'
 import type { UsuarioSucursalDB, RolUsuario } from '../types'
 import { logger } from '../utils/logger'
 
@@ -41,6 +41,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
     if (!userId || !globalRol) {
       setSucursales([])
       setCurrentSucursalId(null)
+      setSucursalHeader(null)
       setLoading(false)
       return
     }
@@ -101,6 +102,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
         }
 
         setCurrentSucursalId(activeId)
+        setSucursalHeader(activeId)
         localStorage.setItem(SUCURSAL_STORAGE_KEY, String(activeId))
       } catch (err) {
         logger.error('[SucursalContext] Exception loading sucursales:', err)
@@ -129,6 +131,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
       }
 
       setCurrentSucursalId(sucursalId)
+      setSucursalHeader(sucursalId)
       localStorage.setItem(SUCURSAL_STORAGE_KEY, String(sucursalId))
 
       // Invalidate ALL queries so data refetches for new sucursal
