@@ -4,17 +4,18 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type { ClienteDB } from '../../types'
 
 // Query keys
 export const clientesKeys = {
-  all: ['clientes'] as const,
-  lists: () => [...clientesKeys.all, 'list'] as const,
-  list: (filters: Record<string, unknown>) => [...clientesKeys.lists(), filters] as const,
-  details: () => [...clientesKeys.all, 'detail'] as const,
-  detail: (id: string) => [...clientesKeys.details(), id] as const,
-  byZona: (zona: string) => [...clientesKeys.all, 'zona', zona] as const,
-  zonas: () => [...clientesKeys.all, 'zonas'] as const,
+  all: (sucursalId: number | null) => ['clientes', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...clientesKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...clientesKeys.details(sucursalId), id] as const,
+  byZona: (sucursalId: number | null, zona: string) => [...clientesKeys.all(sucursalId), 'zona', zona] as const,
+  zonas: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'zonas'] as const,
 }
 
 // Fetch functions
@@ -157,8 +158,9 @@ async function deleteCliente(id: string): Promise<void> {
  * Hook para obtener todos los clientes activos
  */
 export function useClientesQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: clientesKeys.lists(),
+    queryKey: clientesKeys.lists(currentSucursalId),
     queryFn: fetchClientes,
     staleTime: 5 * 60 * 1000, // 5 minutos
   })
@@ -168,8 +170,9 @@ export function useClientesQuery() {
  * Hook para obtener un cliente por ID
  */
 export function useClienteQuery(id: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: clientesKeys.detail(id),
+    queryKey: clientesKeys.detail(currentSucursalId, id),
     queryFn: () => fetchClienteById(id),
     enabled: !!id,
   })
@@ -179,8 +182,9 @@ export function useClienteQuery(id: string) {
  * Hook para obtener clientes por zona
  */
 export function useClientesByZonaQuery(zona: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: clientesKeys.byZona(zona),
+    queryKey: clientesKeys.byZona(currentSucursalId, zona),
     queryFn: () => fetchClientesByZona(zona),
     enabled: !!zona,
     staleTime: 5 * 60 * 1000,
@@ -191,8 +195,9 @@ export function useClientesByZonaQuery(zona: string) {
  * Hook para obtener zonas únicas
  */
 export function useZonasQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: clientesKeys.zonas(),
+    queryKey: clientesKeys.zonas(currentSucursalId),
     queryFn: fetchZonasUnicas,
     staleTime: 10 * 60 * 1000, // 10 minutos - zonas cambian poco
   })
@@ -203,22 +208,23 @@ export function useZonasQuery() {
  */
 export function useCrearClienteMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: createCliente,
     onSuccess: (newCliente) => {
       // Actualizar cache de lista
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(), (old) => {
+      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
         if (!old) return [newCliente]
         return [...old, newCliente].sort((a, b) =>
           (a.nombre_fantasia || '').localeCompare(b.nombre_fantasia || '')
         )
       })
       // Invalidar zonas por si es una nueva zona
-      queryClient.invalidateQueries({ queryKey: clientesKeys.zonas() })
+      queryClient.invalidateQueries({ queryKey: clientesKeys.zonas(currentSucursalId) })
       // Invalidar clientes por zona si aplica
       if (newCliente.zona) {
-        queryClient.invalidateQueries({ queryKey: clientesKeys.byZona(newCliente.zona) })
+        queryClient.invalidateQueries({ queryKey: clientesKeys.byZona(currentSucursalId, newCliente.zona) })
       }
     },
   })
@@ -229,17 +235,18 @@ export function useCrearClienteMutation() {
  */
 export function useActualizarClienteMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: updateCliente,
     // Optimistic update
     onMutate: async ({ id, data: cliente }) => {
-      await queryClient.cancelQueries({ queryKey: clientesKeys.lists() })
+      await queryClient.cancelQueries({ queryKey: clientesKeys.lists(currentSucursalId) })
 
-      const previousClientes = queryClient.getQueryData<ClienteDB[]>(clientesKeys.lists())
+      const previousClientes = queryClient.getQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId))
 
       // Aplicar cambios optimistamente
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(), (old) => {
+      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(c => c.id === id ? { ...c, ...cliente } as ClienteDB : c)
       })
@@ -249,17 +256,17 @@ export function useActualizarClienteMutation() {
     onError: (_, __, context) => {
       // Rollback on error
       if (context?.previousClientes) {
-        queryClient.setQueryData(clientesKeys.lists(), context.previousClientes)
+        queryClient.setQueryData(clientesKeys.lists(currentSucursalId), context.previousClientes)
       }
     },
     onSuccess: (updatedCliente) => {
       // Actualizar cache de detalle con datos reales del servidor
-      queryClient.setQueryData(clientesKeys.detail(updatedCliente.id), updatedCliente)
+      queryClient.setQueryData(clientesKeys.detail(currentSucursalId, updatedCliente.id), updatedCliente)
     },
     onSettled: () => {
       // Revalidar para asegurar consistencia
-      queryClient.invalidateQueries({ queryKey: clientesKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: clientesKeys.zonas() })
+      queryClient.invalidateQueries({ queryKey: clientesKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: clientesKeys.zonas(currentSucursalId) })
     },
   })
 }
@@ -269,14 +276,15 @@ export function useActualizarClienteMutation() {
  */
 export function useEliminarClienteMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: deleteCliente,
     onSuccess: (_, deletedId) => {
       // Remover de cache de detalle
-      queryClient.removeQueries({ queryKey: clientesKeys.detail(deletedId) })
+      queryClient.removeQueries({ queryKey: clientesKeys.detail(currentSucursalId, deletedId) })
       // Actualizar cache de lista
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(), (old) => {
+      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
         if (!old) return []
         return old.filter(c => c.id !== deletedId)
       })

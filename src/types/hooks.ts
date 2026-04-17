@@ -882,6 +882,16 @@ export interface SucursalDB {
   created_at?: string;
 }
 
+export interface UsuarioSucursalDB {
+  id: string;
+  usuario_id: string;
+  sucursal_id: number;
+  rol: string; // 'mismo' | RolUsuario — 'mismo' means use global role
+  es_default: boolean;
+  created_at?: string;
+  sucursal?: SucursalDB | null;
+}
+
 export interface TransferenciaItemDB {
   id: string;
   transferencia_id: string;

@@ -4,6 +4,7 @@
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   DashboardMetricasExtended,
@@ -17,11 +18,11 @@ import type {
 
 // Query keys
 export const metricasKeys = {
-  all: ['metricas'] as const,
-  dashboard: (periodo: string, usuarioId?: string | null) =>
-    [...metricasKeys.all, 'dashboard', periodo, usuarioId] as const,
-  reportePreventistas: (fechaDesde?: string | null, fechaHasta?: string | null) =>
-    [...metricasKeys.all, 'reporte-preventistas', fechaDesde, fechaHasta] as const,
+  all: (sucursalId: number | null) => ['metricas', sucursalId] as const,
+  dashboard: (sucursalId: number | null, periodo: string, usuarioId?: string | null) =>
+    [...metricasKeys.all(sucursalId), 'dashboard', periodo, usuarioId] as const,
+  reportePreventistas: (sucursalId: number | null, fechaDesde?: string | null, fechaHasta?: string | null) =>
+    [...metricasKeys.all(sucursalId), 'reporte-preventistas', fechaDesde, fechaHasta] as const,
 }
 
 interface PedidoWithRelations {
@@ -259,8 +260,9 @@ export function useMetricasQuery(
   fechaHasta?: string | null,
   enabled = true
 ) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: metricasKeys.dashboard(periodo, usuarioId),
+    queryKey: metricasKeys.dashboard(currentSucursalId, periodo, usuarioId),
     queryFn: () => calcularMetricas({ periodo, fechaDesde, fechaHasta, usuarioId }),
     staleTime: 2 * 60 * 1000, // 2 minutos - métricas cambian frecuentemente
     gcTime: 10 * 60 * 1000,
@@ -276,8 +278,9 @@ export function useReportePreventistasQuery(
   fechaHasta?: string | null,
   enabled = true
 ) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: metricasKeys.reportePreventistas(fechaDesde, fechaHasta),
+    queryKey: metricasKeys.reportePreventistas(currentSucursalId, fechaDesde, fechaHasta),
     queryFn: () => calcularReportePreventistas(fechaDesde, fechaHasta),
     enabled,
     staleTime: 5 * 60 * 1000,
@@ -289,8 +292,9 @@ export function useReportePreventistasQuery(
  */
 export function useInvalidateMetricas() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return () => {
-    queryClient.invalidateQueries({ queryKey: metricasKeys.all })
+    queryClient.invalidateQueries({ queryKey: metricasKeys.all(currentSucursalId) })
   }
 }

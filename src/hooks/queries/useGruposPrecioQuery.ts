@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type {
   GrupoPrecioDB,
   GrupoPrecioProductoDB,
@@ -15,11 +16,11 @@ import type { PricingMap, GrupoPrecioInfo, EscalaPrecio } from '../../utils/prec
 
 // Query keys
 export const gruposPrecioKeys = {
-  all: ['grupos_precio'] as const,
-  lists: () => [...gruposPrecioKeys.all, 'list'] as const,
-  details: () => [...gruposPrecioKeys.all, 'detail'] as const,
-  detail: (id: string) => [...gruposPrecioKeys.details(), id] as const,
-  pricingMap: () => [...gruposPrecioKeys.all, 'pricing_map'] as const,
+  all: (sucursalId: number | null) => ['grupos_precio', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...gruposPrecioKeys.all(sucursalId), 'list'] as const,
+  details: (sucursalId: number | null) => [...gruposPrecioKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...gruposPrecioKeys.details(sucursalId), id] as const,
+  pricingMap: (sucursalId: number | null) => [...gruposPrecioKeys.all(sucursalId), 'pricing_map'] as const,
 }
 
 // =============================================================================
@@ -278,8 +279,9 @@ async function toggleGrupoPrecioActivo(id: string, activo: boolean): Promise<Gru
  * Hook para obtener todos los grupos de precio con sus productos y escalas
  */
 export function useGruposPrecioQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: gruposPrecioKeys.lists(),
+    queryKey: gruposPrecioKeys.lists(currentSucursalId),
     queryFn: fetchGruposPrecio,
     staleTime: 10 * 60 * 1000,
   })
@@ -290,8 +292,9 @@ export function useGruposPrecioQuery() {
  * Cache 10 minutos, usado por usePrecioMayorista
  */
 export function usePricingMapQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: gruposPrecioKeys.pricingMap(),
+    queryKey: gruposPrecioKeys.pricingMap(currentSucursalId),
     queryFn: fetchPricingMap,
     staleTime: 10 * 60 * 1000,
   })
@@ -302,11 +305,12 @@ export function usePricingMapQuery() {
  */
 export function useCrearGrupoPrecioMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: createGrupoPrecio,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all })
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
   })
 }
@@ -316,11 +320,12 @@ export function useCrearGrupoPrecioMutation() {
  */
 export function useActualizarGrupoPrecioMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: updateGrupoPrecio,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all })
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
   })
 }
@@ -330,13 +335,14 @@ export function useActualizarGrupoPrecioMutation() {
  */
 export function useEliminarGrupoPrecioMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: deleteGrupoPrecio,
     onMutate: async (id: string) => {
-      await queryClient.cancelQueries({ queryKey: gruposPrecioKeys.lists() })
-      const previous = queryClient.getQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists())
-      queryClient.setQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists(), (old) => {
+      await queryClient.cancelQueries({ queryKey: gruposPrecioKeys.lists(currentSucursalId) })
+      const previous = queryClient.getQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists(currentSucursalId))
+      queryClient.setQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.filter(g => g.id !== id)
       })
@@ -344,11 +350,11 @@ export function useEliminarGrupoPrecioMutation() {
     },
     onError: (_, __, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(gruposPrecioKeys.lists(), context.previous)
+        queryClient.setQueryData(gruposPrecioKeys.lists(currentSucursalId), context.previous)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all })
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
   })
 }
@@ -358,14 +364,15 @@ export function useEliminarGrupoPrecioMutation() {
  */
 export function useToggleGrupoPrecioActivoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
       toggleGrupoPrecioActivo(id, activo),
     onMutate: async ({ id, activo }) => {
-      await queryClient.cancelQueries({ queryKey: gruposPrecioKeys.lists() })
-      const previous = queryClient.getQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists())
-      queryClient.setQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists(), (old) => {
+      await queryClient.cancelQueries({ queryKey: gruposPrecioKeys.lists(currentSucursalId) })
+      const previous = queryClient.getQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists(currentSucursalId))
+      queryClient.setQueryData<GrupoPrecioConDetalles[]>(gruposPrecioKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(g => g.id === id ? { ...g, activo } : g)
       })
@@ -373,11 +380,11 @@ export function useToggleGrupoPrecioActivoMutation() {
     },
     onError: (_, __, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(gruposPrecioKeys.lists(), context.previous)
+        queryClient.setQueryData(gruposPrecioKeys.lists(currentSucursalId), context.previous)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all })
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
   })
 }

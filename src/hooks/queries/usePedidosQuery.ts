@@ -4,22 +4,25 @@
  */
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen } from '../../types'
 import { productosKeys } from './useProductosQuery'
 
 // Query keys
 export const pedidosKeys = {
-  all: ['pedidos'] as const,
-  lists: () => [...pedidosKeys.all, 'list'] as const,
-  list: (filters: Partial<FiltrosPedidosState>) => [...pedidosKeys.lists(), filters] as const,
-  details: () => [...pedidosKeys.all, 'detail'] as const,
-  detail: (id: string) => [...pedidosKeys.details(), id] as const,
-  byTransportista: (transportistaId: string) => [...pedidosKeys.all, 'transportista', transportistaId] as const,
-  byCliente: (clienteId: string) => [...pedidosKeys.all, 'cliente', clienteId] as const,
-  historial: (pedidoId: string) => [...pedidosKeys.all, 'historial', pedidoId] as const,
-  eliminados: () => [...pedidosKeys.all, 'eliminados'] as const,
-  paginated: (page: number, pageSize: number, filters: Partial<FiltrosPedidosState>) =>
-    [...pedidosKeys.all, 'paginated', page, pageSize, filters] as const,
+  all: (sucursalId: number | null) => ['pedidos', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Partial<FiltrosPedidosState>) => [...pedidosKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...pedidosKeys.details(sucursalId), id] as const,
+  byTransportista: (sucursalId: number | null, transportistaId: string) => [...pedidosKeys.all(sucursalId), 'transportista', transportistaId] as const,
+  byCliente: (sucursalId: number | null, clienteId: string) => [...pedidosKeys.all(sucursalId), 'cliente', clienteId] as const,
+  historial: (sucursalId: number | null, pedidoId: string) => [...pedidosKeys.all(sucursalId), 'historial', pedidoId] as const,
+  eliminados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'eliminados'] as const,
+  paginated: (sucursalId: number | null, page: number, pageSize: number, filters: Partial<FiltrosPedidosState>) =>
+    [...pedidosKeys.all(sucursalId), 'paginated', page, pageSize, filters] as const,
+  noEntregados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'no-entregados'] as const,
+  noPagados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'no-pagados'] as const,
 }
 
 // Types
@@ -381,8 +384,9 @@ async function eliminarPedido(id: string, motivo?: string, usuarioId?: string): 
  * Hook para obtener todos los pedidos
  */
 export function usePedidosQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: pedidosKeys.lists(),
+    queryKey: pedidosKeys.lists(currentSucursalId),
     queryFn: fetchPedidos,
     staleTime: 2 * 60 * 1000, // 2 minutos - pedidos cambian frecuentemente
   })
@@ -392,8 +396,9 @@ export function usePedidosQuery() {
  * Hook para obtener un pedido por ID
  */
 export function usePedidoQuery(id: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: pedidosKeys.detail(id),
+    queryKey: pedidosKeys.detail(currentSucursalId, id),
     queryFn: () => fetchPedidoById(id),
     enabled: !!id,
   })
@@ -403,8 +408,9 @@ export function usePedidoQuery(id: string) {
  * Hook para obtener pedidos de un transportista
  */
 export function usePedidosByTransportistaQuery(transportistaId: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: pedidosKeys.byTransportista(transportistaId),
+    queryKey: pedidosKeys.byTransportista(currentSucursalId, transportistaId),
     queryFn: () => fetchPedidosByTransportista(transportistaId),
     enabled: !!transportistaId,
     staleTime: 1 * 60 * 1000, // 1 minuto
@@ -415,8 +421,9 @@ export function usePedidosByTransportistaQuery(transportistaId: string) {
  * Hook para obtener pedidos de un cliente
  */
 export function usePedidosByClienteQuery(clienteId: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: pedidosKeys.byCliente(clienteId),
+    queryKey: pedidosKeys.byCliente(currentSucursalId, clienteId),
     queryFn: () => fetchPedidosByCliente(clienteId),
     enabled: !!clienteId,
     staleTime: 2 * 60 * 1000,
@@ -433,8 +440,9 @@ export function usePedidosPaginatedQuery(
   search?: string,
   enabled = true
 ) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: pedidosKeys.paginated(page, pageSize, { ...filters, busqueda: search } as Partial<FiltrosPedidosState>),
+    queryKey: pedidosKeys.paginated(currentSucursalId, page, pageSize, { ...filters, busqueda: search } as Partial<FiltrosPedidosState>),
     queryFn: () => fetchPedidosPaginated(page, pageSize, filters, search),
     staleTime: 2 * 60 * 1000,
     placeholderData: keepPreviousData,
@@ -447,15 +455,16 @@ export function usePedidosPaginatedQuery(
  */
 export function useCrearPedidoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: crearPedido,
     onSuccess: () => {
       // Invalidar todas las queries de pedidos (list + paginated)
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // Invalidar productos (por cambio de stock)
-      queryClient.invalidateQueries({ queryKey: productosKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }
@@ -465,16 +474,17 @@ export function useCrearPedidoMutation() {
  */
 export function useCambiarEstadoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: actualizarEstado,
     // Optimistic update
     onMutate: async (input) => {
-      await queryClient.cancelQueries({ queryKey: pedidosKeys.lists() })
+      await queryClient.cancelQueries({ queryKey: pedidosKeys.lists(currentSucursalId) })
 
-      const previousPedidos = queryClient.getQueryData<PedidoDB[]>(pedidosKeys.lists())
+      const previousPedidos = queryClient.getQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId))
 
-      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(), (old) => {
+      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(p =>
           p.id === input.pedidoId ? { ...p, estado: input.nuevoEstado as PedidoDB['estado'] } : p
@@ -486,11 +496,11 @@ export function useCambiarEstadoMutation() {
     onError: (_, __, context) => {
       // Rollback on error
       if (context?.previousPedidos) {
-        queryClient.setQueryData(pedidosKeys.lists(), context.previousPedidos)
+        queryClient.setQueryData(pedidosKeys.lists(currentSucursalId), context.previousPedidos)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
   })
 }
@@ -500,15 +510,16 @@ export function useCambiarEstadoMutation() {
  */
 export function useActualizarPagoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: actualizarPago,
     onMutate: async (input) => {
-      await queryClient.cancelQueries({ queryKey: pedidosKeys.lists() })
+      await queryClient.cancelQueries({ queryKey: pedidosKeys.lists(currentSucursalId) })
 
-      const previousPedidos = queryClient.getQueryData<PedidoDB[]>(pedidosKeys.lists())
+      const previousPedidos = queryClient.getQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId))
 
-      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(), (old) => {
+      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(p =>
           p.id === input.pedidoId
@@ -521,11 +532,11 @@ export function useActualizarPagoMutation() {
     },
     onError: (_, __, context) => {
       if (context?.previousPedidos) {
-        queryClient.setQueryData(pedidosKeys.lists(), context.previousPedidos)
+        queryClient.setQueryData(pedidosKeys.lists(currentSucursalId), context.previousPedidos)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
   })
 }
@@ -535,14 +546,15 @@ export function useActualizarPagoMutation() {
  */
 export function useAsignarTransportistaMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ pedidoId, transportistaId }: { pedidoId: string; transportistaId: string | null }) =>
       asignarTransportista(pedidoId, transportistaId),
     onSuccess: (_, { transportistaId }) => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       if (transportistaId) {
-        queryClient.invalidateQueries({ queryKey: pedidosKeys.byTransportista(transportistaId) })
+        queryClient.invalidateQueries({ queryKey: pedidosKeys.byTransportista(currentSucursalId, transportistaId) })
       }
     },
   })
@@ -553,22 +565,23 @@ export function useAsignarTransportistaMutation() {
  */
 export function useEliminarPedidoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ id, motivo, usuarioId }: { id: string; motivo?: string; usuarioId?: string }) =>
       eliminarPedido(id, motivo, usuarioId),
     onSuccess: (_, { id }) => {
       // Remover de cache
-      queryClient.removeQueries({ queryKey: pedidosKeys.detail(id) })
+      queryClient.removeQueries({ queryKey: pedidosKeys.detail(currentSucursalId, id) })
       // Actualizar lista (optimistic for legacy query)
-      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(), (old) => {
+      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId), (old) => {
         if (!old) return []
         return old.filter(p => p.id !== id)
       })
       // Invalidar todas las queries de pedidos (list + paginated)
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // Invalidar productos (stock restaurado)
-      queryClient.invalidateQueries({ queryKey: productosKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
     },
   })
 }
@@ -617,8 +630,9 @@ async function fetchPedidosNoEntregados(): Promise<PedidoDB[]> {
  * Se habilita solo cuando enabled=true (modal abierto)
  */
 export function usePedidosNoEntregadosQuery(enabled = false) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: [...pedidosKeys.all, 'no-entregados'] as const,
+    queryKey: pedidosKeys.noEntregados(currentSucursalId),
     queryFn: fetchPedidosNoEntregados,
     enabled,
     staleTime: 30 * 1000, // 30 segundos
@@ -655,12 +669,13 @@ async function entregarPedidosMasivo(pedidoIds: string[], transportistaId: strin
  */
 export function useEntregasMasivasMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ pedidoIds, transportistaId }: { pedidoIds: string[]; transportistaId: string }) =>
       entregarPedidosMasivo(pedidoIds, transportistaId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
   })
 }
@@ -689,13 +704,14 @@ async function cancelarPedido(pedidoId: string, motivo: string, usuarioId?: stri
  */
 export function useCancelarPedidoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ pedidoId, motivo, usuarioId }: { pedidoId: string; motivo: string; usuarioId?: string }) =>
       cancelarPedido(pedidoId, motivo, usuarioId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
-      queryClient.invalidateQueries({ queryKey: productosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
     },
   })
 }
@@ -745,8 +761,9 @@ async function fetchPedidosNoPagados(): Promise<PedidoDB[]> {
  * Se habilita solo cuando enabled=true (modal abierto)
  */
 export function usePedidosNoPagadosQuery(enabled = false) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: [...pedidosKeys.all, 'no-pagados'] as const,
+    queryKey: pedidosKeys.noPagados(currentSucursalId),
     queryFn: fetchPedidosNoPagados,
     enabled,
     staleTime: 30 * 1000,
@@ -793,12 +810,13 @@ async function marcarPagosMasivo(pedidoIds: string[], formaPago: string): Promis
  */
 export function usePagosMasivosMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ pedidoIds, formaPago }: { pedidoIds: string[]; formaPago: string }) =>
       marcarPagosMasivo(pedidoIds, formaPago),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
   })
 }

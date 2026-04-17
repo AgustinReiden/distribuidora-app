@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import { comprasKeys } from './useComprasQuery'
 
@@ -16,10 +17,10 @@ export interface NCResumen {
 
 // Query keys
 export const notasCreditoKeys = {
-  all: ['notas_credito'] as const,
-  lists: () => [...notasCreditoKeys.all, 'list'] as const,
-  resumen: () => [...notasCreditoKeys.all, 'resumen'] as const,
-  byCompra: (compraId: string) => [...notasCreditoKeys.all, 'compra', compraId] as const,
+  all: (sucursalId: number | null) => ['notas_credito', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...notasCreditoKeys.all(sucursalId), 'list'] as const,
+  resumen: (sucursalId: number | null) => [...notasCreditoKeys.all(sucursalId), 'resumen'] as const,
+  byCompra: (sucursalId: number | null, compraId: string) => [...notasCreditoKeys.all(sucursalId), 'compra', compraId] as const,
 }
 
 // Fetch functions
@@ -100,8 +101,9 @@ async function registrarNotaCredito(data: NotaCreditoFormInput): Promise<void> {
  * Hook para obtener notas de credito de una compra
  */
 export function useNotasCreditoByCompraQuery(compraId: string | undefined, enabled = true) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: notasCreditoKeys.byCompra(compraId || ''),
+    queryKey: notasCreditoKeys.byCompra(currentSucursalId, compraId || ''),
     queryFn: () => fetchNotasCreditoByCompra(compraId!),
     enabled: !!compraId && enabled,
     staleTime: 5 * 60 * 1000,
@@ -112,8 +114,9 @@ export function useNotasCreditoByCompraQuery(compraId: string | undefined, enabl
  * Hook para obtener resumen de NCs por compra (para badges en lista)
  */
 export function useNotasCreditoResumenQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: notasCreditoKeys.resumen(),
+    queryKey: notasCreditoKeys.resumen(currentSucursalId),
     queryFn: fetchNotasCreditoResumen,
     staleTime: 5 * 60 * 1000,
   })
@@ -124,13 +127,14 @@ export function useNotasCreditoResumenQuery() {
  */
 export function useRegistrarNotaCreditoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: registrarNotaCredito,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: comprasKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
-      queryClient.invalidateQueries({ queryKey: notasCreditoKeys.all })
+      queryClient.invalidateQueries({ queryKey: notasCreditoKeys.all(currentSucursalId) })
     },
   })
 }

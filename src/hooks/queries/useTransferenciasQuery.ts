@@ -5,6 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { fechaLocalISO } from '../../utils/formatters'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type {
   TransferenciaDB,
   TransferenciaFormInput,
@@ -13,11 +14,11 @@ import type {
 
 // Query keys
 export const transferenciasKeys = {
-  all: ['transferencias'] as const,
-  lists: () => [...transferenciasKeys.all, 'list'] as const,
-  list: (filters: Record<string, unknown>) => [...transferenciasKeys.lists(), filters] as const,
-  details: () => [...transferenciasKeys.all, 'detail'] as const,
-  detail: (id: string) => [...transferenciasKeys.details(), id] as const,
+  all: (sucursalId: number | null) => ['transferencias', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...transferenciasKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...transferenciasKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...transferenciasKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...transferenciasKeys.details(sucursalId), id] as const,
 }
 
 export const sucursalesKeys = {
@@ -138,8 +139,9 @@ async function registrarIngresoSucursal(formData: TransferenciaFormInput): Promi
  * Hook para obtener todas las transferencias
  */
 export function useTransferenciasQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: transferenciasKeys.lists(),
+    queryKey: transferenciasKeys.lists(currentSucursalId),
     queryFn: fetchTransferencias,
     staleTime: 5 * 60 * 1000,
   })
@@ -175,11 +177,12 @@ export function useCrearSucursalMutation() {
  */
 export function useRegistrarTransferenciaMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: registrarTransferencia,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: transferenciasKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: transferenciasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
     },
   })
@@ -190,11 +193,12 @@ export function useRegistrarTransferenciaMutation() {
  */
 export function useRegistrarIngresoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: registrarIngresoSucursal,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: transferenciasKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: transferenciasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
     },
   })

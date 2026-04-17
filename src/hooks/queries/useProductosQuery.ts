@@ -5,15 +5,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import type { ProductoDB, ProductoFormInput } from '../../types'
+import { useSucursal } from '../../contexts/SucursalContext'
 
 // Query keys
 export const productosKeys = {
-  all: ['productos'] as const,
-  lists: () => [...productosKeys.all, 'list'] as const,
-  list: (filters: Record<string, unknown>) => [...productosKeys.lists(), filters] as const,
-  details: () => [...productosKeys.all, 'detail'] as const,
-  detail: (id: string) => [...productosKeys.details(), id] as const,
-  stockBajo: (umbral: number) => [...productosKeys.all, 'stockBajo', umbral] as const,
+  all: (sucursalId: number | null) => ['productos', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...productosKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...productosKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...productosKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...productosKeys.details(sucursalId), id] as const,
+  stockBajo: (sucursalId: number | null, umbral: number) => [...productosKeys.all(sucursalId), 'stockBajo', umbral] as const,
 }
 
 // Fetch functions
@@ -126,8 +127,9 @@ async function deleteProducto(id: string): Promise<void> {
  * Hook para obtener todos los productos
  */
 export function useProductosQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: productosKeys.lists(),
+    queryKey: productosKeys.lists(currentSucursalId),
     queryFn: fetchProductos,
     staleTime: 10 * 60 * 1000, // 10 minutos - productos cambian poco
   })
@@ -137,8 +139,9 @@ export function useProductosQuery() {
  * Hook para obtener un producto por ID
  */
 export function useProductoQuery(id: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: productosKeys.detail(id),
+    queryKey: productosKeys.detail(currentSucursalId, id),
     queryFn: () => fetchProductoById(id),
     enabled: !!id,
   })
@@ -148,8 +151,9 @@ export function useProductoQuery(id: string) {
  * Hook para obtener productos con stock bajo
  */
 export function useProductosStockBajoQuery(umbral = 10) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: productosKeys.stockBajo(umbral),
+    queryKey: productosKeys.stockBajo(currentSucursalId, umbral),
     queryFn: () => fetchProductosStockBajo(umbral),
     staleTime: 5 * 60 * 1000, // 5 minutos
   })
@@ -160,17 +164,18 @@ export function useProductosStockBajoQuery(umbral = 10) {
  */
 export function useCrearProductoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: createProducto,
     onSuccess: (newProducto) => {
       // Actualizar cache de lista
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(), (old) => {
+      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
         if (!old) return [newProducto]
         return [...old, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre))
       })
       // Invalidar queries relacionadas
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }
@@ -180,17 +185,18 @@ export function useCrearProductoMutation() {
  */
 export function useActualizarProductoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: updateProducto,
     // Optimistic update
     onMutate: async ({ id, data: producto }) => {
-      await queryClient.cancelQueries({ queryKey: productosKeys.lists() })
+      await queryClient.cancelQueries({ queryKey: productosKeys.lists(currentSucursalId) })
 
-      const previousProductos = queryClient.getQueryData<ProductoDB[]>(productosKeys.lists())
+      const previousProductos = queryClient.getQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId))
 
       // Aplicar cambios optimistamente
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(), (old) => {
+      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(p => p.id === id ? { ...p, ...producto } as ProductoDB : p)
       })
@@ -200,17 +206,17 @@ export function useActualizarProductoMutation() {
     onError: (_, __, context) => {
       // Rollback on error
       if (context?.previousProductos) {
-        queryClient.setQueryData(productosKeys.lists(), context.previousProductos)
+        queryClient.setQueryData(productosKeys.lists(currentSucursalId), context.previousProductos)
       }
     },
     onSuccess: (updatedProducto) => {
       // Actualizar cache de detalle con datos reales del servidor
-      queryClient.setQueryData(productosKeys.detail(updatedProducto.id), updatedProducto)
+      queryClient.setQueryData(productosKeys.detail(currentSucursalId, updatedProducto.id), updatedProducto)
     },
     onSettled: () => {
       // Revalidar para asegurar consistencia
-      queryClient.invalidateQueries({ queryKey: productosKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }
@@ -220,14 +226,15 @@ export function useActualizarProductoMutation() {
  */
 export function useEliminarProductoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: deleteProducto,
     onSuccess: (_, deletedId) => {
       // Remover de cache de detalle
-      queryClient.removeQueries({ queryKey: productosKeys.detail(deletedId) })
+      queryClient.removeQueries({ queryKey: productosKeys.detail(currentSucursalId, deletedId) })
       // Actualizar cache de lista
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(), (old) => {
+      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
         if (!old) return []
         return old.filter(p => p.id !== deletedId)
       })
@@ -240,6 +247,7 @@ export function useEliminarProductoMutation() {
  */
 export function useDescontarStockMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: async (items: { producto_id: string; cantidad: number }[]) => {
@@ -258,7 +266,7 @@ export function useDescontarStockMutation() {
     },
     onSuccess: (items) => {
       // Actualizar cache de lista optimistamente
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(), (old) => {
+      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(p => {
           const item = items.find(i => i.producto_id === p.id)
@@ -267,7 +275,7 @@ export function useDescontarStockMutation() {
         })
       })
       // Invalidar stock bajo
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }
@@ -277,6 +285,7 @@ export function useDescontarStockMutation() {
  */
 export function useRestaurarStockMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: async (items: { producto_id: string; cantidad: number }[]) => {
@@ -289,7 +298,7 @@ export function useRestaurarStockMutation() {
     },
     onSuccess: (items) => {
       // Actualizar cache de lista optimistamente
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(), (old) => {
+      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(p => {
           const item = items.find(i => i.producto_id === p.id)
@@ -298,7 +307,7 @@ export function useRestaurarStockMutation() {
         })
       })
       // Invalidar stock bajo
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }

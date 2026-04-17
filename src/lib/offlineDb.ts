@@ -52,6 +52,7 @@ export interface PendingOperation {
   createdAt: Date
   updatedAt: Date
   userId?: string
+  sucursalId?: number // Multi-tenant: sucursal que originó la operación
 }
 
 /**
@@ -147,6 +148,14 @@ function generateOperationHash(type: OperationType, payload: Record<string, unkn
 }
 
 /**
+ * Genera una clave de cache con namespace de sucursal.
+ * Permite aislar el cache por sucursal en modo offline.
+ */
+export function scopedCacheKey(key: string, sucursalId?: number | null): string {
+  return sucursalId != null ? `s${sucursalId}:${key}` : key
+}
+
+/**
  * Agregar operación a la cola
  * Retorna el ID de la operación o null si ya existe (duplicado)
  */
@@ -154,7 +163,8 @@ export async function queueOperation(
   type: OperationType,
   payload: Record<string, unknown>,
   userId?: string,
-  maxRetries = 5
+  maxRetries = 5,
+  sucursalId?: number
 ): Promise<number | null> {
   const hash = generateOperationHash(type, payload)
 
@@ -180,7 +190,8 @@ export async function queueOperation(
     hash,
     createdAt: now,
     updatedAt: now,
-    userId
+    userId,
+    sucursalId
   })
 
   // Registrar evento
@@ -304,15 +315,17 @@ export async function cleanupOldOperations(daysOld = 7): Promise<number> {
 export async function cacheData(
   key: string,
   data: unknown,
-  expiresInMinutes?: number
+  expiresInMinutes?: number,
+  sucursalId?: number | null
 ): Promise<void> {
+  const effectiveKey = scopedCacheKey(key, sucursalId)
   const now = new Date()
   const expiresAt = expiresInMinutes
     ? new Date(now.getTime() + expiresInMinutes * 60 * 1000)
     : undefined
 
   // Buscar si ya existe
-  const existing = await db.offlineCache.where('key').equals(key).first()
+  const existing = await db.offlineCache.where('key').equals(effectiveKey).first()
 
   if (existing) {
     await db.offlineCache.update(existing.id!, {
@@ -323,7 +336,7 @@ export async function cacheData(
     })
   } else {
     await db.offlineCache.add({
-      key,
+      key: effectiveKey,
       data,
       version: 1,
       updatedAt: now,
@@ -335,8 +348,9 @@ export async function cacheData(
 /**
  * Obtener datos del cache
  */
-export async function getCachedData<T>(key: string): Promise<T | null> {
-  const cached = await db.offlineCache.where('key').equals(key).first()
+export async function getCachedData<T>(key: string, sucursalId?: number | null): Promise<T | null> {
+  const effectiveKey = scopedCacheKey(key, sucursalId)
+  const cached = await db.offlineCache.where('key').equals(effectiveKey).first()
 
   if (!cached) return null
 
@@ -352,8 +366,9 @@ export async function getCachedData<T>(key: string): Promise<T | null> {
 /**
  * Invalidar cache
  */
-export async function invalidateCache(key: string): Promise<void> {
-  await db.offlineCache.where('key').equals(key).delete()
+export async function invalidateCache(key: string, sucursalId?: number | null): Promise<void> {
+  const effectiveKey = scopedCacheKey(key, sucursalId)
+  await db.offlineCache.where('key').equals(effectiveKey).delete()
 }
 
 /**
