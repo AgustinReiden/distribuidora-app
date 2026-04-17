@@ -883,7 +883,8 @@ export interface SucursalDB {
 }
 
 export interface UsuarioSucursalDB {
-  id: string;
+  // BIGSERIAL in DB — PostgREST returns this as a JS number, not string. (H12)
+  id: number;
   usuario_id: string;
   sucursal_id: number;
   rol: string; // 'mismo' | RolUsuario — 'mismo' means use global role
