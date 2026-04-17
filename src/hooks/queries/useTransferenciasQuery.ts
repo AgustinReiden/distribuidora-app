@@ -46,10 +46,16 @@ async function fetchTransferencias(): Promise<TransferenciaDB[]> {
 }
 
 async function fetchSucursales(): Promise<SucursalDB[]> {
+  // Multi-tenant (C3): filter out tenant rows (ManaosApp/TP Export, tipo
+  // 'principal' / 'secundaria') from the transfer-destination dropdown.
+  // Only sub-sucursales (tipo='distribuidora') are valid transfer targets;
+  // otherwise the UI would let a user move stock into the tenant row itself,
+  // which has no warehouse semantics.
   const { data, error } = await supabase
     .from('sucursales')
     .select('*')
     .eq('activa', true)
+    .eq('tipo', 'distribuidora')
     .order('nombre', { ascending: true })
 
   if (error) {
