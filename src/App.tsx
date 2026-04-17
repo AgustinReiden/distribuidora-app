@@ -20,6 +20,7 @@ import { useRealtimeInvalidation } from './hooks/useRealtimeInvalidation'
 import { useSyncManager, type SyncDependencies } from './hooks/useSyncManager'
 import { trackFirstAuthenticatedRender } from './utils/authPerformance'
 import LoginScreen from './components/auth/LoginScreen'
+import SinSucursalScreen from './components/SinSucursalScreen'
 import ErrorBoundary from './components/ErrorBoundary'
 import TopNavigation from './components/layout/TopNavigation'
 import OfflineIndicator from './components/layout/OfflineIndicator'
@@ -145,7 +146,13 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const notify = useNotification()
   const location = useLocation()
   const offlineSync = useOfflineSync()
-  const { currentSucursalId, currentSucursalNombre, currentSucursalRol } = useSucursal()
+  const {
+    currentSucursalId,
+    currentSucursalNombre,
+    currentSucursalRol,
+    sucursales,
+    loading: sucursalLoading,
+  } = useSucursal()
   const {
     isOnline,
     pedidosPendientes,
@@ -206,6 +213,14 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()
   }, [refreshPendingOperations])
+
+  // Block the app if the authenticated user has no sucursales assigned.
+  // Replaces the previous phantom fallback that silently pretended the
+  // user was on sucursal id=1 (C6). Placed after all hooks so rules-of-hooks
+  // are respected.
+  if (!sucursalLoading && sucursales.length === 0) {
+    return <SinSucursalScreen onLogout={handleLogout} />
+  }
 
   return (
     <AuthDataProvider value={authDataValue}>

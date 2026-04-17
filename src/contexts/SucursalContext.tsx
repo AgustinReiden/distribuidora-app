@@ -18,7 +18,7 @@ export interface SucursalContextValue {
   currentSucursalRol: RolUsuario | null
   sucursales: SucursalInfo[]
   loading: boolean
-  hasMutipleSucursales: boolean
+  hasMultipleSucursales: boolean
   switchSucursal: (sucursalId: number) => Promise<void>
 }
 
@@ -63,11 +63,11 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
         }
 
         if (!data || data.length === 0) {
-          logger.warn('[SucursalContext] No sucursales found for user, defaulting to sucursal 1')
+          logger.warn('[SucursalContext] Usuario sin sucursales asignadas')
           if (!cancelled) {
-            const fallback: SucursalInfo = { id: 1, nombre: 'Principal', rol: globalRol }
-            setSucursales([fallback])
-            setCurrentSucursalId(1)
+            setSucursales([])
+            setCurrentSucursalId(null)
+            setSucursalHeader(null)
             setLoading(false)
           }
           return
@@ -149,7 +149,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
       currentSucursalRol: currentSucursal?.rol ?? globalRol,
       sucursales,
       loading,
-      hasMutipleSucursales: sucursales.length > 1,
+      hasMultipleSucursales: sucursales.length > 1,
       switchSucursal,
     }
   }, [currentSucursalId, sucursales, loading, globalRol, switchSucursal])

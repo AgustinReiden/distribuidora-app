@@ -3,7 +3,7 @@ import { Building2, ChevronDown } from 'lucide-react'
 import { useSucursal } from '../../contexts/SucursalContext'
 
 export default function SucursalSelector() {
-  const { currentSucursalId, currentSucursalNombre, sucursales, hasMutipleSucursales, switchSucursal } = useSucursal()
+  const { currentSucursalId, currentSucursalNombre, sucursales, hasMultipleSucursales, switchSucursal } = useSucursal()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -22,7 +22,7 @@ export default function SucursalSelector() {
   if (!currentSucursalId) return null
 
   // Single sucursal: static badge, no dropdown
-  if (!hasMutipleSucursales) {
+  if (!hasMultipleSucursales) {
     return (
       <div className="flex items-center space-x-1.5 px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm">
         <Building2 className="w-4 h-4" />
