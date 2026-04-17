@@ -22,7 +22,8 @@ import {
   type OperationType,
   type PendingOperation
 } from '../lib/offlineDb'
-import { supabase } from './supabase/base'
+import { supabase, setSucursalHeader, getSucursalHeader } from './supabase/base'
+import { useSucursal } from '../contexts/SucursalContext'
 import { logger } from '../utils/logger'
 
 // =============================================================================
@@ -43,7 +44,10 @@ export interface SyncState {
 export interface UseOfflineQueueReturn {
   /** Estado actual de sincronización */
   syncState: SyncState
-  /** Agregar operación a la cola */
+  /**
+   * Agregar operación a la cola.
+   * Captura automáticamente la sucursal activa para preservar el tenant al replay.
+   */
   enqueue: (type: OperationType, payload: Record<string, unknown>) => Promise<number | null>
   /** Forzar sincronización */
   syncNow: () => Promise<void>
@@ -122,6 +126,11 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
     lastError: null
   })
 
+  // Multi-tenant: track active sucursal for tagging queued ops and restoring header after replay.
+  const { currentSucursalId } = useSucursal()
+  const currentSucursalIdRef = useRef<number | null>(currentSucursalId)
+  currentSucursalIdRef.current = currentSucursalId
+
   const isSyncing = useRef(false)
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -151,8 +160,19 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
       return false
     }
 
+    // Multi-tenant (C7): refuse to replay ops without a sucursalId — otherwise the
+    // op would execute against whatever tenant happens to be active now, silently
+    // corrupting data across sucursales.
+    if (operation.sucursalId == null) {
+      await markAsFailed(operation.id!, 'Operación pre-migración sin sucursal asignada; descartada para evitar corrupción cross-tenant')
+      logger.warn(`[OfflineQueue] Operación ${operation.type} id=${operation.id} sin sucursalId, marcada como failed`)
+      return false
+    }
+
     try {
       await markAsProcessing(operation.id!)
+      // Set the header so current_sucursal_id() on the server returns the op's tenant.
+      setSucursalHeader(operation.sucursalId)
       await processor(operation.payload)
       await markAsCompleted(operation.id!)
       logger.info(`[OfflineQueue] Operación completada: ${operation.type}`)
@@ -175,6 +195,9 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
 
     isSyncing.current = true
     setSyncState(prev => ({ ...prev, status: 'syncing' }))
+
+    // Snapshot the X-Sucursal-ID header so we can restore it after per-op overrides.
+    const headerBeforeSync = getSucursalHeader()
 
     try {
       let hasErrors = false
@@ -216,6 +239,9 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
         lastError: errorMessage
       }))
     } finally {
+      // Restore header — prefer the latest active sucursal so a mid-sync switch wins.
+      const latestActive = currentSucursalIdRef.current
+      setSucursalHeader(latestActive ?? headerBeforeSync)
       isSyncing.current = false
     }
   }, [processOperation, updateCounts])
@@ -231,7 +257,14 @@ export function useOfflineQueue(): UseOfflineQueueReturn {
       // Obtener usuario actual
       const { data: { user } } = await supabase.auth.getUser()
 
-      const id = await queueOperation(type, payload, user?.id)
+      // Multi-tenant (C7): tag the op with the active sucursal so replay is safe.
+      const id = await queueOperation(
+        type,
+        payload,
+        user?.id,
+        undefined,
+        currentSucursalIdRef.current ?? undefined
+      )
 
       if (id !== null) {
         await updateCounts()
