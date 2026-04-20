@@ -175,6 +175,7 @@ export interface UseAppHandlersParams {
   actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
   actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
   actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
+  actualizarFechaEntrega: (pedidoId: string, fechaEntrega: string) => Promise<void>;
   actualizarOrdenEntrega: (...args: any[]) => Promise<void>;
   actualizarItemsPedido: (...args: any[]) => Promise<any>;
   fetchHistorialPedido: (pedidoId: string) => Promise<any[]>;
@@ -339,6 +340,7 @@ export function useAppHandlers({
   actualizarNotasPedido,
   actualizarEstadoPago,
   actualizarFormaPago,
+  actualizarFechaEntrega,
   actualizarOrdenEntrega,
   actualizarItemsPedido,
   fetchHistorialPedido,
@@ -486,6 +488,7 @@ export function useAppHandlers({
     actualizarNotasPedido,
     actualizarEstadoPago,
     actualizarFormaPago,
+    actualizarFechaEntrega,
     actualizarOrdenEntrega: actualizarOrdenEntrega as UsePedidoHandlersProps['actualizarOrdenEntrega'],
     actualizarItemsPedido: actualizarItemsPedido as UsePedidoHandlersProps['actualizarItemsPedido'],
     fetchHistorialPedido: fetchHistorialPedido as UsePedidoHandlersProps['fetchHistorialPedido'],

@@ -757,63 +757,6 @@ export const schemas: Schemas = {
 export default schemas
 
 // ============================================
-// SCHEMAS DE RENDICION
-// ============================================
-
-export const tipoAjusteRendicionSchema = z.enum([
-  'faltante',
-  'sobrante',
-  'vuelto_no_dado',
-  'error_cobro',
-  'descuento_autorizado',
-  'otro'
-], {
-  error: 'Tipo de ajuste inválido'
-})
-
-export type TipoAjusteRendicionSchema = z.infer<typeof tipoAjusteRendicionSchema>
-
-export const ajusteRendicionSchema = z.object({
-  tipo: tipoAjusteRendicionSchema,
-  monto: z.coerce
-    .number({ error: 'El monto debe ser un número' })
-    .positive({ message: 'El monto debe ser mayor a 0' }),
-  descripcion: z
-    .string()
-    .min(10, { message: 'La descripción debe tener al menos 10 caracteres' })
-    .max(500, { message: 'La descripción no puede superar 500 caracteres' })
-})
-
-export type AjusteRendicionFormData = z.infer<typeof ajusteRendicionSchema>
-
-export const presentarRendicionSchema = z.object({
-  montoRendido: z.coerce
-    .number({ error: 'El monto debe ser un número' })
-    .nonnegative({ message: 'El monto no puede ser negativo' }),
-  justificacion: z.string().optional()
-})
-
-export type PresentarRendicionFormData = z.infer<typeof presentarRendicionSchema>
-
-export const revisarRendicionSchema = z.object({
-  accion: z.enum(['aprobar', 'rechazar', 'observar'], {
-    error: 'Acción no válida'
-  }),
-  observaciones: z.string().optional()
-}).refine(
-  (data) => {
-    // Si es rechazar u observar, las observaciones son obligatorias
-    if (data.accion === 'rechazar' || data.accion === 'observar') {
-      return data.observaciones && data.observaciones.trim().length >= 10
-    }
-    return true
-  },
-  { message: 'Debe incluir observaciones (mínimo 10 caracteres) al rechazar u observar', path: ['observaciones'] }
-)
-
-export type RevisarRendicionFormData = z.infer<typeof revisarRendicionSchema>
-
-// ============================================
 // SCHEMAS DE SALVEDADES
 // ============================================
 
@@ -950,11 +893,3 @@ export const ESTADOS_RESOLUCION_LABELS: Record<EstadoResolucionSalvedadSchema | 
   anulada: 'Anulada'
 }
 
-export const TIPOS_AJUSTE_LABELS: Record<TipoAjusteRendicionSchema, string> = {
-  faltante: 'Faltante',
-  sobrante: 'Sobrante',
-  vuelto_no_dado: 'Vuelto no dado',
-  error_cobro: 'Error de cobro',
-  descuento_autorizado: 'Descuento autorizado',
-  otro: 'Otro'
-}

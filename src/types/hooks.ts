@@ -267,7 +267,7 @@ export interface FiltrosPedidosState {
   transportistaId: string;
   busqueda: string;
   conSalvedad: 'todos' | 'con_salvedad' | 'sin_salvedad';
-  ocultarCancelados?: boolean;
+  verCancelados?: boolean;
   fechaEntregaProgramada?: string | null;
 }
 
@@ -313,6 +313,7 @@ export interface UsePedidosReturn {
   actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
   actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
   actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
+  actualizarFechaEntrega: (pedidoId: string, fechaEntrega: string) => Promise<void>;
   actualizarOrdenEntrega: (pedidosOrdenados: Array<{ id: string; orden_entrega: number }>) => Promise<void>;
   actualizarItemsPedido: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
   fetchHistorialPedido: (pedidoId: string) => Promise<unknown[]>;
@@ -1109,127 +1110,60 @@ export interface UseReportesFinancierosReturn {
 }
 
 // =============================================================================
-// RENDICIONES TYPES
+// RENDICIONES TYPES (auto-calculadas + control diario)
 // =============================================================================
 
-export type EstadoRendicion = 'pendiente' | 'presentada' | 'aprobada' | 'rechazada' | 'con_observaciones';
-
-export type TipoAjusteRendicion = 'faltante' | 'sobrante' | 'vuelto_no_dado' | 'error_cobro' | 'descuento_autorizado' | 'otro';
-
-export interface RendicionDB {
-  id: string;
-  recorrido_id: string;
-  transportista_id: string;
+/**
+ * Resumen diario auto-calculado por (fecha_entrega, transportista).
+ * Retornado por la RPC `obtener_resumen_rendiciones`. No se persiste: se
+ * calcula sobre pedidos entregados.
+ */
+export interface ResumenRendicionDiaria {
   fecha: string;
-  total_efectivo_esperado: number;
-  total_otros_medios: number;
-  monto_rendido: number;
-  diferencia: number;
-  estado: EstadoRendicion;
-  justificacion_transportista?: string | null;
-  observaciones_admin?: string | null;
-  presentada_at?: string | null;
-  revisada_at?: string | null;
-  revisada_por?: string | null;
-  created_at?: string;
-  updated_at?: string;
+  transportista_id: string;
+  transportista_nombre: string;
+  total_efectivo: number;
+  total_transferencia: number;
+  total_cheque: number;
+  total_cuenta_corriente: number;
+  total_tarjeta: number;
+  total_otros: number;
+  total_general: number;
+  cantidad_pedidos: number;
+  controlada: boolean;
+  controlada_at: string | null;
+  controlada_por_nombre: string | null;
 }
 
-export interface RendicionItemDB {
+/** Fila de la tabla `rendiciones_control` (estado de control de una rendición diaria). */
+export interface RendicionControl {
   id: string;
-  rendicion_id: string;
-  pedido_id: string;
-  monto_cobrado: number;
-  forma_pago: string;
-  referencia?: string | null;
-  incluido_en_rendicion: boolean;
-  notas?: string | null;
-  created_at?: string;
-  pedido?: PedidoDB;
-}
-
-export interface RendicionAjusteDB {
-  id: string;
-  rendicion_id: string;
-  tipo: TipoAjusteRendicion;
-  monto: number;
-  descripcion: string;
-  foto_url?: string | null;
-  aprobado?: boolean | null;
-  aprobado_por?: string | null;
-  aprobado_at?: string | null;
+  fecha: string;
+  transportista_id: string;
+  sucursal_id: number;
+  controlada_at: string;
+  controlada_por: string;
   created_at?: string;
 }
 
-export interface RendicionDBExtended extends RendicionDB {
-  transportista?: PerfilDB | null;
-  transportista_nombre?: string;
-  revisada_por_perfil?: PerfilDB | null;
-  recorrido?: RecorridoDBExtended | null;
-  items?: RendicionItemDB[];
-  ajustes?: RendicionAjusteDB[];
-  total_pedidos?: number;
-  pedidos_entregados?: number;
-  total_facturado?: number;
-  total_cobrado?: number;
-  total_ajustes?: number;
-}
-
-export interface RendicionAjusteInput {
-  tipo: TipoAjusteRendicion;
-  monto: number;
-  descripcion: string;
-  foto?: File | null;
-}
-
-export interface PresentarRendicionInput {
-  rendicionId: string;
-  montoRendido: number;
-  justificacion?: string | null;
-  ajustes?: RendicionAjusteInput[];
-}
-
-export interface RevisarRendicionInput {
-  rendicionId: string;
-  accion: 'aprobar' | 'rechazar' | 'observar';
-  observaciones?: string | null;
-}
-
-export interface EstadisticasRendiciones {
-  total: number;
-  pendientes: number;
-  aprobadas: number;
-  rechazadas: number;
-  con_observaciones: number;
-  total_efectivo_esperado: number;
-  total_rendido: number;
-  total_diferencias: number;
-  por_transportista?: Array<{
-    transportista_id: string;
-    transportista_nombre: string;
-    rendiciones: number;
-    total_rendido: number;
-    total_diferencias: number;
-  }>;
+/** Resultado de `consultar_control_rendicion` (para el warning al editar fecha_entrega). */
+export interface ControlRendicionInfo {
+  controlada: boolean;
+  controlada_at: string | null;
+  controlada_por_nombre: string | null;
 }
 
 export interface UseRendicionesReturn {
-  rendiciones: RendicionDBExtended[];
-  rendicionActual: RendicionDBExtended | null;
+  resumenes: ResumenRendicionDiaria[];
   loading: boolean;
-  // Crear y presentar (transportista o admin)
-  crearRendicion: (recorridoId: string, transportistaId?: string) => Promise<string>;
-  crearRendicionPorFecha: (transportistaId: string, fecha: string) => Promise<string>;
-  presentarRendicion: (input: PresentarRendicionInput) => Promise<{ success: boolean; diferencia: number }>;
-  agregarAjuste: (rendicionId: string, ajuste: RendicionAjusteInput) => Promise<void>;
-  // Admin
-  revisarRendicion: (input: RevisarRendicionInput) => Promise<{ success: boolean; nuevoEstado: EstadoRendicion }>;
-  // Consultas
-  fetchRendicionActual: (transportistaId: string) => Promise<RendicionDBExtended | null>;
-  fetchRendicionesPorFecha: (fecha: string) => Promise<RendicionDBExtended[]>;
-  fetchRendicionesPorTransportista: (transportistaId: string, desde?: string, hasta?: string) => Promise<RendicionDBExtended[]>;
-  fetchRendicionById: (id: string) => Promise<RendicionDBExtended | null>;
-  getEstadisticas: (desde?: string, hasta?: string, transportistaId?: string) => Promise<EstadisticasRendiciones>;
+  fetchResumen: (
+    fechaDesde: string,
+    fechaHasta: string,
+    transportistaId?: string | null
+  ) => Promise<ResumenRendicionDiaria[]>;
+  marcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
+  desmarcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
+  consultarControl: (transportistaId: string, fecha: string) => Promise<ControlRendicionInfo>;
   refetch: () => Promise<void>;
 }
 

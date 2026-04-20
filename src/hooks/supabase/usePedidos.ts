@@ -131,6 +131,7 @@ export interface UsePedidosHookReturn {
   actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
   actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number | null) => Promise<void>;
   actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
+  actualizarFechaEntrega: (pedidoId: string, fechaEntrega: string) => Promise<void>;
   actualizarOrdenEntrega: (ordenOptimizado: OrdenEntregaItem[]) => Promise<void>;
   limpiarOrdenEntrega: (transportistaId: string) => Promise<void>;
   actualizarItemsPedido: (pedidoId: string, items: PedidoItemInput[], usuarioId?: string | null) => Promise<ActualizarItemsRPCResponse>;
@@ -453,6 +454,13 @@ export function usePedidos(): UsePedidosHookReturn {
     setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, forma_pago: formaPago } : p))
   }
 
+  const actualizarFechaEntrega = async (pedidoId: string, fechaEntrega: string): Promise<void> => {
+    const fechaISO = fechaEntrega.includes('T') ? fechaEntrega : `${fechaEntrega}T12:00:00Z`
+    const { error } = await supabase.from('pedidos').update({ fecha_entrega: fechaISO }).eq('id', pedidoId)
+    if (error) throw error
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, fecha_entrega: fechaISO } : p))
+  }
+
   const actualizarOrdenEntrega = async (ordenOptimizado: OrdenEntregaItem[]): Promise<void> => {
     if (!ordenOptimizado || ordenOptimizado.length === 0) return
 
@@ -547,6 +555,7 @@ export function usePedidos(): UsePedidosHookReturn {
     actualizarNotasPedido,
     actualizarEstadoPago,
     actualizarFormaPago,
+    actualizarFechaEntrega,
     actualizarOrdenEntrega,
     limpiarOrdenEntrega,
     actualizarItemsPedido,

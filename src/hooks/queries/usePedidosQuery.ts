@@ -221,7 +221,7 @@ async function fetchPedidosPaginated(
   if (filters?.fechaHasta) {
     query = query.lte('fecha', filters.fechaHasta)
   }
-  if (filters?.ocultarCancelados) {
+  if (!filters?.verCancelados) {
     query = query.neq('estado', 'cancelado')
   }
   if (filters?.fechaEntregaProgramada) {

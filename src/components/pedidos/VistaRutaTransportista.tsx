@@ -2,7 +2,7 @@
  * Vista de ruta para transportista
  */
 import React, { useState, useMemo, memo } from 'react';
-import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Banknote, Gift } from 'lucide-react';
+import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
 import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
@@ -26,7 +26,6 @@ export interface VistaRutaTransportistaProps {
     fotoUrl?: string;
     devolverStock: boolean;
   }) => Promise<RegistrarSalvedadResult>;
-  onAbrirRendicion?: () => void;
 }
 
 interface PedidoEnriquecido extends PedidoDB {
@@ -206,8 +205,7 @@ function VistaRutaTransportista({
   userId,
   clientes,
   productos,
-  onRegistrarSalvedad,
-  onAbrirRendicion
+  onRegistrarSalvedad
 }: VistaRutaTransportistaProps): React.ReactElement {
   // Estado para modal de salvedad
   const [salvedadModal, setSalvedadModal] = useState<{
@@ -367,19 +365,6 @@ function VistaRutaTransportista({
           ))}
         </div>
       </div>
-
-      {/* Boton de rendicion (mostrar si hay entregas completadas) */}
-      {entregasCompletadas > 0 && onAbrirRendicion && (
-        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:bottom-6">
-          <button
-            onClick={onAbrirRendicion}
-            className="w-full md:w-auto px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl shadow-lg flex items-center justify-center gap-2"
-          >
-            <Banknote className="w-5 h-5" />
-            Cerrar Dia / Rendicion
-          </button>
-        </div>
-      )}
 
       {/* Modal de salvedad */}
       {salvedadModal && (
