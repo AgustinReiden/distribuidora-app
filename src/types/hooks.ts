@@ -1364,6 +1364,8 @@ export interface GrupoPrecioFormInput {
 
 export type TipoPromocion = 'bonificacion';
 
+export type ModoExclusionPromocion = 'acumulable' | 'excluyente';
+
 export interface PromocionDB {
   id: string;
   nombre: string;
@@ -1375,6 +1377,11 @@ export interface PromocionDB {
   usos_pendientes?: number;
   prioridad?: number;
   regalo_mueve_stock?: boolean;
+  modo_exclusion?: ModoExclusionPromocion;
+  ajuste_automatico?: boolean;
+  ajuste_producto_id?: string | null;
+  unidades_por_bloque?: number | null;
+  stock_por_bloque?: number | null;
   created_at: string;
   updated_at: string;
 }

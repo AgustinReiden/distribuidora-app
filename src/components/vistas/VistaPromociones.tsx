@@ -5,7 +5,7 @@
  * Muestra lista de promos con productos, reglas, contador de usos y ajuste de stock.
  */
 import React, { useState } from 'react'
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, AlertTriangle, Check } from 'lucide-react'
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, AlertTriangle, Check, Layers, Ban, Zap } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
@@ -200,6 +200,23 @@ export default function VistaPromociones({
                           {promo.usos_pendientes}/{promo.limite_usos} usos
                         </span>
                       )}
+                      {promo.modo_exclusion === 'excluyente' ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 rounded-full font-medium">
+                          <Ban className="w-3 h-3" />
+                          Excluyente
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded-full font-medium">
+                          <Layers className="w-3 h-3" />
+                          Acumulable
+                        </span>
+                      )}
+                      {promo.ajuste_automatico && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-full font-medium">
+                          <Zap className="w-3 h-3" />
+                          Auto-ajuste
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                       {formatFecha(promo.fecha_inicio)}
@@ -249,11 +266,19 @@ export default function VistaPromociones({
                 {/* Contador de usos */}
                 <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center justify-between">
                   <p className="text-sm text-blue-700 dark:text-blue-300">
-                    <span className="font-medium">Unidades regaladas:</span> {promo.usos_pendientes} pendientes de ajuste
+                    <span className="font-medium">Unidades regaladas:</span>{' '}
+                    {promo.regalo_mueve_stock
+                      ? `${promo.usos_pendientes} entregadas (stock ya descontado)`
+                      : `${promo.usos_pendientes} pendientes de ajuste`}
                   </p>
-                  {promo.usos_pendientes > 0 && (
+                  {promo.usos_pendientes > 0 && !promo.regalo_mueve_stock && !promo.ajuste_automatico && (
                     <span className="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded-full font-medium">
                       Ajustar stock
+                    </span>
+                  )}
+                  {promo.ajuste_automatico && promo.unidades_por_bloque && (
+                    <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">
+                      Auto-ajuste cada {promo.unidades_por_bloque} u.
                     </span>
                   )}
                 </div>
@@ -279,8 +304,8 @@ export default function VistaPromociones({
                   </div>
                 </div>
 
-                {/* Ajuste de stock */}
-                {promo.usos_pendientes > 0 && !promo.regalo_mueve_stock && (
+                {/* Ajuste de stock (solo si no es auto-ajuste ni mueve stock directo) */}
+                {promo.usos_pendientes > 0 && !promo.regalo_mueve_stock && !promo.ajuste_automatico && (
                   <div className="mt-3 pt-3 border-t dark:border-gray-700">
                     {ajustandoId === promo.id ? (
                       <div className="space-y-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
