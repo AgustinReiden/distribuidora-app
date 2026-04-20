@@ -79,21 +79,6 @@ export function useDashboard(usuarioFiltro: string | null = null): UseDashboardR
   ): Promise<void> => {
     setLoading(true)
     try {
-      let query = supabase
-        .from('pedidos')
-        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
-
-      if (usuarioFiltro) {
-        query = query.eq('usuario_id', usuarioFiltro)
-      }
-
-      const { data: todosPedidos, error: errorTodos } = await query.order('created_at', { ascending: false })
-
-      if (errorTodos) throw errorTodos
-      if (!todosPedidos) { setLoading(false); return }
-
-      const pedidosTyped = (todosPedidos as PedidoWithRelations[]).filter(p => p.estado !== 'cancelado')
-
       const hoy = new Date()
       const hoyStr = fechaLocalISO(hoy)
       let fechaInicioStr: string | null = null
@@ -126,6 +111,31 @@ export function useDashboard(usuarioFiltro: string | null = null): UseDashboardR
           fechaInicioStr = null
           break
       }
+
+      let query = supabase
+        .from('pedidos')
+        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+
+      if (usuarioFiltro) {
+        query = query.eq('usuario_id', usuarioFiltro)
+      }
+
+      // Filtro server-side: evita descargar histórico completo.
+      if (fechaInicioStr) {
+        query = query.gte('created_at', fechaInicioStr)
+      }
+      if (periodo === 'personalizado' && fHasta) {
+        const hastaDate = new Date(fHasta)
+        hastaDate.setDate(hastaDate.getDate() + 1)
+        query = query.lt('created_at', fechaLocalISO(hastaDate))
+      }
+
+      const { data: todosPedidos, error: errorTodos } = await query.order('created_at', { ascending: false })
+
+      if (errorTodos) throw errorTodos
+      if (!todosPedidos) { setLoading(false); return }
+
+      const pedidosTyped = (todosPedidos as PedidoWithRelations[]).filter(p => p.estado !== 'cancelado')
 
       let pedidosFiltrados = pedidosTyped
       if (fechaInicioStr) {

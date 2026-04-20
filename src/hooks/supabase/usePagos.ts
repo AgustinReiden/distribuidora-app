@@ -78,14 +78,16 @@ export function usePagos(): UsePagosReturnExtended {
         const pedidosTyped = (pedidosCliente || []) as PedidoDB[]
         const pagosTyped = (pagosCliente || []) as PagoDB[]
 
-        const totalCompras = pedidosTyped.reduce((s, p) => s + (p.total || 0), 0)
+        const pedidosValidos = pedidosTyped.filter(p => p.estado !== 'cancelado')
+
+        const totalCompras = pedidosValidos.reduce((s, p) => s + (p.total || 0), 0)
         // Use only pagos table as source of truth to avoid double-counting.
         // monto_pagado on pedidos is informational and often reflects the same payments.
         const totalPagosRegistrados = pagosTyped.reduce((s, p) => s + (p.monto || 0), 0)
         const saldoActual = totalCompras - totalPagosRegistrados
 
         // Obtener última fecha correctamente (Math.max no funciona con Date)
-        const ultimoPedidoFecha = pedidosTyped.reduce((max: Date, p) => {
+        const ultimoPedidoFecha = pedidosValidos.reduce((max: Date, p) => {
           const fecha = new Date(p.created_at || 0)
           return fecha > max ? fecha : max
         }, new Date(0))
@@ -99,11 +101,11 @@ export function usePagos(): UsePagosReturnExtended {
           saldo_actual: saldoActual,
           limite_credito: clienteTyped?.limite_credito || 0,
           credito_disponible: (clienteTyped?.limite_credito || 0) - saldoActual,
-          total_pedidos: pedidosTyped.length,
+          total_pedidos: pedidosValidos.length,
           total_compras: totalCompras,
           total_pagos: totalPagosRegistrados,
-          pedidos_pendientes_pago: pedidosTyped.filter(p => p.estado_pago !== 'pagado').length,
-          ultimo_pedido: pedidosTyped.length ? ultimoPedidoFecha.toISOString() : null,
+          pedidos_pendientes_pago: pedidosValidos.filter(p => p.estado_pago !== 'pagado').length,
+          ultimo_pedido: pedidosValidos.length ? ultimoPedidoFecha.toISOString() : null,
           ultimo_pago: pagosTyped.length ? ultimoPagoFecha.toISOString() : null
         }
       }

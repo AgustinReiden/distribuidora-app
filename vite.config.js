@@ -48,7 +48,11 @@ export default defineConfig({
     VitePWA({
       injectRegister: false,
       registerType: 'prompt',
-      selfDestroying: true,
+      // selfDestroying debe estar en false para que el SW persista y la PWA
+      // funcione offline (Workbox precache + Dexie). El deploy previo con
+      // selfDestroying:true ya desregistró SW corruptos; ahora los usuarios
+      // registran un SW válido que habilita el modo offline real.
+      selfDestroying: false,
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
       manifest: {
         name: 'Distribuidora App',

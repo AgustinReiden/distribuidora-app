@@ -170,6 +170,16 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   }, [notify])
 
   useEffect(() => {
+    const handler = (event: Event): void => {
+      const detail = (event as CustomEvent<{ type?: string; error?: string }>).detail
+      const tipo = detail?.type === 'merma' ? 'merma' : detail?.type === 'pedido' ? 'pedido' : 'dato'
+      notify.error(`No se pudo guardar ${tipo} offline: ${detail?.error ?? 'error de almacenamiento'}`)
+    }
+    window.addEventListener('offline-storage-error', handler)
+    return () => window.removeEventListener('offline-storage-error', handler)
+  }, [notify])
+
+  useEffect(() => {
     if (user && perfil) {
       trackFirstAuthenticatedRender(location.pathname || '/')
     }

@@ -771,38 +771,11 @@ export function usePedidosNoPagadosQuery(enabled = false) {
 }
 
 async function marcarPagosMasivo(pedidoIds: string[], formaPago: string): Promise<void> {
-  // First get the totals for each pedido to set monto_pagado correctly
-  const { data: pedidos, error: fetchError } = await supabase
-    .from('pedidos')
-    .select('id, total')
-    .in('id', pedidoIds)
-
-  if (fetchError) throw fetchError
-
-  // Update each pedido with its own total as monto_pagado
-  for (const pedido of (pedidos || [])) {
-    const { error } = await supabase
-      .from('pedidos')
-      .update({
-        estado_pago: 'pagado',
-        monto_pagado: pedido.total,
-        forma_pago: formaPago,
-      })
-      .eq('id', pedido.id)
-
-    if (error) throw error
-  }
-
-  // Registrar historial best-effort
-  const ahora = new Date().toISOString()
-  const historialEntries = pedidoIds.map(pedidoId => ({
-    pedido_id: pedidoId,
-    accion: 'pago_registrado',
-    descripcion: `Pago masivo - Forma: ${formaPago}`,
-    fecha: ahora,
-  }))
-
-  await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
+  const { error } = await supabase.rpc('marcar_pagos_masivo', {
+    p_pedido_ids: pedidoIds.map(id => Number(id)),
+    p_forma_pago: formaPago,
+  })
+  if (error) throw error
 }
 
 /**
