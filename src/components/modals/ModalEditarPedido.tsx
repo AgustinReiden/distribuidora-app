@@ -5,6 +5,7 @@ import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
+import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { calcularNetoVenta } from '../../utils/calculations';
 import type { PedidoDB, ProductoDB } from '../../types';
 
@@ -28,6 +29,7 @@ export interface PedidoSaveData {
   estadoPago: string;
   montoPagado: number;
   fecha?: string;
+  fechaEntrega?: string;
 }
 
 /** Props del componente ModalEditarPedido */
@@ -59,6 +61,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 }: ModalEditarPedidoProps) {
   const [notas, setNotas] = useState<string>(pedido?.notas || "");
   const [fecha, setFecha] = useState<string>(pedido?.fecha || "");
+  const fechaEntregaOriginal = pedido?.fecha_entrega ? pedido.fecha_entrega.split('T')[0] : "";
+  const [fechaEntrega, setFechaEntrega] = useState<string>(fechaEntregaOriginal);
   const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago === 'combinado' ? 'combinado' : (pedido?.forma_pago || "efectivo"));
   const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
   const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
@@ -82,6 +86,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // Zod validation
   const { validate } = useZodValidation(modalEditarPedidoSchema);
+
+  // Consulta de control de rendición (para warning al cambiar fecha_entrega)
+  const { consultarControl } = useRendiciones();
 
   // Estado para edición de items (solo admin)
   const [items, setItems] = useState<PedidoEditItem[]>([]);
@@ -304,6 +311,30 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       return;
     }
 
+    // Si cambió la fecha_entrega (solo admin + pedido entregado), consultar control de rendición
+    const fechaEntregaCambio = isAdmin && pedidoEntregado && fechaEntrega && fechaEntrega !== fechaEntregaOriginal;
+    if (fechaEntregaCambio && pedido?.transportista_id) {
+      try {
+        const [origen, destino] = await Promise.all([
+          fechaEntregaOriginal ? consultarControl(pedido.transportista_id, fechaEntregaOriginal) : Promise.resolve({ controlada: false, controlada_at: null, controlada_por_nombre: null }),
+          consultarControl(pedido.transportista_id, fechaEntrega)
+        ]);
+        const avisos: string[] = [];
+        if (origen.controlada) {
+          avisos.push(`La rendición del ${fechaEntregaOriginal} ya fue controlada por ${origen.controlada_por_nombre || 'un usuario'}.`);
+        }
+        if (destino.controlada) {
+          avisos.push(`La rendición del ${fechaEntrega} ya fue controlada por ${destino.controlada_por_nombre || 'un usuario'}.`);
+        }
+        if (avisos.length > 0) {
+          const mensaje = `${avisos.join('\n')}\n\nSi procedés, ese control se anulará y la rendición deberá volver a controlarse. ¿Continuar?`;
+          if (!window.confirm(mensaje)) return;
+        }
+      } catch {
+        // Si falla la consulta, continuamos (el trigger SQL anulará el control igual)
+      }
+    }
+
     try {
       // Si hay cambios en items y es admin, guardar items con precios mayoristas resueltos y desglose fiscal
       if (itemsModificados && isAdmin && onSaveItems) {
@@ -332,7 +363,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         await onSaveItems(itemsParaGuardar);
       }
       // Guardar el resto de los datos
-      await onSave({ notas: notasFinal, formaPago: formaPagoFinal, estadoPago, montoPagado: montoPagadoFinal, ...(isAdmin && fecha ? { fecha } : {}) });
+      await onSave({
+        notas: notasFinal,
+        formaPago: formaPagoFinal,
+        estadoPago,
+        montoPagado: montoPagadoFinal,
+        ...(isAdmin && fecha ? { fecha } : {}),
+        ...(fechaEntregaCambio ? { fechaEntrega } : {})
+      });
     } catch (err) {
       const error = err as Error;
       setErrorValidacion(error.message || 'Error al guardar los cambios');
@@ -633,6 +671,27 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               onChange={e => setFecha(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
+          </div>
+        )}
+
+        {/* Fecha de entrega (solo admin + pedido entregado) - determina el día de rendición */}
+        {isAdmin && pedidoEntregado && (
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">
+              Fecha de Entrega
+              <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">(determina el día de rendición)</span>
+            </label>
+            <input
+              type="date"
+              value={fechaEntrega}
+              onChange={e => setFechaEntrega(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+            {fechaEntrega !== fechaEntregaOriginal && (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                Cambiar esta fecha moverá el pedido a la rendición del día elegido. Si alguno de los días estaba controlado, su control se anulará.
+              </p>
+            )}
           </div>
         )}
 

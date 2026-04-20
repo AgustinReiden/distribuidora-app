@@ -116,6 +116,7 @@ export interface EdicionPedidoData {
   formaPago: string;
   estadoPago: string;
   montoPagado?: number;
+  fechaEntrega?: string;
 }
 
 // =============================================================================
@@ -161,6 +162,7 @@ export interface UsePedidoHandlersProps {
   actualizarNotasPedido: (pedidoId: string, notas: string) => Promise<void>;
   actualizarEstadoPago: (pedidoId: string, estadoPago: string, montoPagado?: number) => Promise<void>;
   actualizarFormaPago: (pedidoId: string, formaPago: string) => Promise<void>;
+  actualizarFechaEntrega: (pedidoId: string, fechaEntrega: string) => Promise<void>;
   actualizarOrdenEntrega: (pedidosOrdenados: OrdenOptimizadoItem[]) => Promise<void>;
   actualizarItemsPedido?: (pedidoId: string, items: Array<{ producto_id: string; cantidad: number; precio_unitario: number }>, usuarioId?: string) => Promise<void>;
   fetchHistorialPedido: (pedidoId: string) => Promise<HistorialCambio[]>;
@@ -239,6 +241,7 @@ export function usePedidoHandlers({
   actualizarNotasPedido,
   actualizarEstadoPago,
   actualizarFormaPago,
+  actualizarFechaEntrega,
   actualizarOrdenEntrega,
   actualizarItemsPedido: _actualizarItemsPedido, // Passed for potential future use
   fetchHistorialPedido,
@@ -680,7 +683,7 @@ export function usePedidoHandlers({
     modales.editarPedido.setOpen(true)
   }, [setPedidoEditando, modales.editarPedido])
 
-  const handleGuardarEdicionPedido = useCallback(async ({ notas, formaPago, estadoPago, montoPagado }: EdicionPedidoData): Promise<void> => {
+  const handleGuardarEdicionPedido = useCallback(async ({ notas, formaPago, estadoPago, montoPagado, fechaEntrega }: EdicionPedidoData): Promise<void> => {
     const pedidoEditando = pedidoEditandoRef.current
     if (!pedidoEditando) return
     setGuardando(true)
@@ -688,6 +691,9 @@ export function usePedidoHandlers({
       await actualizarNotasPedido(pedidoEditando.id, notas)
       await actualizarFormaPago(pedidoEditando.id, formaPago)
       await actualizarEstadoPago(pedidoEditando.id, estadoPago, montoPagado)
+      if (fechaEntrega && fechaEntrega !== pedidoEditando.fecha_entrega?.split('T')[0]) {
+        await actualizarFechaEntrega(pedidoEditando.id, fechaEntrega)
+      }
       modales.editarPedido.setOpen(false)
       setPedidoEditando(null)
       notify.success('Pedido actualizado correctamente')
@@ -696,7 +702,7 @@ export function usePedidoHandlers({
       notify.error('Error al actualizar pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [pedidoEditandoRef, actualizarNotasPedido, actualizarFormaPago, actualizarEstadoPago, modales.editarPedido, setPedidoEditando, notify, setGuardando])
+  }, [pedidoEditandoRef, actualizarNotasPedido, actualizarFormaPago, actualizarEstadoPago, actualizarFechaEntrega, modales.editarPedido, setPedidoEditando, notify, setGuardando])
 
   // Route optimization
   const handleAplicarOrdenOptimizado = useCallback(async (data: OrdenOptimizadoData | OrdenOptimizadoItem[]): Promise<void> => {

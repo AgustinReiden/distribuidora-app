@@ -370,6 +370,7 @@ export default function PedidosContainer(): React.ReactElement {
     if (filtros.transportistaId && filtros.transportistaId !== 'todos') query = query.eq('transportista_id', filtros.transportistaId)
     if (filtros.fechaDesde) query = query.gte('fecha', filtros.fechaDesde)
     if (filtros.fechaHasta) query = query.lte('fecha', filtros.fechaHasta)
+    if (!filtros.verCancelados) query = query.neq('estado', 'cancelado')
     if (hasSearch) {
       const trimmed = debouncedBusqueda!.trim()
       query = query.or(

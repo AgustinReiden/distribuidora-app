@@ -19,10 +19,8 @@ import type {
   CompraDBExtended,
   FiltrosPedidosState,
   RutaOptimizada,
-  RendicionDBExtended,
   RegistrarSalvedadInput,
   RegistrarSalvedadResult,
-  RendicionAjusteInput,
   PagoDBWithUsuario
 } from '../types/hooks';
 
@@ -53,7 +51,6 @@ const ModalDetalleCompra = lazy(() => import('./modals/ModalDetalleCompra'));
 const ModalProveedor = lazy(() => import('./modals/ModalProveedor'));
 const ModalImportarPrecios = lazy(() => import('./modals/ModalImportarPrecios'));
 const ModalPedidosEliminados = lazy(() => import('./modals/ModalPedidosEliminados'));
-const ModalRendicion = lazy(() => import('./modals/ModalRendicion'));
 const ModalEntregaConSalvedad = lazy(() => import('./modals/ModalEntregaConSalvedad'));
 
 // Lazy load de utilidades PDF (solo cuando se necesiten)
@@ -101,7 +98,6 @@ export interface ModalesState {
   proveedor: ModalState;
   importarPrecios: ModalState;
   pedidosEliminados: ModalState;
-  rendicion: ModalState;
   entregaConSalvedad: ModalState;
 }
 
@@ -148,9 +144,6 @@ export interface AppModalsAppState {
   setCargandoHistorial: (cargando: boolean) => void;
   filtros: FiltrosPedidosState;
   setFiltros: Dispatch<SetStateAction<FiltrosPedidosState>>;
-  // Estado para modal de rendición
-  rendicionParaModal: RendicionDBExtended | null;
-  setRendicionParaModal: (rendicion: RendicionDBExtended | null) => void;
   // Estado para modal de entrega con salvedad
   pedidoParaSalvedad: PedidoDB | null;
   setPedidoParaSalvedad: (pedido: PedidoDB | null) => void;
@@ -209,14 +202,6 @@ export interface AppModalsHandlers {
 
   // Refetch functions
   refetchProductos?: () => Promise<void>;
-
-  // Handlers para rendición
-  handlePresentarRendicion?: (data: {
-    rendicionId: string;
-    montoRendido: number;
-    justificacion?: string;
-    ajustes: RendicionAjusteInput[];
-  }) => Promise<{ success: boolean; diferencia: number }>;
 
   // Handlers para entrega con salvedad
   handleRegistrarSalvedades?: (salvedades: RegistrarSalvedadInput[]) => Promise<RegistrarSalvedadResult[]>;
@@ -645,22 +630,6 @@ export default function AppModals({
             onFetch={fetchPedidosEliminados}
             onClose={() => modales.pedidosEliminados.setOpen(false)}
           />
-        </Suspense>
-      )}
-
-      {/* Modal de Rendición */}
-      {modales.rendicion.open && appState.rendicionParaModal && handlers.handlePresentarRendicion && (
-        <Suspense fallback={<ModalFallback />}>
-          <CompactErrorBoundary componentName="ModalRendicion" onClose={() => { modales.rendicion.setOpen(false); appState.setRendicionParaModal(null); }}>
-            <ModalRendicion
-              rendicion={appState.rendicionParaModal}
-              onPresentar={handlers.handlePresentarRendicion}
-              onClose={() => {
-                modales.rendicion.setOpen(false);
-                appState.setRendicionParaModal(null);
-              }}
-            />
-          </CompactErrorBoundary>
         </Suspense>
       )}
 
