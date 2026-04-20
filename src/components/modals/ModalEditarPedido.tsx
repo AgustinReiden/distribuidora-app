@@ -30,6 +30,7 @@ export interface PedidoSaveData {
   montoPagado: number;
   fecha?: string;
   fechaEntrega?: string;
+  fechaEntregaProgramada?: string;
 }
 
 /** Props del componente ModalEditarPedido */
@@ -63,6 +64,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [fecha, setFecha] = useState<string>(pedido?.fecha || "");
   const fechaEntregaOriginal = pedido?.fecha_entrega ? pedido.fecha_entrega.split('T')[0] : "";
   const [fechaEntrega, setFechaEntrega] = useState<string>(fechaEntregaOriginal);
+  const fechaEntregaProgramadaOriginal = pedido?.fecha_entrega_programada || "";
+  const [fechaEntregaProgramada, setFechaEntregaProgramada] = useState<string>(fechaEntregaProgramadaOriginal);
   const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago === 'combinado' ? 'combinado' : (pedido?.forma_pago || "efectivo"));
   const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
   const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
@@ -363,13 +366,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         await onSaveItems(itemsParaGuardar);
       }
       // Guardar el resto de los datos
+      const fechaEntregaProgramadaCambio = isAdmin && !pedidoEntregado && fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
       await onSave({
         notas: notasFinal,
         formaPago: formaPagoFinal,
         estadoPago,
         montoPagado: montoPagadoFinal,
         ...(isAdmin && fecha ? { fecha } : {}),
-        ...(fechaEntregaCambio ? { fechaEntrega } : {})
+        ...(fechaEntregaCambio ? { fechaEntrega } : {}),
+        ...(fechaEntregaProgramadaCambio ? { fechaEntregaProgramada } : {})
       });
     } catch (err) {
       const error = err as Error;
@@ -671,6 +676,26 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               onChange={e => setFecha(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
+          </div>
+        )}
+
+        {/* Fecha programada de entrega (solo admin + pedido NO entregado) */}
+        {isAdmin && !pedidoEntregado && (
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">
+              Fecha programada de entrega
+            </label>
+            <input
+              type="date"
+              value={fechaEntregaProgramada}
+              onChange={e => setFechaEntregaProgramada(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+            {fechaEntregaProgramada !== fechaEntregaProgramadaOriginal && (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                Se actualizará la fecha estimada de entrega del pedido.
+              </p>
+            )}
           </div>
         )}
 
