@@ -83,7 +83,13 @@ interface ClienteCreateInput {
 }
 
 // Mutation functions
-async function createCliente(cliente: ClienteCreateInput): Promise<ClienteDB> {
+async function createCliente(cliente: ClienteCreateInput, sucursalId: number | null): Promise<ClienteDB> {
+  // La RLS multi-tenant requiere sucursal_id = current_sucursal_id() y la
+  // columna es NOT NULL. Sin esto el INSERT falla con "Error al crear cliente".
+  if (sucursalId == null) {
+    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+  }
+
   // Detección de duplicados por ubicación (~0.2 metros de tolerancia)
   if (cliente.latitud != null && cliente.longitud != null) {
     const TOLERANCE = 0.000002 // ~0.2 metros (6 decimales de precisión)
@@ -122,6 +128,7 @@ async function createCliente(cliente: ClienteCreateInput): Promise<ClienteDB> {
       horarios_atencion: cliente.horarios_atencion || null,
       rubro: cliente.rubro || null,
       notas: cliente.notas || null,
+      sucursal_id: sucursalId,
       ...(cliente.preventista_id ? { preventista_id: cliente.preventista_id } : {})
     }])
     .select()
@@ -211,7 +218,7 @@ export function useCrearClienteMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: createCliente,
+    mutationFn: (cliente: ClienteCreateInput) => createCliente(cliente, currentSucursalId),
     onSuccess: (newCliente) => {
       // Actualizar cache de lista
       queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
