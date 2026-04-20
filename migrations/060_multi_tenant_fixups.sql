@@ -22,12 +22,22 @@ UPDATE sucursales SET tipo = 'distribuidora' WHERE id NOT IN (1, 2) AND tipo IS 
 ALTER TABLE stock_historico ADD COLUMN IF NOT EXISTS usuario_id UUID REFERENCES auth.users(id);
 
 -- =========================================================
--- 3. Drop the 13-param overload of registrar_compra_completa (with p_tipo_factura)
+-- 3. Drop the 13-param overloads of registrar_compra_completa.
+--    The legacy overload exists in BOTH `text` and `character varying`
+--    signatures depending on which historical migration created it
+--    (045 used text, later one re-declared with character varying).
+--    Drop both so only the sucursal-aware version we re-create below
+--    remains.
 -- =========================================================
 DROP FUNCTION IF EXISTS public.registrar_compra_completa(
   bigint, character varying, character varying, date,
   numeric, numeric, numeric, numeric, character varying,
   text, uuid, jsonb, character varying
+);
+DROP FUNCTION IF EXISTS public.registrar_compra_completa(
+  bigint, character varying, character varying, date,
+  numeric, numeric, numeric, numeric, character varying,
+  text, uuid, jsonb, text
 );
 
 -- =========================================================
