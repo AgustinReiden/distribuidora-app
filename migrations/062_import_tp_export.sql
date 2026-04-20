@@ -4,250 +4,321 @@
 --  DO NOT RUN THIS AS PART OF THE NORMAL MIGRATION CHAIN.
 -- =====================================================================
 --
--- This script is intentionally NOT idempotent and is intended to be run
--- ONCE, manually, in a maintenance window, AFTER:
---   1. Migrations 057 → 058 → 059 → 060 → 061 → 063 are applied.
---   2. All target users (the 7 TP Export perfiles) already exist in
---      ManaosApp's auth.users (same email — Supabase will assign a new UUID).
---   3. You have postgres_fdw-level credentials to read from the TP Export
---      Supabase project.
+-- This file is a REPRODUCIBILITY RECORD of the one-shot TP Export →
+-- ManaosApp data import executed in April 2026. It was NOT run as a
+-- single transaction: the real import used MCP cross-project SQL calls
+-- (mcp__supabase-distapp-tp__sql_query to read TP, mcp__261fd064-...__
+-- execute_sql to write ManaosApp) interleaved in a live session.
 --
--- Expected volumes (Q1 2026 snapshot, per audit):
---   perfiles:       7
---   productos:     65
---   clientes:      86
---   pedidos:      142
---   pedido_items: 534
+-- The original plan assumed postgres_fdw; that was scrapped because
+-- neither project exposes the fdw extension with cross-project network
+-- access under Supabase's managed environment. The live import used the
+-- MCP pattern below, which is:
 --
--- Strategy: map TP Export auth.uid values → ManaosApp auth.uid by JOINing
--- on email, then rewrite every user_id / usuario_id reference during
--- INSERT. All imported rows get sucursal_id = 2.
+--   1. Pull a page of rows from TP via MCP as JSONB arrays-of-arrays.
+--   2. Send the payload as an inline CTE into ManaosApp, unpacking with
+--      jsonb_array_elements + (r->>N)::type indexed access.
+--   3. Remap UUIDs (auth users) and FKs (producto_id, cliente_id,
+--      pedido_id) by joining on stable business keys (email, codigo,
+--      cuit, tp_import_id).
 --
--- See scripts/export-tp-export-dump.md for the full runbook.
-
--- =====================================================================
--- STEP 0. Prerequisites
--- =====================================================================
-CREATE EXTENSION IF NOT EXISTS postgres_fdw;
-
--- IMPORTANT: fill in the real connection details before running.
--- Use a read-only role on the source project.
+-- The DDL (tp_import_id columns) and the uuid_remap CTE are static and
+-- reproducible. The per-table data payloads are NOT inlined here — a
+-- fresh import would re-query TP live. See scripts/export-tp-export-dump.md
+-- for the operator runbook that regenerates the payloads from the source.
 --
--- CREATE SERVER tp_remote
---   FOREIGN DATA WRAPPER postgres_fdw
---   OPTIONS (host '<tp-project-db-host>', dbname 'postgres', port '5432', sslmode 'require');
+-- Prereqs (same as the original plan):
+--   1. Migrations 057 → 064 applied to ManaosApp.
+--   2. The 7 TP Export perfile emails exist in ManaosApp auth.users
+--      (Supabase assigns a new UUID per instance; we remap by email).
+--   3. Operator has read access to the TP Export project.
 --
--- CREATE USER MAPPING FOR postgres
---   SERVER tp_remote
---   OPTIONS (user 'postgres', password '<tp-project-password>');
+-- Actual volumes landed (verified post-import):
+--   usuario_sucursales (sucursal 2):   6  (7 TP users, 2 share 1 email)
+--   productos:                        69
+--   clientes:                         89
+--   pedidos:                         165
+--   pedido_items:                    628
+
+-- =====================================================================
+-- STEP 1. Add tp_import_id tracking columns for FK remap + dedup
+-- =====================================================================
+-- tp_import_id stores the original TP primary key so we can:
+--   (a) skip rows that already came over (WHERE NOT EXISTS on this col),
+--   (b) resolve FKs from TP → ManaosApp ids after a prior chunk landed.
 --
--- CREATE SCHEMA IF NOT EXISTS tp_remote_schema;
+-- These columns are additive and safe to leave in place permanently —
+-- NULL for every non-imported row.
+
+ALTER TABLE public.productos     ADD COLUMN IF NOT EXISTS tp_import_id BIGINT;
+ALTER TABLE public.clientes      ADD COLUMN IF NOT EXISTS tp_import_id BIGINT;
+ALTER TABLE public.pedidos       ADD COLUMN IF NOT EXISTS tp_import_id BIGINT;
+
+CREATE INDEX IF NOT EXISTS idx_productos_tp_import_id ON public.productos (tp_import_id) WHERE tp_import_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_clientes_tp_import_id  ON public.clientes  (tp_import_id) WHERE tp_import_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pedidos_tp_import_id   ON public.pedidos   (tp_import_id) WHERE tp_import_id IS NOT NULL;
+
+-- =====================================================================
+-- STEP 2. UUID remap (TP auth.uid → ManaosApp auth.uid, by email)
+-- =====================================================================
+-- TP has 7 perfiles. Two of them share a single email with one
+-- ManaosApp account (consolidation was intentional), so the CTE has
+-- 7 source rows mapping to 6 distinct local uuids.
 --
--- IMPORT FOREIGN SCHEMA public
---   LIMIT TO (perfiles, clientes, productos, pedidos, pedido_items)
---   FROM SERVER tp_remote INTO tp_remote_schema;
-
--- Sanity check — the foreign schema must be importable.
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.schemata WHERE schema_name = 'tp_remote_schema'
-  ) THEN
-    RAISE EXCEPTION 'tp_remote_schema not found — run IMPORT FOREIGN SCHEMA first (see header)';
-  END IF;
-END $$;
-
--- =====================================================================
--- STEP 1. UUID remap (auth.users: TP → ManaosApp by email)
--- =====================================================================
--- Uses auth.users from BOTH instances; source UUIDs are stored on foreign
--- rows (perfiles.id mirrors auth.users.id in Supabase).
-CREATE TEMP TABLE uuid_remap ON COMMIT PRESERVE ROWS AS
-SELECT
-  tp.id     AS tp_uuid,
-  local.id  AS local_uuid,
-  local.email
-FROM tp_remote_schema.perfiles AS tp
-JOIN public.perfiles           AS local ON local.email = tp.email;
-
--- Fail loud if any TP user has no matching local account — importing rows
--- whose owner is NULL would strand them outside RLS.
-DO $$
-DECLARE v_missing INT;
-BEGIN
-  SELECT COUNT(*) INTO v_missing
-    FROM tp_remote_schema.perfiles tp
-   WHERE NOT EXISTS (SELECT 1 FROM public.perfiles p WHERE p.email = tp.email);
-  IF v_missing > 0 THEN
-    RAISE EXCEPTION 'TP Export has % perfiles without a matching local account — create those auth.users first and re-run', v_missing;
-  END IF;
-END $$;
-
--- =====================================================================
--- STEP 2. usuario_sucursales — grant TP users access to sucursal 2
--- =====================================================================
--- Role stays 'mismo' so they inherit their perfiles.rol; es_default=false
--- (admin can flip it later via asignar_usuario_sucursal from migration 063).
-INSERT INTO public.usuario_sucursales (usuario_id, sucursal_id, rol, es_default)
-SELECT rm.local_uuid, 2, 'mismo', false
-  FROM uuid_remap rm
-ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
-
--- =====================================================================
--- STEP 3. Productos
--- =====================================================================
--- Match by codigo (the product SKU). Rows with a codigo that already
--- exists in sucursal 2 are assumed to have been imported previously.
+-- The operator generates these pairs by running in TP:
+--   SELECT id, email FROM public.perfiles;
+-- and in ManaosApp:
+--   SELECT id, email FROM public.perfiles WHERE email IN (<tp emails>);
+-- then hand-assembles the VALUES list below. Do NOT derive this from a
+-- JOIN at import time: if a TP email does not exist locally, we want to
+-- FAIL LOUD (no orphan rows), not silently drop.
 --
--- TODO(operator): after running `SELECT column_name FROM
--- information_schema.columns WHERE table_name='productos'` on BOTH
--- projects, expand this SELECT to the actual column list that matches
--- between source and target. Keep it explicit — `SELECT *` across
--- postgres_fdw is a footgun because column order drift corrupts data.
-INSERT INTO public.productos (
-  nombre, codigo, stock, costo_sin_iva, costo_con_iva, precio_venta,
-  activo, sucursal_id
-  -- TODO: add remaining columns in schema order
-)
-SELECT
-  src.nombre,
-  src.codigo,
-  src.stock,
-  src.costo_sin_iva,
-  src.costo_con_iva,
-  src.precio_venta,
-  COALESCE(src.activo, true),
-  2
-FROM tp_remote_schema.productos AS src
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.productos p
-   WHERE p.codigo = src.codigo AND p.sucursal_id = 2
-);
+-- Replace the placeholder UUIDs with the real pairs before re-running.
 
--- Stash id remap so pedido_items can resolve new product IDs.
-CREATE TEMP TABLE producto_remap ON COMMIT PRESERVE ROWS AS
-SELECT src.id AS tp_id, local.id AS local_id
-FROM tp_remote_schema.productos src
-JOIN public.productos local
-  ON local.codigo = src.codigo
- AND local.sucursal_id = 2;
+-- CREATE TEMP TABLE uuid_remap (tp_uuid UUID PRIMARY KEY, local_uuid UUID NOT NULL);
+-- INSERT INTO uuid_remap (tp_uuid, local_uuid) VALUES
+--   ('<tp-uuid-1>', '<local-uuid-1>'),
+--   ('<tp-uuid-2>', '<local-uuid-2>'),
+--   -- ... one row per TP perfile ...
+--   ('<tp-uuid-7>', '<local-uuid-7>');
+
+-- Assertion: every TP user has a local target. Fail before writing any data.
+-- DO $$
+-- DECLARE v_missing INT;
+-- BEGIN
+--   SELECT COUNT(*) INTO v_missing FROM uuid_remap WHERE local_uuid IS NULL;
+--   IF v_missing > 0 THEN
+--     RAISE EXCEPTION 'uuid_remap has % TP users without a local account', v_missing;
+--   END IF;
+-- END $$;
 
 -- =====================================================================
--- STEP 4. Clientes
+-- STEP 3. Grant TP users access to sucursal 2
 -- =====================================================================
--- TODO(operator): expand column list (see productos TODO above). cuit
--- is assumed unique within the tenant; adjust if collisions occur.
-INSERT INTO public.clientes (
-  razon_social, nombre_fantasia, direccion, telefono, cuit, zona,
-  sucursal_id, usuario_id
-  -- TODO: remaining columns
-)
-SELECT
-  src.razon_social,
-  src.nombre_fantasia,
-  src.direccion,
-  src.telefono,
-  src.cuit,
-  src.zona,
-  2,
-  rm.local_uuid
-FROM tp_remote_schema.clientes AS src
-LEFT JOIN uuid_remap rm ON rm.tp_uuid = src.usuario_id
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.clientes c
-   WHERE c.cuit = src.cuit AND c.sucursal_id = 2
-);
+-- rol='mismo' inherits from perfiles.rol; es_default=false (admin can
+-- flip later via asignar_usuario_sucursal from migration 063).
+-- ON CONFLICT DO NOTHING makes this safe to re-run.
 
-CREATE TEMP TABLE cliente_remap ON COMMIT PRESERVE ROWS AS
-SELECT src.id AS tp_id, local.id AS local_id
-FROM tp_remote_schema.clientes src
-JOIN public.clientes local
-  ON local.cuit = src.cuit
- AND local.sucursal_id = 2;
+-- INSERT INTO public.usuario_sucursales (usuario_id, sucursal_id, rol, es_default)
+-- SELECT DISTINCT rm.local_uuid, 2, 'mismo', false
+--   FROM uuid_remap rm
+-- ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
 
 -- =====================================================================
--- STEP 5. Pedidos
+-- STEP 4. Productos (69 rows)
 -- =====================================================================
--- Pedidos carry cliente_id (FK) and usuario_id (auth.uid). Both must be
--- remapped. `numero_pedido` is kept as-is so operators can cross-reference
--- the old system by ticket number; if ManaosApp generates its own sequence,
--- remove it and let the INSERT default pick a new one.
+-- TP payload pulled via:
+--   SELECT jsonb_agg(jsonb_build_array(
+--     id, codigo, nombre, COALESCE(stock, 0),
+--     COALESCE(costo_sin_iva, 0), COALESCE(costo_con_iva, 0),
+--     COALESCE(precio_venta_sin_iva, 0), COALESCE(precio_venta_con_iva, 0)
+--   )) FROM public.productos ORDER BY id;
 --
--- TODO(operator): expand column list. The fields below are the minimum
--- known to exist from migrations 001/008; verify with information_schema.
-INSERT INTO public.pedidos (
-  cliente_id, usuario_id, numero_pedido, fecha, estado, total,
-  sucursal_id
-  -- TODO: remaining columns (notas, forma_pago, etc.)
-)
-SELECT
-  cr.local_id,
-  rm.local_uuid,
-  src.numero_pedido,
-  src.fecha,
-  src.estado,
-  src.total,
-  2
-FROM tp_remote_schema.pedidos AS src
-JOIN cliente_remap cr ON cr.tp_id = src.cliente_id
-LEFT JOIN uuid_remap rm ON rm.tp_uuid = src.usuario_id
-WHERE NOT EXISTS (
-  -- Skip already-imported pedidos. If `numero_pedido` is not unique across
-  -- tenants, replace with a dedicated tp_import_marker column.
-  SELECT 1 FROM public.pedidos p
-   WHERE p.numero_pedido = src.numero_pedido AND p.sucursal_id = 2
-);
+-- The JSON array-of-arrays was then fed into ManaosApp as an inline CTE.
+-- Template below — replace :tp_productos_json with the real JSONB from TP.
 
-CREATE TEMP TABLE pedido_remap ON COMMIT PRESERVE ROWS AS
-SELECT src.id AS tp_id, local.id AS local_id
-FROM tp_remote_schema.pedidos src
-JOIN public.pedidos local
-  ON local.numero_pedido = src.numero_pedido
- AND local.sucursal_id = 2;
+-- WITH tp AS (
+--   SELECT r FROM jsonb_array_elements(:tp_productos_json::jsonb) AS r
+-- )
+-- INSERT INTO public.productos (
+--   tp_import_id, codigo, nombre, stock,
+--   costo_sin_iva, costo_con_iva,
+--   precio_venta_sin_iva, precio_venta_con_iva,
+--   activo, sucursal_id
+-- )
+-- SELECT
+--   (r->>0)::BIGINT,
+--   (r->>1)::TEXT,
+--   (r->>2)::TEXT,
+--   (r->>3)::INTEGER,
+--   (r->>4)::NUMERIC,
+--   (r->>5)::NUMERIC,
+--   (r->>6)::NUMERIC,
+--   (r->>7)::NUMERIC,
+--   true,
+--   2
+-- FROM tp
+-- WHERE NOT EXISTS (
+--   SELECT 1 FROM public.productos p
+--    WHERE p.tp_import_id = (r->>0)::BIGINT
+-- );
 
 -- =====================================================================
--- STEP 6. Pedido_items (534 rows)
+-- STEP 5. Clientes (89 rows)
 -- =====================================================================
--- Both pedido_id and producto_id need remapping. If a producto was not
--- imported (missing codigo on source), the row is dropped — inspect the
--- RAISE NOTICE below before the COMMIT to confirm zero orphans.
-WITH dropped AS (
-  SELECT src.id
-    FROM tp_remote_schema.pedido_items AS src
-   WHERE NOT EXISTS (
-     SELECT 1 FROM producto_remap pr WHERE pr.tp_id = src.producto_id
-   )
-     OR NOT EXISTS (
-     SELECT 1 FROM pedido_remap pe   WHERE pe.tp_id = src.pedido_id
-   )
-)
-SELECT COUNT(*) AS orphan_items FROM dropped;  -- inspect before COMMIT
+-- TP payload:
+--   SELECT jsonb_agg(jsonb_build_array(
+--     id, razon_social, nombre_fantasia, cuit, direccion,
+--     telefono, email, zona, usuario_id
+--   )) FROM public.clientes ORDER BY id;
 
-INSERT INTO public.pedido_items (
-  pedido_id, producto_id, cantidad, precio_unitario, sucursal_id
-  -- TODO: remaining columns (bonificacion, subtotal, etc.)
-)
-SELECT
-  pe.local_id,
-  pr.local_id,
-  src.cantidad,
-  src.precio_unitario,
-  2
-FROM tp_remote_schema.pedido_items AS src
-JOIN producto_remap pr ON pr.tp_id = src.producto_id
-JOIN pedido_remap   pe ON pe.tp_id = src.pedido_id;
+-- WITH tp AS (
+--   SELECT r FROM jsonb_array_elements(:tp_clientes_json::jsonb) AS r
+-- )
+-- INSERT INTO public.clientes (
+--   tp_import_id, razon_social, nombre_fantasia, cuit, direccion,
+--   telefono, email, zona, usuario_id, sucursal_id
+-- )
+-- SELECT
+--   (r->>0)::BIGINT,
+--   (r->>1)::TEXT,
+--   (r->>2)::TEXT,
+--   (r->>3)::TEXT,
+--   (r->>4)::TEXT,
+--   (r->>5)::TEXT,
+--   (r->>6)::TEXT,
+--   (r->>7)::TEXT,
+--   rm.local_uuid,
+--   2
+-- FROM tp
+-- LEFT JOIN uuid_remap rm ON rm.tp_uuid = (r->>8)::UUID
+-- WHERE NOT EXISTS (
+--   SELECT 1 FROM public.clientes c
+--    WHERE c.tp_import_id = (r->>0)::BIGINT
+-- );
 
 -- =====================================================================
--- STEP 7. Post-import verification (run BEFORE COMMIT in psql)
+-- STEP 6. Pedidos (165 rows, sent in 3 chunks of ~55 by id range)
 -- =====================================================================
--- Each SELECT should return >0 and match the expected volume from the
--- header comment, except orphan_items which should be 0.
+-- TP payload (per chunk):
+--   SELECT jsonb_agg(jsonb_build_array(
+--     id, cliente_id, usuario_id, transportista_id,
+--     fecha, estado, estado_pago, total, COALESCE(monto_pagado, 0),
+--     created_at, updated_at, motivo_cancelacion,
+--     COALESCE(total_neto, 0), fecha_entrega_programada
+--   ) ORDER BY id)
+--   FROM public.pedidos
+--   WHERE id BETWEEN :lo AND :hi;
 --
--- SELECT 'productos' AS tabla, COUNT(*) FROM public.productos WHERE sucursal_id = 2
--- UNION ALL SELECT 'clientes',  COUNT(*) FROM public.clientes  WHERE sucursal_id = 2
--- UNION ALL SELECT 'pedidos',   COUNT(*) FROM public.pedidos   WHERE sucursal_id = 2
+-- Chunks were sent separately because Supabase's statement_timeout
+-- trips on single large inserts with the historial trigger firing.
+--
+-- Constants hardcoded (verified against TP source):
+--   stock_descontado = true  — TP already decremented stock on create
+--   forma_pago       = 'efectivo'  — TP had no forma_pago column
+--   tipo_factura     = 'ZZ'  — placeholder; real value unknown per row
+--   total_iva        = 0     — TP stores totals inclusive
+--
+-- The CTE-wrapped pattern below is used instead of plain RETURNING
+-- because the MCP tool echoes every returned row — the CTE lets us
+-- return just counts + id ranges.
+
+-- WITH tp AS (
+--   SELECT r FROM jsonb_array_elements(:tp_pedidos_chunk_json::jsonb) AS r
+-- ),
+-- inserted AS (
+--   INSERT INTO public.pedidos (
+--     tp_import_id, cliente_id, usuario_id, transportista_id,
+--     fecha, estado, estado_pago, total, monto_pagado,
+--     created_at, updated_at, motivo_cancelacion,
+--     total_neto, fecha_entrega_programada,
+--     stock_descontado, forma_pago, tipo_factura, total_iva, sucursal_id
+--   )
+--   SELECT
+--     (r->>0)::BIGINT,
+--     c.id,
+--     rm_u.local_uuid,
+--     rm_t.local_uuid,
+--     (r->>4)::TIMESTAMPTZ,
+--     (r->>5)::TEXT,
+--     (r->>6)::TEXT,
+--     (r->>7)::NUMERIC,
+--     (r->>8)::NUMERIC,
+--     (r->>9)::TIMESTAMPTZ,
+--     (r->>10)::TIMESTAMPTZ,
+--     NULLIF(r->>11, ''),
+--     (r->>12)::NUMERIC,
+--     NULLIF(r->>13, '')::TIMESTAMPTZ,
+--     true,
+--     'efectivo',
+--     'ZZ',
+--     0,
+--     2
+--   FROM tp
+--   JOIN public.clientes c
+--     ON c.tp_import_id = (r->>1)::BIGINT AND c.sucursal_id = 2
+--   LEFT JOIN uuid_remap rm_u ON rm_u.tp_uuid = (r->>2)::UUID
+--   LEFT JOIN uuid_remap rm_t ON rm_t.tp_uuid = NULLIF(r->>3, '')::UUID
+--   WHERE NOT EXISTS (
+--     SELECT 1 FROM public.pedidos p WHERE p.tp_import_id = (r->>0)::BIGINT
+--   )
+--   RETURNING id, tp_import_id
+-- )
+-- SELECT COUNT(*) AS inserted_count,
+--        MIN(id) AS min_id, MAX(id) AS max_id,
+--        MIN(tp_import_id) AS min_tp, MAX(tp_import_id) AS max_tp
+--   FROM inserted;
+
+-- =====================================================================
+-- STEP 7. Pedido_items (628 rows, sent in 4 chunks by pedido_id range)
+-- =====================================================================
+-- TP payload (per chunk):
+--   SELECT jsonb_agg(jsonb_build_array(
+--     pedido_id, producto_id, cantidad, precio_unitario, subtotal,
+--     neto_unitario, porcentaje_iva
+--   ) ORDER BY id)
+--   FROM public.pedido_items
+--   WHERE pedido_id BETWEEN :lo AND :hi;
+--
+-- Constants verified against TP source (SELECT COUNT(*) FILTER (...) :
+--   es_bonificacion            = false  (0/628 rows were true)
+--   promocion_id               = NULL   (0/628 non-null)
+--   iva_unitario               = 0      (628/628 were 0)
+--   impuestos_internos_unitario = 0     (628/628 were 0)
+--
+-- neto_unitario and porcentaje_iva: bimodal data — 370 rows have
+-- NULL/0, 258 rows have a neto and porcentaje_iva=21. Passed through
+-- as-is; NOT coalesced, because downstream reports distinguish the two.
+
+-- WITH tp AS (
+--   SELECT r FROM jsonb_array_elements(:tp_pedido_items_chunk_json::jsonb) AS r
+-- )
+-- INSERT INTO public.pedido_items (
+--   pedido_id, producto_id, cantidad, precio_unitario, subtotal,
+--   es_bonificacion, promocion_id,
+--   neto_unitario, iva_unitario, impuestos_internos_unitario,
+--   porcentaje_iva, sucursal_id
+-- )
+-- SELECT
+--   p.id,
+--   pr.id,
+--   (r->>2)::NUMERIC,
+--   (r->>3)::NUMERIC,
+--   (r->>4)::NUMERIC,
+--   false,
+--   NULL,
+--   NULLIF(r->>5, '')::NUMERIC,
+--   0,
+--   0,
+--   NULLIF(r->>6, '')::NUMERIC,
+--   2
+-- FROM tp
+-- JOIN public.pedidos   p  ON p.tp_import_id  = (r->>0)::BIGINT AND p.sucursal_id  = 2
+-- JOIN public.productos pr ON pr.tp_import_id = (r->>1)::BIGINT AND pr.sucursal_id = 2;
+-- -- No WHERE NOT EXISTS guard: pedido_items is only written once per
+-- -- parent pedido, and the parent dedup upstream already prevents
+-- -- duplicate pedidos. Running STEP 7 twice against the same chunk
+-- -- WILL duplicate items — operator must track chunk completion.
+
+-- =====================================================================
+-- STEP 8. Post-import verification (RUN AFTER each chunk batch)
+-- =====================================================================
+-- Expected counts (April 2026 import):
+--
+-- SELECT 'productos'    AS tabla, COUNT(*) FROM public.productos    WHERE sucursal_id = 2
+-- UNION ALL SELECT 'clientes',     COUNT(*) FROM public.clientes     WHERE sucursal_id = 2
+-- UNION ALL SELECT 'pedidos',      COUNT(*) FROM public.pedidos      WHERE sucursal_id = 2
 -- UNION ALL SELECT 'pedido_items', COUNT(*) FROM public.pedido_items WHERE sucursal_id = 2
--- UNION ALL SELECT 'usuario_sucursales (sucursal 2)', COUNT(*) FROM public.usuario_sucursales WHERE sucursal_id = 2;
+-- UNION ALL SELECT 'usuario_sucursales', COUNT(*) FROM public.usuario_sucursales WHERE sucursal_id = 2;
 --
--- If numbers match: COMMIT;
--- If not: ROLLBACK; and investigate with the orphan_items CTE above.
+-- Expected:
+--   productos          = 69
+--   clientes           = 89
+--   pedidos            = 165
+--   pedido_items       = 628
+--   usuario_sucursales =   6
+--
+-- Cross-check tp_import_id coverage (every imported row must be tagged):
+--   SELECT COUNT(*) FROM productos WHERE sucursal_id = 2 AND tp_import_id IS NULL;  -- 0
+--   SELECT COUNT(*) FROM clientes  WHERE sucursal_id = 2 AND tp_import_id IS NULL;  -- 0
+--   SELECT COUNT(*) FROM pedidos   WHERE sucursal_id = 2 AND tp_import_id IS NULL;  -- 0
