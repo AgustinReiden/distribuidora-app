@@ -13,11 +13,14 @@ import { useInvalidateMetricas } from './hooks/queries'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { NotificationProvider, useNotification } from './contexts/NotificationContext'
 import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext'
+import { SucursalProvider, useSucursal } from './contexts/SucursalContext'
+import type { PerfilDB } from './types'
 import { useOfflineSync, type UseOfflineSyncReturn } from './hooks/useOfflineSync'
 import { useRealtimeInvalidation } from './hooks/useRealtimeInvalidation'
 import { useSyncManager, type SyncDependencies } from './hooks/useSyncManager'
 import { trackFirstAuthenticatedRender } from './utils/authPerformance'
 import LoginScreen from './components/auth/LoginScreen'
+import SinSucursalScreen from './components/SinSucursalScreen'
 import ErrorBoundary from './components/ErrorBoundary'
 import TopNavigation from './components/layout/TopNavigation'
 import OfflineIndicator from './components/layout/OfflineIndicator'
@@ -119,10 +122,37 @@ function PendingSyncRuntime({
 }
 
 function MainApp(): ReactElement {
-  const { user, perfil, logout, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, authReady } = useAuth()
+  const { user, perfil, logout, authReady } = useAuth()
+  const globalRol = perfil?.rol ?? null
+
+  return (
+    <SucursalProvider userId={user?.id ?? null} globalRol={globalRol}>
+      <MainAppInner
+        user={user}
+        perfil={perfil}
+        logout={logout}
+        authReady={authReady}
+      />
+    </SucursalProvider>
+  )
+}
+
+function MainAppInner({ user, perfil, logout, authReady }: {
+  user: { id: string; email?: string } | null
+  perfil: PerfilDB | null
+  logout: () => Promise<void>
+  authReady: boolean
+}): ReactElement {
   const notify = useNotification()
   const location = useLocation()
   const offlineSync = useOfflineSync()
+  const {
+    currentSucursalId,
+    currentSucursalNombre,
+    currentSucursalRol,
+    sucursales,
+    loading: sucursalLoading,
+  } = useSucursal()
   const {
     isOnline,
     pedidosPendientes,
@@ -155,6 +185,14 @@ function MainApp(): ReactElement {
     }
   }, [logout])
 
+  // Use sucursal-resolved role for permissions
+  const effectiveRol = currentSucursalRol ?? perfil?.rol
+  const isAdmin = effectiveRol === 'admin'
+  const isPreventista = effectiveRol === 'preventista'
+  const isTransportista = effectiveRol === 'transportista'
+  const isEncargado = effectiveRol === 'encargado'
+  const isAdminOrEncargado = isAdmin || isEncargado
+
   const defaultRoute = (isAdmin || isPreventista || isEncargado) ? '/dashboard' : '/pedidos'
 
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
@@ -167,12 +205,22 @@ function MainApp(): ReactElement {
     isEncargado,
     isAdminOrEncargado,
     isOnline,
-    logout: handleLogout
-  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, isOnline, handleLogout])
+    logout: handleLogout,
+    currentSucursalId,
+    currentSucursalNombre,
+  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()
   }, [refreshPendingOperations])
+
+  // Block the app if the authenticated user has no sucursales assigned.
+  // Replaces the previous phantom fallback that silently pretended the
+  // user was on sucursal id=1 (C6). Placed after all hooks so rules-of-hooks
+  // are respected.
+  if (!sucursalLoading && sucursales.length === 0) {
+    return <SinSucursalScreen onLogout={handleLogout} />
+  }
 
   return (
     <AuthDataProvider value={authDataValue}>

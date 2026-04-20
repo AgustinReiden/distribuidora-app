@@ -10,6 +10,8 @@ import {
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
 import type { MermaFormInput, ProductoDB } from '../types'
+import { useSucursal } from '../contexts/SucursalContext'
+import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
 
 // ============================================================================
 // TYPES
@@ -182,6 +184,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   const [mermasPendientes, setMermasPendientes] = useState<MermaOffline[]>([])
   const [sincronizando, setSincronizando] = useState<boolean>(false)
 
+  // Multi-tenant: track the active sucursal so we can tag queued operations
+  // and reset the X-Sucursal-ID header after per-op replay.
+  const { currentSucursalId } = useSucursal()
+  const currentSucursalIdRef = useRef<number | null>(currentSucursalId)
+  currentSucursalIdRef.current = currentSucursalId
+
   // Ref para evitar race conditions en sincronización
   const sincronizandoRef = useRef<boolean>(false)
 
@@ -326,12 +334,20 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     }
 
     // Encolar en IndexedDB - await to ensure persistence before reporting success (BUG-11 fix)
+    // Multi-tenant: persist the sucursal that originated the pedido so the replay
+    // after reconnection can re-set X-Sucursal-ID to the same tenant (avoids C7).
     try {
-      const opId = await queueOperation('CREATE_PEDIDO' as OperationType, {
-        ...pedidoData,
-        tempOfflineId,
-        timestamp: Date.now()
-      }, pedidoData.usuarioId)
+      const opId = await queueOperation(
+        'CREATE_PEDIDO' as OperationType,
+        {
+          ...pedidoData,
+          tempOfflineId,
+          timestamp: Date.now()
+        },
+        pedidoData.usuarioId,
+        undefined,
+        currentSucursalIdRef.current ?? undefined
+      )
 
       if (opId !== null) {
         logger.info(`[useOfflineSync] Pedido encolado con ID: ${opId}`)
@@ -366,11 +382,18 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     }
 
     // Encolar en IndexedDB (async, no bloqueante)
-    queueOperation('CREATE_MERMA' as OperationType, {
-      ...mermaData,
-      tempOfflineId,
-      timestamp: Date.now()
-    })
+    // Multi-tenant: persist sucursal so replay can set the right header (C7).
+    queueOperation(
+      'CREATE_MERMA' as OperationType,
+      {
+        ...mermaData,
+        tempOfflineId,
+        timestamp: Date.now()
+      },
+      undefined,
+      undefined,
+      currentSucursalIdRef.current ?? undefined
+    )
       .then((opId) => {
         if (opId !== null) {
           logger.info(`[useOfflineSync] Merma encolada con ID: ${opId}`)
@@ -498,10 +521,29 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     const conflictos: StockConflict[] = []
     let sincronizados = 0
 
+    // Snapshot the header BEFORE the replay loop so we can restore it even if
+    // the active sucursal changes mid-sync (e.g. user switches tabs). Each op
+    // temporarily sets the header to its own sucursalId.
+    const headerBeforeSync = getSucursalHeader()
+
     try {
       for (const op of pedidoOps) {
         const payload = op.payload as Record<string, unknown>
         const pedido = operationToPedidoOffline(op)
+
+        // Multi-tenant (C7): refuse to replay ops queued without a sucursalId.
+        // These are either pre-migration entries or corrupt writes — replaying
+        // them would mint rows in whatever tenant happens to be active now.
+        if (op.sucursalId == null) {
+          await markAsFailed(op.id!, 'Operación pre-migración sin sucursal asignada; descartada para evitar corrupción cross-tenant')
+          logger.warn(`[useOfflineSync] Pedido ${pedido.offlineId} sin sucursalId, marcado como failed`)
+          errores.push({ pedido, error: 'Operación sin sucursal asignada' })
+          continue
+        }
+
+        // Set the header to the sucursal that originated this op. RPCs rely on
+        // current_sucursal_id() which (migration 061) reads X-Sucursal-ID.
+        setSucursalHeader(op.sucursalId)
 
         // Validar stock si tenemos productos actuales
         if (productosActuales && productosActuales.length > 0) {
@@ -538,6 +580,10 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         }
       }
     } finally {
+      // Always restore the header to whatever was active before replay. If the
+      // user switched sucursal mid-sync, prefer the latest active value.
+      const latestActive = currentSucursalIdRef.current
+      setSucursalHeader(latestActive ?? headerBeforeSync)
       sincronizandoRef.current = false
       setSincronizando(false)
       // Recargar lista de pendientes
@@ -582,10 +628,23 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     const errores: SyncResult['errores'] = []
     let sincronizados = 0
 
+    // Snapshot header to restore after the loop (same pattern as sincronizarPedidos).
+    const headerBeforeSync = getSucursalHeader()
+
     try {
       for (const op of mermaOps) {
         const merma = operationToMermaOffline(op)
         const payload = op.payload as unknown as MermaFormInput
+
+        // Multi-tenant (C7): reject ops without sucursalId to prevent cross-tenant writes.
+        if (op.sucursalId == null) {
+          await markAsFailed(op.id!, 'Operación pre-migración sin sucursal asignada; descartada para evitar corrupción cross-tenant')
+          logger.warn(`[useOfflineSync] Merma ${merma.offlineId} sin sucursalId, marcada como failed`)
+          errores.push({ merma, error: 'Operación sin sucursal asignada' })
+          continue
+        }
+
+        setSucursalHeader(op.sucursalId)
 
         try {
           await registrarMermaFn(payload)
@@ -598,6 +657,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         }
       }
     } finally {
+      const latestActive = currentSucursalIdRef.current
+      setSucursalHeader(latestActive ?? headerBeforeSync)
       sincronizandoRef.current = false
       setSincronizando(false)
       // Recargar lista de pendientes

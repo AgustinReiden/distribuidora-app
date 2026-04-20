@@ -3,7 +3,7 @@
  * Proporciona cliente Supabase y sistema de notificación de errores
  * @module hooks/supabase/base
  */
-import { supabase } from '../../lib/supabase'
+import { supabase, setSucursalHeader, getSucursalHeader } from '../../lib/supabase'
 
 /**
  * Function type for error notification
@@ -56,4 +56,4 @@ export const notifyError = (message: string): void => {
  * Cliente de Supabase pre-configurado
  * @see {@link https://supabase.com/docs/reference/javascript}
  */
-export { supabase }
+export { supabase, setSucursalHeader, getSucursalHeader }

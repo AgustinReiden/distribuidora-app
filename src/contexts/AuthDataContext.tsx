@@ -22,6 +22,8 @@ export interface AuthDataContextValue {
   isAdminOrEncargado: boolean
   isOnline: boolean
   logout: () => Promise<void>
+  currentSucursalId: number | null
+  currentSucursalNombre: string | null
 }
 
 // =============================================================================

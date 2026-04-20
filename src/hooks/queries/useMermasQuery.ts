@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type {
   MermaDBExtended,
   MermaFormInputExtended,
@@ -13,13 +14,13 @@ import { productosKeys } from './useProductosQuery'
 
 // Query keys
 export const mermasKeys = {
-  all: ['mermas'] as const,
-  lists: () => [...mermasKeys.all, 'list'] as const,
-  list: (filters: Record<string, unknown>) => [...mermasKeys.lists(), filters] as const,
-  details: () => [...mermasKeys.all, 'detail'] as const,
-  detail: (id: string) => [...mermasKeys.details(), id] as const,
-  byProducto: (productoId: string) => [...mermasKeys.all, 'producto', productoId] as const,
-  byMotivo: (motivo: string) => [...mermasKeys.all, 'motivo', motivo] as const,
+  all: (sucursalId: number | null) => ['mermas', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...mermasKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...mermasKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...mermasKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...mermasKeys.details(sucursalId), id] as const,
+  byProducto: (sucursalId: number | null, productoId: string) => [...mermasKeys.all(sucursalId), 'producto', productoId] as const,
+  byMotivo: (sucursalId: number | null, motivo: string) => [...mermasKeys.all(sucursalId), 'motivo', motivo] as const,
 }
 
 // Fetch functions
@@ -117,8 +118,9 @@ async function registrarMerma(mermaData: MermaFormInputExtended): Promise<MermaR
  * Hook para obtener todas las mermas
  */
 export function useMermasQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: mermasKeys.lists(),
+    queryKey: mermasKeys.lists(currentSucursalId),
     queryFn: fetchMermas,
     staleTime: 5 * 60 * 1000, // 5 minutos
   })
@@ -128,8 +130,9 @@ export function useMermasQuery() {
  * Hook para obtener mermas por producto
  */
 export function useMermasByProductoQuery(productoId: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: mermasKeys.byProducto(productoId),
+    queryKey: mermasKeys.byProducto(currentSucursalId, productoId),
     queryFn: () => fetchMermasByProducto(productoId),
     enabled: !!productoId,
     staleTime: 5 * 60 * 1000,
@@ -140,8 +143,9 @@ export function useMermasByProductoQuery(productoId: string) {
  * Hook para obtener mermas por motivo
  */
 export function useMermasByMotivoQuery(motivo: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: mermasKeys.byMotivo(motivo),
+    queryKey: mermasKeys.byMotivo(currentSucursalId, motivo),
     queryFn: () => fetchMermasByMotivo(motivo),
     enabled: !!motivo,
     staleTime: 5 * 60 * 1000,
@@ -153,22 +157,23 @@ export function useMermasByMotivoQuery(motivo: string) {
  */
 export function useRegistrarMermaMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: registrarMerma,
     onSuccess: (result, variables) => {
       // Agregar merma al cache si fue creada
       if (result.merma) {
-        queryClient.setQueryData<MermaDBExtended[]>(mermasKeys.lists(), (old) => {
+        queryClient.setQueryData<MermaDBExtended[]>(mermasKeys.lists(currentSucursalId), (old) => {
           if (!old) return [result.merma!]
           return [result.merma!, ...old]
         })
       }
       // Invalidar mermas del producto específico
-      queryClient.invalidateQueries({ queryKey: mermasKeys.byProducto(variables.productoId) })
+      queryClient.invalidateQueries({ queryKey: mermasKeys.byProducto(currentSucursalId, variables.productoId) })
       // Invalidar productos (stock actualizado)
-      queryClient.invalidateQueries({ queryKey: productosKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }

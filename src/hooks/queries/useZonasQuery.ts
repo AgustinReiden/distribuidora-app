@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 
 // Types
 export interface ZonaDB {
@@ -15,9 +16,9 @@ export interface ZonaDB {
 
 // Query keys
 export const zonasKeys = {
-  all: ['zonas'] as const,
-  lists: () => [...zonasKeys.all, 'list'] as const,
-  preventista: (perfilId: string) => [...zonasKeys.all, 'preventista', perfilId] as const,
+  all: (sucursalId: number | null) => ['zonas', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...zonasKeys.all(sucursalId), 'list'] as const,
+  preventista: (sucursalId: number | null, perfilId: string) => [...zonasKeys.all(sucursalId), 'preventista', perfilId] as const,
 }
 
 // Fetch functions
@@ -84,16 +85,18 @@ async function asignarZonasPreventista(perfilId: string, zonaIds: string[]): Pro
 // Hooks
 
 export function useZonasEstandarizadasQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: zonasKeys.lists(),
+    queryKey: zonasKeys.lists(currentSucursalId),
     queryFn: fetchZonas,
     staleTime: 10 * 60 * 1000,
   })
 }
 
 export function usePreventistaZonasQuery(perfilId: string | undefined) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: zonasKeys.preventista(perfilId || ''),
+    queryKey: zonasKeys.preventista(currentSucursalId, perfilId || ''),
     queryFn: () => fetchPreventistaZonas(perfilId!),
     enabled: !!perfilId,
     staleTime: 5 * 60 * 1000,
@@ -102,21 +105,23 @@ export function usePreventistaZonasQuery(perfilId: string | undefined) {
 
 export function useCrearZonaMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: crearZona,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: zonasKeys.all })
+      queryClient.invalidateQueries({ queryKey: zonasKeys.all(currentSucursalId) })
     },
   })
 }
 
 export function useAsignarZonasPrevMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: ({ perfilId, zonaIds }: { perfilId: string; zonaIds: string[] }) =>
       asignarZonasPreventista(perfilId, zonaIds),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: zonasKeys.preventista(variables.perfilId) })
+      queryClient.invalidateQueries({ queryKey: zonasKeys.preventista(currentSucursalId, variables.perfilId) })
     },
   })
 }

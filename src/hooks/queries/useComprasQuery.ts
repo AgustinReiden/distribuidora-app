@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   CompraDBExtended,
@@ -13,13 +14,13 @@ import type {
 
 // Query keys
 export const comprasKeys = {
-  all: ['compras'] as const,
-  lists: () => [...comprasKeys.all, 'list'] as const,
-  list: (filters: Record<string, unknown>) => [...comprasKeys.lists(), filters] as const,
-  details: () => [...comprasKeys.all, 'detail'] as const,
-  detail: (id: string) => [...comprasKeys.details(), id] as const,
-  byProveedor: (proveedorId: string) => [...comprasKeys.all, 'proveedor', proveedorId] as const,
-  byProducto: (productoId: string) => [...comprasKeys.all, 'producto', productoId] as const,
+  all: (sucursalId: number | null) => ['compras', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...comprasKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...comprasKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...comprasKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...comprasKeys.details(sucursalId), id] as const,
+  byProveedor: (sucursalId: number | null, proveedorId: string) => [...comprasKeys.all(sucursalId), 'proveedor', proveedorId] as const,
+  byProducto: (sucursalId: number | null, productoId: string) => [...comprasKeys.all(sucursalId), 'producto', productoId] as const,
 }
 
 interface CompraItemRPC {
@@ -168,8 +169,9 @@ async function anularCompra(compraId: string, compras: CompraDBExtended[]): Prom
  * Hook para obtener todas las compras
  */
 export function useComprasQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: comprasKeys.lists(),
+    queryKey: comprasKeys.lists(currentSucursalId),
     queryFn: fetchCompras,
     staleTime: 5 * 60 * 1000, // 5 minutos
   })
@@ -179,8 +181,9 @@ export function useComprasQuery() {
  * Hook para obtener una compra por ID
  */
 export function useCompraQuery(id: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: comprasKeys.detail(id),
+    queryKey: comprasKeys.detail(currentSucursalId, id),
     queryFn: () => fetchCompraById(id),
     enabled: !!id,
   })
@@ -190,8 +193,9 @@ export function useCompraQuery(id: string) {
  * Hook para obtener compras por proveedor
  */
 export function useComprasByProveedorQuery(proveedorId: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: comprasKeys.byProveedor(proveedorId),
+    queryKey: comprasKeys.byProveedor(currentSucursalId, proveedorId),
     queryFn: () => fetchComprasByProveedor(proveedorId),
     enabled: !!proveedorId,
     staleTime: 5 * 60 * 1000,
@@ -203,12 +207,13 @@ export function useComprasByProveedorQuery(proveedorId: string) {
  */
 export function useRegistrarCompraMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: registrarCompra,
     onSuccess: () => {
       // Invalidar compras y productos (stock actualizado)
-      queryClient.invalidateQueries({ queryKey: comprasKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
     },
   })
@@ -219,21 +224,22 @@ export function useRegistrarCompraMutation() {
  */
 export function useAnularCompraMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: async (compraId: string) => {
-      const compras = queryClient.getQueryData<CompraDBExtended[]>(comprasKeys.lists()) || []
+      const compras = queryClient.getQueryData<CompraDBExtended[]>(comprasKeys.lists(currentSucursalId)) || []
       await anularCompra(compraId, compras)
       return compraId
     },
     // Optimistic update
     onMutate: async (compraId: string) => {
-      await queryClient.cancelQueries({ queryKey: comprasKeys.lists() })
+      await queryClient.cancelQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
 
-      const previousCompras = queryClient.getQueryData<CompraDBExtended[]>(comprasKeys.lists())
+      const previousCompras = queryClient.getQueryData<CompraDBExtended[]>(comprasKeys.lists(currentSucursalId))
 
       // Marcar como cancelada optimistamente
-      queryClient.setQueryData<CompraDBExtended[]>(comprasKeys.lists(), (old) => {
+      queryClient.setQueryData<CompraDBExtended[]>(comprasKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(c => c.id === compraId ? { ...c, estado: 'cancelada' as const } : c)
       })
@@ -243,12 +249,12 @@ export function useAnularCompraMutation() {
     onError: (_, __, context) => {
       // Rollback on error
       if (context?.previousCompras) {
-        queryClient.setQueryData(comprasKeys.lists(), context.previousCompras)
+        queryClient.setQueryData(comprasKeys.lists(currentSucursalId), context.previousCompras)
       }
     },
     onSettled: () => {
       // Revalidar
-      queryClient.invalidateQueries({ queryKey: comprasKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['productos'] })
     },
   })

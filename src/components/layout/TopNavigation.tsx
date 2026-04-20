@@ -9,6 +9,7 @@ import {
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { NotificationCenter } from '../../contexts/NotificationContext';
+import SucursalSelector from './SucursalSelector';
 import type { PerfilDB, RolUsuario } from '../../types';
 
 // =============================================================================
@@ -292,6 +293,9 @@ export default function TopNavigation({
 
             {/* Notificaciones */}
             <NotificationCenter />
+
+            {/* Sucursal */}
+            <SucursalSelector />
 
             {/* Menu de usuario */}
             <div className="relative" ref={userMenuRef}>

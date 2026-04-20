@@ -1,21 +1,29 @@
 /**
  * TanStack Query hooks para Usuarios/Perfiles
  * Reemplaza el hook useUsuarios con mejor cache y gestión de estado
+ *
+ * Multi-tenant (H11): las query keys están scopeadas por sucursalId. Los
+ * usuarios visibles dependen de usuario_sucursales vía RLS, así que la
+ * misma llamada devuelve distintas filas para distintas sucursales.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type { PerfilDB } from '../../types'
 
-// Query keys
+// Query keys scoped by sucursalId (multi-tenant). Using function factories so
+// every cache entry lives under its own tenant prefix and a sucursal switch
+// invalidates cleanly via the `['usuarios', sucursalId]` prefix.
 export const usuariosKeys = {
-  all: ['usuarios'] as const,
-  lists: () => [...usuariosKeys.all, 'list'] as const,
-  list: (filters: Record<string, unknown>) => [...usuariosKeys.lists(), filters] as const,
-  details: () => [...usuariosKeys.all, 'detail'] as const,
-  detail: (id: string) => [...usuariosKeys.details(), id] as const,
-  byRol: (rol: string) => [...usuariosKeys.all, 'rol', rol] as const,
-  transportistas: () => [...usuariosKeys.all, 'transportistas'] as const,
-  preventistas: () => [...usuariosKeys.all, 'preventistas'] as const,
+  all: (sucursalId: number | null) => ['usuarios', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) =>
+    [...usuariosKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...usuariosKeys.details(sucursalId), id] as const,
+  byRol: (sucursalId: number | null, rol: string) => [...usuariosKeys.all(sucursalId), 'rol', rol] as const,
+  transportistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'transportistas'] as const,
+  preventistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistas'] as const,
 }
 
 // Types
@@ -115,8 +123,9 @@ async function toggleUsuarioActivo(id: string, activo: boolean): Promise<PerfilD
  * Hook para obtener todos los usuarios
  */
 export function useUsuariosQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: usuariosKeys.lists(),
+    queryKey: usuariosKeys.lists(currentSucursalId),
     queryFn: fetchUsuarios,
     staleTime: 10 * 60 * 1000, // 10 minutos - usuarios cambian poco
   })
@@ -126,8 +135,9 @@ export function useUsuariosQuery() {
  * Hook para obtener un usuario por ID
  */
 export function useUsuarioQuery(id: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: usuariosKeys.detail(id),
+    queryKey: usuariosKeys.detail(currentSucursalId, id),
     queryFn: () => fetchUsuarioById(id),
     enabled: !!id,
   })
@@ -137,8 +147,9 @@ export function useUsuarioQuery(id: string) {
  * Hook para obtener usuarios por rol
  */
 export function useUsuariosByRolQuery(rol: string) {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: usuariosKeys.byRol(rol),
+    queryKey: usuariosKeys.byRol(currentSucursalId, rol),
     queryFn: () => fetchUsuariosByRol(rol),
     enabled: !!rol,
     staleTime: 10 * 60 * 1000,
@@ -149,8 +160,9 @@ export function useUsuariosByRolQuery(rol: string) {
  * Hook para obtener transportistas activos
  */
 export function useTransportistasQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: usuariosKeys.transportistas(),
+    queryKey: usuariosKeys.transportistas(currentSucursalId),
     queryFn: fetchTransportistas,
     staleTime: 10 * 60 * 1000,
   })
@@ -160,8 +172,9 @@ export function useTransportistasQuery() {
  * Hook para obtener preventistas activos
  */
 export function usePreventistasQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: usuariosKeys.preventistas(),
+    queryKey: usuariosKeys.preventistas(currentSucursalId),
     queryFn: fetchPreventistas,
     staleTime: 10 * 60 * 1000,
   })
@@ -172,23 +185,24 @@ export function usePreventistasQuery() {
  */
 export function useActualizarUsuarioMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: updateUsuario,
     onSuccess: (updatedUsuario) => {
       // Actualizar cache de detalle
-      queryClient.setQueryData(usuariosKeys.detail(updatedUsuario.id), updatedUsuario)
+      queryClient.setQueryData(usuariosKeys.detail(currentSucursalId, updatedUsuario.id), updatedUsuario)
       // Actualizar cache de lista
-      queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(), (old) => {
+      queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
         if (!old) return [updatedUsuario]
         return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
       })
       // Invalidar listas por rol
       if (updatedUsuario.rol) {
-        queryClient.invalidateQueries({ queryKey: usuariosKeys.byRol(updatedUsuario.rol) })
+        queryClient.invalidateQueries({ queryKey: usuariosKeys.byRol(currentSucursalId, updatedUsuario.rol) })
       }
-      queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas() })
-      queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas() })
+      queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas(currentSucursalId) })
     },
   })
 }
@@ -198,17 +212,18 @@ export function useActualizarUsuarioMutation() {
  */
 export function useToggleUsuarioActivoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) => toggleUsuarioActivo(id, activo),
     onSuccess: (updatedUsuario) => {
-      queryClient.setQueryData(usuariosKeys.detail(updatedUsuario.id), updatedUsuario)
-      queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(), (old) => {
+      queryClient.setQueryData(usuariosKeys.detail(currentSucursalId, updatedUsuario.id), updatedUsuario)
+      queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
         if (!old) return [updatedUsuario]
         return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
       })
-      queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas() })
-      queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas() })
+      queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas(currentSucursalId) })
     },
   })
 }

@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   PromocionDB,
@@ -14,9 +15,9 @@ import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 
 // Query keys
 export const promocionesKeys = {
-  all: ['promociones'] as const,
-  lists: () => [...promocionesKeys.all, 'list'] as const,
-  promoMap: () => [...promocionesKeys.all, 'promo_map'] as const,
+  all: (sucursalId: number | null) => ['promociones', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...promocionesKeys.all(sucursalId), 'list'] as const,
+  promoMap: (sucursalId: number | null) => [...promocionesKeys.all(sucursalId), 'promo_map'] as const,
 }
 
 // =============================================================================
@@ -335,8 +336,9 @@ async function ajustarStockPromo(input: AjustarStockInput): Promise<void> {
  * Cache 5 minutos (más corto que mayorista por ser temporal)
  */
 export function usePromoMapQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: promocionesKeys.promoMap(),
+    queryKey: promocionesKeys.promoMap(currentSucursalId),
     queryFn: fetchPromoMap,
     staleTime: 5 * 60 * 1000,
   })
@@ -346,8 +348,9 @@ export function usePromoMapQuery() {
  * Hook para obtener todas las promociones con detalles (admin panel)
  */
 export function usePromocionesListQuery() {
+  const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: promocionesKeys.lists(),
+    queryKey: promocionesKeys.lists(currentSucursalId),
     queryFn: fetchPromocionesList,
     staleTime: 2 * 60 * 1000,
   })
@@ -355,50 +358,55 @@ export function usePromocionesListQuery() {
 
 export function useCrearPromocionMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: createPromocion,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: promocionesKeys.all })
+      queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })
 }
 
 export function useActualizarPromocionMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: updatePromocion,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: promocionesKeys.all })
+      queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })
 }
 
 export function useEliminarPromocionMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: deletePromocion,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: promocionesKeys.all })
+      queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })
 }
 
 export function useTogglePromocionActivaMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) => togglePromocionActiva(id, activo),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: promocionesKeys.all })
+      queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })
 }
 
 export function useAjustarStockPromoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: ajustarStockPromo,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: promocionesKeys.all })
+      queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })
 }

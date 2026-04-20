@@ -10,8 +10,6 @@
 import { useRef, useCallback, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRealtimeSubscription } from './useRealtimeSubscription'
-import { pedidosKeys } from './queries/usePedidosQuery'
-import { productosKeys } from './queries/useProductosQuery'
 
 interface UseRealtimeInvalidationOptions {
   /** Si está habilitado (desactivar cuando offline) */
@@ -33,7 +31,7 @@ export function useRealtimeInvalidation({
       clearTimeout(pedidosTimerRef.current)
     }
     pedidosTimerRef.current = setTimeout(() => {
-      queryClient.invalidateQueries({ queryKey: pedidosKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
     }, debounceMs)
   }, [queryClient, debounceMs])
 
@@ -42,7 +40,7 @@ export function useRealtimeInvalidation({
       clearTimeout(productosTimerRef.current)
     }
     productosTimerRef.current = setTimeout(() => {
-      queryClient.invalidateQueries({ queryKey: productosKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['productos'] })
     }, debounceMs)
   }, [queryClient, debounceMs])
 

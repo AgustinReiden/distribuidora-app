@@ -40,6 +40,10 @@ export {
 } from './AppDataContext'
 export type { AppDataContextValue } from './AppDataContext'
 
+// Sucursal (multi-tenant)
+export { SucursalProvider, useSucursal } from './SucursalContext'
+export type { SucursalContextValue, SucursalInfo } from './SucursalContext'
+
 // Theme
 export { ThemeProvider, useTheme } from './ThemeContext'
 

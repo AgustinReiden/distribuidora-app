@@ -5,15 +5,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import type { ProveedorDBExtended, ProveedorFormInputExtended } from '../../types'
+import { useSucursal } from '../../contexts/SucursalContext'
 
 // Query keys
 export const proveedoresKeys = {
-  all: ['proveedores'] as const,
-  lists: () => [...proveedoresKeys.all, 'list'] as const,
-  list: (filters: Record<string, unknown>) => [...proveedoresKeys.lists(), filters] as const,
-  details: () => [...proveedoresKeys.all, 'detail'] as const,
-  detail: (id: string) => [...proveedoresKeys.details(), id] as const,
-  activos: () => [...proveedoresKeys.all, 'activos'] as const,
+  all: (sucursalId: number | null) => ['proveedores', sucursalId] as const,
+  lists: (sucursalId: number | null) => [...proveedoresKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...proveedoresKeys.lists(sucursalId), filters] as const,
+  details: (sucursalId: number | null) => [...proveedoresKeys.all(sucursalId), 'detail'] as const,
+  detail: (sucursalId: number | null, id: string) => [...proveedoresKeys.details(sucursalId), id] as const,
+  activos: (sucursalId: number | null) => [...proveedoresKeys.all(sucursalId), 'activos'] as const,
 }
 
 // Fetch functions
@@ -163,8 +164,10 @@ async function deleteProveedor(id: string): Promise<void> {
  * Hook para obtener todos los proveedores
  */
 export function useProveedoresQuery() {
+  const { currentSucursalId } = useSucursal()
+
   return useQuery({
-    queryKey: proveedoresKeys.lists(),
+    queryKey: proveedoresKeys.lists(currentSucursalId),
     queryFn: fetchProveedores,
     staleTime: 10 * 60 * 1000, // 10 minutos - proveedores cambian poco
   })
@@ -174,8 +177,10 @@ export function useProveedoresQuery() {
  * Hook para obtener solo proveedores activos
  */
 export function useProveedoresActivosQuery() {
+  const { currentSucursalId } = useSucursal()
+
   return useQuery({
-    queryKey: proveedoresKeys.activos(),
+    queryKey: proveedoresKeys.activos(currentSucursalId),
     queryFn: fetchProveedoresActivos,
     staleTime: 10 * 60 * 1000,
   })
@@ -185,8 +190,10 @@ export function useProveedoresActivosQuery() {
  * Hook para obtener un proveedor por ID
  */
 export function useProveedorQuery(id: string) {
+  const { currentSucursalId } = useSucursal()
+
   return useQuery({
-    queryKey: proveedoresKeys.detail(id),
+    queryKey: proveedoresKeys.detail(currentSucursalId, id),
     queryFn: () => fetchProveedorById(id),
     enabled: !!id,
   })
@@ -197,17 +204,18 @@ export function useProveedorQuery(id: string) {
  */
 export function useCrearProveedorMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: createProveedor,
     onSuccess: (newProveedor) => {
       // Actualizar cache de lista
-      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(), (old) => {
+      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {
         if (!old) return [newProveedor]
         return [...old, newProveedor].sort((a, b) => a.nombre.localeCompare(b.nombre))
       })
       // Invalidar activos también
-      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos() })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos(currentSucursalId) })
     },
   })
 }
@@ -217,17 +225,18 @@ export function useCrearProveedorMutation() {
  */
 export function useActualizarProveedorMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: updateProveedor,
     // Optimistic update
     onMutate: async ({ id, data: proveedor }) => {
-      await queryClient.cancelQueries({ queryKey: proveedoresKeys.lists() })
+      await queryClient.cancelQueries({ queryKey: proveedoresKeys.lists(currentSucursalId) })
 
-      const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists())
+      const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId))
 
       // Aplicar cambios optimistamente
-      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(), (old) => {
+      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(p => p.id === id ? { ...p, ...proveedor } as ProveedorDBExtended : p)
       })
@@ -237,17 +246,17 @@ export function useActualizarProveedorMutation() {
     onError: (_, __, context) => {
       // Rollback on error
       if (context?.previousProveedores) {
-        queryClient.setQueryData(proveedoresKeys.lists(), context.previousProveedores)
+        queryClient.setQueryData(proveedoresKeys.lists(currentSucursalId), context.previousProveedores)
       }
     },
     onSuccess: (updatedProveedor) => {
       // Actualizar cache de detalle
-      queryClient.setQueryData(proveedoresKeys.detail(updatedProveedor.id), updatedProveedor)
+      queryClient.setQueryData(proveedoresKeys.detail(currentSucursalId, updatedProveedor.id), updatedProveedor)
     },
     onSettled: () => {
       // Revalidar para asegurar consistencia
-      queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos() })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos(currentSucursalId) })
     },
   })
 }
@@ -257,17 +266,18 @@ export function useActualizarProveedorMutation() {
  */
 export function useToggleProveedorActivoMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
       toggleProveedorActivo(id, activo),
     // Optimistic update
     onMutate: async ({ id, activo }) => {
-      await queryClient.cancelQueries({ queryKey: proveedoresKeys.lists() })
+      await queryClient.cancelQueries({ queryKey: proveedoresKeys.lists(currentSucursalId) })
 
-      const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists())
+      const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId))
 
-      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(), (old) => {
+      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.map(p => p.id === id ? { ...p, activo } : p)
       })
@@ -276,12 +286,12 @@ export function useToggleProveedorActivoMutation() {
     },
     onError: (_, __, context) => {
       if (context?.previousProveedores) {
-        queryClient.setQueryData(proveedoresKeys.lists(), context.previousProveedores)
+        queryClient.setQueryData(proveedoresKeys.lists(currentSucursalId), context.previousProveedores)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos() })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos(currentSucursalId) })
     },
   })
 }
@@ -291,13 +301,14 @@ export function useToggleProveedorActivoMutation() {
  */
 export function useEliminarProveedorMutation() {
   const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
 
   return useMutation({
     mutationFn: deleteProveedor,
     onMutate: async (id: string) => {
-      await queryClient.cancelQueries({ queryKey: proveedoresKeys.lists() })
-      const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists())
-      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(), (old) => {
+      await queryClient.cancelQueries({ queryKey: proveedoresKeys.lists(currentSucursalId) })
+      const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId))
+      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
         return old.filter(p => p.id !== id)
       })
@@ -305,12 +316,12 @@ export function useEliminarProveedorMutation() {
     },
     onError: (_, __, context) => {
       if (context?.previousProveedores) {
-        queryClient.setQueryData(proveedoresKeys.lists(), context.previousProveedores)
+        queryClient.setQueryData(proveedoresKeys.lists(currentSucursalId), context.previousProveedores)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos() })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos(currentSucursalId) })
     },
   })
 }
