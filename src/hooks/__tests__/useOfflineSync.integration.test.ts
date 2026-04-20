@@ -30,6 +30,29 @@ vi.mock('../../lib/offlineDb', () => ({
   cleanupOldOperations: (...args: unknown[]) => mockCleanupOldOperations(...args),
 }))
 
+// Mock del cliente Supabase y el contexto de sucursal — necesario porque
+// useOfflineSync ahora importa setSucursalHeader de ../../lib/supabase y
+// useSucursal de ../../contexts/SucursalContext para etiquetar cada op con
+// el sucursal_id activo (ver commit 9181a66 / Task 5 multi-tenant).
+vi.mock('../../lib/supabase', () => ({
+  supabase: {
+    from: vi.fn(),
+    rpc: vi.fn(),
+    rest: { headers: {} },
+  },
+  setSucursalHeader: vi.fn(),
+  getSucursalHeader: vi.fn(() => null),
+}))
+
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({
+    currentSucursalId: 1,
+    sucursales: [{ id: 1, nombre: 'Test', rol: 'admin' }],
+    loading: false,
+    switchSucursal: vi.fn(),
+  }),
+}))
+
 describe('useOfflineSync Integration Tests', () => {
   // Productos de prueba
   const mockProductos: ProductoDB[] = [
@@ -117,7 +140,7 @@ describe('useOfflineSync Integration Tests', () => {
       const mockPendingOp = {
         id: 1,
         type: 'CREATE_PEDIDO',
-        status: 'pending',
+        status: 'pending', sucursalId: 1,
         payload: pedidoData,
         createdAt: new Date()
       }
@@ -294,9 +317,9 @@ describe('useOfflineSync Integration Tests', () => {
     it('debe continuar sincronizando otros pedidos si uno falla', async () => {
       // Mock getPendingOperations to return 3 pending orders
       const mockPendingOps = [
-        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() },
-        { id: 2, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() },
-        { id: 3, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '3', items: [], total: 300 }, createdAt: new Date() }
+        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() },
+        { id: 2, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() },
+        { id: 3, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '3', items: [], total: 300 }, createdAt: new Date() }
       ]
       // First call returns all 3 (initial load), second call also returns 3 (sync reads), third returns only failed one (after sync)
       mockGetPendingOperations
@@ -335,8 +358,8 @@ describe('useOfflineSync Integration Tests', () => {
     it('debe reportar todos los errores de sincronización', async () => {
       // Mock getPendingOperations to return 2 pending orders
       const mockPendingOps = [
-        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() },
-        { id: 2, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() }
+        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() },
+        { id: 2, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() }
       ]
       // First call returns both (initial load), second call also returns both (sync reads), third returns both (both failed)
       mockGetPendingOperations
@@ -376,7 +399,7 @@ describe('useOfflineSync Integration Tests', () => {
     it('debe prevenir sincronización simultánea (doble click)', async () => {
       // Mock a single pending operation
       const mockPendingOps = [
-        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
+        { id: 1, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
       ]
       // Return ops for initial load, then for sync reads (multiple times), then empty after sync
       mockGetPendingOperations
@@ -416,7 +439,7 @@ describe('useOfflineSync Integration Tests', () => {
 
     it('debe permitir sincronizar después de que termine la sincronización anterior', async () => {
       // First sync: 1 pending operation
-      const mockOp1 = { id: 1, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
+      const mockOp1 = { id: 1, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
       // Initial load returns op1, first sync returns op1, after sync returns empty
       mockGetPendingOperations
         .mockResolvedValueOnce([mockOp1]) // Initial load
@@ -438,7 +461,7 @@ describe('useOfflineSync Integration Tests', () => {
       expect(mockCrearPedido).toHaveBeenCalledTimes(1)
 
       // Second sync: new pending operation
-      const mockOp2 = { id: 2, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() }
+      const mockOp2 = { id: 2, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() }
       // For second sync: return op2 for sync, then empty after sync
       mockGetPendingOperations
         .mockResolvedValueOnce([mockOp2]) // Second sync reads
@@ -496,7 +519,7 @@ describe('useOfflineSync Integration Tests', () => {
       const mockMermaOp = {
         id: 1,
         type: 'CREATE_MERMA',
-        status: 'pending',
+        status: 'pending', sucursalId: 1,
         payload: mermaData,
         createdAt: new Date()
       }
@@ -520,7 +543,7 @@ describe('useOfflineSync Integration Tests', () => {
       const mockMermaOp = {
         id: 1,
         type: 'CREATE_MERMA',
-        status: 'pending',
+        status: 'pending', sucursalId: 1,
         payload: { producto_id: 'p1', cantidad: 2, tipo_merma: 'rotura', motivo: 'Producto roto' },
         createdAt: new Date()
       }
@@ -607,7 +630,7 @@ describe('useOfflineSync Integration Tests', () => {
       const mockPendingOp = {
         id: 1,
         type: 'CREATE_PEDIDO',
-        status: 'pending',
+        status: 'pending', sucursalId: 1,
         payload: { clienteId: '1', items: [], total: 100 },
         createdAt: new Date()
       }
