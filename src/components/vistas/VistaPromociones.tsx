@@ -10,6 +10,13 @@ import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
 
+export interface AjustePayload {
+  productoRegaloId: string
+  cantidadStock: number
+  usosAjustados: number
+  observaciones: string
+}
+
 export interface VistaPromocionesProps {
   promociones: PromocionConDetalles[]
   productos: ProductoDB[]
@@ -18,7 +25,7 @@ export interface VistaPromocionesProps {
   onEditarPromocion: (promo: PromocionConDetalles) => void
   onEliminarPromocion: (id: string) => void
   onToggleActivo: (promo: PromocionConDetalles) => void
-  onAjustarStock: (promo: PromocionConDetalles, observaciones: string) => void
+  onAjustarStock: (promo: PromocionConDetalles, payload: AjustePayload) => void
 }
 
 export default function VistaPromociones({
@@ -33,6 +40,54 @@ export default function VistaPromociones({
 }: VistaPromocionesProps): React.ReactElement {
   const [ajustandoId, setAjustandoId] = useState<string | null>(null)
   const [observaciones, setObservaciones] = useState('')
+  const [ajusteProductoId, setAjusteProductoId] = useState<string>('')
+  const [ajusteCantidadStock, setAjusteCantidadStock] = useState<string>('')
+  const [ajusteUsos, setAjusteUsos] = useState<string>('')
+  const [ajusteError, setAjusteError] = useState<string | null>(null)
+
+  const iniciarAjuste = (promo: PromocionConDetalles) => {
+    setAjustandoId(promo.id)
+    setAjusteProductoId(promo.producto_regalo_id ? String(promo.producto_regalo_id) : '')
+    setAjusteCantidadStock('')
+    setAjusteUsos(String(promo.usos_pendientes))
+    setObservaciones('')
+    setAjusteError(null)
+  }
+
+  const cancelarAjuste = () => {
+    setAjustandoId(null)
+    setObservaciones('')
+    setAjusteProductoId('')
+    setAjusteCantidadStock('')
+    setAjusteUsos('')
+    setAjusteError(null)
+  }
+
+  const confirmarAjuste = (promo: PromocionConDetalles) => {
+    setAjusteError(null)
+    const pid = ajusteProductoId.trim()
+    if (!pid) {
+      setAjusteError('Elegi el producto al que descontar stock')
+      return
+    }
+    const stock = parseInt(ajusteCantidadStock)
+    if (!stock || stock <= 0) {
+      setAjusteError('Cantidad de stock a descontar debe ser mayor a 0')
+      return
+    }
+    const usos = parseInt(ajusteUsos)
+    if (!usos || usos <= 0 || usos > promo.usos_pendientes) {
+      setAjusteError(`Usos a resolver debe estar entre 1 y ${promo.usos_pendientes}`)
+      return
+    }
+    onAjustarStock(promo, {
+      productoRegaloId: pid,
+      cantidadStock: stock,
+      usosAjustados: usos,
+      observaciones,
+    })
+    cancelarAjuste()
+  }
 
   const getProductoNombre = (productoId: string): string => {
     const prod = productos.find(p => String(p.id) === String(productoId))
@@ -225,42 +280,92 @@ export default function VistaPromociones({
                 </div>
 
                 {/* Ajuste de stock */}
-                {promo.usos_pendientes > 0 && (
+                {promo.usos_pendientes > 0 && !promo.regalo_mueve_stock && (
                   <div className="mt-3 pt-3 border-t dark:border-gray-700">
                     {ajustandoId === promo.id ? (
-                      <div className="flex items-center gap-2">
+                      <div className="space-y-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                          Ajusta stock acumulado por bonificaciones entregadas. Tenes {promo.usos_pendientes} pendientes.
+                        </p>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                            Producto a descontar
+                          </label>
+                          <select
+                            value={ajusteProductoId}
+                            onChange={e => setAjusteProductoId(e.target.value)}
+                            className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                          >
+                            <option value="">Elegir producto...</option>
+                            {productos.map(p => (
+                              <option key={p.id} value={String(p.id)}>
+                                {p.nombre} {p.stock !== undefined ? `(stock: ${p.stock})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                              Stock a descontar
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={ajusteCantidadStock}
+                              onChange={e => setAjusteCantidadStock(e.target.value)}
+                              placeholder="Ej: 1 (fardo)"
+                              className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                              Usos a resolver
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              max={promo.usos_pendientes}
+                              value={ajusteUsos}
+                              onChange={e => setAjusteUsos(e.target.value)}
+                              placeholder={`1-${promo.usos_pendientes}`}
+                              className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                          </div>
+                        </div>
                         <input
                           type="text"
                           placeholder="Observaciones (opcional)"
                           value={observaciones}
                           onChange={e => setObservaciones(e.target.value)}
-                          className="flex-1 px-3 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                          className="w-full px-3 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                         />
-                        <button
-                          onClick={() => {
-                            onAjustarStock(promo, observaciones)
-                            setAjustandoId(null)
-                            setObservaciones('')
-                          }}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
-                        >
-                          <Check className="w-4 h-4" />
-                          Confirmar
-                        </button>
-                        <button
-                          onClick={() => { setAjustandoId(null); setObservaciones('') }}
-                          className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                        >
-                          Cancelar
-                        </button>
+                        {ajusteError && (
+                          <p className="text-xs text-red-600 dark:text-red-400">{ajusteError}</p>
+                        )}
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={cancelarAjuste}
+                            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={() => confirmarAjuste(promo)}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
+                          >
+                            <Check className="w-4 h-4" />
+                            Confirmar ajuste
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <button
-                        onClick={() => setAjustandoId(promo.id)}
+                        onClick={() => iniciarAjuste(promo)}
                         className="flex items-center gap-2 px-3 py-1.5 bg-orange-100 text-orange-700 text-sm rounded-lg hover:bg-orange-200 transition-colors"
                       >
                         <Check className="w-4 h-4" />
-                        Marcar stock ajustado ({promo.usos_pendientes} uso{promo.usos_pendientes !== 1 ? 's' : ''})
+                        Ajustar stock ({promo.usos_pendientes} uso{promo.usos_pendientes !== 1 ? 's' : ''} pendientes)
                       </button>
                     )}
                   </div>

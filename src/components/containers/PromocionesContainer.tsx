@@ -95,17 +95,23 @@ export default function PromocionesContainer(): React.ReactElement {
     }
   }, [toggleActivo, notify])
 
-  const handleAjustarStock = useCallback(async (promo: PromocionConDetalles, observaciones: string) => {
+  const handleAjustarStock = useCallback(async (
+    promo: PromocionConDetalles,
+    payload: { productoRegaloId: string; cantidadStock: number; usosAjustados: number; observaciones: string },
+  ) => {
     try {
       await ajustarStock.mutateAsync({
         promocionId: promo.id,
-        usosAjustados: promo.usos_pendientes,
+        productoRegaloId: payload.productoRegaloId,
+        cantidadStock: payload.cantidadStock,
+        usosAjustados: payload.usosAjustados,
         usuarioId: user?.id ?? '',
-        observaciones: observaciones || undefined,
+        observaciones: payload.observaciones || undefined,
       })
-      notify.success(`Stock ajustado para "${promo.nombre}" (${promo.usos_pendientes} usos)`)
-    } catch {
-      notify.error('Error al ajustar stock')
+      notify.success(`Stock ajustado: -${payload.cantidadStock} unidades (${payload.usosAjustados} usos resueltos)`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al ajustar stock'
+      notify.error(msg)
     }
   }, [ajustarStock, notify, user])
 
