@@ -42,6 +42,11 @@ export interface PromocionFormInput {
   reglas: { clave: string; valor: number }[]
   prioridad?: number
   regaloMueveStock?: boolean
+  modoExclusion?: 'acumulable' | 'excluyente'
+  ajusteAutomatico?: boolean
+  ajusteProductoId?: string | null
+  unidadesPorBloque?: number | null
+  stockPorBloque?: number | null
 }
 
 // =============================================================================
@@ -113,6 +118,7 @@ async function fetchPromoMap(): Promise<PromoMap> {
       productoRegaloId: promo.producto_regalo_id ? String(promo.producto_regalo_id) : undefined,
       prioridad: promo.prioridad ?? 0,
       regaloMueveStock: promo.regalo_mueve_stock ?? false,
+      modoExclusion: promo.modo_exclusion ?? 'acumulable',
     }
 
     for (const productoId of productoIds) {
@@ -178,6 +184,11 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
       producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
       prioridad: input.prioridad ?? 0,
       regalo_mueve_stock: input.regaloMueveStock ?? false,
+      modo_exclusion: input.modoExclusion ?? 'acumulable',
+      ajuste_automatico: input.ajusteAutomatico ?? false,
+      ajuste_producto_id: input.ajusteProductoId ? parseInt(input.ajusteProductoId) : null,
+      unidades_por_bloque: input.unidadesPorBloque ?? null,
+      stock_por_bloque: input.stockPorBloque ?? null,
     }])
     .select()
     .single()
@@ -239,6 +250,11 @@ async function updatePromocion(
       producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
       prioridad: input.prioridad ?? 0,
       regalo_mueve_stock: input.regaloMueveStock ?? false,
+      modo_exclusion: input.modoExclusion ?? 'acumulable',
+      ajuste_automatico: input.ajusteAutomatico ?? false,
+      ajuste_producto_id: input.ajusteProductoId ? parseInt(input.ajusteProductoId) : null,
+      unidades_por_bloque: input.unidadesPorBloque ?? null,
+      stock_por_bloque: input.stockPorBloque ?? null,
     })
     .eq('id', id)
     .select()

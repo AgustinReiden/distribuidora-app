@@ -17,6 +17,8 @@ import type { ItemPedido } from './precioMayorista'
 // TIPOS
 // =============================================================================
 
+export type ModoExclusion = 'acumulable' | 'excluyente'
+
 export interface PromocionActiva {
   id: string
   nombre: string
@@ -26,6 +28,7 @@ export interface PromocionActiva {
   productoRegaloId?: string
   prioridad?: number
   regaloMueveStock?: boolean
+  modoExclusion?: ModoExclusion
 }
 
 /** Mapa de productoId → promos activas que aplican */
@@ -61,11 +64,71 @@ export function resolverPromociones(
   const bonificaciones: BonificacionResult[] = []
   const productosConPromo = new Set<string>()
 
-  // Recolectar promos vistas + qué productos del pedido las activaron (para exclusión)
+  // 1. Recolectar promos vistas en el pedido
+  const promosVistas = acumularPromos(items, promoMap, { skipOverride: true })
+
+  for (const entry of promosVistas.values()) {
+    for (const pid of entry.productoIdsEnPedido) productosConPromo.add(pid)
+  }
+
+  // 2. Filtrar solo las que DISPARAN (bloques >= 1) — clave para el fix del bug
+  //    "2+2 con 2 fardos debe ganar sobre 3+1 con prio mayor si 3+1 no llega"
+  const queDisparan: PromoEntry[] = []
+  for (const entry of promosVistas.values()) {
+    const { promo, totalQty } = entry
+    const cantCompra = promo.reglas['cantidad_compra']
+    const cantBonif = promo.reglas['cantidad_bonificacion']
+    if (!cantCompra || !cantBonif || cantCompra <= 0) continue
+    const bloques = Math.floor(totalQty / cantCompra)
+    if (bloques <= 0) continue
+    queDisparan.push(entry)
+  }
+
+  // 3. Separar acumulables (siempre pasan) vs excluyentes (se resuelven por grupo)
+  const acumulables = queDisparan.filter(e => (e.promo.modoExclusion ?? 'acumulable') === 'acumulable')
+  const excluyentes = queDisparan.filter(e => e.promo.modoExclusion === 'excluyente')
+
+  // 4. Entre excluyentes: agrupar por productos compartidos y elegir ganador
+  //    por tier más alto (mayor cantidad_compra), tiebreak prioridad, tiebreak id.
+  const ganadoresExcluyentes = resolverConflictosExcluyentes(excluyentes)
+
+  const finales = [...acumulables, ...ganadoresExcluyentes]
+
+  for (const { promo, totalQty, primerProductoId } of finales) {
+    const cantCompra = promo.reglas['cantidad_compra']
+    const cantBonif = promo.reglas['cantidad_bonificacion']
+    const bloques = Math.floor(totalQty / cantCompra)
+    bonificaciones.push({
+      productoId: promo.productoRegaloId || primerProductoId,
+      promoId: promo.id,
+      promoNombre: promo.nombre,
+      cantidadBonificacion: bloques * cantBonif,
+    })
+  }
+
+  return { bonificaciones, productosConPromo }
+}
+
+// =============================================================================
+// HELPERS DE EXCLUSIÓN
+// =============================================================================
+
+interface PromoEntry {
+  promo: PromocionActiva
+  totalQty: number
+  primerProductoId: string
+  productoIdsEnPedido: Set<string>
+}
+
+function acumularPromos(
+  items: ItemPedido[],
+  promoMap: PromoMap,
+  opts: { skipOverride: boolean },
+): Map<string, PromoEntry> {
   const promosVistas = new Map<string, PromoEntry>()
 
   for (const item of items) {
-    if (item.precioOverride) continue
+    if (opts.skipOverride && item.precioOverride) continue
 
     const promos = promoMap.get(String(item.productoId))
     if (!promos) continue
@@ -85,55 +148,28 @@ export function resolverPromociones(
           productoIdsEnPedido: new Set([String(item.productoId)]),
         })
       }
-
-      productosConPromo.add(String(item.productoId))
     }
   }
 
-  // Exclusión: entre promos que compiten por el mismo producto, gana la de mayor prioridad
-  const resueltas = resolverConflictos(promosVistas)
-
-  for (const { promo, totalQty, primerProductoId } of resueltas) {
-    const cantCompra = promo.reglas['cantidad_compra']
-    const cantBonif = promo.reglas['cantidad_bonificacion']
-
-    if (!cantCompra || !cantBonif || cantCompra <= 0) continue
-
-    const bloques = Math.floor(totalQty / cantCompra)
-    if (bloques <= 0) continue
-
-    bonificaciones.push({
-      productoId: promo.productoRegaloId || primerProductoId,
-      promoId: promo.id,
-      promoNombre: promo.nombre,
-      cantidadBonificacion: bloques * cantBonif,
-    })
-  }
-
-  return { bonificaciones, productosConPromo }
-}
-
-// =============================================================================
-// EXCLUSIÓN POR PRIORIDAD
-// =============================================================================
-
-interface PromoEntry {
-  promo: PromocionActiva
-  totalQty: number
-  primerProductoId: string
-  productoIdsEnPedido: Set<string>
+  return promosVistas
 }
 
 /**
- * Agrupa promos en "componentes conectados" (dos promos son vecinas si comparten
- * al menos un producto del pedido). Por cada componente deja sólo la ganadora:
- * mayor prioridad; en empate, id menor (creada antes) gana.
+ * Union-find: dos promos son "vecinas" si comparten al menos 1 producto del pedido.
+ * Por cada componente conectado, gana la de mayor cantidad_compra (tier más alto).
+ * Desempates: mayor prioridad manual; luego id menor (promo creada antes).
+ *
+ * Importante: sólo opera sobre promos que YA disparan. Así, si "3+1 fardo" (tier
+ * superior) no llega al umbral, la "2+2 botellas" de tier menor aplica igual.
  */
-function resolverConflictos(promosVistas: Map<string, PromoEntry>): PromoEntry[] {
-  if (promosVistas.size === 0) return []
+function resolverConflictosExcluyentes(excluyentes: PromoEntry[]): PromoEntry[] {
+  if (excluyentes.length === 0) return []
+
+  const byId = new Map<string, PromoEntry>()
+  for (const e of excluyentes) byId.set(e.promo.id, e)
 
   const parent = new Map<string, string>()
-  for (const id of promosVistas.keys()) parent.set(id, id)
+  for (const id of byId.keys()) parent.set(id, id)
 
   const find = (x: string): string => {
     let r = x
@@ -152,9 +188,9 @@ function resolverConflictos(promosVistas: Map<string, PromoEntry>): PromoEntry[]
     if (ra !== rb) parent.set(ra, rb)
   }
 
-  // Para cada producto del pedido, unir todas las promos que lo cubren
+  // Indexar productos → promos (entre las excluyentes que disparan)
   const productoToPromos = new Map<string, string[]>()
-  for (const [promoId, entry] of promosVistas) {
+  for (const [promoId, entry] of byId) {
     for (const pid of entry.productoIdsEnPedido) {
       const arr = productoToPromos.get(pid) || []
       arr.push(promoId)
@@ -165,9 +201,9 @@ function resolverConflictos(promosVistas: Map<string, PromoEntry>): PromoEntry[]
     for (let i = 1; i < promoIds.length; i++) union(promoIds[0], promoIds[i])
   }
 
-  // Por componente elegir mejor (mayor prioridad, tiebreak id menor)
+  // Agrupar por componente y elegir ganador: tier más alto, luego prioridad, luego id
   const porComponente = new Map<string, PromoEntry[]>()
-  for (const [promoId, entry] of promosVistas) {
+  for (const [promoId, entry] of byId) {
     const root = find(promoId)
     const arr = porComponente.get(root) || []
     arr.push(entry)
@@ -177,6 +213,9 @@ function resolverConflictos(promosVistas: Map<string, PromoEntry>): PromoEntry[]
   const ganadores: PromoEntry[] = []
   for (const grupo of porComponente.values()) {
     grupo.sort((a, b) => {
+      const ca = a.promo.reglas['cantidad_compra'] ?? 0
+      const cb = b.promo.reglas['cantidad_compra'] ?? 0
+      if (ca !== cb) return cb - ca // tier más alto gana (mayor cantidad_compra)
       const pa = a.promo.prioridad ?? 0
       const pb = b.promo.prioridad ?? 0
       if (pa !== pb) return pb - pa
@@ -203,40 +242,30 @@ export function calcularFaltanteParaBonificacion(
 ): Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }> {
   const faltantes: Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }> = []
 
-  const promosAcumuladas = new Map<string, PromoEntry>()
+  // Mostramos nudges para promos que AÚN NO disparan. Para promos acumulables,
+  // no hay conflicto. Para excluyentes, evitamos nudgear la que ya perdería el
+  // conflicto con otra excluyente del mismo grupo que SÍ dispara y tiene mayor tier.
+  const promosAcumuladas = acumularPromos(items, promoMap, { skipOverride: false })
 
-  for (const item of items) {
-    const promos = promoMap.get(String(item.productoId))
-    if (!promos) continue
+  const ganadorasEnMismoGrupo = calcularGanadoresActualesPorGrupo(promosAcumuladas)
 
-    for (const promo of promos) {
-      if (promo.tipo !== 'bonificacion') continue
-
-      const existing = promosAcumuladas.get(promo.id)
-      if (existing) {
-        existing.totalQty += item.cantidad
-        existing.productoIdsEnPedido.add(String(item.productoId))
-      } else {
-        promosAcumuladas.set(promo.id, {
-          promo,
-          totalQty: item.cantidad,
-          primerProductoId: String(item.productoId),
-          productoIdsEnPedido: new Set([String(item.productoId)]),
-        })
-      }
-    }
-  }
-
-  // No nudgear promos que ya perdieron el conflicto por prioridad
-  const ganadoras = resolverConflictos(promosAcumuladas)
-
-  for (const { promo, totalQty, primerProductoId } of ganadoras) {
+  for (const [promoId, { promo, totalQty, primerProductoId, productoIdsEnPedido }] of promosAcumuladas) {
     const cantCompra = promo.reglas['cantidad_compra']
     const cantBonif = promo.reglas['cantidad_bonificacion']
     if (!cantCompra || !cantBonif) continue
 
     const resto = totalQty % cantCompra
     if (resto === 0) continue
+
+    // Si es excluyente y hay otra excluyente en el mismo grupo que ya dispara
+    // y tiene tier superior, no nudgeamos (esta promo está bloqueada).
+    if (promo.modoExclusion === 'excluyente') {
+      const ganadora = findGanadoraEnGrupo(ganadorasEnMismoGrupo, productoIdsEnPedido)
+      if (ganadora && ganadora.promo.id !== promoId) {
+        const cantCompraGanadora = ganadora.promo.reglas['cantidad_compra'] ?? 0
+        if (cantCompraGanadora > cantCompra) continue
+      }
+    }
 
     const faltante = cantCompra - resto
     if (faltante <= Math.ceil(cantCompra * 0.5)) {
@@ -250,4 +279,41 @@ export function calcularFaltanteParaBonificacion(
   }
 
   return faltantes
+}
+
+/**
+ * Para cada producto del pedido, indica cuál promo excluyente (de las que ya
+ * disparan) es la ganadora actual. Se usa para suprimir nudges de excluyentes
+ * perdedoras.
+ */
+function calcularGanadoresActualesPorGrupo(
+  promosVistas: Map<string, PromoEntry>,
+): Map<string, PromoEntry> {
+  const disparan: PromoEntry[] = []
+  for (const entry of promosVistas.values()) {
+    const cantCompra = entry.promo.reglas['cantidad_compra']
+    if (!cantCompra || cantCompra <= 0) continue
+    if (Math.floor(entry.totalQty / cantCompra) <= 0) continue
+    if (entry.promo.modoExclusion !== 'excluyente') continue
+    disparan.push(entry)
+  }
+  const ganadoresPorProducto = new Map<string, PromoEntry>()
+  const ganadores = resolverConflictosExcluyentes(disparan)
+  for (const g of ganadores) {
+    for (const pid of g.productoIdsEnPedido) {
+      ganadoresPorProducto.set(pid, g)
+    }
+  }
+  return ganadoresPorProducto
+}
+
+function findGanadoraEnGrupo(
+  ganadoresPorProducto: Map<string, PromoEntry>,
+  productoIds: Set<string>,
+): PromoEntry | undefined {
+  for (const pid of productoIds) {
+    const g = ganadoresPorProducto.get(pid)
+    if (g) return g
+  }
+  return undefined
 }

@@ -5,7 +5,7 @@
  * Incluye: nombre, fechas, selector de productos, reglas (cantidad_compra, cantidad_bonificacion).
  */
 import { useState, useMemo } from 'react'
-import { X, Search, Gift } from 'lucide-react'
+import { X, Search, Gift, ChevronDown, ChevronRight, Layers, Ban } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
@@ -55,6 +55,23 @@ export default function ModalPromocion({
   const [regaloMueveStock, setRegaloMueveStock] = useState<boolean>(
     promocion?.regalo_mueve_stock ?? false
   )
+  const [modoExclusion, setModoExclusion] = useState<'acumulable' | 'excluyente'>(
+    (promocion?.modo_exclusion as 'acumulable' | 'excluyente') ?? 'acumulable'
+  )
+  const [ajusteAutomatico, setAjusteAutomatico] = useState<boolean>(
+    promocion?.ajuste_automatico ?? false
+  )
+  const [ajusteProductoId, setAjusteProductoId] = useState<string>(
+    promocion?.ajuste_producto_id ? String(promocion.ajuste_producto_id) : ''
+  )
+  const [unidadesPorBloque, setUnidadesPorBloque] = useState<string>(
+    promocion?.unidades_por_bloque ? String(promocion.unidades_por_bloque) : ''
+  )
+  const [stockPorBloque, setStockPorBloque] = useState<string>(
+    promocion?.stock_por_bloque ? String(promocion.stock_por_bloque) : '1'
+  )
+  const [busquedaAjusteProd, setBusquedaAjusteProd] = useState('')
+  const [mostrarAvanzadas, setMostrarAvanzadas] = useState(false)
   const [busqueda, setBusqueda] = useState('')
   const [busquedaRegalo, setBusquedaRegalo] = useState('')
   const [saving, setSaving] = useState(false)
@@ -77,6 +94,15 @@ export default function ModalPromocion({
       p.codigo?.toLowerCase().includes(q)
     )
   }, [productos, busquedaRegalo])
+
+  const productosAjusteFiltrados = useMemo(() => {
+    if (!busquedaAjusteProd.trim()) return productos
+    const q = busquedaAjusteProd.toLowerCase()
+    return productos.filter(p =>
+      p.nombre.toLowerCase().includes(q) ||
+      p.codigo?.toLowerCase().includes(q)
+    )
+  }, [productos, busquedaAjusteProd])
 
   const handleToggleProducto = (id: string) => {
     setProductoIds(prev => {
@@ -113,9 +139,29 @@ export default function ModalPromocion({
       return
     }
 
+    // Validaciones para ajuste automatico
+    if (ajusteAutomatico) {
+      if (!ajusteProductoId) {
+        setError('Seleccioná el producto que se descuenta del stock en el ajuste automático')
+        return
+      }
+      const unidBloque = parseInt(unidadesPorBloque)
+      if (!unidBloque || unidBloque <= 0) {
+        setError('Ingresá cuántas unidades bonificadas forman un bloque (ej: 12 botellas = 1 fardo)')
+        return
+      }
+      const stockBloque = parseInt(stockPorBloque)
+      if (!stockBloque || stockBloque <= 0) {
+        setError('Ingresá cuánto stock descuenta cada bloque (normalmente 1)')
+        return
+      }
+    }
+
     setSaving(true)
     const limite = limiteUsos ? parseInt(limiteUsos) : null
     const prio = parseInt(prioridad)
+    const unidBloque = parseInt(unidadesPorBloque)
+    const stockBloque = parseInt(stockPorBloque)
     const result = await onSave({
       nombre: nombre.trim(),
       tipo: 'bonificacion',
@@ -130,6 +176,11 @@ export default function ModalPromocion({
       ],
       prioridad: Number.isFinite(prio) ? prio : 0,
       regaloMueveStock,
+      modoExclusion,
+      ajusteAutomatico,
+      ajusteProductoId: ajusteAutomatico ? (ajusteProductoId || null) : null,
+      unidadesPorBloque: ajusteAutomatico && Number.isFinite(unidBloque) && unidBloque > 0 ? unidBloque : null,
+      stockPorBloque: ajusteAutomatico && Number.isFinite(stockBloque) && stockBloque > 0 ? stockBloque : null,
     })
     setSaving(false)
 
@@ -205,41 +256,214 @@ export default function ModalPromocion({
             </p>
           </div>
 
-          {/* Prioridad (para exclusion entre promos) */}
+          {/* Modo de exclusion: acumulable vs excluyente */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Prioridad
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              ¿Cómo convive con otras promos?
             </label>
-            <input
-              type="number"
-              value={prioridad}
-              onChange={e => setPrioridad(e.target.value)}
-              placeholder="0"
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
-            />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Si dos promos aplican al mismo pedido, gana la de mayor prioridad. Dejar 0 si no hay conflictos.
-            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setModoExclusion('acumulable')}
+                className={`flex items-start gap-2 p-3 rounded-lg border text-left transition ${
+                  modoExclusion === 'acumulable'
+                    ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-400 dark:border-purple-600 ring-2 ring-purple-200 dark:ring-purple-800'
+                    : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                }`}
+              >
+                <Layers className={`w-4 h-4 mt-0.5 flex-shrink-0 ${modoExclusion === 'acumulable' ? 'text-purple-600 dark:text-purple-400' : 'text-gray-400'}`} />
+                <div className="flex-1">
+                  <p className={`text-sm font-medium ${modoExclusion === 'acumulable' ? 'text-purple-700 dark:text-purple-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                    Acumulable
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Se aplica junto con otras promos del pedido.
+                  </p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setModoExclusion('excluyente')}
+                className={`flex items-start gap-2 p-3 rounded-lg border text-left transition ${
+                  modoExclusion === 'excluyente'
+                    ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-400 dark:border-purple-600 ring-2 ring-purple-200 dark:ring-purple-800'
+                    : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                }`}
+              >
+                <Ban className={`w-4 h-4 mt-0.5 flex-shrink-0 ${modoExclusion === 'excluyente' ? 'text-purple-600 dark:text-purple-400' : 'text-gray-400'}`} />
+                <div className="flex-1">
+                  <p className={`text-sm font-medium ${modoExclusion === 'excluyente' ? 'text-purple-700 dark:text-purple-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                    Excluyente
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Si choca con otra excluyente, gana la de mayor cantidad.
+                  </p>
+                </div>
+              </button>
+            </div>
+            {modoExclusion === 'excluyente' && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                Ejemplo: si tenés una promo "2+2 botellas" y otra "3+1 fardo" excluyentes sobre el mismo producto, al pedir 3 fardos gana la 3+1 (tier más alto). Con sólo 2 fardos, aplica la 2+2.
+              </p>
+            )}
           </div>
 
-          {/* Mueve stock (toggle) */}
-          <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-            <input
-              id="regalo-mueve-stock"
-              type="checkbox"
-              checked={regaloMueveStock}
-              onChange={e => setRegaloMueveStock(e.target.checked)}
-              className="mt-1 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
-            />
-            <div className="flex-1">
-              <label htmlFor="regalo-mueve-stock" className="block text-sm font-medium text-amber-800 dark:text-amber-200 cursor-pointer">
-                El regalo descuenta stock automaticamente
-              </label>
+          {/* Mueve stock (switch style) */}
+          <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                El regalo descuenta stock automáticamente
+              </p>
               <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                Apagalo cuando el regalo es una unidad menor al stock (ej: regalar una botella cuando el stock se lleva por fardo). Vas a ajustar manualmente desde "Ajustar stock" cuando se acumulen suficientes unidades.
+                Apagalo cuando el regalo es una unidad menor al stock (ej: regalar una botella cuando el stock se lleva por fardo).
               </p>
             </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={regaloMueveStock}
+              onClick={() => setRegaloMueveStock(v => !v)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
+                regaloMueveStock ? 'bg-amber-600' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  regaloMueveStock ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
           </div>
+
+          {/* Ajuste automatico de stock */}
+          {!regaloMueveStock && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                    Ajustar stock automáticamente por bloques
+                  </p>
+                  <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                    Cuando se acumulan suficientes bonificaciones como para formar un bloque exacto (ej: 12 botellas = 1 fardo), el sistema descuenta el stock y registra la merma automáticamente. Las unidades que sobran quedan pendientes hasta completar el próximo bloque.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={ajusteAutomatico}
+                  onClick={() => setAjusteAutomatico(v => !v)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    ajusteAutomatico ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      ajusteAutomatico ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {ajusteAutomatico && (
+                <div className="space-y-3 pt-2 border-t border-blue-200 dark:border-blue-800">
+                  {/* Producto a descontar */}
+                  <div>
+                    <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
+                      Producto del que se descuenta el stock
+                    </label>
+                    {ajusteProductoId && (
+                      <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-white dark:bg-gray-700 border border-blue-200 dark:border-blue-700 rounded-lg">
+                        <span className="text-sm text-gray-700 dark:text-gray-200 flex-1 truncate">
+                          {productos.find(p => String(p.id) === ajusteProductoId)?.nombre || `Producto #${ajusteProductoId}`}
+                        </span>
+                        <button
+                          onClick={() => setAjusteProductoId('')}
+                          className="text-blue-600 hover:text-blue-800 text-xs underline"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+                    )}
+                    {!ajusteProductoId && (
+                      <>
+                        <div className="relative mb-1">
+                          <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                          <input
+                            type="text"
+                            value={busquedaAjusteProd}
+                            onChange={e => setBusquedaAjusteProd(e.target.value)}
+                            placeholder="Buscar producto (ej: fardo)..."
+                            className="w-full pl-9 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                          />
+                        </div>
+                        {busquedaAjusteProd.trim() && (
+                          <div className="max-h-32 overflow-y-auto border dark:border-gray-600 rounded-lg divide-y dark:divide-gray-700 bg-white dark:bg-gray-700">
+                            {productosAjusteFiltrados.map(prod => (
+                              <button
+                                key={prod.id}
+                                onClick={() => { setAjusteProductoId(String(prod.id)); setBusquedaAjusteProd('') }}
+                                className="w-full text-left flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-sm"
+                              >
+                                <span className="dark:text-white truncate">{prod.nombre}</span>
+                                {prod.codigo && (
+                                  <span className="text-xs text-gray-400 ml-auto shrink-0">{prod.codigo}</span>
+                                )}
+                              </button>
+                            ))}
+                            {productosAjusteFiltrados.length === 0 && (
+                              <p className="text-sm text-gray-400 px-3 py-4 text-center">Sin resultados</p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Unidades por bloque y Stock por bloque */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        Unidades bonificadas por bloque
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={unidadesPorBloque}
+                        onChange={e => setUnidadesPorBloque(e.target.value)}
+                        placeholder="Ej: 12"
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                      />
+                      <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
+                        Cuántas unidades regaladas forman un bloque.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        Stock descontado por bloque
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={stockPorBloque}
+                        onChange={e => setStockPorBloque(e.target.value)}
+                        placeholder="Ej: 1"
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                      />
+                      <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
+                        Cuánto se descuenta por cada bloque (normalmente 1).
+                      </p>
+                    </div>
+                  </div>
+
+                  {unidadesPorBloque && stockPorBloque && parseInt(unidadesPorBloque) > 0 && parseInt(stockPorBloque) > 0 && (
+                    <p className="text-xs text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 rounded px-2 py-1.5">
+                      Resumen: cada {unidadesPorBloque} unidades bonificadas descuentan {stockPorBloque} del stock del producto elegido y generan una merma.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Reglas de bonificacion */}
           <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
@@ -370,6 +594,35 @@ export default function ModalPromocion({
                 <p className="text-sm text-gray-400 px-3 py-4 text-center">Sin resultados</p>
               )}
             </div>
+          </div>
+
+          {/* Opciones avanzadas (collapsible) */}
+          <div className="border-t dark:border-gray-700 pt-3">
+            <button
+              type="button"
+              onClick={() => setMostrarAvanzadas(v => !v)}
+              className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+            >
+              {mostrarAvanzadas ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              <span>Opciones avanzadas</span>
+            </button>
+            {mostrarAvanzadas && (
+              <div className="mt-3 pl-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Prioridad (desempate entre excluyentes)
+                </label>
+                <input
+                  type="number"
+                  value={prioridad}
+                  onChange={e => setPrioridad(e.target.value)}
+                  placeholder="0"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Sólo se usa entre promos <strong>excluyentes</strong> con igual cantidad de compra. Gana la de mayor prioridad. Casi nunca hace falta tocarlo.
+                </p>
+              </div>
+            )}
           </div>
 
           {error && (
