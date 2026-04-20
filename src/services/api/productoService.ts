@@ -41,6 +41,16 @@ class ProductoService extends BaseService<Producto> {
   }
 
   /**
+   * Obtiene varios productos por ID en una sola consulta.
+   */
+  async getByIds(ids: string[]): Promise<Producto[]> {
+    if (ids.length === 0) return []
+    return this.query(async (query) => {
+      return query.select('*').in('id', ids)
+    }) as Promise<Producto[]>
+  }
+
+  /**
    * Obtiene productos con stock bajo
    */
   async getStockBajo(umbral = 10): Promise<Producto[]> {

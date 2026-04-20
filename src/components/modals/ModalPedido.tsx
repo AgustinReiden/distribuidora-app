@@ -3,6 +3,7 @@ import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck 
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
+import ModalBase from './ModalBase';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -211,24 +212,20 @@ const ModalPedido = memo(function ModalPedido({
   const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, totalFinal, totalOriginal, ahorro, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b dark:border-gray-700">
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-semibold dark:text-white">Nuevo Pedido</h2>
-            <select
-              value={nuevoPedido.tipoFactura || 'ZZ'}
-              onChange={(e) => onTipoFacturaChange?.(e.target.value as 'ZZ' | 'FC')}
-              className="px-2 py-1 text-xs font-medium border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            >
-              <option value="ZZ">ZZ</option>
-              <option value="FC">FC</option>
-            </select>
-          </div>
-          <button onClick={onClose}><X className="w-6 h-6 text-gray-500 dark:text-gray-400" /></button>
-        </div>
+    <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl">
+      <div className="px-4 pt-2 pb-0">
+        <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mr-2">Tipo de factura:</label>
+        <select
+          value={nuevoPedido.tipoFactura || 'ZZ'}
+          onChange={(e) => onTipoFacturaChange?.(e.target.value as 'ZZ' | 'FC')}
+          className="px-2 py-1 text-xs font-medium border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+        >
+          <option value="ZZ">ZZ</option>
+          <option value="FC">FC</option>
+        </select>
+      </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="max-h-[65vh] overflow-y-auto p-4 space-y-4">
           {/* Seccion Cliente */}
           <div>
             <div className="flex justify-between items-center mb-1">
@@ -277,15 +274,22 @@ const ModalPedido = memo(function ModalPedido({
                   <input type="text" value={busquedaCliente} onChange={e => setBusquedaCliente(e.target.value)} className="w-full pl-10 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Buscar por nombre, razón social o CUIT..." />
                 </div>
                 {clientesFiltrados.length > 0 && (
-                  <div className="border dark:border-gray-600 rounded-lg max-h-40 overflow-y-auto mt-2">
+                  <div role="listbox" aria-label="Resultados de clientes" className="border dark:border-gray-600 rounded-lg max-h-40 overflow-y-auto mt-2">
                     {clientesFiltrados.map(c => (
-                      <div key={c.id} className="p-3 hover:bg-blue-50 dark:hover:bg-blue-900/30 border-b dark:border-gray-600 cursor-pointer" onClick={() => { onClienteChange(c.id.toString()); setBusquedaCliente(''); }}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        key={c.id}
+                        className="w-full text-left p-3 hover:bg-blue-50 dark:hover:bg-blue-900/30 border-b dark:border-gray-600 focus:outline-none focus:bg-blue-100 dark:focus:bg-blue-900/50"
+                        onClick={() => { onClienteChange(c.id.toString()); setBusquedaCliente(''); }}
+                      >
                         <p className="font-medium dark:text-white">{c.nombre_fantasia}</p>
                         {c.razon_social && c.razon_social !== c.nombre_fantasia && (
                           <p className="text-xs text-gray-400">{c.razon_social}</p>
                         )}
                         <p className="text-sm text-gray-500 dark:text-gray-400">{c.direccion}</p>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -668,6 +672,22 @@ const ModalPedido = memo(function ModalPedido({
               )}
             </div>
           </div>
+          {violacionesMOQ.length > 0 && (
+            <div role="alert" className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
+              <strong>No se puede confirmar:</strong> los siguientes productos no cumplen el mínimo de compra:
+              <ul className="list-disc ml-5 mt-1">
+                {violacionesMOQ.map(v => {
+                  const producto = productos.find(p => p.id === v.productoId);
+                  const nombre = producto?.nombre || v.productoId;
+                  return (
+                    <li key={v.productoId}>
+                      {nombre}: mínimo {v.cantidadMinima} ({v.grupoNombre}), cargaste {v.cantidadActual}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
           <div className="flex justify-end space-x-3">
             <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
             <button onClick={onGuardar} disabled={guardando || violacionesMOQ.length > 0} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 flex items-center">
@@ -675,8 +695,7 @@ const ModalPedido = memo(function ModalPedido({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </ModalBase>
   );
 });
 

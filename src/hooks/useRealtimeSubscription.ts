@@ -57,7 +57,7 @@ export function useRealtimeSubscription({
       return
     }
 
-    const channelName = `realtime-${table}-${event}-${Date.now()}`
+    const channelName = `realtime-${schema}-${table}-${event}`
 
     const channel = (supabase
       .channel(channelName) as any)

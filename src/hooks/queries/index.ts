@@ -50,6 +50,8 @@ export {
   usePagosMasivosMutation,
 } from './usePedidosQuery'
 export type { PaginatedResult } from './usePedidosQuery'
+export { usePedidoStatsQuery, EMPTY_PEDIDO_STATS_SUMMARY } from './usePedidoStatsQuery'
+export type { PedidoStatsBucket, PedidoStatsSummary } from './usePedidoStatsQuery'
 
 // Usuarios
 export {

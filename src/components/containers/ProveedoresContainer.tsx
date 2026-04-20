@@ -20,6 +20,7 @@ import type { ProveedorDBExtended, ProveedorFormInputExtended } from '../../type
 // Lazy load de componentes
 const VistaProveedores = lazy(() => import('../vistas/VistaProveedores'))
 const ModalProveedor = lazy(() => import('../modals/ModalProveedor'))
+const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (
@@ -27,6 +28,14 @@ function LoadingState() {
       <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
     </div>
   )
+}
+
+interface ConfirmConfig {
+  visible: boolean
+  tipo?: 'danger' | 'warning' | 'success'
+  titulo?: string
+  mensaje?: string
+  onConfirm?: () => void
 }
 
 export default function ProveedoresContainer(): React.ReactElement {
@@ -48,6 +57,7 @@ export default function ProveedoresContainer(): React.ReactElement {
 
   // Estado de edición
   const [proveedorEditando, setProveedorEditando] = useState<ProveedorDBExtended | null>(null)
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // Handlers
   const handleNuevoProveedor = useCallback(() => {
@@ -60,16 +70,22 @@ export default function ProveedoresContainer(): React.ReactElement {
     setModalProveedorOpen(true)
   }, [])
 
-  const handleEliminarProveedor = useCallback(async (id: string) => {
+  const handleEliminarProveedor = useCallback((id: string) => {
     const proveedor = proveedores.find(p => p.id === id)
     const nombre = proveedor?.nombre || 'este proveedor'
-    if (!window.confirm(`¿Eliminar permanentemente al proveedor "${nombre}"?\n\nLas compras asociadas conservarán el nombre del proveedor.`)) return
-    try {
-      await eliminarProveedor.mutateAsync(id)
-      notify.success(`Proveedor "${nombre}" eliminado`)
-    } catch {
-      notify.error('Error al eliminar proveedor')
-    }
+    setConfirmConfig({
+      visible: true, tipo: 'danger', titulo: 'Eliminar proveedor',
+      mensaje: `¿Eliminar permanentemente al proveedor "${nombre}"? Las compras asociadas conservarán el nombre del proveedor.`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await eliminarProveedor.mutateAsync(id)
+          notify.success(`Proveedor "${nombre}" eliminado`)
+        } catch {
+          notify.error('Error al eliminar proveedor')
+        }
+      },
+    })
   }, [eliminarProveedor, notify, proveedores])
 
   const handleToggleActivo = useCallback(async (proveedor: ProveedorDBExtended) => {
@@ -124,6 +140,21 @@ export default function ProveedoresContainer(): React.ReactElement {
               setModalProveedorOpen(false)
               setProveedorEditando(null)
             }}
+          />
+        </Suspense>
+      )}
+
+      {confirmConfig.visible && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: confirmConfig.tipo || 'warning',
+              titulo: confirmConfig.titulo || '',
+              mensaje: confirmConfig.mensaje || '',
+              onConfirm: confirmConfig.onConfirm || (() => {}),
+            }}
+            onClose={() => setConfirmConfig({ visible: false })}
           />
         </Suspense>
       )}

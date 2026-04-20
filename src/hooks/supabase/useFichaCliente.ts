@@ -36,20 +36,30 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
     if (!clienteId) return
     setLoading(true)
     try {
+      // Query ligera: todos los pedidos del cliente (sólo columnas necesarias para stats)
+      const { data: todosLiviano, error: errorLiv } = await supabase
+        .from('pedidos')
+        .select('id, total, estado_pago, created_at')
+        .eq('cliente_id', clienteId)
+        .order('created_at', { ascending: false })
+      if (errorLiv) throw errorLiv
+
+      // Query pesada: últimos 50 pedidos con items (para UI + productos favoritos)
       const { data: pedidos, error: errorPedidos } = await supabase
         .from('pedidos')
         .select(`*, items:pedido_items(*, producto:productos(*))`)
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false })
+        .limit(50)
       if (errorPedidos) throw errorPedidos
 
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
-      const pedidosData = pedidosTyped
-      const totalCompras = pedidosData.reduce((s, p) => s + (p.total || 0), 0)
-      const pedidosPagados = pedidosData.filter(p => p.estado_pago === 'pagado')
-      const pedidosPendientes = pedidosData.filter(p => p.estado_pago !== 'pagado')
+      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'total' | 'estado_pago' | 'created_at'>>
+      const totalCompras = pedidosLivianos.reduce((s, p) => s + (p.total || 0), 0)
+      const pedidosPagados = pedidosLivianos.filter(p => p.estado_pago === 'pagado')
+      const pedidosPendientes = pedidosLivianos.filter(p => p.estado_pago !== 'pagado')
 
       // Fetch pagos from the pagos table (source of truth for payments)
       const { data: pagosCliente } = await supabase
@@ -59,8 +69,9 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const totalPagosRegistrados = (pagosCliente || []).reduce((s: number, p: { monto: number }) => s + (p.monto || 0), 0)
       const totalPendienteReal = totalCompras - totalPagosRegistrados
 
+      // Productos favoritos se calculan sobre los últimos 50 pedidos (limitación aceptada)
       const productosFrecuencia: ProductosFrecuenciaMap = {}
-      pedidosData.forEach(p => {
+      pedidosTyped.forEach(p => {
         p.items?.forEach(item => {
           const nombre = item.producto?.nombre || 'Desconocido'
           if (!productosFrecuencia[nombre]) productosFrecuencia[nombre] = { nombre, cantidad: 0, veces: 0 }
@@ -72,23 +83,23 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         .sort((a, b) => b.cantidad - a.cantidad)
         .slice(0, 5)
 
-      const ultimoPedido = pedidosData[0]?.created_at
+      const ultimoPedido = pedidosLivianos[0]?.created_at
       const diasDesdeUltimoP = ultimoPedido
         ? Math.floor((new Date().getTime() - new Date(ultimoPedido).getTime()) / (1000 * 60 * 60 * 24))
         : null
 
-      const ticketPromedio = pedidosData.length > 0 ? totalCompras / pedidosData.length : 0
+      const ticketPromedio = pedidosLivianos.length > 0 ? totalCompras / pedidosLivianos.length : 0
 
       let frecuenciaCompra = 0
-      if (pedidosData.length > 1) {
-        const primerPedido = new Date(pedidosData[pedidosData.length - 1].created_at || 0)
-        const ultimoPedidoDate = new Date(pedidosData[0].created_at || 0)
+      if (pedidosLivianos.length > 1) {
+        const primerPedido = new Date(pedidosLivianos[pedidosLivianos.length - 1].created_at || 0)
+        const ultimoPedidoDate = new Date(pedidosLivianos[0].created_at || 0)
         const meses = Math.max(1, (ultimoPedidoDate.getTime() - primerPedido.getTime()) / (1000 * 60 * 60 * 24 * 30))
-        frecuenciaCompra = pedidosData.length / meses
+        frecuenciaCompra = pedidosLivianos.length / meses
       }
 
       setEstadisticas({
-        totalPedidos: pedidosData.length,
+        totalPedidos: pedidosLivianos.length,
         totalCompras,
         pedidosPagados: pedidosPagados.length,
         montoPagado: totalPagosRegistrados,

@@ -20,6 +20,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 
 const VistaPromociones = lazy(() => import('../vistas/VistaPromociones'))
 const ModalPromocion = lazy(() => import('../modals/ModalPromocion'))
+const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (
@@ -27,6 +28,14 @@ function LoadingState() {
       <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
     </div>
   )
+}
+
+interface ConfirmConfig {
+  visible: boolean
+  tipo?: 'danger' | 'warning' | 'success'
+  titulo?: string
+  mensaje?: string
+  onConfirm?: () => void
 }
 
 export default function PromocionesContainer(): React.ReactElement {
@@ -47,6 +56,7 @@ export default function PromocionesContainer(): React.ReactElement {
   // Estado modal
   const [modalOpen, setModalOpen] = useState(false)
   const [promoEditando, setPromoEditando] = useState<PromocionConDetalles | null>(null)
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   const handleNuevaPromocion = useCallback(() => {
     setPromoEditando(null)
@@ -58,16 +68,22 @@ export default function PromocionesContainer(): React.ReactElement {
     setModalOpen(true)
   }, [])
 
-  const handleEliminarPromocion = useCallback(async (id: string) => {
+  const handleEliminarPromocion = useCallback((id: string) => {
     const promo = promociones.find(p => p.id === id)
     const nombre = promo?.nombre || 'esta promocion'
-    if (!window.confirm(`¿Eliminar la promocion "${nombre}"?\n\nEsto eliminara la promo y sus reglas.`)) return
-    try {
-      await eliminarPromocion.mutateAsync(id)
-      notify.success(`Promocion "${nombre}" eliminada`)
-    } catch {
-      notify.error('Error al eliminar promocion')
-    }
+    setConfirmConfig({
+      visible: true, tipo: 'danger', titulo: 'Eliminar promoción',
+      mensaje: `¿Eliminar la promoción "${nombre}"? Se eliminarán la promo y sus reglas.`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await eliminarPromocion.mutateAsync(id)
+          notify.success(`Promoción "${nombre}" eliminada`)
+        } catch {
+          notify.error('Error al eliminar promoción')
+        }
+      },
+    })
   }, [eliminarPromocion, notify, promociones])
 
   const handleToggleActivo = useCallback(async (promo: PromocionConDetalles) => {
@@ -137,6 +153,21 @@ export default function PromocionesContainer(): React.ReactElement {
               setModalOpen(false)
               setPromoEditando(null)
             }}
+          />
+        </Suspense>
+      )}
+
+      {confirmConfig.visible && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: confirmConfig.tipo || 'warning',
+              titulo: confirmConfig.titulo || '',
+              mensaje: confirmConfig.mensaje || '',
+              onConfirm: confirmConfig.onConfirm || (() => {}),
+            }}
+            onClose={() => setConfirmConfig({ visible: false })}
           />
         </Suspense>
       )}

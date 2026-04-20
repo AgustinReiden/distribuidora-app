@@ -18,6 +18,7 @@ import type { GrupoPrecioConDetalles, GrupoPrecioFormInput } from '../../types'
 
 const VistaGruposPrecio = lazy(() => import('../vistas/VistaGruposPrecio'))
 const ModalGrupoPrecio = lazy(() => import('../modals/ModalGrupoPrecio'))
+const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (
@@ -25,6 +26,14 @@ function LoadingState() {
       <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
     </div>
   )
+}
+
+interface ConfirmConfig {
+  visible: boolean
+  tipo?: 'danger' | 'warning' | 'success'
+  titulo?: string
+  mensaje?: string
+  onConfirm?: () => void
 }
 
 export default function GruposPrecioContainer(): React.ReactElement {
@@ -43,6 +52,7 @@ export default function GruposPrecioContainer(): React.ReactElement {
   // Estado modal
   const [modalOpen, setModalOpen] = useState(false)
   const [grupoEditando, setGrupoEditando] = useState<GrupoPrecioConDetalles | null>(null)
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   const handleNuevoGrupo = useCallback(() => {
     setGrupoEditando(null)
@@ -54,16 +64,22 @@ export default function GruposPrecioContainer(): React.ReactElement {
     setModalOpen(true)
   }, [])
 
-  const handleEliminarGrupo = useCallback(async (id: string) => {
+  const handleEliminarGrupo = useCallback((id: string) => {
     const grupo = grupos.find(g => g.id === id)
     const nombre = grupo?.nombre || 'este grupo'
-    if (!window.confirm(`¿Eliminar el grupo "${nombre}"?\n\nLos productos no se verán afectados, solo se elimina la regla de precio mayorista.`)) return
-    try {
-      await eliminarGrupo.mutateAsync(id)
-      notify.success(`Grupo "${nombre}" eliminado`)
-    } catch {
-      notify.error('Error al eliminar grupo')
-    }
+    setConfirmConfig({
+      visible: true, tipo: 'danger', titulo: 'Eliminar grupo de precio',
+      mensaje: `¿Eliminar el grupo "${nombre}"? Los productos no se verán afectados, solo se elimina la regla de precio mayorista.`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await eliminarGrupo.mutateAsync(id)
+          notify.success(`Grupo "${nombre}" eliminado`)
+        } catch {
+          notify.error('Error al eliminar grupo')
+        }
+      },
+    })
   }, [eliminarGrupo, notify, grupos])
 
   const handleToggleActivo = useCallback(async (grupo: GrupoPrecioConDetalles) => {
@@ -118,6 +134,21 @@ export default function GruposPrecioContainer(): React.ReactElement {
               setModalOpen(false)
               setGrupoEditando(null)
             }}
+          />
+        </Suspense>
+      )}
+
+      {confirmConfig.visible && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: confirmConfig.tipo || 'warning',
+              titulo: confirmConfig.titulo || '',
+              mensaje: confirmConfig.mensaje || '',
+              onConfirm: confirmConfig.onConfirm || (() => {}),
+            }}
+            onClose={() => setConfirmConfig({ visible: false })}
           />
         </Suspense>
       )}

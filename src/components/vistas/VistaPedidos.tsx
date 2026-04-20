@@ -16,6 +16,7 @@ import type {
   PerfilDB,
   FiltrosPedidosState
 } from '../../types';
+import type { PedidoStatsSummary } from '../../hooks/queries';
 
 // =============================================================================
 // INTERFACES DE PROPS
@@ -26,6 +27,8 @@ export interface VistaPedidosProps {
   pedidos: PedidoDB[];
   /** Total de pedidos que coinciden con los filtros (para paginación) */
   totalCount: number;
+  /** Totales por estado/pago sobre todos los pedidos filtrados (no sólo la página) */
+  statsSummary: PedidoStatsSummary;
   paginaActual: number;
   totalPaginas: number;
   busqueda: string;
@@ -66,6 +69,7 @@ export interface VistaPedidosProps {
 export default function VistaPedidos({
   pedidos,
   totalCount,
+  statsSummary,
   paginaActual,
   totalPaginas,
   busqueda,
@@ -192,8 +196,8 @@ export default function VistaPedidos({
         onModalFiltroFecha={onModalFiltroFecha}
       />
 
-      {/* Resumen de estados */}
-      <PedidoStats pedidosParaMostrar={pedidos} />
+      {/* Resumen de estados (totales sobre todos los pedidos filtrados) */}
+      <PedidoStats summary={statsSummary} />
 
       {/* Lista de pedidos */}
       {loading ? (
