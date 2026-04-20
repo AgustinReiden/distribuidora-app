@@ -501,8 +501,8 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pedidoAsignando, asignarTransportistaMut, cambiarEstado, notify])
 
-  // ModalEditarPedido: onSave({ notas, formaPago, estadoPago, montoPagado })
-  const handleGuardarEdicion = useCallback(async (data: { notas: string; formaPago: string; estadoPago: string; montoPagado: number; fecha?: string }) => {
+  // ModalEditarPedido: onSave({ notas, formaPago, estadoPago, montoPagado, fecha?, fechaEntrega?, fechaEntregaProgramada? })
+  const handleGuardarEdicion = useCallback(async (data: { notas: string; formaPago: string; estadoPago: string; montoPagado: number; fecha?: string; fechaEntrega?: string; fechaEntregaProgramada?: string }) => {
     if (!pedidoEditando) return
     setGuardando(true)
     try {
@@ -511,6 +511,10 @@ export default function PedidosContainer(): React.ReactElement {
         estado_pago: data.estadoPago, monto_pagado: data.montoPagado ?? 0,
       }
       if (data.fecha) updateData.fecha = data.fecha
+      if (data.fechaEntrega) {
+        updateData.fecha_entrega = data.fechaEntrega.includes('T') ? data.fechaEntrega : `${data.fechaEntrega}T12:00:00Z`
+      }
+      if (data.fechaEntregaProgramada) updateData.fecha_entrega_programada = data.fechaEntregaProgramada
       const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoEditando.id)
       if (error) throw error
       // Invalidar cache para que los cambios se reflejen en la UI

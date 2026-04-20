@@ -161,7 +161,7 @@ function PedidoFilters({
             <Truck className="w-4 h-4 text-gray-500 dark:text-gray-400" />
             {(() => {
               const hoy = fechaLocalISO();
-              const manana = (() => { const d = new Date(hoy + 'T12:00:00'); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0]; })();
+              const manana = (() => { const d = new Date(hoy + 'T12:00:00'); d.setDate(d.getDate() + 1); return fechaLocalISO(d); })();
               const activa = filtros.fechaEntregaProgramada;
               return (
                 <>

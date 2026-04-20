@@ -183,7 +183,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const haceUnaSemana = useMemo(() => {
     const d = new Date()
     d.setDate(d.getDate() - 7)
-    return d.toISOString().split('T')[0]
+    return fechaLocalISO(d)
   }, [])
 
   const [fechaDesde, setFechaDesde] = useState<string>(haceUnaSemana)
