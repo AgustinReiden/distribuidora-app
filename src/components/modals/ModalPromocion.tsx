@@ -49,6 +49,12 @@ export default function ModalPromocion({
   const [limiteUsos, setLimiteUsos] = useState<string>(
     promocion?.limite_usos ? String(promocion.limite_usos) : ''
   )
+  const [prioridad, setPrioridad] = useState<string>(
+    promocion?.prioridad != null ? String(promocion.prioridad) : '0'
+  )
+  const [regaloMueveStock, setRegaloMueveStock] = useState<boolean>(
+    promocion?.regalo_mueve_stock ?? false
+  )
   const [busqueda, setBusqueda] = useState('')
   const [busquedaRegalo, setBusquedaRegalo] = useState('')
   const [saving, setSaving] = useState(false)
@@ -109,6 +115,7 @@ export default function ModalPromocion({
 
     setSaving(true)
     const limite = limiteUsos ? parseInt(limiteUsos) : null
+    const prio = parseInt(prioridad)
     const result = await onSave({
       nombre: nombre.trim(),
       tipo: 'bonificacion',
@@ -121,6 +128,8 @@ export default function ModalPromocion({
         { clave: 'cantidad_compra', valor: compra },
         { clave: 'cantidad_bonificacion', valor: bonif },
       ],
+      prioridad: Number.isFinite(prio) ? prio : 0,
+      regaloMueveStock,
     })
     setSaving(false)
 
@@ -194,6 +203,42 @@ export default function ModalPromocion({
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Se desactiva automaticamente al alcanzar este numero de bonificaciones entregadas. Dejar vacio para sin limite.
             </p>
+          </div>
+
+          {/* Prioridad (para exclusion entre promos) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Prioridad
+            </label>
+            <input
+              type="number"
+              value={prioridad}
+              onChange={e => setPrioridad(e.target.value)}
+              placeholder="0"
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Si dos promos aplican al mismo pedido, gana la de mayor prioridad. Dejar 0 si no hay conflictos.
+            </p>
+          </div>
+
+          {/* Mueve stock (toggle) */}
+          <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+            <input
+              id="regalo-mueve-stock"
+              type="checkbox"
+              checked={regaloMueveStock}
+              onChange={e => setRegaloMueveStock(e.target.checked)}
+              className="mt-1 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+            />
+            <div className="flex-1">
+              <label htmlFor="regalo-mueve-stock" className="block text-sm font-medium text-amber-800 dark:text-amber-200 cursor-pointer">
+                El regalo descuenta stock automaticamente
+              </label>
+              <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                Apagalo cuando el regalo es una unidad menor al stock (ej: regalar una botella cuando el stock se lleva por fardo). Vas a ajustar manualmente desde "Ajustar stock" cuando se acumulen suficientes unidades.
+              </p>
+            </div>
           </div>
 
           {/* Reglas de bonificacion */}

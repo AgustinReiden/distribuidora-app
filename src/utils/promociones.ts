@@ -24,6 +24,8 @@ export interface PromocionActiva {
   productoIds: string[]
   reglas: Record<string, number>
   productoRegaloId?: string
+  prioridad?: number
+  regaloMueveStock?: boolean
 }
 
 /** Mapa de productoId → promos activas que aplican */
@@ -59,8 +61,8 @@ export function resolverPromociones(
   const bonificaciones: BonificacionResult[] = []
   const productosConPromo = new Set<string>()
 
-  // Recolectar todas las promos únicas que aplican a items del pedido
-  const promosVistas = new Map<string, { promo: PromocionActiva; totalQty: number; primerProductoId: string }>()
+  // Recolectar promos vistas + qué productos del pedido las activaron (para exclusión)
+  const promosVistas = new Map<string, PromoEntry>()
 
   for (const item of items) {
     if (item.precioOverride) continue
@@ -74,21 +76,24 @@ export function resolverPromociones(
       const existing = promosVistas.get(promo.id)
       if (existing) {
         existing.totalQty += item.cantidad
+        existing.productoIdsEnPedido.add(String(item.productoId))
       } else {
         promosVistas.set(promo.id, {
           promo,
           totalQty: item.cantidad,
           primerProductoId: String(item.productoId),
+          productoIdsEnPedido: new Set([String(item.productoId)]),
         })
       }
 
-      // Marcar este producto como parte de una promo
       productosConPromo.add(String(item.productoId))
     }
   }
 
-  // Resolver bonificación para cada promo usando el total acumulado
-  for (const [, { promo, totalQty, primerProductoId }] of promosVistas) {
+  // Exclusión: entre promos que compiten por el mismo producto, gana la de mayor prioridad
+  const resueltas = resolverConflictos(promosVistas)
+
+  for (const { promo, totalQty, primerProductoId } of resueltas) {
     const cantCompra = promo.reglas['cantidad_compra']
     const cantBonif = promo.reglas['cantidad_bonificacion']
 
@@ -109,6 +114,82 @@ export function resolverPromociones(
 }
 
 // =============================================================================
+// EXCLUSIÓN POR PRIORIDAD
+// =============================================================================
+
+interface PromoEntry {
+  promo: PromocionActiva
+  totalQty: number
+  primerProductoId: string
+  productoIdsEnPedido: Set<string>
+}
+
+/**
+ * Agrupa promos en "componentes conectados" (dos promos son vecinas si comparten
+ * al menos un producto del pedido). Por cada componente deja sólo la ganadora:
+ * mayor prioridad; en empate, id menor (creada antes) gana.
+ */
+function resolverConflictos(promosVistas: Map<string, PromoEntry>): PromoEntry[] {
+  if (promosVistas.size === 0) return []
+
+  const parent = new Map<string, string>()
+  for (const id of promosVistas.keys()) parent.set(id, id)
+
+  const find = (x: string): string => {
+    let r = x
+    while (parent.get(r)! !== r) r = parent.get(r)!
+    let cur = x
+    while (parent.get(cur)! !== r) {
+      const next = parent.get(cur)!
+      parent.set(cur, r)
+      cur = next
+    }
+    return r
+  }
+
+  const union = (a: string, b: string) => {
+    const ra = find(a), rb = find(b)
+    if (ra !== rb) parent.set(ra, rb)
+  }
+
+  // Para cada producto del pedido, unir todas las promos que lo cubren
+  const productoToPromos = new Map<string, string[]>()
+  for (const [promoId, entry] of promosVistas) {
+    for (const pid of entry.productoIdsEnPedido) {
+      const arr = productoToPromos.get(pid) || []
+      arr.push(promoId)
+      productoToPromos.set(pid, arr)
+    }
+  }
+  for (const promoIds of productoToPromos.values()) {
+    for (let i = 1; i < promoIds.length; i++) union(promoIds[0], promoIds[i])
+  }
+
+  // Por componente elegir mejor (mayor prioridad, tiebreak id menor)
+  const porComponente = new Map<string, PromoEntry[]>()
+  for (const [promoId, entry] of promosVistas) {
+    const root = find(promoId)
+    const arr = porComponente.get(root) || []
+    arr.push(entry)
+    porComponente.set(root, arr)
+  }
+
+  const ganadores: PromoEntry[] = []
+  for (const grupo of porComponente.values()) {
+    grupo.sort((a, b) => {
+      const pa = a.promo.prioridad ?? 0
+      const pb = b.promo.prioridad ?? 0
+      if (pa !== pb) return pb - pa
+      const ia = Number(a.promo.id), ib = Number(b.promo.id)
+      if (!Number.isNaN(ia) && !Number.isNaN(ib)) return ia - ib
+      return a.promo.id.localeCompare(b.promo.id)
+    })
+    ganadores.push(grupo[0])
+  }
+  return ganadores
+}
+
+// =============================================================================
 // HELPERS
 // =============================================================================
 
@@ -122,8 +203,7 @@ export function calcularFaltanteParaBonificacion(
 ): Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }> {
   const faltantes: Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }> = []
 
-  // Acumular cantidades por promo
-  const promosAcumuladas = new Map<string, { promo: PromocionActiva; totalQty: number; primerProductoId: string }>()
+  const promosAcumuladas = new Map<string, PromoEntry>()
 
   for (const item of items) {
     const promos = promoMap.get(String(item.productoId))
@@ -135,26 +215,30 @@ export function calcularFaltanteParaBonificacion(
       const existing = promosAcumuladas.get(promo.id)
       if (existing) {
         existing.totalQty += item.cantidad
+        existing.productoIdsEnPedido.add(String(item.productoId))
       } else {
         promosAcumuladas.set(promo.id, {
           promo,
           totalQty: item.cantidad,
           primerProductoId: String(item.productoId),
+          productoIdsEnPedido: new Set([String(item.productoId)]),
         })
       }
     }
   }
 
-  for (const [, { promo, totalQty, primerProductoId }] of promosAcumuladas) {
+  // No nudgear promos que ya perdieron el conflicto por prioridad
+  const ganadoras = resolverConflictos(promosAcumuladas)
+
+  for (const { promo, totalQty, primerProductoId } of ganadoras) {
     const cantCompra = promo.reglas['cantidad_compra']
     const cantBonif = promo.reglas['cantidad_bonificacion']
     if (!cantCompra || !cantBonif) continue
 
     const resto = totalQty % cantCompra
-    if (resto === 0) continue // Ya califica exacto
+    if (resto === 0) continue
 
     const faltante = cantCompra - resto
-    // Solo mostrar nudge si falta poco (menos del 50%)
     if (faltante <= Math.ceil(cantCompra * 0.5)) {
       faltantes.push({
         productoId: primerProductoId,

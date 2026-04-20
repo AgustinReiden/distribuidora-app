@@ -40,6 +40,8 @@ export interface PromocionFormInput {
   productoIds: string[]
   productoRegaloId?: string | null
   reglas: { clave: string; valor: number }[]
+  prioridad?: number
+  regaloMueveStock?: boolean
 }
 
 // =============================================================================
@@ -109,6 +111,8 @@ async function fetchPromoMap(): Promise<PromoMap> {
       productoIds,
       reglas: reglasMap,
       productoRegaloId: promo.producto_regalo_id ? String(promo.producto_regalo_id) : undefined,
+      prioridad: promo.prioridad ?? 0,
+      regaloMueveStock: promo.regalo_mueve_stock ?? false,
     }
 
     for (const productoId of productoIds) {
@@ -172,6 +176,8 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
       fecha_fin: input.fechaFin || null,
       limite_usos: input.limiteUsos ?? null,
       producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
+      prioridad: input.prioridad ?? 0,
+      regalo_mueve_stock: input.regaloMueveStock ?? false,
     }])
     .select()
     .single()
@@ -231,6 +237,8 @@ async function updatePromocion(
       fecha_fin: input.fechaFin || null,
       limite_usos: input.limiteUsos ?? null,
       producto_regalo_id: input.productoRegaloId ? parseInt(input.productoRegaloId) : null,
+      prioridad: input.prioridad ?? 0,
+      regalo_mueve_stock: input.regaloMueveStock ?? false,
     })
     .eq('id', id)
     .select()
@@ -302,29 +310,26 @@ async function togglePromocionActiva(id: string, activo: boolean): Promise<Promo
 
 interface AjustarStockInput {
   promocionId: string
+  productoRegaloId: string
+  cantidadStock: number
   usosAjustados: number
   usuarioId: string
   observaciones?: string
 }
 
 async function ajustarStockPromo(input: AjustarStockInput): Promise<void> {
-  // 1. Insertar registro en promo_ajustes
-  const { error: errorAjuste } = await supabase
-    .from('promo_ajustes')
-    .insert([{
-      promocion_id: parseInt(input.promocionId),
-      usos_ajustados: input.usosAjustados,
-      usuario_id: input.usuarioId,
-      observaciones: input.observaciones || null,
-    }])
-  if (errorAjuste) throw errorAjuste
-
-  // 2. Resetear usos_pendientes a 0
-  const { error: errorReset } = await supabase
-    .from('promociones')
-    .update({ usos_pendientes: 0 })
-    .eq('id', input.promocionId)
-  if (errorReset) throw errorReset
+  const { data, error } = await supabase.rpc('ajustar_stock_promocion_completo', {
+    p_promocion_id: parseInt(input.promocionId),
+    p_producto_id: parseInt(input.productoRegaloId),
+    p_cantidad_stock: input.cantidadStock,
+    p_usos_ajustados: input.usosAjustados,
+    p_usuario_id: input.usuarioId,
+    p_observaciones: input.observaciones || null,
+  })
+  if (error) throw error
+  if (data && typeof data === 'object' && 'success' in data && !(data as { success: boolean }).success) {
+    throw new Error((data as { error?: string }).error || 'Error al ajustar stock')
+  }
 }
 
 // =============================================================================
