@@ -1,6 +1,7 @@
 import { useState, memo, useEffect, useMemo } from 'react';
 import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift } from 'lucide-react';
 import ModalBase from './ModalBase';
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
@@ -70,16 +71,32 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
   const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
   const [errorValidacion, setErrorValidacion] = useState<string>('');
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
 
   // Pago combinado
   const [pagoCombinado, setPagoCombinado] = useState<boolean>(pedido?.forma_pago === 'combinado');
+  // Parseo pragmático del detalle guardado en notas — formato frágil (depende de es-AR toLocaleString).
+  // Si falla, cae al default. Fix robusto requeriría columna metadata_pago jsonb (fuera de alcance).
   const [pagosCombinados, setPagosCombinados] = useState<{ monto: string; formaPago: string }[]>(() => {
     if (pedido?.forma_pago === 'combinado' && pedido?.notas) {
-      // Intentar parsear los pagos del notas (formato: "[Pago combinado: Efectivo $X + Transferencia $Y]")
-      return [
-        { monto: '', formaPago: 'efectivo' },
-        { monto: '', formaPago: 'transferencia' },
-      ];
+      const match = pedido.notas.match(/\[Pago combinado:\s*([^\]]+)\]/);
+      if (match) {
+        const mapaLabels: Record<string, string> = {
+          'efectivo': 'efectivo',
+          'transferencia': 'transferencia',
+          'cheque': 'cheque',
+          'tarjeta': 'tarjeta',
+          'cuenta corriente': 'cuenta_corriente',
+        };
+        const parsed = match[1].split('+').map(s => s.trim()).map(parte => {
+          const m = parte.match(/^(.+?)\s*\$([0-9.,]+)$/);
+          if (!m) return null;
+          const key = m[1].trim().toLowerCase();
+          const montoNum = m[2].replace(/\./g, '').replace(',', '.');
+          return { formaPago: mapaLabels[key] || 'efectivo', monto: montoNum };
+        }).filter((x): x is { formaPago: string; monto: string } => x !== null);
+        if (parsed.length >= 2) return parsed;
+      }
     }
     return [
       { monto: '', formaPago: 'efectivo' },
@@ -331,13 +348,32 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         }
         if (avisos.length > 0) {
           const mensaje = `${avisos.join('\n')}\n\nSi procedés, ese control se anulará y la rendición deberá volver a controlarse. ¿Continuar?`;
-          if (!window.confirm(mensaje)) return;
+          setConfirmConfig({
+            visible: true,
+            tipo: 'warning',
+            titulo: 'Rendición ya controlada',
+            mensaje,
+            onConfirm: () => {
+              setConfirmConfig(null);
+              void doGuardar(notasFinal, formaPagoFinal, montoPagadoFinal, true);
+            },
+          });
+          return;
         }
       } catch {
         // Si falla la consulta, continuamos (el trigger SQL anulará el control igual)
       }
     }
 
+    await doGuardar(notasFinal, formaPagoFinal, montoPagadoFinal, !!fechaEntregaCambio);
+  };
+
+  const doGuardar = async (
+    notasFinal: string,
+    formaPagoFinal: string,
+    montoPagadoFinal: number,
+    fechaEntregaCambio: boolean,
+  ): Promise<void> => {
     try {
       // Si hay cambios en items y es admin, guardar items con precios mayoristas resueltos y desglose fiscal
       if (itemsModificados && isAdmin && onSaveItems) {
@@ -960,6 +996,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           {itemsModificados ? 'Guardar Todo' : 'Guardar'}
         </button>
       </div>
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
   );
 });

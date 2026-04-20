@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
 import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet, ClipboardCheck } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
-import { exportControlStock } from '../../utils/excel';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
@@ -105,7 +104,10 @@ export default function VistaProductos({
         {isAdmin && (
           <div className="flex gap-2">
             <button
-              onClick={() => exportControlStock(productos)}
+              onClick={async () => {
+                const { exportControlStock } = await import('../../utils/excel');
+                await exportControlStock(productos);
+              }}
               className="flex items-center space-x-2 px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
             >
               <ClipboardCheck className="w-5 h-5" />

@@ -26,6 +26,7 @@ const VistaCompras = lazy(() => import('../vistas/VistaCompras'))
 const ModalCompra = lazy(() => import('../modals/ModalCompra'))
 const ModalDetalleCompra = lazy(() => import('../modals/ModalDetalleCompra'))
 const ModalNotaCredito = lazy(() => import('../modals/ModalNotaCredito'))
+const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (
@@ -33,6 +34,14 @@ function LoadingState() {
       <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
     </div>
   )
+}
+
+interface ConfirmConfig {
+  visible: boolean
+  tipo?: 'danger' | 'warning' | 'success'
+  titulo?: string
+  mensaje?: string
+  onConfirm?: () => void
 }
 
 export default function ComprasContainer(): React.ReactElement {
@@ -59,6 +68,7 @@ export default function ComprasContainer(): React.ReactElement {
   // Estado de detalle
   const [compraDetalle, setCompraDetalle] = useState<CompraDBExtended | null>(null)
   const [compraParaNC, setCompraParaNC] = useState<CompraDBExtended | null>(null)
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // NC resumen for badges in list
   const { data: ncResumen = [] } = useNotasCreditoResumenQuery()
@@ -77,14 +87,20 @@ export default function ComprasContainer(): React.ReactElement {
     setModalDetalleOpen(true)
   }, [])
 
-  const handleAnularCompra = useCallback(async (compraId: string) => {
-    if (!window.confirm('¿Anular esta compra? Se revertirá el stock de los productos.')) return
-    try {
-      await anularCompra.mutateAsync(compraId)
-      notify.success('Compra anulada')
-    } catch {
-      notify.error('Error al anular compra')
-    }
+  const handleAnularCompra = useCallback((compraId: string) => {
+    setConfirmConfig({
+      visible: true, tipo: 'danger', titulo: 'Anular compra',
+      mensaje: '¿Anular esta compra? Se revertirá el stock de los productos.',
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await anularCompra.mutateAsync(compraId)
+          notify.success('Compra anulada')
+        } catch {
+          notify.error('Error al anular compra')
+        }
+      },
+    })
   }, [anularCompra, notify])
 
   const handleGuardarCompra = useCallback(async (data: CompraFormInputExtended) => {
@@ -191,6 +207,21 @@ export default function ComprasContainer(): React.ReactElement {
               setModalNotaCreditoOpen(false)
               setCompraParaNC(null)
             }}
+          />
+        </Suspense>
+      )}
+
+      {confirmConfig.visible && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: confirmConfig.tipo || 'warning',
+              titulo: confirmConfig.titulo || '',
+              mensaje: confirmConfig.mensaje || '',
+              onConfirm: confirmConfig.onConfirm || (() => {}),
+            }}
+            onClose={() => setConfirmConfig({ visible: false })}
           />
         </Suspense>
       )}

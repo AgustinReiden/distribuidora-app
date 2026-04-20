@@ -92,11 +92,15 @@ class StockManager {
    * Verifica si hay stock suficiente para los items
    */
   async verificarDisponibilidad(items: StockItem[]): Promise<DisponibilidadResult> {
+    if (items.length === 0) return { disponible: true, faltantes: [] }
+
+    const ids = items.map(i => i.producto_id)
+    const productos = await productoService.getByIds(ids)
+    const porId = new Map((productos || []).map(p => [p.id, p]))
+
     const faltantes: StockFaltante[] = []
-
     for (const item of items) {
-      const producto = await productoService.getById(item.producto_id)
-
+      const producto = porId.get(item.producto_id)
       if (!producto) {
         faltantes.push({
           producto_id: item.producto_id,

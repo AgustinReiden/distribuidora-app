@@ -12,6 +12,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
   usePedidosPaginatedQuery,
+  usePedidoStatsQuery,
+  EMPTY_PEDIDO_STATS_SUMMARY,
   useCrearPedidoMutation,
   useCambiarEstadoMutation,
   useAsignarTransportistaMutation,
@@ -92,6 +94,9 @@ export default function PedidosContainer(): React.ReactElement {
   // Queries - use debounced search to avoid firing on every keystroke
   const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
+  )
+  const { data: statsSummary = EMPTY_PEDIDO_STATS_SUMMARY } = usePedidoStatsQuery(
+    filtros, debouncedBusqueda, authReady
   )
   const { data: clientes = [] } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()
@@ -722,6 +727,7 @@ export default function PedidosContainer(): React.ReactElement {
         <VistaPedidos
           pedidos={pedidos}
           totalCount={totalCount}
+          statsSummary={statsSummary}
           paginaActual={paginaActual}
           totalPaginas={totalPaginas}
           busqueda={busqueda}

@@ -22,6 +22,7 @@ import type { ClienteSaveData } from '../modals/ModalCliente'
 const VistaClientes = lazy(() => import('../vistas/VistaClientes'))
 const ModalCliente = lazy(() => import('../modals/ModalCliente'))
 const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
+const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (
@@ -29,6 +30,14 @@ function LoadingState() {
       <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
     </div>
   )
+}
+
+interface ConfirmConfig {
+  visible: boolean
+  tipo?: 'danger' | 'warning' | 'success'
+  titulo?: string
+  mensaje?: string
+  onConfirm?: () => void
 }
 
 export default function ClientesContainer(): React.ReactElement {
@@ -54,6 +63,9 @@ export default function ClientesContainer(): React.ReactElement {
   // Estado de edición
   const [clienteEditando, setClienteEditando] = useState<ClienteDB | null>(null)
 
+  // Confirm modal state
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+
   // Handlers
   const handleNuevoCliente = useCallback(() => {
     setClienteEditando(null)
@@ -65,16 +77,22 @@ export default function ClientesContainer(): React.ReactElement {
     setModalClienteOpen(true)
   }, [])
 
-  const handleEliminarCliente = useCallback(async (clienteId: string) => {
+  const handleEliminarCliente = useCallback((clienteId: string) => {
     const cliente = clientes.find(c => c.id === clienteId)
     if (!cliente) return
-    if (!window.confirm(`¿Eliminar "${cliente.nombre_fantasia || cliente.razon_social}"?`)) return
-    try {
-      await eliminarCliente.mutateAsync(clienteId)
-      notify.success('Cliente eliminado')
-    } catch {
-      notify.error('Error al eliminar cliente')
-    }
+    setConfirmConfig({
+      visible: true, tipo: 'danger', titulo: 'Eliminar cliente',
+      mensaje: `¿Eliminar "${cliente.nombre_fantasia || cliente.razon_social}"?`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await eliminarCliente.mutateAsync(clienteId)
+          notify.success('Cliente eliminado')
+        } catch {
+          notify.error('Error al eliminar cliente')
+        }
+      },
+    })
   }, [clientes, eliminarCliente, notify])
 
   const handleVerFichaCliente = useCallback((cliente: ClienteDB) => {
@@ -158,6 +176,22 @@ export default function ClientesContainer(): React.ReactElement {
               setModalFichaOpen(false)
               setClienteFichaId(null)
             }}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Confirmación */}
+      {confirmConfig.visible && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: confirmConfig.tipo || 'warning',
+              titulo: confirmConfig.titulo || '',
+              mensaje: confirmConfig.mensaje || '',
+              onConfirm: confirmConfig.onConfirm || (() => {}),
+            }}
+            onClose={() => setConfirmConfig({ visible: false })}
           />
         </Suspense>
       )}

@@ -24,6 +24,7 @@ const ModalProducto = lazy(() => import('../modals/ModalProducto'))
 const ModalMermaStock = lazy(() => import('../modals/ModalMermaStock'))
 const ModalHistorialMermas = lazy(() => import('../modals/ModalHistorialMermas'))
 const ModalImportarPrecios = lazy(() => import('../modals/ModalImportarPrecios'))
+const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (
@@ -31,6 +32,14 @@ function LoadingState() {
       <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
     </div>
   )
+}
+
+interface ConfirmConfig {
+  visible: boolean
+  tipo?: 'danger' | 'warning' | 'success'
+  titulo?: string
+  mensaje?: string
+  onConfirm?: () => void
 }
 
 export default function ProductosContainer(): React.ReactElement {
@@ -58,6 +67,9 @@ export default function ProductosContainer(): React.ReactElement {
   const [productoEditando, setProductoEditando] = useState<ProductoDB | null>(null)
   const [productoMerma, setProductoMerma] = useState<ProductoDB | null>(null)
 
+  // Confirm modal state
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+
   // Categorías derivadas
   const categorias = useMemo(() => {
     const cats = new Set<string>()
@@ -78,16 +90,22 @@ export default function ProductosContainer(): React.ReactElement {
     setModalProductoOpen(true)
   }, [])
 
-  const handleEliminarProducto = useCallback(async (productoId: string) => {
+  const handleEliminarProducto = useCallback((productoId: string) => {
     const producto = productos.find(p => p.id === productoId)
     if (!producto) return
-    if (!window.confirm(`¿Eliminar "${producto.nombre}"?`)) return
-    try {
-      await eliminarProducto.mutateAsync(productoId)
-      notify.success('Producto eliminado')
-    } catch {
-      notify.error('Error al eliminar producto')
-    }
+    setConfirmConfig({
+      visible: true, tipo: 'danger', titulo: 'Eliminar producto',
+      mensaje: `¿Eliminar "${producto.nombre}"?`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        try {
+          await eliminarProducto.mutateAsync(productoId)
+          notify.success('Producto eliminado')
+        } catch {
+          notify.error('Error al eliminar producto')
+        }
+      },
+    })
   }, [productos, eliminarProducto, notify])
 
   const handleBajaStock = useCallback((producto: ProductoDB) => {
@@ -214,6 +232,22 @@ export default function ProductosContainer(): React.ReactElement {
             productos={productos}
             onActualizarPrecios={handleActualizarPreciosMasivo}
             onClose={() => setModalImportarOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Confirmación */}
+      {confirmConfig.visible && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: confirmConfig.tipo || 'warning',
+              titulo: confirmConfig.titulo || '',
+              mensaje: confirmConfig.mensaje || '',
+              onConfirm: confirmConfig.onConfirm || (() => {}),
+            }}
+            onClose={() => setConfirmConfig({ visible: false })}
           />
         </Suspense>
       )}

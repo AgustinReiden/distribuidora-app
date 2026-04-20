@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useSavedRoutes, formatDuration, formatDistance } from '../hooks/useSavedRoutes'
 import type { SavedRoute } from '../lib/offlineDb'
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './modals/ModalConfirmacion'
 
 // =============================================================================
 // TIPOS
@@ -56,6 +57,7 @@ export function SavedRoutesPanel({
   const [routeDescription, setRouteDescription] = useState('')
   const [savingRoute, setSavingRoute] = useState(false)
   const [matchingRoute, setMatchingRoute] = useState<SavedRoute | null>(null)
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
   // Buscar ruta existente cuando cambian los clientes
   React.useEffect(() => {
@@ -82,9 +84,17 @@ export function SavedRoutesPanel({
   }
 
   // Eliminar ruta con confirmación
-  const handleDeleteRoute = async (route: SavedRoute) => {
-    if (!confirm(`¿Eliminar la ruta "${route.nombre}"?`)) return
-    await deleteRoute(route.id!)
+  const handleDeleteRoute = (route: SavedRoute) => {
+    setConfirmConfig({
+      visible: true,
+      tipo: 'danger',
+      titulo: 'Eliminar ruta',
+      mensaje: `¿Eliminar la ruta "${route.nombre}"?`,
+      onConfirm: async () => {
+        setConfirmConfig(null)
+        await deleteRoute(route.id!)
+      },
+    })
   }
 
   if (!transportistaId) {
@@ -251,6 +261,8 @@ export function SavedRoutesPanel({
           Las rutas guardadas evitan llamadas repetidas a Google Maps, ahorrando costos.
         </span>
       </div>
+
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </div>
   )
 }

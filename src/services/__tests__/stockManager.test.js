@@ -12,6 +12,7 @@ import { productoService } from '../api/productoService'
 vi.mock('../api/productoService', () => ({
   productoService: {
     getById: vi.fn(),
+    getByIds: vi.fn(),
     descontarStock: vi.fn(),
     restaurarStock: vi.fn(),
     actualizarStock: vi.fn()
@@ -42,9 +43,10 @@ describe('StockManager', () => {
 
   describe('verificarDisponibilidad', () => {
     it('debe retornar disponible=true si hay stock suficiente', async () => {
-      productoService.getById
-        .mockResolvedValueOnce({ id: 'prod-1', nombre: 'Producto 1', stock: 100 })
-        .mockResolvedValueOnce({ id: 'prod-2', nombre: 'Producto 2', stock: 50 })
+      productoService.getByIds.mockResolvedValueOnce([
+        { id: 'prod-1', nombre: 'Producto 1', stock: 100 },
+        { id: 'prod-2', nombre: 'Producto 2', stock: 50 }
+      ])
 
       const items = [
         { producto_id: 'prod-1', cantidad: 10 },
@@ -58,9 +60,10 @@ describe('StockManager', () => {
     })
 
     it('debe retornar disponible=false si no hay stock suficiente', async () => {
-      productoService.getById
-        .mockResolvedValueOnce({ id: 'prod-1', nombre: 'Producto 1', codigo: 'P001', stock: 5 })
-        .mockResolvedValueOnce({ id: 'prod-2', nombre: 'Producto 2', codigo: 'P002', stock: 50 })
+      productoService.getByIds.mockResolvedValueOnce([
+        { id: 'prod-1', nombre: 'Producto 1', codigo: 'P001', stock: 5 },
+        { id: 'prod-2', nombre: 'Producto 2', codigo: 'P002', stock: 50 }
+      ])
 
       const items = [
         { producto_id: 'prod-1', cantidad: 10 }, // Falta stock
@@ -81,7 +84,7 @@ describe('StockManager', () => {
     })
 
     it('debe marcar como faltante si el producto no existe', async () => {
-      productoService.getById.mockResolvedValueOnce(null)
+      productoService.getByIds.mockResolvedValueOnce([])
 
       const items = [{ producto_id: 'prod-inexistente', cantidad: 10 }]
 
@@ -94,7 +97,7 @@ describe('StockManager', () => {
 
   describe('reservarStock', () => {
     it('debe reservar stock exitosamente', async () => {
-      productoService.getById.mockResolvedValue({ id: 'prod-1', nombre: 'Test', stock: 100 })
+      productoService.getByIds.mockResolvedValue([{ id: 'prod-1', nombre: 'Test', stock: 100 }])
       productoService.descontarStock.mockResolvedValue(true)
 
       const items = [{ producto_id: 'prod-1', cantidad: 10 }]
@@ -106,7 +109,7 @@ describe('StockManager', () => {
     })
 
     it('debe fallar si no hay stock suficiente', async () => {
-      productoService.getById.mockResolvedValue({ id: 'prod-1', nombre: 'Test', codigo: 'T1', stock: 5 })
+      productoService.getByIds.mockResolvedValue([{ id: 'prod-1', nombre: 'Test', codigo: 'T1', stock: 5 }])
 
       const items = [{ producto_id: 'prod-1', cantidad: 10 }]
 
@@ -125,7 +128,7 @@ describe('StockManager', () => {
       const result = await stockManager.reservarStock(items, { validar: false })
 
       expect(result.success).toBe(true)
-      expect(productoService.getById).not.toHaveBeenCalled()
+      expect(productoService.getByIds).not.toHaveBeenCalled()
     })
   })
 
@@ -156,8 +159,8 @@ describe('StockManager', () => {
   describe('ajustarDiferencia', () => {
     beforeEach(() => {
       // Mock para verificarDisponibilidad
-      productoService.getById.mockImplementation(id => {
-        return Promise.resolve({ id, nombre: `Producto ${id}`, stock: 100 })
+      productoService.getByIds.mockImplementation(ids => {
+        return Promise.resolve(ids.map(id => ({ id, nombre: `Producto ${id}`, stock: 100 })))
       })
       productoService.restaurarStock.mockResolvedValue(true)
       productoService.descontarStock.mockResolvedValue(true)
