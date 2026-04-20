@@ -57,7 +57,13 @@ async function fetchProveedorById(id: string): Promise<ProveedorDBExtended | nul
 }
 
 // Mutation functions
-async function createProveedor(proveedor: ProveedorFormInputExtended): Promise<ProveedorDBExtended> {
+async function createProveedor(proveedor: ProveedorFormInputExtended, sucursalId: number | null): Promise<ProveedorDBExtended> {
+  // La RLS multi-tenant requiere sucursal_id = current_sucursal_id() y la
+  // columna es NOT NULL. Sin esto el INSERT falla.
+  if (sucursalId == null) {
+    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+  }
+
   // Validar CUIT duplicado
   if (proveedor.cuit) {
     const cuitLimpio = proveedor.cuit.replace(/[-\s]/g, '')
@@ -95,7 +101,8 @@ async function createProveedor(proveedor: ProveedorFormInputExtended): Promise<P
       email: proveedor.email || null,
       contacto: proveedor.contacto || null,
       notas: proveedor.notas || null,
-      activo: true
+      activo: true,
+      sucursal_id: sucursalId
     }])
     .select()
     .single()
@@ -207,7 +214,7 @@ export function useCrearProveedorMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: createProveedor,
+    mutationFn: (proveedor: ProveedorFormInputExtended) => createProveedor(proveedor, currentSucursalId),
     onSuccess: (newProveedor) => {
       // Actualizar cache de lista
       queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {

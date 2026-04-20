@@ -51,7 +51,13 @@ async function fetchProductosStockBajo(umbral: number): Promise<ProductoDB[]> {
 }
 
 // Mutation functions
-async function createProducto(producto: ProductoFormInput): Promise<ProductoDB> {
+async function createProducto(producto: ProductoFormInput, sucursalId: number | null): Promise<ProductoDB> {
+  // La RLS multi-tenant requiere sucursal_id = current_sucursal_id() y la
+  // columna es NOT NULL. Sin esto el INSERT falla.
+  if (sucursalId == null) {
+    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+  }
+
   // Validar código duplicado
   if (producto.codigo) {
     const { data: existente } = await supabase
@@ -78,7 +84,8 @@ async function createProducto(producto: ProductoFormInput): Promise<ProductoDB> 
       costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
       impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
-      precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
+      precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null,
+      sucursal_id: sucursalId
     }])
     .select()
     .single()
@@ -167,7 +174,7 @@ export function useCrearProductoMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: createProducto,
+    mutationFn: (producto: ProductoFormInput) => createProducto(producto, currentSucursalId),
     onSuccess: (newProducto) => {
       // Actualizar cache de lista
       queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
