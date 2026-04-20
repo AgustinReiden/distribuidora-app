@@ -501,26 +501,24 @@ describe('PedidoService', () => {
   })
 
   // =========================================================================
-  // getEstadisticas
+  // getEstadisticas (backed by RPC obtener_estadisticas_pedidos)
   // =========================================================================
   describe('getEstadisticas', () => {
-    it('should calculate statistics correctly from pedido data', async () => {
-      const pedidos = [
-        { id: '1', estado: 'pendiente', total: 100 },
-        { id: '2', estado: 'pendiente', total: 200 },
-        { id: '3', estado: 'entregado', total: 300 },
-        { id: '4', estado: 'entregado', total: 500 },
-        { id: '5', estado: 'cancelado', total: 50 },
-        { id: '6', estado: 'en_preparacion', total: 150 }
-      ]
-
-      // getEstadisticas does: from('pedidos').select('*') then awaits
-      // The last call in the non-filtered path is `select`, which is also
-      // the awaitable.  But Supabase query builder is `then`-able. In our
-      // mock the chain goes: from -> select (if no gte/lte) then await.
-      // We need select to resolve:
-      const mock = chainable({ select: { data: pedidos, error: null } })
-      vi.mocked(supabase.from).mockReturnValue(mock as any)
+    it('should map RPC aggregated response into PedidoEstadisticas', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: {
+          total: 6,
+          pendientes: 2,
+          en_preparacion: 1,
+          en_reparto: 0,
+          entregados: 2,
+          cancelados: 1,
+          total_ventas: '800.00',
+          promedio_ticket: '400.00',
+          por_estado: { pendiente: 2, entregado: 2, cancelado: 1, en_preparacion: 1 }
+        },
+        error: null
+      } as any)
 
       const stats = await pedidoService.getEstadisticas()
 
@@ -531,33 +529,32 @@ describe('PedidoService', () => {
         cancelado: 1,
         en_preparacion: 1
       })
-      // totalVentas = sum of totals for entregados only: 300 + 500
       expect(stats.totalVentas).toBe(800)
-      // promedioTicket = 800 / 2
       expect(stats.promedioTicket).toBe(400)
       expect(stats.pendientes).toBe(2)
       expect(stats.entregados).toBe(2)
     })
 
-    it('should apply date filters when desde and hasta are provided', async () => {
-      const mock = chainable()
-      // When gte/lte are chained, the terminal `await` still resolves through
-      // the last method call.  Since lte is last, make it resolve.
-      mock.lte = vi.fn().mockResolvedValue({ data: [], error: null })
-      vi.mocked(supabase.from).mockReturnValue(mock as any)
+    it('should pass date filters as RPC parameters', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: null } as any)
 
       const desde = new Date('2026-01-01T00:00:00Z')
       const hasta = new Date('2026-01-31T23:59:59Z')
 
       await pedidoService.getEstadisticas(desde, hasta)
 
-      expect(mock.gte).toHaveBeenCalledWith('fecha_creacion', desde.toISOString())
-      expect(mock.lte).toHaveBeenCalledWith('fecha_creacion', hasta.toISOString())
+      expect(supabase.rpc).toHaveBeenCalledWith('obtener_estadisticas_pedidos', {
+        p_fecha_desde: desde.toISOString(),
+        p_fecha_hasta: hasta.toISOString(),
+        p_usuario_id: null
+      })
     })
 
-    it('should return zero-value statistics on error', async () => {
-      const mock = chainable({ select: { data: null, error: new Error('Query failed') } })
-      vi.mocked(supabase.from).mockReturnValue(mock as any)
+    it('should return zero-value statistics when RPC errors', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue({
+        data: null,
+        error: new Error('No hay sucursal activa')
+      } as any)
 
       const stats = await pedidoService.getEstadisticas()
 
@@ -571,20 +568,14 @@ describe('PedidoService', () => {
       })
     })
 
-    it('should handle zero entregados without division by zero', async () => {
-      const pedidos = [
-        { id: '1', estado: 'pendiente', total: 100 },
-        { id: '2', estado: 'cancelado', total: 200 }
-      ]
-      const mock = chainable({ select: { data: pedidos, error: null } })
-      vi.mocked(supabase.from).mockReturnValue(mock as any)
+    it('should return zero-value statistics when RPC returns null data', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: null } as any)
 
       const stats = await pedidoService.getEstadisticas()
 
+      expect(stats.total).toBe(0)
       expect(stats.totalVentas).toBe(0)
       expect(stats.promedioTicket).toBe(0)
-      expect(stats.entregados).toBe(0)
-      expect(stats.pendientes).toBe(1)
     })
   })
 })

@@ -19,8 +19,14 @@ import type {
 // Query keys
 export const metricasKeys = {
   all: (sucursalId: number | null) => ['metricas', sucursalId] as const,
-  dashboard: (sucursalId: number | null, periodo: string, usuarioId?: string | null) =>
-    [...metricasKeys.all(sucursalId), 'dashboard', periodo, usuarioId] as const,
+  dashboard: (
+    sucursalId: number | null,
+    periodo: string,
+    usuarioId?: string | null,
+    fechaDesde?: string | null,
+    fechaHasta?: string | null
+  ) =>
+    [...metricasKeys.all(sucursalId), 'dashboard', periodo, usuarioId, fechaDesde, fechaHasta] as const,
   reportePreventistas: (sucursalId: number | null, fechaDesde?: string | null, fechaHasta?: string | null) =>
     [...metricasKeys.all(sucursalId), 'reporte-preventistas', fechaDesde, fechaHasta] as const,
 }
@@ -56,30 +62,8 @@ interface MetricasParams {
 async function calcularMetricas(params: MetricasParams): Promise<DashboardMetricasExtended> {
   const { periodo, fechaDesde, fechaHasta, usuarioId } = params
 
-  let query = supabase
-    .from('pedidos')
-    .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
-
-  if (usuarioId) {
-    query = query.eq('usuario_id', usuarioId)
-  }
-
-  const { data: todosPedidos, error } = await query.order('created_at', { ascending: false })
-
-  if (error) throw error
-  if (!todosPedidos) {
-    return {
-      ventasPeriodo: 0,
-      pedidosPeriodo: 0,
-      productosMasVendidos: [],
-      clientesMasActivos: [],
-      pedidosPorEstado: { pendiente: 0, en_preparacion: 0, asignado: 0, entregado: 0 },
-      ventasPorDia: []
-    }
-  }
-
-  const pedidosTyped = (todosPedidos as PedidoWithRelations[]).filter(p => p.estado !== 'cancelado')
-
+  // Calcular ventana de fecha ANTES de la query para poder filtrar server-side.
+  // Con 10k+ pedidos, traer todo y filtrar en JS es KB/MB innecesarios.
   const hoy = new Date()
   const hoyStr = fechaLocalISO(hoy)
   let fechaInicioStr: string | null = null
@@ -113,6 +97,46 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
       break
   }
 
+  let query = supabase
+    .from('pedidos')
+    .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+
+  if (usuarioId) {
+    query = query.eq('usuario_id', usuarioId)
+  }
+
+  // Filtro server-side: evita descargar histórico completo.
+  // Para 'historico' (sin fechaInicioStr) se respeta el comportamiento actual
+  // de descargar todo (export ilimitado intencional).
+  if (fechaInicioStr) {
+    query = query.gte('created_at', fechaInicioStr)
+  }
+  if (periodo === 'personalizado' && fechaHasta) {
+    // Sumar un día para incluir pedidos de fechaHasta (timestamptz vs date).
+    const hastaDate = new Date(fechaHasta)
+    hastaDate.setDate(hastaDate.getDate() + 1)
+    query = query.lt('created_at', fechaLocalISO(hastaDate))
+  }
+
+  const { data: todosPedidos, error } = await query.order('created_at', { ascending: false })
+
+  if (error) throw error
+  if (!todosPedidos) {
+    return {
+      ventasPeriodo: 0,
+      pedidosPeriodo: 0,
+      productosMasVendidos: [],
+      clientesMasActivos: [],
+      pedidosPorEstado: { pendiente: 0, en_preparacion: 0, asignado: 0, entregado: 0 },
+      ventasPorDia: []
+    }
+  }
+
+  const pedidosTyped = (todosPedidos as PedidoWithRelations[]).filter(p => p.estado !== 'cancelado')
+
+  // Redundant client-side filter preservado: la columna `fecha` puede diferir
+  // de `created_at` (ej. pedidos reprogramados) y algunos cálculos de UI
+  // (ventasPorDia) usan `fecha` cuando existe.
   let pedidosFiltrados = pedidosTyped
   if (fechaInicioStr) {
     pedidosFiltrados = pedidosTyped.filter(p => (p.fecha ?? p.created_at?.split('T')[0] ?? '') >= fechaInicioStr!)
@@ -262,7 +286,7 @@ export function useMetricasQuery(
 ) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: metricasKeys.dashboard(currentSucursalId, periodo, usuarioId),
+    queryKey: metricasKeys.dashboard(currentSucursalId, periodo, usuarioId, fechaDesde, fechaHasta),
     queryFn: () => calcularMetricas({ periodo, fechaDesde, fechaHasta, usuarioId }),
     staleTime: 2 * 60 * 1000, // 2 minutos - métricas cambian frecuentemente
     gcTime: 10 * 60 * 1000,

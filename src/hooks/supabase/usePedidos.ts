@@ -342,9 +342,8 @@ export function usePedidos(): UsePedidosHookReturn {
   }
 
   const cambiarEstado = async (id: string, nuevoEstado: string): Promise<void> => {
-    const updateData: { estado: PedidoDB['estado']; fecha_entrega: string | null } = {
+    const updateData: Partial<PedidoDB> = {
       estado: nuevoEstado as PedidoDB['estado'],
-      fecha_entrega: null
     }
     if (nuevoEstado === 'entregado') {
       updateData.fecha_entrega = new Date().toISOString()

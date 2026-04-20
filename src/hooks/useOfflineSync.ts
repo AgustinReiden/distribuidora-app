@@ -405,6 +405,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       })
       .catch((err) => {
         logger.error('[useOfflineSync] Error crítico al encolar merma:', err)
+        // Rollback del optimistic update: la merma ya fue pintada como pendiente,
+        // removerla para no engañar al usuario.
+        setMermasPendientes(prev => prev.filter(m => m.offlineId !== tempOfflineId))
         window.dispatchEvent(new CustomEvent('offline-storage-error', {
           detail: { type: 'merma', error: err.message }
         }))

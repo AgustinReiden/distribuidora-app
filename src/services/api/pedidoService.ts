@@ -311,22 +311,19 @@ class PedidoService extends BaseService<Pedido> {
   }
 
   /**
-   * Obtiene estadísticas de pedidos
+   * Obtiene estadísticas agregadas para la sucursal activa.
+   * Usa la RPC obtener_estadisticas_pedidos (agrega en el servidor,
+   * respeta aislamiento multi-tenant via current_sucursal_id()).
    */
   async getEstadisticas(desde: Date | null = null, hasta: Date | null = null): Promise<PedidoEstadisticas> {
-    let query = this.db.from(this.table).select('*')
+    const { data, error } = await this.db.rpc('obtener_estadisticas_pedidos', {
+      p_fecha_desde: desde ? desde.toISOString() : null,
+      p_fecha_hasta: hasta ? hasta.toISOString() : null,
+      p_usuario_id: null
+    })
 
-    if (desde) {
-      query = query.gte('fecha_creacion', desde.toISOString())
-    }
-    if (hasta) {
-      query = query.lte('fecha_creacion', hasta.toISOString())
-    }
-
-    const { data, error } = await query
-
-    if (error) {
-      this.handleError('obtener estadísticas', error)
+    if (error || !data) {
+      if (error) this.handleError('obtener estadísticas', error)
       return {
         total: 0,
         porEstado: {},
@@ -337,28 +334,22 @@ class PedidoService extends BaseService<Pedido> {
       }
     }
 
-    const pedidos = (data || []) as Pedido[]
-
-    // Calcular estadísticas
-    const porEstado = pedidos.reduce((acc: Record<string, number>, p) => {
-      acc[p.estado] = (acc[p.estado] || 0) + 1
-      return acc
-    }, {})
-
-    const pedidosEntregados = pedidos.filter(p => p.estado === 'entregado')
-    const totalVentas = pedidosEntregados.reduce((sum, p) => sum + (p.total || 0), 0)
-
-    const promedioTicket = pedidosEntregados.length > 0
-      ? totalVentas / pedidosEntregados.length
-      : 0
+    const r = data as {
+      total: number
+      por_estado?: Record<string, number>
+      total_ventas: number | string
+      promedio_ticket: number | string
+      pendientes: number
+      entregados: number
+    }
 
     return {
-      total: pedidos.length,
-      porEstado,
-      totalVentas,
-      promedioTicket,
-      pendientes: porEstado.pendiente || 0,
-      entregados: porEstado.entregado || 0
+      total: r.total ?? 0,
+      porEstado: r.por_estado ?? {},
+      totalVentas: Number(r.total_ventas ?? 0),
+      promedioTicket: Number(r.promedio_ticket ?? 0),
+      pendientes: r.pendientes ?? 0,
+      entregados: r.entregados ?? 0
     }
   }
 }
