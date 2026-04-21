@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProductoSchema } from '../../lib/schemas';
-import { calcularTotalConIva } from '../../utils/calculations';
+import { calcularTotalConIva, parsePrecio } from '../../utils/calculations';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
 
 // =============================================================================
@@ -339,7 +339,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            Costo real = Neto + Imp. Internos (sin IVA) = ${((parseFloat(String(form.costo_sin_iva)) || 0) * (1 + (parseFloat(String(form.impuestos_internos)) || 0) / 100)).toFixed(2)}
+            Costo real = Neto + Imp. Internos (sin IVA) = ${(parsePrecio(String(form.costo_sin_iva)) * (1 + (parseFloat(String(form.impuestos_internos)) || 0) / 100)).toFixed(2)}
           </p>
         </div>
 
@@ -374,11 +374,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           <p className="text-xs text-gray-500 mt-2">
             * El precio final incluye IVA ({form.porcentaje_iva || 21}%) + Imp. Internos ({form.impuestos_internos || 0}%) sobre neto
           </p>
-          {(parseFloat(String(form.costo_sin_iva)) > 0 && parseFloat(String(form.precio_sin_iva)) > 0) && (
+          {(parsePrecio(String(form.costo_sin_iva)) > 0 && parsePrecio(String(form.precio_sin_iva)) > 0) && (
             <div className="mt-3 p-3 bg-blue-50 rounded-lg">
               <p className="text-xs font-medium text-blue-800">
-                Rentabilidad neta: ${((parseFloat(String(form.precio_sin_iva)) || 0) - (parseFloat(String(form.costo_sin_iva)) || 0)).toFixed(2)}
-                {' '}({(((parseFloat(String(form.precio_sin_iva)) - parseFloat(String(form.costo_sin_iva))) / parseFloat(String(form.costo_sin_iva))) * 100).toFixed(1)}%)
+                Rentabilidad neta: ${(parsePrecio(String(form.precio_sin_iva)) - parsePrecio(String(form.costo_sin_iva))).toFixed(2)}
+                {' '}({(((parsePrecio(String(form.precio_sin_iva)) - parsePrecio(String(form.costo_sin_iva))) / parsePrecio(String(form.costo_sin_iva))) * 100).toFixed(1)}%)
               </p>
               <p className="text-xs text-blue-600 mt-1">
                 Margen sobre costo neto (sin IVA ni imp. internos)

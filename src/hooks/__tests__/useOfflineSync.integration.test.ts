@@ -504,8 +504,8 @@ describe('useOfflineSync Integration Tests', () => {
         motivo: 'Producto vencido'
       }
 
-      act(() => {
-        result.current.guardarMermaOffline(mermaData)
+      await act(async () => {
+        await result.current.guardarMermaOffline(mermaData)
       })
 
       expect(result.current.mermasPendientes).toHaveLength(1)
@@ -588,8 +588,8 @@ describe('useOfflineSync Integration Tests', () => {
       expect(result.current.cantidadPendientes).toBe(2)
 
       // Agregar mermas
-      act(() => {
-        result.current.guardarMermaOffline({
+      await act(async () => {
+        await result.current.guardarMermaOffline({
           producto_id: 'p1',
           cantidad: 1,
           tipo_merma: 'robo' as const,
@@ -598,6 +598,75 @@ describe('useOfflineSync Integration Tests', () => {
       })
 
       expect(result.current.cantidadPendientes).toBe(3)
+    })
+  })
+
+  // ===========================================================================
+  // SYNC-07: Regresión Task 1.5 — guardarMermaOffline espera queueOperation
+  // ===========================================================================
+  describe('SYNC-07: guardarMermaOffline await queueOperation (Task 1.5)', () => {
+    it('debe esperar a que queueOperation resuelva antes de retornar', async () => {
+      // Arrange: hacemos que queueOperation tarde en resolver y marcamos
+      // un flag cuando efectivamente se resolvió. Si guardarMermaOffline
+      // retorna ANTES de que queueOperation resuelva (bug original con
+      // .then()/.catch()), el flag estará en false en el momento del await.
+      let queueResolved = false
+      mockQueueOperation.mockImplementationOnce(() =>
+        new Promise<number>(resolve => {
+          setTimeout(() => {
+            queueResolved = true
+            resolve(42)
+          }, 50)
+        })
+      )
+
+      const { result } = renderHook(() => useOfflineSync())
+
+      await waitFor(() => {
+        expect(result.current.mermasPendientes).toEqual([])
+      })
+
+      // Act: await el guardarMermaOffline
+      let returnedMerma: Awaited<ReturnType<typeof result.current.guardarMermaOffline>> | undefined
+      await act(async () => {
+        returnedMerma = await result.current.guardarMermaOffline({
+          producto_id: 'p1',
+          cantidad: 3,
+          tipo_merma: 'vencimiento' as const,
+          motivo: 'Test regresión SYNC-07'
+        })
+      })
+
+      // Assert: queueOperation debió resolver ANTES de que guardarMermaOffline retornara.
+      expect(queueResolved).toBe(true)
+      expect(returnedMerma).toBeDefined()
+      expect(returnedMerma!.sincronizado).toBe(false)
+      expect(mockQueueOperation).toHaveBeenCalledTimes(1)
+    })
+
+    it('debe hacer rollback del optimistic update si queueOperation falla', async () => {
+      mockQueueOperation.mockRejectedValueOnce(new Error('IndexedDB quota exceeded'))
+
+      const { result } = renderHook(() => useOfflineSync())
+
+      await waitFor(() => {
+        expect(result.current.mermasPendientes).toEqual([])
+      })
+
+      // Act: esperamos que el await rethrow el error
+      await expect(
+        act(async () => {
+          await result.current.guardarMermaOffline({
+            producto_id: 'p1',
+            cantidad: 1,
+            tipo_merma: 'rotura' as const,
+            motivo: 'Test rollback'
+          })
+        })
+      ).rejects.toThrow('IndexedDB quota exceeded')
+
+      // Assert: el optimistic update fue revertido; la merma NO quedó en la lista.
+      expect(result.current.mermasPendientes).toHaveLength(0)
     })
   })
 

@@ -62,7 +62,7 @@ export interface UseProductoHandlersProps {
   notify: NotifyService;
   user: User | null;
   isOnline: boolean;
-  guardarMermaOffline: (merma: MermaOfflineData) => void;
+  guardarMermaOffline: (merma: MermaOfflineData) => Promise<unknown>;
 }
 
 // =============================================================================
@@ -141,7 +141,9 @@ export function useProductoHandlers({
         // SECURITY FIX: Solo guardar para sincronización posterior
         // NO actualizamos stock directamente para evitar bypass de validación
         // El stock se actualizará cuando se sincronice via RPC con validación server-side
-        guardarMermaOffline({
+        // Task 1.5: await para asegurar que la merma quedó persistida en IndexedDB
+        // antes de notificar al usuario (evita "guardada" falsa si queueOperation falla).
+        await guardarMermaOffline({
           ...mermaData,
           usuarioId: user?.id
         })

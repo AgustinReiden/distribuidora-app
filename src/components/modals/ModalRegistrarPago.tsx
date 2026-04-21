@@ -1,6 +1,7 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2 } from 'lucide-react'
 import { formatPrecio as formatCurrency } from '../../utils/formatters'
+import { parsePrecio } from '../../utils/calculations'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalPagoSchema } from '../../lib/schemas'
 import type { ClienteDB, Pedido, Pago, FormaPago } from '../../types'
@@ -75,7 +76,7 @@ export default function ModalRegistrarPago({
     { monto: '', formaPago: 'transferencia' },
   ])
 
-  const totalDividido = pagos.reduce((sum, p) => sum + (parseFloat(p.monto) || 0), 0)
+  const totalDividido = pagos.reduce((sum, p) => sum + parsePrecio(p.monto), 0)
 
   const handleAddPago = () => {
     setPagos(prev => [...prev, { monto: '', formaPago: 'efectivo' }])
@@ -101,14 +102,14 @@ export default function ModalRegistrarPago({
 
     if (pagoDividido) {
       // Validar pagos divididos
-      const pagosValidos = pagos.filter(p => parseFloat(p.monto) > 0)
+      const pagosValidos = pagos.filter(p => parsePrecio(p.monto) > 0)
       if (pagosValidos.length < 2) {
         setError('Ingresa al menos 2 formas de pago con monto mayor a 0')
         return
       }
 
       // Validate total does not exceed outstanding balance (BUG-10 fix)
-      const totalDividido = pagosValidos.reduce((s, p) => s + parseFloat(p.monto), 0)
+      const totalDividido = pagosValidos.reduce((s, p) => s + parsePrecio(p.monto), 0)
       if (saldoPendiente > 0 && totalDividido > saldoPendiente + 0.01) {
         setError(`El total de pagos ($${totalDividido.toLocaleString('es-AR')}) excede el saldo pendiente ($${saldoPendiente.toLocaleString('es-AR')})`)
         return
@@ -121,7 +122,7 @@ export default function ModalRegistrarPago({
           ultimoPago = await onConfirmar({
             clienteId: cliente!.id,
             pedidoId: pedidoSeleccionado || null,
-            monto: parseFloat(pago.monto),
+            monto: parsePrecio(pago.monto),
             formaPago: pago.formaPago,
             referencia: '',
             notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`
@@ -136,7 +137,7 @@ export default function ModalRegistrarPago({
       }
     } else {
       // Pago simple (comportamiento original)
-      const result = validate({ monto: parseFloat(monto) || 0, formaPago, referencia, notas, pedidoSeleccionado })
+      const result = validate({ monto: parsePrecio(monto), formaPago, referencia, notas, pedidoSeleccionado })
       if (!result.success) {
         setError(getFirstError() || 'Error de validacion')
         return

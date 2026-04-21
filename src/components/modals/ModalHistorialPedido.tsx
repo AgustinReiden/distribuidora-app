@@ -3,6 +3,7 @@ import { Loader2, History } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatFecha } from './utils';
 import { formatPrecio } from '../../utils/formatters';
+import { parsePrecio } from '../../utils/calculations';
 import type { PedidoDB } from '../../types';
 
 // =============================================================================
@@ -47,7 +48,7 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
   };
 
   const formatearValor = (campo: string, valor: string): string => {
-    if (campo === "total") return formatPrecio(parseFloat(valor));
+    if (campo === "total") return formatPrecio(parsePrecio(valor));
     if (campo === "estado") {
       const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparacion", asignado: "En camino", entregado: "Entregado" };
       return estados[valor] || valor;
