@@ -123,11 +123,15 @@ async function fetchPricingMap(): Promise<PricingMap> {
 // MUTATION FUNCTIONS
 // =============================================================================
 
-async function createGrupoPrecio(input: GrupoPrecioFormInput): Promise<GrupoPrecioConDetalles> {
+async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number | null): Promise<GrupoPrecioConDetalles> {
+  if (sucursalId == null) {
+    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+  }
+
   // Crear el grupo
   const { data: grupo, error: errorGrupo } = await supabase
     .from('grupos_precio')
-    .insert([{ nombre: input.nombre, descripcion: input.descripcion || null }])
+    .insert([{ nombre: input.nombre, descripcion: input.descripcion || null, sucursal_id: sucursalId }])
     .select()
     .single()
 
@@ -143,6 +147,7 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput): Promise<GrupoPrec
         grupo_precio_id: parseInt(grupoId),
         producto_id: parseInt(pid),
         cantidad_minima_pedido: input.cantidadesMinimas?.[pid] || null,
+        sucursal_id: sucursalId,
       })))
 
     if (errorProductos) throw errorProductos
@@ -157,6 +162,7 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput): Promise<GrupoPrec
         cantidad_minima: e.cantidadMinima,
         precio_unitario: e.precioUnitario,
         etiqueta: e.etiqueta || null,
+        sucursal_id: sucursalId,
       })))
 
     if (errorEscalas) throw errorEscalas
@@ -182,8 +188,12 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput): Promise<GrupoPrec
 }
 
 async function updateGrupoPrecio(
-  { id, data: input }: { id: string; data: GrupoPrecioFormInput }
+  { id, data: input, sucursalId }: { id: string; data: GrupoPrecioFormInput; sucursalId: number | null }
 ): Promise<GrupoPrecioConDetalles> {
+  if (sucursalId == null) {
+    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+  }
+
   // Actualizar grupo
   const { data: grupo, error: errorGrupo } = await supabase
     .from('grupos_precio')
@@ -207,6 +217,7 @@ async function updateGrupoPrecio(
         grupo_precio_id: parseInt(id),
         producto_id: parseInt(pid),
         cantidad_minima_pedido: input.cantidadesMinimas?.[pid] || null,
+        sucursal_id: sucursalId,
       })))
 
     if (errorProductos) throw errorProductos
@@ -226,6 +237,7 @@ async function updateGrupoPrecio(
         cantidad_minima: e.cantidadMinima,
         precio_unitario: e.precioUnitario,
         etiqueta: e.etiqueta || null,
+        sucursal_id: sucursalId,
       })))
 
     if (errorEscalas) throw errorEscalas
@@ -308,7 +320,7 @@ export function useCrearGrupoPrecioMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: createGrupoPrecio,
+    mutationFn: (input: GrupoPrecioFormInput) => createGrupoPrecio(input, currentSucursalId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
@@ -323,7 +335,8 @@ export function useActualizarGrupoPrecioMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: updateGrupoPrecio,
+    mutationFn: ({ id, data }: { id: string; data: GrupoPrecioFormInput }) =>
+      updateGrupoPrecio({ id, data, sucursalId: currentSucursalId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
