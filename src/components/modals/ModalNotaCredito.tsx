@@ -205,6 +205,8 @@ export default function ModalNotaCredito({
                       <td className="px-4 py-3 text-center">
                         <input
                           type="number"
+                          inputMode="numeric"
+                          step="1"
                           min={0}
                           max={max}
                           value={cant}

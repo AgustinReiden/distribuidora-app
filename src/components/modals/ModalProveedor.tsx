@@ -210,6 +210,7 @@ export default function ModalProveedor({
               </label>
               <input
                 type="tel"
+                inputMode="tel"
                 value={formData.telefono}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => handleChange('telefono', e.target.value)}
                 className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
@@ -223,6 +224,7 @@ export default function ModalProveedor({
               </label>
               <input
                 type="email"
+                inputMode="email"
                 value={formData.email}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => handleChange('email', e.target.value)}
                 className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"

@@ -237,6 +237,8 @@ export default function ModalEntregaConSalvedad({
                             </label>
                             <input
                               type="number"
+                              inputMode="numeric"
+                              step="1"
                               min="1"
                               max={itemSalv.item.cantidad}
                               value={itemSalv.cantidadAfectada}

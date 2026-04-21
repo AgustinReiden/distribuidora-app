@@ -336,6 +336,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         <label className="block text-xs font-medium mb-1">Latitud</label>
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.000001"
                           value={depositoLat}
                           onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLat(e.target.value)}
@@ -347,6 +348,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         <label className="block text-xs font-medium mb-1">Longitud</label>
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.000001"
                           value={depositoLng}
                           onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLng(e.target.value)}

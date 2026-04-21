@@ -1081,6 +1081,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
               <label className="block text-xs text-gray-500 mb-1">Costo neto</label>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={itemRapido.costo || ''}
@@ -1168,6 +1169,8 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">Cant.</label>
             <input
               type="number"
+              inputMode="numeric"
+              step="1"
               min="1"
               value={item.cantidad}
               onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
@@ -1178,6 +1181,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">Bonif.%</label>
             <input
               type="number"
+              inputMode="decimal"
               min="0"
               max="100"
               step="0.01"
@@ -1190,6 +1194,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">Neto</label>
             <input
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
               value={item.costoUnitario}
@@ -1201,6 +1206,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">II%</label>
             <input
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
               value={item.impuestosInternos || 0}
@@ -1224,6 +1230,8 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-2">
           <input
             type="number"
+            inputMode="numeric"
+            step="1"
             min="1"
             value={item.cantidad}
             onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
@@ -1233,6 +1241,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-1">
           <input
             type="number"
+            inputMode="decimal"
             min="0"
             max="100"
             step="0.01"
@@ -1244,6 +1253,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-2">
           <input
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={item.costoUnitario}
@@ -1254,6 +1264,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-2">
           <input
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={item.impuestosInternos || 0}
