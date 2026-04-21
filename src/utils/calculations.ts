@@ -254,6 +254,24 @@ export function calcularPrecioDesdeMargen(
 // ============================================
 
 /**
+ * Parsea un string (con coma o punto decimal) y devuelve un número redondeado a 2 decimales.
+ * Devuelve 0 si el input no es parseable. Usa esta función en TODOS los inputs monetarios.
+ */
+export function parsePrecio(input: string | number | null | undefined): number {
+  if (input === null || input === undefined) return 0
+  const str = typeof input === 'number' ? String(input) : input
+  // Normalizar separador: si hay coma, tratamos los puntos como separador de miles
+  // ("1.234,56" → "1234.56"). Si no hay coma, el punto es el separador decimal
+  // ("10.456" → "10.456").
+  const normalized = str.includes(',')
+    ? str.replace(/\./g, '').replace(',', '.')
+    : str
+  const parsed = parseFloat(normalized)
+  if (!Number.isFinite(parsed)) return 0
+  return redondear(parsed, 2)
+}
+
+/**
  * Redondea un número a la cantidad de decimales especificada
  *
  * @param valor - Número a redondear
@@ -293,6 +311,7 @@ export default {
   calcularMargenPorcentaje,
   calcularGananciaBruta,
   calcularPrecioDesdeMargen,
+  parsePrecio,
   redondear,
   redondearAMultiplo
 };
