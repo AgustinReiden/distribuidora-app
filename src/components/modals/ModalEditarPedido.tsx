@@ -7,7 +7,7 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
-import { calcularNetoVenta } from '../../utils/calculations';
+import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import type { PedidoDB, ProductoDB } from '../../types';
 
 /** Item del pedido para edición */
@@ -222,7 +222,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   }, [estadoPago]);
 
   const handleMontoPagadoChange = (valor: string): void => {
-    const monto = Math.min(parseFloat(valor) || 0, total);
+    const monto = Math.min(parsePrecio(valor), total);
     setMontoPagado(monto);
     if (monto >= total) {
       setEstadoPago('pagado');
@@ -299,14 +299,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     let notasFinal = notas;
 
     if (pagoCombinado) {
-      const pagosValidos = pagosCombinados.filter(p => parseFloat(p.monto) > 0);
+      const pagosValidos = pagosCombinados.filter(p => parsePrecio(p.monto) > 0);
       if (pagosValidos.length < 2) {
         setErrorValidacion('Ingresa al menos 2 formas de pago con monto mayor a 0');
         return;
       }
       formaPagoFinal = 'combinado';
-      montoPagadoFinal = Math.min(pagosValidos.reduce((sum, p) => sum + parseFloat(p.monto), 0), total);
-      if (pagosValidos.reduce((sum, p) => sum + parseFloat(p.monto), 0) > total) {
+      montoPagadoFinal = Math.min(pagosValidos.reduce((sum, p) => sum + parsePrecio(p.monto), 0), total);
+      if (pagosValidos.reduce((sum, p) => sum + parsePrecio(p.monto), 0) > total) {
         setErrorValidacion(`El total combinado no puede superar el total del pedido (${formatPrecio(total)})`);
         return;
       }
@@ -316,7 +316,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         tarjeta: 'Tarjeta', cuenta_corriente: 'Cuenta Corriente'
       };
       const detalle = pagosValidos.map(p =>
-        `${formasPagoLabels[p.formaPago] || p.formaPago} $${parseFloat(p.monto).toLocaleString('es-AR')}`
+        `${formasPagoLabels[p.formaPago] || p.formaPago} $${parsePrecio(p.monto).toLocaleString('es-AR')}`
       ).join(' + ');
       // Reemplazar detalle previo si existe, o agregar
       const notaSinDetalle = notas.replace(/\s*\[Pago combinado:.*?\]/g, '').trim();
@@ -600,7 +600,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                 onChange={e => setEditingPriceValue(e.target.value)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') {
-                                    const newPrice = parseFloat(editingPriceValue);
+                                    const newPrice = parsePrecio(editingPriceValue);
                                     if (newPrice > 0) handlePrecioChange(item.productoId, newPrice);
                                     setEditingPriceId(null);
                                   } else if (e.key === 'Escape') {
@@ -608,7 +608,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                   }
                                 }}
                                 onBlur={() => {
-                                  const newPrice = parseFloat(editingPriceValue);
+                                  const newPrice = parsePrecio(editingPriceValue);
                                   if (newPrice > 0) handlePrecioChange(item.productoId, newPrice);
                                   setEditingPriceId(null);
                                 }}
@@ -815,7 +815,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       onChange={e => {
                         const nuevos = pagosCombinados.map((p, i) => i === index ? { ...p, monto: e.target.value } : p);
                         setPagosCombinados(nuevos);
-                        const totalComb = nuevos.reduce((sum, p) => sum + (parseFloat(p.monto) || 0), 0);
+                        const totalComb = nuevos.reduce((sum, p) => sum + parsePrecio(p.monto), 0);
                         setMontoPagado(totalComb);
                         if (totalComb >= total) setEstadoPago('pagado');
                         else if (totalComb > 0) setEstadoPago('parcial');
@@ -845,7 +845,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 Agregar forma de pago
               </button>
               {(() => {
-                const totalComb = pagosCombinados.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
+                const totalComb = pagosCombinados.reduce((s, p) => s + parsePrecio(p.monto), 0);
                 const excede = totalComb > total;
                 return (
                   <div className={`text-right text-sm ${excede ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
