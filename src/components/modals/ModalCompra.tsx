@@ -8,6 +8,7 @@ import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, l
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { parsePrecio } from '../../utils/calculations'
 import { supabase } from '../../lib/supabase'
 import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
 
@@ -1080,7 +1081,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
                 min="0"
                 step="0.01"
                 value={itemRapido.costo || ''}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, costo: parseFloat(e.target.value) || 0 }))}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, costo: parsePrecio(e.target.value) }))}
                 placeholder="0.00"
                 className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
               />
@@ -1189,7 +1190,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
               min="0"
               step="0.01"
               value={item.costoUnitario}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parsePrecio(e.target.value))}
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -1243,7 +1244,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             min="0"
             step="0.01"
             value={item.costoUnitario}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parseFloat(e.target.value) || 0)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parsePrecio(e.target.value))}
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>

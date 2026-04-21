@@ -7,6 +7,7 @@
 import { useState, useMemo } from 'react'
 import { X, Plus, Trash2, Search, Copy } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import { parsePrecio } from '../../utils/calculations'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
 
 export interface ModalGrupoPrecioProps {
@@ -138,7 +139,7 @@ export default function ModalGrupoPrecio({
 
     for (const e of escalasValidas) {
       const qty = parseInt(e.cantidadMinima)
-      const price = parseFloat(e.precioUnitario)
+      const price = parsePrecio(e.precioUnitario)
       if (isNaN(qty) || qty <= 0) {
         setError('Las cantidades mínimas deben ser mayores a 0')
         return
@@ -171,7 +172,7 @@ export default function ModalGrupoPrecio({
         cantidadesMinimas,
         escalas: escalasValidas.map(e => ({
           cantidadMinima: parseInt(e.cantidadMinima),
-          precioUnitario: parseFloat(e.precioUnitario),
+          precioUnitario: parsePrecio(e.precioUnitario),
           etiqueta: e.etiqueta.trim() || null,
         })),
       })
@@ -382,7 +383,7 @@ export default function ModalGrupoPrecio({
                     .sort((a, b) => parseInt(a.cantidadMinima) - parseInt(b.cantidadMinima))
                     .map((e, i) => (
                       <span key={i} className="text-sm text-green-800 dark:text-green-200">
-                        {e.cantidadMinima}+ = {formatPrecio(parseFloat(e.precioUnitario))}
+                        {e.cantidadMinima}+ = {formatPrecio(parsePrecio(e.precioUnitario))}
                         {e.etiqueta && ` (${e.etiqueta})`}
                         {i < escalas.filter(x => x.cantidadMinima && x.precioUnitario).length - 1 && ' · '}
                       </span>

@@ -1,6 +1,7 @@
 import { useState, useMemo, memo } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck } from 'lucide-react';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
+import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import ModalBase from './ModalBase';
@@ -464,7 +465,7 @@ const ModalPedido = memo(function ModalPedido({
                                 onChange={e => setEditingPriceValue(e.target.value)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') {
-                                    const newPrice = parseFloat(editingPriceValue);
+                                    const newPrice = parsePrecio(editingPriceValue);
                                     if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
                                     setEditingPriceId(null);
                                   } else if (e.key === 'Escape') {
@@ -472,7 +473,7 @@ const ModalPedido = memo(function ModalPedido({
                                   }
                                 }}
                                 onBlur={() => {
-                                  const newPrice = parseFloat(editingPriceValue);
+                                  const newPrice = parsePrecio(editingPriceValue);
                                   if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
                                   setEditingPriceId(null);
                                 }}
@@ -631,7 +632,7 @@ const ModalPedido = memo(function ModalPedido({
                     step="0.01"
                     max={hayDescuento ? totalFinal : calcularTotal()}
                     value={nuevoPedido.montoPagado || ''}
-                    onChange={e => onMontoPagadoChange && onMontoPagadoChange(parseFloat(e.target.value) || 0)}
+                    onChange={e => onMontoPagadoChange && onMontoPagadoChange(parsePrecio(e.target.value))}
                     className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
                     placeholder="Ingrese el monto pagado"
                   />
