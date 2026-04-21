@@ -291,14 +291,15 @@ function generarReciboA4(pedido) {
  */
 function calcularAlturaComanda(pedido) {
   const items = pedido.items || []
-  let height = 30 // header
-  height += 20 // cliente
-  height += 6 // divider + header tabla
-  height += items.length * 9 // productos (nombre + detalle precio)
-  height += 25 // total + pago
-  if (pedido.notas) height += 12
-  height += 20 // pie
-  return Math.max(height, 80)
+  let height = 40 // header empresa + nro recibo + fecha
+  height += 28 // cliente (nombre + direccion 2 lineas + telefono)
+  height += 10 // divider + header tabla productos
+  height += items.length * 12 // productos (nombre puede envolver + detalle precio unit)
+  height += 32 // total + forma pago + estado
+  if (pedido.estado_pago === 'parcial') height += 6
+  if (pedido.notas) height += 18
+  height += 18 // pie
+  return Math.max(height, 110)
 }
 
 /**
@@ -313,124 +314,124 @@ function dibujarComanda(doc, pedido) {
 
   // === HEADER ===
   doc.setTextColor(0, 0, 0)
-  setHeaderStyle(doc, 11)
-  doc.text('CRECER', ticketWidth / 2, y + 4, { align: 'center' })
-  y += 5
-  doc.setFontSize(7)
+  setHeaderStyle(doc, 14)
+  doc.text('CRECER', ticketWidth / 2, y + 5, { align: 'center' })
+  y += 7
+  doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
   doc.text('DISTRIBUCIONES', ticketWidth / 2, y + 2, { align: 'center' })
-  y += 5
+  y += 6
 
   // Número de recibo y fecha
-  setHeaderStyle(doc, 8)
+  setHeaderStyle(doc, 11)
   doc.text(`Recibo #${pedido.id}`, ticketWidth / 2, y, { align: 'center' })
-  y += 3
-  setNormalStyle(doc, 6)
+  y += 5
+  setNormalStyle(doc, 9)
   doc.text(formatFechaHora(pedido.fecha || pedido.created_at || new Date()), ticketWidth / 2, y, { align: 'center' })
-  y += 3
+  y += 4
 
   drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
-  y += 3
+  y += 5
 
   // === CLIENTE ===
-  setHeaderStyle(doc, 8)
+  setHeaderStyle(doc, 12)
   doc.text(pedido.cliente?.nombre_fantasia || 'Cliente', margin, y)
-  y += 3
-  setNormalStyle(doc, 6)
+  y += 5
+  setNormalStyle(doc, 9)
   if (pedido.cliente?.direccion) {
     const dirLines = doc.splitTextToSize(pedido.cliente.direccion, contentWidth)
     dirLines.slice(0, 2).forEach(line => {
       doc.text(line, margin, y)
-      y += 2.5
+      y += 4
     })
   }
   if (pedido.cliente?.telefono) {
     doc.text(`Tel: ${pedido.cliente.telefono}`, margin, y)
-    y += 2.5
+    y += 4
   }
   y += 1
 
   drawDivider(doc, y, margin, ticketWidth - margin, 0.3)
-  y += 3
+  y += 4
 
   // === PRODUCTOS ===
   const items = pedido.items || []
-  setHeaderStyle(doc, 6)
+  setHeaderStyle(doc, 9)
   doc.text('PRODUCTO', margin, y)
   doc.text('SUBT.', ticketWidth - margin, y, { align: 'right' })
-  y += 3
+  y += 4
 
-  setNormalStyle(doc, 6)
+  setNormalStyle(doc, 9)
   items.forEach(item => {
     const productoNombre = item.producto?.nombre || 'Producto'
     const subtotal = item.subtotal || item.precio_unitario * item.cantidad
 
-    const nombreLines = doc.splitTextToSize(`${item.cantidad}x ${productoNombre}`, contentWidth - 22)
+    const nombreLines = doc.splitTextToSize(`${item.cantidad}x ${productoNombre}`, contentWidth - 26)
     nombreLines.forEach((line, idx) => {
       doc.text(line, margin, y)
       if (idx === 0) {
         doc.text(formatPrecio(subtotal), ticketWidth - margin, y, { align: 'right' })
       }
-      y += 2.8
+      y += 4
     })
     // Detalle: cantidad x precio unitario
-    doc.setFontSize(5)
+    doc.setFontSize(7)
     doc.setTextColor(100, 100, 100)
-    doc.text(`${item.cantidad} x ${formatPrecio(item.precio_unitario)}`, margin + 2, y)
+    doc.text(`${item.cantidad} x ${formatPrecio(item.precio_unitario)}`, margin + 3, y)
     doc.setTextColor(0, 0, 0)
-    doc.setFontSize(6)
-    y += 2.5
+    doc.setFontSize(9)
+    y += 3.5
   })
 
   y += 1
   drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
-  y += 3
+  y += 5
 
   // === TOTAL ===
-  setHeaderStyle(doc, 10)
+  setHeaderStyle(doc, 14)
   doc.text('TOTAL:', margin, y)
   doc.text(formatPrecio(pedido.total), ticketWidth - margin, y, { align: 'right' })
-  y += 4
+  y += 6
 
   // Estado de pago
-  setNormalStyle(doc, 7)
+  setNormalStyle(doc, 10)
   const formaPagoLabel = FORMAS_PAGO_LABELS[pedido.forma_pago] || pedido.forma_pago || 'Efectivo'
   doc.text(`${formaPagoLabel}`, margin, y)
 
   const estadoPagoLabel = pedido.estado_pago === 'pagado' ? 'PAGADO' :
     pedido.estado_pago === 'parcial' ? 'PARCIAL' : 'PENDIENTE'
-  setHeaderStyle(doc, 7)
+  setHeaderStyle(doc, 10)
   doc.text(estadoPagoLabel, ticketWidth - margin, y, { align: 'right' })
-  y += 3
+  y += 4
 
   if (pedido.estado_pago === 'parcial') {
-    setNormalStyle(doc, 6)
+    setNormalStyle(doc, 9)
     const montoPagado = pedido.monto_pagado || 0
     doc.text(`Pagado: ${formatPrecio(montoPagado)}`, margin, y)
     doc.text(`Saldo: ${formatPrecio(pedido.total - montoPagado)}`, ticketWidth - margin, y, { align: 'right' })
-    y += 3
+    y += 4
   }
 
   // === NOTAS ===
   if (pedido.notas) {
-    y += 1
-    drawDivider(doc, y, margin, ticketWidth - margin, 0.2)
     y += 2
-    setItalicStyle(doc, 6)
+    drawDivider(doc, y, margin, ticketWidth - margin, 0.2)
+    y += 3
+    setItalicStyle(doc, 9)
     const notasLines = doc.splitTextToSize(pedido.notas, contentWidth)
     notasLines.slice(0, 3).forEach(line => {
       doc.text(line, margin, y)
-      y += 2.5
+      y += 3.5
     })
   }
 
   // === PIE ===
-  y += 2
-  drawDivider(doc, y, margin, ticketWidth - margin, 0.3)
   y += 3
-  setItalicStyle(doc, 5)
+  drawDivider(doc, y, margin, ticketWidth - margin, 0.3)
+  y += 4
+  setItalicStyle(doc, 7)
   doc.text('Crecer Distribuciones', ticketWidth / 2, y, { align: 'center' })
-  y += 2
+  y += 3
   doc.text('DOCUMENTO NO VALIDO COMO FACTURA', ticketWidth / 2, y, { align: 'center' })
 }
 
