@@ -809,6 +809,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                     <input
                       type="number"
+                      inputMode="decimal"
                       step="0.01"
                       min="0"
                       value={pago.monto}
@@ -923,6 +924,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0"
                 max={total}
                 step="0.01"

@@ -628,6 +628,7 @@ const ModalPedido = memo(function ModalPedido({
                   <span className="text-lg font-semibold text-yellow-700 dark:text-yellow-400">$</span>
                   <input
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     step="0.01"
                     max={hayDescuento ? totalFinal : calcularTotal()}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { X, User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2 } from 'lucide-react'
+import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2 } from 'lucide-react'
+import ModalBase from './ModalBase'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
@@ -74,62 +75,57 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   if (!cliente) return null
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+    <ModalBase title="Ficha Cliente" description={cliente.nombre_fantasia} onClose={onClose} maxWidth="max-w-4xl">
+      <div className="flex flex-col">
         {/* Header */}
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex justify-between items-start">
-            <div className="flex items-start gap-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
-                <User className="w-8 h-8 text-white" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{cliente.nombre_fantasia}</h2>
-                  {cliente.rubro && (
-                    <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-xs font-medium flex items-center gap-1">
-                      <Tag className="w-3 h-3" />
-                      {cliente.rubro}
-                    </span>
-                  )}
-                </div>
-                <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                  <Building2 className="w-4 h-4" />
-                  {cliente.razon_social}
-                </p>
-                {cliente.cuit && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    CUIT: <span className="font-mono">{cliente.cuit}</span>
-                  </p>
-                )}
-                <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
-                  {cliente.direccion && (
-                    <span className="flex items-center gap-1">
-                      <MapPin className="w-4 h-4" />
-                      {cliente.direccion}
-                    </span>
-                  )}
-                  {cliente.telefono && (
-                    <span className="flex items-center gap-1">
-                      <Phone className="w-4 h-4" />
-                      {cliente.telefono}
-                      {cliente.contacto && (
-                        <span className="text-gray-400">({cliente.contacto})</span>
-                      )}
-                    </span>
-                  )}
-                </div>
-                {cliente.horarios_atencion && (
-                  <div className="flex items-center gap-1 mt-2 text-sm text-gray-500 dark:text-gray-400">
-                    <Clock className="w-4 h-4" />
-                    <span>{cliente.horarios_atencion}</span>
-                  </div>
-                )}
-              </div>
+        <div className="pb-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-start gap-4">
+            <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shrink-0">
+              <User className="w-8 h-8 text-white" />
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{cliente.nombre_fantasia}</h2>
+                {cliente.rubro && (
+                  <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-xs font-medium flex items-center gap-1">
+                    <Tag className="w-3 h-3" />
+                    {cliente.rubro}
+                  </span>
+                )}
+              </div>
+              <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                <Building2 className="w-4 h-4" />
+                {cliente.razon_social}
+              </p>
+              {cliente.cuit && (
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  CUIT: <span className="font-mono">{cliente.cuit}</span>
+                </p>
+              )}
+              <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
+                {cliente.direccion && (
+                  <span className="flex items-center gap-1">
+                    <MapPin className="w-4 h-4" />
+                    {cliente.direccion}
+                  </span>
+                )}
+                {cliente.telefono && (
+                  <span className="flex items-center gap-1">
+                    <Phone className="w-4 h-4" />
+                    {cliente.telefono}
+                    {cliente.contacto && (
+                      <span className="text-gray-400">({cliente.contacto})</span>
+                    )}
+                  </span>
+                )}
+              </div>
+              {cliente.horarios_atencion && (
+                <div className="flex items-center gap-1 mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  <Clock className="w-4 h-4" />
+                  <span>{cliente.horarios_atencion}</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Account Balance Card */}
@@ -436,7 +432,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
           ) : null}
         </div>
       </div>
-    </div>
+    </ModalBase>
   )
 }
 

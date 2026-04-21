@@ -91,8 +91,7 @@ Esto vuelve a correr `deploy-coolify` sobre el `main` actual.
 Ir a **Settings → Branches → Add branch protection rule** (o editar la existente) para `main` y activar:
 
 - [x] **Require a pull request before merging**
-  - [x] Require approvals: **1** (mínimo)
-  - [x] Dismiss stale pull request approvals when new commits are pushed
+  - [ ] Require approvals: **desactivado** (o `0`). Activarlo en un repo de un solo desarrollador bloquea el merge porque GitHub no permite auto-aprobarse. Si en el futuro se suma otro dev con permiso de write, cambiar a `1` y activar "Dismiss stale pull request approvals when new commits are pushed".
 - [x] **Require status checks to pass before merging**
   - [x] **Require branches to be up to date before merging**
   - Status checks requeridos (nombres exactos de los jobs de `ci.yml`):

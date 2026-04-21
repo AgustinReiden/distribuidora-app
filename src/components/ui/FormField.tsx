@@ -22,6 +22,12 @@ export interface FormFieldProps {
   children: ReactNode;
   /** Clases adicionales */
   className?: string;
+  /**
+   * Pista de teclado móvil (se propaga al input hijo).
+   * Útil para que Android/iOS muestren el teclado correcto en
+   * campos numéricos, de teléfono, email, etc.
+   */
+  inputMode?: 'none' | 'text' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal' | 'search';
 }
 
 export function FormField({
@@ -30,7 +36,8 @@ export function FormField({
   required = false,
   hint,
   children,
-  className = ''
+  className = '',
+  inputMode
 }: FormFieldProps): ReactElement {
   const id = useId()
   const inputId = `field-${id}`
@@ -45,11 +52,12 @@ export function FormField({
 
   // Clone and enhance children with accessibility props
   const enhancedChildren = isValidElement(children)
-    ? cloneElement(children as ReactElement<{ id?: string; className?: string; 'aria-invalid'?: string; 'aria-required'?: string; 'aria-describedby'?: string }>, {
+    ? cloneElement(children as ReactElement<{ id?: string; className?: string; 'aria-invalid'?: string; 'aria-required'?: string; 'aria-describedby'?: string; inputMode?: string }>, {
         id: inputId,
         'aria-invalid': error ? 'true' : undefined,
         'aria-required': required ? 'true' : undefined,
         'aria-describedby': ariaDescribedBy,
+        ...(inputMode ? { inputMode } : {}),
         className: `${(children.props as { className?: string }).className || ''} ${
           error
             ? 'border-red-500 dark:border-red-400 bg-red-50 dark:bg-red-900/20 focus:ring-red-500'

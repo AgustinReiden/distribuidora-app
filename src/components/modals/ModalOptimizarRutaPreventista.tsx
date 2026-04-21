@@ -117,6 +117,7 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
                   <label className="block text-xs font-medium mb-1 dark:text-gray-300">Latitud</label>
                   <input
                     type="number"
+                    inputMode="decimal"
                     step="0.000001"
                     value={depositoLat}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLat(e.target.value)}
@@ -128,6 +129,7 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
                   <label className="block text-xs font-medium mb-1 dark:text-gray-300">Longitud</label>
                   <input
                     type="number"
+                    inputMode="decimal"
                     step="0.000001"
                     value={depositoLng}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLng(e.target.value)}

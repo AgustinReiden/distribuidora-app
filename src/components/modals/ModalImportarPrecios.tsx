@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
-import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, RefreshCw } from 'lucide-react';
+import ModalBase from './ModalBase';
 const loadExcelUtils = () => import('../../utils/excel');
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import { logger } from '../../utils/logger';
@@ -251,33 +252,15 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
   const productosNoEncontrados: PrecioPreviewItem[] = preview.filter(p => p.estado === 'no_encontrado');
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-              <FileSpreadsheet className="w-5 h-5 text-green-600" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
-                Importar Precios desde Excel
-              </h2>
-              <p className="text-sm text-gray-500">
-                Actualiza precios masivamente desde un archivo Excel
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
+    <ModalBase
+      title="Importar Precios desde Excel"
+      description="Actualiza precios masivamente desde un archivo Excel"
+      onClose={onClose}
+      maxWidth="max-w-4xl"
+    >
+      <div className="flex flex-col">
         {/* Contenido */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="space-y-4">
           {/* Zona de carga de archivo */}
           {!archivo && (
             <div
@@ -473,7 +456,7 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
         </div>
 
         {/* Footer */}
-        <div className="flex gap-3 p-4 border-t dark:border-gray-700 shrink-0">
+        <div className="flex gap-3 pt-4 mt-4 border-t dark:border-gray-700 shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -502,6 +485,6 @@ export default function ModalImportarPrecios({ productos, onActualizarPrecios, o
           )}
         </div>
       </div>
-    </div>
+    </ModalBase>
   );
 }

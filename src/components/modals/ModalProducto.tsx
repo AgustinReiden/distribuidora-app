@@ -188,6 +188,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             <label className="block text-sm font-medium mb-1">Stock *</label>
             <input
               type="number"
+              inputMode="numeric"
+              step="1"
               value={form.stock}
               onChange={(e: ChangeEvent<HTMLInputElement>) => {
                 const val = e.target.value;
@@ -205,6 +207,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           <label className="block text-sm font-medium mb-1">Stock Minimo de Seguridad</label>
           <input
             type="number"
+            inputMode="numeric"
+            step="1"
             value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
             onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange('stock_minimo', parseInt(e.target.value) || 0)}
             className={inputClass('stock_minimo')}
@@ -298,6 +302,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos (%)</label>
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.01"
                 min="0"
                 max="100"
@@ -319,6 +324,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               <label className="block text-xs font-medium mb-1 text-gray-600">Costo Neto</label>
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.01"
                 value={form.costo_sin_iva || ''}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => handleCostoSinIvaChange(e.target.value)}
@@ -330,6 +336,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               <label className="block text-xs font-medium mb-1 text-gray-600">Costo Total (Neto + IVA + Imp.Int.)</label>
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.01"
                 value={form.costo_con_iva || ''}
                 readOnly
@@ -351,6 +358,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               <label className="block text-xs font-medium mb-1 text-gray-600">Precio Neto</label>
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.01"
                 value={form.precio_sin_iva || ''}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => handlePrecioSinIvaChange(e.target.value)}
@@ -362,6 +370,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               <label className="block text-xs font-medium mb-1 text-gray-600">Precio Final (Neto + IVA + Imp.Int.) *</label>
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.01"
                 value={form.precio}
                 readOnly

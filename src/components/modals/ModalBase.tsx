@@ -18,6 +18,7 @@ import {
   DialogDescription,
   DialogBody
 } from '../ui/Dialog';
+import { CompactErrorBoundary } from '../ErrorBoundary';
 import { cn } from '../../lib/utils';
 
 export type ModalMaxWidth =
@@ -79,7 +80,9 @@ const ModalBase = memo(function ModalBase({
           {description || `Modal de ${title}`}
         </DialogDescription>
         <DialogBody>
-          {children}
+          <CompactErrorBoundary componentName={title || 'Modal'} onClose={onClose}>
+            {children}
+          </CompactErrorBoundary>
         </DialogBody>
       </DialogContent>
     </Dialog>

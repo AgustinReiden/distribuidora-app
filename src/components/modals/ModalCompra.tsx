@@ -10,6 +10,7 @@ import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { supabase } from '../../lib/supabase'
+import { CompactErrorBoundary } from '../ErrorBoundary'
 import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
 
 const ModalProveedor = lazy(() => import('./ModalProveedor'))
@@ -659,58 +660,60 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         )}
 
         {/* Contenido scrolleable */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
-          {/* Sección Proveedor */}
-          <ProveedorSection
-            state={state}
-            dispatch={dispatch}
-            proveedores={proveedores}
-            onAgregarProveedor={onCrearProveedor ? () => setModalProveedorOpen(true) : undefined}
-          />
-
-          {/* Datos de la compra */}
-          <DatosCompraSection state={state} dispatch={dispatch} />
-
-          {/* Productos */}
-          <ProductosSection
-            state={state}
-            dispatch={dispatch}
-            productosFiltrados={productosFiltrados}
-            onAgregarItem={handleAgregarItem}
-            onActualizarItem={handleActualizarItem}
-            onEliminarItem={handleEliminarItem}
-            onCrearProductoRapido={onCrearProductoRapido}
-            onImportarExcel={() => setModalImportarOpen(true)}
-          />
-
-          {/* Totales */}
-          {state.items.length > 0 && (
-            <ResumenSection
-              subtotalBruto={subtotalBruto}
-              bonificacionTotal={bonificacionTotal}
-              subtotal={subtotal}
-              iva={iva}
-              impuestosInternos={impuestosInternos}
-              total={total}
+        <CompactErrorBoundary componentName="ModalCompra" onClose={onClose}>
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
+            {/* Sección Proveedor */}
+            <ProveedorSection
+              state={state}
+              dispatch={dispatch}
+              proveedores={proveedores}
+              onAgregarProveedor={onCrearProveedor ? () => setModalProveedorOpen(true) : undefined}
             />
-          )}
 
-          {/* Notas */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              <FileText className="w-4 h-4 inline mr-1" />
-              Notas (opcional)
-            </label>
-            <textarea
-              value={state.notas}
-              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => dispatch({ type: 'SET_NOTAS', payload: e.target.value })}
-              placeholder="Observaciones adicionales..."
-              rows={2}
-              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+            {/* Datos de la compra */}
+            <DatosCompraSection state={state} dispatch={dispatch} />
+
+            {/* Productos */}
+            <ProductosSection
+              state={state}
+              dispatch={dispatch}
+              productosFiltrados={productosFiltrados}
+              onAgregarItem={handleAgregarItem}
+              onActualizarItem={handleActualizarItem}
+              onEliminarItem={handleEliminarItem}
+              onCrearProductoRapido={onCrearProductoRapido}
+              onImportarExcel={() => setModalImportarOpen(true)}
             />
-          </div>
 
-        </form>
+            {/* Totales */}
+            {state.items.length > 0 && (
+              <ResumenSection
+                subtotalBruto={subtotalBruto}
+                bonificacionTotal={bonificacionTotal}
+                subtotal={subtotal}
+                iva={iva}
+                impuestosInternos={impuestosInternos}
+                total={total}
+              />
+            )}
+
+            {/* Notas */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <FileText className="w-4 h-4 inline mr-1" />
+                Notas (opcional)
+              </label>
+              <textarea
+                value={state.notas}
+                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => dispatch({ type: 'SET_NOTAS', payload: e.target.value })}
+                placeholder="Observaciones adicionales..."
+                rows={2}
+                className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+
+          </form>
+        </CompactErrorBoundary>
 
         {/* Footer con botones */}
         <div className="p-3 sm:p-4 border-t dark:border-gray-700 shrink-0 space-y-3">
@@ -1078,6 +1081,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
               <label className="block text-xs text-gray-500 mb-1">Costo neto</label>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={itemRapido.costo || ''}
@@ -1165,6 +1169,8 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">Cant.</label>
             <input
               type="number"
+              inputMode="numeric"
+              step="1"
               min="1"
               value={item.cantidad}
               onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
@@ -1175,6 +1181,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">Bonif.%</label>
             <input
               type="number"
+              inputMode="decimal"
               min="0"
               max="100"
               step="0.01"
@@ -1187,6 +1194,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">Neto</label>
             <input
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
               value={item.costoUnitario}
@@ -1198,6 +1206,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
             <label className="block text-xs text-gray-500 mb-1">II%</label>
             <input
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
               value={item.impuestosInternos || 0}
@@ -1221,6 +1230,8 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-2">
           <input
             type="number"
+            inputMode="numeric"
+            step="1"
             min="1"
             value={item.cantidad}
             onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
@@ -1230,6 +1241,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-1">
           <input
             type="number"
+            inputMode="decimal"
             min="0"
             max="100"
             step="0.01"
@@ -1241,6 +1253,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-2">
           <input
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={item.costoUnitario}
@@ -1251,6 +1264,7 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="col-span-2">
           <input
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={item.impuestosInternos || 0}

@@ -245,6 +245,8 @@ export default function ModalPromocion({
             </label>
             <input
               type="number"
+              inputMode="numeric"
+              step="1"
               min="1"
               value={limiteUsos}
               onChange={e => setLimiteUsos(e.target.value)}
@@ -427,6 +429,8 @@ export default function ModalPromocion({
                       </label>
                       <input
                         type="number"
+                        inputMode="numeric"
+                        step="1"
                         min="1"
                         value={unidadesPorBloque}
                         onChange={e => setUnidadesPorBloque(e.target.value)}
@@ -443,6 +447,8 @@ export default function ModalPromocion({
                       </label>
                       <input
                         type="number"
+                        inputMode="numeric"
+                        step="1"
                         min="1"
                         value={stockPorBloque}
                         onChange={e => setStockPorBloque(e.target.value)}
@@ -473,6 +479,8 @@ export default function ModalPromocion({
                 <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad compra</label>
                 <input
                   type="number"
+                  inputMode="numeric"
+                  step="1"
                   min="1"
                   value={cantidadCompra}
                   onChange={e => setCantidadCompra(e.target.value)}
@@ -484,6 +492,8 @@ export default function ModalPromocion({
                 <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad gratis</label>
                 <input
                   type="number"
+                  inputMode="numeric"
+                  step="1"
                   min="1"
                   value={cantidadBonificacion}
                   onChange={e => setCantidadBonificacion(e.target.value)}
@@ -613,6 +623,8 @@ export default function ModalPromocion({
                 </label>
                 <input
                   type="number"
+                  inputMode="numeric"
+                  step="1"
                   value={prioridad}
                   onChange={e => setPrioridad(e.target.value)}
                   placeholder="0"

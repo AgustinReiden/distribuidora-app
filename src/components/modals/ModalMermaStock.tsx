@@ -156,6 +156,8 @@ export default function ModalMermaStock({
             </label>
             <input
               type="number"
+              inputMode="numeric"
+              step="1"
               min="1"
               max={producto.stock}
               value={cantidad}
