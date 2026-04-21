@@ -308,7 +308,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             <label htmlFor="telefono" className="block text-sm font-medium mb-1 dark:text-gray-200">Teléfono</label>
             <input
               id="telefono"
-              type="text"
+              type="tel"
+              inputMode="tel"
               value={form.telefono}
               onChange={e => handleFieldChange('telefono', e.target.value)}
               className={inputClass('telefono')}
@@ -411,6 +412,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Límite de Crédito ($)</label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   min="0"
                   step="100"
                   value={form.limiteCredito}
@@ -424,6 +426,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Días de Crédito</label>
                 <input
                   type="number"
+                  inputMode="numeric"
+                  step="1"
                   min="0"
                   max="365"
                   value={form.diasCredito}

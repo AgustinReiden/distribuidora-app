@@ -274,6 +274,8 @@ export default function ModalGrupoPrecio({
                         {isSelected && (
                           <input
                             type="number"
+                            inputMode="numeric"
+                            step="1"
                             min="1"
                             value={moqPorProducto.get(String(p.id)) || ''}
                             onChange={e => actualizarMoqProducto(String(p.id), e.target.value)}
@@ -296,6 +298,8 @@ export default function ModalGrupoPrecio({
               <div className="flex items-center gap-2 mt-2">
                 <input
                   type="number"
+                  inputMode="numeric"
+                  step="1"
                   min="1"
                   value={moqGlobal}
                   onChange={e => setMoqGlobal(e.target.value)}
@@ -331,6 +335,8 @@ export default function ModalGrupoPrecio({
                   <div className="flex-1">
                     <input
                       type="number"
+                      inputMode="numeric"
+                      step="1"
                       min="1"
                       value={escala.cantidadMinima}
                       onChange={e => actualizarEscala(index, 'cantidadMinima', e.target.value)}
@@ -343,6 +349,7 @@ export default function ModalGrupoPrecio({
                       <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm">$</span>
                       <input
                         type="number"
+                        inputMode="decimal"
                         min="0.01"
                         step="0.01"
                         value={escala.precioUnitario}
