@@ -116,7 +116,7 @@ export interface UseOfflineSyncReturn {
     pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
     options?: GuardarPedidoOptions
   ) => Promise<GuardarPedidoResult>;
-  guardarMermaOffline: (mermaData: MermaFormInput) => MermaOffline;
+  guardarMermaOffline: (mermaData: MermaFormInput) => Promise<MermaOffline>;
   eliminarPedidoOffline: (offlineId: string) => void;
   eliminarMermaOffline: (offlineId: string) => void;
   sincronizarPedidos: (
@@ -371,53 +371,61 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   /**
    * Guarda una merma en modo offline
    * Ahora usa IndexedDB via queueOperation
+   *
+   * Async: espera a que queueOperation persista en IndexedDB antes de retornar
+   * (fix Task 1.5). Antes usaba .then()/.catch() y devolvía el objeto con
+   * sincronizado:false antes de que la op estuviera realmente encolada, lo que
+   * permitía que el caller actuara sobre un estado que aún no existía.
    */
-  const guardarMermaOffline = useCallback((mermaData: MermaFormInput): MermaOffline => {
-    const tempOfflineId = `offline_merma_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const nuevaMerma: MermaOffline = {
-      ...mermaData,
-      offlineId: tempOfflineId,
-      creadoOffline: new Date().toISOString(),
-      sincronizado: false
-    }
-
-    // Encolar en IndexedDB (async, no bloqueante)
-    // Multi-tenant: persist sucursal so replay can set the right header (C7).
-    queueOperation(
-      'CREATE_MERMA' as OperationType,
-      {
+  const guardarMermaOffline = useCallback(
+    async (mermaData: MermaFormInput): Promise<MermaOffline> => {
+      const tempOfflineId = `offline_merma_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      const nuevaMerma: MermaOffline = {
         ...mermaData,
-        tempOfflineId,
-        timestamp: Date.now()
-      },
-      undefined,
-      undefined,
-      currentSucursalIdRef.current ?? undefined
-    )
-      .then((opId) => {
+        offlineId: tempOfflineId,
+        creadoOffline: new Date().toISOString(),
+        sincronizado: false
+      }
+
+      // Optimistic update: pintar la merma como pendiente antes del await para
+      // que la UI responda al instante. Si queueOperation falla, rollback abajo.
+      setMermasPendientes(prev => [...prev, nuevaMerma])
+
+      try {
+        // Encolar en IndexedDB - await para garantizar persistencia antes de retornar.
+        // Multi-tenant: persist sucursal so replay can set the right header (C7).
+        const opId = await queueOperation(
+          'CREATE_MERMA' as OperationType,
+          {
+            ...mermaData,
+            tempOfflineId,
+            timestamp: Date.now()
+          },
+          undefined,
+          undefined,
+          currentSucursalIdRef.current ?? undefined
+        )
+
         if (opId !== null) {
           logger.info(`[useOfflineSync] Merma encolada con ID: ${opId}`)
-          // Usar void para indicar que no esperamos el resultado
-          void loadPendingOperations()
         } else {
           logger.warn('[useOfflineSync] Merma duplicada detectada, no se encoló')
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         logger.error('[useOfflineSync] Error crítico al encolar merma:', err)
         // Rollback del optimistic update: la merma ya fue pintada como pendiente,
         // removerla para no engañar al usuario.
         setMermasPendientes(prev => prev.filter(m => m.offlineId !== tempOfflineId))
         window.dispatchEvent(new CustomEvent('offline-storage-error', {
-          detail: { type: 'merma', error: err.message }
+          detail: { type: 'merma', error: (err as Error).message }
         }))
-      })
+        throw err
+      }
 
-    // Actualizar estado local inmediatamente para UI responsive
-    setMermasPendientes(prev => [...prev, nuevaMerma])
-
-    return nuevaMerma
-  }, [loadPendingOperations])
+      return nuevaMerma
+    },
+    []
+  )
 
   /**
    * Elimina un pedido offline
