@@ -25,7 +25,7 @@ gh run view --log
 | Entorno | Plataforma | Trigger | URL | Vars de build |
 |---------|-----------|---------|-----|---------------|
 | Producción | Coolify (Docker + Nginx) | Push a `main` (webhook `COOLIFY_WEBHOOK_URL`) | Dominio productivo (Hostinger) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN`, `VITE_GOOGLE_API_KEY`, `VITE_N8N_WEBHOOK_URL`, `VITE_N8N_FACTURA_WEBHOOK_URL`, `VITE_APP_VERSION`, `N8N_UPSTREAM` (runtime) |
-| Staging | Vercel | `workflow_dispatch` manual con `environment=staging` | Preview URL Vercel | `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN`, `VITE_GOOGLE_API_KEY`, `VITE_N8N_WEBHOOK_URL`, `VITE_N8N_FACTURA_WEBHOOK_URL` |
+| Staging | Vercel | `workflow_dispatch` manual con `environment=staging` | Preview URL Vercel | `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN` (secret GitHub) → `VITE_SENTRY_DSN` (env de build), `VITE_GOOGLE_API_KEY`, `VITE_N8N_WEBHOOK_URL`, `VITE_N8N_FACTURA_WEBHOOK_URL` |
 | Local | Vite dev server | `npm run dev` | `http://localhost:5173` | `.env` local (ver `.env.example`) |
 
 ## Flujo de Deploy a Producción
@@ -39,7 +39,7 @@ Cuando se mergea un PR a `main`:
    - `security` - `npm audit --audit-level=high` + `npm run check-secrets`
    - `build` - depende de `lint`, `test`, `typecheck`, `security`
    - `e2e` - Playwright (Chromium), depende de `build`
-2. **Deploy (`.github/workflows/deploy.yml`)** corre en paralelo al CI en el mismo push a `main`:
+2. **Deploy (`.github/workflows/deploy.yml`)**: el job `deploy-coolify` corre en paralelo al CI en cada push a `main`. El job `deploy-staging` **solo** corre con `workflow_dispatch` manual con `environment=staging` (ver sección de staging), no en el push a `main`.
    - Job `deploy-coolify` dispara `POST` al `COOLIFY_WEBHOOK_URL` (timeout 30s).
    - Coolify hace `git pull` del repo y construye el `Dockerfile` (Node 20-alpine → Nginx 1.27-alpine, multi-stage).
    - El contenedor tiene un `HEALTHCHECK` cada 30s (`wget http://localhost/`), con `start-period=5s` y 3 reintentos.
@@ -111,7 +111,7 @@ Ir a **Settings → Branches → Add branch protection rule** (o editar la exist
 
 ## Variables de Entorno Críticas
 
-Fuente: `.env.example`. Todas las `VITE_*` quedan horneadas en el bundle en build-time (Vite las reemplaza como strings estáticos) — **nunca poner secretos reales** en variables `VITE_*`.
+Fuente: `.env.example` para las `VITE_*` (build-time). `N8N_UPSTREAM` es runtime-only y solo se configura en Coolify (no está en `.env.example`). Todas las `VITE_*` quedan horneadas en el bundle en build-time (Vite las reemplaza como strings estáticos) — **nunca poner secretos reales** en variables `VITE_*`.
 
 | Variable | Requerido | Descripción |
 |----------|-----------|-------------|
@@ -121,7 +121,7 @@ Fuente: `.env.example`. Todas las `VITE_*` quedan horneadas en el bundle en buil
 | `VITE_N8N_WEBHOOK_URL` | Sí | Ruta al webhook de optimización de ruta. En prod: `/api/n8n/webhook/optimizar-ruta` (proxy nginx). |
 | `VITE_N8N_FACTURA_WEBHOOK_URL` | Sí | Ruta al webhook de escaneo de factura. En prod: `/api/n8n/webhook/escanear-factura`. |
 | `VITE_SENTRY_DSN` | Recomendado | DSN de Sentry para reportar errores de producción. Vacío desactiva Sentry. |
-| `VITE_APP_VERSION` | Recomendado | Versión de la app para releases de Sentry. En CI se usa `${{ github.sha }}`. |
+| `VITE_APP_VERSION` | Recomendado | Versión de la app para releases de Sentry. En staging (job `deploy-staging`) el workflow pasa `${{ github.sha }}`. En producción (Coolify) se configura como env var en el dashboard de Coolify y se pasa como `ARG` al build del Dockerfile; el `ARG VITE_APP_VERSION` del Dockerfile no define default, así que si no se setea queda vacío. |
 | `N8N_UPSTREAM` | Sí (solo Coolify) | URL base del n8n upstream (ej. `https://n8n.shycia.com.ar`). Runtime-only, usada por `envsubst` en el CMD del Dockerfile. |
 
 ### Dónde se configuran
