@@ -1,7 +1,10 @@
-# Pre-commit hook: Verifica secretos y ejecuta lint
+# Pre-commit hook: Verifica secretos, ejecuta lint y corre tests
 
 # Verificar secretos antes del commit
 ./scripts/check-secrets.sh
 
 # Ejecutar lint en archivos staged
 npx lint-staged
+
+# Ejecutar unit tests
+npm run test:run
