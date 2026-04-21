@@ -6,7 +6,7 @@ Runbook corto para revertir producción cuando un deploy rompe algo. Complementa
 
 ```bash
 # 1. Revert del commit problemático (en main, con el hash a revertir)
-git revert <commit-hash> -m 1
+git revert <commit-hash>    # si es merge commit, agregá: -m 1
 git push origin main
 
 # 2. Si el revert no basta y hay que re-disparar el webhook de Coolify
@@ -14,10 +14,9 @@ gh workflow run deploy.yml -f environment=production
 
 # 3. Verificar que el nuevo run se disparó
 gh run list --workflow=deploy.yml --limit 3
-
-# 4. Sentry: abrir dashboard del proyecto y filtrar por "Last 15 minutes"
-#    (ver VITE_SENTRY_DSN en .env o en Environment Variables de Coolify)
 ```
+
+- Sentry: abrir dashboard del proyecto y filtrar por "Last 15 minutes" (ver `VITE_SENTRY_DSN` en `.env` o en Environment Variables de Coolify; más detalle en [`docs/DEPLOY_GUIDE.md`](./DEPLOY_GUIDE.md)).
 
 ## Cuándo usar
 
@@ -41,10 +40,9 @@ Esta es la ruta por defecto. Deja historial auditable y vuelve a pasar por CI.
    ```bash
    git checkout main
    git pull origin main
-   git revert <commit-hash> -m 1
+   git revert <commit-hash>    # si es merge commit, agregá: -m 1
    git push origin main
    ```
-   - `-m 1` solo hace falta si el commit es un merge; para commits directos, omitirlo.
 3. El push a `main` dispara el webhook de Coolify automáticamente (`deploy-coolify` en `.github/workflows/deploy.yml`).
 4. Esperar 2-4 min a que Coolify levante el contenedor nuevo con `HEALTHCHECK` verde.
 
