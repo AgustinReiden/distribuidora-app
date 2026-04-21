@@ -27,4 +27,21 @@ describe('parsePrecio', () => {
     expect(parsePrecio('10,5')).toBe(10.5)
     expect(parsePrecio('1.234,56')).toBe(1234.56)
   })
+
+  it('trimea whitespace en strings', () => {
+    expect(parsePrecio('  10,50  ')).toBe(10.5)
+    expect(parsePrecio('\t99.99\n')).toBe(99.99)
+  })
+
+  it('maneja números negativos', () => {
+    expect(parsePrecio('-10.50')).toBe(-10.5)
+    expect(parsePrecio('-0,01')).toBe(-0.01)
+    expect(parsePrecio(-99.999)).toBe(-100)
+  })
+
+  it('devuelve 0 para Infinity y NaN', () => {
+    expect(parsePrecio(Infinity)).toBe(0)
+    expect(parsePrecio(-Infinity)).toBe(0)
+    expect(parsePrecio(NaN)).toBe(0)
+  })
 })
