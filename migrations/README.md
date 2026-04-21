@@ -1,86 +1,33 @@
-# Migraciones de Base de Datos
+# Migraciones
 
-Este directorio contiene las migraciones SQL para la base de datos de Supabase.
+## Estado actual
 
-## Cómo aplicar las migraciones
+- **`000_baseline.sql`** — dump fiel del schema `public` de la DB de producción **ManaosApp** (`hmuchlzmuqqxcldbzkgc`), generado con `supabase db dump` el 2026-04-21.
+  - 39 tablas + 3 vistas, 73 funciones RPC, 115 políticas RLS, 5 extensiones.
+  - Es la única fuente de verdad para el schema. Todo lo previo está consolidado aquí.
+- **`archive/`** — historial consolidado (001–070 + hotfixes datados). **No aplicar.** Solo queda como registro histórico consultable.
 
-### Opción 1: Desde Supabase Dashboard (Recomendado)
+## Convención para nuevas migraciones
 
-1. Accede a tu proyecto en [Supabase Dashboard](https://app.supabase.com)
-2. Ve a la sección **SQL Editor**
-3. Abre el archivo `001_add_pedido_improvements.sql`
-4. Copia y pega el contenido completo en el editor SQL
-5. Ejecuta la consulta haciendo clic en "Run"
+Los próximos cambios van como `001_descripcion.sql`, `002_…`, numerados correlativos después del baseline. Cada archivo debe ser idempotente cuando sea razonable (ej.: `CREATE TABLE IF NOT EXISTS`, `DROP FUNCTION IF EXISTS` antes de recrear).
 
-### Opción 2: Usando Supabase CLI
+**Aplicar manualmente** vía el SQL Editor de Supabase, o vía CLI:
 
 ```bash
-# Si tienes Supabase CLI instalado
-supabase db push
+npx supabase db push --db-url "postgresql://postgres.hmuchlzmuqqxcldbzkgc:<password>@aws-1-sa-east-1.pooler.supabase.com:5432/postgres"
 ```
 
-## Migraciones disponibles
+Proyecto: `hmuchlzmuqqxcldbzkgc` (región `sa-east-1`, Postgres 17.6.1).
 
-### 001_add_pedido_improvements.sql
+## Regenerar el baseline
 
-**Fecha:** 2025-12-31
+Si el schema de prod cambia fuera de banda y hay que re-sincronizar:
 
-**Descripción:** Mejoras en la funcionalidad de pedidos
-
-**Cambios:**
-- Agrega campo `notas` a tabla pedidos (observaciones para preparación)
-- Agrega campo `forma_pago` a tabla pedidos (efectivo, transferencia, etc.)
-- Agrega campo `estado_pago` a tabla pedidos (pendiente, pagado, parcial)
-- Crea tabla `pedido_historial` para auditoría de cambios
-- Crea triggers automáticos para registrar cambios en pedidos
-
-**Funcionalidades nuevas:**
-- Historial completo de cambios en cada pedido (quién cambió qué y cuándo)
-- Observaciones/notas en pedidos para el equipo de preparación
-- Gestión de forma de pago y estado de pago
-
-## Verificar que las migraciones se aplicaron correctamente
-
-Ejecuta las siguientes consultas en el SQL Editor de Supabase:
-
-```sql
--- Verificar que los campos se agregaron correctamente
-SELECT column_name, data_type, column_default
-FROM information_schema.columns
-WHERE table_name = 'pedidos'
-AND column_name IN ('notas', 'forma_pago', 'estado_pago');
-
--- Verificar que la tabla de historial existe
-SELECT EXISTS (
-  SELECT FROM information_schema.tables
-  WHERE table_name = 'pedido_historial'
-);
-
--- Ver los triggers creados
-SELECT trigger_name, event_manipulation, event_object_table
-FROM information_schema.triggers
-WHERE event_object_table = 'pedidos';
+```bash
+npx supabase db dump \
+  --db-url "postgresql://postgres.hmuchlzmuqqxcldbzkgc:<password>@aws-1-sa-east-1.pooler.supabase.com:5432/postgres" \
+  --schema public \
+  -f migrations/000_baseline.sql
 ```
 
-## Rollback (Revertir cambios)
-
-Si necesitas revertir los cambios de la migración `001_add_pedido_improvements.sql`:
-
-```sql
--- Eliminar triggers
-DROP TRIGGER IF EXISTS trigger_registrar_cambio_pedido ON pedidos;
-DROP TRIGGER IF EXISTS trigger_registrar_creacion_pedido ON pedidos;
-
--- Eliminar funciones
-DROP FUNCTION IF EXISTS registrar_cambio_pedido();
-DROP FUNCTION IF EXISTS registrar_creacion_pedido();
-
--- Eliminar tabla de historial
-DROP TABLE IF EXISTS pedido_historial;
-
--- Eliminar columnas de pedidos
-ALTER TABLE pedidos
-DROP COLUMN IF EXISTS notas,
-DROP COLUMN IF EXISTS forma_pago,
-DROP COLUMN IF EXISTS estado_pago;
-```
+Preservar el header de `000_baseline.sql` (líneas 1–7) después de regenerar.
