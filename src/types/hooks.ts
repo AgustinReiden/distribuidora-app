@@ -1388,6 +1388,12 @@ export interface GrupoPrecioEscalaDB {
 
 /** Fila de la tabla grupo_precio_escala_minimos: minimo individual por producto por escala. */
 export interface GrupoPrecioEscalaMinimoDB {
+  /**
+   * Identificador tecnico (BIGSERIAL) agregado en la migracion 006 para
+   * compatibilidad con el audit trigger generico (que accede a NEW.id).
+   * La identidad logica sigue siendo (escala_id, producto_id).
+   */
+  id?: string;
   escala_id: string;
   producto_id: string;
   cantidad_minima_por_item: number;
