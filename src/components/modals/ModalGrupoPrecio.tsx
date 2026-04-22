@@ -258,7 +258,17 @@ export default function ModalGrupoPrecio({
       return
     }
 
-    const escalasValidas = escalas.filter(e => e.cantidadMinima && e.precioUnitario)
+    // Una escala es valida si tiene cantidad Y (precio base o, si es combinada,
+    // todos los productos con minimo tienen precio override).
+    const escalasValidas = escalas.filter(e => {
+      if (!e.cantidadMinima) return false
+      if (e.precioUnitario && parsePrecio(e.precioUnitario) > 0) return true
+      if (!e.combinada) return false
+      const minimosActivos = Object.values(e.minimosPorProducto)
+        .filter(v => parseInt(v.cantidad) > 0)
+      if (minimosActivos.length === 0) return false
+      return minimosActivos.every(v => v.precio && parsePrecio(v.precio) > 0)
+    })
     if (escalasValidas.length === 0) {
       setError('Agrega al menos una escala de precio')
       return
@@ -266,14 +276,21 @@ export default function ModalGrupoPrecio({
 
     for (const e of escalasValidas) {
       const qty = parseInt(e.cantidadMinima)
-      const price = parsePrecio(e.precioUnitario)
       if (isNaN(qty) || qty <= 0) {
         setError('Las cantidades minimas deben ser mayores a 0')
         return
       }
-      if (isNaN(price) || price <= 0) {
+      const tienePrecioBase = e.precioUnitario && parsePrecio(e.precioUnitario) > 0
+      if (!tienePrecioBase && !e.combinada) {
         setError('Los precios deben ser mayores a 0')
         return
+      }
+      if (tienePrecioBase) {
+        const price = parsePrecio(e.precioUnitario)
+        if (isNaN(price) || price <= 0) {
+          setError('Los precios deben ser mayores a 0')
+          return
+        }
       }
 
       if (e.combinada) {
@@ -286,6 +303,19 @@ export default function ModalGrupoPrecio({
         if (minimosActivos.length < k) {
           setError(`La escala ${qty}u requiere ${k} productos distintos pero solo ${minimosActivos.length} tienen minimo configurado.`)
           return
+        }
+        // Si no hay precio base, todos los productos con minimo DEBEN tener override.
+        if (!tienePrecioBase) {
+          const sinOverride = minimosActivos.filter(([, v]) => !v.precio || parsePrecio(v.precio) <= 0)
+          if (sinOverride.length > 0) {
+            const nombres = sinOverride
+              .map(([pid]) => nombresProductos[pid] || `#${pid}`)
+              .join(', ')
+            setError(
+              `Escala ${qty}u: ingresá un precio base o un precio mayorista para todos los productos con mínimo. Faltan: ${nombres}.`
+            )
+            return
+          }
         }
         // Coherencia: suma de los K minimos mas bajos debe ser <= cantidad_minima total
         const minimosOrdenados = minimosActivos
@@ -333,9 +363,23 @@ export default function ModalGrupoPrecio({
         productoIds: Array.from(productoIds),
         cantidadesMinimas,
         escalas: escalasValidas.map(e => {
+          let precioBase = parsePrecio(e.precioUnitario)
+          const sinPrecioBase = !e.precioUnitario || isNaN(precioBase) || precioBase <= 0
+
+          // Si es combinada y el precio base quedo vacio, usar el maximo override
+          // como fallback (la BD exige precio_unitario > 0; el cálculo no lo usará
+          // porque todos los productos con minimo tienen override configurado).
+          if (sinPrecioBase && e.combinada) {
+            const overrides = Object.values(e.minimosPorProducto)
+              .filter(v => parseInt(v.cantidad) > 0 && v.precio)
+              .map(v => parsePrecio(v.precio))
+              .filter(n => !isNaN(n) && n > 0)
+            if (overrides.length > 0) precioBase = Math.max(...overrides)
+          }
+
           const base = {
             cantidadMinima: parseInt(e.cantidadMinima),
-            precioUnitario: parsePrecio(e.precioUnitario),
+            precioUnitario: precioBase,
             etiqueta: e.etiqueta.trim() || null,
             minProductosDistintos: e.combinada ? parseInt(e.minProductosDistintos) : 1,
           }
@@ -551,7 +595,10 @@ export default function ModalGrupoPrecio({
                           value={escala.precioUnitario}
                           onChange={e => actualizarEscala(index, { precioUnitario: e.target.value })}
                           className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                          placeholder="Precio c/u"
+                          placeholder={escala.combinada ? 'Precio base (opcional)' : 'Precio c/u'}
+                          title={escala.combinada
+                            ? 'Opcional si todos los productos tienen precio propio. Sirve de fallback.'
+                            : undefined}
                         />
                       </div>
                       <input
