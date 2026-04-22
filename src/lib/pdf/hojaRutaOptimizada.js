@@ -119,6 +119,19 @@ function buildCardOps(doc, pedido, orderNumber) {
     })
   }
 
+  // Horarios de atencion
+  if (pedido.cliente?.horarios_atencion) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    const horLines = doc.splitTextToSize(
+      `Horario: ${pedido.cliente.horarios_atencion}`,
+      CARD_CONTENT_WIDTH
+    )
+    horLines.slice(0, 2).forEach((line) => {
+      ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
+    })
+  }
+
   // Total + estado
   ops.push({
     kind: 'text',
@@ -257,6 +270,105 @@ function buildCierreOps(pedidos) {
   return ops
 }
 
+/**
+ * Suma todas las cantidades por producto entre todos los pedidos y
+ * produce operaciones de layout para el manifiesto de carga del camion.
+ */
+function buildManifiestoOps(pedidos) {
+  const totales = {}
+  pedidos.forEach((pedido) => {
+    ;(pedido.items || []).forEach((item) => {
+      const key = item.producto_id ?? item.producto?.id ?? item.producto?.nombre ?? 'sin-id'
+      const nombre = item.producto?.nombre || 'Producto'
+      if (!totales[key]) {
+        totales[key] = { nombre, cantidad: 0 }
+      }
+      totales[key].cantidad += Number(item.cantidad) || 0
+    })
+  })
+
+  const filas = Object.values(totales)
+    .filter((t) => t.cantidad > 0)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+
+  const ops = []
+  ops.push({ kind: 'manifiesto-title', text: 'MANIFIESTO DE CARGA', advance: 5.5 })
+  ops.push({
+    kind: 'manifiesto-subtitle',
+    text: 'Total de productos a cargar en el vehiculo',
+    advance: 5
+  })
+  filas.forEach((f) => {
+    ops.push({
+      kind: 'manifiesto-line',
+      cantidad: `${f.cantidad}x`,
+      nombre: f.nombre,
+      advance: 4.5
+    })
+  })
+  ops.push({ kind: 'spacer', advance: 2 })
+  ops.push({ kind: 'manifiesto-firma', advance: 5.5 })
+  return ops
+}
+
+function drawManifiestoOps(doc, ops, x, yStart) {
+  const innerX = x + CARD_INNER_PADDING
+  let y = yStart
+
+  doc.setDrawColor(80, 80, 80)
+  doc.setLineWidth(0.4)
+  doc.line(x + 1, y - 1, x + COLUMN_WIDTH - 1, y - 1)
+
+  ops.forEach((op) => {
+    switch (op.kind) {
+      case 'manifiesto-title': {
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(11)
+        doc.setTextColor(0, 0, 0)
+        doc.text(op.text, x + COLUMN_WIDTH / 2, y + 3, { align: 'center' })
+        break
+      }
+      case 'manifiesto-subtitle': {
+        doc.setFont('helvetica', 'italic')
+        doc.setFontSize(8)
+        doc.setTextColor(60, 60, 60)
+        doc.text(op.text, x + COLUMN_WIDTH / 2, y + 3, { align: 'center' })
+        doc.setTextColor(0, 0, 0)
+        break
+      }
+      case 'manifiesto-line': {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(9)
+        doc.setTextColor(0, 0, 0)
+        const cantidadWidth = 12
+        doc.setFont('helvetica', 'bold')
+        doc.text(op.cantidad, innerX, y + 3)
+        doc.setFont('helvetica', 'normal')
+        const nombreLineas = doc.splitTextToSize(
+          op.nombre,
+          CARD_CONTENT_WIDTH - cantidadWidth
+        )
+        doc.text(nombreLineas[0] || '', innerX + cantidadWidth, y + 3)
+        break
+      }
+      case 'manifiesto-firma': {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(9)
+        doc.setTextColor(0, 0, 0)
+        drawCheckbox(doc, innerX, y, 3)
+        doc.text('Conforme de carga - Firma: __________', innerX + 4.5, y + 2.5)
+        break
+      }
+      case 'spacer':
+      default:
+        break
+    }
+    y += op.advance || 0
+  })
+
+  return y
+}
+
 function drawCierreOps(doc, ops, x, yStart) {
   const innerX = x + CARD_INNER_PADDING
   let y = yStart
@@ -339,7 +451,19 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
     advanceColumn()
   }
 
-  drawCierreOps(doc, cierreOps, columnX(), y)
+  y = drawCierreOps(doc, cierreOps, columnX(), y)
+
+  // Manifiesto de carga: resumen consolidado de productos para el chofer
+  const manifiestoOps = buildManifiestoOps(pedidos)
+  const manifiestoHeight = manifiestoOps.reduce((s, o) => s + (o.advance || 0), 0) + 4
+
+  if (y + manifiestoHeight > columnBottom) {
+    advanceColumn()
+  } else {
+    y += 3
+  }
+
+  drawManifiestoOps(doc, manifiestoOps, columnX(), y)
 
   doc.save(generateFilename('ruta', transportista?.nombre))
 }

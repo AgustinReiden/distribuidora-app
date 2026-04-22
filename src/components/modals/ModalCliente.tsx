@@ -35,6 +35,7 @@ export interface ClienteFormData {
   limiteCredito: number;
   diasCredito: number;
   preventista_id: string;
+  preventista_ids: string[];
 }
 
 /** Datos para guardar cliente */
@@ -111,7 +112,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     notas: cliente.notas || '',
     limiteCredito: cliente.limite_credito || 0,
     diasCredito: cliente.dias_credito || 30,
-    preventista_id: cliente.preventista_id || ''
+    preventista_id: cliente.preventista_id || '',
+    preventista_ids: cliente.preventista_ids || []
   } : {
     tipo_documento: 'CUIT',
     numero_documento: '',
@@ -128,8 +130,25 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     notas: '',
     limiteCredito: 0,
     diasCredito: 30,
-    preventista_id: ''
+    preventista_id: '',
+    preventista_ids: []
   });
+
+  const [preventistasFiltro, setPreventistasFiltro] = useState('');
+  const togglePreventista = (id: string): void => {
+    setForm(prev => {
+      const exists = prev.preventista_ids.includes(id);
+      return {
+        ...prev,
+        preventista_ids: exists
+          ? prev.preventista_ids.filter(x => x !== id)
+          : [...prev.preventista_ids, id]
+      };
+    });
+  };
+  const preventistasVisibles = preventistas.filter(p =>
+    (p.nombre || '').toLowerCase().includes(preventistasFiltro.trim().toLowerCase())
+  );
 
   const handleAddressSelect = (result: AddressSelectResult): void => {
     setForm(prev => ({
@@ -350,23 +369,53 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           </div>
         </div>
 
-        {/* Preventista asignado */}
+        {/* Preventistas asignados (N-a-N) */}
         {isAdmin && preventistas.length > 0 && (
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
               <Users className="w-4 h-4" />
-              Preventista asignado
+              Preventistas asignados
+              {form.preventista_ids.length > 0 && (
+                <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                  {form.preventista_ids.length} seleccionado{form.preventista_ids.length === 1 ? '' : 's'}
+                </span>
+              )}
             </label>
-            <select
-              value={form.preventista_id}
-              onChange={e => handleFieldChange('preventista_id', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            >
-              <option value="">Sin asignar</option>
-              {preventistas.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre}</option>
-              ))}
-            </select>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+              Si no seleccionás ninguno, todos los preventistas ven este cliente. Si seleccionás uno o más, solo ellos (y admin) lo verán.
+            </p>
+            <input
+              type="text"
+              value={preventistasFiltro}
+              onChange={e => setPreventistasFiltro(e.target.value)}
+              placeholder="Buscar preventista..."
+              className="w-full px-3 py-2 mb-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+            />
+            <div className="max-h-40 overflow-y-auto border rounded-lg dark:border-gray-600 divide-y dark:divide-gray-700">
+              {preventistasVisibles.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                  Sin resultados
+                </div>
+              ) : (
+                preventistasVisibles.map(p => {
+                  const checked = form.preventista_ids.includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => togglePreventista(p.id)}
+                        className="rounded"
+                      />
+                      <span className="text-sm">{p.nombre}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
           </div>
         )}
 

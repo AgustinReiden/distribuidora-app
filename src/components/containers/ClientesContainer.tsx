@@ -41,7 +41,7 @@ interface ConfirmConfig {
 }
 
 export default function ClientesContainer(): React.ReactElement {
-  const { isAdmin, isPreventista } = useAuthData()
+  const { user, isAdmin, isPreventista } = useAuthData()
   const notify = useNotification()
 
   // Queries
@@ -102,6 +102,17 @@ export default function ClientesContainer(): React.ReactElement {
 
   const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
     // Transform from camelCase (form) to snake_case (database)
+    // preventista_ids (N-a-N) es la fuente de verdad; preventista_id (legado)
+    // se espeja con el primer asignado para no romper lecturas en otros modulos
+    // hasta que se elimine la columna en una migracion futura.
+    const isCreating = !clienteEditando
+    const baseIds = data.preventista_ids || []
+    // Al crear, si el creador es preventista (no admin), auto-asignarse al
+    // cliente. Asi el nuevo cliente queda visible solo para el creador y admin.
+    // Admin puede luego editar la lista libremente desde el modal.
+    const ids = isCreating && isPreventista && !isAdmin && user?.id
+      ? Array.from(new Set([...baseIds, user.id]))
+      : baseIds
     const dbData = {
       razon_social: data.razonSocial || data.nombreFantasia,
       nombre_fantasia: data.nombreFantasia,
@@ -117,7 +128,8 @@ export default function ClientesContainer(): React.ReactElement {
       horarios_atencion: data.horarios_atencion || undefined,
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,
-      ...(data.preventista_id ? { preventista_id: data.preventista_id } : {})
+      preventista_id: ids[0] ?? null,
+      preventista_ids: ids
     }
 
     try {
@@ -134,7 +146,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, actualizarCliente, crearCliente, notify])
+  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, user])
 
   return (
     <>

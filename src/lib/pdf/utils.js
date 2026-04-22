@@ -2,6 +2,8 @@
  * Utilidades compartidas para generación de PDFs
  */
 
+const AR_TZ = 'America/Argentina/Buenos_Aires'
+
 /**
  * Formatea un precio en formato de moneda argentina
  * @param {number} p - Precio a formatear
@@ -19,7 +21,8 @@ export const formatFecha = (fecha) =>
   new Date(fecha || new Date()).toLocaleDateString('es-AR', {
     day: '2-digit',
     month: '2-digit',
-    year: 'numeric'
+    year: 'numeric',
+    timeZone: AR_TZ
   })
 
 /**
@@ -33,7 +36,8 @@ export const formatFechaHora = (fecha) =>
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZone: AR_TZ
   })
 
 /**
