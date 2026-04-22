@@ -182,14 +182,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const total = itemsModificados ? totalCalculado : (pedido?.total || 0);
   const saldoPendiente = total - montoPagado;
 
-  // Detectar si hubo cambios en items
+  // Detectar si hubo cambios en items (cantidad, precio, agregados o eliminados)
   useEffect(() => {
     if (itemsOriginales.length === 0) return;
 
     const cambios = items.length !== itemsOriginales.length ||
       items.some((item) => {
         const original = itemsOriginales.find(o => o.productoId === item.productoId);
-        return !original || original.cantidad !== item.cantidad;
+        if (!original) return true; // item nuevo
+        if (original.cantidad !== item.cantidad) return true;
+        if (item.precioOverride) return true;
+        if (Math.abs((original.precioUnitario ?? 0) - (item.precioUnitario ?? 0)) > 0.001) return true;
+        return false;
       }) ||
       itemsOriginales.some(o => !items.find(i => i.productoId === o.productoId));
 
@@ -501,14 +505,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             {/* Buscador de productos */}
             {mostrarBuscador && (
               <div className="p-3 border-b dark:border-gray-600 bg-blue-50 dark:bg-blue-900/20">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <div className="relative w-full">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                   <input
                     type="text"
                     value={busquedaProducto}
                     onChange={e => setBusquedaProducto(e.target.value)}
                     placeholder="Buscar producto por nombre o código..."
-                    className="w-full pl-9 pr-8 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    className="block w-full pl-10 pr-10 py-2.5 min-h-11 text-base border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     autoFocus
                   />
                   {busquedaProducto && (
@@ -596,6 +600,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                 inputMode="decimal"
                                 step="0.01"
                                 min="0.01"
+                                aria-label="Editar precio unitario"
                                 value={editingPriceValue}
                                 onChange={e => setEditingPriceValue(e.target.value)}
                                 onKeyDown={e => {
@@ -612,7 +617,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                   if (newPrice > 0) handlePrecioChange(item.productoId, newPrice);
                                   setEditingPriceId(null);
                                 }}
-                                className="w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                                className="w-28 px-2 py-1 text-sm border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                                 autoFocus
                               />
                               <span className="text-orange-600">c/u</span>

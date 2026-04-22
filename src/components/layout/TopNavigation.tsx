@@ -26,6 +26,7 @@ interface MenuItem {
   icon: LucideIcon;
   label: string;
   roles: RolUsuario[];
+  hidden?: boolean;
 }
 
 interface MenuGroup {
@@ -56,9 +57,9 @@ const menuGroups: MenuGroup[] = [
     roles: ['admin', 'encargado', 'preventista'],
     items: [
       { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'] },
-      { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin', 'encargado'] },
+      { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin', 'encargado'], hidden: true },
       { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin', 'encargado'] },
-      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin', 'encargado'] },
+      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin', 'encargado'], hidden: true },
       { id: 'comisiones', icon: Percent, label: 'Comisiones', roles: ['admin', 'encargado'] },
     ]
   },
@@ -118,7 +119,7 @@ export default function TopNavigation({
 
     return menuGroups.map(group => ({
       ...group,
-      items: group.items.filter(item => item.roles.includes(userRol))
+      items: group.items.filter(item => item.roles.includes(userRol) && !item.hidden)
     })).filter(group => {
       // Filtrar grupos vacios o sin permiso
       if (group.items.length === 0) return false;
@@ -261,7 +262,7 @@ export default function TopNavigation({
                               key={item.id}
                               role="menuitem"
                               onClick={() => handleVistaChange(item.id)}
-                              className={`w-full flex items-center space-x-3 px-4 py-2.5 transition-colors ${
+                              className={`w-full flex items-center space-x-3 px-4 py-3 transition-colors ${
                                 vista === item.id
                                   ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
