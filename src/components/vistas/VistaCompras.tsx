@@ -336,47 +336,148 @@ export default function VistaCompras({
           )}
         </div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-700/50">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Fecha</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Proveedor</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">N Factura</th>
-                <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Items</th>
-                <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Estado</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Total</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y dark:divide-gray-700">
-              {comprasPaginadas.map(compra => {
-                const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
-                const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
-                const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
-                const nc = ncMap.get(String(compra.id));
+        <>
+          {/* Tabla - desktop */}
+          <div className="hidden md:block bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 dark:bg-gray-700/50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Fecha</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Proveedor</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">N Factura</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Items</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Estado</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Total</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y dark:divide-gray-700">
+                {comprasPaginadas.map(compra => {
+                  const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
+                  const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
+                  const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
+                  const nc = ncMap.get(String(compra.id));
 
-                return (
-                  <tr key={compra.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-gray-400" />
-                        <span className="text-gray-800 dark:text-white">
-                          {new Date(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR')}
+                  return (
+                    <tr key={compra.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-800 dark:text-white">
+                            {new Date(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR')}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Building2 className="w-4 h-4 text-gray-400" />
+                          <span className="font-medium text-gray-800 dark:text-white">
+                            {compra.proveedor?.nombre || compra.proveedor_nombre || 'Sin proveedor'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 dark:text-gray-400 font-mono text-sm">
+                        <span className="flex items-center gap-1.5">
+                          {compra.numero_factura || '-'}
+                          {compra.tipo_factura && (
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                              compra.tipo_factura === 'FC'
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                            }`}>
+                              {compra.tipo_factura}
+                            </span>
+                          )}
                         </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Building2 className="w-4 h-4 text-gray-400" />
-                        <span className="font-medium text-gray-800 dark:text-white">
-                          {compra.proveedor?.nombre || compra.proveedor_nombre || 'Sin proveedor'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 font-mono text-sm">
-                      <span className="flex items-center gap-1.5">
-                        {compra.numero_factura || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Package className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-800 dark:text-white">{totalItems}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${estado.color}`}>
+                            {estado.label}
+                          </span>
+                          {nc && (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-1">
+                              <FileText className="w-3 h-3" />
+                              {nc.cantidad} NC
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div>
+                          <span className="font-semibold text-green-600 dark:text-green-400">
+                            {formatPrecio(compra.total)}
+                          </span>
+                          {nc && (
+                            <p className="text-xs text-blue-600 dark:text-blue-400">
+                              NC: -{formatPrecio(nc.total)}
+                            </p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => onVerDetalle(compra)}
+                            className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                            title="Ver detalle"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
+                            <button
+                              onClick={() => onNotaCredito(compra)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                              title="Nota de Credito"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          )}
+                          {isAdmin && compra.estado !== 'cancelada' && (
+                            <button
+                              onClick={() => onAnularCompra(compra.id)}
+                              className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                              title="Anular compra"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Cards - mobile */}
+          <div className="grid gap-3 md:hidden">
+            {comprasPaginadas.map(compra => {
+              const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
+              const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
+              const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
+              const nc = ncMap.get(String(compra.id));
+              const proveedorNombre = compra.proveedor?.nombre || compra.proveedor_nombre || 'Sin proveedor';
+              const fechaStr = new Date(compra.fecha_compra || compra.created_at || '').toLocaleDateString('es-AR');
+
+              return (
+                <div
+                  key={compra.id}
+                  className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg p-4 shadow-sm"
+                >
+                  <div className="flex justify-between items-start gap-3 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{fechaStr}</p>
+                      <h3 className="font-semibold text-gray-800 dark:text-white truncate">{proveedorNombre}</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 font-mono flex items-center gap-1.5">
+                        <span>N° {compra.numero_factura || '-'}</span>
                         {compra.tipo_factura && (
                           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                             compra.tipo_factura === 'FC'
@@ -386,74 +487,69 @@ export default function VistaCompras({
                             {compra.tipo_factura}
                           </span>
                         )}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-bold text-green-600 dark:text-green-400">
+                        {formatPrecio(compra.total)}
+                      </p>
+                      {nc && (
+                        <p className="text-xs text-blue-600 dark:text-blue-400">
+                          NC: -{formatPrecio(nc.total)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${estado.color}`}>
+                      {estado.label}
+                    </span>
+                    {nc && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-1">
+                        <FileText className="w-3 h-3" />
+                        {nc.cantidad} NC
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <Package className="w-4 h-4 text-gray-400" />
-                        <span className="text-gray-800 dark:text-white">{totalItems}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${estado.color}`}>
-                          {estado.label}
-                        </span>
-                        {nc && (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-1">
-                            <FileText className="w-3 h-3" />
-                            {nc.cantidad} NC
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div>
-                        <span className="font-semibold text-green-600 dark:text-green-400">
-                          {formatPrecio(compra.total)}
-                        </span>
-                        {nc && (
-                          <p className="text-xs text-blue-600 dark:text-blue-400">
-                            NC: -{formatPrecio(nc.total)}
-                          </p>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => onVerDetalle(compra)}
-                          className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                          title="Ver detalle"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
-                          <button
-                            onClick={() => onNotaCredito(compra)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                            title="Nota de Credito"
-                          >
-                            <FileText className="w-4 h-4" />
-                          </button>
-                        )}
-                        {isAdmin && compra.estado !== 'cancelada' && (
-                          <button
-                            onClick={() => onAnularCompra(compra.id)}
-                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                            title="Anular compra"
-                          >
-                            <XCircle className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    )}
+                    <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <Package className="w-3.5 h-3.5" />
+                      {totalItems} items
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t dark:border-gray-700">
+                    <button
+                      onClick={() => onVerDetalle(compra)}
+                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                      title="Ver detalle"
+                      aria-label="Ver detalle"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
+                      <button
+                        onClick={() => onNotaCredito(compra)}
+                        className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                        title="Nota de Credito"
+                        aria-label="Nota de Credito"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+                    )}
+                    {isAdmin && compra.estado !== 'cancelada' && (
+                      <button
+                        onClick={() => onAnularCompra(compra.id)}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                        title="Anular compra"
+                        aria-label="Anular compra"
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       <Paginacion
