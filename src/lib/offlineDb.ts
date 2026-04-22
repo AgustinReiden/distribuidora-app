@@ -144,7 +144,12 @@ function generateOperationHash(type: OperationType, payload: Record<string, unkn
     hash = ((hash << 5) - hash) + char
     hash = hash & hash // Convert to 32bit integer
   }
-  return `${type}-${hash.toString(16)}-${Date.now()}`
+  // performance.now() aporta sub-ms para que dos llamadas dentro del mismo
+  // milisegundo no colisionen (flake de CI). Date.now() queda para orden.
+  const tick = typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now().toString().replace('.', '')
+    : String(Math.random()).slice(2)
+  return `${type}-${hash.toString(16)}-${Date.now()}-${tick}`
 }
 
 /**

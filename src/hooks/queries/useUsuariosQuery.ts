@@ -35,10 +35,18 @@ interface UsuarioUpdateInput {
 }
 
 // Fetch functions
-async function fetchUsuarios(): Promise<PerfilDB[]> {
+//
+// Multi-tenant: filtramos perfiles por sucursal activa via inner join con
+// usuario_sucursales. Un preventista/encargado/etc. solo debe ser visible en
+// la(s) sucursal(es) donde fue asignado. Requiere policy RLS
+// `usuario_sucursales_select_sucursal_activa` (migración 007) para que el
+// join sea visible a admin/encargado.
+async function fetchUsuarios(sucursalId: number | null): Promise<PerfilDB[]> {
+  if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*')
+    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
   if (error) throw error
@@ -56,36 +64,42 @@ async function fetchUsuarioById(id: string): Promise<PerfilDB | null> {
   return data as PerfilDB
 }
 
-async function fetchUsuariosByRol(rol: string): Promise<PerfilDB[]> {
+async function fetchUsuariosByRol(sucursalId: number | null, rol: string): Promise<PerfilDB[]> {
+  if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*')
+    .select('*, usuario_sucursales!inner(sucursal_id)')
     .eq('rol', rol)
     .eq('activo', true)
+    .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
   if (error) throw error
   return (data as PerfilDB[]) || []
 }
 
-async function fetchTransportistas(): Promise<PerfilDB[]> {
+async function fetchTransportistas(sucursalId: number | null): Promise<PerfilDB[]> {
+  if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*')
+    .select('*, usuario_sucursales!inner(sucursal_id)')
     .eq('rol', 'transportista')
     .eq('activo', true)
+    .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
   if (error) throw error
   return (data as PerfilDB[]) || []
 }
 
-async function fetchPreventistas(): Promise<PerfilDB[]> {
+async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]> {
+  if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*')
+    .select('*, usuario_sucursales!inner(sucursal_id)')
     .eq('rol', 'preventista')
     .eq('activo', true)
+    .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
   if (error) throw error
@@ -126,7 +140,8 @@ export function useUsuariosQuery() {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: usuariosKeys.lists(currentSucursalId),
-    queryFn: fetchUsuarios,
+    queryFn: () => fetchUsuarios(currentSucursalId),
+    enabled: !!currentSucursalId,
     staleTime: 10 * 60 * 1000, // 10 minutos - usuarios cambian poco
   })
 }
@@ -150,8 +165,8 @@ export function useUsuariosByRolQuery(rol: string) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: usuariosKeys.byRol(currentSucursalId, rol),
-    queryFn: () => fetchUsuariosByRol(rol),
-    enabled: !!rol,
+    queryFn: () => fetchUsuariosByRol(currentSucursalId, rol),
+    enabled: !!rol && !!currentSucursalId,
     staleTime: 10 * 60 * 1000,
   })
 }
@@ -163,7 +178,8 @@ export function useTransportistasQuery() {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: usuariosKeys.transportistas(currentSucursalId),
-    queryFn: fetchTransportistas,
+    queryFn: () => fetchTransportistas(currentSucursalId),
+    enabled: !!currentSucursalId,
     staleTime: 10 * 60 * 1000,
   })
 }
@@ -175,7 +191,8 @@ export function usePreventistasQuery() {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: usuariosKeys.preventistas(currentSucursalId),
-    queryFn: fetchPreventistas,
+    queryFn: () => fetchPreventistas(currentSucursalId),
+    enabled: !!currentSucursalId,
     staleTime: 10 * 60 * 1000,
   })
 }
