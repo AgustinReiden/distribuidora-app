@@ -9,6 +9,7 @@ import type {
   GrupoPrecioDB,
   GrupoPrecioProductoDB,
   GrupoPrecioEscalaDB,
+  GrupoPrecioEscalaMinimoDB,
   GrupoPrecioConDetalles,
   GrupoPrecioFormInput
 } from '../../types'
@@ -59,16 +60,43 @@ async function fetchGruposPrecio(): Promise<GrupoPrecioConDetalles[]> {
     throw errorEscalas
   }
 
+  // Fetch minimos por producto por escala (tabla nueva). Tolerante: si la
+  // migracion 004 no corrio aun, la tabla no existe y seguimos sin combinadas.
+  const { data: escalaMinimos, error: errorMinimos } = await supabase
+    .from('grupo_precio_escala_minimos')
+    .select('*')
+
+  if (errorMinimos && !errorMinimos.message.includes('does not exist')) {
+    throw errorMinimos
+  }
+
+  // Indexar minimos por escalaId
+  const minimosPorEscala: Record<string, GrupoPrecioEscalaMinimoDB[]> = {}
+  for (const m of (escalaMinimos as GrupoPrecioEscalaMinimoDB[] || [])) {
+    const key = String(m.escala_id)
+    if (!minimosPorEscala[key]) minimosPorEscala[key] = []
+    minimosPorEscala[key].push(m)
+  }
+
   // Combinar datos
-  return (grupos as GrupoPrecioDB[]).map(grupo => ({
-    ...grupo,
-    productos: (productos as GrupoPrecioProductoDB[] || []).filter(
-      p => String(p.grupo_precio_id) === String(grupo.id)
-    ),
-    escalas: (escalas as GrupoPrecioEscalaDB[] || []).filter(
+  return (grupos as GrupoPrecioDB[]).map(grupo => {
+    const escalasDelGrupo = (escalas as GrupoPrecioEscalaDB[] || []).filter(
       e => String(e.grupo_precio_id) === String(grupo.id)
-    ),
-  }))
+    )
+    const escalaMinimosDelGrupo: Record<string, GrupoPrecioEscalaMinimoDB[]> = {}
+    for (const e of escalasDelGrupo) {
+      const key = String(e.id)
+      if (minimosPorEscala[key]) escalaMinimosDelGrupo[key] = minimosPorEscala[key]
+    }
+    return {
+      ...grupo,
+      productos: (productos as GrupoPrecioProductoDB[] || []).filter(
+        p => String(p.grupo_precio_id) === String(grupo.id)
+      ),
+      escalas: escalasDelGrupo,
+      escalaMinimos: escalaMinimosDelGrupo,
+    }
+  })
 }
 
 /**
@@ -83,11 +111,20 @@ async function fetchPricingMap(): Promise<PricingMap> {
 
     const escalasActivas = grupo.escalas
       .filter(e => e.activo !== false)
-      .map((e): EscalaPrecio => ({
-        cantidadMinima: e.cantidad_minima,
-        precioUnitario: Number(e.precio_unitario),
-        etiqueta: e.etiqueta || null,
-      }))
+      .map((e): EscalaPrecio => {
+        const minimosRows = grupo.escalaMinimos?.[String(e.id)] || []
+        const minimosPorProducto = new Map<string, number>()
+        for (const m of minimosRows) {
+          minimosPorProducto.set(String(m.producto_id), Number(m.cantidad_minima_por_item))
+        }
+        return {
+          cantidadMinima: e.cantidad_minima,
+          precioUnitario: Number(e.precio_unitario),
+          etiqueta: e.etiqueta || null,
+          minProductosDistintos: e.min_productos_distintos ?? 1,
+          minimosPorProducto,
+        }
+      })
 
     if (escalasActivas.length === 0) continue
 
@@ -153,19 +190,35 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
     if (errorProductos) throw errorProductos
   }
 
-  // Insertar escalas
+  // Insertar escalas y recuperar los IDs para asociar minimos
   if (input.escalas.length > 0) {
-    const { error: errorEscalas } = await supabase
+    const { data: escalasInsertadas, error: errorEscalas } = await supabase
       .from('grupo_precio_escalas')
       .insert(input.escalas.map(e => ({
         grupo_precio_id: parseInt(grupoId),
         cantidad_minima: e.cantidadMinima,
         precio_unitario: e.precioUnitario,
         etiqueta: e.etiqueta || null,
+        min_productos_distintos: e.minProductosDistintos ?? 1,
         sucursal_id: sucursalId,
       })))
+      .select()
 
     if (errorEscalas) throw errorEscalas
+
+    // Insertar los minimos por producto para las escalas combinadas.
+    // Match por cantidad_minima (es UNIQUE dentro del grupo).
+    const filasMinimos = buildFilasMinimos(
+      input.escalas,
+      (escalasInsertadas as GrupoPrecioEscalaDB[]) || [],
+      sucursalId
+    )
+    if (filasMinimos.length > 0) {
+      const { error: errorMinimos } = await supabase
+        .from('grupo_precio_escala_minimos')
+        .insert(filasMinimos)
+      if (errorMinimos) throw errorMinimos
+    }
   }
 
   // Fetch completo para devolver
@@ -185,6 +238,35 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
     productos: (productos || []) as GrupoPrecioProductoDB[],
     escalas: (escalas || []) as GrupoPrecioEscalaDB[],
   }
+}
+
+/**
+ * Arma las filas de grupo_precio_escala_minimos a partir del input del form
+ * y las escalas ya insertadas (para obtener sus IDs). Hace match por
+ * cantidad_minima, que es UNIQUE dentro de un grupo.
+ */
+function buildFilasMinimos(
+  escalasInput: GrupoPrecioFormInput['escalas'],
+  escalasDB: GrupoPrecioEscalaDB[],
+  sucursalId: number
+): Array<{ escala_id: number; producto_id: number; cantidad_minima_por_item: number; sucursal_id: number }> {
+  const filas: Array<{ escala_id: number; producto_id: number; cantidad_minima_por_item: number; sucursal_id: number }> = []
+  for (const e of escalasInput) {
+    if (!e.minimosPorProducto) continue
+    const entries = Object.entries(e.minimosPorProducto).filter(([, v]) => v > 0)
+    if (entries.length === 0) continue
+    const escalaDB = escalasDB.find(db => db.cantidad_minima === e.cantidadMinima)
+    if (!escalaDB) continue
+    for (const [productoId, cantidad] of entries) {
+      filas.push({
+        escala_id: parseInt(String(escalaDB.id)),
+        producto_id: parseInt(productoId),
+        cantidad_minima_por_item: cantidad,
+        sucursal_id: sucursalId,
+      })
+    }
+  }
+  return filas
 }
 
 async function updateGrupoPrecio(
@@ -223,24 +305,39 @@ async function updateGrupoPrecio(
     if (errorProductos) throw errorProductos
   }
 
-  // Reemplazar escalas
+  // Reemplazar escalas (el ON DELETE CASCADE de grupo_precio_escala_minimos
+  // limpia los minimos automaticamente cuando borramos la escala anterior).
   await supabase
     .from('grupo_precio_escalas')
     .delete()
     .eq('grupo_precio_id', id)
 
   if (input.escalas.length > 0) {
-    const { error: errorEscalas } = await supabase
+    const { data: escalasInsertadas, error: errorEscalas } = await supabase
       .from('grupo_precio_escalas')
       .insert(input.escalas.map(e => ({
         grupo_precio_id: parseInt(id),
         cantidad_minima: e.cantidadMinima,
         precio_unitario: e.precioUnitario,
         etiqueta: e.etiqueta || null,
+        min_productos_distintos: e.minProductosDistintos ?? 1,
         sucursal_id: sucursalId,
       })))
+      .select()
 
     if (errorEscalas) throw errorEscalas
+
+    const filasMinimos = buildFilasMinimos(
+      input.escalas,
+      (escalasInsertadas as GrupoPrecioEscalaDB[]) || [],
+      sucursalId
+    )
+    if (filasMinimos.length > 0) {
+      const { error: errorMinimos } = await supabase
+        .from('grupo_precio_escala_minimos')
+        .insert(filasMinimos)
+      if (errorMinimos) throw errorMinimos
+    }
   }
 
   // Fetch completo
