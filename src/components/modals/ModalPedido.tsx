@@ -1,5 +1,5 @@
-import { useState, useMemo, memo } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck } from 'lucide-react';
+import { useState, useMemo, memo, useRef } from 'react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
@@ -124,6 +124,7 @@ const ModalPedido = memo(function ModalPedido({
 }: ModalPedidoProps) {
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
+  const categoriasScrollRef = useRef<HTMLDivElement>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
@@ -343,43 +344,64 @@ const ModalPedido = memo(function ModalPedido({
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Agregar Productos</label>
 
-            {/* Filtros de categoria */}
-            {categorias.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                <button
-                  onClick={() => setCategoriaSeleccionada('')}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                    categoriaSeleccionada === ''
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  Todos
-                </button>
-                {categorias.map((cat) => {
-                  const catValue = typeof cat === 'string' ? cat : cat.nombre;
-                  const catKey = typeof cat === 'string' ? cat : cat.id;
-                  return (
-                    <button
-                      key={catKey}
-                      onClick={() => setCategoriaSeleccionada(catValue)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                        categoriaSeleccionada === catValue
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
-                      }`}
-                    >
-                      {catValue}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
             <div className="relative w-full">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 pointer-events-none" />
               <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} autoComplete="off" className="block w-full pl-10 pr-3 py-3 min-h-11 text-base border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Buscar producto..." />
             </div>
+
+            {/* Filtros de categoria: carrusel horizontal con flechas */}
+            {categorias.length > 0 && (
+              <div className="relative mt-2">
+                <button
+                  type="button"
+                  onClick={() => categoriasScrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
+                  className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/95 dark:bg-gray-800 rounded-full p-1 shadow-md border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  aria-label="Anterior categoría"
+                >
+                  <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                </button>
+                <div
+                  ref={categoriasScrollRef}
+                  className="flex gap-1.5 overflow-x-auto scroll-smooth px-8 py-1 scrollbar-hide"
+                >
+                  <button
+                    onClick={() => setCategoriaSeleccionada('')}
+                    className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                      categoriaSeleccionada === ''
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Todos
+                  </button>
+                  {categorias.map((cat) => {
+                    const catValue = typeof cat === 'string' ? cat : cat.nombre;
+                    const catKey = typeof cat === 'string' ? cat : cat.id;
+                    return (
+                      <button
+                        key={catKey}
+                        onClick={() => setCategoriaSeleccionada(catValue)}
+                        className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                          categoriaSeleccionada === catValue
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {catValue}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => categoriasScrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white/95 dark:bg-gray-800 rounded-full p-1 shadow-md border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  aria-label="Siguiente categoría"
+                >
+                  <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Lista de productos disponibles - altura adaptativa */}
