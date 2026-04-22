@@ -639,41 +639,47 @@ export function usePedidosNoEntregadosQuery(enabled = false) {
   })
 }
 
-async function entregarPedidosMasivo(pedidoIds: string[], transportistaId: string): Promise<void> {
-  const ahora = new Date().toISOString()
+async function entregarPedidosMasivo(
+  pedidoIds: string[],
+  transportistaId: string,
+  fecha?: string | null
+): Promise<void> {
+  // Usa la RPC marcar_entregas_masivo que acepta fecha opcional y ancla al
+  // mediodia AR para evitar corrimientos de timezone.
+  const rpcArgs: Record<string, unknown> = {
+    p_pedido_ids: pedidoIds.map(id => Number(id)),
+    p_transportista_id: transportistaId
+  }
+  if (fecha) rpcArgs.p_fecha = fecha
 
-  const { error } = await supabase
-    .from('pedidos')
-    .update({
-      transportista_id: transportistaId,
-      estado: 'entregado',
-      fecha_entrega: ahora,
-    })
-    .in('id', pedidoIds)
-
+  const { error } = await supabase.rpc('marcar_entregas_masivo', rpcArgs)
   if (error) throw error
 
-  // Registrar historial best-effort
+  // Historial best-effort (no bloquea)
+  const fechaHistorial = fecha ? `${fecha}T12:00:00-03:00` : new Date().toISOString()
   const historialEntries = pedidoIds.map(pedidoId => ({
     pedido_id: pedidoId,
     accion: 'entregado',
     descripcion: `Entrega masiva - Transportista: ${transportistaId}`,
-    fecha: ahora,
+    fecha: fechaHistorial,
   }))
 
   await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
 }
 
 /**
- * Hook para marcar multiples pedidos como entregados
+ * Hook para marcar multiples pedidos como entregados (con fecha opcional)
  */
 export function useEntregasMasivasMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: ({ pedidoIds, transportistaId }: { pedidoIds: string[]; transportistaId: string }) =>
-      entregarPedidosMasivo(pedidoIds, transportistaId),
+    mutationFn: ({ pedidoIds, transportistaId, fecha }: {
+      pedidoIds: string[];
+      transportistaId: string;
+      fecha?: string | null
+    }) => entregarPedidosMasivo(pedidoIds, transportistaId, fecha),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
@@ -770,24 +776,34 @@ export function usePedidosNoPagadosQuery(enabled = false) {
   })
 }
 
-async function marcarPagosMasivo(pedidoIds: string[], formaPago: string): Promise<void> {
-  const { error } = await supabase.rpc('marcar_pagos_masivo', {
+async function marcarPagosMasivo(
+  pedidoIds: string[],
+  formaPago: string,
+  fecha?: string | null
+): Promise<void> {
+  const rpcArgs: Record<string, unknown> = {
     p_pedido_ids: pedidoIds.map(id => Number(id)),
     p_forma_pago: formaPago,
-  })
+  }
+  if (fecha) rpcArgs.p_fecha = fecha
+
+  const { error } = await supabase.rpc('marcar_pagos_masivo', rpcArgs)
   if (error) throw error
 }
 
 /**
- * Hook para marcar multiples pedidos como pagados
+ * Hook para marcar multiples pedidos como pagados (con fecha opcional)
  */
 export function usePagosMasivosMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: ({ pedidoIds, formaPago }: { pedidoIds: string[]; formaPago: string }) =>
-      marcarPagosMasivo(pedidoIds, formaPago),
+    mutationFn: ({ pedidoIds, formaPago, fecha }: {
+      pedidoIds: string[];
+      formaPago: string;
+      fecha?: string | null
+    }) => marcarPagosMasivo(pedidoIds, formaPago, fecha),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },

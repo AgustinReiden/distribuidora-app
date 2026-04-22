@@ -36,7 +36,7 @@ export function usePagos(): UsePagosReturnExtended {
 
   const registrarPago = async (pago: PagoFormInput): Promise<PagoDBWithUsuario> => {
     try {
-      const { data, error } = await supabase.from('pagos').insert([{
+      const insertRow: Record<string, unknown> = {
         cliente_id: pago.clienteId,
         pedido_id: pago.pedidoId || null,
         monto: parseFloat(String(pago.monto)),
@@ -44,7 +44,13 @@ export function usePagos(): UsePagosReturnExtended {
         referencia: pago.referencia || null,
         notas: pago.notas || null,
         usuario_id: pago.usuarioId || null
-      }]).select('*, usuario:perfiles(id, nombre)').single()
+      }
+      // fecha (YYYY-MM-DD) se pasa solo si el caller la especificó; si no,
+      // la BD usa CURRENT_DATE (default de la columna pagos.fecha).
+      if (pago.fecha) insertRow.fecha = pago.fecha
+
+      const { data, error } = await supabase.from('pagos').insert([insertRow])
+        .select('*, usuario:perfiles(id, nombre)').single()
       if (error) throw error
       const pagoData = data as PagoDBWithUsuario
       setPagos(prev => [pagoData, ...prev])

@@ -635,6 +635,8 @@ export interface PagoFormInput {
   referencia?: string | null;
   notas?: string | null;
   usuarioId?: string | null;
+  /** Fecha contable del pago (YYYY-MM-DD). Si se omite, usa CURRENT_DATE. */
+  fecha?: string | null;
 }
 
 export interface ResumenCuenta {
@@ -1125,6 +1127,8 @@ export interface UseReportesFinancierosReturn {
  * Retornado por la RPC `obtener_resumen_rendiciones`. No se persiste: se
  * calcula sobre pedidos entregados.
  */
+export type EstadoRendicion = 'pendiente' | 'confirmada' | 'disconformidad' | 'resuelta';
+
 export interface ResumenRendicionDiaria {
   fecha: string;
   transportista_id: string;
@@ -1135,11 +1139,29 @@ export interface ResumenRendicionDiaria {
   total_cuenta_corriente: number;
   total_tarjeta: number;
   total_otros: number;
+  /** Total cobrado ese día (suma de pagos) */
   total_general: number;
+  /** Cantidad de pedidos entregados ese día */
   cantidad_pedidos: number;
+  /** Total facturado entregado ese día (para comparar contra cobrado) */
+  total_entregado: number;
+  /** Suma de gastos registrados al cerrar la rendición */
+  total_gastos: number;
+  cantidad_gastos: number;
+  /** Estado de la rendición: pendiente | confirmada | disconformidad | resuelta */
+  estado: EstadoRendicion;
+  observaciones: string | null;
+  /** true si estado ∈ {confirmada, resuelta}. Mantenido por compat con UI vieja. */
   controlada: boolean;
   controlada_at: string | null;
   controlada_por_nombre: string | null;
+  resuelta_at: string | null;
+  resuelta_por_nombre: string | null;
+}
+
+export interface RendicionGastoInput {
+  descripcion: string;
+  monto: number;
 }
 
 /** Fila de la tabla `rendiciones_control` (estado de control de una rendición diaria). */
@@ -1170,6 +1192,20 @@ export interface UseRendicionesReturn {
   ) => Promise<ResumenRendicionDiaria[]>;
   marcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
   desmarcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
+  /** Confirma una rendición (estado: confirmada | disconformidad) y registra gastos en el mismo call. */
+  confirmarRendicion: (
+    fecha: string,
+    transportistaId: string,
+    estado: 'confirmada' | 'disconformidad',
+    observaciones?: string | null,
+    gastos?: RendicionGastoInput[]
+  ) => Promise<void>;
+  /** Resuelve una rendición en disconformidad. Preserva el historial de observaciones. */
+  resolverRendicion: (
+    fecha: string,
+    transportistaId: string,
+    observaciones: string
+  ) => Promise<void>;
   consultarControl: (transportistaId: string, fecha: string) => Promise<ControlRendicionInfo>;
   refetch: () => Promise<void>;
 }

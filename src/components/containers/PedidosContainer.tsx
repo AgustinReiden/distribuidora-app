@@ -323,20 +323,20 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pedidoCancelando, cancelarPedidoMut, user, notify])
 
-  const handleEntregasMasivas = useCallback(async (transportistaId: string, pedidoIds: string[]) => {
+  const handleEntregasMasivas = useCallback(async (transportistaId: string, pedidoIds: string[], fechaEntrega: string) => {
     setGuardando(true)
     try {
-      await entregasMasivas.mutateAsync({ pedidoIds, transportistaId })
+      await entregasMasivas.mutateAsync({ pedidoIds, transportistaId, fecha: fechaEntrega })
       setModalEntregasMasivasOpen(false)
       notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como entregado${pedidoIds.length !== 1 ? 's' : ''}`)
     } catch (e) { notify.error('Error en entregas masivas: ' + (e as Error).message) }
     setGuardando(false)
   }, [entregasMasivas, notify])
 
-  const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[]) => {
+  const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[], fechaPago: string) => {
     setGuardando(true)
     try {
-      await pagosMasivos.mutateAsync({ pedidoIds, formaPago })
+      await pagosMasivos.mutateAsync({ pedidoIds, formaPago, fecha: fechaPago })
       setModalPagosMasivosOpen(false)
       notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como pagado${pedidoIds.length !== 1 ? 's' : ''}`)
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }

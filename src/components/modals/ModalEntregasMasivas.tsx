@@ -1,13 +1,19 @@
 import { useState, useMemo, memo } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import { Loader2, Search, Calendar } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { usePedidosNoEntregadosQuery } from '../../hooks/queries'
-import { getEstadoColor, getEstadoLabel, formatPrecio } from '../../utils/formatters'
+import { getEstadoColor, getEstadoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import type { PerfilDB } from '../../types'
 
 export interface ModalEntregasMasivasProps {
   transportistas: PerfilDB[]
-  onConfirm: (transportistaId: string, pedidoIds: string[]) => Promise<void>
+  /**
+   * Callback de confirmación.
+   * @param transportistaId - ID del transportista seleccionado
+   * @param pedidoIds - IDs de los pedidos seleccionados
+   * @param fechaEntrega - Fecha a asignar a la entrega (YYYY-MM-DD, hora local AR 12:00)
+   */
+  onConfirm: (transportistaId: string, pedidoIds: string[], fechaEntrega: string) => Promise<void>
   onClose: () => void
   guardando: boolean
 }
@@ -23,6 +29,7 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
+  const [fechaEntrega, setFechaEntrega] = useState<string>(fechaLocalISO())
 
   const { data: pedidos = [], isLoading } = usePedidosNoEntregadosQuery(true)
 
@@ -59,26 +66,45 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   }
 
   const allSelected = pedidosFiltrados.length > 0 && selectedIds.size === pedidosFiltrados.length
-  const canConfirm = selectedTransportista && selectedIds.size > 0 && !guardando
+  const canConfirm = selectedTransportista && selectedIds.size > 0 && !guardando && !!fechaEntrega
 
   return (
     <ModalBase title="Entregas Masivas" onClose={onClose} maxWidth="max-w-3xl">
       <div className="p-4 space-y-4">
-        {/* Selector de transportista */}
-        <div>
-          <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Transportista
-          </label>
-          <select
-            value={selectedTransportista}
-            onChange={e => setSelectedTransportista(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            <option value="">Seleccionar transportista...</option>
-            {transportistas.map(t => (
-              <option key={t.id} value={t.id}>{t.nombre}</option>
-            ))}
-          </select>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Selector de transportista */}
+          <div>
+            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+              Transportista
+            </label>
+            <select
+              value={selectedTransportista}
+              onChange={e => setSelectedTransportista(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Seleccionar transportista...</option>
+              {transportistas.map(t => (
+                <option key={t.id} value={t.id}>{t.nombre}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Fecha de entrega a aplicar */}
+          <div>
+            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300 flex items-center gap-1">
+              <Calendar className="w-4 h-4" />
+              Fecha de entrega
+            </label>
+            <input
+              type="date"
+              value={fechaEntrega}
+              onChange={e => setFechaEntrega(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Se aplica a todas las entregas seleccionadas. Por defecto hoy.
+            </p>
+          </div>
         </div>
 
         {/* Filtro por fechas */}
@@ -186,7 +212,7 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
             Cancelar
           </button>
           <button
-            onClick={() => canConfirm && onConfirm(selectedTransportista, Array.from(selectedIds))}
+            onClick={() => canConfirm && onConfirm(selectedTransportista, Array.from(selectedIds), fechaEntrega)}
             disabled={!canConfirm}
             className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
