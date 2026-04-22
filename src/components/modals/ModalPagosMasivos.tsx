@@ -1,22 +1,21 @@
 import { useState, useMemo, memo } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import { Loader2, Search, Calendar } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { usePedidosNoPagadosQuery } from '../../hooks/queries'
-import { getEstadoPagoColor, getEstadoPagoLabel, formatPrecio } from '../../utils/formatters'
+import { getEstadoPagoColor, getEstadoPagoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { FORMAS_PAGO } from '../../constants/formasPago'
 
 export interface ModalPagosMasivosProps {
-  onConfirm: (formaPago: string, pedidoIds: string[]) => Promise<void>
+  /**
+   * Callback de confirmación.
+   * @param formaPago - Forma de pago seleccionada
+   * @param pedidoIds - IDs de los pedidos seleccionados
+   * @param fechaPago - Fecha contable a aplicar al pago (YYYY-MM-DD)
+   */
+  onConfirm: (formaPago: string, pedidoIds: string[], fechaPago: string) => Promise<void>
   onClose: () => void
   guardando: boolean
 }
-
-const FORMAS_PAGO = [
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'cuenta_corriente', label: 'Cuenta Corriente' },
-  { value: 'tarjeta', label: 'Tarjeta' },
-]
 
 const ModalPagosMasivos = memo(function ModalPagosMasivos({
   onConfirm,
@@ -28,6 +27,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
+  const [fechaPago, setFechaPago] = useState<string>(fechaLocalISO())
 
   const { data: pedidos = [], isLoading } = usePedidosNoPagadosQuery(true)
 
@@ -64,7 +64,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   }
 
   const allSelected = pedidosFiltrados.length > 0 && selectedIds.size === pedidosFiltrados.length
-  const canConfirm = selectedFormaPago && selectedIds.size > 0 && !guardando
+  const canConfirm = selectedFormaPago && selectedIds.size > 0 && !guardando && !!fechaPago
 
   // Calculate total of selected orders
   const totalSeleccionado = useMemo(() => {
@@ -76,21 +76,40 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   return (
     <ModalBase title="Pagos Masivos" onClose={onClose} maxWidth="max-w-3xl">
       <div className="p-4 space-y-4">
-        {/* Selector de forma de pago */}
-        <div>
-          <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Forma de pago
-          </label>
-          <select
-            value={selectedFormaPago}
-            onChange={e => setSelectedFormaPago(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            <option value="">Seleccionar forma de pago...</option>
-            {FORMAS_PAGO.map(fp => (
-              <option key={fp.value} value={fp.value}>{fp.label}</option>
-            ))}
-          </select>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Selector de forma de pago */}
+          <div>
+            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+              Forma de pago
+            </label>
+            <select
+              value={selectedFormaPago}
+              onChange={e => setSelectedFormaPago(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Seleccionar forma de pago...</option>
+              {FORMAS_PAGO.filter(fp => fp.value !== 'otros').map(fp => (
+                <option key={fp.value} value={fp.value}>{fp.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Fecha contable del pago */}
+          <div>
+            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300 flex items-center gap-1">
+              <Calendar className="w-4 h-4" />
+              Fecha del pago
+            </label>
+            <input
+              type="date"
+              value={fechaPago}
+              onChange={e => setFechaPago(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Se imputa a la rendición de esa fecha. Por defecto hoy.
+            </p>
+          </div>
         </div>
 
         {/* Filtro por fechas */}
@@ -203,7 +222,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
             Cancelar
           </button>
           <button
-            onClick={() => canConfirm && onConfirm(selectedFormaPago, Array.from(selectedIds))}
+            onClick={() => canConfirm && onConfirm(selectedFormaPago, Array.from(selectedIds), fechaPago)}
             disabled={!canConfirm}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >

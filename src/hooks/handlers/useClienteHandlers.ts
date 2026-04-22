@@ -42,6 +42,8 @@ export interface DatosPagoInput {
   formaPago?: string;
   referencia?: string | null;
   notas?: string | null;
+  /** Fecha contable del pago (YYYY-MM-DD). Opcional: si se omite, la BD usa CURRENT_DATE. */
+  fecha?: string | null;
 }
 
 // =============================================================================

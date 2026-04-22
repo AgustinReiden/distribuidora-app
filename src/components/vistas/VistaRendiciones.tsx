@@ -1,9 +1,10 @@
 /**
- * Vista de rendiciones (resumen auto-calculado + control diario)
- * Muestra resumen por (día, transportista) con breakdown por forma de pago.
- * Admin/encargado puede marcar/desmarcar como controlada.
+ * Vista de rendiciones (resumen auto-calculado + cierre + resolucion).
+ * Muestra resumen por (dia de pago, transportista) con breakdown por forma de
+ * pago, total entregado ese dia (comparador secundario), gastos del dia y
+ * estado (pendiente/confirmada/disconformidad/resuelta).
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Banknote,
   Calendar,
@@ -13,12 +14,19 @@ import {
   Filter,
   RefreshCw,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  AlertTriangle,
+  FileText,
+  Receipt
 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import { useRendiciones, useUsuarios } from '../../hooks/supabase'
 import { useNotification } from '../../contexts/NotificationContext'
-import type { ResumenRendicionDiaria, PerfilDB } from '../../types'
+import { FORMAS_PAGO } from '../../constants/formasPago'
+import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput } from '../../types'
+
+const ModalCerrarRendicion = lazy(() => import('../modals/ModalCerrarRendicion'))
+const ModalResolverRendicion = lazy(() => import('../modals/ModalResolverRendicion'))
 
 function formatMoney(value: number | undefined | null): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)
@@ -29,84 +37,132 @@ function formatFechaCorta(fechaISO: string): string {
   return `${d}/${m}/${y}`
 }
 
-interface ResumenCardProps {
-  resumen: ResumenRendicionDiaria
-  onMarcar: (fecha: string, transportistaId: string) => Promise<void>
-  onDesmarcar: (fecha: string, transportistaId: string) => Promise<void>
+const ESTADO_STYLES: Record<EstadoRendicion, { label: string; badge: string; border: string }> = {
+  pendiente: {
+    label: 'Pendiente',
+    badge: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+    border: 'border-gray-300 dark:border-gray-600'
+  },
+  confirmada: {
+    label: 'Confirmada',
+    badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+    border: 'border-emerald-500'
+  },
+  disconformidad: {
+    label: 'Disconformidad',
+    badge: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    border: 'border-red-500'
+  },
+  resuelta: {
+    label: 'Resuelta',
+    badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    border: 'border-blue-500'
+  }
 }
 
-function ResumenCard({ resumen, onMarcar, onDesmarcar }: ResumenCardProps): React.ReactElement {
+interface ResumenCardProps {
+  resumen: ResumenRendicionDiaria
+  onCerrar: (resumen: ResumenRendicionDiaria) => void
+  onResolver: (resumen: ResumenRendicionDiaria) => void
+}
+
+function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
-  const [accionando, setAccionando] = useState(false)
+  const estadoStyle = ESTADO_STYLES[resumen.estado]
 
-  const handleToggle = async (): Promise<void> => {
-    setAccionando(true)
-    try {
-      if (resumen.controlada) {
-        await onDesmarcar(resumen.fecha, resumen.transportista_id)
-      } else {
-        await onMarcar(resumen.fecha, resumen.transportista_id)
-      }
-    } finally {
-      setAccionando(false)
+  const desgloses = useMemo(() => {
+    const mapa: Record<string, number> = {
+      efectivo: resumen.total_efectivo,
+      transferencia: resumen.total_transferencia,
+      cheque: resumen.total_cheque,
+      cuenta_corriente: resumen.total_cuenta_corriente,
+      tarjeta: resumen.total_tarjeta,
+      otros: resumen.total_otros
     }
-  }
+    return FORMAS_PAGO
+      .map(fp => ({ meta: fp, value: mapa[fp.value] || 0 }))
+      .filter(d => d.value > 0)
+  }, [resumen])
 
-  const formasPago = [
-    { label: 'Efectivo', value: resumen.total_efectivo, color: 'text-green-700 dark:text-green-400' },
-    { label: 'Transferencia', value: resumen.total_transferencia, color: 'text-blue-700 dark:text-blue-400' },
-    { label: 'Cheque', value: resumen.total_cheque, color: 'text-purple-700 dark:text-purple-400' },
-    { label: 'Cuenta Cte.', value: resumen.total_cuenta_corriente, color: 'text-amber-700 dark:text-amber-400' },
-    { label: 'Tarjeta', value: resumen.total_tarjeta, color: 'text-indigo-700 dark:text-indigo-400' },
-    { label: 'Otros', value: resumen.total_otros, color: 'text-gray-700 dark:text-gray-400' }
-  ].filter(fp => fp.value > 0)
+  const diferencia = resumen.total_general - resumen.total_entregado
+  const diferenciaStr = diferencia === 0
+    ? 'Cobrado igual a entregado'
+    : diferencia > 0
+      ? `+${formatMoney(diferencia)} cobrado sobre entregado`
+      : `${formatMoney(diferencia)} cobrado menos que entregado`
 
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border-l-4 ${
-      resumen.controlada ? 'border-green-500' : 'border-gray-300'
-    } overflow-hidden`}>
+    <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border-l-4 ${estadoStyle.border} overflow-hidden`}>
       <div className="p-4">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div className="flex-1 min-w-[200px]">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <User className="w-4 h-4 text-gray-500" />
               <span className="font-semibold text-gray-800 dark:text-white">
                 {resumen.transportista_nombre}
               </span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${estadoStyle.badge}`}>
+                {estadoStyle.label}
+              </span>
             </div>
-            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 flex-wrap">
               <Calendar className="w-4 h-4" />
               <span>{formatFechaCorta(resumen.fecha)}</span>
               <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 dark:bg-gray-700">
-                {resumen.cantidad_pedidos} {resumen.cantidad_pedidos === 1 ? 'pedido' : 'pedidos'}
+                {resumen.cantidad_pedidos} {resumen.cantidad_pedidos === 1 ? 'pedido entregado' : 'pedidos entregados'}
               </span>
             </div>
           </div>
 
           <div className="text-right">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Total general</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Cobrado ese día</p>
             <p className="text-2xl font-bold text-gray-800 dark:text-white">
               {formatMoney(resumen.total_general)}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Entregado: <span className="font-medium">{formatMoney(resumen.total_entregado)}</span>
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
-          {formasPago.map(fp => (
-            <div key={fp.label} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
-              <p className="text-xs text-gray-500 dark:text-gray-400">{fp.label}</p>
-              <p className={`font-bold ${fp.color}`}>{formatMoney(fp.value)}</p>
-            </div>
-          ))}
-        </div>
+        {/* Breakdown por forma de pago (solo las que tienen monto) */}
+        {desgloses.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
+            {desgloses.map(({ meta, value }) => (
+              <div key={meta.value} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{meta.label}</p>
+                <p className={`font-bold text-${meta.color}-700 dark:text-${meta.color}-400`}>{formatMoney(value)}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
+        {/* Indicadores de gastos y observaciones */}
+        {(resumen.cantidad_gastos > 0 || resumen.observaciones) && (
+          <div className="mt-3 flex items-center gap-3 text-xs flex-wrap">
+            {resumen.cantidad_gastos > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
+                <Receipt className="w-3 h-3" />
+                {resumen.cantidad_gastos} gasto{resumen.cantidad_gastos !== 1 ? 's' : ''} · {formatMoney(resumen.total_gastos)}
+              </span>
+            )}
+            {resumen.observaciones && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                <FileText className="w-3 h-3" />
+                Con observaciones
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Footer con estado + acciones */}
         <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            {resumen.controlada ? (
+          <div className="flex items-center gap-2 text-sm">
+            {resumen.estado === 'confirmada' && (
               <>
-                <CheckCircle className="w-5 h-5 text-green-500" />
+                <CheckCircle className="w-5 h-5 text-emerald-500" />
                 <div>
-                  <p className="text-sm font-medium text-green-700 dark:text-green-400">Controlada</p>
+                  <p className="font-medium text-emerald-700 dark:text-emerald-400">Confirmada</p>
                   {resumen.controlada_at && (
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {new Date(resumen.controlada_at).toLocaleString('es-AR')}
@@ -115,15 +171,44 @@ function ResumenCard({ resumen, onMarcar, onDesmarcar }: ResumenCardProps): Reac
                   )}
                 </div>
               </>
-            ) : (
+            )}
+            {resumen.estado === 'disconformidad' && (
+              <>
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                <div>
+                  <p className="font-medium text-red-700 dark:text-red-400">Disconformidad</p>
+                  {resumen.controlada_at && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Reportada {new Date(resumen.controlada_at).toLocaleString('es-AR')}
+                      {resumen.controlada_por_nombre && ` por ${resumen.controlada_por_nombre}`}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+            {resumen.estado === 'resuelta' && (
+              <>
+                <CheckCircle className="w-5 h-5 text-blue-500" />
+                <div>
+                  <p className="font-medium text-blue-700 dark:text-blue-400">Resuelta</p>
+                  {resumen.resuelta_at && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {new Date(resumen.resuelta_at).toLocaleString('es-AR')}
+                      {resumen.resuelta_por_nombre && ` por ${resumen.resuelta_por_nombre}`}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+            {resumen.estado === 'pendiente' && (
               <>
                 <Clock className="w-5 h-5 text-gray-400" />
-                <p className="text-sm text-gray-600 dark:text-gray-400">Pendiente de control</p>
+                <p className="text-gray-600 dark:text-gray-400">Pendiente de control</p>
               </>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setExpandido(!expandido)}
               className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
@@ -132,35 +217,51 @@ function ResumenCard({ resumen, onMarcar, onDesmarcar }: ResumenCardProps): Reac
               Detalle
             </button>
 
-            <button
-              onClick={handleToggle}
-              disabled={accionando}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
-                resumen.controlada
-                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
-                  : 'bg-green-600 hover:bg-green-700 text-white'
-              }`}
-            >
-              {accionando
-                ? '...'
-                : resumen.controlada
-                  ? 'Desmarcar'
-                  : 'Marcar controlada'}
-            </button>
+            {resumen.estado === 'disconformidad' ? (
+              <button
+                onClick={() => onResolver(resumen)}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Resolver
+              </button>
+            ) : (
+              <button
+                onClick={() => onCerrar(resumen)}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {resumen.estado === 'pendiente' ? 'Cerrar rendición' : 'Editar cierre'}
+              </button>
+            )}
           </div>
         </div>
 
         {expandido && (
-          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 text-sm">
-            <p className="text-xs text-gray-500 mb-2">Breakdown completo por forma de pago:</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <div><span className="text-gray-500">Efectivo:</span> <span className="font-medium">{formatMoney(resumen.total_efectivo)}</span></div>
-              <div><span className="text-gray-500">Transferencia:</span> <span className="font-medium">{formatMoney(resumen.total_transferencia)}</span></div>
-              <div><span className="text-gray-500">Cheque:</span> <span className="font-medium">{formatMoney(resumen.total_cheque)}</span></div>
-              <div><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
-              <div><span className="text-gray-500">Tarjeta:</span> <span className="font-medium">{formatMoney(resumen.total_tarjeta)}</span></div>
-              <div><span className="text-gray-500">Otros:</span> <span className="font-medium">{formatMoney(resumen.total_otros)}</span></div>
+          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 text-sm space-y-3">
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Breakdown completo por forma de pago</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div><span className="text-gray-500">Efectivo:</span> <span className="font-medium">{formatMoney(resumen.total_efectivo)}</span></div>
+                <div><span className="text-gray-500">Transferencia:</span> <span className="font-medium">{formatMoney(resumen.total_transferencia)}</span></div>
+                <div><span className="text-gray-500">Cheque:</span> <span className="font-medium">{formatMoney(resumen.total_cheque)}</span></div>
+                <div><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
+                <div><span className="text-gray-500">Tarjeta:</span> <span className="font-medium">{formatMoney(resumen.total_tarjeta)}</span></div>
+                <div><span className="text-gray-500">Otros:</span> <span className="font-medium">{formatMoney(resumen.total_otros)}</span></div>
+              </div>
             </div>
+
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <Banknote className="w-3 h-3" />
+              <span>{diferenciaStr}</span>
+            </div>
+
+            {resumen.observaciones && (
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Observaciones</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700/50 p-2 rounded">
+                  {resumen.observaciones}
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -174,8 +275,8 @@ export default function VistaRendiciones(): React.ReactElement {
     resumenes,
     loading,
     fetchResumen,
-    marcarControlada,
-    desmarcarControlada
+    confirmarRendicion,
+    resolverRendicion
   } = useRendiciones()
   const { transportistas } = useUsuarios()
 
@@ -189,7 +290,11 @@ export default function VistaRendiciones(): React.ReactElement {
   const [fechaDesde, setFechaDesde] = useState<string>(haceUnaSemana)
   const [fechaHasta, setFechaHasta] = useState<string>(hoy)
   const [transportistaFiltro, setTransportistaFiltro] = useState<string>('')
-  const [estadoFiltro, setEstadoFiltro] = useState<'todas' | 'controladas' | 'pendientes'>('todas')
+  const [estadoFiltro, setEstadoFiltro] = useState<'todas' | 'pendientes' | 'confirmadas' | 'disconformidad' | 'resueltas'>('todas')
+
+  const [cerrarResumen, setCerrarResumen] = useState<ResumenRendicionDiaria | null>(null)
+  const [resolverResumen, setResolverResumen] = useState<ResumenRendicionDiaria | null>(null)
+  const [guardando, setGuardando] = useState(false)
 
   const cargar = useCallback(async (): Promise<void> => {
     await fetchResumen(fechaDesde, fechaHasta, transportistaFiltro || null)
@@ -199,39 +304,65 @@ export default function VistaRendiciones(): React.ReactElement {
     cargar()
   }, [cargar])
 
-  const handleMarcar = async (fecha: string, transportistaId: string): Promise<void> => {
+  const handleCerrar = useCallback(async (
+    estado: 'confirmada' | 'disconformidad',
+    observaciones: string | null,
+    gastos: RendicionGastoInput[]
+  ): Promise<void> => {
+    if (!cerrarResumen) return
+    setGuardando(true)
     try {
-      await marcarControlada(fecha, transportistaId)
-      notify.success('Rendición marcada como controlada')
+      await confirmarRendicion(
+        cerrarResumen.fecha,
+        cerrarResumen.transportista_id,
+        estado,
+        observaciones,
+        gastos
+      )
+      notify.success(estado === 'confirmada' ? 'Rendición confirmada' : 'Disconformidad registrada')
+      setCerrarResumen(null)
     } catch {
-      // Error ya notificado desde el hook
+      // Error ya notificado en el hook
+    } finally {
+      setGuardando(false)
     }
-  }
+  }, [cerrarResumen, confirmarRendicion, notify])
 
-  const handleDesmarcar = async (fecha: string, transportistaId: string): Promise<void> => {
+  const handleResolver = useCallback(async (observaciones: string): Promise<void> => {
+    if (!resolverResumen) return
+    setGuardando(true)
     try {
-      await desmarcarControlada(fecha, transportistaId)
-      notify.success('Control anulado')
+      await resolverRendicion(
+        resolverResumen.fecha,
+        resolverResumen.transportista_id,
+        observaciones
+      )
+      notify.success('Disconformidad resuelta')
+      setResolverResumen(null)
     } catch {
       // Error ya notificado
+    } finally {
+      setGuardando(false)
     }
-  }
+  }, [resolverResumen, resolverRendicion, notify])
 
   const resumenesFiltrados = useMemo(() => {
-    if (estadoFiltro === 'controladas') return resumenes.filter(r => r.controlada)
-    if (estadoFiltro === 'pendientes') return resumenes.filter(r => !r.controlada)
+    if (estadoFiltro === 'todas') return resumenes
+    if (estadoFiltro === 'pendientes') return resumenes.filter(r => r.estado === 'pendiente')
+    if (estadoFiltro === 'confirmadas') return resumenes.filter(r => r.estado === 'confirmada')
+    if (estadoFiltro === 'disconformidad') return resumenes.filter(r => r.estado === 'disconformidad')
+    if (estadoFiltro === 'resueltas') return resumenes.filter(r => r.estado === 'resuelta')
     return resumenes
   }, [resumenes, estadoFiltro])
 
-  const stats = useMemo(() => {
-    return {
-      total: resumenes.length,
-      controladas: resumenes.filter(r => r.controlada).length,
-      pendientes: resumenes.filter(r => !r.controlada).length,
-      totalGeneral: resumenes.reduce((sum, r) => sum + r.total_general, 0),
-      totalEfectivo: resumenes.reduce((sum, r) => sum + r.total_efectivo, 0)
-    }
-  }, [resumenes])
+  const stats = useMemo(() => ({
+    total: resumenes.length,
+    confirmadas: resumenes.filter(r => r.estado === 'confirmada').length,
+    pendientes: resumenes.filter(r => r.estado === 'pendiente').length,
+    disconformidad: resumenes.filter(r => r.estado === 'disconformidad').length,
+    totalCobrado: resumenes.reduce((sum, r) => sum + r.total_general, 0),
+    totalEntregado: resumenes.reduce((sum, r) => sum + r.total_entregado, 0)
+  }), [resumenes])
 
   return (
     <div className="space-y-4 p-4">
@@ -243,7 +374,7 @@ export default function VistaRendiciones(): React.ReactElement {
             Rendiciones Diarias
           </h1>
           <p className="text-gray-500 mt-1 text-sm">
-            Resumen auto-calculado de pedidos entregados por transportista y día
+            Resumen auto-calculado por transportista y día (basado en fecha de pago)
           </p>
         </div>
         <button
@@ -257,26 +388,30 @@ export default function VistaRendiciones(): React.ReactElement {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
           <p className="text-xs text-gray-500">Total</p>
           <p className="text-2xl font-bold">{stats.total}</p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
-          <p className="text-xs text-gray-500">Controladas</p>
-          <p className="text-2xl font-bold text-green-600">{stats.controladas}</p>
+          <p className="text-xs text-gray-500">Confirmadas</p>
+          <p className="text-2xl font-bold text-emerald-600">{stats.confirmadas}</p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
           <p className="text-xs text-gray-500">Pendientes</p>
           <p className="text-2xl font-bold text-amber-600">{stats.pendientes}</p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
-          <p className="text-xs text-gray-500">Total general</p>
-          <p className="text-lg font-bold">{formatMoney(stats.totalGeneral)}</p>
+          <p className="text-xs text-gray-500">Disconformidad</p>
+          <p className="text-2xl font-bold text-red-600">{stats.disconformidad}</p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
-          <p className="text-xs text-gray-500">Total efectivo</p>
-          <p className="text-lg font-bold text-green-600">{formatMoney(stats.totalEfectivo)}</p>
+          <p className="text-xs text-gray-500">Cobrado total</p>
+          <p className="text-lg font-bold">{formatMoney(stats.totalCobrado)}</p>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+          <p className="text-xs text-gray-500">Entregado total</p>
+          <p className="text-lg font-bold">{formatMoney(stats.totalEntregado)}</p>
         </div>
       </div>
 
@@ -322,12 +457,14 @@ export default function VistaRendiciones(): React.ReactElement {
             <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Estado</label>
             <select
               value={estadoFiltro}
-              onChange={(e) => setEstadoFiltro(e.target.value as 'todas' | 'controladas' | 'pendientes')}
+              onChange={(e) => setEstadoFiltro(e.target.value as typeof estadoFiltro)}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-sm"
             >
               <option value="todas">Todas</option>
-              <option value="controladas">Controladas</option>
               <option value="pendientes">Pendientes</option>
+              <option value="confirmadas">Confirmadas</option>
+              <option value="disconformidad">Disconformidad</option>
+              <option value="resueltas">Resueltas</option>
             </select>
           </div>
         </div>
@@ -350,11 +487,40 @@ export default function VistaRendiciones(): React.ReactElement {
             <ResumenCard
               key={`${r.fecha}-${r.transportista_id}`}
               resumen={r}
-              onMarcar={handleMarcar}
-              onDesmarcar={handleDesmarcar}
+              onCerrar={setCerrarResumen}
+              onResolver={setResolverResumen}
             />
           ))}
         </div>
+      )}
+
+      {/* Modales */}
+      {cerrarResumen && (
+        <Suspense fallback={null}>
+          <ModalCerrarRendicion
+            fecha={cerrarResumen.fecha}
+            transportistaNombre={cerrarResumen.transportista_nombre}
+            totalCobrado={cerrarResumen.total_general}
+            totalEntregado={cerrarResumen.total_entregado}
+            observacionesPrevias={cerrarResumen.observaciones}
+            onConfirmar={handleCerrar}
+            onClose={() => setCerrarResumen(null)}
+            guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {resolverResumen && (
+        <Suspense fallback={null}>
+          <ModalResolverRendicion
+            fecha={resolverResumen.fecha}
+            transportistaNombre={resolverResumen.transportista_nombre}
+            observacionesPrevias={resolverResumen.observaciones}
+            onResolver={handleResolver}
+            onClose={() => setResolverResumen(null)}
+            guardando={guardando}
+          />
+        </Suspense>
       )}
     </div>
   )

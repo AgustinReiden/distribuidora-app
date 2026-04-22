@@ -1,6 +1,6 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
-import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2 } from 'lucide-react'
-import { formatPrecio as formatCurrency } from '../../utils/formatters'
+import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
+import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalPagoSchema } from '../../lib/schemas'
@@ -29,6 +29,8 @@ interface PagoData {
   formaPago: string;
   referencia: string;
   notas: string;
+  /** Fecha contable del pago (YYYY-MM-DD). Default hoy. */
+  fecha: string;
 }
 
 interface PagoRegistrado extends Pago {
@@ -68,6 +70,7 @@ export default function ModalRegistrarPago({
   const [loading, setLoading] = useState<boolean>(false)
   const [pagoRegistrado, setPagoRegistrado] = useState<PagoRegistrado | null>(null)
   const [error, setError] = useState<string>('')
+  const [fecha, setFecha] = useState<string>(fechaLocalISO())
 
   // Pago dividido
   const [pagoDividido, setPagoDividido] = useState<boolean>(false)
@@ -125,7 +128,8 @@ export default function ModalRegistrarPago({
             monto: parsePrecio(pago.monto),
             formaPago: pago.formaPago,
             referencia: '',
-            notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`
+            notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`,
+            fecha
           })
         }
         if (ultimoPago) setPagoRegistrado(ultimoPago)
@@ -151,7 +155,8 @@ export default function ModalRegistrarPago({
           monto: result.data.monto,
           formaPago,
           referencia,
-          notas
+          notas,
+          fecha
         })
         setPagoRegistrado(pago)
       } catch (err) {
@@ -245,6 +250,23 @@ export default function ModalRegistrarPago({
               {error}
             </div>
           )}
+
+          {/* Fecha contable del pago */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1">
+              <Calendar className="w-4 h-4" />
+              Fecha del pago
+            </label>
+            <input
+              type="date"
+              value={fecha}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setFecha(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Se imputa a la rendición de esa fecha. Por defecto hoy.
+            </p>
+          </div>
 
           {/* Toggle pago dividido */}
           <label className="flex items-center gap-2 cursor-pointer">

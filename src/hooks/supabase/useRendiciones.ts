@@ -8,7 +8,9 @@ import { fechaLocalISO } from '../../utils/formatters'
 import type {
   ResumenRendicionDiaria,
   ControlRendicionInfo,
-  UseRendicionesReturn
+  UseRendicionesReturn,
+  EstadoRendicion,
+  RendicionGastoInput
 } from '../../types'
 
 export function useRendiciones(): UseRendicionesReturn {
@@ -47,9 +49,16 @@ export function useRendiciones(): UseRendicionesReturn {
         total_otros: Number(r.total_otros) || 0,
         total_general: Number(r.total_general) || 0,
         cantidad_pedidos: Number(r.cantidad_pedidos) || 0,
+        total_entregado: Number(r.total_entregado) || 0,
+        total_gastos: Number(r.total_gastos) || 0,
+        cantidad_gastos: Number(r.cantidad_gastos) || 0,
+        estado: ((r.estado as string) || 'pendiente') as EstadoRendicion,
+        observaciones: (r.observaciones as string) || null,
         controlada: Boolean(r.controlada),
         controlada_at: (r.controlada_at as string) || null,
-        controlada_por_nombre: (r.controlada_por_nombre as string) || null
+        controlada_por_nombre: (r.controlada_por_nombre as string) || null,
+        resuelta_at: (r.resuelta_at as string) || null,
+        resuelta_por_nombre: (r.resuelta_por_nombre as string) || null
       })) as ResumenRendicionDiaria[]
 
       setResumenes(resumen)
@@ -106,6 +115,52 @@ export function useRendiciones(): UseRendicionesReturn {
     }
   }, [ultimoRango, fetchResumen])
 
+  const confirmarRendicion = useCallback(async (
+    fecha: string,
+    transportistaId: string,
+    estado: 'confirmada' | 'disconformidad',
+    observaciones?: string | null,
+    gastos?: RendicionGastoInput[]
+  ): Promise<void> => {
+    const { error } = await supabase.rpc('confirmar_rendicion', {
+      p_fecha: fecha,
+      p_transportista_id: transportistaId,
+      p_estado: estado,
+      p_observaciones: observaciones ?? null,
+      p_gastos: (gastos || []) as unknown
+    })
+
+    if (error) {
+      notifyError('Error al cerrar rendición: ' + error.message)
+      throw error
+    }
+
+    if (ultimoRango) {
+      await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
+    }
+  }, [ultimoRango, fetchResumen])
+
+  const resolverRendicion = useCallback(async (
+    fecha: string,
+    transportistaId: string,
+    observaciones: string
+  ): Promise<void> => {
+    const { error } = await supabase.rpc('resolver_rendicion', {
+      p_fecha: fecha,
+      p_transportista_id: transportistaId,
+      p_observaciones: observaciones
+    })
+
+    if (error) {
+      notifyError('Error al resolver rendición: ' + error.message)
+      throw error
+    }
+
+    if (ultimoRango) {
+      await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
+    }
+  }, [ultimoRango, fetchResumen])
+
   const consultarControl = useCallback(async (
     transportistaId: string,
     fecha: string
@@ -143,6 +198,8 @@ export function useRendiciones(): UseRendicionesReturn {
     fetchResumen,
     marcarControlada,
     desmarcarControlada,
+    confirmarRendicion,
+    resolverRendicion,
     consultarControl,
     refetch
   }
