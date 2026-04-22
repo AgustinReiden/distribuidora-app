@@ -106,13 +106,21 @@ export default function ClientesContainer(): React.ReactElement {
     // se espeja con el primer asignado para no romper lecturas en otros modulos
     // hasta que se elimine la columna en una migracion futura.
     const isCreating = !clienteEditando
-    const baseIds = data.preventista_ids || []
-    // Al crear, si el creador es preventista (no admin), auto-asignarse al
-    // cliente. Asi el nuevo cliente queda visible solo para el creador y admin.
-    // Admin puede luego editar la lista libremente desde el modal.
-    const ids = isCreating && isPreventista && !isAdmin && user?.id
-      ? Array.from(new Set([...baseIds, user.id]))
-      : baseIds
+    // Solo admin puede editar las asignaciones desde la UI. Un preventista
+    // editando un cliente NO debe tocar la tabla N-a-N (RLS lo rechazaria y
+    // ademas no vio el selector). La unica excepcion: al crear, el preventista
+    // se auto-asigna para que el cliente quede visible solo para el y admins.
+    const willTouchAssignments =
+      isAdmin || (isCreating && isPreventista && !isAdmin && !!user?.id)
+
+    let ids: string[] | undefined
+    if (willTouchAssignments) {
+      const baseIds = data.preventista_ids || []
+      ids = isCreating && isPreventista && !isAdmin && user?.id
+        ? Array.from(new Set([...baseIds, user.id]))
+        : baseIds
+    }
+
     const dbData = {
       razon_social: data.razonSocial || data.nombreFantasia,
       nombre_fantasia: data.nombreFantasia,
@@ -128,8 +136,7 @@ export default function ClientesContainer(): React.ReactElement {
       horarios_atencion: data.horarios_atencion || undefined,
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,
-      preventista_id: ids[0] ?? null,
-      preventista_ids: ids
+      ...(ids !== undefined ? { preventista_id: ids[0] ?? null, preventista_ids: ids } : {})
     }
 
     try {
