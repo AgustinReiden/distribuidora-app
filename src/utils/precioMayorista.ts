@@ -13,24 +13,37 @@
 // TIPOS
 // =============================================================================
 
+/**
+ * Configuracion por producto dentro de una escala combinada:
+ *   - cantidad: cantidad minima individual que ese producto debe tener en el
+ *     pedido para "contar" hacia la activacion de la escala.
+ *   - precioOverride (opcional): precio mayorista especifico que usa ese
+ *     producto cuando la escala aplica. Si es null/undefined, cae al
+ *     precioUnitario de la escala.
+ */
+export interface ReglaProducto {
+  cantidad: number
+  precioOverride?: number | null
+}
+
 export interface EscalaPrecio {
   cantidadMinima: number
+  /** Precio unitario base de la escala. Fallback para productos sin override. */
   precioUnitario: number
   etiqueta: string | null
   /**
    * Cantidad minima de productos DISTINTOS del grupo presentes en el pedido
    * (con cantidad >= su minimo individual, o > 0 si no tienen minimo) para
-   * activar la escala. Default 1 = comportamiento clasico (no importa cuantos
-   * productos distintos haya mientras se cumpla el total).
+   * activar la escala. Default 1 = comportamiento clasico.
    */
   minProductosDistintos: number
   /**
-   * Mapa productoId -> minimo individual que ese producto debe tener en el
-   * pedido para "contar" hacia la activacion de la escala. Si un producto
-   * del grupo no esta en este mapa, basta con cantidad > 0 para contar.
-   * Ausencia total de entradas = escala clasica.
+   * Mapa productoId -> regla individual (cantidad minima + precio override).
+   * Si un producto del grupo no esta en este mapa, basta con cantidad > 0
+   * para contar y usa el precioUnitario de la escala. Ausencia total de
+   * entradas = escala clasica.
    */
-  minimosPorProducto: Map<string, number>
+  minimosPorProducto: Map<string, ReglaProducto>
 }
 
 export interface GrupoPrecioInfo {
@@ -106,9 +119,9 @@ export function escalaAplica(
 
   // 2. Si hay minimos por producto, validar que los presentes los cumplan
   if (escala.minimosPorProducto.size > 0) {
-    for (const [pid, minimo] of escala.minimosPorProducto) {
+    for (const [pid, regla] of escala.minimosPorProducto) {
       const cantidad = cantidadesPorProducto.get(pid) || 0
-      if (cantidad > 0 && cantidad < minimo) {
+      if (cantidad > 0 && cantidad < regla.cantidad) {
         return false
       }
     }
@@ -120,15 +133,27 @@ export function escalaAplica(
   for (const pid of productoIdsGrupo) {
     const cantidad = cantidadesPorProducto.get(pid) || 0
     if (cantidad <= 0) continue
-    const minimoIndividual = escala.minimosPorProducto.get(pid)
-    if (minimoIndividual !== undefined) {
-      if (cantidad >= minimoIndividual) productosQueCuentan++
+    const regla = escala.minimosPorProducto.get(pid)
+    if (regla !== undefined) {
+      if (cantidad >= regla.cantidad) productosQueCuentan++
     } else {
       // Sin minimo configurado: basta con estar presente
       productosQueCuentan++
     }
   }
   return productosQueCuentan >= minK
+}
+
+/**
+ * Devuelve el precio efectivo que usa un producto cuando una escala aplica.
+ * Respeta el override por producto si existe; si no, usa el precio de la escala.
+ */
+export function precioEfectivoEscala(escala: EscalaPrecio, productoId: string): number {
+  const regla = escala.minimosPorProducto.get(String(productoId))
+  if (regla && regla.precioOverride != null && regla.precioOverride > 0) {
+    return regla.precioOverride
+  }
+  return escala.precioUnitario
 }
 
 /**
@@ -209,24 +234,28 @@ export function resolverPreciosMayorista(
       const productoIdsStr = grupo.productoIds.map(String)
 
       // Filtrar escalas que apliquen (clasica o combinada) y quedarme con la
-      // de mayor cantidad_minima. En caso de empate por cantidad, gana la de
-      // menor precio (la mejor para el cliente), tipicamente la combinada
-      // cuando existe junto a una clasica con el mismo umbral.
+      // de mayor cantidad_minima. En caso de empate por cantidad, gana la
+      // de menor precio EFECTIVO para este producto en particular (respeta
+      // overrides por producto). Asi una combinada con override mas bajo
+      // gana a una clasica con el mismo umbral; y una clasica mas barata
+      // gana si la combinada no bajo ese producto especifico.
+      const pidStr = String(item.productoId)
       const escalasAplicables = grupo.escalas
         .filter(e => escalaAplica(e, cantidadesPorProducto, productoIdsStr))
         .sort((a, b) => {
           if (b.cantidadMinima !== a.cantidadMinima) {
             return b.cantidadMinima - a.cantidadMinima
           }
-          return a.precioUnitario - b.precioUnitario
+          return precioEfectivoEscala(a, pidStr) - precioEfectivoEscala(b, pidStr)
         })
 
       if (escalasAplicables.length === 0) continue
 
       const escalaElegida = escalasAplicables[0]
+      const precioParaEsteProducto = precioEfectivoEscala(escalaElegida, pidStr)
       // Solo aplicar si el precio mayorista es menor o igual al actual mejor
-      if (escalaElegida.precioUnitario <= mejorPrecio) {
-        mejorPrecio = escalaElegida.precioUnitario
+      if (precioParaEsteProducto <= mejorPrecio) {
+        mejorPrecio = precioParaEsteProducto
         mejorGrupoNombre = grupo.grupoNombre
         mejorEtiqueta = escalaElegida.etiqueta
         mejorCantidadEnGrupo = totalPorGrupo.get(grupo.grupoId) || 0

@@ -25,6 +25,12 @@ export interface ModalGrupoPrecioProps {
   onClose: () => void
 }
 
+interface ReglaProductoForm {
+  cantidad: string
+  /** Precio mayorista especifico para ESTE producto (override). Vacio = usa precio base de la escala. */
+  precio: string
+}
+
 interface EscalaForm {
   cantidadMinima: string
   precioUnitario: string
@@ -34,13 +40,13 @@ interface EscalaForm {
   /** UI: expandido o colapsado */
   expandido: boolean
   minProductosDistintos: string
-  /** productoId -> cantidad minima individual (string para controlar el input). */
-  minimosPorProducto: Record<string, string>
+  /** productoId -> regla individual. */
+  minimosPorProducto: Record<string, ReglaProductoForm>
 }
 
 function escalaDesdeGrupo(
   escalaDB: GrupoPrecioConDetalles['escalas'][number],
-  minimosDB: Record<string, number>
+  minimosDB: Record<string, { cantidad: number; precioOverride?: number | null }>
 ): EscalaForm {
   const combinada = Object.keys(minimosDB).length > 0 || (escalaDB.min_productos_distintos ?? 1) > 1
   return {
@@ -51,7 +57,13 @@ function escalaDesdeGrupo(
     expandido: combinada,
     minProductosDistintos: String(escalaDB.min_productos_distintos ?? 1),
     minimosPorProducto: Object.fromEntries(
-      Object.entries(minimosDB).map(([pid, v]) => [pid, String(v)])
+      Object.entries(minimosDB).map(([pid, v]) => [
+        pid,
+        {
+          cantidad: String(v.cantidad),
+          precio: v.precioOverride != null && v.precioOverride > 0 ? String(v.precioOverride) : '',
+        },
+      ])
     ),
   }
 }
@@ -84,9 +96,12 @@ export default function ModalGrupoPrecio({
   const [escalas, setEscalas] = useState<EscalaForm[]>(() => {
     if (!grupo) return [escalaVacia()]
     return grupo.escalas.map(e => {
-      const minimosDB: Record<string, number> = {}
+      const minimosDB: Record<string, { cantidad: number; precioOverride?: number | null }> = {}
       for (const m of grupo.escalaMinimos?.[String(e.id)] || []) {
-        minimosDB[String(m.producto_id)] = Number(m.cantidad_minima_por_item)
+        minimosDB[String(m.producto_id)] = {
+          cantidad: Number(m.cantidad_minima_por_item),
+          precioOverride: m.precio_unitario_override != null ? Number(m.precio_unitario_override) : null,
+        }
       }
       return escalaDesdeGrupo(e, minimosDB)
     })
@@ -133,7 +148,7 @@ export default function ModalGrupoPrecio({
   // Si se quita un producto del grupo, limpiar los minimos asociados en cada escala
   useEffect(() => {
     setEscalas(prev => prev.map(e => {
-      const nuevosMinimos: Record<string, string> = {}
+      const nuevosMinimos: Record<string, ReglaProductoForm> = {}
       for (const [pid, v] of Object.entries(e.minimosPorProducto)) {
         if (productoIds.has(pid)) nuevosMinimos[pid] = v
       }
@@ -214,8 +229,19 @@ export default function ModalGrupoPrecio({
       if (!value || value === '0' || parseInt(value) <= 0) {
         delete next[productoId]
       } else {
-        next[productoId] = value
+        next[productoId] = { cantidad: value, precio: next[productoId]?.precio || '' }
       }
+      return { ...e, minimosPorProducto: next }
+    }))
+  }
+
+  const actualizarPrecioProducto = (escalaIdx: number, productoId: string, value: string) => {
+    setEscalas(prev => prev.map((e, i) => {
+      if (i !== escalaIdx) return e
+      const prev2 = e.minimosPorProducto[productoId]
+      // Si aun no hay cantidad configurada, no tiene sentido guardar precio solo.
+      if (!prev2 || !prev2.cantidad) return e
+      const next = { ...e.minimosPorProducto, [productoId]: { ...prev2, precio: value } }
       return { ...e, minimosPorProducto: next }
     }))
   }
@@ -256,14 +282,14 @@ export default function ModalGrupoPrecio({
           setError(`Con "Requiere combinacion" activo, el minimo de productos distintos debe ser >= 2 (escala ${qty}u)`)
           return
         }
-        const minimosActivos = Object.entries(e.minimosPorProducto).filter(([, v]) => parseInt(v) > 0)
+        const minimosActivos = Object.entries(e.minimosPorProducto).filter(([, v]) => parseInt(v.cantidad) > 0)
         if (minimosActivos.length < k) {
           setError(`La escala ${qty}u requiere ${k} productos distintos pero solo ${minimosActivos.length} tienen minimo configurado.`)
           return
         }
         // Coherencia: suma de los K minimos mas bajos debe ser <= cantidad_minima total
         const minimosOrdenados = minimosActivos
-          .map(([, v]) => parseInt(v))
+          .map(([, v]) => parseInt(v.cantidad))
           .sort((a, b) => a - b)
         const sumaMinima = minimosOrdenados.slice(0, k).reduce((s, n) => s + n, 0)
         if (sumaMinima > qty) {
@@ -271,6 +297,17 @@ export default function ModalGrupoPrecio({
             `Regla inalcanzable en escala ${qty}u: sumando los ${k} minimos mas bajos da ${sumaMinima}, que excede ${qty}.`
           )
           return
+        }
+        // Precios override: si estan seteados, deben ser > 0
+        for (const [pid, regla] of minimosActivos) {
+          if (regla.precio && regla.precio.trim() !== '') {
+            const precioProd = parsePrecio(regla.precio)
+            if (isNaN(precioProd) || precioProd <= 0) {
+              const nombre = nombresProductos[pid] || `#${pid}`
+              setError(`Precio invalido para ${nombre} en escala ${qty}u.`)
+              return
+            }
+          }
         }
       }
     }
@@ -303,10 +340,13 @@ export default function ModalGrupoPrecio({
             minProductosDistintos: e.combinada ? parseInt(e.minProductosDistintos) : 1,
           }
           if (!e.combinada) return base
-          const minimos: Record<string, number> = {}
+          const minimos: Record<string, { cantidad: number; precioOverride?: number | null }> = {}
           for (const [pid, v] of Object.entries(e.minimosPorProducto)) {
-            const n = parseInt(v)
-            if (!isNaN(n) && n > 0 && productoIds.has(pid)) minimos[pid] = n
+            const cant = parseInt(v.cantidad)
+            if (isNaN(cant) || cant <= 0 || !productoIds.has(pid)) continue
+            const precioRaw = v.precio && v.precio.trim() !== '' ? parsePrecio(v.precio) : null
+            const precioOverride = precioRaw != null && !isNaN(precioRaw) && precioRaw > 0 ? precioRaw : null
+            minimos[pid] = { cantidad: cant, precioOverride }
           }
           return { ...base, minimosPorProducto: minimos }
         }),
@@ -473,8 +513,18 @@ export default function ModalGrupoPrecio({
                   minProductosDistintos: escala.combinada ? parseInt(escala.minProductosDistintos) || 1 : 1,
                   minimosPorProducto: new Map(
                     Object.entries(escala.minimosPorProducto)
-                      .map(([pid, v]) => [pid, parseInt(v) || 0] as const)
-                      .filter(([, n]) => n > 0)
+                      .map(([pid, v]) => {
+                        const cant = parseInt(v.cantidad) || 0
+                        const precioOv = v.precio && v.precio.trim() !== '' ? parsePrecio(v.precio) : null
+                        return [
+                          pid,
+                          {
+                            cantidad: cant,
+                            precioOverride: precioOv != null && !isNaN(precioOv) && precioOv > 0 ? precioOv : null,
+                          },
+                        ] as const
+                      })
+                      .filter(([, v]) => v.cantidad > 0)
                   ),
                 }
 
@@ -564,27 +614,55 @@ export default function ModalGrupoPrecio({
 
                         <div>
                           <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                            Cantidad mínima por producto (solo los productos marcados cuentan hacia la combinación):
+                            Cantidad mínima y precio mayorista por producto (precio vacío = usa el precio base de la escala):
                           </p>
                           {productosDelGrupo.length === 0 ? (
                             <p className="text-xs text-gray-400 italic">Primero agregá productos al grupo.</p>
                           ) : (
-                            <div className="space-y-1 max-h-40 overflow-y-auto border dark:border-gray-600 rounded p-1">
-                              {productosDelGrupo.map(p => (
-                                <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
-                                  <span className="truncate dark:text-gray-200">{p.nombre}</span>
-                                  <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min="1"
-                                    step="1"
-                                    value={escala.minimosPorProducto[String(p.id)] || ''}
-                                    onChange={e => actualizarMinimoProducto(index, String(p.id), e.target.value)}
-                                    className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                                    placeholder="Min"
-                                  />
-                                </div>
-                              ))}
+                            <div className="space-y-1 max-h-56 overflow-y-auto border dark:border-gray-600 rounded p-1">
+                              <div className="grid grid-cols-[1fr_auto_auto] gap-2 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1 pb-1 border-b dark:border-gray-700">
+                                <span>Producto</span>
+                                <span className="text-center w-16">Mín.</span>
+                                <span className="text-center w-24">Precio</span>
+                              </div>
+                              {productosDelGrupo.map(p => {
+                                const regla = escala.minimosPorProducto[String(p.id)]
+                                const cantidadValue = regla?.cantidad || ''
+                                const precioValue = regla?.precio || ''
+                                const tieneCantidad = !!cantidadValue && parseInt(cantidadValue) > 0
+                                return (
+                                  <div key={p.id} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs">
+                                    <span className="truncate dark:text-gray-200" title={p.nombre}>
+                                      {p.nombre}
+                                    </span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="1"
+                                      step="1"
+                                      value={cantidadValue}
+                                      onChange={e => actualizarMinimoProducto(index, String(p.id), e.target.value)}
+                                      className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                      placeholder="Min"
+                                    />
+                                    <div className="relative w-24">
+                                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]">$</span>
+                                      <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        min="0.01"
+                                        step="0.01"
+                                        value={precioValue}
+                                        onChange={e => actualizarPrecioProducto(index, String(p.id), e.target.value)}
+                                        disabled={!tieneCantidad}
+                                        className="w-full pl-5 pr-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
+                                        placeholder={tieneCantidad ? 'Base' : ''}
+                                        title={tieneCantidad ? 'Dejar vacío para usar el precio base de la escala' : 'Primero ingresá la cantidad mínima'}
+                                      />
+                                    </div>
+                                  </div>
+                                )
+                              })}
                             </div>
                           )}
                         </div>

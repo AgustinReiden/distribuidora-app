@@ -1391,6 +1391,11 @@ export interface GrupoPrecioEscalaMinimoDB {
   escala_id: string;
   producto_id: string;
   cantidad_minima_por_item: number;
+  /**
+   * Precio mayorista especifico para este producto cuando la escala aplica.
+   * Si es null o undefined, se usa el precio_unitario de la escala.
+   */
+  precio_unitario_override?: number | null;
   sucursal_id: string;
   created_at?: string;
 }
@@ -1413,8 +1418,13 @@ export interface GrupoPrecioFormInput {
     etiqueta?: string | null;
     /** Minimo de productos distintos (default 1 = clasica). */
     minProductosDistintos?: number;
-    /** Minimo por producto para escalas combinadas: productoId -> cantidad. */
-    minimosPorProducto?: Record<string, number>;
+    /**
+     * Config por producto para escalas combinadas: cantidad minima individual
+     * y, opcionalmente, un precio mayorista especifico para ese producto. Si
+     * precioOverride es null/undefined, el producto usa el `precioUnitario`
+     * de la escala cuando aplica.
+     */
+    minimosPorProducto?: Record<string, { cantidad: number; precioOverride?: number | null }>;
   }>;
 }
 
