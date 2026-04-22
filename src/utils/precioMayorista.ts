@@ -17,6 +17,20 @@ export interface EscalaPrecio {
   cantidadMinima: number
   precioUnitario: number
   etiqueta: string | null
+  /**
+   * Cantidad minima de productos DISTINTOS del grupo presentes en el pedido
+   * (con cantidad >= su minimo individual, o > 0 si no tienen minimo) para
+   * activar la escala. Default 1 = comportamiento clasico (no importa cuantos
+   * productos distintos haya mientras se cumpla el total).
+   */
+  minProductosDistintos: number
+  /**
+   * Mapa productoId -> minimo individual que ese producto debe tener en el
+   * pedido para "contar" hacia la activacion de la escala. Si un producto
+   * del grupo no esta en este mapa, basta con cantidad > 0 para contar.
+   * Ausencia total de entradas = escala clasica.
+   */
+  minimosPorProducto: Map<string, number>
 }
 
 export interface GrupoPrecioInfo {
@@ -59,6 +73,65 @@ export interface ItemPedido {
 // =============================================================================
 
 /**
+ * Indica si una escala es "combinada" (exige reglas mas alla del total del grupo).
+ * Default (sin filas en minimosPorProducto y minProductosDistintos <= 1) = clasica.
+ */
+export function esEscalaCombinada(escala: EscalaPrecio): boolean {
+  return escala.minProductosDistintos > 1 || escala.minimosPorProducto.size > 0
+}
+
+/**
+ * Evalua si una escala aplica dadas las cantidades por producto del grupo en el pedido.
+ *
+ * Reglas:
+ *   1. total del grupo >= escala.cantidadMinima.
+ *   2. Si hay minimos por producto: ningun producto presente en el pedido con
+ *      minimo configurado puede tener cantidad < minimo (si lo tiene, la escala
+ *      falla incluso aunque ese producto no "cuente" individualmente).
+ *   3. Cantidad de productos DISTINTOS del grupo que "cuentan" (presentes con
+ *      cantidad >= su minimo individual, o >0 si no tienen minimo) debe ser
+ *      >= escala.minProductosDistintos.
+ */
+export function escalaAplica(
+  escala: EscalaPrecio,
+  cantidadesPorProducto: Map<string, number>,
+  productoIdsGrupo: string[]
+): boolean {
+  // 1. Total del grupo
+  let totalGrupo = 0
+  for (const pid of productoIdsGrupo) {
+    totalGrupo += cantidadesPorProducto.get(pid) || 0
+  }
+  if (totalGrupo < escala.cantidadMinima) return false
+
+  // 2. Si hay minimos por producto, validar que los presentes los cumplan
+  if (escala.minimosPorProducto.size > 0) {
+    for (const [pid, minimo] of escala.minimosPorProducto) {
+      const cantidad = cantidadesPorProducto.get(pid) || 0
+      if (cantidad > 0 && cantidad < minimo) {
+        return false
+      }
+    }
+  }
+
+  // 3. Contar productos distintos que cuentan
+  const minK = Math.max(1, escala.minProductosDistintos)
+  let productosQueCuentan = 0
+  for (const pid of productoIdsGrupo) {
+    const cantidad = cantidadesPorProducto.get(pid) || 0
+    if (cantidad <= 0) continue
+    const minimoIndividual = escala.minimosPorProducto.get(pid)
+    if (minimoIndividual !== undefined) {
+      if (cantidad >= minimoIndividual) productosQueCuentan++
+    } else {
+      // Sin minimo configurado: basta con estar presente
+      productosQueCuentan++
+    }
+  }
+  return productosQueCuentan >= minK
+}
+
+/**
  * Resuelve los precios mayoristas para cada item del pedido
  *
  * @param items - Items del pedido actual
@@ -71,24 +144,27 @@ export function resolverPreciosMayorista(
 ): Map<string, PrecioResuelto> {
   const result = new Map<string, PrecioResuelto>()
 
-  // Pre-calcular cantidades totales por grupo
-  const cantidadesPorGrupo = new Map<string, number>()
+  // Mapa productoId -> cantidad total en el pedido
+  const cantidadesPorProducto = new Map<string, number>()
+  for (const item of items) {
+    const pid = String(item.productoId)
+    cantidadesPorProducto.set(pid, (cantidadesPorProducto.get(pid) || 0) + item.cantidad)
+  }
+
+  // Pre-calcular total por grupo (compat con el campo cantidadEnGrupo del resultado)
+  const totalPorGrupo = new Map<string, number>()
+  const gruposVistos = new Set<string>()
   for (const item of items) {
     const grupos = pricingMap.get(String(item.productoId))
     if (!grupos) continue
     for (const grupo of grupos) {
-      const totalActual = cantidadesPorGrupo.get(grupo.grupoId) || 0
-      // Sumar las cantidades de TODOS los items del pedido que pertenecen a este grupo
-      let totalGrupo = 0
-      for (const otroItem of items) {
-        if (grupo.productoIds.includes(String(otroItem.productoId))) {
-          totalGrupo += otroItem.cantidad
-        }
+      if (gruposVistos.has(grupo.grupoId)) continue
+      gruposVistos.add(grupo.grupoId)
+      let total = 0
+      for (const pid of grupo.productoIds) {
+        total += cantidadesPorProducto.get(String(pid)) || 0
       }
-      // Usar el máximo calculado (evitar doble conteo)
-      if (totalGrupo > totalActual) {
-        cantidadesPorGrupo.set(grupo.grupoId, totalGrupo)
-      }
+      totalPorGrupo.set(grupo.grupoId, total)
     }
   }
 
@@ -130,23 +206,31 @@ export function resolverPreciosMayorista(
     let mejorCantidadMinima: number | null = null
 
     for (const grupo of grupos) {
-      const totalGrupo = cantidadesPorGrupo.get(grupo.grupoId) || 0
+      const productoIdsStr = grupo.productoIds.map(String)
 
-      // Encontrar la escala más alta aplicable (ordenar por cantidad_minima descendente)
-      const escalasOrdenadas = [...grupo.escalas]
-        .filter(e => e.cantidadMinima <= totalGrupo)
-        .sort((a, b) => b.cantidadMinima - a.cantidadMinima)
+      // Filtrar escalas que apliquen (clasica o combinada) y quedarme con la
+      // de mayor cantidad_minima. En caso de empate por cantidad, gana la de
+      // menor precio (la mejor para el cliente), tipicamente la combinada
+      // cuando existe junto a una clasica con el mismo umbral.
+      const escalasAplicables = grupo.escalas
+        .filter(e => escalaAplica(e, cantidadesPorProducto, productoIdsStr))
+        .sort((a, b) => {
+          if (b.cantidadMinima !== a.cantidadMinima) {
+            return b.cantidadMinima - a.cantidadMinima
+          }
+          return a.precioUnitario - b.precioUnitario
+        })
 
-      if (escalasOrdenadas.length > 0) {
-        const escalaAplicable = escalasOrdenadas[0]
-        // Solo aplicar si el precio mayorista es menor o igual al original
-        if (escalaAplicable.precioUnitario <= mejorPrecio) {
-          mejorPrecio = escalaAplicable.precioUnitario
-          mejorGrupoNombre = grupo.grupoNombre
-          mejorEtiqueta = escalaAplicable.etiqueta
-          mejorCantidadEnGrupo = totalGrupo
-          mejorCantidadMinima = escalaAplicable.cantidadMinima
-        }
+      if (escalasAplicables.length === 0) continue
+
+      const escalaElegida = escalasAplicables[0]
+      // Solo aplicar si el precio mayorista es menor o igual al actual mejor
+      if (escalaElegida.precioUnitario <= mejorPrecio) {
+        mejorPrecio = escalaElegida.precioUnitario
+        mejorGrupoNombre = grupo.grupoNombre
+        mejorEtiqueta = escalaElegida.etiqueta
+        mejorCantidadEnGrupo = totalPorGrupo.get(grupo.grupoId) || 0
+        mejorCantidadMinima = escalaElegida.cantidadMinima
       }
     }
 
@@ -206,8 +290,11 @@ export function calcularFaltanteParaTier(
 
       const totalGrupo = cantidadesPorGrupo.get(grupo.grupoId) || 0
 
-      // Encontrar el próximo tier que no se ha alcanzado
-      const escalasOrdenadas = [...grupo.escalas]
+      // Encontrar el proximo tier que no se ha alcanzado.
+      // Las escalas combinadas no participan del nudge porque el mensaje
+      // "te faltan X unidades" no puede expresar combinaciones requeridas.
+      const escalasOrdenadas = grupo.escalas
+        .filter(e => !esEscalaCombinada(e))
         .sort((a, b) => a.cantidadMinima - b.cantidadMinima)
 
       for (const escala of escalasOrdenadas) {

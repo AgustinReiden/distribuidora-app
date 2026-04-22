@@ -1381,12 +1381,25 @@ export interface GrupoPrecioEscalaDB {
   precio_unitario: number;
   etiqueta?: string | null;
   activo?: boolean;
+  /** Minimo de productos DISTINTOS que deben contar para activar. Default 1 = clasica. */
+  min_productos_distintos?: number;
+  created_at?: string;
+}
+
+/** Fila de la tabla grupo_precio_escala_minimos: minimo individual por producto por escala. */
+export interface GrupoPrecioEscalaMinimoDB {
+  escala_id: string;
+  producto_id: string;
+  cantidad_minima_por_item: number;
+  sucursal_id: string;
   created_at?: string;
 }
 
 export interface GrupoPrecioConDetalles extends GrupoPrecioDB {
   productos: GrupoPrecioProductoDB[];
   escalas: GrupoPrecioEscalaDB[];
+  /** Minimos por producto agrupados por escalaId. Solo se llenan para escalas combinadas. */
+  escalaMinimos?: Record<string, GrupoPrecioEscalaMinimoDB[]>;
 }
 
 export interface GrupoPrecioFormInput {
@@ -1398,6 +1411,10 @@ export interface GrupoPrecioFormInput {
     cantidadMinima: number;
     precioUnitario: number;
     etiqueta?: string | null;
+    /** Minimo de productos distintos (default 1 = clasica). */
+    minProductosDistintos?: number;
+    /** Minimo por producto para escalas combinadas: productoId -> cantidad. */
+    minimosPorProducto?: Record<string, number>;
   }>;
 }
 
