@@ -222,9 +222,12 @@ export default function VistaGruposPrecio({
                     .sort((a, b) => a.cantidad_minima - b.cantidad_minima)
                     .map(escala => {
                       const minimosRows = grupo.escalaMinimos?.[String(escala.id)] || []
-                      const minimosMap = new Map<string, number>()
+                      const minimosMap = new Map<string, { cantidad: number; precioOverride?: number | null }>()
                       for (const m of minimosRows) {
-                        minimosMap.set(String(m.producto_id), Number(m.cantidad_minima_por_item))
+                        minimosMap.set(String(m.producto_id), {
+                          cantidad: Number(m.cantidad_minima_por_item),
+                          precioOverride: m.precio_unitario_override != null ? Number(m.precio_unitario_override) : null,
+                        })
                       }
                       const escalaTipada: EscalaPrecio = {
                         cantidadMinima: escala.cantidad_minima,

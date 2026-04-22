@@ -29,26 +29,42 @@ function getNombre(id: string, opts: DescribirReglaOpts): string {
 }
 
 export function describirReglaEscala(escala: EscalaPrecio, opts: DescribirReglaOpts = {}): string {
-  const precio = formatMoneda(escala.precioUnitario)
+  const precioBase = formatMoneda(escala.precioUnitario)
   const total = escala.cantidadMinima
 
   const minProdDistintos = Math.max(1, escala.minProductosDistintos)
   const minimos = Array.from(escala.minimosPorProducto.entries())
-    .filter(([, v]) => v > 0)
+    .filter(([, v]) => v.cantidad > 0)
     .sort(([a], [b]) => a.localeCompare(b))
 
   // Caso clásico: sin mínimos por producto y con K=1.
   if (minProdDistintos <= 1 && minimos.length === 0) {
-    return `Si el grupo suma ${total}+ unidades, ${precio} c/u.`
+    return `Si el grupo suma ${total}+ unidades, ${precioBase} c/u.`
   }
 
   const partes: string[] = [`${total}+ unidades totales`]
   if (minProdDistintos > 1) {
     partes.push(`al menos ${minProdDistintos} productos distintos`)
   }
+
+  // Detectar si hay precios override heterogéneos vs un precio uniforme.
+  const algunoConOverride = minimos.some(([, v]) => v.precioOverride != null && v.precioOverride > 0)
   if (minimos.length > 0) {
-    const lista = minimos.map(([pid, cant]) => `${getNombre(pid, opts)} ${cant}+`).join(', ')
+    if (algunoConOverride) {
+      // Lista con precio individual por producto.
+      const lista = minimos
+        .map(([pid, v]) => {
+          const precioProd = v.precioOverride != null && v.precioOverride > 0
+            ? formatMoneda(v.precioOverride)
+            : precioBase
+          return `${getNombre(pid, opts)} ${v.cantidad}+ a ${precioProd}`
+        })
+        .join(', ')
+      return `Si comprás ${partes.join(', ')}, con precios por producto (${lista}).`
+    }
+    // Precios uniformes: solo listar cantidades.
+    const lista = minimos.map(([pid, v]) => `${getNombre(pid, opts)} ${v.cantidad}+`).join(', ')
     partes.push(`con mínimos (${lista})`)
   }
-  return `Si comprás ${partes.join(', ')}, ${precio} c/u.`
+  return `Si comprás ${partes.join(', ')}, ${precioBase} c/u.`
 }

@@ -14,11 +14,13 @@ import { describe, expect, it } from 'vitest'
 import {
   escalaAplica,
   esEscalaCombinada,
+  precioEfectivoEscala,
   resolverPreciosMayorista,
   type EscalaPrecio,
   type GrupoPrecioInfo,
   type ItemPedido,
-  type PricingMap
+  type PricingMap,
+  type ReglaProducto
 } from './precioMayorista'
 
 // Helpers para armar escalas facilmente
@@ -32,19 +34,29 @@ function escalaClasica(cantidadMinima: number, precioUnitario: number, etiqueta 
   }
 }
 
+/**
+ * Arma una escala combinada. `minimos` acepta tanto un numero (shortcut a
+ * { cantidad: N }) como un objeto { cantidad, precioOverride? } para configurar
+ * un precio mayorista especifico por producto.
+ */
 function escalaCombinada(
   cantidadMinima: number,
   precioUnitario: number,
   minProductosDistintos: number,
-  minimos: Record<string, number>,
+  minimos: Record<string, number | ReglaProducto>,
   etiqueta = ''
 ): EscalaPrecio {
+  const map = new Map<string, ReglaProducto>()
+  for (const [pid, v] of Object.entries(minimos)) {
+    if (typeof v === 'number') map.set(pid, { cantidad: v })
+    else map.set(pid, v)
+  }
   return {
     cantidadMinima,
     precioUnitario,
     etiqueta: etiqueta || null,
     minProductosDistintos,
-    minimosPorProducto: new Map(Object.entries(minimos))
+    minimosPorProducto: map
   }
 }
 
@@ -252,6 +264,101 @@ describe('resolverPreciosMayorista - coexistencia clasica + combinada', () => {
     const items = [item('A', 12, 1000), item('B', 12, 1000)]
     const res = resolverPreciosMayorista(items, pm)
     expect(res.get('A')!.precioResuelto).toBe(750)
+  })
+})
+
+describe('precioEfectivoEscala', () => {
+  it('sin override devuelve precio base de la escala', () => {
+    const e = escalaCombinada(12, 800, 2, { A: 6, B: 6 })
+    expect(precioEfectivoEscala(e, 'A')).toBe(800)
+  })
+
+  it('con override devuelve el override del producto', () => {
+    const e = escalaCombinada(12, 800, 2, {
+      A: { cantidad: 6, precioOverride: 850 },
+      B: { cantidad: 6, precioOverride: 950 }
+    })
+    expect(precioEfectivoEscala(e, 'A')).toBe(850)
+    expect(precioEfectivoEscala(e, 'B')).toBe(950)
+  })
+
+  it('override null cae a precio base', () => {
+    const e = escalaCombinada(12, 800, 2, {
+      A: { cantidad: 6, precioOverride: null },
+      B: { cantidad: 6, precioOverride: 950 }
+    })
+    expect(precioEfectivoEscala(e, 'A')).toBe(800)
+    expect(precioEfectivoEscala(e, 'B')).toBe(950)
+  })
+})
+
+describe('resolverPreciosMayorista - precios heterogeneos por producto', () => {
+  // Caso del cliente: codito $900 con mayorista $850, moñito $1000 con mayorista $950.
+  // Escala combinada exige 6 de cada uno y al menos 2 productos.
+  const g = grupo('g1', 'Fideos', ['codito', 'moñito'], [
+    escalaCombinada(12, 900, 2, {
+      codito: { cantidad: 6, precioOverride: 850 },
+      moñito: { cantidad: 6, precioOverride: 950 }
+    })
+  ])
+  const pm = pricingMap([g])
+
+  it('6 codito + 6 moñito aplica precios distintos por producto', () => {
+    const items = [item('codito', 6, 900), item('moñito', 6, 1000)]
+    const res = resolverPreciosMayorista(items, pm)
+    expect(res.get('codito')!.precioResuelto).toBe(850)
+    expect(res.get('moñito')!.precioResuelto).toBe(950)
+    expect(res.get('codito')!.esMayorista).toBe(true)
+    expect(res.get('moñito')!.esMayorista).toBe(true)
+  })
+
+  it('producto sin override en la escala usa el precio base de la escala', () => {
+    const g2 = grupo('g2', 'Fideos', ['A', 'B', 'C'], [
+      escalaCombinada(12, 800, 2, {
+        A: { cantidad: 6, precioOverride: 700 },  // override
+        B: { cantidad: 6 },                         // sin override -> 800
+        C: { cantidad: 6, precioOverride: 750 }   // override
+      })
+    ])
+    const pm2 = pricingMap([g2])
+    const items = [item('A', 6, 1000), item('B', 6, 1000), item('C', 0, 1000)]
+    const res = resolverPreciosMayorista(items, pm2)
+    expect(res.get('A')!.precioResuelto).toBe(700)
+    expect(res.get('B')!.precioResuelto).toBe(800)
+  })
+
+  it('clasica compite con combinada por el precio efectivo de cada producto', () => {
+    // Escala clasica $820 para todos + escala combinada con override $870 para A.
+    // La clasica gana para A (820 < 870), pero la combinada no subiria precios.
+    const gMixto = grupo('g3', 'Fideos', ['A', 'B'], [
+      escalaClasica(12, 820),
+      escalaCombinada(12, 900, 2, {
+        A: { cantidad: 6, precioOverride: 870 },
+        B: { cantidad: 6, precioOverride: 850 }
+      })
+    ])
+    const pm3 = pricingMap([gMixto])
+    const items = [item('A', 6, 1000), item('B', 6, 1000)]
+    const res = resolverPreciosMayorista(items, pm3)
+    // Para A, la clasica $820 gana a la combinada $870
+    expect(res.get('A')!.precioResuelto).toBe(820)
+    // Para B, la combinada $850 gana a la clasica $820? No, $820 < $850, gana clasica.
+    expect(res.get('B')!.precioResuelto).toBe(820)
+  })
+
+  it('clasica vs combinada con override mas barato por producto: gana la combinada', () => {
+    const gMixto = grupo('g4', 'Fideos', ['A', 'B'], [
+      escalaClasica(12, 820),
+      escalaCombinada(12, 900, 2, {
+        A: { cantidad: 6, precioOverride: 800 },  // mas barato que 820
+        B: { cantidad: 6, precioOverride: 850 }
+      })
+    ])
+    const pm4 = pricingMap([gMixto])
+    const items = [item('A', 6, 1000), item('B', 6, 1000)]
+    const res = resolverPreciosMayorista(items, pm4)
+    expect(res.get('A')!.precioResuelto).toBe(800)
+    expect(res.get('B')!.precioResuelto).toBe(820)
   })
 })
 

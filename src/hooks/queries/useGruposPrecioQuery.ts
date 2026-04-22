@@ -113,9 +113,12 @@ async function fetchPricingMap(): Promise<PricingMap> {
       .filter(e => e.activo !== false)
       .map((e): EscalaPrecio => {
         const minimosRows = grupo.escalaMinimos?.[String(e.id)] || []
-        const minimosPorProducto = new Map<string, number>()
+        const minimosPorProducto = new Map<string, { cantidad: number; precioOverride?: number | null }>()
         for (const m of minimosRows) {
-          minimosPorProducto.set(String(m.producto_id), Number(m.cantidad_minima_por_item))
+          minimosPorProducto.set(String(m.producto_id), {
+            cantidad: Number(m.cantidad_minima_por_item),
+            precioOverride: m.precio_unitario_override != null ? Number(m.precio_unitario_override) : null,
+          })
         }
         return {
           cantidadMinima: e.cantidad_minima,
@@ -245,23 +248,33 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
  * y las escalas ya insertadas (para obtener sus IDs). Hace match por
  * cantidad_minima, que es UNIQUE dentro de un grupo.
  */
+interface FilaMinimoInsert {
+  escala_id: number
+  producto_id: number
+  cantidad_minima_por_item: number
+  precio_unitario_override: number | null
+  sucursal_id: number
+}
+
 function buildFilasMinimos(
   escalasInput: GrupoPrecioFormInput['escalas'],
   escalasDB: GrupoPrecioEscalaDB[],
   sucursalId: number
-): Array<{ escala_id: number; producto_id: number; cantidad_minima_por_item: number; sucursal_id: number }> {
-  const filas: Array<{ escala_id: number; producto_id: number; cantidad_minima_por_item: number; sucursal_id: number }> = []
+): FilaMinimoInsert[] {
+  const filas: FilaMinimoInsert[] = []
   for (const e of escalasInput) {
     if (!e.minimosPorProducto) continue
-    const entries = Object.entries(e.minimosPorProducto).filter(([, v]) => v > 0)
+    const entries = Object.entries(e.minimosPorProducto).filter(([, v]) => v && v.cantidad > 0)
     if (entries.length === 0) continue
     const escalaDB = escalasDB.find(db => db.cantidad_minima === e.cantidadMinima)
     if (!escalaDB) continue
-    for (const [productoId, cantidad] of entries) {
+    for (const [productoId, regla] of entries) {
       filas.push({
         escala_id: parseInt(String(escalaDB.id)),
         producto_id: parseInt(productoId),
-        cantidad_minima_por_item: cantidad,
+        cantidad_minima_por_item: regla.cantidad,
+        precio_unitario_override:
+          regla.precioOverride != null && regla.precioOverride > 0 ? regla.precioOverride : null,
         sucursal_id: sucursalId,
       })
     }
