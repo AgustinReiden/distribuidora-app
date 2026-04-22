@@ -18,26 +18,61 @@ export const clientesKeys = {
   zonas: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'zonas'] as const,
 }
 
+type ClienteRow = ClienteDB & {
+  cliente_preventistas?: { preventista_id: string }[] | null
+}
+
+function flattenPreventistaIds(row: ClienteRow): ClienteDB {
+  const { cliente_preventistas, ...rest } = row
+  return {
+    ...rest,
+    preventista_ids: (cliente_preventistas || []).map(cp => cp.preventista_id)
+  }
+}
+
 // Fetch functions
 async function fetchClientes(): Promise<ClienteDB[]> {
   const { data, error } = await supabase
     .from('clientes')
-    .select('*')
+    .select('*, cliente_preventistas(preventista_id)')
     .order('nombre_fantasia')
 
   if (error) throw error
-  return (data as ClienteDB[]) || []
+  return ((data as ClienteRow[]) || []).map(flattenPreventistaIds)
 }
 
 async function fetchClienteById(id: string): Promise<ClienteDB | null> {
   const { data, error } = await supabase
     .from('clientes')
-    .select('*')
+    .select('*, cliente_preventistas(preventista_id)')
     .eq('id', id)
     .single()
 
   if (error) throw error
-  return data as ClienteDB
+  return data ? flattenPreventistaIds(data as ClienteRow) : null
+}
+
+/**
+ * Reemplaza las filas en `cliente_preventistas` para un cliente dado.
+ * Idempotente: si el array viene vacío borra todas las asignaciones.
+ */
+async function replacePreventistaAssignments(
+  clienteId: string,
+  preventistaIds: string[]
+): Promise<void> {
+  const { error: delError } = await supabase
+    .from('cliente_preventistas')
+    .delete()
+    .eq('cliente_id', clienteId)
+  if (delError) throw delError
+
+  if (preventistaIds.length === 0) return
+
+  const rows = preventistaIds.map(pid => ({ cliente_id: clienteId, preventista_id: pid }))
+  const { error: insError } = await supabase
+    .from('cliente_preventistas')
+    .insert(rows)
+  if (insError) throw insError
 }
 
 async function fetchClientesByZona(zona: string): Promise<ClienteDB[]> {
@@ -80,6 +115,7 @@ interface ClienteCreateInput {
   rubro?: string
   notas?: string
   preventista_id?: string | null
+  preventista_ids?: string[]
 }
 
 // Mutation functions
@@ -111,43 +147,60 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     }
   }
 
+  const { preventista_ids, ...clienteFields } = cliente
   const { data, error } = await supabase
     .from('clientes')
     .insert([{
-      razon_social: cliente.razon_social,
-      nombre_fantasia: cliente.nombre_fantasia,
-      direccion: cliente.direccion,
-      telefono: cliente.telefono || null,
-      cuit: cliente.cuit || null,
-      zona: cliente.zona || null,
-      latitud: cliente.latitud || null,
-      longitud: cliente.longitud || null,
-      limite_credito: cliente.limite_credito || 0,
-      dias_credito: cliente.dias_credito || 30,
-      contacto: cliente.contacto || null,
-      horarios_atencion: cliente.horarios_atencion || null,
-      rubro: cliente.rubro || null,
-      notas: cliente.notas || null,
+      razon_social: clienteFields.razon_social,
+      nombre_fantasia: clienteFields.nombre_fantasia,
+      direccion: clienteFields.direccion,
+      telefono: clienteFields.telefono || null,
+      cuit: clienteFields.cuit || null,
+      zona: clienteFields.zona || null,
+      latitud: clienteFields.latitud || null,
+      longitud: clienteFields.longitud || null,
+      limite_credito: clienteFields.limite_credito || 0,
+      dias_credito: clienteFields.dias_credito || 30,
+      contacto: clienteFields.contacto || null,
+      horarios_atencion: clienteFields.horarios_atencion || null,
+      rubro: clienteFields.rubro || null,
+      notas: clienteFields.notas || null,
       sucursal_id: sucursalId,
-      ...(cliente.preventista_id ? { preventista_id: cliente.preventista_id } : {})
+      ...(clienteFields.preventista_id ? { preventista_id: clienteFields.preventista_id } : {})
     }])
     .select()
     .single()
 
   if (error) throw error
-  return data as ClienteDB
+  const newCliente = data as ClienteDB
+
+  if (preventista_ids !== undefined) {
+    await replacePreventistaAssignments(newCliente.id, preventista_ids)
+    newCliente.preventista_ids = preventista_ids
+  }
+
+  return newCliente
 }
 
 async function updateCliente({ id, data: cliente }: { id: string; data: Partial<ClienteCreateInput> }): Promise<ClienteDB> {
+  const { preventista_ids, ...clienteFields } = cliente
+
   const { data, error } = await supabase
     .from('clientes')
-    .update(cliente)
+    .update(clienteFields)
     .eq('id', id)
     .select()
     .single()
 
   if (error) throw error
-  return data as ClienteDB
+  const updated = data as ClienteDB
+
+  if (preventista_ids !== undefined) {
+    await replacePreventistaAssignments(id, preventista_ids)
+    updated.preventista_ids = preventista_ids
+  }
+
+  return updated
 }
 
 async function deleteCliente(id: string): Promise<void> {

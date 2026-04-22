@@ -28,6 +28,12 @@ export interface ClienteDB {
   dias_credito?: number;
   saldo_cuenta?: number;
   preventista_id?: string | null;
+  /**
+   * IDs de preventistas asignados (N-a-N via tabla cliente_preventistas).
+   * Si el array está vacío o ausente, cualquier preventista lo puede ver.
+   * Si contiene uno o más IDs, solo esos preventistas (y admin) lo ven.
+   */
+  preventista_ids?: string[];
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -202,6 +208,7 @@ export interface ClienteFormInput {
   limiteCredito?: string | number;
   diasCredito?: string | number;
   preventistaId?: string | null;
+  preventista_ids?: string[];
 }
 
 export interface ProductoFormInput {
