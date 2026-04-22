@@ -272,7 +272,7 @@ const ModalPedido = memo(function ModalPedido({
               <div>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input type="text" value={busquedaCliente} onChange={e => setBusquedaCliente(e.target.value)} className="w-full pl-10 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Buscar por nombre, razón social o CUIT..." />
+                  <input type="text" value={busquedaCliente} onChange={e => setBusquedaCliente(e.target.value)} autoComplete="off" className="w-full pl-10 pr-3 py-3 min-h-11 text-base border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Buscar por nombre, razón social o CUIT..." />
                 </div>
                 {clientesFiltrados.length > 0 && (
                   <div role="listbox" aria-label="Resultados de clientes" className="border dark:border-gray-600 rounded-lg max-h-40 overflow-y-auto mt-2">
@@ -378,7 +378,7 @@ const ModalPedido = memo(function ModalPedido({
 
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} className="w-full pl-9 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Buscar producto..." />
+              <input type="text" value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} autoComplete="off" className="w-full pl-9 pr-3 py-3 min-h-11 text-base border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Buscar producto..." />
             </div>
           </div>
 

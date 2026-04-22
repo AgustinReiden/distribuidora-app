@@ -26,26 +26,24 @@ import TopNavigation from './components/layout/TopNavigation'
 import OfflineIndicator from './components/layout/OfflineIndicator'
 import SyncStatusBanner from './components/SyncStatusBanner'
 import SkipLinks from './components/a11y/SkipLinks'
-import {
-  AnalyticsContainer,
-  ClientesContainer,
-  ComisionesContainer,
-  ComprasContainer,
-  TransferenciasContainer,
-  DashboardContainer,
-  GruposPrecioContainer,
-  PromocionesContainer,
-  PedidosContainer,
-  ProductosContainer,
-  ProveedoresContainer,
-  RecorridoPreventistaContainer,
-  RecorridosContainer,
-  ReportesContainer,
-  UsuariosContainer
-} from './components/containers'
+import ClientesContainer from './components/containers/ClientesContainer'
+import ComprasContainer from './components/containers/ComprasContainer'
+import DashboardContainer from './components/containers/DashboardContainer'
+import GruposPrecioContainer from './components/containers/GruposPrecioContainer'
+import PedidosContainer from './components/containers/PedidosContainer'
+import ProductosContainer from './components/containers/ProductosContainer'
+import ProveedoresContainer from './components/containers/ProveedoresContainer'
+import UsuariosContainer from './components/containers/UsuariosContainer'
 
 const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'))
 const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'))
+const AnalyticsContainer = lazy(() => import('./components/containers/AnalyticsContainer'))
+const ReportesContainer = lazy(() => import('./components/containers/ReportesContainer'))
+const ComisionesContainer = lazy(() => import('./components/containers/ComisionesContainer'))
+const RecorridosContainer = lazy(() => import('./components/containers/RecorridosContainer'))
+const RecorridoPreventistaContainer = lazy(() => import('./components/containers/RecorridoPreventistaContainer'))
+const TransferenciasContainer = lazy(() => import('./components/containers/TransferenciasContainer'))
+const PromocionesContainer = lazy(() => import('./components/containers/PromocionesContainer'))
 
 function LoadingVista(): ReactElement {
   return (
