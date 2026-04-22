@@ -91,7 +91,13 @@ export type EstadoPedido =
   | 'entregado'
   | 'cancelado';
 
-export type FormaPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'cuenta_corriente';
+export type FormaPago =
+  | 'efectivo'
+  | 'transferencia'
+  | 'tarjeta'
+  | 'cuenta_corriente'
+  | 'cheque'
+  | 'otros';
 
 export type EstadoPago = 'pendiente' | 'parcial' | 'pagado';
 
