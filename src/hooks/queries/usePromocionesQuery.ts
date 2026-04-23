@@ -17,7 +17,8 @@ import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 export const promocionesKeys = {
   all: (sucursalId: number | null) => ['promociones', sucursalId] as const,
   lists: (sucursalId: number | null) => [...promocionesKeys.all(sucursalId), 'list'] as const,
-  promoMap: (sucursalId: number | null) => [...promocionesKeys.all(sucursalId), 'promo_map'] as const,
+  promoMap: (sucursalId: number | null, fechaReferencia?: string) =>
+    [...promocionesKeys.all(sucursalId), 'promo_map', fechaReferencia ?? 'today'] as const,
 }
 
 // =============================================================================
@@ -54,18 +55,22 @@ export interface PromocionFormInput {
 // =============================================================================
 
 /**
- * Fetch denormalizado que construye el PromoMap para resolución O(1)
- * Solo trae promociones activas dentro de su rango de fechas.
+ * Fetch denormalizado que construye el PromoMap para resolución O(1).
+ *
+ * Por defecto evalúa vigencia al día de HOY. Si se pasa `fechaReferencia`
+ * (ej. la fecha del pedido que se está editando) se usa esa fecha para
+ * decidir si la promo estaba activa entonces. Imprescindible al re-resolver
+ * promos en la edición de pedidos existentes.
  */
-async function fetchPromoMap(): Promise<PromoMap> {
-  const hoy = fechaLocalISO()
+async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
+  const fecha = fechaReferencia || fechaLocalISO()
 
   const { data: promos, error: errorPromos } = await supabase
     .from('promociones')
     .select('*')
     .eq('activo', true)
-    .lte('fecha_inicio', hoy)
-    .or(`fecha_fin.is.null,fecha_fin.gte.${hoy}`)
+    .lte('fecha_inicio', fecha)
+    .or(`fecha_fin.is.null,fecha_fin.gte.${fecha}`)
 
   if (errorPromos) {
     if (errorPromos.message.includes('does not exist')) return new Map()
@@ -354,13 +359,16 @@ async function ajustarStockPromo(input: AjustarStockInput): Promise<void> {
 
 /**
  * Hook para obtener el PromoMap denormalizado (para resolución de promos)
- * Cache 5 minutos (más corto que mayorista por ser temporal)
+ * Cache 5 minutos (más corto que mayorista por ser temporal).
+ *
+ * Si se pasa `fechaReferencia` (YYYY-MM-DD), se filtra por vigencia a esa fecha
+ * en vez de hoy — necesario al editar pedidos antiguos.
  */
-export function usePromoMapQuery() {
+export function usePromoMapQuery(fechaReferencia?: string) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: promocionesKeys.promoMap(currentSucursalId),
-    queryFn: fetchPromoMap,
+    queryKey: promocionesKeys.promoMap(currentSucursalId, fechaReferencia),
+    queryFn: () => fetchPromoMap(fechaReferencia),
     staleTime: 5 * 60 * 1000,
   })
 }

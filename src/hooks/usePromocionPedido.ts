@@ -60,9 +60,12 @@ interface UsePromocionPedidoReturn {
   violacionesMOQ: ViolacionMOQ[]
 }
 
-export function usePromocionPedido(items: ItemPedido[]): UsePromocionPedidoReturn {
+export function usePromocionPedido(
+  items: ItemPedido[],
+  fechaReferencia?: string,
+): UsePromocionPedidoReturn {
   const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
-  const { data: promoMap, isLoading: loadingPromos } = usePromoMapQuery()
+  const { data: promoMap, isLoading: loadingPromos } = usePromoMapQuery(fechaReferencia)
 
   // 1. Resolver promociones
   const promoResolucion = useMemo((): PromoResolucion => {

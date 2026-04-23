@@ -531,7 +531,10 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pedidoEditando, notify, queryClient])
 
-  // ModalEditarPedido: onSaveItems - guardar cambios de items via RPC
+  // ModalEditarPedido: onSaveItems - guardar cambios de items via RPC.
+  // Reenvía el desglose fiscal para que el RPC actualice correctamente
+  // total_neto/total_iva (sin esto, los COALESCE(..., precio) del RPC dejaban
+  // todo el monto como "neto" ignorando el IVA en facturas FC).
   const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[]) => {
     if (!pedidoEditando) return
     const itemsParaRPC = items.map(item => ({
@@ -540,6 +543,10 @@ export default function PedidosContainer(): React.ReactElement {
       precio_unitario: item.precioUnitario,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+      ...(item.neto_unitario !== undefined ? { neto_unitario: item.neto_unitario } : {}),
+      ...(item.iva_unitario !== undefined ? { iva_unitario: item.iva_unitario } : {}),
+      ...(item.impuestos_internos_unitario !== undefined ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
+      ...(item.porcentaje_iva !== undefined ? { porcentaje_iva: item.porcentaje_iva } : {}),
     }))
     const { data, error } = await supabase.rpc('actualizar_pedido_items', {
       p_pedido_id: pedidoEditando.id,
