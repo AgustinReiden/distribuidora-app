@@ -44,6 +44,8 @@ export interface ModalBaseProps {
   maxWidth?: ModalMaxWidth;
   /** Clases CSS adicionales */
   className?: string;
+  /** Contenido adicional en el header (derecha del título, izquierda del botón de cerrar) */
+  headerExtra?: ReactNode;
 }
 
 const MAX_WIDTH_MAP: Record<ModalMaxWidth, string> = {
@@ -63,7 +65,8 @@ const ModalBase = memo(function ModalBase({
   title,
   description,
   maxWidth = 'max-w-md',
-  className
+  className,
+  headerExtra
 }: ModalBaseProps) {
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
@@ -73,7 +76,10 @@ const ModalBase = memo(function ModalBase({
         onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader onClose={onClose}>
-          <DialogTitle>{title}</DialogTitle>
+          <div className="flex items-center justify-between flex-1 gap-3 min-w-0">
+            <DialogTitle>{title}</DialogTitle>
+            {headerExtra && <div className="flex-shrink-0">{headerExtra}</div>}
+          </div>
         </DialogHeader>
         {/* DialogDescription para accesibilidad (aria-describedby) - visualmente oculto si no se pasa description */}
         <DialogDescription className={description ? 'px-4 -mt-2 mb-2' : 'sr-only'}>
