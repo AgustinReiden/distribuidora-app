@@ -5,12 +5,12 @@ import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirma
 import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
-import { usePrecioMayorista } from '../../hooks/usePrecioMayorista';
+import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import type { PedidoDB, ProductoDB } from '../../types';
 
-/** Item del pedido para edición */
+/** Item del pedido para edición. Incluye fiscales opcionales que se pueblan al guardar. */
 export interface PedidoEditItem {
   productoId: string;
   nombre: string;
@@ -21,6 +21,10 @@ export interface PedidoEditItem {
   precioOverride?: boolean;
   esBonificacion?: boolean;
   promocionId?: string;
+  neto_unitario?: number;
+  iva_unitario?: number;
+  impuestos_internos_unitario?: number;
+  porcentaje_iva?: number;
 }
 
 /** Datos a guardar del pedido */
@@ -123,52 +127,64 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
 
-  // Inicializar items del pedido
+  // Inicializar items del pedido — sólo no-bonificaciones.
+  // Las bonificaciones se recalculan reactivamente a partir del estado no-bonif
+  // vía usePromocionPedido (ver abajo). Así, editar cantidades, agregar o
+  // eliminar productos recalcula las promos automáticamente.
   useEffect(() => {
     if (pedido?.items) {
-      const itemsFormateados = pedido.items.map(item => ({
-        productoId: item.producto_id,
-        nombre: item.producto?.nombre || 'Producto desconocido',
-        cantidad: item.cantidad,
-        precioUnitario: item.precio_unitario,
-        cantidadOriginal: item.cantidad,
-        esBonificacion: item.es_bonificacion || false,
-        promocionId: item.promocion_id || undefined,
-      }));
+      const itemsFormateados = pedido.items
+        .filter(item => !item.es_bonificacion)
+        .map(item => ({
+          productoId: item.producto_id,
+          nombre: item.producto?.nombre || 'Producto desconocido',
+          cantidad: item.cantidad,
+          precioUnitario: item.precio_unitario,
+          cantidadOriginal: item.cantidad,
+        }));
       setItems(itemsFormateados);
       setItemsOriginales(JSON.parse(JSON.stringify(itemsFormateados)));
     }
   }, [pedido]);
 
-  // Recalcular precios mayorista/minorista según cantidades actuales
-  // Usamos el precio base (retail) de cada producto para que la resolución sea correcta
+  // Armar input con precios base para la resolución. Para items con override
+  // manual usamos ese precio; para los demás, el precio base del producto
+  // (si el precio del item en DB es 0 por ser regalo legacy, igual funcionaría).
   const itemsConPrecioBase = useMemo(() => {
     return items.map(item => {
-      // Si tiene override, usar el precio manual; si no, usar precio base del producto
       if (item.precioOverride) {
         return {
           productoId: item.productoId,
           cantidad: item.cantidad,
           precioUnitario: item.precioUnitario,
-          precioOverride: true
+          precioOverride: true,
         };
       }
       const producto = productos.find(p => p.id === item.productoId);
       return {
         productoId: item.productoId,
         cantidad: item.cantidad,
-        precioUnitario: producto?.precio || item.precioUnitario
+        precioUnitario: producto?.precio || item.precioUnitario,
       };
     });
   }, [items, productos]);
 
-  const { itemsConPrecioMayorista, totalMayorista: totalCalculado, moqMap } = usePrecioMayorista(itemsConPrecioBase);
+  // Re-resolver promos + mayorista usando la FECHA DEL PEDIDO (no hoy).
+  // Así promos vigentes al momento de la creación siguen aplicando; y promos
+  // creadas DESPUÉS del pedido no se aplican retroactivamente.
+  const fechaReferenciaPromo = pedido?.fecha || undefined;
+  const {
+    itemsFinales,
+    totalFinal,
+    moqMap,
+    isLoading: promosLoading,
+  } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo);
 
-  // Mapa de precios resueltos para mostrar en cada item
+  // Mapa de precios resueltos para mostrar en cada item no-bonif
   const preciosResueltosMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (const item of itemsConPrecioMayorista) {
-      // Si el item tiene override, usar su precio manual en vez del resuelto
+    for (const item of itemsFinales) {
+      if (item.esBonificacion) continue;
       const originalItem = items.find(i => i.productoId === item.productoId);
       if (originalItem?.precioOverride) {
         map.set(item.productoId, originalItem.precioUnitario);
@@ -177,9 +193,40 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       }
     }
     return map;
-  }, [itemsConPrecioMayorista, items]);
+  }, [itemsFinales, items]);
 
-  const total = itemsModificados ? totalCalculado : (pedido?.total || 0);
+  // Bonificaciones calculadas para mostrar como filas read-only
+  const bonificacionesCalculadas = useMemo(() => {
+    return itemsFinales
+      .filter(i => i.esBonificacion)
+      .map(bonif => {
+        const producto = productos.find(p => String(p.id) === String(bonif.productoId));
+        return {
+          productoId: String(bonif.productoId),
+          nombre: producto?.nombre || bonif.promoNombre || 'Regalo',
+          cantidad: bonif.cantidad,
+          promoNombre: bonif.promoNombre,
+          promocionId: bonif.promoId,
+        };
+      });
+  }, [itemsFinales, productos]);
+
+  // Detectar si las bonificaciones recalculadas difieren de las que estaban
+  // guardadas en el pedido. Si difieren, hay que marcar "modificado" para que
+  // el user vea el nuevo total y pueda guardar (arregla pedidos con promos
+  // obsoletas por edición previa sin recálculo).
+  const bonifDifierenDeDB = useMemo(() => {
+    if (promosLoading || !pedido?.items || items.length === 0) return false;
+    const originales = pedido.items.filter(i => i.es_bonificacion);
+    if (originales.length !== bonificacionesCalculadas.length) return true;
+    const mapOrig = new Map(originales.map(b => [String(b.producto_id), b.cantidad]));
+    for (const b of bonificacionesCalculadas) {
+      if (mapOrig.get(String(b.productoId)) !== b.cantidad) return true;
+    }
+    return false;
+  }, [promosLoading, pedido, items, bonificacionesCalculadas]);
+
+  const total = itemsModificados ? totalFinal : (pedido?.total || 0);
   const saldoPendiente = total - montoPagado;
 
   // Detectar si hubo cambios en items (cantidad, precio, agregados o eliminados)
@@ -197,8 +244,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       }) ||
       itemsOriginales.some(o => !items.find(i => i.productoId === o.productoId));
 
-    setItemsModificados(cambios);
-  }, [items, itemsOriginales]);
+    setItemsModificados(cambios || bonifDifierenDeDB);
+  }, [items, itemsOriginales, bonifDifierenDeDB]);
 
   // Productos disponibles para agregar
   const productosDisponibles = useMemo(() => {
@@ -379,20 +426,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     fechaEntregaCambio: boolean,
   ): Promise<void> => {
     try {
-      // Si hay cambios en items y es admin, guardar items con precios mayoristas resueltos y desglose fiscal
+      // Si hay cambios en items y es admin, guardar items con precios mayoristas
+      // resueltos, desglose fiscal y bonificaciones recalculadas por el hook.
       if (itemsModificados && isAdmin && onSaveItems) {
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
-        const itemsParaGuardar = items.map(item => {
+
+        // Items no-bonif del estado → con precio resuelto + desglose fiscal
+        const itemsNoBonif: PedidoEditItem[] = items.map(item => {
           const precioFinal = preciosResueltosMap.get(item.productoId) ?? item.precioUnitario;
           const producto = productos.find(p => p.id === item.productoId);
           const pctIva = producto?.porcentaje_iva ?? 21;
           const pctImpInt = producto?.impuestos_internos ?? 0;
-          const esBonif = item.esBonificacion || false;
-
-          if (esBonif) {
-            return { ...item, precioUnitario: 0, neto_unitario: 0, iva_unitario: 0, impuestos_internos_unitario: 0, porcentaje_iva: 0 };
-          }
-
           const desglose = calcularNetoVenta(precioFinal, pctIva, pctImpInt, tipoFactura as 'ZZ' | 'FC');
           return {
             ...item,
@@ -403,7 +447,23 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             porcentaje_iva: pctIva,
           };
         });
-        await onSaveItems(itemsParaGuardar);
+
+        // Bonificaciones recalculadas → precio 0, promocionId del hook
+        const itemsBonif: PedidoEditItem[] = bonificacionesCalculadas.map(bonif => ({
+          productoId: bonif.productoId,
+          nombre: bonif.nombre,
+          cantidad: bonif.cantidad,
+          cantidadOriginal: 0,
+          precioUnitario: 0,
+          esBonificacion: true,
+          promocionId: bonif.promocionId,
+          neto_unitario: 0,
+          iva_unitario: 0,
+          impuestos_internos_unitario: 0,
+          porcentaje_iva: 0,
+        }));
+
+        await onSaveItems([...itemsNoBonif, ...itemsBonif]);
       }
       // Guardar el resto de los datos
       const fechaEntregaProgramadaCambio = isAdmin && !pedidoEntregado && fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
@@ -557,22 +617,6 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   const cambio = item.cantidad - (item.cantidadOriginal || 0);
                   const precioResuelto = preciosResueltosMap.get(item.productoId) ?? item.precioUnitario;
 
-                  // Bonificacion items: show as read-only
-                  if (item.esBonificacion) {
-                    return (
-                      <div key={item.productoId} className="p-3 flex items-center justify-between bg-green-50 dark:bg-green-900/20">
-                        <div className="flex items-center gap-2 flex-1">
-                          <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />
-                          <div>
-                            <p className="font-medium text-sm dark:text-white">{item.nombre}</p>
-                            <p className="text-xs text-green-600 font-medium">REGALO x{item.cantidad}</p>
-                          </div>
-                        </div>
-                        <span className="text-sm font-bold text-green-600">$0</span>
-                      </div>
-                    )
-                  }
-
                   return (
                     <div
                       key={item.productoId}
@@ -688,6 +732,26 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   );
                 })
               )}
+
+              {/* Bonificaciones recalculadas (read-only) */}
+              {bonificacionesCalculadas.map(bonif => (
+                <div
+                  key={`bonif-${bonif.productoId}-${bonif.promocionId ?? 'anon'}`}
+                  className="p-3 flex items-center justify-between bg-green-50 dark:bg-green-900/20"
+                >
+                  <div className="flex items-center gap-2 flex-1">
+                    <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-sm dark:text-white">{bonif.nombre}</p>
+                      <p className="text-xs text-green-600 font-medium">
+                        REGALO x{bonif.cantidad}
+                        {bonif.promoNombre ? ` · ${bonif.promoNombre}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-sm font-bold text-green-600">$0</span>
+                </div>
+              ))}
             </div>
           </div>
         )}

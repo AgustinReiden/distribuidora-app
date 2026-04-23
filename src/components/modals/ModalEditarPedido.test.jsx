@@ -15,14 +15,18 @@ vi.mock('../../lib/supabase', () => ({
   },
 }))
 
-// Mock TanStack Query hooks used by usePrecioMayorista
+// Mock TanStack Query hooks used by usePromocionPedido (price + promo maps)
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
 }))
+vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
+  usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
+}))
 
-// Mock formatPrecio
+// Mock formatPrecio (preserve fechaLocalISO since usePromocionesQuery uses it indirectly)
 vi.mock('../../utils/formatters', () => ({
-  formatPrecio: (value) => `$${Number(value).toFixed(2)}`
+  formatPrecio: (value) => `$${Number(value).toFixed(2)}`,
+  fechaLocalISO: () => '2026-01-01',
 }))
 
 import ModalEditarPedido from './ModalEditarPedido'
@@ -412,6 +416,82 @@ describe('ModalEditarPedido', () => {
       await user.click(btnCancelar)
 
       expect(onClose).toHaveBeenCalled()
+    })
+  })
+
+  describe('Bonificaciones en edición (regresión bug 2)', () => {
+    // Bug 2: al abrir un pedido con regalos cargados en DB e incrementar un
+    // item, el total mostrado se inflaba porque los regalos se re-cotizaban
+    // al precio base del producto (producto.precio || 0 caía a producto.precio).
+    // Con el fix, los regalos se filtran del estado editable y el total se
+    // calcula sólo a partir de los items no-bonif.
+    const pedidoConBonif = {
+      ...mockPedido,
+      total: 1000,
+      items: [
+        { producto_id: 1, cantidad: 2, precio_unitario: 250, producto: { nombre: 'Producto 1' }, es_bonificacion: false },
+        { producto_id: 2, cantidad: 1, precio_unitario: 500, producto: { nombre: 'Producto 2' }, es_bonificacion: false },
+        // Regalo: precio 0 en DB, pero producto base precio = 100. Bajo el bug
+        // viejo, este item sumaba 200 al total al recalcular.
+        { producto_id: 3, cantidad: 2, precio_unitario: 0, producto: { nombre: 'Producto 3' }, es_bonificacion: true },
+      ],
+    }
+
+    // ModalBase monta el contenido en un portal (Radix Dialog), así que
+    // querySelectorAll se hace contra document.body. El botón "+" de cantidad
+    // se identifica por su clase rounded-r-lg, única de ese control.
+    const findIncrementButtons = () =>
+      Array.from(document.body.querySelectorAll('button.rounded-r-lg'))
+
+    it('no suma el precio base de los items de regalo al incrementar otro producto', async () => {
+      const user = userEvent.setup()
+      render(<ModalEditarPedido {...defaultProps} pedido={pedidoConBonif} isAdmin={true} />)
+
+      await waitFor(() => expect(screen.getByText('Producto 1')).toBeInTheDocument())
+
+      // Incrementar Producto 1: 2 → 3
+      const incrementButtons = findIncrementButtons()
+      expect(incrementButtons.length).toBeGreaterThan(0)
+      await user.click(incrementButtons[0])
+
+      // Total esperado = 3·250 + 1·500 = $1250 (no $1450 como haría el bug viejo,
+      // que sumaba 2·100 del regalo cotizado a precio base).
+      await waitFor(() => {
+        expect(screen.getByText('$1250.00')).toBeInTheDocument()
+      }, { timeout: 3000 })
+      expect(screen.queryByText('$1450.00')).not.toBeInTheDocument()
+    })
+
+    it('guarda los items sin arrastrar el regalo al precio base del producto', async () => {
+      const user = userEvent.setup()
+      const onSaveItems = vi.fn().mockResolvedValue()
+      const onSave = vi.fn()
+      render(
+        <ModalEditarPedido
+          {...defaultProps}
+          pedido={pedidoConBonif}
+          isAdmin={true}
+          onSave={onSave}
+          onSaveItems={onSaveItems}
+        />
+      )
+
+      await waitFor(() => expect(screen.getByText('Producto 1')).toBeInTheDocument())
+
+      const incrementButtons = findIncrementButtons()
+      expect(incrementButtons.length).toBeGreaterThan(0)
+      await user.click(incrementButtons[0])
+
+      await waitFor(() => expect(screen.getByText('Guardar Todo')).toBeInTheDocument())
+      await user.click(screen.getByRole('button', { name: 'Guardar Todo' }))
+
+      expect(onSaveItems).toHaveBeenCalled()
+      const savedItems = onSaveItems.mock.calls[0][0]
+      // Ningún item del pedido persistido puede tener productoId=3 con precio>0.
+      // En un pedido sin promos activas (promoMap mockeado vacío), el regalo
+      // simplemente desaparece del guardado.
+      const producto3 = savedItems.find(i => i.productoId === 3)
+      expect(producto3).toBeUndefined()
     })
   })
 })
