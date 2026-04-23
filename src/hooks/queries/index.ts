@@ -18,6 +18,16 @@ export {
   useRestaurarStockMutation,
 } from './useProductosQuery'
 
+// Categorías
+export {
+  categoriasKeys,
+  useCategoriasQuery,
+  useCrearCategoriaMutation,
+  useRenombrarCategoriaMutation,
+  useEliminarCategoriaMutation,
+} from './useCategoriasQuery'
+export type { CategoriaDB } from './useCategoriasQuery'
+
 // Clientes
 export {
   clientesKeys,

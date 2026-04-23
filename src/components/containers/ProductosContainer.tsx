@@ -25,6 +25,7 @@ const ModalMermaStock = lazy(() => import('../modals/ModalMermaStock'))
 const ModalHistorialMermas = lazy(() => import('../modals/ModalHistorialMermas'))
 const ModalImportarPrecios = lazy(() => import('../modals/ModalImportarPrecios'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
+const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
 
 function LoadingState() {
   return (
@@ -62,6 +63,7 @@ export default function ProductosContainer(): React.ReactElement {
   const [modalMermaOpen, setModalMermaOpen] = useState(false)
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
+  const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
 
   // Estado de edición
   const [productoEditando, setProductoEditando] = useState<ProductoDB | null>(null)
@@ -119,6 +121,10 @@ export default function ProductosContainer(): React.ReactElement {
 
   const handleImportarPrecios = useCallback(() => {
     setModalImportarOpen(true)
+  }, [])
+
+  const handleGestionarCategorias = useCallback(() => {
+    setModalCategoriasOpen(true)
   }, [])
 
   const handleGuardarProducto = useCallback(async (data: ProductoFormInput) => {
@@ -180,6 +186,7 @@ export default function ProductosContainer(): React.ReactElement {
           onBajaStock={handleBajaStock}
           onVerHistorialMermas={handleVerHistorialMermas}
           onImportarPrecios={handleImportarPrecios}
+          onGestionarCategorias={handleGestionarCategorias}
         />
       </Suspense>
 
@@ -232,6 +239,16 @@ export default function ProductosContainer(): React.ReactElement {
             productos={productos}
             onActualizarPrecios={handleActualizarPreciosMasivo}
             onClose={() => setModalImportarOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Categorías */}
+      {modalCategoriasOpen && (
+        <Suspense fallback={null}>
+          <ModalCategorias
+            productos={productos}
+            onClose={() => setModalCategoriasOpen(false)}
           />
         </Suspense>
       )}
