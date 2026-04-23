@@ -1,5 +1,5 @@
 import { useState, useMemo, memo, useRef } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp } from 'lucide-react';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
@@ -132,6 +132,7 @@ const ModalPedido = memo(function ModalPedido({
   const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
   const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
   const [errorCliente, setErrorCliente] = useState<string>('');
+  const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
 
   const productosFiltrados = useMemo(() => {
     return productos.filter(p => {
@@ -213,21 +214,29 @@ const ModalPedido = memo(function ModalPedido({
   // Precios mayoristas, promociones y cantidades mínimas
   const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, totalFinal, totalOriginal, ahorro, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items);
 
-  return (
-    <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl">
-      <div className="px-4 pt-2 pb-0">
-        <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mr-2">Tipo de factura:</label>
-        <select
-          value={nuevoPedido.tipoFactura || 'ZZ'}
-          onChange={(e) => onTipoFacturaChange?.(e.target.value as 'ZZ' | 'FC')}
-          className="px-2 py-1 text-xs font-medium border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-        >
-          <option value="ZZ">ZZ</option>
-          <option value="FC">FC</option>
-        </select>
-      </div>
+  const totalItemsCarrito = nuevoPedido.items.reduce((t, i) => t + i.cantidad, 0);
+  const totalParaMostrar = hayDescuento ? totalFinal : calcularTotal();
+  const hayItems = nuevoPedido.items.length > 0;
 
-      <div className="max-h-[65vh] overflow-y-auto p-4 space-y-4">
+  const tipoFacturaToggle = (
+    <label className="flex items-center gap-1.5">
+      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Factura</span>
+      <select
+        value={nuevoPedido.tipoFactura || 'ZZ'}
+        onChange={(e) => onTipoFacturaChange?.(e.target.value as 'ZZ' | 'FC')}
+        className="px-2 py-1 text-sm font-medium border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+        aria-label="Tipo de factura"
+      >
+        <option value="ZZ">ZZ</option>
+        <option value="FC">FC</option>
+      </select>
+    </label>
+  );
+
+  return (
+    <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
+      <div className="relative overflow-hidden">
+        <div className="max-h-[65vh] overflow-y-auto overscroll-contain p-4 space-y-4">
           {/* Seccion Cliente */}
           <div>
             <div className="flex justify-between items-center mb-1">
@@ -300,7 +309,7 @@ const ModalPedido = memo(function ModalPedido({
           </div>
 
           {/* Fechas - pedido y entrega programada */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
                 <Calendar className="w-4 h-4" />
@@ -334,9 +343,6 @@ const ModalPedido = memo(function ModalPedido({
                 min={nuevoPedido.fecha || fechaLocalISO()}
                 className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
               />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                ¿Cuándo se va a entregar este pedido?
-              </p>
             </div>
           </div>
 
@@ -440,284 +446,341 @@ const ModalPedido = memo(function ModalPedido({
             )}
           </div>
 
-          {/* Items del pedido */}
-          {nuevoPedido.items.length > 0 && (
-            <div>
-              <h3 className="font-medium mb-2 dark:text-white text-sm">Productos en el pedido ({nuevoPedido.items.length})</h3>
-              <div className="border dark:border-gray-600 rounded-lg divide-y dark:divide-gray-600">
-                {nuevoPedido.items.map(item => {
-                  const prod = productos.find(p => p.id === item.productoId);
-                  const warning = getStockWarning(item.productoId, item.cantidad);
-                  const precioInfo = preciosResueltos.get(String(item.productoId));
-                  const esOverride = item.precioOverride || false;
-                  const esMayorista = !esOverride && (precioInfo?.esMayorista || false);
-                  const precioMostrar = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
-                  const subtotal = precioMostrar * item.cantidad;
-                  const itemMoq = moqMap.get(String(item.productoId));
-                  const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
-                  const isEditingPrice = editingPriceId === item.productoId;
-                  return (
-                    <div key={item.productoId} className="px-3 py-2.5">
-                      <div className="flex justify-between items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="font-medium text-sm dark:text-white truncate">{prod?.nombre}</p>
-                            {esOverride && (
-                              <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium shrink-0">
-                                <Pencil className="w-3 h-3" />
-                                Manual
-                              </span>
-                            )}
-                            {esMayorista && (
-                              <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium shrink-0">
-                                <Tag className="w-3 h-3" />
-                                {precioInfo?.etiqueta || 'Mayorista'}
-                              </span>
-                            )}
-                          </div>
-                          {isEditingPrice && isAdmin && onActualizarPrecio ? (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <span className="text-xs text-orange-600">$</span>
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.01"
-                                min="0.01"
-                                value={editingPriceValue}
-                                onChange={e => setEditingPriceValue(e.target.value)}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') {
-                                    const newPrice = parsePrecio(editingPriceValue);
-                                    if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
-                                    setEditingPriceId(null);
-                                  } else if (e.key === 'Escape') {
-                                    setEditingPriceId(null);
-                                  }
-                                }}
-                                onBlur={() => {
-                                  const newPrice = parsePrecio(editingPriceValue);
-                                  if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
-                                  setEditingPriceId(null);
-                                }}
-                                className="w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
-                                autoFocus
-                              />
-                              <span className="text-xs text-orange-600">c/u</span>
+          </div>
+
+          {/* Drawer overlay: cubre el área del modal con slide-up */}
+          <div
+            id="carrito-drawer"
+            className={`absolute inset-0 z-20 bg-white dark:bg-gray-800 flex flex-col transition-transform duration-300 ease-out ${
+              carritoAbierto ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+            }`}
+            aria-hidden={!carritoAbierto}
+          >
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4 min-h-0">
+              {/* Violaciones MOQ (bloquean confirmar) */}
+              {violacionesMOQ.length > 0 && (
+                <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
+                  <strong>No se puede confirmar:</strong> los siguientes productos no cumplen el mínimo de compra:
+                  <ul className="list-disc ml-5 mt-1">
+                    {violacionesMOQ.map(v => {
+                      const producto = productos.find(p => p.id === v.productoId);
+                      const nombre = producto?.nombre || v.productoId;
+                      return (
+                        <li key={v.productoId}>
+                          {nombre}: mínimo {v.cantidadMinima} ({v.grupoNombre}), cargaste {v.cantidadActual}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+
+              {/* Items del pedido */}
+              {nuevoPedido.items.length > 0 ? (
+                <div>
+                  <h3 className="font-medium mb-2 dark:text-white text-sm">Productos en el pedido ({nuevoPedido.items.length})</h3>
+                  <div className="border dark:border-gray-600 rounded-lg divide-y dark:divide-gray-600">
+                    {nuevoPedido.items.map(item => {
+                        const prod = productos.find(p => p.id === item.productoId);
+                        const warning = getStockWarning(item.productoId, item.cantidad);
+                        const precioInfo = preciosResueltos.get(String(item.productoId));
+                        const esOverride = item.precioOverride || false;
+                        const esMayorista = !esOverride && (precioInfo?.esMayorista || false);
+                        const precioMostrar = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
+                        const subtotal = precioMostrar * item.cantidad;
+                        const itemMoq = moqMap.get(String(item.productoId));
+                        const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
+                        const isEditingPrice = editingPriceId === item.productoId;
+                        return (
+                          <div key={item.productoId} className="px-3 py-2.5">
+                            <div className="flex justify-between items-center gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="font-medium text-sm dark:text-white truncate">{prod?.nombre}</p>
+                                  {esOverride && (
+                                    <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium shrink-0">
+                                      <Pencil className="w-3 h-3" />
+                                      Manual
+                                    </span>
+                                  )}
+                                  {esMayorista && (
+                                    <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium shrink-0">
+                                      <Tag className="w-3 h-3" />
+                                      {precioInfo?.etiqueta || 'Mayorista'}
+                                    </span>
+                                  )}
+                                </div>
+                                {isEditingPrice && isAdmin && onActualizarPrecio ? (
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <span className="text-xs text-orange-600">$</span>
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      step="0.01"
+                                      min="0.01"
+                                      value={editingPriceValue}
+                                      onChange={e => setEditingPriceValue(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                          const newPrice = parsePrecio(editingPriceValue);
+                                          if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
+                                          setEditingPriceId(null);
+                                        } else if (e.key === 'Escape') {
+                                          setEditingPriceId(null);
+                                        }
+                                      }}
+                                      onBlur={() => {
+                                        const newPrice = parsePrecio(editingPriceValue);
+                                        if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
+                                        setEditingPriceId(null);
+                                      }}
+                                      className="w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                                      autoFocus
+                                    />
+                                    <span className="text-xs text-orange-600">c/u</span>
+                                  </div>
+                                ) : esOverride ? (
+                                  <p
+                                    className={`text-xs text-orange-600 font-medium ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
+                                    onClick={() => {
+                                      if (isAdmin && onActualizarPrecio) {
+                                        setEditingPriceId(item.productoId);
+                                        setEditingPriceValue(String(item.precioUnitario));
+                                      }
+                                    }}
+                                  >
+                                    {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5" />}
+                                  </p>
+                                ) : esMayorista ? (
+                                  <p className={`text-xs ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
+                                    onClick={() => {
+                                      if (isAdmin && onActualizarPrecio) {
+                                        setEditingPriceId(item.productoId);
+                                        setEditingPriceValue(String(precioInfo!.precioResuelto));
+                                      }
+                                    }}
+                                  >
+                                    <span className="text-gray-400 line-through">{formatPrecio(item.precioUnitario)}</span>
+                                    <span className="ml-1 text-green-600 font-medium">{formatPrecio(precioInfo!.precioResuelto)} c/u</span>
+                                    {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-1 text-gray-400" />}
+                                  </p>
+                                ) : (
+                                  <p
+                                    className={`text-xs text-gray-500 dark:text-gray-400 ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
+                                    onClick={() => {
+                                      if (isAdmin && onActualizarPrecio) {
+                                        setEditingPriceId(item.productoId);
+                                        setEditingPriceValue(String(item.precioUnitario));
+                                      }
+                                    }}
+                                  >
+                                    {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
+                                  </p>
+                                )}
+                                {itemMoq && itemMoq > 1 && (
+                                  <p className="text-xs text-amber-600 mt-0.5">Min: {itemMoq} uds</p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, 0); }} className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="Eliminar producto"><Trash2 className="w-4 h-4" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, Math.max(item.cantidad - 1, minCantidad)); }} className={`w-7 h-7 rounded-full text-sm ${item.cantidad <= minCantidad ? 'bg-gray-100 text-gray-400 dark:bg-gray-700' : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500'}`} disabled={item.cantidad <= minCantidad}>-</button>
+                                <span className="w-6 text-center font-medium text-sm dark:text-white">{item.cantidad}</span>
+                                <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad + 1); }} className="w-7 h-7 rounded-full text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500">+</button>
+                                <p className="w-20 text-right font-semibold text-sm dark:text-white">{formatPrecio(subtotal)}</p>
+                              </div>
                             </div>
-                          ) : esOverride ? (
-                            <p
-                              className={`text-xs text-orange-600 font-medium ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
-                              onClick={() => {
-                                if (isAdmin && onActualizarPrecio) {
-                                  setEditingPriceId(item.productoId);
-                                  setEditingPriceValue(String(item.precioUnitario));
-                                }
-                              }}
-                            >
-                              {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5" />}
-                            </p>
-                          ) : esMayorista ? (
-                            <p className={`text-xs ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
-                              onClick={() => {
-                                if (isAdmin && onActualizarPrecio) {
-                                  setEditingPriceId(item.productoId);
-                                  setEditingPriceValue(String(precioInfo!.precioResuelto));
-                                }
-                              }}
-                            >
-                              <span className="text-gray-400 line-through">{formatPrecio(item.precioUnitario)}</span>
-                              <span className="ml-1 text-green-600 font-medium">{formatPrecio(precioInfo!.precioResuelto)} c/u</span>
-                              {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-1 text-gray-400" />}
-                            </p>
-                          ) : (
-                            <p
-                              className={`text-xs text-gray-500 dark:text-gray-400 ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
-                              onClick={() => {
-                                if (isAdmin && onActualizarPrecio) {
-                                  setEditingPriceId(item.productoId);
-                                  setEditingPriceValue(String(item.precioUnitario));
-                                }
-                              }}
-                            >
-                              {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
-                            </p>
-                          )}
-                          {itemMoq && itemMoq > 1 && (
-                            <p className="text-xs text-amber-600 mt-0.5">Min: {itemMoq} uds</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, 0); }} className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="Eliminar producto"><Trash2 className="w-4 h-4" /></button>
-                          <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, Math.max(item.cantidad - 1, minCantidad)); }} className={`w-7 h-7 rounded-full text-sm ${item.cantidad <= minCantidad ? 'bg-gray-100 text-gray-400 dark:bg-gray-700' : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500'}`} disabled={item.cantidad <= minCantidad}>-</button>
-                          <span className="w-6 text-center font-medium text-sm dark:text-white">{item.cantidad}</span>
-                          <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad + 1); }} className="w-7 h-7 rounded-full text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500">+</button>
-                          <p className="w-20 text-right font-semibold text-sm dark:text-white">{formatPrecio(subtotal)}</p>
-                        </div>
-                      </div>
-                      {warning && <p className={`text-xs mt-1 ${warning.tipo === 'error' ? 'text-red-600' : 'text-yellow-600'}`}>{warning.mensaje}</p>}
-                    </div>
-                  );
-                })}
-                {/* Items de bonificación (gratis) */}
-                {promoResolucion.bonificaciones.map(bonif => {
-                  const prod = productos.find(p => p.id === bonif.productoId);
-                  return (
-                    <div key={`bonif-${bonif.productoId}`} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
-                      <div className="flex justify-between items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="font-medium text-sm text-green-700 dark:text-green-400 truncate">{prod?.nombre}</p>
-                            <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-200 text-green-800 rounded-full font-medium shrink-0">
-                              <Gift className="w-3 h-3" />
-                              Bonificacion
-                            </span>
+                            {warning && <p className={`text-xs mt-1 ${warning.tipo === 'error' ? 'text-red-600' : 'text-yellow-600'}`}>{warning.mensaje}</p>}
                           </div>
-                          <p className="text-xs text-green-600 dark:text-green-400">{bonif.promoNombre}</p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="w-6 text-center font-medium text-sm text-green-700 dark:text-green-400">{bonif.cantidadBonificacion}</span>
-                          <p className="w-20 text-right font-semibold text-sm text-green-600">GRATIS</p>
-                        </div>
-                      </div>
+                        );
+                      })}
+                      {/* Items de bonificación (gratis) */}
+                      {promoResolucion.bonificaciones.map(bonif => {
+                        const prod = productos.find(p => p.id === bonif.productoId);
+                        return (
+                          <div key={`bonif-${bonif.productoId}`} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
+                            <div className="flex justify-between items-center gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="font-medium text-sm text-green-700 dark:text-green-400 truncate">{prod?.nombre}</p>
+                                  <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-200 text-green-800 rounded-full font-medium shrink-0">
+                                    <Gift className="w-3 h-3" />
+                                    Bonificacion
+                                  </span>
+                                </div>
+                                <p className="text-xs text-green-600 dark:text-green-400">{bonif.promoNombre}</p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="w-6 text-center font-medium text-sm text-green-700 dark:text-green-400">{bonif.cantidadBonificacion}</span>
+                                <p className="w-20 text-right font-semibold text-sm text-green-600">GRATIS</p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
 
-              {/* Nudges para alcanzar siguiente tier */}
-              {faltantes.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {faltantes.map((f, i) => (
-                    <p key={i} className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg">
-                      Agrega {f.faltante} mas de <strong>{f.grupoNombre}</strong> para precio {f.etiqueta || 'mayorista'} ({formatPrecio(f.precioTier)} c/u)
-                    </p>
-                  ))}
-                </div>
-              )}
+                    {/* Nudges para alcanzar siguiente tier */}
+                    {faltantes.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {faltantes.map((f, i) => (
+                          <p key={i} className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg">
+                            Agrega {f.faltante} mas de <strong>{f.grupoNombre}</strong> para precio {f.etiqueta || 'mayorista'} ({formatPrecio(f.precioTier)} c/u)
+                          </p>
+                        ))}
+                      </div>
+                    )}
 
-              {/* Nudges para alcanzar bonificación */}
-              {faltantesBonificacion.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {faltantesBonificacion.map((f, i) => {
-                    const prod = productos.find(p => p.id === f.productoId);
-                    return (
-                      <p key={`bonif-nudge-${i}`} className="text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-1.5 rounded-lg">
-                        Agrega {f.faltante} mas de <strong>{prod?.nombre || f.promoNombre}</strong> y te llevas {f.bonificacion} gratis!
-                      </p>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Seccion Tipo Factura, Forma de Pago y Observaciones - al fondo */}
-          <div className="border-t dark:border-gray-600 pt-4 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium mb-1 dark:text-gray-200">Forma de Pago</label>
-                <select
-                  value={nuevoPedido.formaPago || 'efectivo'}
-                  onChange={e => onFormaPagoChange && onFormaPagoChange(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
-                >
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="cheque">Cheque</option>
-                  <option value="cuenta_corriente">Cuenta Corriente</option>
-                  <option value="tarjeta">Tarjeta</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 dark:text-gray-200">Estado de Pago</label>
-                <select
-                  value={nuevoPedido.estadoPago || 'pendiente'}
-                  onChange={e => onEstadoPagoChange && onEstadoPagoChange(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
-                >
-                  <option value="pendiente">Pendiente</option>
-                  <option value="pagado">Pagado</option>
-                  <option value="parcial">Parcial</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Monto pagado si es pago parcial */}
-            {nuevoPedido.estadoPago === 'parcial' && (
-              <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
-                <label className="block text-sm font-medium mb-1 text-yellow-800 dark:text-yellow-300">Monto del pago parcial *</label>
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold text-yellow-700 dark:text-yellow-400">$</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    max={hayDescuento ? totalFinal : calcularTotal()}
-                    value={nuevoPedido.montoPagado || ''}
-                    onChange={e => onMontoPagadoChange && onMontoPagadoChange(parsePrecio(e.target.value))}
-                    className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
-                    placeholder="Ingrese el monto pagado"
-                  />
-                </div>
-                {(nuevoPedido.montoPagado ?? 0) > 0 && (
-                  <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">
-                    Resta por pagar: {formatPrecio((hayDescuento ? totalFinal : calcularTotal()) - (nuevoPedido.montoPagado ?? 0))}
+                    {/* Nudges para alcanzar bonificación */}
+                    {faltantesBonificacion.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {faltantesBonificacion.map((f, i) => {
+                          const prod = productos.find(p => p.id === f.productoId);
+                          return (
+                            <p key={`bonif-nudge-${i}`} className="text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-1.5 rounded-lg">
+                              Agrega {f.faltante} mas de <strong>{prod?.nombre || f.promoNombre}</strong> y te llevas {f.bonificacion} gratis!
+                            </p>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-center text-sm text-gray-500 dark:text-gray-400 py-6">
+                    El carrito está vacío. Agregá productos arriba.
                   </p>
                 )}
-              </div>
-            )}
 
-            <div>
-              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Observaciones</label>
-              <textarea
-                value={nuevoPedido.notas || ''}
-                onChange={e => onNotasChange && onNotasChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
-                placeholder="Observaciones para la preparacion..."
-                rows={2}
-              />
+                {/* Forma de Pago + Estado */}
+                <div className="border-t dark:border-gray-600 pt-3 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1 dark:text-gray-200">Forma de Pago</label>
+                      <select
+                        value={nuevoPedido.formaPago || 'efectivo'}
+                        onChange={e => onFormaPagoChange && onFormaPagoChange(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                      >
+                        <option value="efectivo">Efectivo</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="cuenta_corriente">Cuenta Corriente</option>
+                        <option value="tarjeta">Tarjeta</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1 dark:text-gray-200">Estado de Pago</label>
+                      <select
+                        value={nuevoPedido.estadoPago || 'pendiente'}
+                        onChange={e => onEstadoPagoChange && onEstadoPagoChange(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                      >
+                        <option value="pendiente">Pendiente</option>
+                        <option value="pagado">Pagado</option>
+                        <option value="parcial">Parcial</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Monto pagado si es pago parcial */}
+                  {nuevoPedido.estadoPago === 'parcial' && (
+                    <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                      <label className="block text-sm font-medium mb-1 text-yellow-800 dark:text-yellow-300">Monto del pago parcial *</label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-semibold text-yellow-700 dark:text-yellow-400">$</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          max={hayDescuento ? totalFinal : calcularTotal()}
+                          value={nuevoPedido.montoPagado || ''}
+                          onChange={e => onMontoPagadoChange && onMontoPagadoChange(parsePrecio(e.target.value))}
+                          className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
+                          placeholder="Ingrese el monto pagado"
+                        />
+                      </div>
+                      {(nuevoPedido.montoPagado ?? 0) > 0 && (
+                        <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">
+                          Resta por pagar: {formatPrecio((hayDescuento ? totalFinal : calcularTotal()) - (nuevoPedido.montoPagado ?? 0))}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1 dark:text-gray-200">Observaciones</label>
+                    <textarea
+                      value={nuevoPedido.notas || ''}
+                      onChange={e => onNotasChange && onNotasChange(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                      placeholder="Observaciones para la preparacion..."
+                      rows={2}
+                    />
+                  </div>
+                </div>
+
+              {/* Total detallado */}
+              <div className="border-t dark:border-gray-600 pt-3 flex justify-between items-center">
+                <span className="text-base font-medium dark:text-white">Total</span>
+                <div className="text-right">
+                  {hayDescuento ? (
+                    <>
+                      <span className="text-xs text-gray-400 line-through mr-2">{formatPrecio(totalOriginal)}</span>
+                      <span className="text-xl font-bold text-green-600">{formatPrecio(totalFinal)}</span>
+                      <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(ahorro)}</p>
+                    </>
+                  ) : (
+                    <span className="text-xl font-bold text-blue-600">{formatPrecio(calcularTotal())}</span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="border-t bg-gray-50 p-4">
-          <div className="flex justify-between items-center mb-4">
-            <span className="text-lg font-medium">Total</span>
-            <div className="text-right">
-              {hayDescuento ? (
-                <>
-                  <span className="text-sm text-gray-400 line-through mr-2">{formatPrecio(totalOriginal)}</span>
-                  <span className="text-2xl font-bold text-green-600">{formatPrecio(totalFinal)}</span>
-                  <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(ahorro)}</p>
-                </>
-              ) : (
-                <span className="text-2xl font-bold text-blue-600">{formatPrecio(calcularTotal())}</span>
+        {/* Aviso compacto de violaciones (siempre visible cuando aplican) */}
+        {violacionesMOQ.length > 0 && (
+          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
+            {violacionesMOQ.length} producto{violacionesMOQ.length > 1 ? 's no cumplen' : ' no cumple'} el mínimo — revisá el carrito.
+          </div>
+        )}
+
+        {/* Barra inferior: toggle del carrito + Confirmar (siempre visibles) */}
+        <div className="flex items-stretch border-t dark:border-gray-600 flex-shrink-0 bg-white dark:bg-gray-800">
+          <button
+            type="button"
+            onClick={() => setCarritoAbierto(v => !v)}
+            disabled={!hayItems}
+            aria-expanded={carritoAbierto}
+            aria-controls="carrito-drawer"
+            className="flex-1 px-4 py-3 flex items-center justify-between gap-2 active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <ShoppingCart className="w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0" />
+              <span className="font-medium text-sm dark:text-white truncate">
+                {hayItems
+                  ? `${totalItemsCarrito} ${totalItemsCarrito === 1 ? 'unidad' : 'unidades'}`
+                  : 'Sin productos'}
+              </span>
+              {hayItems && (
+                <span className={`font-bold text-sm truncate ${hayDescuento ? 'text-green-600' : 'text-blue-600 dark:text-blue-400'}`}>
+                  {formatPrecio(totalParaMostrar)}
+                </span>
               )}
-            </div>
-          </div>
-          {violacionesMOQ.length > 0 && (
-            <div role="alert" className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
-              <strong>No se puede confirmar:</strong> los siguientes productos no cumplen el mínimo de compra:
-              <ul className="list-disc ml-5 mt-1">
-                {violacionesMOQ.map(v => {
-                  const producto = productos.find(p => p.id === v.productoId);
-                  const nombre = producto?.nombre || v.productoId;
-                  return (
-                    <li key={v.productoId}>
-                      {nombre}: mínimo {v.cantidadMinima} ({v.grupoNombre}), cargaste {v.cantidadActual}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-          <div className="flex justify-end space-x-3">
-            <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
-            <button onClick={onGuardar} disabled={guardando || violacionesMOQ.length > 0} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 flex items-center">
-              {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Confirmar
-            </button>
-          </div>
+            </span>
+            {hayItems && (
+              <ChevronUp className={`w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0 transition-transform duration-200 ${carritoAbierto ? 'rotate-180' : ''}`} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onGuardar}
+            disabled={guardando || violacionesMOQ.length > 0 || !hayItems}
+            className="px-5 bg-green-600 text-white font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 text-sm"
+          >
+            {guardando && <Loader2 className="w-4 h-4 animate-spin" />}
+            Confirmar
+          </button>
         </div>
     </ModalBase>
   );
