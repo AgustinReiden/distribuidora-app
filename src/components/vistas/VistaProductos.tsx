@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import type { ChangeEvent } from 'react';
-import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet, ClipboardCheck } from 'lucide-react';
+import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet, ClipboardCheck, Tag, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
@@ -23,6 +23,7 @@ export interface VistaProductosProps {
   onBajaStock?: (producto: ProductoDB) => void;
   onVerHistorialMermas?: () => void;
   onImportarPrecios?: () => void;
+  onGestionarCategorias?: () => void;
 }
 
 export default function VistaProductos({
@@ -35,12 +36,14 @@ export default function VistaProductos({
   onEliminarProducto,
   onBajaStock,
   onVerHistorialMermas,
-  onImportarPrecios
+  onImportarPrecios,
+  onGestionarCategorias
 }: VistaProductosProps) {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
   const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState<boolean>(false);
   const [paginaActual, setPaginaActual] = useState(1);
+  const categoriasScrollRef = useRef<HTMLDivElement>(null);
 
   // Obtener categorías únicas
   const categorias = useMemo((): string[] => {
@@ -102,7 +105,16 @@ export default function VistaProductos({
           <p className="text-sm text-gray-500 dark:text-gray-400">{productos.length} productos en catálogo</p>
         </div>
         {isAdmin && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {onGestionarCategorias && (
+              <button
+                onClick={onGestionarCategorias}
+                className="flex items-center space-x-2 px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+              >
+                <Tag className="w-5 h-5" />
+                <span>Categorías</span>
+              </button>
+            )}
             <button
               onClick={async () => {
                 const { exportControlStock } = await import('../../utils/excel');
@@ -174,26 +186,39 @@ export default function VistaProductos({
         </div>
       )}
 
-      {/* Filtros */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" aria-hidden="true" />
-          <input
-            type="text"
-            value={busqueda}
-            onChange={handleBusqueda}
-            className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-            placeholder="Buscar por nombre o código..."
-            aria-label="Buscar productos"
-          />
-        </div>
-        {categorias.length > 1 && (
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por categoría">
+      {/* Búsqueda — full width */}
+      <div className="relative w-full">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" aria-hidden="true" />
+        <input
+          type="text"
+          value={busqueda}
+          onChange={handleBusqueda}
+          className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+          placeholder="Buscar por nombre o código..."
+          aria-label="Buscar productos"
+        />
+      </div>
+
+      {/* Filtros de categoría — carrusel horizontal con flechas */}
+      {categorias.length > 1 && (
+        <div className="relative" role="group" aria-label="Filtrar por categoría">
+          <button
+            type="button"
+            onClick={() => categoriasScrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
+            className="hidden sm:flex absolute left-0 top-1/2 -translate-y-1/2 z-10 items-center justify-center w-8 h-8 bg-white/95 dark:bg-gray-800 rounded-full shadow-md border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+            aria-label="Scroll categorías a la izquierda"
+          >
+            <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+          </button>
+          <div
+            ref={categoriasScrollRef}
+            className="flex gap-2 overflow-x-auto scroll-smooth sm:px-10 py-1 scrollbar-hide"
+          >
             {categorias.map(cat => (
               <button
                 key={cat}
                 onClick={() => handleCategoria(cat)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   filtroCategoria === cat
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
@@ -204,8 +229,16 @@ export default function VistaProductos({
               </button>
             ))}
           </div>
-        )}
-      </div>
+          <button
+            type="button"
+            onClick={() => categoriasScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+            className="hidden sm:flex absolute right-0 top-1/2 -translate-y-1/2 z-10 items-center justify-center w-8 h-8 bg-white/95 dark:bg-gray-800 rounded-full shadow-md border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+            aria-label="Scroll categorías a la derecha"
+          >
+            <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+          </button>
+        </div>
+      )}
 
       {/* Contador de resultados */}
       {(busqueda || filtroCategoria !== 'todas' || mostrarSoloStockBajo) && (

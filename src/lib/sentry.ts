@@ -255,7 +255,11 @@ export function initSentry(): void {
         block: ['.sensitive-data', '[data-sentry-block]']
       }),
       // Feedback del usuario
+      // NOTE: autoInject deshabilitado porque el botón flotante molestaba al
+      // layout y no se usaba. La integración queda configurada en código para
+      // poder habilitarla rápido si más adelante la necesitamos.
       Sentry.feedbackIntegration({
+        autoInject: false,
         colorScheme: 'system',
         showBranding: false,
         buttonLabel: 'Reportar problema',
