@@ -3,7 +3,7 @@
  * Usado por transportistas y admin cuando un item no puede ser entregado
  */
 import React, { useState, FormEvent, ChangeEvent } from 'react'
-import { X, AlertTriangle, Package, FileText, AlertCircle, Gift } from 'lucide-react'
+import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { useSimularSalvedadPromoImpactoQuery } from '../../hooks/queries'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
@@ -195,25 +195,55 @@ export default function ModalSalvedadItem({
 
         {/* Formulario */}
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {/* Cantidad afectada */}
+          {/* Cantidad afectada — spinner touch-friendly */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Cantidad con problema *
             </label>
-            <input
-              type="number"
-              inputMode="numeric"
-              step="1"
-              min="1"
-              max={item.cantidad}
-              value={cantidad}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setCantidad(e.target.value)}
-              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 dark:bg-gray-700 dark:text-white"
-              required
-            />
-            <div className="mt-1 flex justify-between text-xs text-gray-500">
-              <span>Se entregaran: <span className="font-bold text-green-600">{Math.max(0, cantidadRestante)}</span> unidades</span>
-              <span>Monto afectado: <span className="font-bold text-red-600">${montoAfectado.toLocaleString()}</span></span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCantidad(prev => {
+                  const n = typeof prev === 'string' ? parseInt(prev) || 0 : prev
+                  return Math.max(1, n - 1)
+                })}
+                disabled={cantidadNum <= 1}
+                className="h-14 w-14 flex items-center justify-center rounded-lg border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                aria-label="Restar uno"
+              >
+                <Minus className="w-6 h-6" />
+              </button>
+              <input
+                type="number"
+                inputMode="numeric"
+                step="1"
+                min="1"
+                max={item.cantidad}
+                value={cantidad}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setCantidad(e.target.value)}
+                className="flex-1 h-14 text-center text-2xl font-bold border-2 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 dark:bg-gray-700 dark:text-white"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setCantidad(prev => {
+                  const n = typeof prev === 'string' ? parseInt(prev) || 0 : prev
+                  return Math.min(item.cantidad, n + 1)
+                })}
+                disabled={cantidadNum >= item.cantidad}
+                className="h-14 w-14 flex items-center justify-center rounded-lg border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                aria-label="Sumar uno"
+              >
+                <Plus className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="mt-2 flex justify-between text-sm">
+              <span className="text-gray-600 dark:text-gray-400">
+                Se entregarán: <span className="font-bold text-green-600">{Math.max(0, cantidadRestante)}</span> unidades
+              </span>
+              <span className="text-gray-600 dark:text-gray-400">
+                Monto: <span className="font-bold text-red-600">${montoAfectado.toLocaleString()}</span>
+              </span>
             </div>
           </div>
 
@@ -342,19 +372,19 @@ export default function ModalSalvedadItem({
             </div>
           )}
 
-          {/* Botones */}
+          {/* Botones touch-friendly */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              className="flex-1 min-h-[56px] px-4 py-3 border-2 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={guardando || !motivo || cantidadNum <= 0}
-              className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors flex items-center justify-center gap-2 ${
+              className={`flex-1 min-h-[56px] px-4 py-3 text-white rounded-lg transition-colors flex items-center justify-center gap-2 font-semibold active:scale-95 ${
                 tienePromoRota
                   ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-400'
                   : 'bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400'
@@ -367,7 +397,7 @@ export default function ModalSalvedadItem({
                 </>
               ) : (
                 <>
-                  <AlertTriangle className="w-4 h-4" />
+                  <AlertTriangle className="w-5 h-5" />
                   {tienePromoRota ? 'Confirmar (se pierde promo)' : 'Registrar Salvedad'}
                 </>
               )}
