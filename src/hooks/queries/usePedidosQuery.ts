@@ -596,12 +596,17 @@ export function useEliminarPedidoMutation() {
 // Entregas Masivas
 // =========================================================================
 
-async function fetchPedidosNoEntregados(): Promise<PedidoDB[]> {
-  const { data, error } = await supabase
+async function fetchPedidosNoEntregados(sucursalId: number | null): Promise<PedidoDB[]> {
+  let query = supabase
     .from('pedidos')
     .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
     .not('estado', 'in', '("entregado","cancelado")')
-    .order('created_at', { ascending: false })
+
+  if (sucursalId != null) {
+    query = query.eq('sucursal_id', sucursalId)
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: false })
 
   if (error) throw error
 
@@ -639,8 +644,8 @@ export function usePedidosNoEntregadosQuery(enabled = false) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: pedidosKeys.noEntregados(currentSucursalId),
-    queryFn: fetchPedidosNoEntregados,
-    enabled,
+    queryFn: () => fetchPedidosNoEntregados(currentSucursalId),
+    enabled: enabled && !!currentSucursalId,
     staleTime: 30 * 1000, // 30 segundos
   })
 }
@@ -732,13 +737,18 @@ export function useCancelarPedidoMutation() {
 // Pagos Masivos
 // =========================================================================
 
-async function fetchPedidosNoPagados(): Promise<PedidoDB[]> {
-  const { data, error } = await supabase
+async function fetchPedidosNoPagados(sucursalId: number | null): Promise<PedidoDB[]> {
+  let query = supabase
     .from('pedidos')
     .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
     .neq('estado_pago', 'pagado')
     .neq('estado', 'cancelado')
-    .order('created_at', { ascending: false })
+
+  if (sucursalId != null) {
+    query = query.eq('sucursal_id', sucursalId)
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: false })
 
   if (error) throw error
 
@@ -776,8 +786,8 @@ export function usePedidosNoPagadosQuery(enabled = false) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: pedidosKeys.noPagados(currentSucursalId),
-    queryFn: fetchPedidosNoPagados,
-    enabled,
+    queryFn: () => fetchPedidosNoPagados(currentSucursalId),
+    enabled: enabled && !!currentSucursalId,
     staleTime: 30 * 1000,
   })
 }
