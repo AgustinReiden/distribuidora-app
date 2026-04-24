@@ -25,6 +25,7 @@ export {
   useCrearCategoriaMutation,
   useRenombrarCategoriaMutation,
   useEliminarCategoriaMutation,
+  useToggleCategoriaActivaMutation,
 } from './useCategoriasQuery'
 export type { CategoriaDB } from './useCategoriasQuery'
 
@@ -157,6 +158,7 @@ export {
   useEliminarPromocionMutation,
   useTogglePromocionActivaMutation,
   useAjustarStockPromoMutation,
+  usePromoUnidadesEntregadasQuery,
 } from './usePromocionesQuery'
 export type { PromocionConDetalles, PromocionFormInput } from './usePromocionesQuery'
 

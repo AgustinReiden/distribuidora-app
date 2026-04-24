@@ -432,6 +432,37 @@ export function useTogglePromocionActivaMutation() {
   })
 }
 
+/**
+ * Hook para obtener el total de unidades regaladas historicas por cada promo
+ * (suma de pedido_items.cantidad con es_bonificacion=true).
+ * Multi-tenant: scoped por sucursal activa via RLS.
+ */
+export function usePromoUnidadesEntregadasQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...promocionesKeys.all(currentSucursalId), 'unidades_entregadas'] as const,
+    queryFn: async (): Promise<Map<string, number>> => {
+      const { data, error } = await supabase
+        .from('pedido_items')
+        .select('promocion_id, cantidad')
+        .eq('es_bonificacion', true)
+        .not('promocion_id', 'is', null)
+      if (error) {
+        if (error.message.includes('does not exist')) return new Map()
+        throw error
+      }
+      const map = new Map<string, number>()
+      for (const row of (data ?? []) as { promocion_id: string | number; cantidad: number }[]) {
+        const key = String(row.promocion_id)
+        map.set(key, (map.get(key) ?? 0) + Number(row.cantidad ?? 0))
+      }
+      return map
+    },
+    enabled: !!currentSucursalId,
+    staleTime: 60 * 1000,
+  })
+}
+
 export function useAjustarStockPromoMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()

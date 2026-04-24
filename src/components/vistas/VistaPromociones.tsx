@@ -2,96 +2,44 @@
  * VistaPromociones
  *
  * Vista admin para gestionar promociones (bonificacion).
- * Muestra lista de promos con productos, reglas, contador de usos y ajuste de stock.
+ * Todas las promos descuentan stock automaticamente (unidad entera en
+ * cada venta o fraccion al cerrar bloque), por eso no hay ajuste manual.
  */
-import React, { useState } from 'react'
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, AlertTriangle, Check, Layers, Ban, Zap } from 'lucide-react'
+import React, { useMemo, useState } from 'react'
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, Layers, Ban, Zap, History, Filter } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
-import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
 
-export interface AjustePayload {
-  productoRegaloId: string
-  cantidadStock: number
-  usosAjustados: number
-  observaciones: string
-}
+type FiltroEstado = 'vigentes' | 'todas' | 'inactivas'
 
 export interface VistaPromocionesProps {
   promociones: PromocionConDetalles[]
-  productos: ProductoDB[]
   loading: boolean
   onNuevaPromocion: () => void
   onEditarPromocion: (promo: PromocionConDetalles) => void
   onEliminarPromocion: (id: string) => void
   onToggleActivo: (promo: PromocionConDetalles) => void
-  onAjustarStock: (promo: PromocionConDetalles, payload: AjustePayload) => void
+  /** Map producto_id -> nombre (para render de chips de productos asignados) */
+  productoNombres: Map<string, string>
+  /** Map promo_id -> total unidades regaladas historicas (suma de pedido_items.cantidad con es_bonificacion=true) */
+  unidadesEntregadas?: Map<string, number>
 }
 
 export default function VistaPromociones({
   promociones,
-  productos,
   loading,
   onNuevaPromocion,
   onEditarPromocion,
   onEliminarPromocion,
   onToggleActivo,
-  onAjustarStock,
+  productoNombres,
+  unidadesEntregadas,
 }: VistaPromocionesProps): React.ReactElement {
-  const [ajustandoId, setAjustandoId] = useState<string | null>(null)
-  const [observaciones, setObservaciones] = useState('')
-  const [ajusteProductoId, setAjusteProductoId] = useState<string>('')
-  const [ajusteCantidadStock, setAjusteCantidadStock] = useState<string>('')
-  const [ajusteUsos, setAjusteUsos] = useState<string>('')
-  const [ajusteError, setAjusteError] = useState<string | null>(null)
-
-  const iniciarAjuste = (promo: PromocionConDetalles) => {
-    setAjustandoId(promo.id)
-    setAjusteProductoId(promo.producto_regalo_id ? String(promo.producto_regalo_id) : '')
-    setAjusteCantidadStock('')
-    setAjusteUsos(String(promo.usos_pendientes))
-    setObservaciones('')
-    setAjusteError(null)
-  }
-
-  const cancelarAjuste = () => {
-    setAjustandoId(null)
-    setObservaciones('')
-    setAjusteProductoId('')
-    setAjusteCantidadStock('')
-    setAjusteUsos('')
-    setAjusteError(null)
-  }
-
-  const confirmarAjuste = (promo: PromocionConDetalles) => {
-    setAjusteError(null)
-    const pid = ajusteProductoId.trim()
-    if (!pid) {
-      setAjusteError('Elegi el producto al que descontar stock')
-      return
-    }
-    const stock = parseInt(ajusteCantidadStock)
-    if (!stock || stock <= 0) {
-      setAjusteError('Cantidad de stock a descontar debe ser mayor a 0')
-      return
-    }
-    const usos = parseInt(ajusteUsos)
-    if (!usos || usos <= 0 || usos > promo.usos_pendientes) {
-      setAjusteError(`Usos a resolver debe estar entre 1 y ${promo.usos_pendientes}`)
-      return
-    }
-    onAjustarStock(promo, {
-      productoRegaloId: pid,
-      cantidadStock: stock,
-      usosAjustados: usos,
-      observaciones,
-    })
-    cancelarAjuste()
-  }
+  const [filtro, setFiltro] = useState<FiltroEstado>('vigentes')
+  const [mostrarHistorico, setMostrarHistorico] = useState(false)
 
   const getProductoNombre = (productoId: string): string => {
-    const prod = productos.find(p => String(p.id) === String(productoId))
-    return prod?.nombre || `Producto #${productoId}`
+    return productoNombres.get(String(productoId)) || `Producto #${productoId}`
   }
 
   const getReglaValor = (promo: PromocionConDetalles, clave: string): number | null => {
@@ -111,6 +59,12 @@ export default function VistaPromociones({
     return true
   }
 
+  const promosFiltradas = useMemo(() => {
+    if (filtro === 'todas') return promociones
+    if (filtro === 'inactivas') return promociones.filter(p => !isPromoVigente(p))
+    return promociones.filter(p => isPromoVigente(p))
+  }, [promociones, filtro])  
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -122,24 +76,57 @@ export default function VistaPromociones({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold dark:text-white">Promociones</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Gestiona promociones de bonificacion para productos
+            Gestiona promociones de bonificación para productos
           </p>
         </div>
-        <button
-          onClick={onNuevaPromocion}
-          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Nueva Promocion
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setMostrarHistorico(v => !v)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
+              mostrarHistorico
+                ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-400 text-purple-700 dark:text-purple-300'
+                : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            title="Mostrar unidades regaladas históricas por promo"
+          >
+            <History className="w-4 h-4" />
+            {mostrarHistorico ? 'Ocultar' : 'Ver'} histórico
+          </button>
+          <button
+            onClick={onNuevaPromocion}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Nueva Promoción
+          </button>
+        </div>
+      </div>
+
+      {/* Filtros de estado */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Filter className="w-4 h-4 text-gray-400" />
+        {(['vigentes', 'todas', 'inactivas'] as FiltroEstado[]).map(f => (
+          <button
+            key={f}
+            onClick={() => setFiltro(f)}
+            className={`px-3 py-1 rounded-full text-sm capitalize transition-colors ${
+              filtro === f
+                ? 'bg-purple-600 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            {f === 'vigentes' ? 'Vigentes' : f === 'todas' ? 'Todas' : 'Inactivas / vencidas'}
+          </button>
+        ))}
+        <span className="text-xs text-gray-500 ml-auto">{promosFiltradas.length} / {promociones.length}</span>
       </div>
 
       {/* Lista de promos */}
-      {promociones.length === 0 ? (
+      {promosFiltradas.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
           <Gift className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Sin promociones</h3>
@@ -155,7 +142,7 @@ export default function VistaPromociones({
         </div>
       ) : (
         <div className="grid gap-4">
-          {promociones.map(promo => {
+          {promosFiltradas.map(promo => {
             const cantCompra = getReglaValor(promo, 'cantidad_compra')
             const cantBonif = getReglaValor(promo, 'cantidad_bonificacion')
             const vigente = isPromoVigente(promo)
@@ -185,12 +172,6 @@ export default function VistaPromociones({
                           Fuera de rango
                         </span>
                       )}
-                      {promo.usos_pendientes > 0 && (
-                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium">
-                          <AlertTriangle className="w-3 h-3" />
-                          {promo.usos_pendientes} uso{promo.usos_pendientes !== 1 ? 's' : ''} pendiente{promo.usos_pendientes !== 1 ? 's' : ''}
-                        </span>
-                      )}
                       {promo.limite_usos && (
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           promo.usos_pendientes >= promo.limite_usos
@@ -215,6 +196,12 @@ export default function VistaPromociones({
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-full font-medium">
                           <Zap className="w-3 h-3" />
                           Auto-ajuste
+                        </span>
+                      )}
+                      {mostrarHistorico && unidadesEntregadas && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-full font-medium">
+                          <History className="w-3 h-3" />
+                          {unidadesEntregadas.get(String(promo.id)) ?? 0} unidades regaladas
                         </span>
                       )}
                     </div>
@@ -263,25 +250,14 @@ export default function VistaPromociones({
                   </div>
                 )}
 
-                {/* Contador de usos */}
-                <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center justify-between">
-                  <p className="text-sm text-blue-700 dark:text-blue-300">
-                    <span className="font-medium">Unidades regaladas:</span>{' '}
-                    {promo.regalo_mueve_stock
-                      ? `${promo.usos_pendientes} entregadas (stock ya descontado)`
-                      : `${promo.usos_pendientes} pendientes de ajuste`}
-                  </p>
-                  {promo.usos_pendientes > 0 && !promo.regalo_mueve_stock && !promo.ajuste_automatico && (
-                    <span className="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded-full font-medium">
-                      Ajustar stock
-                    </span>
-                  )}
-                  {promo.ajuste_automatico && promo.unidades_por_bloque && (
-                    <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">
-                      Auto-ajuste cada {promo.unidades_por_bloque} u.
-                    </span>
-                  )}
-                </div>
+                {/* Contador auxiliar: solo muestra cuántas unidades faltan para el proximo bloque (fracción) */}
+                {promo.ajuste_automatico && promo.unidades_por_bloque && promo.unidades_por_bloque > 0 && (
+                  <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+                    <span className="font-medium">Progreso hacia el próximo bloque:</span>{' '}
+                    {promo.usos_pendientes} / {promo.unidades_por_bloque} unidades
+                    {promo.usos_pendientes === 0 && ' (bloque recién cerrado)'}
+                  </div>
+                )}
 
                 {/* Productos */}
                 <div className="mb-3">
@@ -304,97 +280,6 @@ export default function VistaPromociones({
                   </div>
                 </div>
 
-                {/* Ajuste de stock (solo si no es auto-ajuste ni mueve stock directo) */}
-                {promo.usos_pendientes > 0 && !promo.regalo_mueve_stock && !promo.ajuste_automatico && (
-                  <div className="mt-3 pt-3 border-t dark:border-gray-700">
-                    {ajustandoId === promo.id ? (
-                      <div className="space-y-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                        <p className="text-xs text-amber-700 dark:text-amber-300">
-                          Ajusta stock acumulado por bonificaciones entregadas. Tenes {promo.usos_pendientes} pendientes.
-                        </p>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                            Producto a descontar
-                          </label>
-                          <select
-                            value={ajusteProductoId}
-                            onChange={e => setAjusteProductoId(e.target.value)}
-                            className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                          >
-                            <option value="">Elegir producto...</option>
-                            {productos.map(p => (
-                              <option key={p.id} value={String(p.id)}>
-                                {p.nombre} {p.stock !== undefined ? `(stock: ${p.stock})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                              Stock a descontar
-                            </label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={ajusteCantidadStock}
-                              onChange={e => setAjusteCantidadStock(e.target.value)}
-                              placeholder="Ej: 1 (fardo)"
-                              className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                              Usos a resolver
-                            </label>
-                            <input
-                              type="number"
-                              min="1"
-                              max={promo.usos_pendientes}
-                              value={ajusteUsos}
-                              onChange={e => setAjusteUsos(e.target.value)}
-                              placeholder={`1-${promo.usos_pendientes}`}
-                              className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </div>
-                        </div>
-                        <input
-                          type="text"
-                          placeholder="Observaciones (opcional)"
-                          value={observaciones}
-                          onChange={e => setObservaciones(e.target.value)}
-                          className="w-full px-3 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        />
-                        {ajusteError && (
-                          <p className="text-xs text-red-600 dark:text-red-400">{ajusteError}</p>
-                        )}
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={cancelarAjuste}
-                            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            onClick={() => confirmarAjuste(promo)}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
-                          >
-                            <Check className="w-4 h-4" />
-                            Confirmar ajuste
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => iniciarAjuste(promo)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-orange-100 text-orange-700 text-sm rounded-lg hover:bg-orange-200 transition-colors"
-                      >
-                        <Check className="w-4 h-4" />
-                        Ajustar stock ({promo.usos_pendientes} uso{promo.usos_pendientes !== 1 ? 's' : ''} pendientes)
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             )
           })}

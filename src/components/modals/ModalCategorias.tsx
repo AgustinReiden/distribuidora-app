@@ -7,13 +7,14 @@
  * normalizarlas). Renombrar/eliminar actualizan en bloque `productos.categoria`.
  */
 import { memo, useMemo, useState } from 'react';
-import { Loader2, Plus, Pencil, Trash2, Check, X, Tag, AlertCircle } from 'lucide-react';
+import { Loader2, Plus, Pencil, Trash2, Check, X, Tag, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
 import ModalBase from './ModalBase';
 import {
   useCategoriasQuery,
   useCrearCategoriaMutation,
   useRenombrarCategoriaMutation,
   useEliminarCategoriaMutation,
+  useToggleCategoriaActivaMutation,
 } from '../../hooks/queries';
 import type { CategoriaDB } from '../../hooks/queries';
 import type { ProductoDB } from '../../types';
@@ -31,6 +32,7 @@ interface CategoriaEntry {
   nombre: string;
   productCount: number;
   source: 'tabla' | 'derivada' | 'ambas';
+  activa: boolean;
 }
 
 const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: ModalCategoriasProps) {
@@ -38,6 +40,7 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
   const crearMut = useCrearCategoriaMutation();
   const renameMut = useRenombrarCategoriaMutation();
   const deleteMut = useEliminarCategoriaMutation();
+  const toggleMut = useToggleCategoriaActivaMutation();
 
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [error, setError] = useState('');
@@ -60,11 +63,13 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
     names.forEach(nombre => {
       const enTabla = tablaMap.has(nombre);
       const enProductos = counts.has(nombre);
+      const cat = enTabla ? tablaMap.get(nombre)! : null;
       combined.push({
-        id: enTabla ? tablaMap.get(nombre)!.id : null,
+        id: cat ? cat.id : null,
         nombre,
         productCount: counts.get(nombre) || 0,
         source: enTabla && enProductos ? 'ambas' : enTabla ? 'tabla' : 'derivada',
+        activa: cat ? cat.activa !== false : true,
       });
     });
     return combined.sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -138,7 +143,17 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
     }
   };
 
-  const working = crearMut.isPending || renameMut.isPending || deleteMut.isPending;
+  const handleToggleActiva = async (entry: CategoriaEntry) => {
+    if (!entry.id) return;
+    setError('');
+    try {
+      await toggleMut.mutateAsync({ id: entry.id, activa: !entry.activa, nombre: entry.nombre });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al cambiar estado');
+    }
+  };
+
+  const working = crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending;
 
   return (
     <ModalBase title="Gestionar categorías" onClose={onClose} maxWidth="max-w-2xl">
@@ -222,11 +237,16 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
                         disabled={renameMut.isPending}
                       />
                     ) : (
-                      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                      <div className={`flex-1 min-w-0 flex items-center gap-2 flex-wrap ${!entry.activa ? 'opacity-60' : ''}`}>
                         <span className="font-medium dark:text-white truncate">{entry.nombre}</span>
                         <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full">
                           {entry.productCount} {entry.productCount === 1 ? 'producto' : 'productos'}
                         </span>
+                        {!entry.activa && (
+                          <span className="text-xs px-2 py-0.5 bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-full font-medium">
+                            inactiva
+                          </span>
+                        )}
                         {entry.source === 'derivada' && (
                           <span
                             className="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full"
@@ -273,6 +293,21 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
+                        {entry.id && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleActiva(entry)}
+                            disabled={working}
+                            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+                            title={entry.activa ? `Desactivar ${entry.nombre}` : `Activar ${entry.nombre}`}
+                            aria-label={entry.activa ? `Desactivar ${entry.nombre}` : `Activar ${entry.nombre}`}
+                          >
+                            {entry.activa
+                              ? <ToggleRight className="w-5 h-5 text-green-600" />
+                              : <ToggleLeft className="w-5 h-5 text-gray-400" />
+                            }
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setConfirmDelete(entry)}
