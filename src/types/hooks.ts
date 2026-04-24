@@ -68,6 +68,7 @@ export interface PedidoItemDB {
   subtotal?: number;
   es_bonificacion?: boolean;
   promocion_id?: string;
+  descripcion_regalo?: string | null;
   neto_unitario?: number;
   iva_unitario?: number;
   impuestos_internos_unitario?: number;
@@ -1458,6 +1459,7 @@ export interface PromocionDB {
   ajuste_producto_id?: string | null;
   unidades_por_bloque?: number | null;
   stock_por_bloque?: number | null;
+  descripcion_regalo?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -5,7 +5,7 @@
  * Incluye: nombre, fechas, selector de productos, reglas (cantidad_compra, cantidad_bonificacion).
  */
 import { useState, useMemo } from 'react'
-import { X, Search, Gift, ChevronDown, ChevronRight, Layers, Ban } from 'lucide-react'
+import { X, Search, Gift, ChevronDown, ChevronRight, Layers, Ban, Package, Droplet } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
@@ -58,9 +58,6 @@ export default function ModalPromocion({
   const [modoExclusion, setModoExclusion] = useState<'acumulable' | 'excluyente'>(
     (promocion?.modo_exclusion as 'acumulable' | 'excluyente') ?? 'acumulable'
   )
-  const [ajusteAutomatico, setAjusteAutomatico] = useState<boolean>(
-    promocion?.ajuste_automatico ?? false
-  )
   const [ajusteProductoId, setAjusteProductoId] = useState<string>(
     promocion?.ajuste_producto_id ? String(promocion.ajuste_producto_id) : ''
   )
@@ -69,6 +66,17 @@ export default function ModalPromocion({
   )
   const [stockPorBloque, setStockPorBloque] = useState<string>(
     promocion?.stock_por_bloque ? String(promocion.stock_por_bloque) : '1'
+  )
+  const [descripcionRegalo, setDescripcionRegalo] = useState<string>(
+    promocion?.descripcion_regalo ?? ''
+  )
+  // Derivar tipo al abrir en modo edicion: promos con ajuste_automatico o
+  // descripcion_regalo cargada se tratan como fracción. Las nuevas arrancan
+  // como unidad entera (el modo clásico).
+  const [tipoRegalo, setTipoRegalo] = useState<'unidad_entera' | 'fraccion'>(
+    (promocion?.ajuste_automatico || (promocion?.descripcion_regalo ?? '').length > 0)
+      ? 'fraccion'
+      : 'unidad_entera'
   )
   const [busquedaAjusteProd, setBusquedaAjusteProd] = useState('')
   const [mostrarAvanzadas, setMostrarAvanzadas] = useState(false)
@@ -139,10 +147,19 @@ export default function ModalPromocion({
       return
     }
 
-    // Validaciones para ajuste automatico
-    if (ajusteAutomatico) {
+    // Derivados segun tipo de regalo. Fraccion fuerza ajuste automatico y
+    // regalo NO mueve stock directamente (el auto-ajuste descuenta bloques).
+    const esFraccion = tipoRegalo === 'fraccion'
+    const finalAjusteAutomatico = esFraccion ? true : false
+    const finalRegaloMueveStock = esFraccion ? false : regaloMueveStock
+
+    if (esFraccion) {
+      if (!descripcionRegalo.trim()) {
+        setError('Escribí una descripción del regalo (ej: "1 botella Manaos Naranja 600cc")')
+        return
+      }
       if (!ajusteProductoId) {
-        setError('Seleccioná el producto que se descuenta del stock en el ajuste automático')
+        setError('Seleccioná el producto que se descuenta del stock (ej: el fardo que contiene las botellas)')
         return
       }
       const unidBloque = parseInt(unidadesPorBloque)
@@ -175,12 +192,13 @@ export default function ModalPromocion({
         { clave: 'cantidad_bonificacion', valor: bonif },
       ],
       prioridad: Number.isFinite(prio) ? prio : 0,
-      regaloMueveStock,
+      regaloMueveStock: finalRegaloMueveStock,
       modoExclusion,
-      ajusteAutomatico,
-      ajusteProductoId: ajusteAutomatico ? (ajusteProductoId || null) : null,
-      unidadesPorBloque: ajusteAutomatico && Number.isFinite(unidBloque) && unidBloque > 0 ? unidBloque : null,
-      stockPorBloque: ajusteAutomatico && Number.isFinite(stockBloque) && stockBloque > 0 ? stockBloque : null,
+      ajusteAutomatico: finalAjusteAutomatico,
+      ajusteProductoId: finalAjusteAutomatico ? (ajusteProductoId || null) : null,
+      unidadesPorBloque: finalAjusteAutomatico && Number.isFinite(unidBloque) && unidBloque > 0 ? unidBloque : null,
+      stockPorBloque: finalAjusteAutomatico && Number.isFinite(stockBloque) && stockBloque > 0 ? stockBloque : null,
+      descripcionRegalo: esFraccion ? descripcionRegalo.trim() : null,
     })
     setSaving(false)
 
@@ -310,64 +328,114 @@ export default function ModalPromocion({
             )}
           </div>
 
-          {/* Mueve stock (switch style) */}
-          <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                El regalo descuenta stock automáticamente
-              </p>
-              <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                Apagalo cuando el regalo es una unidad menor al stock (ej: regalar una botella cuando el stock se lleva por fardo).
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={regaloMueveStock}
-              onClick={() => setRegaloMueveStock(v => !v)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
-                regaloMueveStock ? 'bg-amber-600' : 'bg-gray-300 dark:bg-gray-600'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  regaloMueveStock ? 'translate-x-6' : 'translate-x-1'
+          {/* Tipo de regalo: unidad entera vs fracción */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              ¿Qué se regala?
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setTipoRegalo('unidad_entera')}
+                className={`flex items-start gap-2 p-3 rounded-lg border text-left transition ${
+                  tipoRegalo === 'unidad_entera'
+                    ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-400 dark:border-emerald-600 ring-2 ring-emerald-200 dark:ring-emerald-800'
+                    : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
                 }`}
-              />
-            </button>
-          </div>
-
-          {/* Ajuste automatico de stock */}
-          {!regaloMueveStock && (
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                    Ajustar stock automáticamente por bloques
+              >
+                <Package className={`w-4 h-4 mt-0.5 flex-shrink-0 ${tipoRegalo === 'unidad_entera' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`} />
+                <div className="flex-1">
+                  <p className={`text-sm font-medium ${tipoRegalo === 'unidad_entera' ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                    Unidad entera
                   </p>
-                  <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                    Cuando se acumulan suficientes bonificaciones como para formar un bloque exacto (ej: 12 botellas = 1 fardo), el sistema descuenta el stock y registra la merma automáticamente. Las unidades que sobran quedan pendientes hasta completar el próximo bloque.
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Se regala el producto tal como figura en el stock (ej: 1 fardo).
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={ajusteAutomatico}
-                  onClick={() => setAjusteAutomatico(v => !v)}
-                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                    ajusteAutomatico ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipoRegalo('fraccion')}
+                className={`flex items-start gap-2 p-3 rounded-lg border text-left transition ${
+                  tipoRegalo === 'fraccion'
+                    ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-400 dark:border-emerald-600 ring-2 ring-emerald-200 dark:ring-emerald-800'
+                    : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                }`}
+              >
+                <Droplet className={`w-4 h-4 mt-0.5 flex-shrink-0 ${tipoRegalo === 'fraccion' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`} />
+                <div className="flex-1">
+                  <p className={`text-sm font-medium ${tipoRegalo === 'fraccion' ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                    Fracción de unidad
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Se regala una parte del producto (ej: 1 botella de un fardo x12). El stock se descuenta por bloques completos.
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Mueve stock (solo para unidad entera) */}
+          {tipoRegalo === 'unidad_entera' && (
+            <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                  El regalo descuenta stock automáticamente
+                </p>
+                <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                  Si se regala una unidad que existe como producto en el stock, dejalo encendido. Apagalo si lo ajustás manualmente después.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={regaloMueveStock}
+                onClick={() => setRegaloMueveStock(v => !v)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
+                  regaloMueveStock ? 'bg-amber-600' : 'bg-gray-300 dark:bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    regaloMueveStock ? 'translate-x-6' : 'translate-x-1'
                   }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      ajusteAutomatico ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
+                />
+              </button>
+            </div>
+          )}
+
+          {/* Descripción manual del regalo (solo fracción) */}
+          {tipoRegalo === 'fraccion' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Descripción del regalo <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                Texto que aparece en la tarjeta del pedido. Ej: "1 botella Manaos Naranja 600cc".
+              </p>
+              <input
+                type="text"
+                value={descripcionRegalo}
+                onChange={e => setDescripcionRegalo(e.target.value)}
+                placeholder='Ej: 1 botella Manaos Naranja 600cc'
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+          )}
+
+          {/* Ajuste automatico por bloques (solo fracción — siempre visible/requerido) */}
+          {tipoRegalo === 'fraccion' && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 space-y-3">
+              <div>
+                <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                  Ajuste automático de stock por bloques
+                </p>
+                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                  Cuando se acumulan suficientes regalos como para formar un bloque exacto (ej: 12 botellas = 1 fardo), el sistema descuenta el stock y registra la merma. Las unidades sueltas quedan pendientes hasta completar el próximo bloque.
+                </p>
               </div>
 
-              {ajusteAutomatico && (
-                <div className="space-y-3 pt-2 border-t border-blue-200 dark:border-blue-800">
+              <div className="space-y-3 pt-2 border-t border-blue-200 dark:border-blue-800">
                   {/* Producto a descontar */}
                   <div>
                     <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
@@ -466,8 +534,7 @@ export default function ModalPromocion({
                       Resumen: cada {unidadesPorBloque} unidades bonificadas descuentan {stockPorBloque} del stock del producto elegido y generan una merma.
                     </p>
                   )}
-                </div>
-              )}
+              </div>
             </div>
           )}
 
