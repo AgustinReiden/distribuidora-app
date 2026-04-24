@@ -2,9 +2,10 @@
  * Vista de ruta para transportista
  */
 import React, { useState, useMemo, useRef, memo } from 'react';
-import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift } from 'lucide-react';
+import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift, WifiOff } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
 import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types';
+import { useAuthData } from '../../contexts/AuthDataContext';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 import ModalRegistrarPago from '../modals/ModalRegistrarPago';
 
@@ -166,10 +167,12 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad 
                         e.stopPropagation();
                         onReportarSalvedad(pedido.id, item);
                       }}
-                      className="p-1 text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded"
+                      className="flex items-center gap-1.5 px-3 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg text-sm font-medium min-h-[44px] min-w-[44px] shrink-0 transition-colors"
                       title="Reportar problema con este item"
+                      aria-label="Reportar salvedad"
                     >
-                      <AlertTriangle className="w-4 h-4" />
+                      <AlertTriangle className="w-5 h-5" />
+                      <span className="hidden sm:inline">Salvedad</span>
                     </button>
                   )}
                 </div>
@@ -187,23 +190,23 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad 
         </div>
       )}
 
-      {/* Boton de marcar entregado */}
+      {/* Boton de marcar entregado — touch-friendly para uso en ruta */}
       {pedido.estado === 'asignado' && (
         <div className="p-3 bg-gray-50 dark:bg-gray-900 border-t dark:border-gray-700 rounded-b-xl">
           <button
             onClick={() => onMarcarEntregado(pedido)}
-            className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+            className="w-full py-4 text-lg bg-green-600 active:bg-green-800 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 min-h-[56px]"
           >
-            <Check className="w-5 h-5" />
+            <Check className="w-6 h-6" />
             Marcar como Entregado
           </button>
         </div>
       )}
 
       {pedido.estado === 'entregado' && (
-        <div className="p-3 bg-green-100 dark:bg-green-900/30 border-t border-green-200 dark:border-green-800 rounded-b-xl">
-          <p className="text-center text-green-700 dark:text-green-400 font-medium flex items-center justify-center gap-2">
-            <Check className="w-5 h-5" />
+        <div className="p-4 bg-green-100 dark:bg-green-900/30 border-t border-green-200 dark:border-green-800 rounded-b-xl">
+          <p className="text-center text-green-700 dark:text-green-400 font-semibold text-lg flex items-center justify-center gap-2">
+            <Check className="w-6 h-6" />
             Entregado
           </p>
         </div>
@@ -236,6 +239,9 @@ function VistaRutaTransportista({
   // Ref para saber si el pago del modal fue exitoso (no queremos marcar
   // entregado si el transportista cancelo).
   const pagoExitosoRef = useRef(false);
+
+  // Estado de conexion — en ruta es importante saber si quedo sin red.
+  const { isOnline } = useAuthData();
 
   // Enriquecer pedidos con datos de clientes y productos
   const pedidosEnriquecidos = useMemo<PedidoEnriquecido[]>(() => {
@@ -342,18 +348,38 @@ function VistaRutaTransportista({
     return result;
   };
 
+  // Banner de estado offline — visible solo cuando el navegador reporta sin red.
+  const offlineBanner = !isOnline ? (
+    <div
+      role="alert"
+      className="sticky top-0 z-30 -mx-4 px-4 py-3 bg-orange-500 text-white shadow-md flex items-center gap-3"
+    >
+      <WifiOff className="w-5 h-5 flex-shrink-0" aria-hidden />
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold">Sin conexión a internet</p>
+        <p className="text-sm text-orange-100">
+          Las entregas y pagos no se están guardando. Volvé a intentar cuando recuperes señal.
+        </p>
+      </div>
+    </div>
+  ) : null;
+
   if (pedidosOrdenados.length === 0) {
     return (
-      <div className="text-center py-12">
-        <Truck className="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
-        <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">Sin entregas asignadas</h3>
-        <p className="text-gray-500 dark:text-gray-500">No tienes entregas pendientes por el momento</p>
-      </div>
+      <>
+        {offlineBanner}
+        <div className="text-center py-12">
+          <Truck className="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
+          <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">Sin entregas asignadas</h3>
+          <p className="text-gray-500 dark:text-gray-500">No tienes entregas pendientes por el momento</p>
+        </div>
+      </>
     );
   }
 
   return (
     <div className="space-y-6">
+      {offlineBanner}
       {/* Header con resumen */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-6 text-white shadow-lg">
         <div className="flex items-center gap-3 mb-4">
