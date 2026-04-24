@@ -160,6 +160,8 @@ export {
   useAjustarStockPromoMutation,
   usePromoUnidadesEntregadasQuery,
 } from './usePromocionesQuery'
+export { useSimularSalvedadPromoImpactoQuery } from './useSimularSalvedadQuery'
+export type { PromoImpactoSalvedad } from './useSimularSalvedadQuery'
 export type { PromocionConDetalles, PromocionFormInput } from './usePromocionesQuery'
 
 // Notas de Crédito

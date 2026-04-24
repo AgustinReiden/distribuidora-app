@@ -1,11 +1,12 @@
 /**
  * Vista de ruta para transportista
  */
-import React, { useState, useMemo, memo } from 'react';
+import React, { useState, useMemo, useRef, memo } from 'react';
 import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
 import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
+import ModalRegistrarPago from '../modals/ModalRegistrarPago';
 
 // =============================================================================
 // INTERFACES DE PROPS Y TIPOS
@@ -26,6 +27,20 @@ export interface VistaRutaTransportistaProps {
     fotoUrl?: string;
     devolverStock: boolean;
   }) => Promise<RegistrarSalvedadResult>;
+  /**
+   * Handler para registrar un pago al marcar entregado. Si el pedido ya esta
+   * pagado o no se provee este handler, se salta el modal y se marca
+   * entregado directamente.
+   */
+  onRegistrarPago?: (data: {
+    clienteId: string;
+    pedidoId: string | null;
+    monto: number;
+    formaPago: string;
+    referencia: string;
+    notas: string;
+    fecha: string;
+  }) => Promise<unknown>;
 }
 
 interface PedidoEnriquecido extends PedidoDB {
@@ -207,13 +222,20 @@ function VistaRutaTransportista({
   userId,
   clientes,
   productos,
-  onRegistrarSalvedad
+  onRegistrarSalvedad,
+  onRegistrarPago
 }: VistaRutaTransportistaProps): React.ReactElement {
   // Estado para modal de salvedad
   const [salvedadModal, setSalvedadModal] = useState<{
     pedidoId: string;
     item: PedidoItemDB & { producto?: ProductoDB };
   } | null>(null);
+
+  // Estado para modal de pago al marcar entregado. Si null, no hay modal.
+  const [pedidoParaCobrar, setPedidoParaCobrar] = useState<PedidoEnriquecido | null>(null);
+  // Ref para saber si el pago del modal fue exitoso (no queremos marcar
+  // entregado si el transportista cancelo).
+  const pagoExitosoRef = useRef(false);
 
   // Enriquecer pedidos con datos de clientes y productos
   const pedidosEnriquecidos = useMemo<PedidoEnriquecido[]>(() => {
@@ -263,7 +285,38 @@ function VistaRutaTransportista({
   const totalPendienteCobro = pedidosOrdenados.filter(p => p.estado === 'asignado' && p.estado_pago !== 'pagado').reduce((sum, p) => sum + (p.total || 0), 0);
 
   const handleMarcarEntregado = (pedido: PedidoEnriquecido): void => {
+    // Si el pedido no esta pagado y hay handler de pago disponible, abrimos
+    // modal de cobranza. Si ya esta pagado o no hay handler, marcamos directo.
+    if (onRegistrarPago && pedido.estado_pago !== 'pagado' && pedido.cliente) {
+      pagoExitosoRef.current = false;
+      setPedidoParaCobrar(pedido);
+      return;
+    }
     onMarcarEntregado(pedido as PedidoDB);
+  };
+
+  const handleConfirmarPago = async (data: {
+    clienteId: string;
+    pedidoId: string | null;
+    monto: number;
+    formaPago: string;
+    referencia: string;
+    notas: string;
+    fecha: string;
+  }): Promise<import('../../types').Pago & { monto: number }> => {
+    if (!onRegistrarPago) throw new Error('Handler de pago no disponible');
+    const pago = await onRegistrarPago(data);
+    pagoExitosoRef.current = true;
+    return pago as import('../../types').Pago & { monto: number };
+  };
+
+  const handleCerrarModalPago = (): void => {
+    const pedido = pedidoParaCobrar;
+    setPedidoParaCobrar(null);
+    if (pagoExitosoRef.current && pedido) {
+      onMarcarEntregado(pedido as PedidoDB);
+    }
+    pagoExitosoRef.current = false;
   };
 
   const handleReportarSalvedad = (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }): void => {
@@ -375,6 +428,17 @@ function VistaRutaTransportista({
           item={salvedadModal.item}
           onSave={handleGuardarSalvedad}
           onClose={() => setSalvedadModal(null)}
+        />
+      )}
+
+      {/* Modal de registrar pago al marcar entregado */}
+      {pedidoParaCobrar && pedidoParaCobrar.cliente && (
+        <ModalRegistrarPago
+          cliente={pedidoParaCobrar.cliente}
+          saldoPendiente={(pedidoParaCobrar.total || 0) - (pedidoParaCobrar.monto_pagado || 0)}
+          pedidos={[pedidoParaCobrar as unknown as import('../../types').Pedido]}
+          onClose={handleCerrarModalPago}
+          onConfirmar={handleConfirmarPago}
         />
       )}
     </div>
