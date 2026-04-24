@@ -250,13 +250,39 @@ export default function VistaPromociones({
                   </div>
                 )}
 
-                {/* Contador auxiliar: solo muestra cuántas unidades faltan para el proximo bloque (fracción) */}
+                {/* Subunidades pendientes para el proximo bloque (solo fracción) */}
                 {promo.ajuste_automatico && promo.unidades_por_bloque && promo.unidades_por_bloque > 0 && (
-                  <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
-                    <span className="font-medium">Progreso hacia el próximo bloque:</span>{' '}
-                    {promo.usos_pendientes} / {promo.unidades_por_bloque} unidades
-                    {promo.usos_pendientes === 0 && ' (bloque recién cerrado)'}
-                  </div>
+                  (() => {
+                    const pendientes = promo.usos_pendientes ?? 0
+                    const porBloque = promo.unidades_por_bloque ?? 0
+                    const falta = Math.max(porBloque - pendientes, 0)
+                    const progreso = porBloque > 0 ? Math.min((pendientes / porBloque) * 100, 100) : 0
+                    return (
+                      <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div className="flex items-center justify-between gap-2 text-sm text-blue-700 dark:text-blue-300 mb-1.5">
+                          <span className="font-medium">
+                            Subunidades pendientes para descontar stock:
+                          </span>
+                          <span className="font-bold tabular-nums">
+                            {pendientes} / {porBloque}
+                          </span>
+                        </div>
+                        <div className="w-full bg-blue-100 dark:bg-blue-900/40 rounded-full h-2 overflow-hidden">
+                          <div
+                            className="bg-blue-500 dark:bg-blue-400 h-full transition-all"
+                            style={{ width: `${progreso}%` }}
+                            aria-label={`${pendientes} de ${porBloque}`}
+                          />
+                        </div>
+                        <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
+                          {pendientes === 0
+                            ? 'Bloque recién cerrado — se descontó 1 unidad del contenedor.'
+                            : `Faltan ${falta} subunidad${falta === 1 ? '' : 'es'} para cerrar el próximo bloque y descontar 1 unidad del contenedor.`
+                          }
+                        </p>
+                      </div>
+                    )
+                  })()
                 )}
 
                 {/* Productos */}
