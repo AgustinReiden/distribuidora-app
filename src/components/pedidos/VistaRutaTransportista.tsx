@@ -139,7 +139,9 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad 
                 <div key={item.id} className={`flex items-center justify-between text-sm p-2 rounded gap-2 ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800' : 'bg-gray-50 dark:bg-gray-700'}`}>
                   <span className="text-gray-700 dark:text-gray-300 flex-1 flex items-center gap-1.5">
                     {item.es_bonificacion && <Gift className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />}
-                    {item.cantidad}x {item.producto?.nombre || 'Producto sin nombre'}
+                    {item.cantidad}x {item.es_bonificacion && item.descripcion_regalo
+                      ? item.descripcion_regalo
+                      : (item.producto?.nombre || 'Producto sin nombre')}
                     {item.es_bonificacion && <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1 py-0.5 rounded font-medium">REGALO</span>}
                   </span>
                   {!item.es_bonificacion && <span className="text-gray-500">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</span>}

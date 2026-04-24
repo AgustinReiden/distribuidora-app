@@ -48,6 +48,7 @@ export interface PromocionFormInput {
   ajusteProductoId?: string | null
   unidadesPorBloque?: number | null
   stockPorBloque?: number | null
+  descripcionRegalo?: string | null
 }
 
 // =============================================================================
@@ -194,6 +195,7 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
       ajuste_producto_id: input.ajusteProductoId ? parseInt(input.ajusteProductoId) : null,
       unidades_por_bloque: input.unidadesPorBloque ?? null,
       stock_por_bloque: input.stockPorBloque ?? null,
+      descripcion_regalo: input.descripcionRegalo ?? null,
     }])
     .select()
     .single()
@@ -260,6 +262,7 @@ async function updatePromocion(
       ajuste_producto_id: input.ajusteProductoId ? parseInt(input.ajusteProductoId) : null,
       unidades_por_bloque: input.unidadesPorBloque ?? null,
       stock_por_bloque: input.stockPorBloque ?? null,
+      descripcion_regalo: input.descripcionRegalo ?? null,
     })
     .eq('id', id)
     .select()

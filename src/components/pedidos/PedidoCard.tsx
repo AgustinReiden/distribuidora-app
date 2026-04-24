@@ -333,7 +333,9 @@ function PedidoCard({
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                       {item.es_bonificacion && <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />}
-                      {item.producto?.nombre || 'Producto'}
+                      {item.es_bonificacion && item.descripcion_regalo
+                        ? item.descripcion_regalo
+                        : (item.producto?.nombre || 'Producto')}
                       {item.es_bonificacion && <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full font-medium">REGALO</span>}
                       {salvedadItem && (
                         <span className="text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-medium">
