@@ -52,9 +52,6 @@ export default function ModalPromocion({
   const [prioridad, setPrioridad] = useState<string>(
     promocion?.prioridad != null ? String(promocion.prioridad) : '0'
   )
-  const [regaloMueveStock, setRegaloMueveStock] = useState<boolean>(
-    promocion?.regalo_mueve_stock ?? false
-  )
   const [modoExclusion, setModoExclusion] = useState<'acumulable' | 'excluyente'>(
     (promocion?.modo_exclusion as 'acumulable' | 'excluyente') ?? 'acumulable'
   )
@@ -147,11 +144,14 @@ export default function ModalPromocion({
       return
     }
 
-    // Derivados segun tipo de regalo. Fraccion fuerza ajuste automatico y
-    // regalo NO mueve stock directamente (el auto-ajuste descuenta bloques).
+    // Derivados segun tipo de regalo.
+    // - Fraccion: ajuste_automatico=true (descuenta fardo al cerrar bloque),
+    //   regalo_mueve_stock=false (no descuenta al entregar la botella suelta).
+    // - Unidad entera: ajuste_automatico=false, regalo_mueve_stock=true
+    //   (el stock se descuenta al entregar cada unidad completa).
     const esFraccion = tipoRegalo === 'fraccion'
-    const finalAjusteAutomatico = esFraccion ? true : false
-    const finalRegaloMueveStock = esFraccion ? false : regaloMueveStock
+    const finalAjusteAutomatico = esFraccion
+    const finalRegaloMueveStock = !esFraccion
 
     if (esFraccion) {
       if (!descripcionRegalo.trim()) {
@@ -375,35 +375,6 @@ export default function ModalPromocion({
             </div>
           </div>
 
-          {/* Mueve stock (solo para unidad entera) */}
-          {tipoRegalo === 'unidad_entera' && (
-            <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                  El regalo descuenta stock automáticamente
-                </p>
-                <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                  Si se regala una unidad que existe como producto en el stock, dejalo encendido. Apagalo si lo ajustás manualmente después.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={regaloMueveStock}
-                onClick={() => setRegaloMueveStock(v => !v)}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
-                  regaloMueveStock ? 'bg-amber-600' : 'bg-gray-300 dark:bg-gray-600'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    regaloMueveStock ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-          )}
-
           {/* Descripción manual del regalo (solo fracción) */}
           {tipoRegalo === 'fraccion' && (
             <div>
@@ -423,15 +394,15 @@ export default function ModalPromocion({
             </div>
           )}
 
-          {/* Ajuste automatico por bloques (solo fracción — siempre visible/requerido) */}
+          {/* Regla de bonificación — layout fracción (incluye producto contenedor, bloque y cantidades) */}
           {tipoRegalo === 'fraccion' && (
             <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 space-y-3">
               <div>
                 <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                  Ajuste automático de stock por bloques
+                  Regla de bonificación
                 </p>
                 <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                  Cuando se acumulan suficientes regalos como para formar un bloque exacto (ej: 12 botellas = 1 fardo), el sistema descuenta el stock y registra la merma. Las unidades sueltas quedan pendientes hasta completar el próximo bloque.
+                  Al acumularse las unidades sueltas hasta formar un bloque exacto (ej: 12 botellas = 1 fardo), el sistema descuenta el stock del producto contenedor y registra la merma automáticamente.
                 </p>
               </div>
 
@@ -529,54 +500,93 @@ export default function ModalPromocion({
                     </div>
                   </div>
 
-                  {unidadesPorBloque && stockPorBloque && parseInt(unidadesPorBloque) > 0 && parseInt(stockPorBloque) > 0 && (
+                  {/* Cantidad compra y cantidad gratis (dentro del bloque fracción) */}
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-blue-200 dark:border-blue-800">
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        Cantidad compra
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        step="1"
+                        min="1"
+                        value={cantidadCompra}
+                        onChange={e => setCantidadCompra(e.target.value)}
+                        placeholder="Ej: 2"
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        Cantidad gratis
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        step="1"
+                        min="1"
+                        value={cantidadBonificacion}
+                        onChange={e => setCantidadBonificacion(e.target.value)}
+                        placeholder="Ej: 1"
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {cantidadCompra && cantidadBonificacion && unidadesPorBloque && stockPorBloque
+                    && parseInt(cantidadCompra) > 0 && parseInt(cantidadBonificacion) > 0
+                    && parseInt(unidadesPorBloque) > 0 && parseInt(stockPorBloque) > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 rounded px-2 py-1.5">
-                      Resumen: cada {unidadesPorBloque} unidades bonificadas descuentan {stockPorBloque} del stock del producto elegido y generan una merma.
+                      Resumen: cada {cantidadCompra} unidades compradas → {cantidadBonificacion} gratis ({descripcionRegalo.trim() || 'unidad fraccionada'}). Cada {unidadesPorBloque} unidades regaladas descuentan {stockPorBloque} del stock del producto contenedor.
                     </p>
                   )}
               </div>
             </div>
           )}
 
-          {/* Reglas de bonificacion */}
-          <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-            <p className="text-sm font-medium text-purple-700 dark:text-purple-300 mb-2">Regla de bonificacion</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad compra</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  step="1"
-                  min="1"
-                  value={cantidadCompra}
-                  onChange={e => setCantidadCompra(e.target.value)}
-                  placeholder="Ej: 12"
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
-                />
+          {/* Regla de bonificacion — layout unidad entera */}
+          {tipoRegalo === 'unidad_entera' && (
+            <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+              <p className="text-sm font-medium text-purple-700 dark:text-purple-300 mb-2">Regla de bonificación</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad compra</label>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    step="1"
+                    min="1"
+                    value={cantidadCompra}
+                    onChange={e => setCantidadCompra(e.target.value)}
+                    placeholder="Ej: 12"
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad gratis</label>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    step="1"
+                    min="1"
+                    value={cantidadBonificacion}
+                    onChange={e => setCantidadBonificacion(e.target.value)}
+                    placeholder="Ej: 2"
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad gratis</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  step="1"
-                  min="1"
-                  value={cantidadBonificacion}
-                  onChange={e => setCantidadBonificacion(e.target.value)}
-                  placeholder="Ej: 2"
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
-                />
-              </div>
+              {cantidadCompra && cantidadBonificacion && parseInt(cantidadCompra) > 0 && parseInt(cantidadBonificacion) > 0 && (
+                <p className="text-xs text-purple-600 mt-2">
+                  Cada {cantidadCompra} unidades compradas → {cantidadBonificacion} gratis (acumulable)
+                </p>
+              )}
             </div>
-            {cantidadCompra && cantidadBonificacion && parseInt(cantidadCompra) > 0 && parseInt(cantidadBonificacion) > 0 && (
-              <p className="text-xs text-purple-600 mt-2">
-                Cada {cantidadCompra} unidades compradas → {cantidadBonificacion} gratis (acumulable)
-              </p>
-            )}
-          </div>
+          )}
 
-          {/* Producto regalo */}
+          {/* Producto regalo (solo unidad entera) */}
+          {tipoRegalo === 'unidad_entera' && (
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Producto de regalo
@@ -628,6 +638,7 @@ export default function ModalPromocion({
               </div>
             )}
           </div>
+          )}
 
           {/* Selector de productos (que activan la promo) */}
           <div>

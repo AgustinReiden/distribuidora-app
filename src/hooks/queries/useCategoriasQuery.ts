@@ -21,6 +21,7 @@ export interface CategoriaDB {
   id: string
   nombre: string
   sucursal_id: number
+  activa: boolean
   created_at: string
   updated_at: string
 }
@@ -194,6 +195,48 @@ export function useEliminarCategoriaMutation() {
 
   return useMutation({
     mutationFn: deleteCategoria,
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: categoriasKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Toggle soft-delete: marca la categoria como activa/inactiva sin borrarla.
+ * Una categoria inactiva no aparece en selectores ni filtros. Los productos
+ * que la tenian asignada se dejan con categoria NULL.
+ */
+async function toggleCategoriaActiva(
+  { id, activa, nombre }: { id: string; activa: boolean; nombre: string }
+): Promise<CategoriaDB> {
+  const { data, error } = await supabase
+    .from('categorias')
+    .update({ activa })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+
+  // Si estamos desactivando, soltar la asignacion en productos para que no
+  // sigan apareciendo con esa categoria en filtros.
+  if (!activa) {
+    const { error: bulkErr } = await supabase
+      .from('productos')
+      .update({ categoria: null })
+      .eq('categoria', nombre)
+    if (bulkErr) throw bulkErr
+  }
+
+  return data as CategoriaDB
+}
+
+export function useToggleCategoriaActivaMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: toggleCategoriaActiva,
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: categoriasKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })

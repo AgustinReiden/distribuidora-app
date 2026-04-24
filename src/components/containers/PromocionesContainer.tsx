@@ -3,7 +3,7 @@
  *
  * Container que gestiona promociones usando TanStack Query.
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { lazy, Suspense, useMemo, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   usePromocionesListQuery,
@@ -12,11 +12,10 @@ import {
   useActualizarPromocionMutation,
   useEliminarPromocionMutation,
   useTogglePromocionActivaMutation,
-  useAjustarStockPromoMutation,
+  usePromoUnidadesEntregadasQuery,
 } from '../../hooks/queries'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
-import { useAuthData } from '../../contexts/AuthDataContext'
 
 const VistaPromociones = lazy(() => import('../vistas/VistaPromociones'))
 const ModalPromocion = lazy(() => import('../modals/ModalPromocion'))
@@ -40,18 +39,23 @@ interface ConfirmConfig {
 
 export default function PromocionesContainer(): React.ReactElement {
   const notify = useNotification()
-  const { user } = useAuthData()
 
   // Queries
   const { data: promociones = [], isLoading } = usePromocionesListQuery()
   const { data: productos = [] } = useProductosQuery()
+  const { data: unidadesEntregadas } = usePromoUnidadesEntregadasQuery()
+
+  const productoNombres = useMemo(() => {
+    const m = new Map<string, string>()
+    productos.forEach(p => m.set(String(p.id), p.nombre))
+    return m
+  }, [productos])
 
   // Mutations
   const crearPromocion = useCrearPromocionMutation()
   const actualizarPromocion = useActualizarPromocionMutation()
   const eliminarPromocion = useEliminarPromocionMutation()
   const toggleActivo = useTogglePromocionActivaMutation()
-  const ajustarStock = useAjustarStockPromoMutation()
 
   // Estado modal
   const [modalOpen, setModalOpen] = useState(false)
@@ -95,26 +99,6 @@ export default function PromocionesContainer(): React.ReactElement {
     }
   }, [toggleActivo, notify])
 
-  const handleAjustarStock = useCallback(async (
-    promo: PromocionConDetalles,
-    payload: { productoRegaloId: string; cantidadStock: number; usosAjustados: number; observaciones: string },
-  ) => {
-    try {
-      await ajustarStock.mutateAsync({
-        promocionId: promo.id,
-        productoRegaloId: payload.productoRegaloId,
-        cantidadStock: payload.cantidadStock,
-        usosAjustados: payload.usosAjustados,
-        usuarioId: user?.id ?? '',
-        observaciones: payload.observaciones || undefined,
-      })
-      notify.success(`Stock ajustado: -${payload.cantidadStock} unidades (${payload.usosAjustados} usos resueltos)`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al ajustar stock'
-      notify.error(msg)
-    }
-  }, [ajustarStock, notify, user])
-
   const handleGuardarPromocion = useCallback(async (data: PromocionFormInput) => {
     try {
       if (promoEditando) {
@@ -139,13 +123,13 @@ export default function PromocionesContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaPromociones
           promociones={promociones}
-          productos={productos}
+          productoNombres={productoNombres}
+          unidadesEntregadas={unidadesEntregadas}
           loading={isLoading}
           onNuevaPromocion={handleNuevaPromocion}
           onEditarPromocion={handleEditarPromocion}
           onEliminarPromocion={handleEliminarPromocion}
           onToggleActivo={handleToggleActivo}
-          onAjustarStock={handleAjustarStock}
         />
       </Suspense>
 
