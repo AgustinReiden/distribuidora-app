@@ -61,9 +61,6 @@ export default function ModalPromocion({
   const [unidadesPorBloque, setUnidadesPorBloque] = useState<string>(
     promocion?.unidades_por_bloque ? String(promocion.unidades_por_bloque) : ''
   )
-  const [stockPorBloque, setStockPorBloque] = useState<string>(
-    promocion?.stock_por_bloque ? String(promocion.stock_por_bloque) : '1'
-  )
   const [descripcionRegalo, setDescripcionRegalo] = useState<string>(
     promocion?.descripcion_regalo ?? ''
   )
@@ -159,17 +156,12 @@ export default function ModalPromocion({
         return
       }
       if (!ajusteProductoId) {
-        setError('Seleccioná el producto que se descuenta del stock (ej: el fardo que contiene las botellas)')
+        setError('Seleccioná el producto del que se descuenta el stock (ej: el fardo contenedor)')
         return
       }
       const unidBloque = parseInt(unidadesPorBloque)
       if (!unidBloque || unidBloque <= 0) {
-        setError('Ingresá cuántas unidades bonificadas forman un bloque (ej: 12 botellas = 1 fardo)')
-        return
-      }
-      const stockBloque = parseInt(stockPorBloque)
-      if (!stockBloque || stockBloque <= 0) {
-        setError('Ingresá cuánto stock descuenta cada bloque (normalmente 1)')
+        setError('Ingresá cuántas subunidades forman una unidad del producto contenedor (ej: 6 botellas = 1 fardo)')
         return
       }
     }
@@ -178,7 +170,9 @@ export default function ModalPromocion({
     const limite = limiteUsos ? parseInt(limiteUsos) : null
     const prio = parseInt(prioridad)
     const unidBloque = parseInt(unidadesPorBloque)
-    const stockBloque = parseInt(stockPorBloque)
+    // stock_por_bloque siempre es 1 en el modelo fraccional (no es un campo
+    // visible al usuario). El backend lo usa al cerrar un bloque.
+    const stockBloque = 1
     const result = await onSave({
       nombre: nombre.trim(),
       tipo: 'bonificacion',
@@ -460,11 +454,29 @@ export default function ModalPromocion({
                     )}
                   </div>
 
-                  {/* Unidades por bloque y Stock por bloque */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* Unidades regaladas por promocion + Subunidades por unidad + Cantidad compra */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
-                        Unidades bonificadas por bloque
+                        Unidades regaladas por promoción
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        step="1"
+                        min="1"
+                        value={cantidadBonificacion}
+                        onChange={e => setCantidadBonificacion(e.target.value)}
+                        placeholder="Ej: 2"
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                      />
+                      <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
+                        Ej: 2 botellas por cada aplicación.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        Subunidades por unidad
                       </label>
                       <input
                         type="number"
@@ -473,35 +485,13 @@ export default function ModalPromocion({
                         min="1"
                         value={unidadesPorBloque}
                         onChange={e => setUnidadesPorBloque(e.target.value)}
-                        placeholder="Ej: 12"
+                        placeholder="Ej: 6"
                         className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                       />
                       <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
-                        Cuántas unidades regaladas forman un bloque.
+                        Ej: 6 botellas = 1 fardo.
                       </p>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
-                        Stock descontado por bloque
-                      </label>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        step="1"
-                        min="1"
-                        value={stockPorBloque}
-                        onChange={e => setStockPorBloque(e.target.value)}
-                        placeholder="Ej: 1"
-                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
-                      />
-                      <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
-                        Cuánto se descuenta por cada bloque (normalmente 1).
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Cantidad compra y cantidad gratis (dentro del bloque fracción) */}
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-blue-200 dark:border-blue-800">
                     <div>
                       <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
                         Cantidad compra
@@ -513,32 +503,20 @@ export default function ModalPromocion({
                         min="1"
                         value={cantidadCompra}
                         onChange={e => setCantidadCompra(e.target.value)}
-                        placeholder="Ej: 2"
+                        placeholder="Ej: 5"
                         className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                       />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
-                        Cantidad gratis
-                      </label>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        step="1"
-                        min="1"
-                        value={cantidadBonificacion}
-                        onChange={e => setCantidadBonificacion(e.target.value)}
-                        placeholder="Ej: 1"
-                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
-                      />
+                      <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
+                        Del producto disparador.
+                      </p>
                     </div>
                   </div>
 
-                  {cantidadCompra && cantidadBonificacion && unidadesPorBloque && stockPorBloque
+                  {cantidadCompra && cantidadBonificacion && unidadesPorBloque
                     && parseInt(cantidadCompra) > 0 && parseInt(cantidadBonificacion) > 0
-                    && parseInt(unidadesPorBloque) > 0 && parseInt(stockPorBloque) > 0 && (
+                    && parseInt(unidadesPorBloque) > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 rounded px-2 py-1.5">
-                      Resumen: cada {cantidadCompra} unidades compradas → {cantidadBonificacion} gratis ({descripcionRegalo.trim() || 'unidad fraccionada'}). Cada {unidadesPorBloque} unidades regaladas descuentan {stockPorBloque} del stock del producto contenedor.
+                      Resumen: cada {cantidadCompra} unidades compradas → {cantidadBonificacion} {descripcionRegalo.trim() || 'subunidad(es)'} gratis. Cada {unidadesPorBloque} subunidades regaladas se descuenta 1 del stock del producto contenedor.
                     </p>
                   )}
               </div>
