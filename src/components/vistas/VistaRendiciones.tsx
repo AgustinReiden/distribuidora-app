@@ -20,7 +20,8 @@ import {
   Receipt
 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
-import { useRendiciones, useUsuarios } from '../../hooks/supabase'
+import { useRendiciones } from '../../hooks/supabase'
+import { useTransportistasQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { FORMAS_PAGO } from '../../constants/formasPago'
 import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput } from '../../types'
@@ -278,7 +279,7 @@ export default function VistaRendiciones(): React.ReactElement {
     confirmarRendicion,
     resolverRendicion
   } = useRendiciones()
-  const { transportistas } = useUsuarios()
+  const { data: transportistas = [] } = useTransportistasQuery()
 
   const hoy = fechaLocalISO()
   const haceUnaSemana = useMemo(() => {
