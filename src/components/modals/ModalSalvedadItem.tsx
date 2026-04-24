@@ -3,8 +3,9 @@
  * Usado por transportistas y admin cuando un item no puede ser entregado
  */
 import React, { useState, FormEvent, ChangeEvent } from 'react'
-import { X, AlertTriangle, Package, FileText, AlertCircle } from 'lucide-react'
+import { X, AlertTriangle, Package, FileText, AlertCircle, Gift } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
+import { useSimularSalvedadPromoImpactoQuery } from '../../hooks/queries'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
 
 interface MotivoOption {
@@ -148,6 +149,14 @@ export default function ModalSalvedadItem({
   const montoAfectado = cantidadNum * item.precio_unitario
   const cantidadRestante = item.cantidad - cantidadNum
 
+  // Dry-run: detecta si esta salvedad rompe alguna bonificacion de promo.
+  const { data: promosAfectadas = [] } = useSimularSalvedadPromoImpactoQuery(
+    pedidoId,
+    item.id,
+    cantidadNum > 0 && cantidadNum <= item.cantidad ? cantidadNum : 0,
+  )
+  const tienePromoRota = promosAfectadas.length > 0
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -287,6 +296,45 @@ export default function ModalSalvedadItem({
             </div>
           )}
 
+          {/* Alerta de promocion rota */}
+          {tienePromoRota && (
+            <div
+              role="alert"
+              className="p-3 bg-red-50 dark:bg-red-900/20 border-2 border-red-400 dark:border-red-700 rounded-lg space-y-2"
+            >
+              <div className="flex items-start gap-2">
+                <Gift className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-red-700 dark:text-red-300">
+                    Atención: esta salvedad afecta {promosAfectadas.length === 1 ? 'una promoción' : 'varias promociones'}
+                  </p>
+                  <ul className="mt-1.5 space-y-1">
+                    {promosAfectadas.map(p => (
+                      <li key={p.promocion_id} className="text-sm text-red-700 dark:text-red-300">
+                        •{' '}
+                        <span className="font-semibold">{p.promo_nombre}:</span>{' '}
+                        {p.sera_eliminada ? (
+                          <>
+                            se cancela por completo el regalo{' '}
+                            <span className="italic">
+                              &ldquo;{p.descripcion_regalo || `${p.bonif_actual} unidades`}&rdquo;
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            el regalo baja de <span className="font-bold">{p.bonif_actual}</span> a{' '}
+                            <span className="font-bold">{p.bonif_esperada}</span> unidades
+                            {p.descripcion_regalo && ` (${p.descripcion_regalo})`}
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -306,7 +354,11 @@ export default function ModalSalvedadItem({
             <button
               type="submit"
               disabled={guardando || !motivo || cantidadNum <= 0}
-              className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                tienePromoRota
+                  ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-400'
+                  : 'bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400'
+              }`}
             >
               {guardando ? (
                 <>
@@ -316,7 +368,7 @@ export default function ModalSalvedadItem({
               ) : (
                 <>
                   <AlertTriangle className="w-4 h-4" />
-                  Registrar Salvedad
+                  {tienePromoRota ? 'Confirmar (se pierde promo)' : 'Registrar Salvedad'}
                 </>
               )}
             </button>

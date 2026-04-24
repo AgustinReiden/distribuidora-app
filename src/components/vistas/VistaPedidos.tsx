@@ -14,7 +14,9 @@ import type {
   ClienteDB,
   ProductoDB,
   PerfilDB,
-  FiltrosPedidosState
+  FiltrosPedidosState,
+  MotivoSalvedad,
+  RegistrarSalvedadResult
 } from '../../types';
 import type { PedidoStatsSummary } from '../../hooks/queries';
 
@@ -64,6 +66,26 @@ export interface VistaPedidosProps {
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
   onAsignarTransportistaMasivo?: () => void;
+  /** Handler para registrar una salvedad individual desde la vista transportista. */
+  onRegistrarSalvedad?: (data: {
+    pedidoId: string;
+    pedidoItemId: string;
+    cantidadAfectada: number;
+    motivo: MotivoSalvedad;
+    descripcion?: string;
+    fotoUrl?: string;
+    devolverStock: boolean;
+  }) => Promise<RegistrarSalvedadResult>;
+  /** Handler para registrar un pago (reutiliza el flujo del admin). */
+  onRegistrarPago?: (data: {
+    clienteId: string;
+    pedidoId: string | null;
+    monto: number;
+    formaPago: string;
+    referencia: string;
+    notas: string;
+    fecha: string;
+  }) => Promise<unknown>;
 }
 
 export default function VistaPedidos({
@@ -105,6 +127,8 @@ export default function VistaPedidos({
   onEntregasMasivas,
   onPagosMasivos,
   onAsignarTransportistaMasivo,
+  onRegistrarSalvedad,
+  onRegistrarPago,
 }: VistaPedidosProps) {
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
@@ -115,6 +139,8 @@ export default function VistaPedidos({
         userId={userId}
         clientes={clientes}
         productos={productos}
+        onRegistrarSalvedad={onRegistrarSalvedad}
+        onRegistrarPago={onRegistrarPago}
       />
     );
   }

@@ -31,6 +31,7 @@ import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
 import { usePromocionPedido } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { supabase } from '../../hooks/supabase/base'
+import { usePagos } from '../../hooks/supabase/usePagos'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 
@@ -92,6 +93,8 @@ export default function PedidosContainer(): React.ReactElement {
   const [filtros, setFiltros] = useState<FiltrosPedidosState>(DEFAULT_FILTROS)
 
   // Queries - use debounced search to avoid firing on every keystroke
+  const { registrarPago } = usePagos()
+
   const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
   )
@@ -709,6 +712,45 @@ export default function PedidosContainer(): React.ReactElement {
     return results
   }, [queryClient])
 
+  // Handler single-salvedad para la vista transportista (wrapper sobre bulk)
+  const handleRegistrarSalvedadSingle = useCallback(async (data: {
+    pedidoId: string;
+    pedidoItemId: string;
+    cantidadAfectada: number;
+    motivo: import('../../types').MotivoSalvedad;
+    descripcion?: string;
+    fotoUrl?: string;
+    devolverStock: boolean;
+  }): Promise<RegistrarSalvedadResult> => {
+    const results = await handleSaveSalvedades([data])
+    return results[0] ?? { success: false, error: 'Sin respuesta del servidor' }
+  }, [handleSaveSalvedades])
+
+  // Handler de registrar pago desde la vista transportista. Usa usePagos +
+  // invalida cache de pedidos para refrescar monto_pagado / estado_pago.
+  const handleRegistrarPagoTransportista = useCallback(async (data: {
+    clienteId: string;
+    pedidoId: string | null;
+    monto: number;
+    formaPago: string;
+    referencia: string;
+    notas: string;
+    fecha: string;
+  }) => {
+    const pago = await registrarPago({
+      clienteId: data.clienteId,
+      pedidoId: data.pedidoId,
+      monto: data.monto,
+      formaPago: data.formaPago,
+      referencia: data.referencia,
+      notas: data.notas,
+      fecha: data.fecha,
+      usuarioId: user?.id ?? null,
+    })
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    return pago
+  }, [registrarPago, queryClient, user?.id])
+
   const handleMarcarEntregadoConSalvedadConfirm = useCallback(async () => {
     if (!pedidoParaSalvedad) return
     try {
@@ -770,6 +812,8 @@ export default function PedidosContainer(): React.ReactElement {
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
           onAsignarTransportistaMasivo={() => setModalAsignarMasivoOpen(true)}
+          onRegistrarSalvedad={handleRegistrarSalvedadSingle}
+          onRegistrarPago={handleRegistrarPagoTransportista}
         />
       </Suspense>
 
