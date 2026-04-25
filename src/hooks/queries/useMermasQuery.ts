@@ -66,7 +66,14 @@ async function fetchMermasByMotivo(motivo: string): Promise<MermaDBExtended[]> {
 }
 
 // Mutation functions
-async function registrarMerma(mermaData: MermaFormInputExtended): Promise<MermaRegistroResult> {
+async function registrarMerma(
+  mermaData: MermaFormInputExtended,
+  sucursalId: number | null
+): Promise<MermaRegistroResult> {
+  if (sucursalId == null) {
+    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+  }
+
   // Primero intentar insertar la merma (para fallar antes de modificar stock)
   const { data, error } = await supabase
     .from('mermas_stock')
@@ -77,7 +84,8 @@ async function registrarMerma(mermaData: MermaFormInputExtended): Promise<MermaR
       observaciones: mermaData.observaciones || null,
       stock_anterior: mermaData.stockAnterior,
       stock_nuevo: mermaData.stockNuevo,
-      usuario_id: mermaData.usuarioId || null
+      usuario_id: mermaData.usuarioId || null,
+      sucursal_id: sucursalId
     }])
     .select()
     .single()
@@ -160,7 +168,7 @@ export function useRegistrarMermaMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: registrarMerma,
+    mutationFn: (mermaData: MermaFormInputExtended) => registrarMerma(mermaData, currentSucursalId),
     onSuccess: (result, variables) => {
       // Agregar merma al cache si fue creada
       if (result.merma) {
