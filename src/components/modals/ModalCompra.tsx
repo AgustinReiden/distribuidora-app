@@ -54,6 +54,57 @@ export interface FacturaEscaneada {
   confianza: number;
 }
 
+/** Item escaneado pendiente de revisión humana */
+export type FacturaItemEscaneado = FacturaEscaneada['items'][number]
+
+/**
+ * Normaliza strings para comparar nombres/códigos: minúsculas,
+ * trim, colapsa whitespace.
+ */
+function normalizarTexto(s: string | null | undefined): string {
+  return (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * Auto-link estricto: solo retorna match si código exacto o nombre exacto
+ * (case/espacios normalizados). Cualquier otra coincidencia (parcial,
+ * substring) queda fuera para que el usuario decida.
+ */
+function matchProductoEstricto(
+  scanItem: FacturaItemEscaneado,
+  productos: ProductoDB[]
+): ProductoDB | null {
+  const cod = normalizarTexto(scanItem.codigo)
+  if (cod) {
+    const porCodigo = productos.find(p => normalizarTexto(p.codigo) === cod)
+    if (porCodigo) return porCodigo
+  }
+  const desc = normalizarTexto(scanItem.descripcion)
+  if (desc) {
+    const porNombre = productos.find(p => normalizarTexto(p.nombre) === desc)
+    if (porNombre) return porNombre
+  }
+  return null
+}
+
+/** Construye un CompraItemForm a partir de un producto resuelto + datos de la factura. */
+function construirCompraItemDesdeScan(
+  producto: ProductoDB,
+  scanItem: FacturaItemEscaneado
+): CompraItemForm {
+  return {
+    productoId: producto.id,
+    productoNombre: producto.nombre,
+    productoCodigo: producto.codigo || scanItem.codigo,
+    cantidad: scanItem.cantidad || 1,
+    bonificacion: scanItem.bonificacion || 0,
+    costoUnitario: scanItem.costoUnitario || 0,
+    impuestosInternos: 0,
+    porcentajeIva: scanItem.iva || 21,
+    stockActual: producto.stock || 0
+  }
+}
+
 /** Estado del reducer de compra */
 export interface CompraState {
   proveedorId: string;
@@ -74,6 +125,8 @@ export interface CompraState {
   escaneando: boolean;
   resultadoEscaneo: FacturaEscaneada | null;
   errorEscaneo: string;
+  /** Items del último escaneo que no se auto-vincularon y esperan decisión del usuario. */
+  itemsPendientesScan: FacturaItemEscaneado[];
 }
 
 /** Tipos de acciones del reducer */
@@ -100,7 +153,11 @@ type CompraActionType =
   | { type: 'SET_ESCANEANDO'; payload: boolean }
   | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
   | { type: 'SET_ERROR_ESCANEO'; payload: string }
-  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[] } };
+  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: FacturaItemEscaneado[] } }
+  | { type: 'RESOLVER_PENDIENTE_VINCULAR'; payload: { index: number; producto: ProductoDB } }
+  | { type: 'RESOLVER_PENDIENTE_CREAR'; payload: { index: number; producto: ProductoDB } }
+  | { type: 'RESOLVER_PENDIENTE_OMITIR'; payload: { index: number } }
+  | { type: 'LIMPIAR_PENDIENTES_SCAN' };
 
 /** Props del componente principal */
 export interface ModalCompraProps {
@@ -205,7 +262,8 @@ const initialState: CompraState = {
   // Escaneo
   escaneando: false,
   resultadoEscaneo: null,
-  errorEscaneo: ''
+  errorEscaneo: '',
+  itemsPendientesScan: []
 }
 
 // Reducer
@@ -330,7 +388,7 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
       return { ...state, errorEscaneo: action.payload, escaneando: false }
 
     case 'APLICAR_ESCANEO': {
-      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items } = action.payload
+      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items, pendientes } = action.payload
       return {
         ...state,
         proveedorId,
@@ -340,10 +398,44 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
         fechaCompra: fechaCompra || state.fechaCompra,
         formaPago: formaPago || state.formaPago,
         items,
+        itemsPendientesScan: pendientes,
         resultadoEscaneo: null,
         errorEscaneo: ''
       }
     }
+
+    case 'RESOLVER_PENDIENTE_VINCULAR':
+    case 'RESOLVER_PENDIENTE_CREAR': {
+      const { index, producto } = action.payload
+      const scanItem = state.itemsPendientesScan[index]
+      if (!scanItem) return state
+      const nuevoItem = construirCompraItemDesdeScan(producto, scanItem)
+      // Si ya existe un item con el mismo productoId, sumar cantidades
+      const existenteIdx = state.items.findIndex(i => i.productoId === producto.id)
+      const itemsActualizados = existenteIdx >= 0
+        ? state.items.map((i, idx) =>
+            idx === existenteIdx
+              ? { ...i, cantidad: i.cantidad + nuevoItem.cantidad }
+              : i
+          )
+        : [...state.items, nuevoItem]
+      return {
+        ...state,
+        items: itemsActualizados,
+        itemsPendientesScan: state.itemsPendientesScan.filter((_, i) => i !== index)
+      }
+    }
+
+    case 'RESOLVER_PENDIENTE_OMITIR': {
+      const { index } = action.payload
+      return {
+        ...state,
+        itemsPendientesScan: state.itemsPendientesScan.filter((_, i) => i !== index)
+      }
+    }
+
+    case 'LIMPIAR_PENDIENTES_SCAN':
+      return { ...state, itemsPendientesScan: [] }
 
     default:
       return state
@@ -480,35 +572,18 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
       if (match) proveedorIdMatch = match.id
     }
 
-    // Matchear items por código de producto
-    const itemsConvertidos: CompraItemForm[] = scan.items.map(scanItem => {
-      let productoMatch: ProductoDB | undefined
-      if (scanItem.codigo) {
-        productoMatch = productos.find(p =>
-          p.codigo && p.codigo.toLowerCase() === scanItem.codigo!.toLowerCase()
-        )
+    // Auto-vincular SOLO con certeza (código exacto o nombre exacto normalizados).
+    // El resto queda pendiente de revisión humana.
+    const itemsMatcheados: CompraItemForm[] = []
+    const pendientes: FacturaItemEscaneado[] = []
+    for (const scanItem of scan.items) {
+      const match = matchProductoEstricto(scanItem, productos)
+      if (match) {
+        itemsMatcheados.push(construirCompraItemDesdeScan(match, scanItem))
+      } else {
+        pendientes.push(scanItem)
       }
-      if (!productoMatch) {
-        // Intentar match por nombre parcial
-        const descLower = scanItem.descripcion.toLowerCase()
-        productoMatch = productos.find(p =>
-          p.nombre.toLowerCase().includes(descLower) ||
-          descLower.includes(p.nombre.toLowerCase())
-        )
-      }
-
-      return {
-        productoId: productoMatch?.id || '',
-        productoNombre: productoMatch?.nombre || scanItem.descripcion,
-        productoCodigo: productoMatch?.codigo || scanItem.codigo,
-        cantidad: scanItem.cantidad || 1,
-        bonificacion: scanItem.bonificacion || 0,
-        costoUnitario: scanItem.costoUnitario || 0,
-        impuestosInternos: 0,
-        porcentajeIva: scanItem.iva || 21,
-        stockActual: productoMatch?.stock || 0
-      }
-    })
+    }
 
     const formaPagoMap: Record<string, string> = {
       'efectivo': 'efectivo',
@@ -526,7 +601,8 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         numeroFactura: scan.numeroFactura || '',
         fechaCompra: scan.fechaCompra || '',
         formaPago: formaPagoMap[scan.formaPago || ''] || 'efectivo',
-        items: itemsConvertidos
+        items: itemsMatcheados,
+        pendientes
       }
     })
   }, [state.resultadoEscaneo, productos, proveedores])
@@ -643,6 +719,27 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             proveedores={proveedores}
             onAplicar={handleAplicarEscaneo}
             onDescartar={() => dispatch({ type: 'SET_RESULTADO_ESCANEO', payload: null })}
+          />
+        )}
+
+        {/* Panel de revisión de ítems no auto-vinculados */}
+        {state.itemsPendientesScan.length > 0 && (
+          <ItemsPendientesScanPanel
+            pendientes={state.itemsPendientesScan}
+            productos={productos}
+            puedeCrear={!!onCrearProductoRapido}
+            onVincular={(index, producto) =>
+              dispatch({ type: 'RESOLVER_PENDIENTE_VINCULAR', payload: { index, producto } })
+            }
+            onCrearNuevo={async (index, datos) => {
+              if (!onCrearProductoRapido) return
+              const producto = await onCrearProductoRapido(datos)
+              dispatch({ type: 'RESOLVER_PENDIENTE_CREAR', payload: { index, producto } })
+            }}
+            onOmitir={(index) =>
+              dispatch({ type: 'RESOLVER_PENDIENTE_OMITIR', payload: { index } })
+            }
+            onDescartarTodos={() => dispatch({ type: 'LIMPIAR_PENDIENTES_SCAN' })}
           />
         )}
 
@@ -1297,16 +1394,9 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
   onAplicar: () => void;
   onDescartar: () => void;
 }) {
-  // Contar items matcheados
-  const itemsMatcheados = resultado.items.filter(item => {
-    if (item.codigo) {
-      return productos.some(p => p.codigo?.toLowerCase() === item.codigo!.toLowerCase())
-    }
-    const desc = item.descripcion.toLowerCase()
-    return productos.some(p =>
-      p.nombre.toLowerCase().includes(desc) || desc.includes(p.nombre.toLowerCase())
-    )
-  }).length
+  // Contar items que se van a auto-vincular con certeza (mismas reglas que matchProductoEstricto)
+  const itemsMatcheados = resultado.items.filter(item => matchProductoEstricto(item, productos) !== null).length
+  const itemsPendientes = resultado.items.length - itemsMatcheados
 
   // Verificar match de proveedor
   const proveedorMatch = resultado.proveedorCuit
@@ -1362,7 +1452,8 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
       </div>
 
       <p className="text-xs text-gray-500 mb-3">
-        {resultado.items.length} items detectados, {itemsMatcheados} matcheados con productos existentes
+        {resultado.items.length} items detectados · {itemsMatcheados} se vincularán automáticamente
+        {itemsPendientes > 0 && ` · ${itemsPendientes} requerirán tu revisión`}
       </p>
 
       <div className="flex gap-2">
@@ -1379,6 +1470,286 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
           Descartar
         </button>
       </div>
+    </div>
+  )
+}
+
+interface ItemsPendientesScanPanelProps {
+  pendientes: FacturaItemEscaneado[];
+  productos: ProductoDB[];
+  puedeCrear: boolean;
+  onVincular: (index: number, producto: ProductoDB) => void;
+  onCrearNuevo: (index: number, datos: { nombre: string; codigo: string; costoSinIva: number }) => Promise<void>;
+  onOmitir: (index: number) => void;
+  onDescartarTodos: () => void;
+}
+
+type PendienteRowMode = 'idle' | 'vincular' | 'crear'
+
+function ItemsPendientesScanPanel({
+  pendientes,
+  productos,
+  puedeCrear,
+  onVincular,
+  onCrearNuevo,
+  onOmitir,
+  onDescartarTodos
+}: ItemsPendientesScanPanelProps) {
+  return (
+    <div className="mx-3 sm:mx-4 mt-2 p-3 sm:p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-800 rounded-lg">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5 text-amber-600" />
+          <div>
+            <h4 className="font-medium text-amber-800 dark:text-amber-200">
+              {pendientes.length} {pendientes.length === 1 ? 'ítem necesita' : 'ítems necesitan'} tu revisión
+            </h4>
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              No se pudieron vincular automáticamente. Elegí qué hacer con cada uno.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDescartarTodos}
+          className="text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 text-xs font-medium underline"
+          title="Descartar todos los pendientes"
+        >
+          Descartar todo
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {pendientes.map((scanItem, index) => (
+          <ItemPendienteRow
+            key={`${index}-${scanItem.codigo || ''}-${scanItem.descripcion}`}
+            index={index}
+            scanItem={scanItem}
+            productos={productos}
+            puedeCrear={puedeCrear}
+            onVincular={onVincular}
+            onCrearNuevo={onCrearNuevo}
+            onOmitir={onOmitir}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+interface ItemPendienteRowProps {
+  index: number;
+  scanItem: FacturaItemEscaneado;
+  productos: ProductoDB[];
+  puedeCrear: boolean;
+  onVincular: (index: number, producto: ProductoDB) => void;
+  onCrearNuevo: (index: number, datos: { nombre: string; codigo: string; costoSinIva: number }) => Promise<void>;
+  onOmitir: (index: number) => void;
+}
+
+function ItemPendienteRow({
+  index,
+  scanItem,
+  productos,
+  puedeCrear,
+  onVincular,
+  onCrearNuevo,
+  onOmitir
+}: ItemPendienteRowProps) {
+  const [modo, setModo] = useState<PendienteRowMode>('idle')
+  const [busqueda, setBusqueda] = useState('')
+  const [nombreNuevo, setNombreNuevo] = useState(scanItem.descripcion)
+  const [codigoNuevo, setCodigoNuevo] = useState(scanItem.codigo || '')
+  const [costoNuevo, setCostoNuevo] = useState(scanItem.costoUnitario || 0)
+  const [creando, setCreando] = useState(false)
+
+  const productosFiltrados = useMemo(() => {
+    const termino = busqueda.trim().toLowerCase()
+    if (!termino) return productos.slice(0, 8)
+    return productos
+      .filter(p =>
+        p.nombre?.toLowerCase().includes(termino) ||
+        p.codigo?.toLowerCase().includes(termino)
+      )
+      .slice(0, 8)
+  }, [productos, busqueda])
+
+  const handleCrear = async () => {
+    if (!nombreNuevo.trim()) return
+    setCreando(true)
+    try {
+      await onCrearNuevo(index, {
+        nombre: nombreNuevo.trim(),
+        codigo: codigoNuevo.trim(),
+        costoSinIva: costoNuevo
+      })
+      // El reducer remueve la fila; este componente se desmonta.
+    } catch {
+      // Error manejado arriba (toast del container)
+    } finally {
+      setCreando(false)
+    }
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-800/60 rounded-lg p-3 space-y-2">
+      {/* Datos de la factura */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-gray-800 dark:text-white text-sm break-words">
+            {scanItem.descripcion}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            {scanItem.codigo && <span className="mr-2">Código: <span className="font-mono">{scanItem.codigo}</span></span>}
+            <span>Cant: <span className="font-semibold">{scanItem.cantidad}</span></span>
+            <span className="mx-1.5">·</span>
+            <span>Costo: <span className="font-semibold">{formatPrecio(scanItem.costoUnitario || 0)}</span></span>
+            {scanItem.iva > 0 && (
+              <>
+                <span className="mx-1.5">·</span>
+                <span>IVA: <span className="font-semibold">{scanItem.iva}%</span></span>
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* Acciones */}
+      {modo === 'idle' && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => { setModo('vincular'); setBusqueda('') }}
+            className="flex-1 min-w-[120px] px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
+          >
+            <Search className="w-3.5 h-3.5" />
+            Vincular existente
+          </button>
+          {puedeCrear && (
+            <button
+              type="button"
+              onClick={() => setModo('crear')}
+              className="flex-1 min-w-[120px] px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Crear nuevo
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onOmitir(index)}
+            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg text-sm font-medium transition-colors"
+            title="Omitir esta línea"
+          >
+            Omitir
+          </button>
+        </div>
+      )}
+
+      {/* Modo: Vincular existente */}
+      {modo === 'vincular' && (
+        <div className="space-y-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar producto por nombre o código..."
+              autoFocus
+              className="w-full pl-10 pr-4 py-2 text-sm border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+            />
+          </div>
+          <div className="max-h-40 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-700">
+            {productosFiltrados.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-gray-500">Sin resultados</p>
+            ) : (
+              productosFiltrados.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onVincular(index, p)}
+                  className="w-full px-3 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center justify-between"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-800 dark:text-white truncate">{p.nombre}</p>
+                    <p className="text-xs text-gray-500">
+                      {p.codigo && `Cód: ${p.codigo} · `}Stock: {p.stock}
+                    </p>
+                  </div>
+                  <Plus className="w-4 h-4 text-blue-600 shrink-0" />
+                </button>
+              ))
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setModo('idle')}
+            className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+
+      {/* Modo: Crear nuevo */}
+      {modo === 'crear' && puedeCrear && (
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-2 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-gray-500 mb-0.5">Nombre *</label>
+              <input
+                type="text"
+                value={nombreNuevo}
+                onChange={(e) => setNombreNuevo(e.target.value)}
+                placeholder="Nombre del producto"
+                className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-0.5">Código</label>
+              <input
+                type="text"
+                value={codigoNuevo}
+                onChange={(e) => setCodigoNuevo(e.target.value)}
+                placeholder="Código"
+                className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-0.5">Costo sin IVA</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              value={costoNuevo}
+              onChange={(e) => setCostoNuevo(parsePrecio(e.target.value))}
+              className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={handleCrear}
+              disabled={!nombreNuevo.trim() || creando}
+              className="flex-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded text-sm font-medium transition-colors flex items-center justify-center gap-1"
+            >
+              {creando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Crear y vincular
+            </button>
+            <button
+              type="button"
+              onClick={() => setModo('idle')}
+              disabled={creando}
+              className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded text-sm transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
