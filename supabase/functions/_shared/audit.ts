@@ -18,8 +18,10 @@ export interface LogEventParams {
   tool_name?: string;
   parametros?: Record<string, unknown>;
   resultado_meta?: Record<string, unknown>;
-  texto_usuario?: string;
-  texto_bot?: string;
+  // Permitimos null explícitamente para casos donde queremos auditar un evento
+  // sin texto (ej: update con shape no soportado).
+  texto_usuario?: string | null;
+  texto_bot?: string | null;
 }
 
 export async function logEvent(params: LogEventParams): Promise<void> {

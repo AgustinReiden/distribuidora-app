@@ -74,6 +74,24 @@ export function escapeMarkdownV2(text: string): string {
 }
 
 /**
+ * Comparación de strings constant-time para evitar timing attacks al validar
+ * secrets/tokens. NO usar `===` para comparar el `X-Telegram-Bot-Api-Secret-Token`
+ * porque la duración del `===` filtra cuántos chars iniciales matchearon.
+ *
+ * Implementación XOR sobre charCodes: O(min(a.length, b.length)) tiempo,
+ * sin early-return cuando hay diff. El short-circuit por longitud diferente
+ * es aceptable (la longitud del secret no es secreta una vez fijada).
+ */
+export function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+/**
  * Type guard mínimo: verifica que `body` tenga la forma de un Update válido
  * (al menos `update_id: number`). Retorna null si no parsea — el caller
  * responde 200 OK igualmente para no causar reintento de Telegram.

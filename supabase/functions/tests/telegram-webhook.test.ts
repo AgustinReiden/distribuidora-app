@@ -12,6 +12,7 @@ import {
   escapeMarkdownV2,
   parseUpdate,
   sendMessage,
+  timingSafeEqual,
 } from "../_shared/telegram.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 
@@ -82,6 +83,30 @@ Deno.test("escapeMarkdownV2 deja texto normal intacto", () => {
 Deno.test("escapeMarkdownV2 escapa nombres con punto", () => {
   // Caso típico: apellido + ".com" o iniciales con punto.
   assertEquals(escapeMarkdownV2("Juan A. Pérez"), "Juan A\\. Pérez");
+});
+
+// ============================================================================
+// timingSafeEqual
+// ============================================================================
+
+Deno.test("timingSafeEqual matchea strings iguales", () => {
+  assertEquals(timingSafeEqual("", ""), true);
+  assertEquals(timingSafeEqual("a", "a"), true);
+  assertEquals(timingSafeEqual("supersecret-123", "supersecret-123"), true);
+});
+
+Deno.test("timingSafeEqual rechaza longitudes distintas", () => {
+  assertEquals(timingSafeEqual("a", "ab"), false);
+  assertEquals(timingSafeEqual("abc", ""), false);
+  assertEquals(timingSafeEqual("", "abc"), false);
+});
+
+Deno.test("timingSafeEqual rechaza diff en primer char", () => {
+  assertEquals(timingSafeEqual("xbc", "abc"), false);
+});
+
+Deno.test("timingSafeEqual rechaza diff en último char", () => {
+  assertEquals(timingSafeEqual("abc", "abx"), false);
 });
 
 // ============================================================================
@@ -345,6 +370,53 @@ Deno.test("handleUpdate /vincular código expirado manda mensaje de error", asyn
       (i.row.resultado_meta as { success?: boolean })?.success === false
     );
     assert(auditFail, "no se logueó audit del vincular fallido");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("handleUpdate audita el mensaje con perfil_id/rol cuando el user está vinculado", async () => {
+  const { handleUpdate } = await import("../telegram-webhook/handlers.ts");
+
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const mockSupabase = createMockSupabase({
+    resolveUserData: {
+      telegram_user_id: 999,
+      perfil_id: "22222222-2222-2222-2222-222222222222",
+      rol: "preventista",
+      sucursal_id: 5,
+      activo: true,
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(mockSupabase as any);
+
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 10,
+      message: {
+        message_id: 10,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "/ayuda",
+      },
+    });
+
+    // Audit del mensaje DEBE incluir perfil_id y rol del usuario resuelto.
+    const auditMensaje = mockSupabase.__inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tipo === "mensaje"
+    );
+    assert(auditMensaje, "no se logueó audit del mensaje");
+    assertEquals(
+      auditMensaje!.row.perfil_id,
+      "22222222-2222-2222-2222-222222222222",
+    );
+    assertEquals(auditMensaje!.row.rol, "preventista");
   } finally {
     fetchMock.restore();
     _setServiceRoleClientForTests(null);

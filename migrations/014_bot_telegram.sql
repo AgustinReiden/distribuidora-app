@@ -36,7 +36,11 @@ CREATE TABLE bot_usuarios (
   sucursal_id        BIGINT       REFERENCES sucursales(id) ON DELETE SET NULL,
   vinculado_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
   activo             BOOLEAN      NOT NULL DEFAULT true,
-  ultimo_uso_at      TIMESTAMPTZ
+  ultimo_uso_at      TIMESTAMPTZ,
+  -- El rol del bot debe matchear el union de perfiles.rol. NO replicamos este
+  -- check en bot_audit_log.rol porque ese campo guarda snapshots históricos
+  -- y puede tener valores fantasma de usuarios cuyo rol cambió.
+  CONSTRAINT bot_usuarios_rol_check CHECK (rol IN ('admin', 'preventista', 'transportista'))
 );
 
 CREATE INDEX idx_bot_usuarios_perfil ON bot_usuarios (perfil_id);

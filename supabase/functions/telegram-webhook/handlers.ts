@@ -5,7 +5,7 @@
 import { canjearCodigo, resolveUserByTelegramId } from "../_shared/auth.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { escapeMarkdownV2, sendMessage } from "../_shared/telegram.ts";
-import type { BotRol, TelegramUpdate, TelegramUser } from "../_shared/types.ts";
+import type { BotRol, BotUser, TelegramUpdate, TelegramUser } from "../_shared/types.ts";
 
 const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
 
@@ -19,16 +19,24 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   const chatId = msg.chat.id;
   const tgUser = msg.from;
 
+  // Resolvemos al usuario UNA SOLA VEZ por update. Esto:
+  //   1. Evita N lookups cuando el handler también necesita al user.
+  //   2. Permite poblar perfil_id/rol en el audit del mensaje entrante,
+  //      respetando el contrato "audit incluye identidad cuando se conoce".
+  const user = await resolveUserByTelegramId(tgUser.id);
+
   // Audit del mensaje entrante (fail-closed: si esto explota, queremos saber).
   await logEvent({
     telegram_user_id: tgUser.id,
+    perfil_id: user?.perfil_id,
+    rol: user?.rol,
     tipo: "mensaje",
     texto_usuario: text,
   });
 
   // Comando /start (con o sin sufijo @bot_name que Telegram añade en grupos).
   if (text === "/start" || text.startsWith("/start@") || text.startsWith("/start ")) {
-    return handleStart(chatId, tgUser);
+    return handleStart(chatId, tgUser, user);
   }
 
   // Comando /ayuda o /help (alias en inglés es común).
@@ -36,7 +44,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     text === "/ayuda" || text === "/help" ||
     text.startsWith("/ayuda@") || text.startsWith("/help@")
   ) {
-    return handleAyuda(chatId, tgUser.id);
+    return handleAyuda(chatId, tgUser.id, user);
   }
 
   // Comando /vincular CODIGO.
@@ -57,7 +65,6 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   }
 
   // Mensaje normal: respuesta placeholder hasta Fase 3.
-  const user = await resolveUserByTelegramId(tgUser.id);
   if (!user) {
     await sendMessage(
       chatId,
@@ -78,9 +85,11 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
 // /start
 // ----------------------------------------------------------------------------
 
-async function handleStart(chatId: number, tgUser: TelegramUser): Promise<void> {
-  const user = await resolveUserByTelegramId(tgUser.id);
-
+async function handleStart(
+  chatId: number,
+  tgUser: TelegramUser,
+  user: BotUser | null,
+): Promise<void> {
   if (user) {
     const nombre = escapeMarkdownV2(tgUser.first_name);
     const rol = escapeMarkdownV2(user.rol);
@@ -117,9 +126,11 @@ async function handleStart(chatId: number, tgUser: TelegramUser): Promise<void> 
 // /ayuda
 // ----------------------------------------------------------------------------
 
-async function handleAyuda(chatId: number, telegramUserId: number): Promise<void> {
-  const user = await resolveUserByTelegramId(telegramUserId);
-
+async function handleAyuda(
+  chatId: number,
+  telegramUserId: number,
+  user: BotUser | null,
+): Promise<void> {
   let texto: string;
   if (!user) {
     texto = "Todavía no estás vinculado.\n\n" +
@@ -171,6 +182,14 @@ function ayudaPorRol(rol: BotRol): string {
         "- Ver tu hoja de ruta",
         "- Marcar entregas y registrar pagos",
       ];
+      break;
+    default:
+      // Defensivo: si bot_usuarios.rol tuviera un valor fuera del union (por
+      // ej. un rol nuevo agregado en perfiles que todavía no contemplamos
+      // acá), no queremos un TypeError por hacer spread de undefined.
+      // Logueamos warning y mostramos solo los comandos comunes.
+      console.warn(`ayudaPorRol: rol no esperado "${rol as string}"`);
+      extras = [];
       break;
   }
   return ["Comandos disponibles:", ...comunes, ...extras].join("\n");

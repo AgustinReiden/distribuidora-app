@@ -3,7 +3,7 @@
 // Endpoint que Telegram llama vía setWebhook. Responsabilidades:
 //  1. Aceptar solo POST (Telegram nunca usa otros métodos).
 //  2. Validar el secret que configuramos al hacer setWebhook
-//     (header X-Telegram-Bot-Api-Secret-Token, fallback ?secret=).
+//     (header X-Telegram-Bot-Api-Secret-Token, comparado en constant-time).
 //  3. Parsear el JSON del Update y delegar al handler.
 //  4. Loguear errores en bot_audit_log para post-mortem.
 //  5. SIEMPRE responder 200 OK al final del flujo "happy" (después del
@@ -19,7 +19,7 @@
 
 import { serve } from "std/http/server.ts";
 import { logEvent } from "../_shared/audit.ts";
-import { parseUpdate } from "../_shared/telegram.ts";
+import { parseUpdate, timingSafeEqual } from "../_shared/telegram.ts";
 import { handleUpdate } from "./handlers.ts";
 
 serve(async (req: Request) => {
@@ -35,15 +35,12 @@ serve(async (req: Request) => {
     return new Response("forbidden", { status: 403 });
   }
 
-  const headerSecret = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
-  let querySecret: string | null = null;
-  try {
-    querySecret = new URL(req.url).searchParams.get("secret");
-  } catch {
-    // URL inválida no debería pasar pero por las dudas ignoramos.
-  }
-
-  if (headerSecret !== expected && querySecret !== expected) {
+  // Telegram manda el secret SOLO en el header `X-Telegram-Bot-Api-Secret-Token`
+  // cuando configuramos `setWebhook` con `secret_token`. No aceptamos query
+  // param: queda en logs/history/error reports y es un anti-pattern para
+  // material secreto.
+  const headerSecret = req.headers.get("X-Telegram-Bot-Api-Secret-Token") ?? "";
+  if (!timingSafeEqual(headerSecret, expected)) {
     return new Response("forbidden", { status: 403 });
   }
 
@@ -59,8 +56,26 @@ serve(async (req: Request) => {
 
   // Updates sin message+text+from no nos interesan en Fase 1.2 (callbacks,
   // ediciones, etc. los ignoramos). Igual respondemos 200 para que Telegram
-  // no reintente.
+  // no reintente — pero auditamos para mantener el contrato "todo update
+  // recibido queda registrado".
   if (!update?.message?.text || !update.message.from) {
+    try {
+      await logEvent({
+        telegram_user_id: update?.message?.from?.id,
+        tipo: "mensaje",
+        texto_usuario: null,
+        resultado_meta: {
+          reason: "unsupported_update_shape",
+          raw_keys: body && typeof body === "object"
+            ? Object.keys(body as Record<string, unknown>)
+            : [],
+        },
+      });
+    } catch (auditErr) {
+      // Best-effort: no queremos que un fallo de audit haga reintentar a
+      // Telegram. Logueamos a consola y seguimos.
+      console.error("telegram-webhook audit dropped-update failed", auditErr);
+    }
     return new Response("ok");
   }
 
