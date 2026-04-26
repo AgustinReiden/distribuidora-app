@@ -10,6 +10,7 @@ import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { NotificationCenter } from '../../contexts/NotificationContext';
 import SucursalSelector from './SucursalSelector';
+import VincularTelegramButton from '../perfil/VincularTelegramButton';
 import type { PerfilDB, RolUsuario } from '../../types';
 
 // =============================================================================
@@ -328,6 +329,10 @@ export default function TopNavigation({
                       {getRolLabel(perfil?.rol || '')}
                     </span>
                   </div>
+                  {/* Vincular Telegram (Phase 1 MVP del bot) */}
+                  <VincularTelegramButton
+                    className="w-full flex items-center space-x-3 px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  />
                   <button
                     onClick={onLogout}
                     className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
