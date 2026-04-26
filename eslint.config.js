@@ -7,7 +7,10 @@ import tsparser from '@typescript-eslint/parser'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', '**/*.d.ts']),
+  // supabase/functions/** son edge functions Deno (imports HTTPS, Deno globals).
+  // Las ignoramos en ESLint del frontend; tienen su propio toolchain en
+  // supabase/functions/deno.json (deno lint + deno fmt + deno check).
+  globalIgnores(['dist', '**/*.d.ts', 'supabase/functions/**']),
   // JavaScript/JSX files
   {
     files: ['**/*.{js,jsx}'],

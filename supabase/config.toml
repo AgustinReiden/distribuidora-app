@@ -1,0 +1,13 @@
+# Supabase project config (local + CI). El project_id real se setea con
+# `supabase link --project-ref <ref>` desde el dashboard; este es solo el
+# slug del directorio para `supabase init`.
+project_id = "distribuidora-app"
+
+# ============================================================================
+# Edge Functions
+# ============================================================================
+# `verify_jwt = false` es CRÍTICO en telegram-webhook: Telegram no manda JWT,
+# autenticamos vía X-Telegram-Bot-Api-Secret-Token (validado dentro del
+# handler con TELEGRAM_WEBHOOK_SECRET).
+[functions.telegram-webhook]
+verify_jwt = false
