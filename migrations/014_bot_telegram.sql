@@ -186,6 +186,114 @@ COMMENT ON FUNCTION public.generar_codigo_vinculacion_bot() IS
   'Genera un código OTP de 6 chars uppercase con TTL de 10 minutos para vincular un chat de Telegram al perfil del usuario authenticated actual. Invalida códigos activos previos del mismo perfil. Lanza excepción si no hay sesión o si no se logra un código único tras 5 intentos.';
 
 -- ============================================================================
+-- 7. RPC: canjear_codigo_vinculacion_bot
+-- ============================================================================
+-- Canjea atómicamente un código OTP generado previamente y vincula el chat de
+-- Telegram al perfil correspondiente. Invocado SOLO desde el backend del bot
+-- (Edge Function telegram-webhook) usando la service_role key — por eso solo
+-- tiene GRANT EXECUTE TO service_role.
+--
+-- Atomicidad: todo el flujo (validar código + leer perfil + leer sucursal +
+-- marcar código como usado + UPSERT en bot_usuarios) corre dentro del bloque
+-- de la función. Lockeo del row del código vía SELECT ... FOR UPDATE para
+-- evitar canjeo concurrente del mismo OTP.
+--
+-- Retorna jsonb con shape:
+--   { success: true,  perfil_id, rol, sucursal_id, nombre }                — éxito
+--   { success: false, error: 'no_encontrado'|'expirado'|'ya_usado'|'perfil_invalido' }
+
+CREATE OR REPLACE FUNCTION public.canjear_codigo_vinculacion_bot(
+  p_codigo             TEXT,
+  p_telegram_user_id   BIGINT,
+  p_telegram_username  TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_codigo_row    bot_codigos_vinculacion%ROWTYPE;
+  v_perfil_id     UUID;
+  v_perfil_rol    TEXT;
+  v_perfil_nombre TEXT;
+  v_perfil_activo BOOLEAN;
+  v_sucursal_id   BIGINT;
+BEGIN
+  -- 1) Lockear la fila del código (si existe) para canjeo atómico.
+  SELECT *
+    INTO v_codigo_row
+    FROM bot_codigos_vinculacion
+   WHERE codigo = p_codigo
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'no_encontrado');
+  END IF;
+
+  IF v_codigo_row.usado_at IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'ya_usado');
+  END IF;
+
+  IF v_codigo_row.expira_at <= now() THEN
+    RETURN jsonb_build_object('success', false, 'error', 'expirado');
+  END IF;
+
+  -- 2) Leer perfil asociado y validar que esté activo.
+  SELECT id, rol, nombre, activo
+    INTO v_perfil_id, v_perfil_rol, v_perfil_nombre, v_perfil_activo
+    FROM perfiles
+   WHERE id = v_codigo_row.perfil_id;
+
+  IF NOT FOUND OR v_perfil_activo IS NOT TRUE THEN
+    RETURN jsonb_build_object('success', false, 'error', 'perfil_invalido');
+  END IF;
+
+  -- 3) Sucursal default del perfil (puede ser NULL si no tiene asignación).
+  SELECT sucursal_id
+    INTO v_sucursal_id
+    FROM usuario_sucursales
+   WHERE usuario_id = v_perfil_id
+     AND es_default = true
+   LIMIT 1;
+
+  -- 4) Marcar el código como usado.
+  UPDATE bot_codigos_vinculacion
+     SET usado_at = now(),
+         usado_por_telegram_id = p_telegram_user_id
+   WHERE codigo = p_codigo;
+
+  -- 5) UPSERT en bot_usuarios (soporta re-vinculación del mismo chat a otro perfil).
+  INSERT INTO bot_usuarios (
+    telegram_user_id, telegram_username, perfil_id, rol, sucursal_id, vinculado_at, activo
+  ) VALUES (
+    p_telegram_user_id, p_telegram_username, v_perfil_id, v_perfil_rol, v_sucursal_id, now(), true
+  )
+  ON CONFLICT (telegram_user_id) DO UPDATE
+     SET telegram_username = EXCLUDED.telegram_username,
+         perfil_id         = EXCLUDED.perfil_id,
+         rol               = EXCLUDED.rol,
+         sucursal_id       = EXCLUDED.sucursal_id,
+         vinculado_at      = now(),
+         activo            = true;
+
+  RETURN jsonb_build_object(
+    'success',     true,
+    'perfil_id',   v_perfil_id,
+    'rol',         v_perfil_rol,
+    'sucursal_id', v_sucursal_id,
+    'nombre',      v_perfil_nombre
+  );
+END;
+$$;
+
+REVOKE ALL    ON FUNCTION public.canjear_codigo_vinculacion_bot(TEXT, BIGINT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.canjear_codigo_vinculacion_bot(TEXT, BIGINT, TEXT) TO service_role;
+
+COMMENT ON FUNCTION public.canjear_codigo_vinculacion_bot(TEXT, BIGINT, TEXT) IS
+  'Canjea atómicamente un código OTP de vinculación de bot Telegram. Lockea la fila del código, valida vigencia, lee perfil + sucursal default y hace UPSERT en bot_usuarios. Solo invocable por service_role desde la Edge Function. Retorna jsonb con success bool y, en caso de error, code en {no_encontrado, expirado, ya_usado, perfil_invalido}.';
+
+-- ============================================================================
 -- TODO retención (Phase 2)
 -- ============================================================================
 -- bot_audit_log y bot_conversaciones crecen sin tope:
