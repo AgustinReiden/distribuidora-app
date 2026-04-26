@@ -57,9 +57,10 @@ CREATE TABLE bot_codigos_vinculacion (
   created_at              TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
--- Solo indexa códigos activos (sin usar). Acelera la query de validación al
--- ingresar el código en el bot y mantiene el índice chico.
-CREATE INDEX idx_codigos_perfil_activos
+-- Garantiza que cada perfil tiene como máximo 1 código activo (sin usar) a la vez.
+-- Doble función: hard constraint contra race conditions en generar_codigo_vinculacion_bot
+-- y acelera la query de validación al ingresar el código en el bot.
+CREATE UNIQUE INDEX idx_codigos_perfil_activos
   ON bot_codigos_vinculacion (perfil_id)
   WHERE usado_at IS NULL;
 
@@ -73,7 +74,7 @@ COMMENT ON TABLE bot_codigos_vinculacion IS
 CREATE TABLE bot_audit_log (
   id                BIGSERIAL    PRIMARY KEY,
   telegram_user_id  BIGINT,
-  perfil_id         UUID,
+  perfil_id         UUID         REFERENCES perfiles(id) ON DELETE SET NULL,
   rol               TEXT,
   tipo              TEXT         NOT NULL,
   tool_name         TEXT,
@@ -136,6 +137,9 @@ CREATE POLICY "codigos_self_read"
 -- código activo previo del mismo perfil (un solo código activo a la vez).
 -- Reintenta hasta 5 veces ante colisión de PK; expira a los 10 minutos.
 
+-- Asegura que pgcrypto esté disponible para gen_random_bytes en el RPC.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE OR REPLACE FUNCTION public.generar_codigo_vinculacion_bot()
 RETURNS TEXT
 LANGUAGE plpgsql
@@ -158,7 +162,9 @@ BEGIN
 
   -- Generar código único de 6 chars uppercase, retry si colisiona.
   LOOP
-    v_codigo := upper(substring(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 6));
+    -- gen_random_bytes (pgcrypto, habilitada por defecto en Supabase) provee CSPRNG.
+    -- 4 bytes -> 8 chars hex -> truncamos a 6 chars uppercase.
+    v_codigo := upper(substring(encode(gen_random_bytes(4), 'hex') FROM 1 FOR 6));
     BEGIN
       INSERT INTO bot_codigos_vinculacion (codigo, perfil_id, expira_at)
         VALUES (v_codigo, auth.uid(), now() + interval '10 minutes');
@@ -178,3 +184,14 @@ GRANT EXECUTE ON FUNCTION public.generar_codigo_vinculacion_bot() TO authenticat
 
 COMMENT ON FUNCTION public.generar_codigo_vinculacion_bot() IS
   'Genera un código OTP de 6 chars uppercase con TTL de 10 minutos para vincular un chat de Telegram al perfil del usuario authenticated actual. Invalida códigos activos previos del mismo perfil. Lanza excepción si no hay sesión o si no se logra un código único tras 5 intentos.';
+
+-- ============================================================================
+-- TODO retención (Phase 2)
+-- ============================================================================
+-- bot_audit_log y bot_conversaciones crecen sin tope:
+--   * audit log: 1 row por mensaje + 1 por tool_call. Con texto en español puede
+--     ser GBs/año. Estrategia sugerida: pg_cron mensual que borre rows con
+--     created_at < now() - interval '90 days'.
+--   * conversaciones: el backend trunca a ~12 turnos antes de UPSERT, pero si
+--     hay un bug puede crecer sin límite. Considerar CHECK
+--     (jsonb_array_length(mensajes) <= 50) como backstop defensivo.
