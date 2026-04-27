@@ -29,6 +29,8 @@ import {
 import { buscarClienteTool } from "../_shared/tools/common/buscar_cliente.ts";
 import { buscarProductoTool } from "../_shared/tools/common/buscar_producto.ts";
 import { fichaClienteTool } from "../_shared/tools/common/ficha_cliente.ts";
+import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
+import { miRecorridoHoyTool } from "../_shared/tools/transportista/mi_recorrido_hoy.ts";
 import type { Tool, ToolContext } from "../_shared/tools/base.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 
@@ -523,7 +525,7 @@ Deno.test("invokeTool retorna ok:false 'permiso_denegado' cuando rol no autoriza
 // Bonus sanity: registerAllTools registra las 3 esperadas
 // ============================================================================
 
-Deno.test("registerAllTools registra buscar_cliente, buscar_producto, ficha_cliente", () => {
+Deno.test("registerAllTools registra todas las tools esperadas", () => {
   _clearToolsForTests();
   _resetRegisterFlagForTests();
 
@@ -531,11 +533,15 @@ Deno.test("registerAllTools registra buscar_cliente, buscar_producto, ficha_clie
   assert(getTool("buscar_cliente"), "buscar_cliente no registrada");
   assert(getTool("buscar_producto"), "buscar_producto no registrada");
   assert(getTool("ficha_cliente"), "ficha_cliente no registrada");
+  assert(getTool("mis_clientes"), "mis_clientes no registrada");
+  assert(getTool("mi_recorrido_hoy"), "mi_recorrido_hoy no registrada");
 
   // Sanity: las refs son las correctas.
   assertEquals(getTool("buscar_cliente"), buscarClienteTool);
   assertEquals(getTool("buscar_producto"), buscarProductoTool);
   assertEquals(getTool("ficha_cliente"), fichaClienteTool);
+  assertEquals(getTool("mis_clientes"), misClientesTool);
+  assertEquals(getTool("mi_recorrido_hoy"), miRecorridoHoyTool);
 
   _clearToolsForTests();
   _resetRegisterFlagForTests();
@@ -692,4 +698,268 @@ Deno.test("ficha_cliente rechaza acceso de preventista a cliente no asignado", a
 
   // Y NO debe haber llamado al RPC — el lookup falló antes.
   assertEquals(spy.rpcCalls.length, 0, "no debió invocarse el RPC tras un null en el lookup");
+});
+
+// ============================================================================
+// 12. mis_clientes: rol incorrecto (admin) → permission denied via invokeTool
+// ============================================================================
+
+Deno.test("mis_clientes rechaza rol admin via invokeTool con permiso_denegado", async () => {
+  _clearToolsForTests();
+  _resetRegisterFlagForTests();
+
+  const { client, spy } = createMockSupabase({});
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  registerTool(misClientesTool);
+
+  try {
+    const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+    const r = await invokeTool("mis_clientes", {}, ctx);
+
+    assertEquals(r.ok, false);
+    if (!r.ok) {
+      assertEquals(r.error, "permiso_denegado");
+    }
+
+    const auditErr = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tool_name === "mis_clientes" &&
+      i.row.tipo === "error"
+    );
+    assert(auditErr, "no se logueó audit del permission denied");
+    const meta = auditErr!.row.resultado_meta as Record<string, unknown>;
+    assertEquals(meta.error, "permission_denied");
+    assertEquals(meta.rol, "admin");
+
+    // No debió haber llamado al RPC: el gate de permisos se hizo antes.
+    assertEquals(spy.rpcCalls.length, 0, "no debió invocarse el RPC con permiso denegado");
+  } finally {
+    _setServiceRoleClientForTests(null);
+    _clearToolsForTests();
+    _resetRegisterFlagForTests();
+  }
+});
+
+// ============================================================================
+// 13. mis_clientes: happy path con RPC mockeada
+// ============================================================================
+
+Deno.test("mis_clientes happy path retorna shape esperado y mapea nombres", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        total: 2,
+        clientes: [
+          {
+            id: 10,
+            codigo: 100,
+            nombre_fantasia: "Almacén Norte",
+            razon_social: "Norte SRL",
+            saldo_cuenta: "12500.50",
+            zona: "Norte",
+            ultima_compra: "2026-04-20",
+            dias_desde_ultima: 6,
+          },
+          {
+            id: 11,
+            codigo: null,
+            nombre_fantasia: null,
+            razon_social: "Sur SA",
+            saldo_cuenta: 0,
+            zona: null,
+            ultima_compra: null,
+            dias_desde_ultima: null,
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    perfil_id: "77777777-7777-7777-7777-777777777777",
+    sucursal_id: 1,
+  });
+
+  const result = await misClientesTool.handler(
+    { con_deuda: true, sin_pedidos_dias: 30, limit: 25 },
+    ctx,
+  );
+
+  assertEquals(result.total, 2);
+  assertEquals(result.clientes.length, 2);
+
+  // Mapeo nombre: nombre_fantasia tiene precedencia.
+  assertEquals(result.clientes[0].nombre, "Almacén Norte");
+  assertEquals(result.clientes[0].saldo_cuenta, 12500.5);
+  assertEquals(result.clientes[0].dias_desde_ultima, 6);
+  assertEquals(result.clientes[0].ultima_compra, "2026-04-20");
+
+  // Fallback razón social cuando nombre_fantasia es null.
+  assertEquals(result.clientes[1].nombre, "Sur SA");
+  assertEquals(result.clientes[1].codigo, null);
+  assertEquals(result.clientes[1].dias_desde_ultima, null);
+  assertEquals(result.clientes[1].ultima_compra, null);
+
+  // RPC: nombre y params correctos.
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_mis_clientes");
+  assertEquals(call.params.p_preventista_id, "77777777-7777-7777-7777-777777777777");
+  assertEquals(call.params.p_sucursal_id, 1);
+  assertEquals(call.params.p_con_deuda, true);
+  assertEquals(call.params.p_sin_pedidos_dias, 30);
+  assertEquals(call.params.p_limit, 25);
+});
+
+// ============================================================================
+// 14. mi_recorrido_hoy: sin recorrido → recorrido null + pedidos vacíos
+// ============================================================================
+
+Deno.test("mi_recorrido_hoy sin recorrido del día retorna recorrido:null y pedidos:[]", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: { recorrido: null, pedidos: [] },
+      error: null,
+    },
+  });
+
+  const ctx = makeCtx(client, {
+    rol: "transportista",
+    perfil_id: "88888888-8888-8888-8888-888888888888",
+    sucursal_id: 2,
+  });
+
+  const result = await miRecorridoHoyTool.handler({}, ctx);
+
+  assertEquals(result.recorrido, null);
+  assertEquals(result.pedidos.length, 0);
+
+  // El RPC se llamó con fecha=null (default del SQL function: CURRENT_DATE).
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_mi_recorrido");
+  assertEquals(call.params.p_transportista_id, "88888888-8888-8888-8888-888888888888");
+  assertEquals(call.params.p_sucursal_id, 2);
+  assertEquals(call.params.p_fecha, null);
+});
+
+// ============================================================================
+// 15. mi_recorrido_hoy: con recorrido y 3 pedidos → ordenados por orden_entrega
+// ============================================================================
+
+Deno.test("mi_recorrido_hoy con recorrido + 3 pedidos retorna estructura completa", async () => {
+  // Nota: el ORDER BY orden_entrega lo hace el RPC SQL. Acá la mock devuelve
+  // los pedidos ya ordenados (como lo haría el RPC) — la tool solo mapea.
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        recorrido: {
+          id: 555,
+          fecha: "2026-04-26",
+          estado: "en_curso",
+          total_pedidos: 3,
+          pedidos_entregados: 1,
+          total_facturado: "150000.00",
+          total_cobrado: "50000.00",
+        },
+        pedidos: [
+          {
+            pedido_id: 1001,
+            orden_entrega: 1,
+            estado_entrega: "entregado",
+            cliente_id: 10,
+            cliente_nombre: "Almacén Uno",
+            direccion: "Calle 1 100",
+            total: "50000.00",
+            estado_pago: "pagado",
+          },
+          {
+            pedido_id: 1002,
+            orden_entrega: 2,
+            estado_entrega: "pendiente",
+            cliente_id: 20,
+            cliente_nombre: "Almacén Dos",
+            direccion: null,
+            total: 60000,
+            estado_pago: "pendiente",
+          },
+          {
+            pedido_id: 1003,
+            orden_entrega: 3,
+            estado_entrega: "pendiente",
+            cliente_id: 30,
+            cliente_nombre: "Almacén Tres",
+            direccion: "Av. Siempre Viva 742",
+            total: 40000,
+            estado_pago: "parcial",
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+
+  const ctx = makeCtx(client, {
+    rol: "transportista",
+    perfil_id: "99999999-9999-9999-9999-999999999999",
+    sucursal_id: 3,
+  });
+
+  const result = await miRecorridoHoyTool.handler({ fecha: "2026-04-26" }, ctx);
+
+  // Recorrido: shape correcto y números casteados.
+  assert(result.recorrido, "recorrido debió no ser null");
+  assertEquals(result.recorrido!.id, 555);
+  assertEquals(result.recorrido!.fecha, "2026-04-26");
+  assertEquals(result.recorrido!.estado, "en_curso");
+  assertEquals(result.recorrido!.total_pedidos, 3);
+  assertEquals(result.recorrido!.pedidos_entregados, 1);
+  assertEquals(result.recorrido!.total_facturado, 150000);
+  assertEquals(result.recorrido!.total_cobrado, 50000);
+
+  // Pedidos: 3, en orden de orden_entrega (1, 2, 3).
+  assertEquals(result.pedidos.length, 3);
+  assertEquals(result.pedidos[0].orden_entrega, 1);
+  assertEquals(result.pedidos[0].pedido_id, 1001);
+  assertEquals(result.pedidos[0].cliente_nombre, "Almacén Uno");
+  assertEquals(result.pedidos[0].total, 50000);
+
+  assertEquals(result.pedidos[1].orden_entrega, 2);
+  assertEquals(result.pedidos[1].direccion, null);
+
+  assertEquals(result.pedidos[2].orden_entrega, 3);
+  assertEquals(result.pedidos[2].estado_pago, "parcial");
+
+  // RPC: fecha pasada como string YYYY-MM-DD.
+  assertEquals(spy.rpcCalls.length, 1);
+  assertEquals(spy.rpcCalls[0].fn, "bot_mi_recorrido");
+  assertEquals(spy.rpcCalls[0].params.p_fecha, "2026-04-26");
+});
+
+// ============================================================================
+// 16. mi_recorrido_hoy: fecha inválida lanza error claro
+// ============================================================================
+
+Deno.test("mi_recorrido_hoy rechaza fecha con formato inválido", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "transportista",
+    sucursal_id: 1,
+    perfil_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  });
+
+  let threw = false;
+  try {
+    await miRecorridoHoyTool.handler({ fecha: "26/04/2026" }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "fecha inválida",
+    );
+  }
+  assert(threw, "debió lanzar 'fecha inválida'");
 });

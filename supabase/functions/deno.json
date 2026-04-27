@@ -7,7 +7,7 @@
     "test": "deno test --allow-env --allow-net=api.telegram.org",
     "lint": "deno lint",
     "fmt": "deno fmt",
-    "check": "deno check telegram-webhook/index.ts telegram-webhook/handlers.ts _shared/*.ts _shared/tools/*.ts _shared/tools/common/*.ts tests/*.ts"
+    "check": "deno check telegram-webhook/index.ts telegram-webhook/handlers.ts _shared/*.ts _shared/tools/*.ts _shared/tools/common/*.ts _shared/tools/preventista/*.ts _shared/tools/transportista/*.ts tests/*.ts"
   },
   "lint": {
     "rules": {
