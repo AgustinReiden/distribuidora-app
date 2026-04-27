@@ -77,6 +77,13 @@ export const buscarClienteTool: Tool<BuscarClienteParams, BuscarClienteResult> =
       throw new Error("Límite fuera de rango (1-25)");
     }
 
+    // Multi-tenancy guardrail: solo admin puede operar sin sucursal asignada
+    // (multi-sucursal). Cualquier otro rol con sucursal_id NULL es un data
+    // error y NO debe ver datos cross-sucursal.
+    if (ctx.sucursal_id == null && ctx.rol !== "admin") {
+      throw new Error("Sucursal no asignada en bot_usuarios — contactá al administrador");
+    }
+
     const sb = ctx.supabase;
     const isPreventista = ctx.rol === "preventista";
 
@@ -103,15 +110,20 @@ export const buscarClienteTool: Tool<BuscarClienteParams, BuscarClienteResult> =
     // Búsqueda: si q es exclusivamente dígitos, lo tratamos como código
     // exacto OR como substring del nombre (raro pero útil — ej: "Casa 24").
     // Si tiene caracteres no numéricos, ILIKE en nombre y razón social.
+    //
+    // Caracteres especiales en filtros PostgREST: %, _ (LIKE wildcards),
+    // ',' separa términos en .or(), '(' ')' agrupan, ',', '.', ':' separan
+    // op/col/val. Los escapamos todos para evitar inyección de filtro.
     const codigoNum = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : null;
     if (codigoNum !== null) {
-      const escaped = trimmed.replace(/[%_,()]/g, "\\$&");
+      // Rama numérica: trimmed son dígitos puros, no necesita escape.
+      // Igualmente lo escapamos por uniformidad (no-op sobre dígitos).
+      const escaped = trimmed.replace(/[%_,()\.:]/g, "\\$&");
       query = query.or(
         `codigo.eq.${codigoNum},nombre_fantasia.ilike.%${escaped}%,razon_social.ilike.%${escaped}%`,
       );
     } else {
-      // Escape PostgREST OR-syntax separators y wildcards SQL.
-      const escaped = trimmed.replace(/[%_,()]/g, "\\$&");
+      const escaped = trimmed.replace(/[%_,()\.:]/g, "\\$&");
       query = query.or(
         `nombre_fantasia.ilike.%${escaped}%,razon_social.ilike.%${escaped}%`,
       );

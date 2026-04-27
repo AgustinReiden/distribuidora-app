@@ -19,7 +19,12 @@ export interface ToolContext {
   perfil_id: string;
   /** Rol con el que el bot reconoció al usuario */
   rol: BotRol;
-  /** Sucursal asignada al user del bot. NULL = "todas" (típico admin). */
+  /**
+   * Sucursal del bot user. NULL es válido SOLO para admin (multi-sucursal).
+   * Tools no-admin DEBEN rechazar `ctx.sucursal_id == null` al inicio del
+   * handler — un preventista/transportista/encargado/deposito sin sucursal
+   * asignada es un data error y nunca debe ver datos cross-sucursal.
+   */
   sucursal_id: number | null;
   /** Cliente Supabase con service_role (bypasses RLS — las tools deben
    *  filtrar por sucursal/preventista manualmente cuando aplique). */

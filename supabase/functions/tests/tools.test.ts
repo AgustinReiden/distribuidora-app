@@ -10,6 +10,9 @@
 //   6. ficha_cliente happy path con RPC mockeada
 //   7. invokeTool tool inexistente → ok:false con audit log
 //   8. invokeTool permission denied → ok:false con audit log
+//   9. buscar_cliente escapa metacaracteres PostgREST ('.', ':', '(', ')')
+//  10. tools rechazan ctx.sucursal_id == null para roles no-admin
+//  11. ficha_cliente: preventista no puede leer cliente NO asignado a él
 
 import { assert, assertEquals, assertStringIncludes } from "std/assert/mod.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -377,11 +380,14 @@ Deno.test("ficha_cliente happy path retorna saldo + último pedido", async () =>
   assertEquals(result.ultimo_pedido!.fecha, "2026-04-20T10:30:00Z");
   assertEquals(result.ultimo_pedido!.monto, 0); // string-shape: monto=0 default
 
-  // Se llamó a la RPC con cliente_id correcto.
+  // Se llamó a la RPC `_bot` con cliente_id correcto. La variante `_bot`
+  // existe porque la edge function usa service_role y la RPC original
+  // (`obtener_resumen_cuenta_cliente`) chequea auth.uid() — que es null
+  // bajo service_role y haría fallar la tool.
   const rpcCall = spy.rpcCalls.find((c) =>
-    c.fn === "obtener_resumen_cuenta_cliente"
+    c.fn === "obtener_resumen_cuenta_cliente_bot"
   );
-  assert(rpcCall, "no se llamó al RPC obtener_resumen_cuenta_cliente");
+  assert(rpcCall, "no se llamó al RPC obtener_resumen_cuenta_cliente_bot");
   assertEquals(rpcCall!.params.p_cliente_id, 42);
 });
 
@@ -533,4 +539,157 @@ Deno.test("registerAllTools registra buscar_cliente, buscar_producto, ficha_clie
 
   _clearToolsForTests();
   _resetRegisterFlagForTests();
+});
+
+// ============================================================================
+// 9. PostgREST metachar escape: '.' y ':' en q deben escaparse
+// ============================================================================
+
+Deno.test("buscar_cliente escapa metacaracteres de PostgREST (. y :)", async () => {
+  // q con '.' y ':' — debe escaparse y resultar en ILIKE literal sin
+  // interpretarse como separador de filtro PostgREST.
+  const { client, spy } = createMockSupabase({
+    selectResponse: { data: [], error: null, count: 0 },
+  });
+
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+
+  // Usamos una q con '.', ':', '(' y ')' — todos los metacaracteres.
+  await buscarClienteTool.handler({ q: "foo.bar:baz(x)" }, ctx);
+
+  const clienteQuery = spy.queries.find((q) => q.table === "clientes");
+  assert(clienteQuery, "no se hizo query a clientes");
+  const orFilter = clienteQuery!.filters.find((f) => f.type === "or");
+  assert(orFilter, "no se aplicó filter .or()");
+
+  const expr = orFilter!.args[0] as string;
+  // Cada metacaracter debe estar escapado con \.
+  assertStringIncludes(expr, "foo\\.bar\\:baz\\(x\\)");
+  // Y el char crudo NO debe aparecer como separador de filtro.
+  // (Verificamos que el patrón completo escapado está dentro del ilike).
+  assertStringIncludes(expr, "nombre_fantasia.ilike.%foo\\.bar\\:baz\\(x\\)%");
+});
+
+// ============================================================================
+// 10. sucursal_id null guard: rol no-admin debe ser rechazado
+// ============================================================================
+
+Deno.test("buscar_cliente rechaza preventista sin sucursal asignada", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: null,
+    perfil_id: "33333333-3333-3333-3333-333333333333",
+  });
+
+  let threw = false;
+  try {
+    await buscarClienteTool.handler({ q: "Pedro" }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Sucursal no asignada",
+    );
+  }
+  assert(threw, "debió lanzar 'Sucursal no asignada'");
+});
+
+Deno.test("buscar_producto rechaza transportista sin sucursal asignada", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "transportista",
+    sucursal_id: null,
+    perfil_id: "44444444-4444-4444-4444-444444444444",
+  });
+
+  let threw = false;
+  try {
+    await buscarProductoTool.handler({ q: "agua" }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Sucursal no asignada",
+    );
+  }
+  assert(threw, "debió lanzar 'Sucursal no asignada'");
+});
+
+Deno.test("ficha_cliente rechaza encargado sin sucursal asignada", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "encargado",
+    sucursal_id: null,
+    perfil_id: "55555555-5555-5555-5555-555555555555",
+  });
+
+  let threw = false;
+  try {
+    await fichaClienteTool.handler({ cliente_id: 1 }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Sucursal no asignada",
+    );
+  }
+  assert(threw, "debió lanzar 'Sucursal no asignada'");
+});
+
+// ============================================================================
+// 11. Preventista bypass via cliente_id NO asignado
+// ============================================================================
+
+Deno.test("ficha_cliente rechaza acceso de preventista a cliente no asignado", async () => {
+  // Mock supabase: la query a clientes con !inner(cliente_preventistas)
+  // devuelve null (porque el join falla — el cliente no tiene match con
+  // este preventista_id). El filtro `cliente_preventistas.preventista_id`
+  // se aplica con el perfil_id del PREVENTISTA QUE LLAMA, no el del owner real.
+  const { client, spy } = createMockSupabase({
+    perTable: {
+      clientes: {
+        maybeSingleResponse: { data: null, error: null },
+      },
+    },
+  });
+
+  const callerPerfilId = "66666666-6666-6666-6666-666666666666";
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: 1,
+    perfil_id: callerPerfilId,
+  });
+
+  let threw = false;
+  try {
+    // cliente_id existe pero está asignado a OTRO preventista — el join falla.
+    await fichaClienteTool.handler({ cliente_id: 999 }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Cliente no encontrado o sin permiso",
+    );
+  }
+  assert(threw, "debió lanzar 'Cliente no encontrado o sin permiso'");
+
+  // Verificación crítica: la query construida debe filtrar por el perfil_id
+  // del preventista que LLAMA (no es algo que un atacante pueda alterar).
+  const clienteQuery = spy.queries.find((q) => q.table === "clientes");
+  assert(clienteQuery, "no se hizo query a clientes");
+  assertStringIncludes(clienteQuery!.selectCols ?? "", "cliente_preventistas!inner");
+
+  const eqFilters = clienteQuery!.filters.filter((f) => f.type === "eq");
+  const hasPreventistaFilter = eqFilters.some((f) =>
+    f.args[0] === "cliente_preventistas.preventista_id" &&
+    f.args[1] === callerPerfilId
+  );
+  assert(
+    hasPreventistaFilter,
+    "no se aplicó filter cliente_preventistas.preventista_id con el perfil_id del caller",
+  );
+
+  // Y NO debe haber llamado al RPC — el lookup falló antes.
+  assertEquals(spy.rpcCalls.length, 0, "no debió invocarse el RPC tras un null en el lookup");
 });

@@ -73,6 +73,13 @@ export const buscarProductoTool: Tool<BuscarProductoParams, BuscarProductoResult
       throw new Error("Límite fuera de rango (1-25)");
     }
 
+    // Multi-tenancy guardrail: solo admin puede operar sin sucursal asignada
+    // (multi-sucursal). Cualquier otro rol con sucursal_id NULL es un data
+    // error y NO debe ver datos cross-sucursal.
+    if (ctx.sucursal_id == null && ctx.rol !== "admin") {
+      throw new Error("Sucursal no asignada en bot_usuarios — contactá al administrador");
+    }
+
     const sb = ctx.supabase;
 
     let query = sb.from("productos")
@@ -87,7 +94,10 @@ export const buscarProductoTool: Tool<BuscarProductoParams, BuscarProductoResult
       query = query.eq("sucursal_id", ctx.sucursal_id);
     }
 
-    const escaped = trimmed.replace(/[%_,()]/g, "\\$&");
+    // Caracteres especiales en filtros PostgREST: %, _ (LIKE wildcards),
+    // ',' separa términos en .or(), '(' ')' agrupan, ',', '.', ':' separan
+    // op/col/val. Los escapamos todos para evitar inyección de filtro.
+    const escaped = trimmed.replace(/[%_,()\.:]/g, "\\$&");
     query = query.or(
       `nombre.ilike.%${escaped}%,codigo.ilike.%${escaped}%`,
     );
