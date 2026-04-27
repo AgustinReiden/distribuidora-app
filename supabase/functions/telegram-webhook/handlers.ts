@@ -19,6 +19,7 @@ import { getServiceRoleClient } from "../_shared/supabase.ts";
 import { escapeMarkdownV2, sendMessage } from "../_shared/telegram.ts";
 import { registerAllTools } from "../_shared/tools/index.ts";
 import type { ToolContext } from "../_shared/tools/base.ts";
+import { runAgent } from "../_shared/gemini/agent.ts";
 import type { BotRol, BotUser, TelegramUpdate, TelegramUser } from "../_shared/types.ts";
 
 import { parseCommand } from "./commands/parser.ts";
@@ -176,7 +177,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     return;
   }
 
-  // ----- Mensaje no-comando: placeholder hasta Phase 3 ----------------------
+  // ----- Mensaje no-comando: invocar agente IA (Phase 3 task 3.2) -----------
   if (!user) {
     await sendMessage(
       chatId,
@@ -186,11 +187,38 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     );
     return;
   }
-  await sendMessage(
-    chatId,
-    "Recibí tu mensaje. El asistente IA todavía no está activo (próxima fase). " +
-      "Mientras tanto: probá /ayuda para ver los comandos disponibles.",
-  );
+
+  // runAgent maneja audit + memory save por dentro. Solo entregamos el texto.
+  // OJO: sendMessage SIN parse_mode — el LLM puede emitir texto que parezca
+  // Markdown sin ser válido en MarkdownV2, y un parse error 400 deja al user
+  // sin respuesta. Plain text es robusto. Si en el futuro queremos rich
+  // formatting, hay que agregar un wrapper que sanitice MV2 (Phase 4+).
+  try {
+    const result = await runAgent({
+      supabase: getServiceRoleClient(),
+      user,
+      telegram_user_id: tgUser.id,
+      userMessage: text,
+    });
+    await sendMessage(chatId, result.text);
+  } catch (err) {
+    console.error("[handler] runAgent failed:", err);
+    await logEvent({
+      telegram_user_id: tgUser.id,
+      perfil_id: user.perfil_id,
+      rol: user.rol,
+      tipo: "error",
+      resultado_meta: {
+        gemini: true,
+        crashed: true,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    }).catch(() => {});
+    await sendMessage(
+      chatId,
+      "Tuve un problema procesando tu mensaje. Probá de nuevo en un momento o usá /ayuda.",
+    );
+  }
 }
 
 // ----------------------------------------------------------------------------
