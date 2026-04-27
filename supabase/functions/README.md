@@ -16,12 +16,26 @@ otras dos hay que setearlas explícitamente como secrets.
 | `SUPABASE_SERVICE_ROLE_KEY`   | Auto-inyectada por Supabase     | Key con permisos elevados                            |
 | `TELEGRAM_BOT_TOKEN`          | Setear como secret              | Token del bot (BotFather)                            |
 | `TELEGRAM_WEBHOOK_SECRET`     | Setear como secret              | String random único, validado en cada request        |
+| `GEMINI_API_KEY`              | Setear como secret (Phase 3+)   | API key de Google AI Studio para function calling    |
+| `GEMINI_MODEL`                | Opcional (default abajo)        | Override del modelo. Default: `gemini-2.5-flash`     |
 
 Setear secrets en producción:
 
 ```bash
 supabase secrets set TELEGRAM_BOT_TOKEN=123:ABC
 supabase secrets set TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 32)
+supabase secrets set GEMINI_API_KEY=AIzaSy...   # https://aistudio.google.com/apikey
+```
+
+### Sobre `GEMINI_MODEL`
+
+El default es `gemini-2.5-flash` (estable, GA). Es configurable via env var
+para poder bumpear el modelo sin re-deploy. Hoy NO usamos `gemini-3-flash-preview`
+porque tiene un bug activo con `thought_signature` en parallel function calls.
+Cuando Gemini 3 sea estable (estimado Q3 2026), se puede actualizar el secret:
+
+```bash
+supabase secrets set GEMINI_MODEL=gemini-3-flash
 ```
 
 Para desarrollo local crear un `.env.local` (ya en `.gitignore`):
@@ -164,12 +178,22 @@ supabase/functions/
 │   ├── auth.ts         # resolveUserByTelegramId, canjearCodigo (RPC)
 │   ├── supabase.ts     # singleton del cliente service_role
 │   ├── telegram.ts     # sendMessage, escapeMarkdownV2, parseUpdate
-│   └── types.ts        # tipos de la Telegram Bot API + dominio del bot
+│   ├── types.ts        # tipos de la Telegram Bot API + dominio del bot
+│   ├── tools/          # Tool registry + tools por rol (Phase 2)
+│   └── gemini/         # Cliente Gemini, schema mapper, system prompts (Phase 3)
+│       ├── client.ts
+│       ├── schema.ts
+│       ├── types.ts
+│       └── prompts/    # admin.txt, preventista.txt, transportista.txt, ...
 ├── telegram-webhook/
+│   ├── commands/       # parser + router de slash commands
+│   ├── formatters/     # respuestas → texto Telegram
 │   ├── handlers.ts     # /start, /ayuda, /vincular
 │   └── index.ts        # entrypoint, validación de secret, error handling
 ├── tests/
-│   └── telegram-webhook.test.ts
+│   ├── telegram-webhook.test.ts
+│   ├── tools.test.ts
+│   └── gemini.test.ts
 ├── .gitignore
 ├── deno.json
 └── README.md           (este archivo)
