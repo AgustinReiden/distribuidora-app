@@ -222,10 +222,19 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     }
 
     // Hay function calls — ejecutamos TODAS y appendeamos resultados.
-    for (const fc of fnCalls) {
-      const { name, args } = fc.functionCall;
-      toolCallsCount++;
-      const result = await invokeTool(name, args, toolCtx);
+    // Ejecutamos las tool calls en paralelo. invokeTool nunca propaga
+    // excepciones (las traduce a {ok:false}), así que un tool fallido no
+    // aborta los otros. El orden del map preserva el orden del append al
+    // history para coherencia con el orden en que Gemini las emitió.
+    const results = await Promise.all(
+      fnCalls.map(async (fc) => {
+        const { name, args } = fc.functionCall;
+        const result = await invokeTool(name, args, toolCtx);
+        return { name, result };
+      }),
+    );
+    toolCallsCount += fnCalls.length;
+    for (const { name, result } of results) {
       const responseObj = result.ok
         ? { result: result.data }
         : { error: result.error };

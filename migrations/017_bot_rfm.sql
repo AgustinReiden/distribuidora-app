@@ -107,8 +107,12 @@ AS $$
       ROUND(COALESCE(ticket_promedio, 0), 2) AS ticket_promedio,
       n_pedidos,
       ROUND((r_norm * 0.5 + f_norm * 0.25 + m_norm * 0.25)::numeric, 3) AS score,
-      (dias_desde_ultima > freq_efectiva * 1.3) AS vencido,
+      -- vencido: solo cuando hay datos previos (n_pedidos > 0). Cliente nuevo
+      -- no se considera "atrasado" sino "primer contacto".
+      (n_pedidos > 0 AND dias_desde_ultima > freq_efectiva * 1.3) AS vencido,
       CASE
+        WHEN n_pedidos = 0 OR ultima_compra IS NULL THEN
+          'Cliente sin pedidos en últimos 180 días — priorizar primer contacto'
         WHEN dias_desde_ultima > freq_efectiva * 2 THEN
           format('Atrasado: %s días sin comprar (compra cada ~%s)', dias_desde_ultima, ROUND(freq_efectiva))
         WHEN dias_desde_ultima > freq_efectiva * 1.3 THEN
