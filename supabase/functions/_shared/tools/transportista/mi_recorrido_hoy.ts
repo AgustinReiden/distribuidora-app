@@ -19,7 +19,7 @@
 
 import type { Tool } from "../base.ts";
 
-interface MiRecorridoHoyParams {
+export interface MiRecorridoHoyParams {
   /**
    * Override de la fecha (YYYY-MM-DD). Default: hoy en TZ
    * America/Argentina/Buenos_Aires (resuelta en TS, no en SQL).
@@ -27,7 +27,7 @@ interface MiRecorridoHoyParams {
   fecha?: string;
 }
 
-interface MiRecorridoHoyResult {
+export interface MiRecorridoHoyResult {
   recorrido: {
     id: number;
     fecha: string;

@@ -15,12 +15,12 @@
 
 import type { Tool } from "../base.ts";
 
-interface BuscarClienteParams {
+export interface BuscarClienteParams {
   q: string;
   limit?: number;
 }
 
-interface BuscarClienteResult {
+export interface BuscarClienteResult {
   total: number;
   clientes: Array<{
     id: number;

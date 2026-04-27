@@ -22,16 +22,16 @@
 
 import type { Tool } from "../base.ts";
 
-interface FichaClienteParams {
+export interface FichaClienteParams {
   cliente_id: number;
 }
 
-interface UltimoMov {
+export interface UltimoMov {
   fecha: string;
   monto: number;
 }
 
-interface FichaClienteResult {
+export interface FichaClienteResult {
   cliente: {
     id: number;
     codigo: number | null;

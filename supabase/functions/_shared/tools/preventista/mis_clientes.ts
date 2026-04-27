@@ -17,7 +17,7 @@
 
 import type { Tool } from "../base.ts";
 
-interface MisClientesParams {
+export interface MisClientesParams {
   /** Filtrar solo clientes con saldo_cuenta > 0. Default false. */
   con_deuda?: boolean;
   /**
@@ -31,7 +31,7 @@ interface MisClientesParams {
   limit?: number;
 }
 
-interface MisClientesResult {
+export interface MisClientesResult {
   total: number;
   clientes: Array<{
     id: number;

@@ -9,12 +9,12 @@
 
 import type { Tool } from "../base.ts";
 
-interface BuscarProductoParams {
+export interface BuscarProductoParams {
   q: string;
   limit?: number;
 }
 
-interface BuscarProductoResult {
+export interface BuscarProductoResult {
   total: number;
   productos: Array<{
     id: number;

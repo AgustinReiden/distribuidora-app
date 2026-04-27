@@ -1,15 +1,68 @@
-// Handlers de comandos del bot. Fase 1.2 — solo /start, /ayuda, /vincular.
-// El LLM (Gemini) entra en Fase 3; mientras tanto, mensajes que no son
-// comandos reciben un placeholder.
+// Handlers de comandos del bot. Phase 2 task 2.3 — command router con
+// scope checks + 5 nuevos slash commands (/cliente, /producto, /saldo,
+// /misclientes, /recorrido). Los comandos legacy /start, /ayuda, /vincular
+// siguen handcoded acá porque tienen lógica especial (no necesitan tool
+// invocation y deben funcionar incluso para usuarios no vinculados).
+//
+// Flujo de handleUpdate:
+//   1. bootCommands() — registra tools + comandos en el primer call.
+//   2. Audit del mensaje entrante (con perfil_id si está vinculado).
+//   3. Si es un comando:
+//      a. /start, /ayuda, /vincular → handler legacy.
+//      b. Comando registrado en el router → scope check + invoke handler.
+//      c. Comando desconocido → mensaje "no reconocido".
+//   4. Si no es comando → placeholder hasta Phase 3 (Gemini).
 
 import { canjearCodigo, resolveUserByTelegramId } from "../_shared/auth.ts";
 import { logEvent } from "../_shared/audit.ts";
+import { getServiceRoleClient } from "../_shared/supabase.ts";
 import { escapeMarkdownV2, sendMessage } from "../_shared/telegram.ts";
+import { registerAllTools } from "../_shared/tools/index.ts";
+import type { ToolContext } from "../_shared/tools/base.ts";
 import type { BotRol, BotUser, TelegramUpdate, TelegramUser } from "../_shared/types.ts";
+
+import { parseCommand } from "./commands/parser.ts";
+import { getCommand, listCommands, registerCommand } from "./commands/router.ts";
+import type { CommandSpec } from "./commands/types.ts";
+import { clienteCommand } from "./commands/cliente.ts";
+import { productoCommand } from "./commands/producto.ts";
+import { saldoCommand } from "./commands/saldo.ts";
+import { misClientesCommand } from "./commands/misclientes.ts";
+import { recorridoCommand } from "./commands/recorrido.ts";
 
 const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
 
+// ----------------------------------------------------------------------------
+// Boot del registry. Idempotente — se llama al inicio de cada handleUpdate.
+// El flag local evita registrar dos veces (si ya estaba booteado, los
+// register* tirarían throw).
+// ----------------------------------------------------------------------------
+
+let _booted = false;
+
+function bootCommands(): void {
+  if (_booted) return;
+  registerAllTools();
+  registerCommand(clienteCommand);
+  registerCommand(productoCommand);
+  registerCommand(saldoCommand);
+  registerCommand(misClientesCommand);
+  registerCommand(recorridoCommand);
+  _booted = true;
+}
+
+/** Test helper: permite a los tests resetear el flag. NO usar en producción. */
+export function _resetBootForTests(): void {
+  _booted = false;
+}
+
+// ----------------------------------------------------------------------------
+// handleUpdate — entry point del webhook.
+// ----------------------------------------------------------------------------
+
 export async function handleUpdate(update: TelegramUpdate): Promise<void> {
+  bootCommands();
+
   const msg = update.message;
   // El index.ts ya filtra updates sin message+text+from, pero hacemos un guard
   // defensivo para que este módulo sea testeable de forma aislada.
@@ -34,37 +87,96 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     texto_usuario: text,
   });
 
-  // Comando /start (con o sin sufijo @bot_name que Telegram añade en grupos).
-  if (text === "/start" || text.startsWith("/start@") || text.startsWith("/start ")) {
-    return handleStart(chatId, tgUser, user);
-  }
+  const parsed = parseCommand(text);
+  if (parsed) {
+    // ----- Comandos legacy (siempre hardcodeados) ---------------------------
+    if (parsed.command === "/start") {
+      return handleStart(chatId, tgUser, user);
+    }
+    if (parsed.command === "/ayuda" || parsed.command === "/help") {
+      return handleAyuda(chatId, tgUser.id, user);
+    }
+    if (parsed.command === "/vincular") {
+      return handleVincular(chatId, tgUser, parsed.rawArgs);
+    }
 
-  // Comando /ayuda o /help (alias en inglés es común).
-  if (
-    text === "/ayuda" || text === "/help" ||
-    text.startsWith("/ayuda@") || text.startsWith("/help@")
-  ) {
-    return handleAyuda(chatId, tgUser.id, user);
-  }
+    // ----- Comandos del router ---------------------------------------------
+    const cmd = getCommand(parsed.command);
+    if (cmd) {
+      // Scope check.
+      if (cmd.scope !== "guest" && !user) {
+        await sendMessage(
+          chatId,
+          "Necesitás vincularte primero. Mandá /vincular CODIGO.",
+        );
+        await logEvent({
+          telegram_user_id: tgUser.id,
+          tipo: "comando",
+          tool_name: parsed.command.slice(1),
+          resultado_meta: { blocked: "no_vinculado" },
+        });
+        return;
+      }
+      if (
+        Array.isArray(cmd.scope) &&
+        (!user || !cmd.scope.includes(user.rol))
+      ) {
+        const rolesTxt = cmd.scope.join(", ");
+        await sendMessage(
+          chatId,
+          `Este comando es solo para: ${rolesTxt}.`,
+        );
+        await logEvent({
+          telegram_user_id: tgUser.id,
+          perfil_id: user?.perfil_id,
+          rol: user?.rol,
+          tipo: "comando",
+          tool_name: parsed.command.slice(1),
+          resultado_meta: { blocked: "rol_no_permitido", scope: cmd.scope },
+        });
+        return;
+      }
 
-  // Comando /vincular CODIGO.
-  if (text.startsWith("/vincular ") || text.startsWith("/vincular@")) {
-    // Soportar `/vincular@bot_name CODIGO`: dropeamos el primer token.
-    const partes = text.split(/\s+/);
-    const codigo = (partes[1] ?? "").toUpperCase();
-    return handleVincular(chatId, tgUser, codigo);
-  }
-  if (text === "/vincular") {
+      // Audit del comando ANTES de ejecutarlo (así si el handler explota,
+      // sabemos que se intentó). El registry agregará tool_call/error
+      // específicos por cada invokeTool.
+      await logEvent({
+        telegram_user_id: tgUser.id,
+        perfil_id: user?.perfil_id,
+        rol: user?.rol,
+        tipo: "comando",
+        tool_name: parsed.command.slice(1),
+      });
+
+      const toolCtx: ToolContext | null = user
+        ? {
+          perfil_id: user.perfil_id,
+          rol: user.rol,
+          sucursal_id: user.sucursal_id,
+          supabase: getServiceRoleClient(),
+        }
+        : null;
+
+      await cmd.handler({
+        user,
+        tgUser,
+        chatId,
+        rawArgs: parsed.rawArgs,
+        toolCtx,
+      });
+      return;
+    }
+
+    // ----- Comando desconocido ---------------------------------------------
     await sendMessage(
       chatId,
-      "Uso: /vincular CODIGO\n\n" +
-        "Generá un código en la app web (Perfil > Vincular Telegram) y mandalo así:\n" +
-        "/vincular ABC123",
+      `Comando \`${escapeMarkdownV2(parsed.command)}\` no reconocido\\. Probá /ayuda\\.`,
+      { parse_mode: "MarkdownV2" },
     );
     return;
   }
 
-  // Mensaje normal: respuesta placeholder hasta Fase 3.
+  // ----- Mensaje no-comando: placeholder hasta Phase 3 ----------------------
   if (!user) {
     await sendMessage(
       chatId,
@@ -152,10 +264,29 @@ async function handleAyuda(
   });
 }
 
+/**
+ * Lista los comandos del router que el rol `rol` puede invocar y los
+ * concatena con los comandos legacy. Usamos `listCommands()` (deduplicado por
+ * aliases) y filtramos por scope: "any" pasa siempre, BotRol[] solo si el rol
+ * está incluido, "guest" siempre se muestra.
+ */
+function comandosDisponiblesPara(rol: BotRol): CommandSpec[] {
+  return listCommands().filter((c) => {
+    if (c.scope === "any" || c.scope === "guest") return true;
+    return c.scope.includes(rol);
+  });
+}
+
 function ayudaPorRol(rol: BotRol): string {
   const comunes = ["/start - Mensaje de bienvenida", "/ayuda - Ver esta lista"];
-  // Fase 1.2: el LLM y las tools no están todavía. Mostramos solo lo que
-  // realmente funciona + un teaser de lo que viene en Fase 3.
+
+  // Comandos del router que el rol puede usar (formateados como
+  // "<name> - <description>").
+  const routerCmds = comandosDisponiblesPara(rol).map(
+    (c) => `${c.name} - ${c.description}`,
+  );
+
+  // Teaser de Phase 3 (LLM) + cualquier extra específico de rol.
   let extras: string[];
   switch (rol) {
     case "admin":
@@ -170,8 +301,6 @@ function ayudaPorRol(rol: BotRol): string {
       extras = [
         "",
         "Próximamente (Fase 3):",
-        "- Consultar tu lista de clientes",
-        "- Ver resumen de pedidos del día",
         "- Crear pedidos por chat",
       ];
       break;
@@ -179,15 +308,11 @@ function ayudaPorRol(rol: BotRol): string {
       extras = [
         "",
         "Próximamente (Fase 3):",
-        "- Ver tu hoja de ruta",
         "- Marcar entregas y registrar pagos",
       ];
       break;
     case "deposito":
-      extras = [
-        "",
-        "Próximamente: consultas de stock y compras",
-      ];
+      extras = ["", "Próximamente: consultas de stock y compras"];
       break;
     case "encargado":
       extras = [
@@ -204,7 +329,10 @@ function ayudaPorRol(rol: BotRol): string {
       extras = [];
       break;
   }
-  return ["Comandos disponibles:", ...comunes, ...extras].join("\n");
+
+  return ["Comandos disponibles:", ...comunes, ...routerCmds, ...extras].join(
+    "\n",
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -214,20 +342,24 @@ function ayudaPorRol(rol: BotRol): string {
 async function handleVincular(
   chatId: number,
   tgUser: TelegramUser,
-  codigo: string,
+  rawArgs: string,
 ): Promise<void> {
+  // Tomamos el primer token como código — preservamos el comportamiento
+  // original (`text.split(/\s+/)` / partes[1]). Si alguien manda
+  // `/vincular ABC123 basura` tomamos "ABC123" e ignoramos lo demás.
+  const trimmed = rawArgs.trim();
+  const firstToken = trimmed.length > 0 ? trimmed.split(/\s+/)[0] : "";
+  const codigo = firstToken.toUpperCase();
+
   if (!codigo) {
     await sendMessage(
       chatId,
-      "Uso: /vincular CODIGO\n\nEjemplo: /vincular ABC123",
+      "Uso: /vincular CODIGO\n\n" +
+        "Generá un código en la app web (Perfil > Vincular Telegram) y mandalo así:\n" +
+        "/vincular ABC123",
     );
-    await logEvent({
-      telegram_user_id: tgUser.id,
-      tipo: "comando",
-      tool_name: "vincular",
-      parametros: { codigo_redacted: redactCodigo(codigo) },
-      resultado_meta: { success: false, error: "formato" },
-    });
+    // No auditamos el "uso vacío" como error: es información inválida cero,
+    // no hay codigo_redacted que loguear.
     return;
   }
 
