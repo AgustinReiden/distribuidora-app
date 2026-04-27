@@ -40,7 +40,7 @@ CREATE TABLE bot_usuarios (
   -- El rol del bot debe matchear el union de perfiles.rol. NO replicamos este
   -- check en bot_audit_log.rol porque ese campo guarda snapshots históricos
   -- y puede tener valores fantasma de usuarios cuyo rol cambió.
-  CONSTRAINT bot_usuarios_rol_check CHECK (rol IN ('admin', 'preventista', 'transportista'))
+  CONSTRAINT bot_usuarios_rol_check CHECK (rol IN ('admin', 'preventista', 'transportista', 'deposito', 'encargado'))
 );
 
 CREATE INDEX idx_bot_usuarios_perfil ON bot_usuarios (perfil_id);
@@ -145,14 +145,15 @@ CREATE POLICY "codigos_self_read"
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE OR REPLACE FUNCTION public.generar_codigo_vinculacion_bot()
-RETURNS TEXT
+RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_codigo   TEXT;
-  v_intentos INT := 0;
+  v_codigo    TEXT;
+  v_expira_at TIMESTAMPTZ;
+  v_intentos  INT := 0;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'No autenticado';
@@ -164,6 +165,11 @@ BEGIN
    WHERE perfil_id = auth.uid()
      AND usado_at IS NULL;
 
+  -- Calcular expira_at una sola vez para que coincida exactamente entre
+  -- el INSERT y el JSON retornado (el cliente usa este valor para el countdown,
+  -- así evitamos drift entre reloj del servidor y reloj del navegador).
+  v_expira_at := now() + interval '10 minutes';
+
   -- Generar código único de 6 chars uppercase, retry si colisiona.
   LOOP
     -- gen_random_bytes (pgcrypto, habilitada por defecto en Supabase) provee CSPRNG.
@@ -171,8 +177,8 @@ BEGIN
     v_codigo := upper(substring(encode(gen_random_bytes(4), 'hex') FROM 1 FOR 6));
     BEGIN
       INSERT INTO bot_codigos_vinculacion (codigo, perfil_id, expira_at)
-        VALUES (v_codigo, auth.uid(), now() + interval '10 minutes');
-      RETURN v_codigo;
+        VALUES (v_codigo, auth.uid(), v_expira_at);
+      RETURN jsonb_build_object('codigo', v_codigo, 'expira_at', v_expira_at);
     EXCEPTION WHEN unique_violation THEN
       v_intentos := v_intentos + 1;
       IF v_intentos >= 5 THEN
@@ -187,7 +193,7 @@ REVOKE ALL    ON FUNCTION public.generar_codigo_vinculacion_bot() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.generar_codigo_vinculacion_bot() TO authenticated;
 
 COMMENT ON FUNCTION public.generar_codigo_vinculacion_bot() IS
-  'Genera un código OTP de 6 chars uppercase con TTL de 10 minutos para vincular un chat de Telegram al perfil del usuario authenticated actual. Invalida códigos activos previos del mismo perfil. Lanza excepción si no hay sesión o si no se logra un código único tras 5 intentos.';
+  'Genera un código OTP de 6 chars uppercase con TTL de 10 minutos para vincular un chat de Telegram al perfil del usuario authenticated actual. Invalida códigos activos previos del mismo perfil. Retorna jsonb con shape { codigo: TEXT, expira_at: TIMESTAMPTZ } — el cliente usa expira_at del server para evitar drift de reloj. Lanza excepción si no hay sesión o si no se logra un código único tras 5 intentos.';
 
 -- ============================================================================
 -- 7. RPC: canjear_codigo_vinculacion_bot

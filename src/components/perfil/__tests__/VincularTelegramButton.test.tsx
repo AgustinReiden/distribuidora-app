@@ -51,6 +51,17 @@ function renderButton(): { user: ReturnType<typeof userEvent.setup> } {
   return { user }
 }
 
+/** Helper para construir el payload jsonb que retorna la RPC ahora. */
+function rpcOk(codigo: string): { data: { codigo: string; expira_at: string }; error: null } {
+  return {
+    data: {
+      codigo,
+      expira_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    },
+    error: null,
+  }
+}
+
 describe('VincularTelegramButton', () => {
   beforeEach(() => {
     rpcMock.mockReset()
@@ -63,7 +74,7 @@ describe('VincularTelegramButton', () => {
   })
 
   it('al click, llama la mutation y muestra el código retornado', async () => {
-    rpcMock.mockResolvedValueOnce({ data: 'abc123', error: null })
+    rpcMock.mockResolvedValueOnce(rpcOk('abc123'))
     const { user } = renderButton()
 
     await user.click(screen.getByRole('button', { name: /vincular telegram/i }))
@@ -81,8 +92,8 @@ describe('VincularTelegramButton', () => {
 
   it('"Generar otro código" re-dispara la mutation y actualiza el modal', async () => {
     rpcMock
-      .mockResolvedValueOnce({ data: 'abc123', error: null })
-      .mockResolvedValueOnce({ data: 'xyz789', error: null })
+      .mockResolvedValueOnce(rpcOk('abc123'))
+      .mockResolvedValueOnce(rpcOk('xyz789'))
 
     const { user } = renderButton()
 
@@ -105,7 +116,7 @@ describe('VincularTelegramButton', () => {
     // resuelve OK para que la UI complete el flujo limpio.
     rpcMock
       .mockResolvedValueOnce({ data: null, error: new Error('boom') })
-      .mockResolvedValueOnce({ data: 'ok1234', error: null })
+      .mockResolvedValueOnce(rpcOk('ok1234'))
 
     const { user } = renderButton()
 

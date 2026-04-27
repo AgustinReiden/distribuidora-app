@@ -183,6 +183,18 @@ function ayudaPorRol(rol: BotRol): string {
         "- Marcar entregas y registrar pagos",
       ];
       break;
+    case "deposito":
+      extras = [
+        "",
+        "Próximamente: consultas de stock y compras",
+      ];
+      break;
+    case "encargado":
+      extras = [
+        "",
+        "Próximamente: vista de admin parcial (sin gestión de usuarios)",
+      ];
+      break;
     default:
       // Defensivo: si bot_usuarios.rol tuviera un valor fuera del union (por
       // ej. un rol nuevo agregado en perfiles que todavía no contemplamos
@@ -213,7 +225,7 @@ async function handleVincular(
       telegram_user_id: tgUser.id,
       tipo: "comando",
       tool_name: "vincular",
-      parametros: { codigo: "" },
+      parametros: { codigo_redacted: redactCodigo(codigo) },
       resultado_meta: { success: false, error: "formato" },
     });
     return;
@@ -229,7 +241,7 @@ async function handleVincular(
       telegram_user_id: tgUser.id,
       tipo: "comando",
       tool_name: "vincular",
-      parametros: { codigo },
+      parametros: { codigo_redacted: redactCodigo(codigo) },
       resultado_meta: { success: false, error: "formato" },
     });
     return;
@@ -257,7 +269,7 @@ async function handleVincular(
       rol: result.user.rol,
       tipo: "comando",
       tool_name: "vincular",
-      parametros: { codigo },
+      parametros: { codigo_redacted: redactCodigo(codigo) },
       resultado_meta: { success: true },
     });
     return;
@@ -270,9 +282,19 @@ async function handleVincular(
     telegram_user_id: tgUser.id,
     tipo: "comando",
     tool_name: "vincular",
-    parametros: { codigo },
+    parametros: { codigo_redacted: redactCodigo(codigo) },
     resultado_meta: { success: false, error: result.error },
   });
+}
+
+/**
+ * Redacta un OTP para el audit log: muestra los primeros 2 chars + asterisks.
+ * Aunque el código tiene TTL corto y se invalida al usarse, el audit queda en
+ * DB y puede filtrarse a backups/exports — preferimos no persistir el OTP en
+ * plaintext.
+ */
+function redactCodigo(codigo: string): string {
+  return codigo.length === 6 ? `${codigo.slice(0, 2)}****` : "****";
 }
 
 function mensajeErrorVincular(

@@ -33,7 +33,7 @@ export interface TelegramUpdate {
 // Tipos del dominio del bot (reflejan tablas en migrations/014_bot_telegram.sql).
 // ----------------------------------------------------------------------------
 
-export type BotRol = "admin" | "preventista" | "transportista";
+export type BotRol = "admin" | "preventista" | "transportista" | "deposito" | "encargado";
 
 export interface BotUser {
   telegram_user_id: number;

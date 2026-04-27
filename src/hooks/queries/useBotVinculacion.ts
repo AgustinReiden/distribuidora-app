@@ -7,10 +7,11 @@
  * `auth.uid()` internamente para identificar al usuario autenticado, así que
  * cualquier sesión válida puede generar SU PROPIO código de vinculación.
  *
- * La RPC retorna el código TEXT directamente (no JSON). El hook lo envuelve en
- * un objeto `{ codigo, expira_at, generado_at }` para conveniencia de la UI:
- * la RPC garantiza TTL de 10 minutos, así que `expira_at` se calcula client-side
- * sumando 10 min al `now()` del navegador (suficiente para mostrar countdown).
+ * La RPC retorna jsonb con shape `{ codigo, expira_at }`. El `expira_at` viene
+ * del server (now() + 10 min calculado en Postgres) — esto evita drift cuando
+ * el reloj del navegador está desincronizado, que se manifestaría como
+ * countdowns incorrectos en la UI. El hook agrega `generado_at` (now() del
+ * cliente, solo informativo, no usado para el countdown).
  */
 import { useMutation, type UseMutationResult } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
@@ -21,9 +22,9 @@ import { supabase } from '../supabase/base'
 export interface CodigoVinculacionResult {
   /** Código OTP de 6 chars en mayúsculas (ej: "ABC123"). */
   codigo: string
-  /** Timestamp ISO de expiración (now + 10 min, calculado client-side). */
+  /** Timestamp ISO de expiración (server-side: now() + 10 min en Postgres). */
   expira_at: string
-  /** Timestamp ISO en el que se generó el código (now() del cliente). */
+  /** Timestamp ISO en el que se generó el código (now() del cliente, informativo). */
   generado_at: string
 }
 
@@ -37,8 +38,19 @@ export const botVinculacionKeys = {
   codigo: () => [...botVinculacionKeys.all, 'codigo'] as const,
 }
 
-/** TTL fijo de la RPC (10 minutos) — debe matchear migrations/014_bot_telegram.sql. */
-const TTL_MS = 10 * 60 * 1000
+/**
+ * Type guard interno: la RPC retorna jsonb arbitrario, así que validamos
+ * que tenga la shape esperada antes de confiar en los campos.
+ */
+interface RpcCodigoPayload {
+  codigo: string
+  expira_at: string
+}
+function isRpcCodigoPayload(v: unknown): v is RpcCodigoPayload {
+  if (typeof v !== 'object' || v === null) return false
+  const obj = v as Record<string, unknown>
+  return typeof obj.codigo === 'string' && typeof obj.expira_at === 'string'
+}
 
 async function generarCodigoVinculacionBot(): Promise<CodigoVinculacionResult> {
   const { data, error } = await supabase.rpc('generar_codigo_vinculacion_bot')
@@ -47,17 +59,21 @@ async function generarCodigoVinculacionBot(): Promise<CodigoVinculacionResult> {
     throw error
   }
 
-  if (typeof data !== 'string' || data.length === 0) {
-    throw new Error('La RPC no retornó un código válido')
+  if (!isRpcCodigoPayload(data)) {
+    throw new Error('La RPC no retornó un payload válido')
   }
 
-  const generadoAt = new Date()
-  const expiraAt = new Date(generadoAt.getTime() + TTL_MS)
+  const codigo = data.codigo.toUpperCase()
+  const expiraAtIso = new Date(data.expira_at).toISOString()
+
+  if (!codigo || !expiraAtIso) {
+    throw new Error('La RPC retornó datos incompletos')
+  }
 
   return {
-    codigo: data.toUpperCase(),
-    expira_at: expiraAt.toISOString(),
-    generado_at: generadoAt.toISOString(),
+    codigo,
+    expira_at: expiraAtIso,
+    generado_at: new Date().toISOString(),
   }
 }
 
