@@ -11,6 +11,7 @@ import { buscarClienteTool } from "./common/buscar_cliente.ts";
 import { buscarProductoTool } from "./common/buscar_producto.ts";
 import { fichaClienteTool } from "./common/ficha_cliente.ts";
 import { misClientesTool } from "./preventista/mis_clientes.ts";
+import { sugerirVisitasRfmTool } from "./preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "./transportista/mi_recorrido_hoy.ts";
 
 let _registered = false;
@@ -21,6 +22,7 @@ export function registerAllTools(): void {
   registerTool(buscarProductoTool);
   registerTool(fichaClienteTool);
   registerTool(misClientesTool);
+  registerTool(sugerirVisitasRfmTool);
   registerTool(miRecorridoHoyTool);
   _registered = true;
 }

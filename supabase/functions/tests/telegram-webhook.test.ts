@@ -1022,3 +1022,205 @@ Deno.test("/comando_desconocido manda 'no reconocido'", async () => {
     Deno.env.delete("TELEGRAM_BOT_TOKEN");
   }
 });
+
+// ============================================================================
+// /sugerencias (RFM) — comando preventista, scope check + parsing del límite
+// ============================================================================
+
+Deno.test("/sugerencias con preventista invoca tool con limit default 10", async () => {
+  const handleUpdate = await freshHandleUpdate();
+
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    rpcByFn: {
+      bot_sugerir_visitas_rfm: {
+        data: {
+          total: 1,
+          sugerencias: [
+            {
+              cliente_id: 1,
+              codigo: 100,
+              nombre: "Almacén Test",
+              zona: "Centro",
+              saldo_cuenta: 0,
+              ultima_compra: "2026-04-20",
+              dias_desde_ultima: 6,
+              frecuencia_dias: 7,
+              ticket_promedio: 5000,
+              n_pedidos: 8,
+              score: 0.7,
+              vencido: false,
+              motivo: "Cliente top por frecuencia",
+            },
+          ],
+        },
+        error: null,
+      },
+    },
+    maybeSingleByTable: {
+      bot_usuarios: {
+        data: {
+          telegram_user_id: 999,
+          perfil_id: "33333333-3333-3333-3333-333333333333",
+          rol: "preventista",
+          sucursal_id: 1,
+          activo: true,
+        },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 200,
+      message: {
+        message_id: 200,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Pre" },
+        text: "/sugerencias",
+      },
+    });
+
+    // Se llamó al RPC con limit default = 10.
+    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_sugerir_visitas_rfm");
+    assert(rpcCall, "no se llamó al RPC bot_sugerir_visitas_rfm");
+    assertEquals(rpcCall!.params.p_limit, 10);
+    assertEquals(rpcCall!.params.p_sucursal_id, 1);
+
+    // Mensaje formateado en MarkdownV2 con el nombre del cliente.
+    const msg = fetchMock.sent.find((s) => {
+      const sBody = (s as { body?: string }).body ?? "";
+      return sBody.includes("Almacén Test") && sBody.includes("MarkdownV2");
+    });
+    assert(msg, "no se mandó el mensaje formateado de /sugerencias");
+
+    // Audit del comando.
+    const auditCmd = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tool_name === "sugerencias" &&
+      i.row.tipo === "comando"
+    );
+    assert(auditCmd, "no se logueó audit del comando /sugerencias");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/sugerencias 5 con preventista invoca tool con limit=5", async () => {
+  const handleUpdate = await freshHandleUpdate();
+
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    rpcByFn: {
+      bot_sugerir_visitas_rfm: {
+        data: { total: 0, sugerencias: [] },
+        error: null,
+      },
+    },
+    maybeSingleByTable: {
+      bot_usuarios: {
+        data: {
+          telegram_user_id: 999,
+          perfil_id: "33333333-3333-3333-3333-333333333333",
+          rol: "preventista",
+          sucursal_id: 1,
+          activo: true,
+        },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 201,
+      message: {
+        message_id: 201,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Pre" },
+        text: "/sugerencias 5",
+      },
+    });
+
+    // Se llamó al RPC con limit = 5 (parseado del arg).
+    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_sugerir_visitas_rfm");
+    assert(rpcCall, "no se llamó al RPC bot_sugerir_visitas_rfm");
+    assertEquals(rpcCall!.params.p_limit, 5);
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/sugerencias con rol admin: bloqueado por scope", async () => {
+  const handleUpdate = await freshHandleUpdate();
+
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    maybeSingleByTable: {
+      bot_usuarios: {
+        data: {
+          telegram_user_id: 999,
+          perfil_id: "33333333-3333-3333-3333-333333333333",
+          rol: "admin",
+          sucursal_id: null,
+          activo: true,
+        },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 202,
+      message: {
+        message_id: 202,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Admin" },
+        text: "/sugerencias",
+      },
+    });
+
+    // El RPC NO debe haberse llamado.
+    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_sugerir_visitas_rfm");
+    assertEquals(rpcCall, undefined, "no debió invocarse bot_sugerir_visitas_rfm");
+
+    // Mensaje de scope-block con "preventista" en el texto.
+    const msg = fetchMock.sent.find((s) => {
+      const sBody = (s as { body?: string }).body ?? "";
+      return sBody.includes("preventista") && sBody.includes("solo para");
+    });
+    assert(msg, "no se mandó el mensaje de scope bloqueado");
+
+    // Audit con blocked=rol_no_permitido.
+    const auditBlock = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tool_name === "sugerencias" &&
+      (i.row.resultado_meta as { blocked?: string })?.blocked ===
+        "rol_no_permitido"
+    );
+    assert(auditBlock, "no se logueó audit del scope-block");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});

@@ -30,6 +30,7 @@ import { buscarClienteTool } from "../_shared/tools/common/buscar_cliente.ts";
 import { buscarProductoTool } from "../_shared/tools/common/buscar_producto.ts";
 import { fichaClienteTool } from "../_shared/tools/common/ficha_cliente.ts";
 import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
+import { sugerirVisitasRfmTool } from "../_shared/tools/preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "../_shared/tools/transportista/mi_recorrido_hoy.ts";
 import type { Tool, ToolContext } from "../_shared/tools/base.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
@@ -534,6 +535,7 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("buscar_producto"), "buscar_producto no registrada");
   assert(getTool("ficha_cliente"), "ficha_cliente no registrada");
   assert(getTool("mis_clientes"), "mis_clientes no registrada");
+  assert(getTool("sugerir_visitas_rfm"), "sugerir_visitas_rfm no registrada");
   assert(getTool("mi_recorrido_hoy"), "mi_recorrido_hoy no registrada");
 
   // Sanity: las refs son las correctas.
@@ -541,6 +543,7 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("buscar_producto"), buscarProductoTool);
   assertEquals(getTool("ficha_cliente"), fichaClienteTool);
   assertEquals(getTool("mis_clientes"), misClientesTool);
+  assertEquals(getTool("sugerir_visitas_rfm"), sugerirVisitasRfmTool);
   assertEquals(getTool("mi_recorrido_hoy"), miRecorridoHoyTool);
 
   _clearToolsForTests();
@@ -1017,4 +1020,165 @@ Deno.test("mi_recorrido_hoy handler rechaza rol distinto a transportista", async
     );
   }
   assert(threw, "mi_recorrido_hoy debió rechazar rol preventista");
+});
+
+// ============================================================================
+// 18. sugerir_visitas_rfm: defense-in-depth (rol distinto a preventista)
+// ============================================================================
+
+Deno.test("sugerir_visitas_rfm handler rechaza rol distinto a preventista", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "admin",
+    perfil_id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+    sucursal_id: 1,
+  });
+
+  let threw = false;
+  try {
+    await sugerirVisitasRfmTool.handler({}, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "preventista",
+    );
+  }
+  assert(threw, "sugerir_visitas_rfm debió rechazar rol admin");
+});
+
+// ============================================================================
+// 19. sugerir_visitas_rfm: rechaza sucursal_id null
+// ============================================================================
+
+Deno.test("sugerir_visitas_rfm rechaza preventista sin sucursal asignada", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: null,
+    perfil_id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+  });
+
+  let threw = false;
+  try {
+    await sugerirVisitasRfmTool.handler({}, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Sucursal no asignada",
+    );
+  }
+  assert(threw, "debió lanzar 'Sucursal no asignada'");
+});
+
+// ============================================================================
+// 20. sugerir_visitas_rfm: happy path con RPC mockeada
+// ============================================================================
+
+Deno.test("sugerir_visitas_rfm happy path retorna shape esperado y mapea campos", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        total: 3,
+        sugerencias: [
+          {
+            cliente_id: 10,
+            codigo: 100,
+            nombre: "Almacén Norte",
+            zona: "Norte",
+            saldo_cuenta: "12500.50",
+            ultima_compra: "2026-04-01",
+            dias_desde_ultima: 25,
+            frecuencia_dias: "21.0",
+            ticket_promedio: "8500.00",
+            n_pedidos: 4,
+            score: "0.875",
+            vencido: true,
+            motivo: "Atrasado: 25 días sin comprar (compra cada ~21)",
+          },
+          {
+            cliente_id: 11,
+            codigo: null,
+            nombre: "Sur SA",
+            zona: null,
+            saldo_cuenta: 0,
+            ultima_compra: null,
+            dias_desde_ultima: 9999,
+            frecuencia_dias: 21,
+            ticket_promedio: 0,
+            n_pedidos: 0,
+            score: 0.5,
+            vencido: false,
+            motivo: "Cliente activo",
+          },
+          {
+            cliente_id: 12,
+            codigo: 200,
+            nombre: "Boliche Don Tito",
+            zona: "Centro",
+            saldo_cuenta: 3500,
+            ultima_compra: "2026-04-15",
+            dias_desde_ultima: 11,
+            frecuencia_dias: 7,
+            ticket_promedio: 12000,
+            n_pedidos: 8,
+            score: 0.62,
+            vencido: true,
+            motivo: "Próximo a re-pedido (cada ~7 días, lleva 11)",
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    perfil_id: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+    sucursal_id: 2,
+  });
+
+  const result = await sugerirVisitasRfmTool.handler({ limit: 10 }, ctx);
+
+  assertEquals(result.total, 3);
+  assertEquals(result.sugerencias.length, 3);
+
+  // Primer cliente: campos numéricos casteados desde strings.
+  assertEquals(result.sugerencias[0].cliente_id, 10);
+  assertEquals(result.sugerencias[0].codigo, 100);
+  assertEquals(result.sugerencias[0].nombre, "Almacén Norte");
+  assertEquals(result.sugerencias[0].zona, "Norte");
+  assertEquals(result.sugerencias[0].saldo_cuenta, 12500.5);
+  assertEquals(result.sugerencias[0].ultima_compra, "2026-04-01");
+  assertEquals(result.sugerencias[0].dias_desde_ultima, 25);
+  assertEquals(result.sugerencias[0].frecuencia_dias, 21);
+  assertEquals(result.sugerencias[0].ticket_promedio, 8500);
+  assertEquals(result.sugerencias[0].n_pedidos, 4);
+  assertEquals(result.sugerencias[0].score, 0.875);
+  assertEquals(result.sugerencias[0].vencido, true);
+  assertEquals(
+    result.sugerencias[0].motivo,
+    "Atrasado: 25 días sin comprar (compra cada ~21)",
+  );
+
+  // Segundo cliente: campos null, codigo null y dias_desde_ultima sentinel 9999.
+  assertEquals(result.sugerencias[1].codigo, null);
+  assertEquals(result.sugerencias[1].zona, null);
+  assertEquals(result.sugerencias[1].ultima_compra, null);
+  assertEquals(result.sugerencias[1].dias_desde_ultima, 9999);
+  assertEquals(result.sugerencias[1].n_pedidos, 0);
+  assertEquals(result.sugerencias[1].vencido, false);
+
+  // Tercer cliente: vencido true por la regla freq*1.3, sin saldo en motivo.
+  assertEquals(result.sugerencias[2].cliente_id, 12);
+  assertEquals(result.sugerencias[2].vencido, true);
+
+  // RPC: nombre y params correctos.
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_sugerir_visitas_rfm");
+  assertEquals(call.params.p_preventista_id, "ffffffff-ffff-ffff-ffff-ffffffffffff");
+  assertEquals(call.params.p_sucursal_id, 2);
+  assertEquals(call.params.p_limit, 10);
 });

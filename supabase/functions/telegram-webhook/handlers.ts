@@ -30,6 +30,7 @@ import { productoCommand } from "./commands/producto.ts";
 import { saldoCommand } from "./commands/saldo.ts";
 import { misClientesCommand } from "./commands/misclientes.ts";
 import { recorridoCommand } from "./commands/recorrido.ts";
+import { sugerenciasCommand } from "./commands/sugerencias.ts";
 
 const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
 
@@ -49,6 +50,7 @@ function bootCommands(): void {
   registerCommand(saldoCommand);
   registerCommand(misClientesCommand);
   registerCommand(recorridoCommand);
+  registerCommand(sugerenciasCommand);
   _booted = true;
 }
 
