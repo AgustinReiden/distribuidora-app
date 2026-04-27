@@ -191,14 +191,92 @@ supabase/functions/
 │   ├── formatters/     # respuestas → texto Telegram
 │   ├── handlers.ts     # /start, /ayuda, /vincular
 │   └── index.ts        # entrypoint, validación de secret, error handling
+├── telegram-digest/    # Phase 4: digest ejecutivo diario para admins
+│   ├── digest.ts       # runDigestForAdmin: RPC + Gemini + Telegram + idempotencia
+│   └── index.ts        # entrypoint, auth con bearer service_role_key
 ├── tests/
 │   ├── telegram-webhook.test.ts
 │   ├── tools.test.ts
-│   └── gemini.test.ts
+│   ├── gemini.test.ts
+│   ├── agent.test.ts
+│   └── digest.test.ts
 ├── .gitignore
 ├── deno.json
 └── README.md           (este archivo)
 ```
+
+## Digest diario admin (Phase 4 task 4.1)
+
+La función `telegram-digest` genera un resumen ejecutivo del día anterior y
+lo manda por Telegram a cada admin vinculado al bot. Disparada por `pg_cron`
+a las 10:00 UTC (= 07:00 ART, Argentina UTC-3 sin DST).
+
+### Componentes
+
+- **RPC** `bot_metricas_admin_dia(p_fecha date, p_sucursal_id bigint)` →
+  JSON con ventas, top clientes/productos, pendientes, stock crítico, CxC,
+  CxC vencido, rendiciones sin controlar y recorridos. Service_role-only.
+- **Tabla** `bot_digests_enviados (admin_perfil_id, fecha)` con PRIMARY KEY
+  para idempotencia: un retry del cron no duplica mensajes.
+- **Edge function** `telegram-digest`: itera admins activos, llama al RPC,
+  pide narrativa a Gemini, manda a Telegram. Una invocación HTTP procesa a
+  todos los admins con `Promise.allSettled` — el fallo de uno no rompe al resto.
+- **Prompt** `_shared/gemini/prompts/digest_admin.txt`: tono ejecutivo,
+  voseo argentino, plain text, máx 1500 chars.
+
+### Configurar el cron en producción
+
+El bloque `cron.schedule` de la migración 018 usa dos settings de cluster
+para resolver la URL y la key. Configurarlas una vez:
+
+```sql
+ALTER DATABASE postgres SET app.settings.bot_digest_url
+  = 'https://<project-ref>.supabase.co/functions/v1/telegram-digest';
+
+ALTER DATABASE postgres SET app.settings.service_role_key
+  = '<service-role-key>';
+```
+
+Verificar el schedule:
+
+```sql
+SELECT jobid, schedule, command FROM cron.job WHERE jobname = 'bot-telegram-digest-diario';
+```
+
+Y los runs recientes:
+
+```sql
+SELECT * FROM cron.job_run_details
+WHERE jobid = (SELECT jobid FROM cron.job WHERE jobname = 'bot-telegram-digest-diario')
+ORDER BY start_time DESC
+LIMIT 5;
+```
+
+### Disparar manualmente (para testing)
+
+```bash
+URL="https://<project-ref>.supabase.co/functions/v1/telegram-digest"
+KEY="<service-role-key>"
+
+curl -i -X POST "$URL" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+La response es JSON con `{ok, fecha, results: [{admin_perfil_id, status, reason}]}`.
+
+### Verificar resultados
+
+```sql
+SELECT admin_perfil_id, fecha, status, sent_at, error_meta
+FROM bot_digests_enviados
+ORDER BY sent_at DESC
+LIMIT 10;
+```
+
+Si `status='error'`, `error_meta.stage` indica dónde falló: `metricas`,
+`gemini` o `telegram`.
 
 ## Privacidad y retención
 

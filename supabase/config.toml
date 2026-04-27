@@ -11,3 +11,9 @@ project_id = "distribuidora-app"
 # handler con TELEGRAM_WEBHOOK_SECRET).
 [functions.telegram-webhook]
 verify_jwt = false
+
+# `verify_jwt = false` también acá: la auth se hace manualmente con bearer token
+# == SUPABASE_SERVICE_ROLE_KEY (validado dentro del handler). pg_cron via
+# pg_net es el caller esperado y manda esa key.
+[functions.telegram-digest]
+verify_jwt = false
