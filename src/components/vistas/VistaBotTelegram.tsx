@@ -132,7 +132,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
   // ============================================================================
   const usuariosActivos = vinculados.filter((u) => u.activo).length;
   const erroresUltimas24h = auditSummary?.errores_recientes ?? 0;
-  // "Mensajes hoy": tomamos el count del tipo `mensaje` del summary del rango
+  // "Mensajes (rango)": tomamos el count del tipo `mensaje` del summary del rango
   // actual. Si el filtro abarca solo hoy, refleja el día; si abarca más, queda
   // claro porque el rango lo dibuja arriba el componente.
   const mensajesEnRango =
@@ -212,7 +212,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
       {/* Stats cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatsCard
-          label="Mensajes hoy"
+          label="Mensajes (rango)"
           value={mensajesEnRango}
           loading={loadingSummary}
           icon={MessageSquare}
@@ -224,6 +224,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
           loading={loadingSummary}
           icon={AlertTriangle}
           tone={erroresUltimas24h > 0 ? 'red' : 'gray'}
+          tooltip="Siempre muestra errores en las últimas 24 horas, independiente del filtro de fechas"
         />
         <StatsCard
           label="Usuarios activos"
@@ -580,9 +581,10 @@ interface StatsCardProps {
   loading: boolean;
   icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
   tone: 'blue' | 'green' | 'red' | 'purple' | 'gray';
+  tooltip?: string;
 }
 
-function StatsCard({ label, value, loading, icon: Icon, tone }: StatsCardProps): ReactElement {
+function StatsCard({ label, value, loading, icon: Icon, tone, tooltip }: StatsCardProps): ReactElement {
   const toneClasses: Record<StatsCardProps['tone'], string> = {
     blue: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400',
     green: 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400',
@@ -591,7 +593,10 @@ function StatsCard({ label, value, loading, icon: Icon, tone }: StatsCardProps):
     gray: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
   };
   return (
-    <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 flex items-center gap-3">
+    <div
+      className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 flex items-center gap-3"
+      title={tooltip}
+    >
       <div className={`p-2 rounded-lg ${toneClasses[tone]}`}>
         <Icon className="w-5 h-5" aria-hidden />
       </div>
