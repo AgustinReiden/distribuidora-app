@@ -18,6 +18,7 @@ otras dos hay que setearlas explícitamente como secrets.
 | `TELEGRAM_WEBHOOK_SECRET`     | Setear como secret              | String random único, validado en cada request        |
 | `GEMINI_API_KEY`              | Setear como secret (Phase 3+)   | API key de Google AI Studio para function calling    |
 | `GEMINI_MODEL`                | Opcional (default abajo)        | Override del modelo. Default: `gemini-2.5-flash`     |
+| `BOT_MAX_TOOL_ITERATIONS`     | Opcional (default 5, rango 1-20)| Cap del loop de tool-calls del agente Gemini         |
 
 Setear secrets en producción:
 
@@ -198,3 +199,11 @@ supabase/functions/
 ├── deno.json
 └── README.md           (este archivo)
 ```
+
+## Privacidad y retención
+
+- `bot_audit_log` registra cada mensaje recibido (`texto_usuario`) y cada respuesta del bot (`texto_bot`) en plaintext, con `perfil_id` y `telegram_user_id`. Esto es necesario para debugging y compliance interno.
+- Retención: cron mensual (migration 016) borra rows con `created_at < now() - interval '90 days'`.
+- `bot_conversaciones.mensajes` mantiene los últimos 12 turnos por chat para contexto del LLM. Truncado automático.
+- El comando `/start` informa al usuario que sus mensajes quedan registrados 90 días — alineado con esta política.
+- Si el negocio requiere mayor restricción (ej: GDPR, sector regulado), considerar redactar partes del prompt/respuesta antes de logear.

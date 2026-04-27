@@ -74,12 +74,29 @@ export function escapeMarkdownV2(text: string): string {
 }
 
 /**
+ * Detecta si un error de `sendMessage` es un fallo de parseo de MarkdownV2 —
+ * típicamente "Bad Request: can't parse entities" cuando el texto tiene
+ * escapes mal aplicados. Solo en ese caso queremos caer al fallback plain
+ * text: errores de red, chat_id inválido, rate limits, etc. NO deben
+ * mutarse silenciosamente a un mensaje sin formato.
+ */
+function isMarkdownParseError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  // Telegram devuelve "Bad Request: can't parse entities: ..." con varias
+  // sub-causas; basta con detectar el prefijo "can't parse" (case-insensitive)
+  // o el genérico "parse entities". El status también es útil pero el
+  // sendMessage actual no lo expone — usamos el mensaje.
+  return /can'?t parse|parse entities/i.test(msg);
+}
+
+/**
  * Envía mensaje con `parse_mode: MarkdownV2`. Si Telegram rechaza el formato
  * (escapes mal aplicados → 400 "can't parse entities"), reintenta como plain
  * text para que el usuario reciba algo legible en vez de nada. Esto es
  * defense-in-depth: si un formatter tiene un bug de escape, el comando
  * todavía responde. NO silencia errores de red u otros 4xx/5xx — solo el
- * fallo de parseo de markdown.
+ * fallo de parseo de markdown. Si el segundo intento (plain) también falla,
+ * el error se propaga al caller.
  */
 export async function sendMessageMarkdownSafe(
   chatId: number,
@@ -87,19 +104,24 @@ export async function sendMessageMarkdownSafe(
 ): Promise<void> {
   try {
     await sendMessage(chatId, markdownV2Text, { parse_mode: "MarkdownV2" });
+    return;
   } catch (err) {
-    console.error(
-      "[telegram] MarkdownV2 send failed, falling back to plain",
-      err,
+    if (!isMarkdownParseError(err)) {
+      // Network / rate-limit / chat invalid / etc — propagar.
+      throw err;
+    }
+    console.warn(
+      "[telegram] MarkdownV2 parse rejected, falling back to plain text:",
+      err instanceof Error ? err.message : String(err),
     );
-    // Despojamos de la sintaxis MarkdownV2 más obvia para que se lea.
-    // 1) Unescape de los chars MarkdownV2 (`\\.` → `.`).
-    // 2) Strip de markers `*` `_` `` ` ``  (bold/italic/mono).
-    const plain = markdownV2Text
-      .replace(/\\([_*\[\]()~`>#+\-=|{}.!])/g, "$1")
-      .replace(/[*_`]/g, "");
-    await sendMessage(chatId, plain);
   }
+  // Despojamos de la sintaxis MarkdownV2 más obvia para que se lea.
+  // 1) Unescape de los chars MarkdownV2 (`\\.` → `.`).
+  // 2) Strip de markers `*` `_` `` ` ``  (bold/italic/mono).
+  const plain = markdownV2Text
+    .replace(/\\([_*\[\]()~`>#+\-=|{}.!])/g, "$1")
+    .replace(/[*_`]/g, "");
+  await sendMessage(chatId, plain);
 }
 
 /**

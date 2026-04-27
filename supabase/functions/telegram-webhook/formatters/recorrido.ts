@@ -3,7 +3,7 @@
 // entrega, dirección y estado de pago.
 
 import { escapeMarkdownV2 } from "../../_shared/telegram.ts";
-import { formatCurrency } from "../../_shared/tools/formatters.ts";
+import { formatCurrency, formatFechaCorta } from "../../_shared/tools/formatters.ts";
 import type { MiRecorridoHoyResult } from "../../_shared/tools/transportista/mi_recorrido_hoy.ts";
 
 export function formatMiRecorridoResult(r: MiRecorridoHoyResult): string {
@@ -12,8 +12,10 @@ export function formatMiRecorridoResult(r: MiRecorridoHoyResult): string {
   }
 
   const lines: string[] = [];
+  // `fecha` viene del tool en formato YYYY-MM-DD — la pasamos por
+  // formatFechaCorta para mostrar dd/mm/yy en vez de la fecha cruda.
   lines.push(
-    `*Recorrido del ${escapeMarkdownV2(r.recorrido.fecha)}*` +
+    `*Recorrido del ${escapeMarkdownV2(formatFechaCorta(r.recorrido.fecha))}*` +
       ` \\| ${escapeMarkdownV2(r.recorrido.estado)}`,
   );
   lines.push(

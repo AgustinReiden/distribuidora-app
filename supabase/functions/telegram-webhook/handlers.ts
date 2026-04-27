@@ -232,25 +232,41 @@ async function handleStart(
   tgUser: TelegramUser,
   user: BotUser | null,
 ): Promise<void> {
+  // Disclaimer de privacidad alineado con la sección "Privacidad y retención"
+  // del README (90 días en bot_audit_log). Lo mandamos en /start porque es
+  // el primer punto de contacto y el bot no tiene UI para aceptar términos.
+  // En MarkdownV2 todos los `.` `!` etc. requieren escape; el `_..._` lo
+  // renderiza Telegram como italics. Si en el futuro este string crece,
+  // moverlo a una constante exportable.
+  const privacyMv2 =
+    "_Tus mensajes y las respuestas del bot quedan registrados " +
+    "\\(90 días\\) para auditoría y mejora del servicio\\._";
+
   if (user) {
     const nombre = escapeMarkdownV2(tgUser.first_name);
     const rol = escapeMarkdownV2(user.rol);
     await sendMessage(
       chatId,
       `¡Hola, ${nombre}\\! Ya estás vinculado como *${rol}*\\.\n\n` +
-        `Probá /ayuda para ver lo que puedo hacer\\.`,
+        `Probá /ayuda para ver lo que puedo hacer\\.\n\n` +
+        privacyMv2,
       { parse_mode: "MarkdownV2" },
     );
   } else {
+    // El bloque "no vinculado" iba en plain text — para consistencia y para
+    // que el italics del disclaimer renderee, lo migramos a MarkdownV2 con
+    // los escapes apropiados.
     await sendMessage(
       chatId,
-      "¡Hola! Soy el asistente de la distribuidora.\n\n" +
+      "¡Hola\\! Soy el asistente de la distribuidora\\.\n\n" +
         "Para empezar necesito vincularte a tu cuenta:\n" +
-        "1. Entrá a la app web\n" +
-        "2. Andá a tu perfil > 'Vincular Telegram'\n" +
-        "3. Copiá el código de 6 caracteres\n" +
-        "4. Mandame: /vincular ABC123\n\n" +
-        "Comandos disponibles: /ayuda",
+        "1\\. Entrá a la app web\n" +
+        "2\\. Andá a tu perfil \\> 'Vincular Telegram'\n" +
+        "3\\. Copiá el código de 6 caracteres\n" +
+        "4\\. Mandame: /vincular ABC123\n\n" +
+        "Comandos disponibles: /ayuda\n\n" +
+        privacyMv2,
+      { parse_mode: "MarkdownV2" },
     );
   }
 

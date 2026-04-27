@@ -44,7 +44,57 @@ import {
 } from "./history-mapper.ts";
 import type { ToolContext } from "../tools/base.ts";
 
-const MAX_TOOL_ITERATIONS = 5;
+/**
+ * Cap del loop de tool-calls. Configurable via env var `BOT_MAX_TOOL_ITERATIONS`
+ * (entero entre 1 y 20). Default 5 — suficiente para la mayoría de los flows
+ * y bajo enough para que un loop infinito del modelo no explote latencia ni
+ * costo. Subir a 7-10 si vemos hit_max_iterations frecuentes en producción.
+ */
+function getMaxToolIterations(): number {
+  const raw = Deno.env.get("BOT_MAX_TOOL_ITERATIONS");
+  if (!raw) return 5;
+  const n = parseInt(raw, 10);
+  // Out-of-range / NaN → default. No queremos que un typo en el secret deje
+  // el bot con MAX=0 (no responde) o MAX=1000 (loops gigantes).
+  if (!Number.isFinite(n) || n < 1 || n > 20) return 5;
+  return n;
+}
+
+const MAX_TOOL_ITERATIONS = getMaxToolIterations();
+
+/**
+ * Helper centralizado para persistir el history conversacional. Si el upsert
+ * falla (network down, RLS reject, lo que sea), no abortamos la respuesta al
+ * usuario — pero queremos visibilidad: escribimos un audit row con
+ * `tipo='error'` y `resultado_meta.save_failed=true`. El audit row tampoco
+ * aborta si falla (el catch al final lo suprime) — preferimos un audit
+ * perdido a perder la respuesta al usuario.
+ */
+async function persistOrAudit(
+  supabase: SupabaseClient,
+  telegram_user_id: number,
+  perfil_id: string,
+  rol: BotUser["rol"],
+  history: GeminiContent[],
+  context: string,
+): Promise<void> {
+  try {
+    await saveConversation(supabase, telegram_user_id, history);
+  } catch (err) {
+    console.error(`[runAgent] saveConversation (${context}):`, err);
+    await logEvent({
+      telegram_user_id,
+      perfil_id,
+      rol,
+      tipo: "error",
+      resultado_meta: {
+        save_failed: true,
+        context,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    }).catch(() => {});
+  }
+}
 
 export interface RunAgentOptions {
   supabase: SupabaseClient;
@@ -140,10 +190,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       // queremos que el siguiente turn no tenga "model: <fallback>" que
       // contamine la respuesta.
       if (!ephemeral) {
-        await saveConversation(supabase, telegram_user_id, history).catch(
-          (err) => {
-            console.error("[runAgent] saveConversation (block path):", err);
-          },
+        await persistOrAudit(
+          supabase,
+          telegram_user_id,
+          user.perfil_id,
+          user.rol,
+          history,
+          "block-path",
         );
       }
       await logEvent({
@@ -185,15 +238,28 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         .filter(isTextPart)
         .map((p) => p.text)
         .join("");
-      const text = textParts.trim().length > 0
+      let text = textParts.trim().length > 0
         ? textParts
         : "No pude generar una respuesta. Probá reformular.";
 
+      // Si Gemini cortó por límite de tokens, avisamos al usuario para que
+      // sepa que la respuesta puede estar incompleta y pueda pedir más detalle.
+      // El sufijo va en italics MarkdownV2 — pero como el resto del texto va
+      // sin parse_mode (handlers.ts manda plain), el `_` se ve como subrayado
+      // visual sin romper nada.
+      if (lastFinishReason === "MAX_TOKENS") {
+        text +=
+          "\n\n_(Respuesta truncada — pedí más detalle si querés profundizar.)_";
+      }
+
       if (!ephemeral) {
-        await saveConversation(supabase, telegram_user_id, history).catch(
-          (err) => {
-            console.error("[runAgent] saveConversation (text path):", err);
-          },
+        await persistOrAudit(
+          supabase,
+          telegram_user_id,
+          user.perfil_id,
+          user.rol,
+          history,
+          "text-path",
         );
       }
       await logEvent({
@@ -250,9 +316,14 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     "Probá descomponerlo en consultas más cortas o usá /ayuda.";
   history = appendModelParts(history, [{ text: fallback }]);
   if (!ephemeral) {
-    await saveConversation(supabase, telegram_user_id, history).catch((err) => {
-      console.error("[runAgent] saveConversation (max-iter path):", err);
-    });
+    await persistOrAudit(
+      supabase,
+      telegram_user_id,
+      user.perfil_id,
+      user.rol,
+      history,
+      "max-iter-path",
+    );
   }
   await logEvent({
     telegram_user_id,

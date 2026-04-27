@@ -105,6 +105,15 @@ export function truncateHistory(
       return i === 0 ? tail : tail.slice(i);
     }
   }
+  // Caso raro pero posible: el tail entero está hecho de turns model + user
+  // con functionResponse. Devolverlo tal cual puede dejar a Gemini con un
+  // functionResponse huérfano al frente del próximo prompt → riesgo de error.
+  // No cambiamos el comportamiento (preferimos history roto a vacío) pero
+  // dejamos visibilidad para detectarlo en logs.
+  console.warn(
+    "[memory] truncateHistory: no user-text turn found in tail; returning " +
+      "tail as-is, may have orphan functionResponse at head",
+  );
   return tail;
 }
 
