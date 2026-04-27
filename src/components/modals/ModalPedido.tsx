@@ -493,10 +493,10 @@ const ModalPedido = memo(function ModalPedido({
                         const isEditingPrice = editingPriceId === item.productoId;
                         return (
                           <div key={item.productoId} className="px-3 py-2.5">
-                            <div className="flex justify-between items-center gap-2">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="font-medium text-sm dark:text-white truncate">{prod?.nombre}</p>
+                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+                              <div className="min-w-0 sm:flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="font-medium text-sm dark:text-white sm:truncate break-words">{prod?.nombre}</p>
                                   {esOverride && (
                                     <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium shrink-0">
                                       <Pencil className="w-3 h-3" />
@@ -581,7 +581,7 @@ const ModalPedido = memo(function ModalPedido({
                                   <p className="text-xs text-amber-600 mt-0.5">Min: {itemMoq} uds</p>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                                 <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, 0); }} className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="Eliminar producto"><Trash2 className="w-4 h-4" /></button>
                                 <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, Math.max(item.cantidad - 1, minCantidad)); }} className={`w-7 h-7 rounded-full text-sm ${item.cantidad <= minCantidad ? 'bg-gray-100 text-gray-400 dark:bg-gray-700' : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500'}`} disabled={item.cantidad <= minCantidad}>-</button>
                                 <span className="w-6 text-center font-medium text-sm dark:text-white">{item.cantidad}</span>
