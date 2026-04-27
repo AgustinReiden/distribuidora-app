@@ -20,10 +20,10 @@ import { Send, Copy, Check, RefreshCcw, Loader2, AlertTriangle } from 'lucide-re
 import ModalBase from '../modals/ModalBase'
 import { useGenerarCodigoVinculacionBot } from '../../hooks/queries/useBotVinculacion'
 
-// TODO(bot-telegram): reemplazar este placeholder por el username real cuando
-// se cree el bot en BotFather (Phase 1, task 1.x). Hasta entonces, el bot
-// público todavía no existe.
-const BOT_USERNAME_PLACEHOLDER = '@TuBotDeTelegram'
+// El username del bot se inyecta vía env var (`VITE_TELEGRAM_BOT_USERNAME`)
+// para que se pueda actualizar sin re-deploys cuando BotFather lo cree.
+// Fallback al placeholder genérico mientras el bot público todavía no existe.
+const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? '@TuBotDeTelegram'
 
 /** Formatea ms restantes como mm:ss (ej: 09:35). */
 function formatMmSs(msRestantes: number): string {
@@ -123,7 +123,7 @@ function VincularTelegramModal({
             <li>
               Buscá el bot oficial:{' '}
               <code className="px-1.5 py-0.5 rounded bg-white dark:bg-gray-800 border dark:border-gray-600 font-mono text-xs">
-                {BOT_USERNAME_PLACEHOLDER}
+                {BOT_USERNAME}
               </code>{' '}
               <span className="text-xs text-gray-400 italic">(Próximamente disponible)</span>
             </li>
@@ -140,7 +140,7 @@ function VincularTelegramModal({
                 /vincular {codigo}
               </code>
               <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5 ml-4">
-                (reemplazando {codigo} por el código de arriba)
+                (o copiá y pegá la línea entera)
               </span>
             </li>
             <li>El bot te confirmará la vinculación.</li>
@@ -266,7 +266,7 @@ export default function VincularTelegramButton({ className }: VincularTelegramBu
           'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
         }
       >
-        <Send className="w-4 h-4" />
+        <Send className="w-5 h-5" />
         <span>Vincular Telegram</span>
       </button>
 
@@ -289,9 +289,9 @@ export default function VincularTelegramButton({ className }: VincularTelegramBu
         </ModalBase>
       )}
 
-      {abierto && mutation.isError && !mutation.data && (
+      {abierto && mutation.isError && !mutation.data && mutation.error && (
         <VincularTelegramErrorModal
-          error={mutation.error as Error}
+          error={mutation.error}
           onReintentar={handleRegenerar}
           onClose={handleClose}
           reintentando={mutation.isPending}

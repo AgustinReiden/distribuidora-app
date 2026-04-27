@@ -99,4 +99,28 @@ describe('VincularTelegramButton', () => {
     // El código previo ya no está visible.
     expect(screen.queryByText('ABC123')).not.toBeInTheDocument()
   })
+
+  it('si la RPC falla, muestra modal de error con "Reintentar" que re-dispara la mutation', async () => {
+    // Primer intento falla; segundo intento (al hacer click en Reintentar)
+    // resuelve OK para que la UI complete el flujo limpio.
+    rpcMock
+      .mockResolvedValueOnce({ data: null, error: new Error('boom') })
+      .mockResolvedValueOnce({ data: 'ok1234', error: null })
+
+    const { user } = renderButton()
+
+    await user.click(screen.getByRole('button', { name: /vincular telegram/i }))
+
+    // Aparece el modal de error con el botón "Reintentar".
+    const reintentarBtn = await screen.findByRole('button', { name: /reintentar/i })
+    expect(reintentarBtn).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(/boom/i)
+
+    // Click en "Reintentar" → segundo call a la RPC.
+    await user.click(reintentarBtn)
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledTimes(2)
+    })
+  })
 })

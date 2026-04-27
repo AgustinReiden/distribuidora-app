@@ -4,7 +4,7 @@
  * Wraps la RPC `generar_codigo_vinculacion_bot` (migración 014_bot_telegram.sql).
  *
  * Importante: el frontend NO necesita pasar `perfil_id`. La RPC usa
- * `auth.uid()` internamente para identificar al usuario authenticated, así que
+ * `auth.uid()` internamente para identificar al usuario autenticado, así que
  * cualquier sesión válida puede generar SU PROPIO código de vinculación.
  *
  * La RPC retorna el código TEXT directamente (no JSON). El hook lo envuelve en

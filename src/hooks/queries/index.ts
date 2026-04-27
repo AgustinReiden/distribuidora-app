@@ -172,3 +172,10 @@ export {
   useRegistrarNotaCreditoMutation,
 } from './useNotasCreditoQuery'
 export type { NCResumen } from './useNotasCreditoQuery'
+
+// Bot Telegram - Vinculación
+export {
+  botVinculacionKeys,
+  useGenerarCodigoVinculacionBot,
+} from './useBotVinculacion'
+export type { CodigoVinculacionResult } from './useBotVinculacion'
