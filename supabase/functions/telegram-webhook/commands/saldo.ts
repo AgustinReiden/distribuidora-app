@@ -3,6 +3,12 @@
 // El `id` es el PK numérico de `clientes.id`, NO el campo `codigo`. El
 // preventista lo obtiene típicamente con `/cliente <texto>` (que lo muestra
 // en monospace para copiar/pegar).
+//
+// Scope: solo admin, preventista y encargado. Transportista y deposito no
+// tienen razón de ver la ficha financiera (saldo, límite de crédito, deudas)
+// del cliente — el router los bloquea con el mensaje estándar de scope.
+// El filtrado a nivel tool (`ficha_cliente`) sigue aplicando: preventista
+// solo ve sus clientes asignados, encargado/admin filtran por sucursal.
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
 import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
@@ -16,7 +22,7 @@ import type { CommandSpec } from "./types.ts";
 export const saldoCommand: CommandSpec = {
   name: "/saldo",
   description: "Ficha del cliente por ID. Uso: /saldo <id>",
-  scope: "any",
+  scope: ["admin", "preventista", "encargado"],
   async handler({ chatId, rawArgs, user, toolCtx }) {
     if (!user || !toolCtx) {
       await sendMessage(

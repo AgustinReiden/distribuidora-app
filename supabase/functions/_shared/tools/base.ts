@@ -20,10 +20,16 @@ export interface ToolContext {
   /** Rol con el que el bot reconoció al usuario */
   rol: BotRol;
   /**
-   * Sucursal del bot user. NULL es válido SOLO para admin (multi-sucursal).
-   * Tools no-admin DEBEN rechazar `ctx.sucursal_id == null` al inicio del
-   * handler — un preventista/transportista/encargado/deposito sin sucursal
-   * asignada es un data error y nunca debe ver datos cross-sucursal.
+   * Sucursal del bot user al momento de vincular.
+   *
+   * - Para roles no-admin (preventista, transportista, encargado, deposito):
+   *   las tools deben rechazar `null` al inicio del handler — el filtrado
+   *   por sucursal es obligatorio para multi-tenancy.
+   * - Para admin: hoy se aplica el mismo filtro (admin queda en su sucursal
+   *   default). `null` significa "no asignada" y permite ver todas las
+   *   sucursales. Una futura iteración (Phase 4+) puede agregar `--sucursal`
+   *   override en comandos para que el admin alterne entre sus sucursales
+   *   asignadas en `usuario_sucursales`.
    */
   sucursal_id: number | null;
   /** Cliente Supabase con service_role (bypasses RLS — las tools deben
