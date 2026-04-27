@@ -172,3 +172,32 @@ export {
   useRegistrarNotaCreditoMutation,
 } from './useNotasCreditoQuery'
 export type { NCResumen } from './useNotasCreditoQuery'
+
+// Bot Telegram - Vinculación
+export {
+  botVinculacionKeys,
+  useGenerarCodigoVinculacionBot,
+} from './useBotVinculacion'
+export type { CodigoVinculacionResult } from './useBotVinculacion'
+
+// Bot Telegram - Vista admin (Phase 4 task 4.2)
+export {
+  botAdminKeys,
+  useBotVinculadosQuery,
+  useBotAuditLogQuery,
+  useBotAuditSummaryQuery,
+  useBotDigestsEnviadosQuery,
+  useToggleBotUsuarioMutation,
+} from './useBotAdmin'
+export type {
+  BotVinculado,
+  BotAuditEvent,
+  BotAuditPorTipo,
+  BotAuditPorPerfil,
+  BotAuditToolTop,
+  BotAuditSummary,
+  BotDigestEnviado,
+  BotAuditFilters,
+  BotToggleUsuarioInput,
+  BotToggleUsuarioResult,
+} from './useBotAdmin'

@@ -4,12 +4,13 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
-  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Tag, Percent, ArrowRightLeft, Gift
+  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Tag, Percent, ArrowRightLeft, Gift, Send
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { NotificationCenter } from '../../contexts/NotificationContext';
 import SucursalSelector from './SucursalSelector';
+import VincularTelegramButton from '../perfil/VincularTelegramButton';
 import type { PerfilDB, RolUsuario } from '../../types';
 
 // =============================================================================
@@ -87,6 +88,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'rendiciones', icon: Banknote, label: 'Rendiciones', roles: ['admin', 'encargado'] },
       { id: 'salvedades', icon: AlertTriangle, label: 'Salvedades', roles: ['admin', 'encargado'] },
       { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
+      { id: 'bot-telegram', icon: Send, label: 'Bot Telegram', roles: ['admin'] },
     ]
   }
 ];
@@ -328,6 +330,10 @@ export default function TopNavigation({
                       {getRolLabel(perfil?.rol || '')}
                     </span>
                   </div>
+                  {/* Vincular Telegram (Phase 1 MVP del bot) */}
+                  <VincularTelegramButton
+                    className="w-full flex items-center space-x-3 px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  />
                   <button
                     onClick={onLogout}
                     className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"

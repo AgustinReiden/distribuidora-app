@@ -44,6 +44,7 @@ const RecorridosContainer = lazy(() => import('./components/containers/Recorrido
 const RecorridoPreventistaContainer = lazy(() => import('./components/containers/RecorridoPreventistaContainer'))
 const TransferenciasContainer = lazy(() => import('./components/containers/TransferenciasContainer'))
 const PromocionesContainer = lazy(() => import('./components/containers/PromocionesContainer'))
+const VistaBotTelegramContainer = lazy(() => import('./components/containers/VistaBotTelegramContainer'))
 
 function LoadingVista(): ReactElement {
   return (
@@ -314,6 +315,11 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/comisiones"
                   element={isAdminOrEncargado ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                <Route
+                  path="/bot-telegram"
+                  element={isAdmin ? <VistaBotTelegramContainer /> : <Navigate to="/dashboard" replace />}
                 />
 
                 <Route path="*" element={<Navigate to={defaultRoute} replace />} />
