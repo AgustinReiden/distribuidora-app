@@ -10,11 +10,20 @@
 //
 // La RPC SQL `bot_mi_recorrido` (migrations/015_bot_rpcs_phase2.sql) hace el
 // JOIN recorridos ↔ recorrido_pedidos ↔ pedidos ↔ clientes en una sola pasada.
+//
+// IMPORTANTE — timezone: la fecha "hoy" se resuelve siempre en TZ
+// America/Argentina/Buenos_Aires (la distribuidora vive en ART, UTC-3).
+// NO confiamos en `CURRENT_DATE` del servidor PostgreSQL (que usa UTC en
+// Supabase) ni dejamos que PostgREST mande NULL al RPC — un NULL explícito
+// no triggea el `DEFAULT CURRENT_DATE` y rompe el path por defecto.
 
 import type { Tool } from "../base.ts";
 
 interface MiRecorridoHoyParams {
-  /** Override de la fecha (YYYY-MM-DD). Default: today (en TZ del servidor). */
+  /**
+   * Override de la fecha (YYYY-MM-DD). Default: hoy en TZ
+   * America/Argentina/Buenos_Aires (resuelta en TS, no en SQL).
+   */
   fecha?: string;
 }
 
@@ -68,6 +77,23 @@ interface RpcResponse {
 
 const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Devuelve "hoy" en TZ America/Argentina/Buenos_Aires como string YYYY-MM-DD.
+ * Usamos `Intl.DateTimeFormat` con locale "en-CA" porque ese locale siempre
+ * formatea como YYYY-MM-DD (a diferencia de "es-AR" que usa DD/MM/YYYY).
+ * El `timeZone` fuerza la conversión desde la hora del proceso (UTC en
+ * Supabase Edge) a ART antes de extraer el componente "fecha".
+ */
+function hoyEnArgentina(): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(new Date());
+}
+
 export const miRecorridoHoyTool: Tool<MiRecorridoHoyParams, MiRecorridoHoyResult> = {
   name: "mi_recorrido_hoy",
   description:
@@ -81,7 +107,8 @@ export const miRecorridoHoyTool: Tool<MiRecorridoHoyParams, MiRecorridoHoyResult
       fecha: {
         type: "string",
         description:
-          "Fecha en formato YYYY-MM-DD. Si no se especifica, usa la fecha de hoy.",
+          "Fecha en formato YYYY-MM-DD. Si no se especifica, usa la fecha " +
+          "de hoy en TZ America/Argentina/Buenos_Aires.",
       },
     },
   },
@@ -98,15 +125,19 @@ export const miRecorridoHoyTool: Tool<MiRecorridoHoyParams, MiRecorridoHoyResult
       );
     }
 
-    // Validamos `fecha` si vino. Si no, dejamos que el RPC use el default
-    // (CURRENT_DATE) — pasamos null para que el cliente Supabase no setee
-    // explícitamente el parámetro y postgres aplique el DEFAULT.
-    let p_fecha: string | null = null;
+    // Resolvemos la fecha en TS para no depender del default SQL: PostgREST
+    // pasa null verbatim al RPC, lo que NO triggea `DEFAULT CURRENT_DATE`
+    // (la query interna haría WHERE fecha = NULL → siempre 0 rows). Además,
+    // CURRENT_DATE en Supabase corre en UTC y la distribuidora vive en ART
+    // (UTC-3), así que a las 21:00 ART ya estaríamos un día adelantados.
+    let p_fecha: string;
     if (fecha !== undefined && fecha !== null && fecha !== "") {
       if (typeof fecha !== "string" || !FECHA_RE.test(fecha)) {
         throw new Error("fecha inválida (formato YYYY-MM-DD)");
       }
       p_fecha = fecha;
+    } else {
+      p_fecha = hoyEnArgentina();
     }
 
     const sb = ctx.supabase;

@@ -837,13 +837,19 @@ Deno.test("mi_recorrido_hoy sin recorrido del día retorna recorrido:null y pedi
   assertEquals(result.recorrido, null);
   assertEquals(result.pedidos.length, 0);
 
-  // El RPC se llamó con fecha=null (default del SQL function: CURRENT_DATE).
+  // El RPC se llamó con fecha resuelta en TS (TZ ART) — string YYYY-MM-DD,
+  // NUNCA null. PostgREST pasaría un null verbatim al RPC y el DEFAULT
+  // CURRENT_DATE no triggearía → retornaría 0 rows.
   assertEquals(spy.rpcCalls.length, 1);
   const call = spy.rpcCalls[0];
   assertEquals(call.fn, "bot_mi_recorrido");
   assertEquals(call.params.p_transportista_id, "88888888-8888-8888-8888-888888888888");
   assertEquals(call.params.p_sucursal_id, 2);
-  assertEquals(call.params.p_fecha, null);
+  assert(
+    typeof call.params.p_fecha === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(call.params.p_fecha),
+    `p_fecha debió ser un string YYYY-MM-DD, fue: ${JSON.stringify(call.params.p_fecha)}`,
+  );
 });
 
 // ============================================================================
@@ -962,4 +968,53 @@ Deno.test("mi_recorrido_hoy rechaza fecha con formato inválido", async () => {
     );
   }
   assert(threw, "debió lanzar 'fecha inválida'");
+});
+
+// ============================================================================
+// 17. Defense-in-depth: handlers rechazan rol incorrecto cuando se llaman
+// directo (bypass del registry). En producción `invokeTool` ya gatea por
+// `allowedRoles` (cubierto por el test 12), pero si alguien llama el handler
+// desde tests/scripts/sin pasar por el registry, el guard interno debe disparar.
+// ============================================================================
+
+Deno.test("mis_clientes handler rechaza rol distinto a preventista", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "admin",
+    perfil_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    sucursal_id: 1,
+  });
+
+  let threw = false;
+  try {
+    await misClientesTool.handler({}, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "preventista",
+    );
+  }
+  assert(threw, "mis_clientes debió rechazar rol admin");
+});
+
+Deno.test("mi_recorrido_hoy handler rechaza rol distinto a transportista", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    perfil_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    sucursal_id: 1,
+  });
+
+  let threw = false;
+  try {
+    await miRecorridoHoyTool.handler({}, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "transportista",
+    );
+  }
+  assert(threw, "mi_recorrido_hoy debió rechazar rol preventista");
 });

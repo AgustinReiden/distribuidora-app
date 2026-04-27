@@ -20,7 +20,12 @@ import type { Tool } from "../base.ts";
 interface MisClientesParams {
   /** Filtrar solo clientes con saldo_cuenta > 0. Default false. */
   con_deuda?: boolean;
-  /** Solo clientes sin pedidos en los últimos N días. Si 0 o ausente, sin filtro. */
+  /**
+   * Solo clientes sin pedidos no-cancelados en los últimos N días (>= 1).
+   * Si está ausente / undefined, no se aplica filtro. Antes 0 era sentinel
+   * de "sin filtro" — eliminado por confuso (un LLM mandando `0` probablemente
+   * quiere decir "sin gap", no "ignoralo").
+   */
   sin_pedidos_dias?: number;
   /** Default 20, max 50. */
   limit?: number;
@@ -73,15 +78,18 @@ export const misClientesTool: Tool<MisClientesParams, MisClientesResult> = {
       },
       sin_pedidos_dias: {
         type: "integer",
-        minimum: 0,
+        minimum: 1,
+        maximum: 365,
         description:
-          "Si está, solo clientes que no tienen pedidos no-cancelados en los " +
-          "últimos N días (incluye los que nunca compraron). 0 equivale a sin filtro.",
+          "Solo clientes sin pedidos no-cancelados en los últimos N días " +
+          "(incluye los que nunca compraron). Omitir el parámetro para " +
+          "no aplicar filtro.",
       },
       limit: {
         type: "integer",
         minimum: 1,
         maximum: 50,
+        default: 20,
         description: "Cantidad máxima de resultados (default 20, máx 50).",
       },
     },
@@ -112,13 +120,19 @@ export const misClientesTool: Tool<MisClientesParams, MisClientesResult> = {
       effectiveLimit = limit;
     }
 
+    // sin_pedidos_dias: omitir → null (no filtra). >= 1 → se aplica.
+    // 0 / negativos / no-int rechazados explícitamente — antes 0 era un
+    // sentinel "sin filtro", ahora es un error de input (más predecible
+    // para callers LLM).
     let effectiveSinPedidos: number | null = null;
     if (sin_pedidos_dias !== undefined && sin_pedidos_dias !== null) {
-      if (!Number.isInteger(sin_pedidos_dias) || sin_pedidos_dias < 0) {
-        throw new Error("sin_pedidos_dias debe ser entero >= 0");
+      if (
+        !Number.isInteger(sin_pedidos_dias) || sin_pedidos_dias < 1 ||
+        sin_pedidos_dias > 365
+      ) {
+        throw new Error("sin_pedidos_dias debe ser entero entre 1 y 365");
       }
-      // 0 equivale a "todos" — pasamos null al RPC para no filtrar.
-      effectiveSinPedidos = sin_pedidos_dias === 0 ? null : sin_pedidos_dias;
+      effectiveSinPedidos = sin_pedidos_dias;
     }
 
     const effectiveConDeuda = con_deuda === true;
