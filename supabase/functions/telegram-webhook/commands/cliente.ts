@@ -1,7 +1,7 @@
 // /cliente <texto> — busca clientes por nombre o código y devuelve hasta 10.
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
-import { sendMessage } from "../../_shared/telegram.ts";
+import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
 import { formatBuscarClienteResult } from "../formatters/cliente.ts";
 import type {
   BuscarClienteParams,
@@ -47,6 +47,6 @@ export const clienteCommand: CommandSpec = {
     }
 
     const text = formatBuscarClienteResult(result.data);
-    await sendMessage(chatId, text, { parse_mode: "MarkdownV2" });
+    await sendMessageMarkdownSafe(chatId, text);
   },
 };

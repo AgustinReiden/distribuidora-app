@@ -6,7 +6,7 @@
 // Sin args, lista los primeros 20 clientes asignados.
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
-import { sendMessage } from "../../_shared/telegram.ts";
+import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
 import { formatMisClientesResult } from "../formatters/misclientes.ts";
 import type {
   MisClientesParams,
@@ -63,10 +63,6 @@ export const misClientesCommand: CommandSpec = {
       return;
     }
 
-    await sendMessage(
-      chatId,
-      formatMisClientesResult(result.data),
-      { parse_mode: "MarkdownV2" },
-    );
+    await sendMessageMarkdownSafe(chatId, formatMisClientesResult(result.data));
   },
 };

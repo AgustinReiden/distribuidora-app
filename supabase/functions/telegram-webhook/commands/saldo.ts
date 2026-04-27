@@ -5,7 +5,7 @@
 // en monospace para copiar/pegar).
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
-import { sendMessage } from "../../_shared/telegram.ts";
+import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
 import { formatFichaCliente } from "../formatters/cliente.ts";
 import type {
   FichaClienteParams,
@@ -50,6 +50,6 @@ export const saldoCommand: CommandSpec = {
     }
 
     const text = formatFichaCliente(result.data);
-    await sendMessage(chatId, text, { parse_mode: "MarkdownV2" });
+    await sendMessageMarkdownSafe(chatId, text);
   },
 };

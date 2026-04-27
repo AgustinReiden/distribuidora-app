@@ -43,6 +43,12 @@ export function formatMiRecorridoResult(r: MiRecorridoHoyResult): string {
           `Total: ${escapeMarkdownV2(formatCurrency(p.total))}${pago}`,
       );
     }
+  } else {
+    // Edge case: existe el recorrido pero no tiene paradas asignadas todavía.
+    // Sin este bloque el usuario veía solo la cabecera y se quedaba sin
+    // entender por qué no hay pedidos.
+    lines.push("");
+    lines.push("_Sin paradas asignadas\\._");
   }
   return lines.join("\n");
 }

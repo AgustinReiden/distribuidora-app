@@ -74,6 +74,35 @@ export function escapeMarkdownV2(text: string): string {
 }
 
 /**
+ * Envía mensaje con `parse_mode: MarkdownV2`. Si Telegram rechaza el formato
+ * (escapes mal aplicados → 400 "can't parse entities"), reintenta como plain
+ * text para que el usuario reciba algo legible en vez de nada. Esto es
+ * defense-in-depth: si un formatter tiene un bug de escape, el comando
+ * todavía responde. NO silencia errores de red u otros 4xx/5xx — solo el
+ * fallo de parseo de markdown.
+ */
+export async function sendMessageMarkdownSafe(
+  chatId: number,
+  markdownV2Text: string,
+): Promise<void> {
+  try {
+    await sendMessage(chatId, markdownV2Text, { parse_mode: "MarkdownV2" });
+  } catch (err) {
+    console.error(
+      "[telegram] MarkdownV2 send failed, falling back to plain",
+      err,
+    );
+    // Despojamos de la sintaxis MarkdownV2 más obvia para que se lea.
+    // 1) Unescape de los chars MarkdownV2 (`\\.` → `.`).
+    // 2) Strip de markers `*` `_` `` ` ``  (bold/italic/mono).
+    const plain = markdownV2Text
+      .replace(/\\([_*\[\]()~`>#+\-=|{}.!])/g, "$1")
+      .replace(/[*_`]/g, "");
+    await sendMessage(chatId, plain);
+  }
+}
+
+/**
  * Comparación de strings constant-time para evitar timing attacks al validar
  * secrets/tokens. NO usar `===` para comparar el `X-Telegram-Bot-Api-Secret-Token`
  * porque la duración del `===` filtra cuántos chars iniciales matchearon.

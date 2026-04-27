@@ -32,9 +32,20 @@ export function formatCurrency(n: number | string | null | undefined): string {
 /**
  * Formatea una fecha como dd/mm/yy. null/undefined → "—".
  * Si la entrada es inválida (NaN), retorna "—" también.
+ *
+ * Acepta:
+ *   - Date instance
+ *   - ISO `YYYY-MM-DD` o `YYYY-MM-DDTHH:mm:ss(.sss)?Z?`
+ *   - Strings ya formateados como `DD/MM/YY` o `DD/MM/YYYY` → se devuelven
+ *     pasthrough (sin re-parsear) para que un caller que ya formateó no
+ *     vea "—" si new Date() del Locale es inválido.
  */
 export function formatFechaCorta(fecha: string | Date | null | undefined): string {
   if (fecha === null || fecha === undefined || fecha === "") return "—";
+  if (typeof fecha === "string") {
+    // Pasthrough si ya viene en formato DD/MM/YY o DD/MM/YYYY.
+    if (/^\d{1,2}\/\d{1,2}\/\d{2}(\d{2})?$/.test(fecha)) return fecha;
+  }
   const d = fecha instanceof Date ? fecha : new Date(fecha);
   if (Number.isNaN(d.getTime())) return "—";
   return FECHA_CORTA.format(d);

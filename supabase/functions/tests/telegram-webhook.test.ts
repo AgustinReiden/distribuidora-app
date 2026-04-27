@@ -16,6 +16,7 @@ import {
   escapeMarkdownV2,
   parseUpdate,
   sendMessage,
+  sendMessageMarkdownSafe,
   timingSafeEqual,
 } from "../_shared/telegram.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
@@ -180,6 +181,66 @@ Deno.test("sendMessage lanza si la API responde con ok:false", async () => {
       );
     }
     assert(threw, "sendMessage debió lanzar ante ok:false");
+  } finally {
+    globalThis.fetch = original;
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("sendMessageMarkdownSafe cae a plain text si MarkdownV2 falla", async () => {
+  const original = globalThis.fetch;
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token-123");
+
+  // Capturamos cada call. Primero retornamos 400 (formato roto), luego 200.
+  const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+  let callIdx = 0;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    callIdx++;
+    if (callIdx === 1) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: can't parse entities",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  }) as typeof fetch;
+
+  try {
+    // Texto que simula MarkdownV2 con escapes (`\.`) y bold (`*x*`).
+    const md = "*Pepito*\nfecha: 20/04/26 \\| saldo";
+    await sendMessageMarkdownSafe(123, md);
+
+    assertEquals(calls.length, 2, "debió hacer 2 fetches (md fail + plain retry)");
+
+    // Primer call: con parse_mode MarkdownV2 y el texto crudo.
+    const body1 = JSON.parse(calls[0].init?.body as string);
+    assertEquals(body1.parse_mode, "MarkdownV2");
+    assertEquals(body1.text, md);
+
+    // Segundo call: SIN parse_mode, texto sin `*` y con `\|` despojado a `|`.
+    const body2 = JSON.parse(calls[1].init?.body as string);
+    assertEquals(
+      body2.parse_mode,
+      undefined,
+      "el retry no debería tener parse_mode",
+    );
+    assertStringIncludes(body2.text, "Pepito");
+    // Ya no debería haber `*` en el plain text.
+    assertEquals(body2.text.includes("*"), false, "* no debería sobrevivir");
+    // El `\|` debió convertirse a `|` (unescape).
+    assertStringIncludes(body2.text, "| saldo");
   } finally {
     globalThis.fetch = original;
     Deno.env.delete("TELEGRAM_BOT_TOKEN");

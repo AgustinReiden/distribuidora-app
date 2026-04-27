@@ -10,7 +10,7 @@
 // que la sintaxis sea válida en TS y llegue a Telegram como `\.`.
 
 import { escapeMarkdownV2 } from "../../_shared/telegram.ts";
-import { formatCurrency } from "../../_shared/tools/formatters.ts";
+import { formatCurrency, formatFechaCorta } from "../../_shared/tools/formatters.ts";
 import type { BuscarClienteResult } from "../../_shared/tools/common/buscar_cliente.ts";
 import type { FichaClienteResult } from "../../_shared/tools/common/ficha_cliente.ts";
 
@@ -69,16 +69,18 @@ export function formatFichaCliente(r: FichaClienteResult): string {
     parts.push(`Pendientes de pago: *${r.pedidos_pendientes_pago}*`);
   }
   if (r.ultimo_pedido) {
+    const fechaFmt = formatFechaCorta(r.ultimo_pedido.fecha);
     const monto = r.ultimo_pedido.monto != null && r.ultimo_pedido.monto !== 0
       ? ` por ${formatCurrency(r.ultimo_pedido.monto)}`
       : "";
-    parts.push(`📦 Último pedido: ${escapeMarkdownV2(`${r.ultimo_pedido.fecha}${monto}`)}`);
+    parts.push(`📦 Último pedido: ${escapeMarkdownV2(`${fechaFmt}${monto}`)}`);
   }
   if (r.ultimo_pago) {
+    const fechaFmt = formatFechaCorta(r.ultimo_pago.fecha);
     const monto = r.ultimo_pago.monto != null && r.ultimo_pago.monto !== 0
       ? ` por ${formatCurrency(r.ultimo_pago.monto)}`
       : "";
-    parts.push(`💵 Último pago: ${escapeMarkdownV2(`${r.ultimo_pago.fecha}${monto}`)}`);
+    parts.push(`💵 Último pago: ${escapeMarkdownV2(`${fechaFmt}${monto}`)}`);
   }
   return parts.join("\n");
 }

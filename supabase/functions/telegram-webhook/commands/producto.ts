@@ -1,7 +1,7 @@
 // /producto <texto> — busca productos por nombre o código y devuelve hasta 10.
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
-import { sendMessage } from "../../_shared/telegram.ts";
+import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
 import { formatBuscarProductoResult } from "../formatters/producto.ts";
 import type {
   BuscarProductoParams,
@@ -45,6 +45,6 @@ export const productoCommand: CommandSpec = {
     }
 
     const text = formatBuscarProductoResult(result.data);
-    await sendMessage(chatId, text, { parse_mode: "MarkdownV2" });
+    await sendMessageMarkdownSafe(chatId, text);
   },
 };

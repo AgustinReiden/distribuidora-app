@@ -115,12 +115,18 @@ export const buscarClienteTool: Tool<BuscarClienteParams, BuscarClienteResult> =
     // ',' separa términos en .or(), '(' ')' agrupan, ',', '.', ':' separan
     // op/col/val. Los escapamos todos para evitar inyección de filtro.
     const codigoNum = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : null;
-    if (codigoNum !== null) {
+    // Guard contra overflow de int4: PostgreSQL.codigo es int4 (max 2^31-1).
+    // Si el usuario tipea "9999999999", parseInt da 9999999999 y PostgREST
+    // tira "value out of range". Lo nuleamos para caer al ILIKE solo.
+    const codigoSafe = codigoNum != null && codigoNum > 0 && codigoNum <= 2147483647
+      ? codigoNum
+      : null;
+    if (codigoSafe !== null) {
       // Rama numérica: trimmed son dígitos puros, no necesita escape.
       // Igualmente lo escapamos por uniformidad (no-op sobre dígitos).
       const escaped = trimmed.replace(/[%_,()\.:]/g, "\\$&");
       query = query.or(
-        `codigo.eq.${codigoNum},nombre_fantasia.ilike.%${escaped}%,razon_social.ilike.%${escaped}%`,
+        `codigo.eq.${codigoSafe},nombre_fantasia.ilike.%${escaped}%,razon_social.ilike.%${escaped}%`,
       );
     } else {
       const escaped = trimmed.replace(/[%_,()\.:]/g, "\\$&");

@@ -2,7 +2,7 @@
 // en TZ America/Argentina/Buenos_Aires (lo resuelve el tool).
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
-import { sendMessage } from "../../_shared/telegram.ts";
+import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
 import { formatMiRecorridoResult } from "../formatters/recorrido.ts";
 import type {
   MiRecorridoHoyParams,
@@ -35,10 +35,6 @@ export const recorridoCommand: CommandSpec = {
       return;
     }
 
-    await sendMessage(
-      chatId,
-      formatMiRecorridoResult(result.data),
-      { parse_mode: "MarkdownV2" },
-    );
+    await sendMessageMarkdownSafe(chatId, formatMiRecorridoResult(result.data));
   },
 };
