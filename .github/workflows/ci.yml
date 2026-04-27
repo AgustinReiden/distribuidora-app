@@ -93,9 +93,9 @@ jobs:
 
       - name: Setup Deno
         if: needs.deno-changes.outputs.deno == 'true'
-        uses: denoland/setup-deno@v1
+        uses: denoland/setup-deno@v2
         with:
-          deno-version: v1.x
+          deno-version: v2.x
 
       - name: Type check
         if: needs.deno-changes.outputs.deno == 'true'
