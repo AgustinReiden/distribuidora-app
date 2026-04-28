@@ -46,17 +46,18 @@ import type { ToolContext } from "../tools/base.ts";
 
 /**
  * Cap del loop de tool-calls. Configurable via env var `BOT_MAX_TOOL_ITERATIONS`
- * (entero entre 1 y 20). Default 5 — suficiente para la mayoría de los flows
- * y bajo enough para que un loop infinito del modelo no explote latencia ni
- * costo. Subir a 7-10 si vemos hit_max_iterations frecuentes en producción.
+ * (entero entre 1 y 20). Default 8 — sube de 5 para acomodar flujos multi-tool
+ * que ahora son explícitos en los prompts (listar_categorias →
+ * productos_por_categoria → eventual fallback con sinónimo). Bajo enough
+ * para que un loop infinito del modelo no explote latencia ni costo.
  */
 function getMaxToolIterations(): number {
   const raw = Deno.env.get("BOT_MAX_TOOL_ITERATIONS");
-  if (!raw) return 5;
+  if (!raw) return 8;
   const n = parseInt(raw, 10);
   // Out-of-range / NaN → default. No queremos que un typo en el secret deje
   // el bot con MAX=0 (no responde) o MAX=1000 (loops gigantes).
-  if (!Number.isFinite(n) || n < 1 || n > 20) return 5;
+  if (!Number.isFinite(n) || n < 1 || n > 20) return 8;
   return n;
 }
 
