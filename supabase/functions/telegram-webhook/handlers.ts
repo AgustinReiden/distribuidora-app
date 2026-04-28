@@ -35,7 +35,9 @@ import type {
   TelegramUser,
 } from "../_shared/types.ts";
 import { formatFichaCliente } from "./formatters/cliente.ts";
+import { formatFichaProducto } from "./formatters/ficha-producto.ts";
 import type { FichaClienteResult } from "../_shared/tools/common/ficha_cliente.ts";
+import type { FichaProductoResult } from "../_shared/tools/common/ficha_producto.ts";
 
 import { parseCommand } from "./commands/parser.ts";
 import { getCommand, listCommands, registerCommand } from "./commands/router.ts";
@@ -661,11 +663,14 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
   switch (parsed.action) {
     case "cliente":
       return handleCallbackCliente(cb, toolCtx, parsed.args);
+    case "producto":
+      return handleCallbackProducto(cb, toolCtx, parsed.args);
     case "menu":
       return handleCallbackMenu(cb, user, toolCtx, parsed.args);
-    case "producto":
     case "visitar":
-      // Reservadas: confirmamos el callback y respondemos con placeholder.
+      // Reservada: confirmamos el callback y respondemos con placeholder.
+      // Acciones de write con confirmación están out of scope hasta una
+      // iteración futura.
       await answerCallbackQuery(cb.id, {
         text: "Esa acción todavía no está disponible.",
       });
@@ -727,6 +732,51 @@ async function handleCallbackCliente(
   }
 
   // OK → confirmamos el callback (apaga el spinner).
+  await answerCallbackQuery(cb.id);
+}
+
+async function handleCallbackProducto(
+  cb: TelegramCallbackQuery,
+  toolCtx: ToolContext,
+  args: string[],
+): Promise<void> {
+  // Mismo patrón que handleCallbackCliente — el rol y el scope los hace
+  // invokeTool basándose en `toolCtx`.
+  const chatId = cb.message.chat.id;
+  const idStr = args[0];
+  const producto_id = idStr ? parseInt(idStr, 10) : NaN;
+  if (!Number.isFinite(producto_id) || producto_id <= 0) {
+    await answerCallbackQuery(cb.id, { text: "ID de producto inválido." });
+    return;
+  }
+
+  const result = await invokeTool(
+    "ficha_producto",
+    { producto_id },
+    toolCtx,
+  );
+
+  if (!result.ok) {
+    const errMsg = result.error === "permiso_denegado"
+      ? "No tenés permiso para ver este producto."
+      : "No pude abrir la ficha del producto.";
+    await answerCallbackQuery(cb.id, { text: errMsg, show_alert: true });
+    return;
+  }
+
+  const ficha = result.data as FichaProductoResult;
+  const text = formatFichaProducto(ficha);
+  try {
+    await sendMessageMarkdownSafe(chatId, text);
+  } catch (err) {
+    console.error("[callback producto] sendMessage failed:", err);
+    await answerCallbackQuery(cb.id, {
+      text: "No pude enviar la ficha. Probá de nuevo.",
+      show_alert: true,
+    });
+    return;
+  }
+
   await answerCallbackQuery(cb.id);
 }
 
