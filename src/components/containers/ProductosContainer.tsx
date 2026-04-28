@@ -14,8 +14,11 @@ import {
 } from '../../hooks/queries'
 import { useMermasQuery, useRegistrarMermaMutation } from '../../hooks/queries'
 import { useProveedoresActivosQuery } from '../../hooks/queries'
+import { useClientesQuery } from '../../hooks/queries'
+import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended } from '../../types'
 
 // Lazy load de componentes
@@ -26,6 +29,7 @@ const ModalHistorialMermas = lazy(() => import('../modals/ModalHistorialMermas')
 const ModalImportarPrecios = lazy(() => import('../modals/ModalImportarPrecios'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
+const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
 
 function LoadingState() {
   return (
@@ -44,19 +48,22 @@ interface ConfirmConfig {
 }
 
 export default function ProductosContainer(): React.ReactElement {
-  const { isAdmin } = useAuthData()
+  const { isAdmin, isEncargado } = useAuthData()
+  const puedeCambiarProductos = isAdmin || isEncargado
   const notify = useNotification()
 
   // Queries
   const { data: productos = [], isLoading } = useProductosQuery()
   const { data: mermas = [] } = useMermasQuery()
   const { data: proveedores = [] } = useProveedoresActivosQuery()
+  const { data: clientes = [] } = useClientesQuery()
 
   // Mutations
   const crearProducto = useCrearProductoMutation()
   const actualizarProducto = useActualizarProductoMutation()
   const eliminarProducto = useEliminarProductoMutation()
   const registrarMerma = useRegistrarMermaMutation()
+  const registrarCambioProducto = useRegistrarCambioProductoMutation()
 
   // Estado de modales
   const [modalProductoOpen, setModalProductoOpen] = useState(false)
@@ -64,6 +71,7 @@ export default function ProductosContainer(): React.ReactElement {
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
   const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
+  const [modalCambioOpen, setModalCambioOpen] = useState(false)
 
   // Estado de edición
   const [productoEditando, setProductoEditando] = useState<ProductoDB | null>(null)
@@ -127,6 +135,31 @@ export default function ProductosContainer(): React.ReactElement {
     setModalCategoriasOpen(true)
   }, [])
 
+  const handleAbrirCambioProducto = useCallback(() => {
+    setModalCambioOpen(true)
+  }, [])
+
+  const handleGuardarCambioProducto = useCallback(async (data: RegistrarCambioInput) => {
+    try {
+      await registrarCambioProducto.mutateAsync(data)
+      const productoDevuelto = productos.find(p => p.id === data.productoDevueltoId)
+      const productoEntregado = productos.find(p => p.id === data.productoEntregadoId)
+      const diferencia = (productoEntregado?.precio || 0) * data.cantidadEntregada
+                       - (productoDevuelto?.precio || 0) * data.cantidadDevuelta
+      const detalle = diferencia === 0
+        ? 'sin diferencia de precio'
+        : diferencia > 0
+        ? `el cliente debe ${formatPrecio(diferencia)}`
+        : `saldo a favor del cliente por ${formatPrecio(Math.abs(diferencia))}`
+      notify.success(`Cambio registrado · ${detalle}`)
+      setModalCambioOpen(false)
+    } catch (err) {
+      const mensaje = err instanceof Error ? err.message : 'Error al registrar el cambio'
+      notify.error(mensaje)
+      throw err
+    }
+  }, [registrarCambioProducto, productos, notify])
+
   const handleGuardarProducto = useCallback(async (data: ProductoFormInput) => {
     try {
       if (productoEditando) {
@@ -187,6 +220,7 @@ export default function ProductosContainer(): React.ReactElement {
           onVerHistorialMermas={handleVerHistorialMermas}
           onImportarPrecios={handleImportarPrecios}
           onGestionarCategorias={handleGestionarCategorias}
+          onCambioProducto={puedeCambiarProductos ? handleAbrirCambioProducto : undefined}
         />
       </Suspense>
 
@@ -249,6 +283,18 @@ export default function ProductosContainer(): React.ReactElement {
           <ModalCategorias
             productos={productos}
             onClose={() => setModalCategoriasOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Cambio de productos */}
+      {modalCambioOpen && (
+        <Suspense fallback={null}>
+          <ModalCambioProducto
+            clientes={clientes}
+            productos={productos}
+            onSave={handleGuardarCambioProducto}
+            onClose={() => setModalCambioOpen(false)}
           />
         </Suspense>
       )}
