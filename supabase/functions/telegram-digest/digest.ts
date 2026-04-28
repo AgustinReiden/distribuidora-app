@@ -125,7 +125,10 @@ export async function runDigestForAdmin(
   }
 
   // 4. Telegram (plain text, sin parse_mode).
-  const mensaje = `Resumen ${fecha}\n\n${texto}`;
+  // Header con emoji + fecha legible ("lun 27/04/2026" en vez de
+  // "2026-04-27"), después divider, después el texto del LLM.
+  const mensaje = `🌅 Resumen ${formatFechaLegible(fecha)}\n` +
+    `━━━━━━━━━━━━━━\n\n${texto}`;
   try {
     await sendMessage(telegram_user_id, mensaje);
   } catch (err) {
@@ -187,4 +190,30 @@ async function registrarEnvio(
       error.message,
     );
   }
+}
+
+/**
+ * Formatea YYYY-MM-DD como "lun 27/04/2026" para el header del digest.
+ * Si la fecha no parsea, devuelve la string original (defensivo: nunca
+ * queremos que un fallo de Date parsing dropee el mensaje entero).
+ *
+ * Usamos `Intl.DateTimeFormat` con timeZone explícita ART para evitar que
+ * el runtime del Edge interprete YYYY-MM-DD como UTC y devuelva el día
+ * anterior en zonas con offset negativo.
+ */
+function formatFechaLegible(fecha: string): string {
+  // Construimos la fecha como UTC mediodía para sortear bordes de TZ —
+  // el día calendario es el mismo en cualquier TZ razonable.
+  const d = new Date(`${fecha}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return fecha;
+  const fmt = new Intl.DateTimeFormat("es-AR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "America/Argentina/Buenos_Aires",
+  });
+  // Salida: "lun., 27/04/2026" — limpiamos el punto del weekday corto y la
+  // coma para que quede "lun 27/04/2026".
+  return fmt.format(d).replace(/\./g, "").replace(",", "");
 }
