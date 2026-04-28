@@ -75,6 +75,7 @@ function PedidoFilters({
             <option value="en_preparacion">En preparacion</option>
             <option value="asignado">En camino</option>
             <option value="entregado">Entregados</option>
+            <option value="cancelado">Cancelados</option>
           </select>
         </div>
         <label className="flex items-center gap-2 px-3 py-2 border rounded-lg cursor-pointer select-none dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">

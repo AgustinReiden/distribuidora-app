@@ -23,7 +23,8 @@ import {
 function calcularAltura(pedidos) {
   let totalHeight = 25 // Encabezado inicial
   pedidos.forEach(pedido => {
-    totalHeight += 18 // Cabecera del pedido
+    totalHeight += 18 // Cabecera del pedido (cliente + direccion + telefono)
+    if (pedido.cliente?.horarios_atencion) totalHeight += 3 // Horario
     totalHeight += (pedido.items?.length || 0) * 5 // Productos
     if (pedido.notas) totalHeight += 8
     totalHeight += 5 // Separador
@@ -85,6 +86,12 @@ export function generarOrdenPreparacion(pedidos) {
     // Teléfono
     if (pedido.cliente?.telefono) {
       doc.text(`Tel: ${pedido.cliente.telefono}`, margin, y)
+      y += 3
+    }
+
+    // Horario de atencion
+    if (pedido.cliente?.horarios_atencion) {
+      doc.text(`Hor: ${truncate(pedido.cliente.horarios_atencion, 35)}`, margin, y)
       y += 3
     }
 
