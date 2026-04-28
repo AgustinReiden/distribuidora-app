@@ -622,7 +622,7 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
 
   switch (parsed.action) {
     case "cliente":
-      return handleCallbackCliente(cb, user, toolCtx, parsed.args);
+      return handleCallbackCliente(cb, toolCtx, parsed.args);
     case "producto":
     case "visitar":
     case "menu":
@@ -641,10 +641,12 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
 
 async function handleCallbackCliente(
   cb: TelegramCallbackQuery,
-  user: BotUser,
   toolCtx: ToolContext,
   args: string[],
 ): Promise<void> {
+  // `user` no es necesario acá — su info (perfil_id, rol, sucursal_id) ya
+  // viaja en `toolCtx`, y los permission gates los hace `invokeTool`
+  // basándose en `toolCtx.rol`.
   const chatId = cb.message.chat.id;
   const idStr = args[0];
   const cliente_id = idStr ? parseInt(idStr, 10) : NaN;
