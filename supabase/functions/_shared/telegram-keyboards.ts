@@ -17,6 +17,7 @@ import type {
   InlineKeyboardButton,
   InlineKeyboardMarkup,
 } from "./telegram.ts";
+import type { BotRol } from "./types.ts";
 
 // ----------------------------------------------------------------------------
 // Constantes
@@ -133,6 +134,89 @@ export function buildMisClientesKeyboard(
 }
 
 // ----------------------------------------------------------------------------
+// Main menu (Fase 3)
+// ----------------------------------------------------------------------------
+
+/**
+ * Tipo de cada entrada del main menu. La `key` viaja como argumento del
+ * callback (`v1:menu:<key>`) y el handler decide cómo materializarla.
+ */
+interface MainMenuEntry {
+  text: string;
+  /** Key del callback. Sin chars `:` ni espacios. */
+  key: string;
+}
+
+/**
+ * Construye el main menu apropiado para el rol del usuario. Layout 2 cols
+ * por fila — cabe bien en mobile, es lo que el GauchOs Bot usa de
+ * referencia. Cada rol ve solo las opciones que sus tools permiten.
+ *
+ *   admin / encargado:   [👥 Buscar cliente] [📦 Buscar producto]
+ *                         [❓ Ayuda]
+ *
+ *   preventista:         [👥 Mis clientes]   [💡 Sugerencias]
+ *                         [📦 Buscar producto] [❓ Ayuda]
+ *
+ *   transportista:       [🚚 Recorrido hoy]  [📦 Buscar producto]
+ *                         [❓ Ayuda]
+ *
+ *   deposito:            [📦 Buscar producto] [❓ Ayuda]
+ *
+ * El key del callback se interpreta en handleCallbackMenu — algunos disparan
+ * un slash command sin args (mis clientes, sugerencias, recorrido, ayuda),
+ * otros piden al usuario que tipee qué buscar (cliente, producto).
+ */
+export function buildMainMenuKeyboard(rol: BotRol): InlineKeyboardMarkup {
+  const entries = mainMenuEntriesForRol(rol);
+  // Pareamos en filas de 2 cols. Si la cantidad es impar, la última fila
+  // queda con 1 botón solo (visualmente OK).
+  const rows: InlineKeyboardButton[][] = [];
+  for (let i = 0; i < entries.length; i += 2) {
+    const row: InlineKeyboardButton[] = [];
+    for (let j = i; j < Math.min(i + 2, entries.length); j++) {
+      const e = entries[j];
+      row.push({
+        text: truncate(e.text),
+        callback_data: callbackData("menu", e.key),
+      });
+    }
+    rows.push(row);
+  }
+  return { inline_keyboard: rows };
+}
+
+function mainMenuEntriesForRol(rol: BotRol): MainMenuEntry[] {
+  switch (rol) {
+    case "admin":
+    case "encargado":
+      return [
+        { text: "👥 Buscar cliente", key: "buscar_cliente" },
+        { text: "📦 Buscar producto", key: "buscar_producto" },
+        { text: "❓ Ayuda", key: "ayuda" },
+      ];
+    case "preventista":
+      return [
+        { text: "👥 Mis clientes", key: "mis_clientes" },
+        { text: "💡 Sugerencias", key: "sugerencias" },
+        { text: "📦 Buscar producto", key: "buscar_producto" },
+        { text: "❓ Ayuda", key: "ayuda" },
+      ];
+    case "transportista":
+      return [
+        { text: "🚚 Recorrido de hoy", key: "recorrido" },
+        { text: "📦 Buscar producto", key: "buscar_producto" },
+        { text: "❓ Ayuda", key: "ayuda" },
+      ];
+    case "deposito":
+      return [
+        { text: "📦 Buscar producto", key: "buscar_producto" },
+        { text: "❓ Ayuda", key: "ayuda" },
+      ];
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Exports auxiliares para tests
 // ----------------------------------------------------------------------------
 
@@ -141,4 +225,5 @@ export const _internal = {
   callbackData,
   BUTTON_TEXT_MAX,
   CALLBACK_VERSION,
+  mainMenuEntriesForRol,
 };

@@ -19,9 +19,11 @@ import { getServiceRoleClient } from "../_shared/supabase.ts";
 import {
   answerCallbackQuery,
   escapeMarkdownV2,
+  sendChatAction,
   sendMessage,
   sendMessageMarkdownSafe,
 } from "../_shared/telegram.ts";
+import { buildMainMenuKeyboard } from "../_shared/telegram-keyboards.ts";
 import { invokeTool, registerAllTools } from "../_shared/tools/index.ts";
 import type { ToolContext } from "../_shared/tools/base.ts";
 import { runAgent } from "../_shared/gemini/agent.ts";
@@ -44,6 +46,9 @@ import { saldoCommand } from "./commands/saldo.ts";
 import { misClientesCommand } from "./commands/misclientes.ts";
 import { recorridoCommand } from "./commands/recorrido.ts";
 import { sugerenciasCommand } from "./commands/sugerencias.ts";
+import { menuCommand } from "./commands/menu.ts";
+import { resetCommand } from "./commands/reset.ts";
+import { desvincularCommand } from "./commands/desvincular.ts";
 
 const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
 
@@ -64,6 +69,9 @@ function bootCommands(): void {
   registerCommand(misClientesCommand);
   registerCommand(recorridoCommand);
   registerCommand(sugerenciasCommand);
+  registerCommand(menuCommand);
+  registerCommand(resetCommand);
+  registerCommand(desvincularCommand);
   _booted = true;
 }
 
@@ -208,6 +216,13 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   // Markdown sin ser válido en MarkdownV2, y un parse error 400 deja al user
   // sin respuesta. Plain text es robusto. Si en el futuro queremos rich
   // formatting, hay que agregar un wrapper que sanitice MV2 (Phase 4+).
+  //
+  // Typing indicator antes de runAgent: Telegram muestra "typing..." ~5s y
+  // se autodescarta. Si runAgent tarda más, el indicator se va — preferimos
+  // eso a complejizar con un loop de re-emisión. Fire-and-forget: errores
+  // de red en sendChatAction están atrapados ahí adentro y no propagan.
+  void sendChatAction(chatId, "typing");
+
   try {
     const result = await runAgent({
       supabase: getServiceRoleClient(),
@@ -229,11 +244,30 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       },
     }).catch(() => {});
-    await sendMessage(
-      chatId,
-      "Tuve un problema procesando tu mensaje. Probá de nuevo en un momento o usá /ayuda.",
-    );
+    await sendMessage(chatId, errorMessageFor(err));
   }
+}
+
+/**
+ * Discrimina el error de runAgent y devuelve un mensaje específico para el
+ * usuario. Default mantiene el mensaje genérico de antes.
+ *
+ * - 429 / RateLimit: rate limiting de Gemini o Telegram. El usuario debería
+ *   esperar antes de reintentar.
+ * - 403 / API key issue: típicamente el bot está mal configurado a nivel
+ *   infra (key inválida o IP bloqueada). El usuario no puede arreglarlo
+ *   por sí mismo, pero le decimos algo claro.
+ * - Otro: mensaje genérico.
+ */
+function errorMessageFor(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/\b429\b|rate.?limit|too many requests/i.test(msg)) {
+    return "⏳ Estoy saturado en este momento, probá de nuevo en 30 segundos.";
+  }
+  if (/\b403\b|forbidden|unauthorized|api.?key/i.test(msg)) {
+    return "⚠️ Hay un problema de configuración del bot. Avisale al admin que revise los logs.";
+  }
+  return "❌ Tuve un problema procesando tu mensaje. Probá de nuevo en un momento o usá /ayuda.";
 }
 
 // ----------------------------------------------------------------------------
@@ -258,12 +292,16 @@ async function handleStart(
   if (user) {
     const nombre = escapeMarkdownV2(tgUser.first_name);
     const rol = escapeMarkdownV2(user.rol);
+    // Mostramos el main menu como keyboard adjunto al mensaje de bienvenida
+    // para que el usuario tenga acceso directo a las acciones principales
+    // sin tener que recordar slash commands.
+    const reply_markup = buildMainMenuKeyboard(user.rol);
     await sendMessage(
       chatId,
       `¡Hola, ${nombre}\\! Ya estás vinculado como *${rol}*\\.\n\n` +
-        `Probá /ayuda para ver lo que puedo hacer\\.\n\n` +
+        `Tocá una opción del menú o probá /ayuda\\.\n\n` +
         privacyMv2,
-      { parse_mode: "MarkdownV2" },
+      { parse_mode: "MarkdownV2", reply_markup },
     );
   } else {
     // El bloque "no vinculado" iba en plain text — para consistencia y para
@@ -623,9 +661,10 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
   switch (parsed.action) {
     case "cliente":
       return handleCallbackCliente(cb, toolCtx, parsed.args);
+    case "menu":
+      return handleCallbackMenu(cb, user, toolCtx, parsed.args);
     case "producto":
     case "visitar":
-    case "menu":
       // Reservadas: confirmamos el callback y respondemos con placeholder.
       await answerCallbackQuery(cb.id, {
         text: "Esa acción todavía no está disponible.",
@@ -689,4 +728,97 @@ async function handleCallbackCliente(
 
   // OK → confirmamos el callback (apaga el spinner).
   await answerCallbackQuery(cb.id);
+}
+
+/**
+ * Resuelve los callbacks del main menu (`v1:menu:<key>`). Los keys que
+ * mapean a un slash command sin args (ayuda, mis_clientes, sugerencias,
+ * recorrido) reusan el comando registrado para no duplicar lógica.
+ * Los keys que requieren input del usuario (buscar_cliente, buscar_producto)
+ * mandan un prompt de NL y el LLM se encarga después.
+ */
+async function handleCallbackMenu(
+  cb: TelegramCallbackQuery,
+  user: BotUser,
+  toolCtx: ToolContext,
+  args: string[],
+): Promise<void> {
+  const chatId = cb.message.chat.id;
+  const key = args[0];
+  if (!key) {
+    await answerCallbackQuery(cb.id, { text: "Opción inválida." });
+    return;
+  }
+
+  // Apagamos el spinner del botón al toque para que la UI responda fluida —
+  // el slash command que viene después puede tomar segundos.
+  await answerCallbackQuery(cb.id);
+
+  switch (key) {
+    case "ayuda":
+      await handleAyuda(chatId, cb.from.id, user);
+      return;
+
+    case "mis_clientes": {
+      const cmd = getCommand("/misclientes");
+      if (cmd) {
+        await cmd.handler({
+          user,
+          tgUser: cb.from,
+          chatId,
+          rawArgs: "",
+          toolCtx,
+        });
+      }
+      return;
+    }
+
+    case "sugerencias": {
+      const cmd = getCommand("/sugerencias");
+      if (cmd) {
+        await cmd.handler({
+          user,
+          tgUser: cb.from,
+          chatId,
+          rawArgs: "",
+          toolCtx,
+        });
+      }
+      return;
+    }
+
+    case "recorrido": {
+      const cmd = getCommand("/recorrido");
+      if (cmd) {
+        await cmd.handler({
+          user,
+          tgUser: cb.from,
+          chatId,
+          rawArgs: "",
+          toolCtx,
+        });
+      }
+      return;
+    }
+
+    case "buscar_cliente":
+      await sendMessage(
+        chatId,
+        "👥 ¿Qué cliente buscás?\n" +
+          "Mandame el nombre o código (ej: \"almacén gabriel\" o \"549\").",
+      );
+      return;
+
+    case "buscar_producto":
+      await sendMessage(
+        chatId,
+        "📦 ¿Qué producto buscás?\n" +
+          "Mandame el nombre, código, o un tipo (ej: \"coca\", \"gaseosas naranja\").",
+      );
+      return;
+
+    default:
+      await sendMessage(chatId, "Opción del menú no reconocida.");
+      return;
+  }
 }
