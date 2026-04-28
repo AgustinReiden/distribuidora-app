@@ -80,10 +80,15 @@ serve(async (req: Request) => {
     return new Response("ok");
   }
 
-  if (!update?.message?.text || !update.message.from) {
+  // El handleUpdate acepta message con text, voice o audio. Cualquier otro
+  // shape (edited_message, channel_post, sticker, etc.) lo descartamos
+  // como unsupported.
+  const msg = update?.message;
+  const hasContent = !!(msg?.text || msg?.voice || msg?.audio);
+  if (!msg || !hasContent || !msg.from) {
     try {
       await logEvent({
-        telegram_user_id: update?.message?.from?.id,
+        telegram_user_id: msg?.from?.id,
         tipo: "mensaje",
         texto_usuario: null,
         resultado_meta: {
@@ -106,9 +111,9 @@ serve(async (req: Request) => {
     console.error("telegram-webhook handler error", err);
     try {
       await logEvent({
-        telegram_user_id: update.message.from.id,
+        telegram_user_id: msg.from!.id,
         tipo: "error",
-        texto_usuario: update.message.text,
+        texto_usuario: msg.text ?? null,
         resultado_meta: { error: err instanceof Error ? err.message : String(err) },
       });
     } catch (auditErr) {

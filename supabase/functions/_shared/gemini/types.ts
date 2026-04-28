@@ -32,10 +32,24 @@ export interface GeminiFunctionResponsePart {
   functionResponse: GeminiFunctionResponse;
 }
 
+/**
+ * Inline binary data (audio/imagen/etc) embebido en una request a Gemini.
+ * Usado por el GeminiTranscriber para mandar el audio en base64 sin
+ * pasar por el File API. https://ai.google.dev/api/generate-content
+ */
+export interface GeminiInlineDataPart {
+  inlineData: {
+    mimeType: string;
+    /** base64 sin prefijo `data:`. */
+    data: string;
+  };
+}
+
 export type GeminiPart =
   | GeminiTextPart
   | GeminiFunctionCallPart
-  | GeminiFunctionResponsePart;
+  | GeminiFunctionResponsePart
+  | GeminiInlineDataPart;
 
 export interface GeminiContent {
   role: GeminiRole;
