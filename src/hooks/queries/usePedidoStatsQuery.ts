@@ -66,7 +66,7 @@ async function fetchPedidoStats(
   if (filters?.fechaHasta) {
     query = query.lte('fecha', filters.fechaHasta)
   }
-  if (!filters?.verCancelados) {
+  if (!filters?.verCancelados && filters?.estado !== 'cancelado') {
     query = query.neq('estado', 'cancelado')
   }
   if (filters?.fechaEntregaProgramada) {
