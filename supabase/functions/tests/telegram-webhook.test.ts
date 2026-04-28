@@ -590,6 +590,8 @@ interface RouterMockSpy {
   rpcCalls: Array<{ fn: string; params: Record<string, unknown> }>;
   inserts: Array<{ table: string; row: Record<string, unknown> }>;
   selectQueries: Array<{ table: string; cols: string; filters: unknown[] }>;
+  deletes: Array<{ table: string; filters: unknown[] }>;
+  updates: Array<{ table: string; row: Record<string, unknown>; filters: unknown[] }>;
 }
 
 interface RouterMockOpts {
@@ -610,11 +612,19 @@ interface RouterMockOpts {
 
 // deno-lint-ignore no-explicit-any
 function createRouterMockSupabase(opts: RouterMockOpts = {}): { client: any; spy: RouterMockSpy } {
-  const spy: RouterMockSpy = { rpcCalls: [], inserts: [], selectQueries: [] };
+  const spy: RouterMockSpy = {
+    rpcCalls: [],
+    inserts: [],
+    selectQueries: [],
+    deletes: [],
+    updates: [],
+  };
 
   function makeBuilder(table: string) {
     const filters: unknown[] = [];
     let isSelect = false;
+    let isDelete = false;
+    let isUpdate = false;
     let cols = "";
 
     // deno-lint-ignore no-explicit-any
@@ -627,6 +637,16 @@ function createRouterMockSupabase(opts: RouterMockOpts = {}): { client: any; spy
         isSelect = true;
         cols = c;
         spy.selectQueries.push({ table, cols, filters });
+        return builder;
+      },
+      delete() {
+        isDelete = true;
+        spy.deletes.push({ table, filters });
+        return builder;
+      },
+      update(row: Record<string, unknown>) {
+        isUpdate = true;
+        spy.updates.push({ table, row, filters });
         return builder;
       },
       eq(col: string, val: unknown) {
@@ -651,9 +671,13 @@ function createRouterMockSupabase(opts: RouterMockOpts = {}): { client: any; spy
         return Promise.resolve(r);
       },
       // Thenable: cuando se hace `await query` sin terminator explícito,
-      // resolvemos con selectResponseByTable[table].
+      // resolvemos con selectResponseByTable[table] o {error: null} para
+      // delete/update.
       // deno-lint-ignore no-explicit-any
       then(onFulfilled?: (v: any) => any, onRejected?: (e: any) => any) {
+        if (isDelete || isUpdate) {
+          return Promise.resolve({ error: null }).then(onFulfilled, onRejected);
+        }
         if (!isSelect) {
           return Promise.resolve({ data: [], error: null }).then(
             onFulfilled,
@@ -1244,4 +1268,201 @@ Deno.test("/sugerencias con rol admin: bloqueado por scope", async () => {
     _setServiceRoleClientForTests(null);
     Deno.env.delete("TELEGRAM_BOT_TOKEN");
   }
+});
+
+// ============================================================================
+// Fase 3 commands: /menu, /reset, /desvincular, errorMessageFor
+// ============================================================================
+
+const linkedAdmin = {
+  telegram_user_id: 999,
+  perfil_id: "11111111-1111-1111-1111-111111111111",
+  rol: "admin",
+  sucursal_id: 1,
+  activo: true,
+};
+const linkedPreventista = {
+  telegram_user_id: 888,
+  perfil_id: "22222222-2222-2222-2222-222222222222",
+  rol: "preventista",
+  sucursal_id: 1,
+  activo: true,
+};
+
+Deno.test("/menu (admin) manda keyboard con opciones para admin", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 999, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Admin" },
+        text: "/menu",
+      },
+    });
+    const sent = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").includes("¿Qué querés hacer?")
+    );
+    assert(sent, "no se mandó el mensaje del menú");
+    const body = (sent as { body?: string }).body ?? "";
+    assertStringIncludes(body, "Buscar cliente");
+    assertStringIncludes(body, "Buscar producto");
+    assertStringIncludes(body, "Ayuda");
+    assertStringIncludes(body, "v1:menu:buscar_cliente");
+    assertStringIncludes(body, "v1:menu:buscar_producto");
+    assertStringIncludes(body, "v1:menu:ayuda");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/menu (preventista) keyboard incluye Mis clientes y Sugerencias", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedPreventista, error: null } },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 888, type: "private" },
+        from: { id: 888, is_bot: false, first_name: "Vendedor" },
+        text: "/menu",
+      },
+    });
+    const sent = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").includes("Mis clientes")
+    );
+    assert(sent, "no se mandó el menú con 'Mis clientes'");
+    const body = (sent as { body?: string }).body ?? "";
+    assertStringIncludes(body, "Sugerencias");
+    assertStringIncludes(body, "v1:menu:mis_clientes");
+    assertStringIncludes(body, "v1:menu:sugerencias");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/reset borra bot_conversaciones y manda confirmación", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 999, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Admin" },
+        text: "/reset",
+      },
+    });
+    const del = spy.deletes.find((d) => d.table === "bot_conversaciones");
+    assert(del, "no se hizo delete sobre bot_conversaciones");
+    const eq = (del!.filters as Array<Record<string, unknown>>).find((f) =>
+      f.type === "eq" && f.col === "telegram_user_id"
+    );
+    assert(eq, "delete debió tener eq(telegram_user_id)");
+    assertEquals(eq!.val, 999);
+
+    const confirm = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").includes("borré la memoria")
+    );
+    assert(confirm, "no se mandó confirmación de reset");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/desvincular hace soft delete (activo=false) y confirma", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 999, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Admin" },
+        text: "/desvincular",
+      },
+    });
+    const upd = spy.updates.find((u) => u.table === "bot_usuarios");
+    assert(upd, "no se hizo update sobre bot_usuarios");
+    assertEquals(upd!.row.activo, false);
+    const eq = (upd!.filters as Array<Record<string, unknown>>).find((f) =>
+      f.type === "eq" && f.col === "telegram_user_id"
+    );
+    assert(eq, "update debió tener eq(telegram_user_id)");
+    assertEquals(eq!.val, 999);
+
+    const confirm = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").includes("desvinculé")
+    );
+    assert(confirm, "no se mandó confirmación de desvincular");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("errorMessageFor: 429/rate limit -> mensaje 'saturado'", async () => {
+  const { errorMessageFor } = await import("../telegram-webhook/handlers.ts");
+  const r1 = errorMessageFor(new Error("Gemini 429: rate limited"));
+  assertStringIncludes(r1, "saturado");
+  const r2 = errorMessageFor(new Error("too many requests"));
+  assertStringIncludes(r2, "saturado");
+});
+
+Deno.test("errorMessageFor: 403/forbidden -> mensaje de config", async () => {
+  const { errorMessageFor } = await import("../telegram-webhook/handlers.ts");
+  const r1 = errorMessageFor(new Error("Gemini 403: forbidden"));
+  assertStringIncludes(r1, "config");
+  const r2 = errorMessageFor(new Error("API_KEY_IP_ADDRESS_BLOCKED"));
+  assertStringIncludes(r2, "config");
+});
+
+Deno.test("errorMessageFor: error genérico -> mensaje default", async () => {
+  const { errorMessageFor } = await import("../telegram-webhook/handlers.ts");
+  const r = errorMessageFor(new Error("ECONNRESET pillin"));
+  assertStringIncludes(r, "problema procesando");
 });

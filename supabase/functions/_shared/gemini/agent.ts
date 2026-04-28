@@ -112,6 +112,21 @@ export interface RunAgentOptions {
   ephemeral?: boolean;
 }
 
+/**
+ * Lista de items "interactables" extraída de la última tool call relevante
+ * del turno. El handler la usa para armar un inline keyboard que adjunta
+ * a result.text — así las respuestas NL del LLM también tienen botones,
+ * matching la UX de los slash commands.
+ *
+ * Se popula con la ÚLTIMA tool call cuyo result devolvió una lista con
+ * IDs + nombres. Si una tool posterior devuelve otra lista, sobreescribe
+ * (vale la más reciente — es la que probablemente esté más relacionada
+ * con el texto final del LLM).
+ */
+export type InteractableContext =
+  | { kind: "clientes"; items: Array<{ id: number; nombre: string }> }
+  | { kind: "productos"; items: Array<{ id: number; nombre: string }> };
+
 export interface RunAgentResult {
   /** Texto final que el caller debe mandar al usuario. */
   text: string;
@@ -125,6 +140,77 @@ export interface RunAgentResult {
   totalTokens: number;
   /** True si terminó por hit del cap MAX_TOOL_ITERATIONS sin respuesta final. */
   hitMaxIterations: boolean;
+  /** Última tool call que devolvió una lista de items con IDs.
+   *  El handler arma un inline keyboard a partir de esto. */
+  interactableContext?: InteractableContext;
+}
+
+/**
+ * Extrae el `InteractableContext` correspondiente al output de una tool.
+ * Cubre las tools que retornan listas con IDs + nombres. Para tools que
+ * retornan single-items (ficha_cliente, ficha_producto), retorna undefined
+ * — un keyboard de un solo botón sería ruido.
+ */
+function extractInteractableContext(
+  name: string,
+  data: unknown,
+): InteractableContext | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const d = data as Record<string, unknown>;
+
+  // Limit a 10 items para evitar mensajes con keyboards gigantes.
+  const TAKE = 10;
+
+  const mapClientes = (
+    arr: unknown[],
+    idKey: string,
+  ): InteractableContext | undefined => {
+    const items = arr
+      .slice(0, TAKE)
+      .map((c) => {
+        const r = c as Record<string, unknown>;
+        const id = Number(r[idKey]);
+        const nombre = typeof r.nombre === "string" ? r.nombre : "";
+        return Number.isFinite(id) && id > 0 && nombre.length > 0
+          ? { id, nombre }
+          : null;
+      })
+      .filter((x): x is { id: number; nombre: string } => x !== null);
+    return items.length > 0 ? { kind: "clientes", items } : undefined;
+  };
+
+  const mapProductos = (
+    arr: unknown[],
+  ): InteractableContext | undefined => {
+    const items = arr
+      .slice(0, TAKE)
+      .map((p) => {
+        const r = p as Record<string, unknown>;
+        const id = Number(r.id);
+        const nombre = typeof r.nombre === "string" ? r.nombre : "";
+        return Number.isFinite(id) && id > 0 && nombre.length > 0
+          ? { id, nombre }
+          : null;
+      })
+      .filter((x): x is { id: number; nombre: string } => x !== null);
+    return items.length > 0 ? { kind: "productos", items } : undefined;
+  };
+
+  switch (name) {
+    case "buscar_cliente":
+    case "mis_clientes":
+      return Array.isArray(d.clientes) ? mapClientes(d.clientes, "id") : undefined;
+    case "sugerir_visitas_rfm":
+      // sugerencias usan `cliente_id` como key, no `id`.
+      return Array.isArray(d.sugerencias)
+        ? mapClientes(d.sugerencias, "cliente_id")
+        : undefined;
+    case "buscar_producto":
+    case "productos_por_categoria":
+      return Array.isArray(d.productos) ? mapProductos(d.productos) : undefined;
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -163,6 +249,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   let toolCallsCount = 0;
   let totalTokens = 0;
   let lastFinishReason = "UNKNOWN";
+  // Última tool call que devolvió una lista interactable. Se sobreescribe
+  // si una tool posterior emite otra (vale la más reciente).
+  let lastInteractableContext: InteractableContext | undefined;
 
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
     const response = await callGemini({
@@ -285,6 +374,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         finishReason: lastFinishReason,
         totalTokens,
         hitMaxIterations: false,
+        interactableContext: lastInteractableContext,
       };
     }
 
@@ -306,6 +396,12 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         ? { result: result.data }
         : { error: result.error };
       history = appendFunctionResponse(history, name, responseObj);
+      // Si la tool devolvió un result OK con shape de lista interactable,
+      // lo guardamos para que el handler arme un keyboard al final.
+      if (result.ok) {
+        const ctx = extractInteractableContext(name, result.data);
+        if (ctx) lastInteractableContext = ctx;
+      }
     }
     // Loop sigue: el próximo callGemini verá los functionResponse que acabamos
     // de appendear y decidirá si emitir texto final o más function calls.

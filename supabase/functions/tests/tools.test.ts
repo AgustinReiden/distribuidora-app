@@ -29,6 +29,7 @@ import {
 import { buscarClienteTool } from "../_shared/tools/common/buscar_cliente.ts";
 import { buscarProductoTool } from "../_shared/tools/common/buscar_producto.ts";
 import { fichaClienteTool } from "../_shared/tools/common/ficha_cliente.ts";
+import { fichaProductoTool } from "../_shared/tools/common/ficha_producto.ts";
 import { listarCategoriasTool } from "../_shared/tools/common/listar_categorias.ts";
 import { productosPorCategoriaTool } from "../_shared/tools/common/productos_por_categoria.ts";
 import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
@@ -533,6 +534,7 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("buscar_cliente"), "buscar_cliente no registrada");
   assert(getTool("buscar_producto"), "buscar_producto no registrada");
   assert(getTool("ficha_cliente"), "ficha_cliente no registrada");
+  assert(getTool("ficha_producto"), "ficha_producto no registrada");
   assert(getTool("listar_categorias"), "listar_categorias no registrada");
   assert(getTool("productos_por_categoria"), "productos_por_categoria no registrada");
   assert(getTool("mis_clientes"), "mis_clientes no registrada");
@@ -543,6 +545,7 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("buscar_cliente"), buscarClienteTool);
   assertEquals(getTool("buscar_producto"), buscarProductoTool);
   assertEquals(getTool("ficha_cliente"), fichaClienteTool);
+  assertEquals(getTool("ficha_producto"), fichaProductoTool);
   assertEquals(getTool("listar_categorias"), listarCategoriasTool);
   assertEquals(getTool("productos_por_categoria"), productosPorCategoriaTool);
   assertEquals(getTool("mis_clientes"), misClientesTool);
@@ -1457,4 +1460,118 @@ Deno.test("productos_por_categoria rechaza limit fuera de rango", async () => {
     );
   }
   assert(threw, "debió lanzar 'Límite fuera de rango'");
+});
+
+// ============================================================================
+// 29. ficha_producto: invoca el RPC bot_ficha_producto y mapea bajo_stock
+// ============================================================================
+
+Deno.test("ficha_producto invoca el RPC y derivado bajo_stock cuando stock <= minimo", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        producto: {
+          id: 215,
+          codigo: "M00025",
+          nombre: "MANAOS CITRUS 2250CC X 6",
+          precio: "9100",
+          precio_sin_iva: 9100,
+          stock: 5,
+          stock_minimo: 10,
+          categoria: "GASEOSAS",
+          proveedor_id: null,
+        },
+        ventas_30d_cantidad: 3,
+        ultima_venta: "2026-04-21T15:53:48.330307+00:00",
+      },
+      error: null,
+    },
+  });
+
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 2 });
+  const result = await fichaProductoTool.handler({ producto_id: 215 }, ctx);
+
+  assertEquals(result.producto.id, 215);
+  assertEquals(result.producto.nombre, "MANAOS CITRUS 2250CC X 6");
+  assertEquals(result.producto.precio, 9100);
+  assertEquals(result.producto.bajo_stock, true); // 5 <= 10
+  assertEquals(result.ventas_30d_cantidad, 3);
+  assert(result.ultima_venta?.startsWith("2026-04-21"));
+
+  // RPC se llamó con los params correctos.
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_ficha_producto");
+  assertEquals(call.params.p_producto_id, 215);
+  assertEquals(call.params.p_sucursal_id, 2);
+});
+
+// ============================================================================
+// 30. ficha_producto: producto no encontrado lanza error claro
+// ============================================================================
+
+Deno.test("ficha_producto lanza si el RPC retorna null (producto no existe)", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: { data: null, error: null },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+
+  let threw = false;
+  try {
+    await fichaProductoTool.handler({ producto_id: 99999 }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Producto no encontrado",
+    );
+  }
+  assert(threw, "debió lanzar 'Producto no encontrado'");
+});
+
+// ============================================================================
+// 31. ficha_producto: rechaza preventista sin sucursal asignada
+// ============================================================================
+
+Deno.test("ficha_producto rechaza preventista sin sucursal asignada", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: null,
+    perfil_id: "no-sucursal",
+  });
+
+  let threw = false;
+  try {
+    await fichaProductoTool.handler({ producto_id: 1 }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Sucursal no asignada",
+    );
+  }
+  assert(threw, "debió lanzar 'Sucursal no asignada'");
+});
+
+// ============================================================================
+// 32. ficha_producto: producto_id inválido lanza error
+// ============================================================================
+
+Deno.test("ficha_producto rechaza producto_id no entero", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+
+  let threw = false;
+  try {
+    // deno-lint-ignore no-explicit-any
+    await fichaProductoTool.handler({ producto_id: "abc" as any }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "entero positivo",
+    );
+  }
+  assert(threw, "debió lanzar error de producto_id inválido");
 });
