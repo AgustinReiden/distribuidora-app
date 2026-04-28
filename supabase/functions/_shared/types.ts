@@ -24,9 +24,28 @@ export interface TelegramMessage {
   text?: string;
 }
 
+/**
+ * Update generado cuando el usuario toca un botón de inline keyboard.
+ * Telegram entrega `data` (el callback_data del botón, ≤ 64 bytes) y el
+ * mensaje al que pertenecía el keyboard. El bot debe responder con
+ * `answerCallbackQuery` para apagar el spinner del cliente.
+ * https://core.telegram.org/bots/api#callbackquery
+ */
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  /** Mensaje original que tenía el inline keyboard. */
+  message: TelegramMessage;
+  /** Payload del botón (callback_data). Vacío si el botón usaba `url`. */
+  data?: string;
+  /** Hash que Telegram usa para deduplicar — informativo, no lo validamos. */
+  chat_instance?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 }
 
 // ----------------------------------------------------------------------------
