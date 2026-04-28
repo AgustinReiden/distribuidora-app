@@ -13,6 +13,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from './base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type {
   MermaDBExtended,
   MermaFormInputExtended,
@@ -26,6 +27,7 @@ import type {
  * @deprecated Usar useMermasQuery de src/hooks/queries en su lugar
  */
 export function useMermas(): UseMermasReturnExtended {
+  const { currentSucursalId } = useSucursal()
   const [mermas, setMermas] = useState<MermaDBExtended[]>([])
   const [loading, setLoading] = useState<boolean>(false)
 
@@ -54,6 +56,10 @@ export function useMermas(): UseMermasReturnExtended {
   useEffect(() => { fetchMermas() }, [])
 
   const registrarMerma = async (mermaData: MermaFormInputExtended): Promise<MermaRegistroResult> => {
+    if (currentSucursalId == null) {
+      throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+    }
+
     // Primero intentar insertar la merma (para fallar antes de modificar stock)
     const { data, error } = await supabase
       .from('mermas_stock')
@@ -64,7 +70,8 @@ export function useMermas(): UseMermasReturnExtended {
         observaciones: mermaData.observaciones || null,
         stock_anterior: mermaData.stockAnterior,
         stock_nuevo: mermaData.stockNuevo,
-        usuario_id: mermaData.usuarioId || null
+        usuario_id: mermaData.usuarioId || null,
+        sucursal_id: currentSucursalId
       }])
       .select()
       .single()
