@@ -72,8 +72,20 @@ const ModalBase = memo(function ModalBase({
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         className={cn(MAX_WIDTH_MAP[maxWidth] || maxWidth, className)}
+        // Bloqueo defensivo en TODAS las modalidades de cierre por interacción
+        // externa. Radix puede malinterpretar como "outside" cuando el cursor
+        // empieza el click DENTRO y se arrastra fuera (selección de texto,
+        // drag accidental). preventDefault aborta el cierre — el usuario sigue
+        // pudiendo cerrar con Escape o el botón X.
         onPointerDownOutside={(e) => e.preventDefault()}
+        onFocusOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
+        // Detiene la propagación de pointerdown/mousedown del propio contenido
+        // hacia los listeners globales del overlay. Sin esto, un click iniciado
+        // dentro del modal cuyo `up` cae fuera puede ser interpretado por
+        // Radix como interacción externa y disparar el cierre.
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <DialogHeader onClose={onClose}>
           <div className="flex items-center justify-between flex-1 gap-3 min-w-0">
