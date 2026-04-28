@@ -258,7 +258,11 @@ Deno.test("runDigestForAdmin happy path: RPC + Gemini + Telegram → status=ok",
     assert(tgCall, "debió llamar a Telegram");
     const tgBody = tgCall!.body as { chat_id: number; text: string };
     assertEquals(tgBody.chat_id, 42);
-    assertStringIncludes(tgBody.text, "Resumen 2026-04-26");
+    // Header con emoji 🌅 + fecha legible (dd/mm/yyyy via Intl). El día
+    // de la semana depende del locale del runtime — solo aserto que esté
+    // el emoji + la fecha en formato legible + el texto del LLM.
+    assertStringIncludes(tgBody.text, "🌅 Resumen");
+    assertStringIncludes(tgBody.text, "26/04/2026");
     assertStringIncludes(tgBody.text, "Ayer +18%");
 
     // UPSERT en bot_digests_enviados con status='ok'.
