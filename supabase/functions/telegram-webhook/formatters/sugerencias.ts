@@ -1,10 +1,13 @@
 // Formatter para `sugerir_visitas_rfm` (sugerencias RFM de visitas).
-// Lista priorizada con indicadores de criticidad (🔴 vencido, 🟡 cercano,
+// Lista priorizada con flags de criticidad (🔴 vencido, 🟡 cercano,
 // 🟢 al día) + motivo + saldo + zona, pensado para que el preventista
 // decida en 5 segundos qué cliente visitar primero.
 
-import { escapeMarkdownV2 } from "../../_shared/telegram.ts";
-import { formatCurrency } from "../../_shared/tools/formatters.ts";
+import {
+  escapeMarkdownV2,
+  formatCurrency,
+  header,
+} from "../../_shared/format.ts";
 import type { SugerirVisitasRfmResult } from "../../_shared/tools/preventista/sugerir_visitas_rfm.ts";
 
 export function formatSugerenciasResult(r: SugerirVisitasRfmResult): string {
@@ -12,8 +15,8 @@ export function formatSugerenciasResult(r: SugerirVisitasRfmResult): string {
     return "No tengo sugerencias para hoy\\. Probá /misclientes para ver tu cartera completa\\.";
   }
 
-  const header =
-    `*${r.sugerencias.length} clientes priorizados* \\(top ${r.total} por score RFM\\):`;
+  const titulo = `${r.sugerencias.length} clientes priorizados ` +
+    `(top ${r.total} por score RFM)`;
 
   const lines = r.sugerencias.map((s, i) => {
     const numero = `${i + 1}\\.`;
@@ -40,5 +43,5 @@ export function formatSugerenciasResult(r: SugerirVisitasRfmResult): string {
     return `${numero} ${flag} ${codigo}${nombre}\n${motivoEsc}${datosLine}`;
   });
 
-  return [header, "", ...lines].join("\n");
+  return [header(titulo, "💡"), "", ...lines].join("\n\n");
 }
