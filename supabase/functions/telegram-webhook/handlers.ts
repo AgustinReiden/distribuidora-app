@@ -261,7 +261,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
  *   por sí mismo, pero le decimos algo claro.
  * - Otro: mensaje genérico.
  */
-function errorMessageFor(err: unknown): string {
+export function errorMessageFor(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/\b429\b|rate.?limit|too many requests/i.test(msg)) {
     return "⏳ Estoy saturado en este momento, probá de nuevo en 30 segundos.";
