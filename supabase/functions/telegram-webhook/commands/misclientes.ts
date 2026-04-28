@@ -7,6 +7,7 @@
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
 import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
+import { buildMisClientesKeyboard } from "../../_shared/telegram-keyboards.ts";
 import { formatMisClientesResult } from "../formatters/misclientes.ts";
 import type {
   MisClientesParams,
@@ -63,6 +64,15 @@ export const misClientesCommand: CommandSpec = {
       return;
     }
 
-    await sendMessageMarkdownSafe(chatId, formatMisClientesResult(result.data));
+    const reply_markup = result.data.clientes.length > 0
+      ? buildMisClientesKeyboard(
+        result.data.clientes.map((c) => ({ id: c.id, nombre: c.nombre })),
+      )
+      : undefined;
+    await sendMessageMarkdownSafe(
+      chatId,
+      formatMisClientesResult(result.data),
+      { reply_markup },
+    );
   },
 };

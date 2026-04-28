@@ -2,6 +2,7 @@
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
 import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
+import { buildProductoListKeyboard } from "../../_shared/telegram-keyboards.ts";
 import { formatBuscarProductoResult } from "../formatters/producto.ts";
 import type {
   BuscarProductoParams,
@@ -45,6 +46,15 @@ export const productoCommand: CommandSpec = {
     }
 
     const text = formatBuscarProductoResult(result.data);
-    await sendMessageMarkdownSafe(chatId, text);
+    // Inline keyboard "Ver detalle" — callback v1:producto:<id> está reservado
+    // pero responde con placeholder hasta que se implemente la tool de
+    // detalle (Fase futura). Igual ofrecemos el botón para que el preventista
+    // se acostumbre al patrón.
+    const reply_markup = result.data.productos.length > 0
+      ? buildProductoListKeyboard(
+        result.data.productos.map((p) => ({ id: p.id, nombre: p.nombre })),
+      )
+      : undefined;
+    await sendMessageMarkdownSafe(chatId, text, { reply_markup });
   },
 };

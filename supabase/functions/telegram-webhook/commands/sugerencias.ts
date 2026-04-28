@@ -4,6 +4,7 @@
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
 import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
+import { buildSugerenciasKeyboard } from "../../_shared/telegram-keyboards.ts";
 import { formatSugerenciasResult } from "../formatters/sugerencias.ts";
 import type {
   SugerirVisitasRfmParams,
@@ -49,6 +50,18 @@ export const sugerenciasCommand: CommandSpec = {
       return;
     }
 
-    await sendMessageMarkdownSafe(chatId, formatSugerenciasResult(result.data));
+    const reply_markup = result.data.sugerencias.length > 0
+      ? buildSugerenciasKeyboard(
+        result.data.sugerencias.map((s) => ({
+          cliente_id: s.cliente_id,
+          nombre: s.nombre,
+        })),
+      )
+      : undefined;
+    await sendMessageMarkdownSafe(
+      chatId,
+      formatSugerenciasResult(result.data),
+      { reply_markup },
+    );
   },
 };

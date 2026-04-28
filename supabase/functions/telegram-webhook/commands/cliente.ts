@@ -2,6 +2,7 @@
 
 import { invokeTool } from "../../_shared/tools/registry.ts";
 import { sendMessage, sendMessageMarkdownSafe } from "../../_shared/telegram.ts";
+import { buildClienteListKeyboard } from "../../_shared/telegram-keyboards.ts";
 import { formatBuscarClienteResult } from "../formatters/cliente.ts";
 import type {
   BuscarClienteParams,
@@ -47,6 +48,13 @@ export const clienteCommand: CommandSpec = {
     }
 
     const text = formatBuscarClienteResult(result.data);
-    await sendMessageMarkdownSafe(chatId, text);
+    // Inline keyboard "Ver ficha" por cada cliente — mismo callback que
+    // /sugerencias y /misclientes (action='cliente' va a la ficha).
+    const reply_markup = result.data.clientes.length > 0
+      ? buildClienteListKeyboard(
+        result.data.clientes.map((c) => ({ id: c.id, nombre: c.nombre })),
+      )
+      : undefined;
+    await sendMessageMarkdownSafe(chatId, text, { reply_markup });
   },
 };

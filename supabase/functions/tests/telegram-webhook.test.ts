@@ -766,6 +766,21 @@ Deno.test("/cliente Pe flow: invoca buscar_cliente y manda mensaje MarkdownV2", 
     });
     assert(msg, "no se mandó el mensaje formateado de buscar_cliente");
 
+    // Inline keyboard adjunto: callback_data v1:cliente:42 (action=cliente)
+    // y label con el nombre del cliente.
+    const msgBody = (msg as { body?: string }).body ?? "";
+    assertStringIncludes(
+      msgBody,
+      "reply_markup",
+      "el mensaje debe llevar reply_markup con el inline keyboard",
+    );
+    assertStringIncludes(
+      msgBody,
+      "v1:cliente:42",
+      "el callback_data del botón debe ser v1:cliente:<id>",
+    );
+    assertStringIncludes(msgBody, "Ver ficha", "el botón debe decir Ver ficha");
+
     // Se logueó el comando (tipo=comando, tool_name=cliente).
     const auditCmd = spy.inserts.find((i) =>
       i.table === "bot_audit_log" && i.row.tool_name === "cliente" &&
