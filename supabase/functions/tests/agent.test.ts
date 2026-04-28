@@ -463,8 +463,11 @@ Deno.test("runAgent max iterations: tool calls infinitos → hitMaxIterations tr
   };
   registerTool(loopTool);
 
-  // Programamos MAX_TOOL_ITERATIONS=5 respuestas, todas con functionCall.
-  const responses = Array.from({ length: 5 }, () => ({
+  // Programamos MAX_TOOL_ITERATIONS=8 respuestas (default actual), todas con
+  // functionCall. La constante se lee del env var en module init de agent.ts,
+  // así que el test usa el default. Si más adelante se quiere parametrizar
+  // por test, hay que reestructurar agent.ts para leer per-call.
+  const responses = Array.from({ length: 8 }, () => ({
     candidates: [
       {
         content: {
@@ -487,9 +490,9 @@ Deno.test("runAgent max iterations: tool calls infinitos → hitMaxIterations tr
     });
 
     assertEquals(result.hitMaxIterations, true);
-    assertEquals(result.iterations, 5);
-    assertEquals(result.toolCallsCount, 5);
-    assertEquals(result.totalTokens, 50);
+    assertEquals(result.iterations, 8);
+    assertEquals(result.toolCallsCount, 8);
+    assertEquals(result.totalTokens, 80);
     assertStringIncludes(result.text, "complejo");
 
     // Audit: tipo='error' con hit_max_iterations=true.

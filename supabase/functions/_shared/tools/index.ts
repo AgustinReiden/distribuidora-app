@@ -10,6 +10,8 @@ import { registerTool } from "./registry.ts";
 import { buscarClienteTool } from "./common/buscar_cliente.ts";
 import { buscarProductoTool } from "./common/buscar_producto.ts";
 import { fichaClienteTool } from "./common/ficha_cliente.ts";
+import { listarCategoriasTool } from "./common/listar_categorias.ts";
+import { productosPorCategoriaTool } from "./common/productos_por_categoria.ts";
 import { misClientesTool } from "./preventista/mis_clientes.ts";
 import { sugerirVisitasRfmTool } from "./preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "./transportista/mi_recorrido_hoy.ts";
@@ -21,6 +23,8 @@ export function registerAllTools(): void {
   registerTool(buscarClienteTool);
   registerTool(buscarProductoTool);
   registerTool(fichaClienteTool);
+  registerTool(listarCategoriasTool);
+  registerTool(productosPorCategoriaTool);
   registerTool(misClientesTool);
   registerTool(sugerirVisitasRfmTool);
   registerTool(miRecorridoHoyTool);
