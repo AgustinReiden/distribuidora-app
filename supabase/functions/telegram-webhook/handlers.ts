@@ -16,11 +16,24 @@
 import { canjearCodigo, resolveUserByTelegramId } from "../_shared/auth.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { getServiceRoleClient } from "../_shared/supabase.ts";
-import { escapeMarkdownV2, sendMessage } from "../_shared/telegram.ts";
-import { registerAllTools } from "../_shared/tools/index.ts";
+import {
+  answerCallbackQuery,
+  escapeMarkdownV2,
+  sendMessage,
+  sendMessageMarkdownSafe,
+} from "../_shared/telegram.ts";
+import { invokeTool, registerAllTools } from "../_shared/tools/index.ts";
 import type { ToolContext } from "../_shared/tools/base.ts";
 import { runAgent } from "../_shared/gemini/agent.ts";
-import type { BotRol, BotUser, TelegramUpdate, TelegramUser } from "../_shared/types.ts";
+import type {
+  BotRol,
+  BotUser,
+  TelegramCallbackQuery,
+  TelegramUpdate,
+  TelegramUser,
+} from "../_shared/types.ts";
+import { formatFichaCliente } from "./formatters/cliente.ts";
+import type { FichaClienteResult } from "../_shared/tools/common/ficha_cliente.ts";
 
 import { parseCommand } from "./commands/parser.ts";
 import { getCommand, listCommands, registerCommand } from "./commands/router.ts";
@@ -494,4 +507,184 @@ function mensajeErrorVincular(
     case "rpc_error":
       return "❌ Hubo un error procesando tu código. Probá de nuevo en un momento.";
   }
+}
+
+// ----------------------------------------------------------------------------
+// handleCallbackQuery — entry point cuando el usuario toca un inline keyboard.
+// ----------------------------------------------------------------------------
+//
+// Formato esperado de callback_data: `v1:<action>:<arg1>[:<arg2>...]`
+//
+// Acciones soportadas en Fase 1:
+//   - v1:cliente:<id>  → muestra la ficha del cliente.
+//
+// Acciones reservadas (responden con un placeholder hasta que se implementen):
+//   - v1:producto:<id> → ver detalle producto.
+//   - v1:visitar:<id>  → marcar visita (write futuro).
+//   - v1:menu:<key>    → main menu (Fase 3).
+//
+// Auditoría: cada callback genera una fila en bot_audit_log con `tipo='comando'`
+// y `parametros: { source: 'callback', action, args }`. NO ampliamos el enum
+// `tipo` con un valor 'callback' nuevo en este PR — eso requeriría una
+// migration y no agrega valor inmediato (se puede filtrar por
+// `parametros->>'source' = 'callback'`).
+
+const CALLBACK_VERSION = "v1";
+
+interface ParsedCallback {
+  action: string;
+  args: string[];
+}
+
+function parseCallbackData(raw: string | undefined): ParsedCallback | null {
+  if (!raw || typeof raw !== "string") return null;
+  const parts = raw.split(":");
+  if (parts.length < 2) return null;
+  if (parts[0] !== CALLBACK_VERSION) return null;
+  const [, action, ...args] = parts;
+  if (!action) return null;
+  return { action, args };
+}
+
+export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<void> {
+  bootCommands();
+
+  const tgUser = cb.from;
+  const chatId = cb.message.chat.id;
+
+  // Defense-in-depth: el caller (index.ts) ya garantiza que cb.from existe,
+  // pero parseamos los args con cuidado igual.
+  const parsed = parseCallbackData(cb.data);
+  if (!parsed) {
+    await answerCallbackQuery(cb.id, {
+      text: "Acción no reconocida.",
+      show_alert: false,
+    });
+    await logEvent({
+      telegram_user_id: tgUser.id,
+      tipo: "error",
+      resultado_meta: {
+        source: "callback",
+        error: "callback_data_inválido",
+        raw: cb.data ?? null,
+      },
+    }).catch(() => {});
+    return;
+  }
+
+  const user = await resolveUserByTelegramId(tgUser.id);
+  if (!user) {
+    await answerCallbackQuery(cb.id, {
+      text: "Vinculá tu cuenta primero.",
+      show_alert: true,
+    });
+    await sendMessage(
+      chatId,
+      "Para usar los botones necesito que estés vinculado.\n\n" +
+        "Pedí un código en la app web (Perfil > Vincular Telegram) y mandalo " +
+        "así: /vincular ABC123",
+    );
+    await logEvent({
+      telegram_user_id: tgUser.id,
+      tipo: "comando",
+      tool_name: parsed.action,
+      parametros: {
+        source: "callback",
+        action: parsed.action,
+        args: parsed.args,
+      },
+      resultado_meta: { blocked: "no_vinculado" },
+    }).catch(() => {});
+    return;
+  }
+
+  // Audit del callback ANTES de ejecutar (mismo patrón que comandos en el
+  // router): si el handler explota, queda registro del intento.
+  await logEvent({
+    telegram_user_id: tgUser.id,
+    perfil_id: user.perfil_id,
+    rol: user.rol,
+    tipo: "comando",
+    tool_name: parsed.action,
+    parametros: {
+      source: "callback",
+      action: parsed.action,
+      args: parsed.args,
+    },
+  });
+
+  const toolCtx: ToolContext = {
+    perfil_id: user.perfil_id,
+    rol: user.rol,
+    sucursal_id: user.sucursal_id,
+    supabase: getServiceRoleClient(),
+  };
+
+  switch (parsed.action) {
+    case "cliente":
+      return handleCallbackCliente(cb, user, toolCtx, parsed.args);
+    case "producto":
+    case "visitar":
+    case "menu":
+      // Reservadas: confirmamos el callback y respondemos con placeholder.
+      await answerCallbackQuery(cb.id, {
+        text: "Esa acción todavía no está disponible.",
+      });
+      return;
+    default:
+      await answerCallbackQuery(cb.id, {
+        text: "Acción desconocida.",
+      });
+      return;
+  }
+}
+
+async function handleCallbackCliente(
+  cb: TelegramCallbackQuery,
+  user: BotUser,
+  toolCtx: ToolContext,
+  args: string[],
+): Promise<void> {
+  const chatId = cb.message.chat.id;
+  const idStr = args[0];
+  const cliente_id = idStr ? parseInt(idStr, 10) : NaN;
+  if (!Number.isFinite(cliente_id) || cliente_id <= 0) {
+    await answerCallbackQuery(cb.id, { text: "ID de cliente inválido." });
+    return;
+  }
+
+  const result = await invokeTool(
+    "ficha_cliente",
+    { cliente_id },
+    toolCtx,
+  );
+
+  if (!result.ok) {
+    // invokeTool devuelve ok:false con códigos como 'permiso_denegado',
+    // 'tool_no_existe' o un error genérico desde el handler. El audit ya
+    // queda registrado por invokeTool — solo respondemos al usuario.
+    const errMsg = result.error === "permiso_denegado"
+      ? "No tenés permiso para ver este cliente."
+      : "No pude abrir la ficha del cliente.";
+    await answerCallbackQuery(cb.id, { text: errMsg, show_alert: true });
+    return;
+  }
+
+  const ficha = result.data as FichaClienteResult;
+  const text = formatFichaCliente(ficha);
+  // Mandamos el mensaje con MarkdownV2 + fallback plain (mismo patrón que
+  // los slash commands de cliente).
+  try {
+    await sendMessageMarkdownSafe(chatId, text);
+  } catch (err) {
+    console.error("[callback cliente] sendMessage failed:", err);
+    await answerCallbackQuery(cb.id, {
+      text: "No pude enviar la ficha. Probá de nuevo.",
+      show_alert: true,
+    });
+    return;
+  }
+
+  // OK → confirmamos el callback (apaga el spinner).
+  await answerCallbackQuery(cb.id);
 }

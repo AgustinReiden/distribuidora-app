@@ -20,7 +20,7 @@
 import { serve } from "std/http/server.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { parseUpdate, timingSafeEqual } from "../_shared/telegram.ts";
-import { handleUpdate } from "./handlers.ts";
+import { handleCallbackQuery, handleUpdate } from "./handlers.ts";
 
 serve(async (req: Request) => {
   if (req.method !== "POST") {
@@ -54,10 +54,32 @@ serve(async (req: Request) => {
 
   const update = parseUpdate(body);
 
-  // Updates sin message+text+from no nos interesan en Fase 1.2 (callbacks,
-  // ediciones, etc. los ignoramos). Igual respondemos 200 para que Telegram
-  // no reintente — pero auditamos para mantener el contrato "todo update
-  // recibido queda registrado".
+  // Discriminamos por shape:
+  //   - callback_query: usuario tocó un inline keyboard.
+  //   - message con text+from: slash command o NL.
+  //   - cualquier otro shape (edited_message, channel_post, sin texto, etc.)
+  //     se ignora — auditamos para visibilidad.
+  if (update?.callback_query) {
+    try {
+      await handleCallbackQuery(update.callback_query);
+    } catch (err) {
+      console.error("telegram-webhook callback handler error", err);
+      try {
+        await logEvent({
+          telegram_user_id: update.callback_query.from.id,
+          tipo: "error",
+          resultado_meta: {
+            error: err instanceof Error ? err.message : String(err),
+            source: "callback_query",
+          },
+        });
+      } catch (auditErr) {
+        console.error("telegram-webhook audit-of-callback-error failed", auditErr);
+      }
+    }
+    return new Response("ok");
+  }
+
   if (!update?.message?.text || !update.message.from) {
     try {
       await logEvent({
@@ -72,8 +94,6 @@ serve(async (req: Request) => {
         },
       });
     } catch (auditErr) {
-      // Best-effort: no queremos que un fallo de audit haga reintentar a
-      // Telegram. Logueamos a consola y seguimos.
       console.error("telegram-webhook audit dropped-update failed", auditErr);
     }
     return new Response("ok");
@@ -84,8 +104,6 @@ serve(async (req: Request) => {
     await handleUpdate(update);
   } catch (err) {
     console.error("telegram-webhook handler error", err);
-    // Best-effort audit del error. Si esto también falla, ya logeamos a
-    // la consola arriba.
     try {
       await logEvent({
         telegram_user_id: update.message.from.id,
