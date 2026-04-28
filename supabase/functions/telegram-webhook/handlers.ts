@@ -18,11 +18,14 @@ import { logEvent } from "../_shared/audit.ts";
 import { getServiceRoleClient } from "../_shared/supabase.ts";
 import {
   answerCallbackQuery,
+  downloadTelegramFile,
   escapeMarkdownV2,
+  getFile,
   sendChatAction,
   sendMessage,
   sendMessageMarkdownSafe,
 } from "../_shared/telegram.ts";
+import { getTranscriber } from "../_shared/transcribe/index.ts";
 import {
   buildKeyboardForContext,
   buildMainMenuKeyboard,
@@ -93,19 +96,86 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   bootCommands();
 
   const msg = update.message;
-  // El index.ts ya filtra updates sin message+text+from, pero hacemos un guard
-  // defensivo para que este módulo sea testeable de forma aislada.
-  if (!msg || !msg.text || !msg.from) return;
+  // El index.ts filtra updates sin message+from y sin contenido (text/voice/audio),
+  // pero hacemos un guard defensivo para que este módulo sea testeable
+  // de forma aislada.
+  if (!msg || !msg.from) return;
+  const hasContent = !!(msg.text || msg.voice || msg.audio);
+  if (!hasContent) return;
 
-  const text = msg.text.trim();
   const chatId = msg.chat.id;
   const tgUser = msg.from;
 
-  // Resolvemos al usuario UNA SOLA VEZ por update. Esto:
-  //   1. Evita N lookups cuando el handler también necesita al user.
-  //   2. Permite poblar perfil_id/rol en el audit del mensaje entrante,
-  //      respetando el contrato "audit incluye identidad cuando se conoce".
+  // Resolvemos al usuario UNA SOLA VEZ por update.
   const user = await resolveUserByTelegramId(tgUser.id);
+
+  // Si llegó un voice/audio en lugar de texto, transcribimos antes de
+  // procesar. La transcripción usa el provider de BOT_TRANSCRIPTION_MODEL
+  // (default: gemini). El texto resultante se trata después como si fuera
+  // un mensaje de texto normal — slash command, NL, etc.
+  let text = msg.text?.trim() ?? "";
+  let transcriptionMeta: Record<string, unknown> | undefined;
+
+  if (!text && (msg.voice || msg.audio)) {
+    const audio = msg.voice ?? msg.audio!;
+    const MAX_DURATION_SEC = 300; // 5 min cap
+    if (audio.duration > MAX_DURATION_SEC) {
+      await sendMessage(
+        chatId,
+        `🎤 El audio es muy largo (${audio.duration}s). Máximo ${MAX_DURATION_SEC}s ` +
+          "(5 minutos). Probá de nuevo más corto.",
+      );
+      return;
+    }
+
+    void sendChatAction(chatId, "typing");
+
+    let transcriber;
+    try {
+      transcriber = getTranscriber();
+      const file = await getFile(audio.file_id);
+      const audioData = await downloadTelegramFile(file.file_path);
+      const mime = audio.mime_type ?? "audio/ogg";
+      text = (await transcriber.transcribe(audioData, mime)).trim();
+    } catch (err) {
+      console.error("[handler] transcription failed:", err);
+      await logEvent({
+        telegram_user_id: tgUser.id,
+        perfil_id: user?.perfil_id,
+        rol: user?.rol,
+        tipo: "error",
+        resultado_meta: {
+          source: "voice",
+          provider: transcriber?.name,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      }).catch(() => {});
+      await sendMessage(
+        chatId,
+        "🎤 No pude transcribir el audio. Probá de nuevo o tipeá tu mensaje.",
+      );
+      return;
+    }
+
+    if (!text) {
+      await sendMessage(
+        chatId,
+        "🎤 No te entendí del audio (vino vacío). Probá hablar más cerca o tipear.",
+      );
+      return;
+    }
+
+    // Acknowledge: le mostramos al usuario qué entendió el bot antes de
+    // procesarlo. Evita confusión si la transcripción salió torcida.
+    await sendMessage(chatId, `🎤 Te entendí: "${text}"`);
+
+    transcriptionMeta = {
+      source: "voice",
+      provider: transcriber.name,
+      duration: audio.duration,
+      file_size: audio.file_size,
+    };
+  }
 
   // Audit del mensaje entrante (fail-closed: si esto explota, queremos saber).
   await logEvent({
@@ -114,6 +184,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     rol: user?.rol,
     tipo: "mensaje",
     texto_usuario: text,
+    parametros: transcriptionMeta,
   });
 
   const parsed = parseCommand(text);

@@ -6,6 +6,7 @@ import type {
   TelegramMessage,
   TelegramUpdate,
   TelegramUser,
+  TelegramVoice,
 } from "./types.ts";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -173,6 +174,50 @@ export async function sendChatAction(
 }
 
 /**
+ * Resuelve el `file_path` de un file_id (necesario antes de descargar).
+ * https://core.telegram.org/bots/api#getfile
+ *
+ * Errores propagan: si fallás bajando el archivo, no hay nada que
+ * transcribir y el caller necesita saberlo.
+ */
+export async function getFile(
+  file_id: string,
+): Promise<{ file_path: string; file_size?: number }> {
+  const r = await callTelegramApi<{ file_path: string; file_size?: number }>(
+    "getFile",
+    { file_id },
+  );
+  if (!r.result?.file_path) {
+    throw new Error(`getFile returned no file_path for file_id=${file_id}`);
+  }
+  return { file_path: r.result.file_path, file_size: r.result.file_size };
+}
+
+/**
+ * Descarga el binary del archivo. La URL es distinta de la API JSON: el
+ * endpoint de archivos es `/file/bot{token}/{file_path}` (sin /bot{token}/
+ * como prefijo de método).
+ *
+ * Errores propagan.
+ */
+export async function downloadTelegramFile(file_path: string): Promise<Uint8Array> {
+  const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN not set in Edge Function environment");
+  }
+  const url = `${TELEGRAM_API_BASE}/file/bot${token}/${file_path}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(
+      `downloadTelegramFile failed (status ${res.status}): ${
+        await res.text().catch(() => "<no body>")
+      }`,
+    );
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/**
  * Confirma la recepción de un callback_query. Sin esta llamada, el botón en
  * la UI del cliente Telegram queda con un spinner por hasta 30s. Llamala
  * SIEMPRE al final de handleCallbackQuery, aunque haya habido error — con
@@ -336,6 +381,24 @@ function parseMessage(raw: unknown): TelegramMessage | undefined {
     chat: { id: chat.id, type: chat.type },
     text: typeof msg.text === "string" ? msg.text : undefined,
     from: parseFromUser(msg.from),
+    voice: parseVoiceLike(msg.voice),
+    audio: parseVoiceLike(msg.audio),
+  };
+}
+
+function parseVoiceLike(raw: unknown): TelegramVoice | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.file_id !== "string" || typeof v.file_unique_id !== "string") {
+    return undefined;
+  }
+  if (typeof v.duration !== "number") return undefined;
+  return {
+    file_id: v.file_id,
+    file_unique_id: v.file_unique_id,
+    duration: v.duration,
+    mime_type: typeof v.mime_type === "string" ? v.mime_type : undefined,
+    file_size: typeof v.file_size === "number" ? v.file_size : undefined,
   };
 }
 
