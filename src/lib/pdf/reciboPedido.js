@@ -90,12 +90,13 @@ function generarReciboA4(pedido) {
   doc.text('DATOS DEL CLIENTE', margin, y)
   y += 5
 
-  // Caja del cliente
+  // Caja del cliente (alto dinamico si hay horarios)
+  const boxHeight = pedido.cliente?.horarios_atencion ? 36 : 30
   setFillColor(doc, BRAND.warmGray)
-  doc.roundedRect(margin, y - 2, contentWidth, 30, 3, 3, 'F')
+  doc.roundedRect(margin, y - 2, contentWidth, boxHeight, 3, 3, 'F')
   // Borde izquierdo verde
   setFillColor(doc, BRAND.primary)
-  doc.rect(margin, y - 2, 3, 30, 'F')
+  doc.rect(margin, y - 2, 3, boxHeight, 'F')
 
   setTextColor(doc, BRAND.dark)
   doc.setFontSize(14)
@@ -119,9 +120,17 @@ function generarReciboA4(pedido) {
     pedido.cliente?.telefono ? `Tel: ${pedido.cliente.telefono}` : null,
     pedido.cliente?.cuit ? `CUIT: ${pedido.cliente.cuit}` : null
   ].filter(Boolean).join('  |  ')
-  if (contacto) doc.text(contacto, margin + 8, clienteY)
+  if (contacto) {
+    doc.text(contacto, margin + 8, clienteY)
+    clienteY += 5
+  }
+  if (pedido.cliente?.horarios_atencion) {
+    const horarioTxt = `Horario: ${pedido.cliente.horarios_atencion}`
+    const horLine = doc.splitTextToSize(horarioTxt, contentWidth - 16)[0] || horarioTxt
+    doc.text(horLine, margin + 8, clienteY)
+  }
 
-  y += 38
+  y += boxHeight + 8
 
   // === TABLA DE PRODUCTOS ===
   setTextColor(doc, BRAND.primary)
@@ -293,6 +302,7 @@ function calcularAlturaComanda(pedido) {
   const items = pedido.items || []
   let height = 40 // header empresa + nro recibo + fecha
   height += 28 // cliente (nombre + direccion 2 lineas + telefono)
+  if (pedido.cliente?.horarios_atencion) height += 8 // horario (hasta 2 lineas)
   height += 10 // divider + header tabla productos
   height += items.length * 12 // productos (nombre puede envolver + detalle precio unit)
   height += 32 // total + forma pago + estado
@@ -348,6 +358,13 @@ function dibujarComanda(doc, pedido) {
   if (pedido.cliente?.telefono) {
     doc.text(`Tel: ${pedido.cliente.telefono}`, margin, y)
     y += 4
+  }
+  if (pedido.cliente?.horarios_atencion) {
+    const horLines = doc.splitTextToSize(`Hor: ${pedido.cliente.horarios_atencion}`, contentWidth)
+    horLines.slice(0, 2).forEach(line => {
+      doc.text(line, margin, y)
+      y += 4
+    })
   }
   y += 1
 

@@ -70,7 +70,7 @@ export function fechaLocalISO(date: Date = new Date()): string {
  * que JavaScript los interprete como UTC medianoche (lo cual causa
  * que se muestre el día anterior en zonas UTC-).
  */
-function parseDateSafe(f: string | Date): Date {
+export function parseDateSafe(f: string | Date): Date {
   if (typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f)) {
     return new Date(f + 'T12:00:00')
   }

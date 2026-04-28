@@ -1,6 +1,7 @@
 /**
  * Utilidades compartidas para generación de PDFs
  */
+import { parseDateSafe } from '../../utils/formatters'
 
 const AR_TZ = 'America/Argentina/Buenos_Aires'
 
@@ -18,7 +19,7 @@ export const formatPrecio = (p) =>
  * @returns {string} Fecha formateada
  */
 export const formatFecha = (fecha) =>
-  new Date(fecha || new Date()).toLocaleDateString('es-AR', {
+  parseDateSafe(fecha || new Date()).toLocaleDateString('es-AR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -31,7 +32,7 @@ export const formatFecha = (fecha) =>
  * @returns {string} Fecha y hora formateadas
  */
 export const formatFechaHora = (fecha) =>
-  new Date(fecha || new Date()).toLocaleString('es-AR', {
+  parseDateSafe(fecha || new Date()).toLocaleString('es-AR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
