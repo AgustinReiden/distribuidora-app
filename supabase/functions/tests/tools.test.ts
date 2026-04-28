@@ -36,6 +36,9 @@ import { ventasPeriodoTool } from "../_shared/tools/admin/ventas_periodo.ts";
 import { pendientesPagoTool } from "../_shared/tools/admin/pendientes_pago.ts";
 import { historicoPagosClienteTool } from "../_shared/tools/admin/historico_pagos_cliente.ts";
 import { comprasPeriodoTool } from "../_shared/tools/admin/compras_periodo.ts";
+import { historicoClienteTool } from "../_shared/tools/preventista/historico_cliente.ts";
+import { productosRecurrentesTool } from "../_shared/tools/preventista/productos_recurrentes.ts";
+import { recorridoResumenTool } from "../_shared/tools/transportista/recorrido_resumen.ts";
 import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
 import { sugerirVisitasRfmTool } from "../_shared/tools/preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "../_shared/tools/transportista/mi_recorrido_hoy.ts";
@@ -545,6 +548,9 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("pendientes_pago"), "pendientes_pago no registrada");
   assert(getTool("historico_pagos_cliente"), "historico_pagos_cliente no registrada");
   assert(getTool("compras_periodo"), "compras_periodo no registrada");
+  assert(getTool("historico_pedidos_cliente"), "historico_pedidos_cliente no registrada");
+  assert(getTool("productos_recurrentes_cliente"), "productos_recurrentes_cliente no registrada");
+  assert(getTool("recorrido_resumen"), "recorrido_resumen no registrada");
   assert(getTool("mis_clientes"), "mis_clientes no registrada");
   assert(getTool("sugerir_visitas_rfm"), "sugerir_visitas_rfm no registrada");
   assert(getTool("mi_recorrido_hoy"), "mi_recorrido_hoy no registrada");
@@ -560,6 +566,9 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("pendientes_pago"), pendientesPagoTool);
   assertEquals(getTool("historico_pagos_cliente"), historicoPagosClienteTool);
   assertEquals(getTool("compras_periodo"), comprasPeriodoTool);
+  assertEquals(getTool("historico_pedidos_cliente"), historicoClienteTool);
+  assertEquals(getTool("productos_recurrentes_cliente"), productosRecurrentesTool);
+  assertEquals(getTool("recorrido_resumen"), recorridoResumenTool);
   assertEquals(getTool("mis_clientes"), misClientesTool);
   assertEquals(getTool("sugerir_visitas_rfm"), sugerirVisitasRfmTool);
   assertEquals(getTool("mi_recorrido_hoy"), miRecorridoHoyTool);
@@ -1785,7 +1794,158 @@ Deno.test("compras_periodo invoca RPC y mapea top_proveedores", async () => {
   assertEquals(result.top_proveedores[0].nombre, "MANAOS//REFRES NOW S.A.");
   assertEquals(result.top_proveedores[0].cuit, "30708668733");
   assertEquals(result.top_proveedores[1].proveedor_id, null);
-
   assertEquals(spy.rpcCalls[0].fn, "bot_compras_periodo");
   assertEquals(spy.rpcCalls[0].params.p_desde, "2026-01-01");
+});
+
+// ============================================================================
+// 37. historico_pedidos_cliente: pasa scope params al RPC
+// ============================================================================
+
+Deno.test("historico_pedidos_cliente pasa perfil_id+rol al RPC", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        cliente_id: 565,
+        pedidos_count: 1,
+        rango_dias: 90,
+        total_periodo: 8600,
+        pedidos: [{
+          id: 1280, fecha: "2026-04-27", total: 8600,
+          estado: "entregado", estado_pago: "pagado",
+          created_at: "2026-04-27T13:01:07Z",
+          items: [
+            { producto_id: 138, codigo: "1000", nombre: "AZUCAR X 1KG X 10",
+              cantidad: 1, subtotal: 8600 },
+          ],
+        }],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, {
+    rol: "preventista", sucursal_id: 1, perfil_id: "prev-uuid",
+  });
+  const result = await historicoClienteTool.handler(
+    { cliente_id: 565, dias: 90, limit: 5 },
+    ctx,
+  );
+
+  assertEquals(result.pedidos_count, 1);
+  assertEquals(result.total_periodo, 8600);
+  assertEquals(result.pedidos[0].items[0].nombre, "AZUCAR X 1KG X 10");
+
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_historico_pedidos_cliente");
+  assertEquals(call.params.p_perfil_id, "prev-uuid");
+  assertEquals(call.params.p_rol, "preventista");
+});
+
+Deno.test("historico_pedidos_cliente: error de scope se propaga al output", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        cliente_id: 999,
+        pedidos_count: 0,
+        rango_dias: 90,
+        pedidos: [],
+        error: "Cliente no asignado a este preventista",
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, {
+    rol: "preventista", sucursal_id: 1, perfil_id: "otro-prev",
+  });
+  const result = await historicoClienteTool.handler({ cliente_id: 999 }, ctx);
+  assertEquals(result.pedidos.length, 0);
+  assertEquals(result.error, "Cliente no asignado a este preventista");
+});
+
+// ============================================================================
+// 38. productos_recurrentes_cliente
+// ============================================================================
+
+Deno.test("productos_recurrentes_cliente ordena por pedidos_con_producto", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        cliente_id: 440,
+        rango_dias: 90,
+        productos: [
+          { id: 206, codigo: "F000006", nombre: "PAPAS FRITAS",
+            precio: 300, pedidos_con_producto: 3,
+            unidades_totales: 54, facturado_total: "16200" },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 2 });
+  const result = await productosRecurrentesTool.handler({ cliente_id: 440 }, ctx);
+
+  assertEquals(result.productos[0].pedidos_con_producto, 3);
+  assertEquals(result.productos[0].facturado_total, 16200);
+
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_productos_recurrentes_cliente");
+  assertEquals(call.params.p_dias, 90);
+});
+
+// ============================================================================
+// 39. recorrido_resumen
+// ============================================================================
+
+Deno.test("recorrido_resumen invoca RPC con perfil_id como transportista_id", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        recorrido_id: 555,
+        fecha: "2026-04-26",
+        estado: "completado",
+        total_pedidos: 12,
+        pedidos_entregados: 10,
+        pedidos_pendientes: 2,
+        total_facturado: "150000",
+        total_cobrado: "120000",
+        porcentaje_cobrado: "80",
+        completed_at: null,
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, {
+    rol: "transportista", sucursal_id: 1, perfil_id: "trans-uuid",
+  });
+  const result = await recorridoResumenTool.handler({}, ctx);
+
+  assertEquals(result.recorrido_id, 555);
+  assertEquals(result.pedidos_entregados, 10);
+  assertEquals(result.pedidos_pendientes, 2);
+  assertEquals(result.porcentaje_cobrado, 80);
+
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_recorrido_resumen");
+  assertEquals(call.params.p_transportista_id, "trans-uuid");
+  assertEquals(call.params.p_fecha, null);
+});
+
+Deno.test("recorrido_resumen sin recorrido devuelto lanza mensaje claro", async () => {
+  const { client } = createMockSupabase({
+    rpcResponse: { data: null, error: null },
+  });
+  const ctx = makeCtx(client, {
+    rol: "transportista", sucursal_id: 1, perfil_id: "trans-uuid",
+  });
+  let threw = false;
+  try {
+    await recorridoResumenTool.handler({}, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : "",
+      "No tenés recorrido cargado",
+    );
+  }
+  assert(threw, "debió lanzar 'No tenés recorrido'");
 });
