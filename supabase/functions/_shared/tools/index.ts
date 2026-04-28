@@ -16,6 +16,10 @@ import { productosPorCategoriaTool } from "./common/productos_por_categoria.ts";
 import { misClientesTool } from "./preventista/mis_clientes.ts";
 import { sugerirVisitasRfmTool } from "./preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "./transportista/mi_recorrido_hoy.ts";
+import { ventasPeriodoTool } from "./admin/ventas_periodo.ts";
+import { pendientesPagoTool } from "./admin/pendientes_pago.ts";
+import { historicoPagosClienteTool } from "./admin/historico_pagos_cliente.ts";
+import { comprasPeriodoTool } from "./admin/compras_periodo.ts";
 
 let _registered = false;
 
@@ -30,6 +34,10 @@ export function registerAllTools(): void {
   registerTool(misClientesTool);
   registerTool(sugerirVisitasRfmTool);
   registerTool(miRecorridoHoyTool);
+  registerTool(ventasPeriodoTool);
+  registerTool(pendientesPagoTool);
+  registerTool(historicoPagosClienteTool);
+  registerTool(comprasPeriodoTool);
   _registered = true;
 }
 

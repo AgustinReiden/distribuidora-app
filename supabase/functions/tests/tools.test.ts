@@ -32,6 +32,10 @@ import { fichaClienteTool } from "../_shared/tools/common/ficha_cliente.ts";
 import { fichaProductoTool } from "../_shared/tools/common/ficha_producto.ts";
 import { listarCategoriasTool } from "../_shared/tools/common/listar_categorias.ts";
 import { productosPorCategoriaTool } from "../_shared/tools/common/productos_por_categoria.ts";
+import { ventasPeriodoTool } from "../_shared/tools/admin/ventas_periodo.ts";
+import { pendientesPagoTool } from "../_shared/tools/admin/pendientes_pago.ts";
+import { historicoPagosClienteTool } from "../_shared/tools/admin/historico_pagos_cliente.ts";
+import { comprasPeriodoTool } from "../_shared/tools/admin/compras_periodo.ts";
 import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
 import { sugerirVisitasRfmTool } from "../_shared/tools/preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "../_shared/tools/transportista/mi_recorrido_hoy.ts";
@@ -537,6 +541,10 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("ficha_producto"), "ficha_producto no registrada");
   assert(getTool("listar_categorias"), "listar_categorias no registrada");
   assert(getTool("productos_por_categoria"), "productos_por_categoria no registrada");
+  assert(getTool("ventas_periodo"), "ventas_periodo no registrada");
+  assert(getTool("pendientes_pago"), "pendientes_pago no registrada");
+  assert(getTool("historico_pagos_cliente"), "historico_pagos_cliente no registrada");
+  assert(getTool("compras_periodo"), "compras_periodo no registrada");
   assert(getTool("mis_clientes"), "mis_clientes no registrada");
   assert(getTool("sugerir_visitas_rfm"), "sugerir_visitas_rfm no registrada");
   assert(getTool("mi_recorrido_hoy"), "mi_recorrido_hoy no registrada");
@@ -548,6 +556,10 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("ficha_producto"), fichaProductoTool);
   assertEquals(getTool("listar_categorias"), listarCategoriasTool);
   assertEquals(getTool("productos_por_categoria"), productosPorCategoriaTool);
+  assertEquals(getTool("ventas_periodo"), ventasPeriodoTool);
+  assertEquals(getTool("pendientes_pago"), pendientesPagoTool);
+  assertEquals(getTool("historico_pagos_cliente"), historicoPagosClienteTool);
+  assertEquals(getTool("compras_periodo"), comprasPeriodoTool);
   assertEquals(getTool("mis_clientes"), misClientesTool);
   assertEquals(getTool("sugerir_visitas_rfm"), sugerirVisitasRfmTool);
   assertEquals(getTool("mi_recorrido_hoy"), miRecorridoHoyTool);
@@ -1574,4 +1586,206 @@ Deno.test("ficha_producto rechaza producto_id no entero", async () => {
     );
   }
   assert(threw, "debió lanzar error de producto_id inválido");
+});
+
+// ============================================================================
+// 33. ventas_periodo: invoca el RPC y mapea top_clientes con nombre derivado
+// ============================================================================
+
+Deno.test("ventas_periodo invoca el RPC y deriva nombre de cliente", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-04-01",
+        hasta: "2026-04-28",
+        total_ventas: "8125460",
+        pedidos_count: 173,
+        ticket_promedio: "46967.98",
+        top_clientes: [
+          {
+            id: 440, codigo: 424,
+            nombre_fantasia: "Taco Pozo", razon_social: "Comercial",
+            total_comprado: "994200", pedidos: 13,
+          },
+          {
+            id: 999, codigo: null,
+            nombre_fantasia: null, razon_social: "Solo Razón",
+            total_comprado: 100, pedidos: 1,
+          },
+        ],
+        top_productos: [
+          { id: 178, codigo: "M00002", nombre: "MANAOS COLA 3000CC X 6", unidades: 82, facturado: "910200" },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 2 });
+  const result = await ventasPeriodoTool.handler(
+    { desde: "2026-04-01", hasta: "2026-04-28", limit: 5 },
+    ctx,
+  );
+
+  assertEquals(result.total_ventas, 8125460);
+  assertEquals(result.pedidos_count, 173);
+  assertEquals(result.ticket_promedio, 46967.98);
+  // Primer cliente: nombre_fantasia.
+  assertEquals(result.top_clientes[0].nombre, "Taco Pozo");
+  assertEquals(result.top_clientes[0].total_comprado, 994200);
+  // Segundo cliente: fallback a razon_social cuando nombre_fantasia es null.
+  assertEquals(result.top_clientes[1].nombre, "Solo Razón");
+
+  // RPC params correctos.
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_ventas_periodo");
+  assertEquals(call.params.p_desde, "2026-04-01");
+  assertEquals(call.params.p_hasta, "2026-04-28");
+  assertEquals(call.params.p_sucursal_id, 2);
+  assertEquals(call.params.p_limit, 5);
+});
+
+Deno.test("ventas_periodo rechaza fechas inválidas y rangos invertidos", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+
+  let threw = 0;
+  try {
+    await ventasPeriodoTool.handler(
+      { desde: "01/04/2026", hasta: "2026-04-28" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(err instanceof Error ? err.message : "", "Fechas inválidas");
+  }
+  try {
+    await ventasPeriodoTool.handler(
+      { desde: "2026-04-30", hasta: "2026-04-01" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(err instanceof Error ? err.message : "", "desde");
+  }
+  assertEquals(threw, 2, "debió lanzar 2 veces (fechas + rango)");
+});
+
+// ============================================================================
+// 34. pendientes_pago: invoca RPC y mapea
+// ============================================================================
+
+Deno.test("pendientes_pago invoca RPC con dias_atraso default 0", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        sucursal_id: 2,
+        dias_atraso_min: 0,
+        total_global: "9604385",
+        clientes_count: 81,
+        clientes: [
+          {
+            cliente_id: 415, cliente_codigo: 399,
+            nombre_fantasia: "RAMON ABREGU", razon_social: "RAMON ABREGU",
+            pedidos_pendientes: 3, total_adeudado: "87800",
+            pedido_mas_viejo: "2026-03-21", dias_max_atraso: 38,
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 2 });
+  const result = await pendientesPagoTool.handler({}, ctx);
+
+  assertEquals(result.total_global, 9604385);
+  assertEquals(result.clientes_count, 81);
+  assertEquals(result.clientes[0].nombre, "RAMON ABREGU");
+  assertEquals(result.clientes[0].dias_max_atraso, 38);
+
+  assertEquals(spy.rpcCalls.length, 1);
+  assertEquals(spy.rpcCalls[0].fn, "bot_pendientes_pago");
+  assertEquals(spy.rpcCalls[0].params.p_dias_atraso, 0);
+  assertEquals(spy.rpcCalls[0].params.p_limit, 50);
+});
+
+// ============================================================================
+// 35. historico_pagos_cliente
+// ============================================================================
+
+Deno.test("historico_pagos_cliente invoca RPC con cliente_id correcto", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        cliente_id: 42,
+        pagos_count: 2,
+        total_ultimos: "5000",
+        pagos: [
+          { id: 1, monto: "3000", forma_pago: "efectivo", fecha: "2026-04-20", referencia: null, notas: null, pedido_id: 100 },
+          { id: 2, monto: 2000, forma_pago: "transferencia", fecha: "2026-04-15", referencia: "ABC", notas: null, pedido_id: null },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 2 });
+  const result = await historicoPagosClienteTool.handler(
+    { cliente_id: 42, limit: 10 },
+    ctx,
+  );
+
+  assertEquals(result.pagos_count, 2);
+  assertEquals(result.total_ultimos, 5000);
+  assertEquals(result.pagos[0].monto, 3000);
+  assertEquals(result.pagos[0].forma_pago, "efectivo");
+  assertEquals(result.pagos[1].referencia, "ABC");
+
+  assertEquals(spy.rpcCalls[0].fn, "bot_historico_pagos_cliente");
+  assertEquals(spy.rpcCalls[0].params.p_cliente_id, 42);
+  assertEquals(spy.rpcCalls[0].params.p_sucursal_id, 2);
+});
+
+// ============================================================================
+// 36. compras_periodo: top_proveedores con nombre y cuit
+// ============================================================================
+
+Deno.test("compras_periodo invoca RPC y mapea top_proveedores", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-01-01",
+        hasta: "2026-04-28",
+        total_compras: "7864107.9",
+        compras_count: 11,
+        top_proveedores: [
+          {
+            proveedor_id: 12,
+            nombre: "MANAOS//REFRES NOW S.A.",
+            cuit: "30708668733",
+            total_comprado: "1805295.6",
+            compras_count: 3,
+          },
+          {
+            proveedor_id: null, nombre: "Sin nombre",
+            cuit: null, total_comprado: 1557178, compras_count: 1,
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 2 });
+  const result = await comprasPeriodoTool.handler(
+    { desde: "2026-01-01", hasta: "2026-04-28" },
+    ctx,
+  );
+
+  assertEquals(result.total_compras, 7864107.9);
+  assertEquals(result.compras_count, 11);
+  assertEquals(result.top_proveedores[0].nombre, "MANAOS//REFRES NOW S.A.");
+  assertEquals(result.top_proveedores[0].cuit, "30708668733");
+  assertEquals(result.top_proveedores[1].proveedor_id, null);
+
+  assertEquals(spy.rpcCalls[0].fn, "bot_compras_periodo");
+  assertEquals(spy.rpcCalls[0].params.p_desde, "2026-01-01");
 });
