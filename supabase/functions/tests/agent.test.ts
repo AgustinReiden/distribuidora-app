@@ -698,3 +698,148 @@ Deno.test("truncateHistory no toca history de longitud <= cap", () => {
   const tr = truncateHistory(h, 12);
   assertEquals(tr, h);
 });
+
+// ============================================================================
+// interactableContext (Task 4.3): runAgent expone la última tool call
+// que devolvió una lista de items con id+nombre, así el handler arma un
+// inline keyboard al final.
+// ============================================================================
+
+Deno.test("runAgent: buscar_cliente popula interactableContext={kind:'clientes'}", async () => {
+  setupAgentEnv();
+  const { client } = createMockSupabase({ conversacionData: null });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  // Tool con el name reconocido por extractInteractableContext.
+  // Devuelve el shape que la tool real produce.
+  const fakeBuscarCliente: Tool<
+    { q: string },
+    { total: number; clientes: Array<{ id: number; nombre: string }> }
+  > = {
+    name: "buscar_cliente",
+    description: "test tool",
+    parameters: {
+      type: "object",
+      properties: { q: { type: "string" } },
+      required: ["q"],
+    },
+    allowedRoles: ["admin"],
+    handler: () =>
+      Promise.resolve({
+        total: 2,
+        clientes: [
+          { id: 42, nombre: "Pepito SA" },
+          { id: 100, nombre: "Almacén Centro" },
+        ],
+      }),
+  };
+  registerTool(fakeBuscarCliente);
+
+  const fetchStub = installGeminiFetchStub([
+    {
+      candidates: [{
+        content: {
+          role: "model",
+          parts: [{ functionCall: { name: "buscar_cliente", args: { q: "Pe" } } }],
+        },
+        finishReason: "STOP",
+      }],
+      usageMetadata: { totalTokenCount: 50 },
+    },
+    {
+      candidates: [{
+        content: {
+          role: "model",
+          parts: [{ text: "Encontré 2 clientes." }],
+        },
+        finishReason: "STOP",
+      }],
+      usageMetadata: { totalTokenCount: 30 },
+    },
+  ]);
+
+  try {
+    const result = await runAgent({
+      supabase: client,
+      user: makeUser("admin"),
+      telegram_user_id: 42,
+      userMessage: "buscame pe",
+    });
+
+    assert(result.interactableContext, "interactableContext debe estar populado");
+    assertEquals(result.interactableContext!.kind, "clientes");
+    assertEquals(result.interactableContext!.items.length, 2);
+    assertEquals(result.interactableContext!.items[0], { id: 42, nombre: "Pepito SA" });
+    assertEquals(result.interactableContext!.items[1], { id: 100, nombre: "Almacén Centro" });
+  } finally {
+    fetchStub.restore();
+    teardownAgentEnv();
+  }
+});
+
+Deno.test("runAgent: tool no reconocida (ej ficha_cliente) NO popula interactableContext", async () => {
+  setupAgentEnv();
+  const { client } = createMockSupabase({ conversacionData: null });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  // Tool con shape de single-item — extractInteractableContext debe
+  // retornar undefined (un keyboard de 1 botón sería ruido).
+  const fakeFichaCliente: Tool<
+    { cliente_id: number },
+    { cliente: { id: number; nombre: string } }
+  > = {
+    name: "ficha_cliente",
+    description: "test tool",
+    parameters: {
+      type: "object",
+      properties: { cliente_id: { type: "integer" } },
+      required: ["cliente_id"],
+    },
+    allowedRoles: ["admin"],
+    handler: () => Promise.resolve({ cliente: { id: 42, nombre: "Pepito" } }),
+  };
+  registerTool(fakeFichaCliente);
+
+  const fetchStub = installGeminiFetchStub([
+    {
+      candidates: [{
+        content: {
+          role: "model",
+          parts: [{ functionCall: { name: "ficha_cliente", args: { cliente_id: 42 } } }],
+        },
+        finishReason: "STOP",
+      }],
+      usageMetadata: { totalTokenCount: 50 },
+    },
+    {
+      candidates: [{
+        content: {
+          role: "model",
+          parts: [{ text: "Pepito tiene saldo X." }],
+        },
+        finishReason: "STOP",
+      }],
+      usageMetadata: { totalTokenCount: 30 },
+    },
+  ]);
+
+  try {
+    const result = await runAgent({
+      supabase: client,
+      user: makeUser("admin"),
+      telegram_user_id: 42,
+      userMessage: "ficha de pepito",
+    });
+
+    assertEquals(
+      result.interactableContext,
+      undefined,
+      "ficha_cliente NO debe popular interactableContext",
+    );
+  } finally {
+    fetchStub.restore();
+    teardownAgentEnv();
+  }
+});

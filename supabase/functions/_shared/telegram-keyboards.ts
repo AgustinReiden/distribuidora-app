@@ -134,6 +134,30 @@ export function buildMisClientesKeyboard(
 }
 
 // ----------------------------------------------------------------------------
+// Builder genérico para respuestas NL del LLM (Fase 4 / Task 4.3)
+// ----------------------------------------------------------------------------
+
+/**
+ * Discrimina por kind y reusa el builder específico. El handler de la rama
+ * NL del LLM usa esto cuando `runAgent` devuelve un `interactableContext`.
+ *
+ * Items vacíos → undefined (no queremos un keyboard vacío en la UI).
+ */
+export function buildKeyboardForContext(
+  ctx:
+    | { kind: "clientes"; items: Array<{ id: number; nombre: string }> }
+    | { kind: "productos"; items: Array<{ id: number; nombre: string }> },
+): InlineKeyboardMarkup | undefined {
+  if (ctx.items.length === 0) return undefined;
+  switch (ctx.kind) {
+    case "clientes":
+      return buildClienteListKeyboard(ctx.items);
+    case "productos":
+      return buildProductoListKeyboard(ctx.items);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Main menu (Fase 3)
 // ----------------------------------------------------------------------------
 

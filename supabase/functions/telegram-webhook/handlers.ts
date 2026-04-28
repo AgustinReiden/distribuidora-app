@@ -23,7 +23,10 @@ import {
   sendMessage,
   sendMessageMarkdownSafe,
 } from "../_shared/telegram.ts";
-import { buildMainMenuKeyboard } from "../_shared/telegram-keyboards.ts";
+import {
+  buildKeyboardForContext,
+  buildMainMenuKeyboard,
+} from "../_shared/telegram-keyboards.ts";
 import { invokeTool, registerAllTools } from "../_shared/tools/index.ts";
 import type { ToolContext } from "../_shared/tools/base.ts";
 import { runAgent } from "../_shared/gemini/agent.ts";
@@ -232,7 +235,14 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
       telegram_user_id: tgUser.id,
       userMessage: text,
     });
-    await sendMessage(chatId, result.text);
+    // Si la última tool call relevante devolvió una lista de clientes o
+    // productos, adjuntamos un inline keyboard al mensaje de respuesta —
+    // así las respuestas NL del LLM se sienten consistentes con los slash
+    // commands (que ya tienen keyboards desde Fase 1).
+    const reply_markup = result.interactableContext
+      ? buildKeyboardForContext(result.interactableContext)
+      : undefined;
+    await sendMessage(chatId, result.text, { reply_markup });
   } catch (err) {
     console.error("[handler] runAgent failed:", err);
     await logEvent({
