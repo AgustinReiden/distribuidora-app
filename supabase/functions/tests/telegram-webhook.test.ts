@@ -701,8 +701,8 @@ Deno.test("/cliente Pe flow: invoca buscar_cliente y manda mensaje MarkdownV2", 
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    selectResponseByTable: {
-      clientes: {
+    rpcByFn: {
+      bot_buscar_cliente: {
         data: [
           {
             id: 42,
@@ -716,7 +716,6 @@ Deno.test("/cliente Pe flow: invoca buscar_cliente y manda mensaje MarkdownV2", 
           },
         ],
         error: null,
-        count: 1,
       },
     },
     maybeSingleByTable: {
@@ -749,9 +748,16 @@ Deno.test("/cliente Pe flow: invoca buscar_cliente y manda mensaje MarkdownV2", 
       },
     });
 
-    // Se hizo una query a la tabla clientes (la del tool buscar_cliente).
-    const clientesQuery = spy.selectQueries.find((q) => q.table === "clientes");
-    assert(clientesQuery, "no se hizo query a la tabla clientes");
+    // Se invocó al RPC bot_buscar_cliente con el q + scope del preventista.
+    const rpcCall = spy.rpcCalls.find((c) => c.fn === "bot_buscar_cliente");
+    assert(rpcCall, "no se invocó al RPC bot_buscar_cliente");
+    assertEquals(rpcCall!.params.p_q, "Pe");
+    assertEquals(rpcCall!.params.p_rol, "preventista");
+    assertEquals(rpcCall!.params.p_sucursal_id, 1);
+    assertEquals(
+      rpcCall!.params.p_perfil_id,
+      "33333333-3333-3333-3333-333333333333",
+    );
 
     // Se mandó al menos un mensaje a Telegram (con MarkdownV2 + el nombre).
     const msg = fetchMock.sent.find((s) => {

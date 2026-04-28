@@ -224,12 +224,16 @@ Deno.test("canInvoke deniega rol no autorizado", () => {
 });
 
 // ============================================================================
-// 3. buscar_cliente happy path (preventista) + verifica filtro cliente_preventistas
+// 3. buscar_cliente: invoca el RPC bot_buscar_cliente con los params correctos
 // ============================================================================
+// La tool delega al RPC (migration 020). El test verifica que se invoca con
+// los argumentos correctos y el shape de salida se mapea bien — la lógica de
+// scoping y accent-fold vive en el SQL y se valida con tests de integración
+// directos a la BD (no acá).
 
-Deno.test("buscar_cliente con rol preventista aplica filter cliente_preventistas", async () => {
+Deno.test("buscar_cliente invoca el RPC bot_buscar_cliente con params correctos (preventista)", async () => {
   const { client, spy } = createMockSupabase({
-    selectResponse: {
+    rpcResponse: {
       data: [
         {
           id: 1,
@@ -253,7 +257,6 @@ Deno.test("buscar_cliente con rol preventista aplica filter cliente_preventistas
         },
       ],
       error: null,
-      count: 2,
     },
   });
 
@@ -263,32 +266,22 @@ Deno.test("buscar_cliente con rol preventista aplica filter cliente_preventistas
     sucursal_id: 1,
   });
 
-  const result = await buscarClienteTool.handler({ q: "Pe" }, ctx);
+  const result = await buscarClienteTool.handler({ q: "Pe", limit: 25 }, ctx);
 
   assertEquals(result.total, 2);
   assertEquals(result.clientes.length, 2);
   assertEquals(result.clientes[0].nombre, "Pedro SRL");
   assertEquals(result.clientes[0].saldo_cuenta, 1500.5);
 
-  // La query a `clientes` debe haber:
-  //   * usado select con !inner cliente_preventistas
-  //   * tenido un eq sobre cliente_preventistas.preventista_id con el perfil_id
-  //   * tenido un eq sobre sucursal_id
-  const clienteQuery = spy.queries.find((q) => q.table === "clientes");
-  assert(clienteQuery, "no se hizo query a clientes");
-  assertStringIncludes(clienteQuery!.selectCols ?? "", "cliente_preventistas!inner");
-
-  const eqFilters = clienteQuery!.filters.filter((f) => f.type === "eq");
-  const hasPreventistaFilter = eqFilters.some((f) =>
-    f.args[0] === "cliente_preventistas.preventista_id" &&
-    f.args[1] === "22222222-2222-2222-2222-222222222222"
-  );
-  assert(hasPreventistaFilter, "no se aplicó filter cliente_preventistas.preventista_id");
-
-  const hasSucursalFilter = eqFilters.some((f) =>
-    f.args[0] === "sucursal_id" && f.args[1] === 1
-  );
-  assert(hasSucursalFilter, "no se aplicó filter sucursal_id");
+  // Se invocó al RPC bot_buscar_cliente con los params esperados.
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_buscar_cliente");
+  assertEquals(call.params.p_q, "Pe");
+  assertEquals(call.params.p_perfil_id, "22222222-2222-2222-2222-222222222222");
+  assertEquals(call.params.p_rol, "preventista");
+  assertEquals(call.params.p_sucursal_id, 1);
+  assertEquals(call.params.p_limit, 25);
 });
 
 // ============================================================================
@@ -561,32 +554,50 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
 });
 
 // ============================================================================
-// 9. PostgREST metachar escape: '.' y ':' en q deben escaparse
+// 9. buscar_cliente: pasa el q multi-word + acentuado tal cual al RPC
 // ============================================================================
+// La normalización (lowercase + unaccent + split) la hace el SQL — la tool TS
+// debe pasar el q sin tocar para que el RPC tenga el dato original. Test
+// dual: confirma que multi-word ('almacen gabriel') y trim() funcionan, y que
+// el output trimmea trailing whitespace de los nombres (caso real id=565).
 
-Deno.test("buscar_cliente escapa metacaracteres de PostgREST (. y :)", async () => {
-  // q con '.' y ':' — debe escaparse y resultar en ILIKE literal sin
-  // interpretarse como separador de filtro PostgREST.
+Deno.test("buscar_cliente con q multi-word + accent-fold pasa el q tal cual al RPC y trimmea output", async () => {
   const { client, spy } = createMockSupabase({
-    selectResponse: { data: [], error: null, count: 0 },
+    rpcResponse: {
+      data: [
+        {
+          id: 565,
+          codigo: 549,
+          nombre_fantasia: "Almacén Gabriel ", // trailing space del dato real
+          razon_social: "Briondi Gabriel ",
+          saldo_cuenta: 0,
+          direccion: null,
+          zona: null,
+          sucursal_id: 1,
+        },
+      ],
+      error: null,
+    },
   });
 
   const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
 
-  // Usamos una q con '.', ':', '(' y ')' — todos los metacaracteres.
-  await buscarClienteTool.handler({ q: "foo.bar:baz(x)" }, ctx);
+  // q con espacio (multi-word) + sin acentos en el input (el SQL hace el fold).
+  // Trim() en el handler convierte "  almacen gabriel  " → "almacen gabriel".
+  const result = await buscarClienteTool.handler(
+    { q: "  almacen gabriel  " },
+    ctx,
+  );
 
-  const clienteQuery = spy.queries.find((q) => q.table === "clientes");
-  assert(clienteQuery, "no se hizo query a clientes");
-  const orFilter = clienteQuery!.filters.find((f) => f.type === "or");
-  assert(orFilter, "no se aplicó filter .or()");
+  assertEquals(result.clientes.length, 1);
+  // El handler devuelve el nombre trimmed (limpia trailing space del dato).
+  assertEquals(result.clientes[0].nombre, "Almacén Gabriel");
 
-  const expr = orFilter!.args[0] as string;
-  // Cada metacaracter debe estar escapado con \.
-  assertStringIncludes(expr, "foo\\.bar\\:baz\\(x\\)");
-  // Y el char crudo NO debe aparecer como separador de filtro.
-  // (Verificamos que el patrón completo escapado está dentro del ilike).
-  assertStringIncludes(expr, "nombre_fantasia.ilike.%foo\\.bar\\:baz\\(x\\)%");
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_buscar_cliente");
+  // El q se pasa tal cual (post-trim). El SQL lo lowerea + unaccent + splitea.
+  assertEquals(call.params.p_q, "almacen gabriel");
 });
 
 // ============================================================================
