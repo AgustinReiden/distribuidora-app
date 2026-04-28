@@ -1,36 +1,44 @@
 // Carga de system prompts por rol.
 //
-// Los prompts viven como archivos .txt al lado de este módulo. Razón: son
-// texto largo, los queremos editar sin tocar código TS, y mantenerlos fuera
-// del bundle hace los diffs más legibles. En Deno los .txt no se importan
-// como módulos, así que los leemos con `Deno.readTextFile` resolviendo
-// `import.meta.url`. Los prompts pesan pocos KB, los cacheamos en memoria
-// tras la primera lectura.
+// Los prompts se embeben como módulos TS (uno por rol) y se importan
+// estáticamente. Razón: en el deploy de Supabase Edge Functions el bundler
+// solo incluye archivos TS/JS, así que un Deno.readTextFile sobre un .txt
+// resuelto via import.meta.url falla con "path not found" en producción.
+// Los .ts viajan en el bundle siempre — esto es portable, type-safe y
+// elimina permisos de --allow-read en runtime.
 //
-// El cache es per-isolate. En edge functions el isolate persiste warm entre
-// invocations del mismo deploy, así que los prompts se leen del FS solo en el
-// primer cold start. Reset manual disponible para tests via
-// `clearSystemPromptCache`.
+// API pública (`getSystemPrompt`, `setSystemPromptForTests`,
+// `clearSystemPromptCache`) se mantiene compatible con los call sites previos
+// para no romper tests ni callers.
 
 import type { BotRol } from "../../types.ts";
+import adminPrompt from "./admin.ts";
+import preventistaPrompt from "./preventista.ts";
+import transportistaPrompt from "./transportista.ts";
+import encargadoPrompt from "./encargado.ts";
+import depositoPrompt from "./deposito.ts";
 
-const PROMPTS = new Map<BotRol, string>();
+const DEFAULTS: Record<BotRol, string> = {
+  admin: adminPrompt,
+  preventista: preventistaPrompt,
+  transportista: transportistaPrompt,
+  encargado: encargadoPrompt,
+  deposito: depositoPrompt,
+};
 
-async function loadPromptOnce(rol: BotRol): Promise<string> {
-  const cached = PROMPTS.get(rol);
-  if (cached !== undefined) return cached;
-  const url = new URL(`./${rol}.txt`, import.meta.url);
-  const text = await Deno.readTextFile(url);
-  PROMPTS.set(rol, text);
-  return text;
-}
+// Overrides aplicables solo desde tests via setSystemPromptForTests.
+const OVERRIDES = new Map<BotRol, string>();
 
 /**
- * Carga el system prompt para el rol del usuario.
- * Cachea en memoria — los prompts son estáticos.
+ * Carga el system prompt para el rol del usuario. Async por compat con la
+ * implementación previa basada en FS — el contenido viene de un módulo
+ * importado estáticamente, no se va al disco.
  */
+// deno-lint-ignore require-await
 export async function getSystemPrompt(rol: BotRol): Promise<string> {
-  return await loadPromptOnce(rol);
+  const override = OVERRIDES.get(rol);
+  if (override !== undefined) return override;
+  return DEFAULTS[rol];
 }
 
 // ----------------------------------------------------------------------------
@@ -39,10 +47,14 @@ export async function getSystemPrompt(rol: BotRol): Promise<string> {
 
 /** Override del prompt en memoria. Útil para tests sin tocar el FS. */
 export function setSystemPromptForTests(rol: BotRol, text: string): void {
-  PROMPTS.set(rol, text);
+  OVERRIDES.set(rol, text);
 }
 
-/** Limpia el cache. Llamar entre tests para evitar bleed. */
+/**
+ * Limpia los overrides de tests. El nombre se mantiene por compat con los
+ * tests existentes — ya no hay un "cache" propiamente dicho, los defaults
+ * son constantes inmutables del módulo.
+ */
 export function clearSystemPromptCache(): void {
-  PROMPTS.clear();
+  OVERRIDES.clear();
 }

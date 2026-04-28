@@ -24,6 +24,7 @@ import { callGemini } from "../_shared/gemini/client.ts";
 import { sendMessage } from "../_shared/telegram.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { isTextPart } from "../_shared/gemini/types.ts";
+import digestAdminPrompt from "../_shared/gemini/prompts/digest_admin.ts";
 
 export interface DigestArgs {
   telegram_user_id: number;
@@ -38,27 +39,23 @@ export interface DigestResult {
   reason?: string;
 }
 
-// Cache en memoria del prompt (per-isolate, mismo patrón que prompts/base.ts).
-let _cachedDigestPrompt: string | null = null;
+// Override de tests (null = usar el módulo importado estáticamente). Mantiene
+// el patrón de los seams previos: nombres y semántica intactos para no romper
+// los tests existentes.
+let _digestPromptOverride: string | null = null;
 
-async function getDigestPrompt(): Promise<string> {
-  if (_cachedDigestPrompt !== null) return _cachedDigestPrompt;
-  const url = new URL(
-    "../_shared/gemini/prompts/digest_admin.txt",
-    import.meta.url,
-  );
-  _cachedDigestPrompt = await Deno.readTextFile(url);
-  return _cachedDigestPrompt;
+function getDigestPrompt(): string {
+  return _digestPromptOverride ?? digestAdminPrompt;
 }
 
-/** Test seam: limpia el cache del prompt entre tests. */
+/** Test seam: limpia el override del prompt entre tests. */
 export function _clearDigestPromptCacheForTests(): void {
-  _cachedDigestPrompt = null;
+  _digestPromptOverride = null;
 }
 
-/** Test seam: setea el prompt sin tocar el FS. */
+/** Test seam: setea el prompt sin tocar el módulo. */
 export function _setDigestPromptForTests(text: string): void {
-  _cachedDigestPrompt = text;
+  _digestPromptOverride = text;
 }
 
 /**
@@ -102,7 +99,7 @@ export async function runDigestForAdmin(
   // 2. Prompt + 3. Gemini.
   let texto: string;
   try {
-    const systemPrompt = await getDigestPrompt();
+    const systemPrompt = getDigestPrompt();
     const userMessage = `Métricas del ${fecha} (sucursal ${sucursal_id ?? "todas"}):\n\n${
       JSON.stringify(metricas, null, 2)
     }`;
