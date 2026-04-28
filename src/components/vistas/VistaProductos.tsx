@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react';
 import type { ChangeEvent } from 'react';
-import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet, ClipboardCheck, Tag, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet, ClipboardCheck, Tag, ChevronLeft, ChevronRight, ArrowLeftRight } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
@@ -24,6 +24,7 @@ export interface VistaProductosProps {
   onVerHistorialMermas?: () => void;
   onImportarPrecios?: () => void;
   onGestionarCategorias?: () => void;
+  onCambioProducto?: () => void;
 }
 
 export default function VistaProductos({
@@ -37,7 +38,8 @@ export default function VistaProductos({
   onBajaStock,
   onVerHistorialMermas,
   onImportarPrecios,
-  onGestionarCategorias
+  onGestionarCategorias,
+  onCambioProducto
 }: VistaProductosProps) {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
@@ -104,9 +106,9 @@ export default function VistaProductos({
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Productos</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{productos.length} productos en catálogo</p>
         </div>
-        {isAdmin && (
+        {(isAdmin || onCambioProducto) && (
           <div className="flex flex-wrap gap-2">
-            {onGestionarCategorias && (
+            {isAdmin && onGestionarCategorias && (
               <button
                 onClick={onGestionarCategorias}
                 className="flex items-center space-x-2 px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
@@ -115,17 +117,19 @@ export default function VistaProductos({
                 <span>Categorías</span>
               </button>
             )}
-            <button
-              onClick={async () => {
-                const { exportControlStock } = await import('../../utils/excel');
-                await exportControlStock(productos);
-              }}
-              className="flex items-center space-x-2 px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
-            >
-              <ClipboardCheck className="w-5 h-5" />
-              <span>Control de Stock</span>
-            </button>
-            {onVerHistorialMermas && (
+            {isAdmin && (
+              <button
+                onClick={async () => {
+                  const { exportControlStock } = await import('../../utils/excel');
+                  await exportControlStock(productos);
+                }}
+                className="flex items-center space-x-2 px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+              >
+                <ClipboardCheck className="w-5 h-5" />
+                <span>Control de Stock</span>
+              </button>
+            )}
+            {isAdmin && onVerHistorialMermas && (
               <button
                 onClick={onVerHistorialMermas}
                 className="flex items-center space-x-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
@@ -134,7 +138,7 @@ export default function VistaProductos({
                 <span>Historial Mermas</span>
               </button>
             )}
-            {onImportarPrecios && (
+            {isAdmin && onImportarPrecios && (
               <button
                 onClick={onImportarPrecios}
                 className="flex items-center space-x-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
@@ -143,13 +147,24 @@ export default function VistaProductos({
                 <span>Importar Precios</span>
               </button>
             )}
-            <button
-              onClick={onNuevoProducto}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Nuevo Producto</span>
-            </button>
+            {onCambioProducto && (
+              <button
+                onClick={onCambioProducto}
+                className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
+              >
+                <ArrowLeftRight className="w-5 h-5" />
+                <span>Cambio de productos</span>
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={onNuevoProducto}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="w-5 h-5" />
+                <span>Nuevo Producto</span>
+              </button>
+            )}
           </div>
         )}
       </div>

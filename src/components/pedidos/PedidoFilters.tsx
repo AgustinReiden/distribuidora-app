@@ -2,7 +2,7 @@
  * Componente de filtros para la vista de pedidos
  */
 import React, { memo, ChangeEvent } from 'react';
-import { Search, Calendar, X, Truck } from 'lucide-react';
+import { Search, Calendar, X, Truck, User } from 'lucide-react';
 import { fechaLocalISO } from '../../utils/formatters';
 import type { Usuario, EstadoPedido, EstadoPago } from '../../types';
 
@@ -10,6 +10,7 @@ interface FiltrosPedido {
   estado: string;
   estadoPago?: string;
   transportistaId?: string;
+  usuarioId?: string;
   fechaDesde?: string | null;
   fechaHasta?: string | null;
   conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
@@ -21,6 +22,7 @@ interface FiltrosChange {
   estado?: string;
   estadoPago?: string;
   transportistaId?: string;
+  usuarioId?: string;
   fechaDesde?: string | null;
   fechaHasta?: string | null;
   conSalvedad?: 'todos' | 'con_salvedad' | 'sin_salvedad';
@@ -32,6 +34,7 @@ export interface PedidoFiltersProps {
   busqueda: string;
   filtros: FiltrosPedido;
   transportistas?: Usuario[];
+  usuarios?: Usuario[];
   isAdmin: boolean;
   onBusquedaChange: (value: string) => void;
   onFiltrosChange: (filtros: FiltrosChange) => void;
@@ -42,6 +45,7 @@ function PedidoFilters({
   busqueda,
   filtros,
   transportistas = [],
+  usuarios = [],
   isAdmin,
   onBusquedaChange,
   onFiltrosChange,
@@ -138,6 +142,25 @@ function PedidoFilters({
               <option value="sin_asignar">Sin asignar</option>
               {transportistas.map(t => (
                 <option key={t.id} value={t.id}>{t.nombre}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-1">
+            <User className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+            <label htmlFor="filtro-usuario" className="sr-only">Filtrar por usuario que cargó el pedido</label>
+            <select
+              id="filtro-usuario"
+              value={filtros.usuarioId || 'todos'}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => onFiltrosChange({ usuarioId: e.target.value })}
+              className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+                filtros.usuarioId && filtros.usuarioId !== 'todos'
+                  ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/30 dark:border-blue-600'
+                  : ''
+              }`}
+            >
+              <option value="todos">Todos los usuarios</option>
+              {usuarios.map(u => (
+                <option key={u.id} value={u.id}>{u.nombre}</option>
               ))}
             </select>
           </div>

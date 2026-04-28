@@ -23,6 +23,7 @@ import {
   useClientesQuery,
   useProductosQuery,
   useTransportistasQuery,
+  useUsuariosQuery,
   useCrearClienteMutation,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -60,6 +61,7 @@ const DEFAULT_FILTROS: FiltrosPedidosState = {
   estado: 'todos',
   estadoPago: 'todos',
   transportistaId: 'todos',
+  usuarioId: 'todos',
   busqueda: '',
   conSalvedad: 'todos',
 }
@@ -104,6 +106,11 @@ export default function PedidosContainer(): React.ReactElement {
   const { data: clientes = [] } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: transportistas = [] } = useTransportistasQuery()
+  const { data: usuariosTodos = [] } = useUsuariosQuery()
+  const usuarios = useMemo(
+    () => (isAdmin ? usuariosTodos : []),
+    [isAdmin, usuariosTodos],
+  )
 
   // Mutations
   const crearPedido = useCrearPedidoMutation()
@@ -789,6 +796,7 @@ export default function PedidosContainer(): React.ReactElement {
           clientes={clientes}
           productos={productos}
           transportistas={transportistas}
+          usuarios={usuarios}
           loading={loadingPedidos}
           exportando={exportando}
           onBusquedaChange={handleBusquedaChange}

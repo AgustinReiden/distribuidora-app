@@ -663,6 +663,30 @@ export const modalMermaSchema = z.object({
 export type ModalMermaFormData = z.infer<typeof modalMermaSchema>
 
 /**
+ * Schema para ModalCambioProducto
+ */
+export const modalCambioProductoSchema = z.object({
+  clienteId: z.string().min(1, { message: 'Debe seleccionar un cliente' }),
+  productoDevueltoId: z.string().min(1, { message: 'Debe seleccionar el producto a devolver' }),
+  cantidadDevuelta: z.coerce
+    .number({ error: 'La cantidad debe ser un número' })
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+  productoEntregadoId: z.string().min(1, { message: 'Debe seleccionar el producto a entregar' }),
+  cantidadEntregada: z.coerce
+    .number({ error: 'La cantidad debe ser un número' })
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+  observaciones: z.string().optional()
+}).refine(d => d.productoDevueltoId !== d.productoEntregadoId, {
+  message: 'Los productos deben ser distintos',
+  path: ['productoEntregadoId']
+})
+
+/** Inferred type for ModalCambioProducto schema */
+export type ModalCambioProductoFormData = z.infer<typeof modalCambioProductoSchema>
+
+/**
  * Schema para ModalProveedor
  */
 export const modalProveedorSchema = z.object({

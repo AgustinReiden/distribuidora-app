@@ -60,6 +60,9 @@ async function fetchPedidoStats(
   if (filters?.transportistaId && filters.transportistaId !== 'todos') {
     query = query.eq('transportista_id', filters.transportistaId)
   }
+  if (filters?.usuarioId && filters.usuarioId !== 'todos') {
+    query = query.eq('usuario_id', filters.usuarioId)
+  }
   if (filters?.fechaDesde) {
     query = query.gte('fecha', filters.fechaDesde)
   }

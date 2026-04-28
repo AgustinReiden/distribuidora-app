@@ -108,6 +108,13 @@ export {
   useMermasResumen,
 } from './useMermasQuery'
 
+// Cambios de productos cliente↔depósito
+export {
+  cambiosProductosKeys,
+  useRegistrarCambioProductoMutation,
+} from './useCambiosProductosQuery'
+export type { RegistrarCambioInput } from './useCambiosProductosQuery'
+
 // Grupos de Precio Mayorista
 export {
   gruposPrecioKeys,

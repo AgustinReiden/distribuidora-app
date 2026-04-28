@@ -43,6 +43,7 @@ export interface VistaPedidosProps {
   clientes: ClienteDB[];
   productos: ProductoDB[];
   transportistas?: PerfilDB[];
+  usuarios?: PerfilDB[];
   loading: boolean;
   exportando: boolean;
   onBusquedaChange: (busqueda: string) => void;
@@ -104,6 +105,7 @@ export default function VistaPedidos({
   clientes,
   productos,
   transportistas = [],
+  usuarios = [],
   loading,
   exportando,
   onBusquedaChange,
@@ -216,6 +218,7 @@ export default function VistaPedidos({
         busqueda={busqueda}
         filtros={filtros}
         transportistas={transportistas as import('../../types').Usuario[]}
+        usuarios={usuarios as import('../../types').Usuario[]}
         isAdmin={isAdmin}
         onBusquedaChange={onBusquedaChange}
         onFiltrosChange={onFiltrosChange}
