@@ -29,6 +29,8 @@ import {
 import { buscarClienteTool } from "../_shared/tools/common/buscar_cliente.ts";
 import { buscarProductoTool } from "../_shared/tools/common/buscar_producto.ts";
 import { fichaClienteTool } from "../_shared/tools/common/ficha_cliente.ts";
+import { listarCategoriasTool } from "../_shared/tools/common/listar_categorias.ts";
+import { productosPorCategoriaTool } from "../_shared/tools/common/productos_por_categoria.ts";
 import { misClientesTool } from "../_shared/tools/preventista/mis_clientes.ts";
 import { sugerirVisitasRfmTool } from "../_shared/tools/preventista/sugerir_visitas_rfm.ts";
 import { miRecorridoHoyTool } from "../_shared/tools/transportista/mi_recorrido_hoy.ts";
@@ -40,7 +42,7 @@ import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
 // ============================================================================
 
 interface QueryFilter {
-  type: "eq" | "or";
+  type: "eq" | "or" | "ilike";
   args: unknown[];
 }
 
@@ -102,6 +104,10 @@ function createMockSupabase(opts: MockSupabaseOpts = {}): {
       },
       or(expr: string) {
         record.filters.push({ type: "or", args: [expr] });
+        return builder;
+      },
+      ilike(col: string, pattern: string) {
+        record.filters.push({ type: "ilike", args: [col, pattern] });
         return builder;
       },
       order(col: string, orderOpts?: Record<string, unknown>) {
@@ -534,6 +540,8 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("buscar_cliente"), "buscar_cliente no registrada");
   assert(getTool("buscar_producto"), "buscar_producto no registrada");
   assert(getTool("ficha_cliente"), "ficha_cliente no registrada");
+  assert(getTool("listar_categorias"), "listar_categorias no registrada");
+  assert(getTool("productos_por_categoria"), "productos_por_categoria no registrada");
   assert(getTool("mis_clientes"), "mis_clientes no registrada");
   assert(getTool("sugerir_visitas_rfm"), "sugerir_visitas_rfm no registrada");
   assert(getTool("mi_recorrido_hoy"), "mi_recorrido_hoy no registrada");
@@ -542,6 +550,8 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("buscar_cliente"), buscarClienteTool);
   assertEquals(getTool("buscar_producto"), buscarProductoTool);
   assertEquals(getTool("ficha_cliente"), fichaClienteTool);
+  assertEquals(getTool("listar_categorias"), listarCategoriasTool);
+  assertEquals(getTool("productos_por_categoria"), productosPorCategoriaTool);
   assertEquals(getTool("mis_clientes"), misClientesTool);
   assertEquals(getTool("sugerir_visitas_rfm"), sugerirVisitasRfmTool);
   assertEquals(getTool("mi_recorrido_hoy"), miRecorridoHoyTool);
@@ -1181,4 +1191,259 @@ Deno.test("sugerir_visitas_rfm happy path retorna shape esperado y mapea campos"
   assertEquals(call.params.p_preventista_id, "ffffffff-ffff-ffff-ffff-ffffffffffff");
   assertEquals(call.params.p_sucursal_id, 2);
   assertEquals(call.params.p_limit, 10);
+});
+
+// ============================================================================
+// 21. listar_categorias: happy path con dedupe + filtro de null/empty
+// ============================================================================
+
+Deno.test("listar_categorias dedupe y filtra null/'' del resultado", async () => {
+  // Mock devuelve filas con categorías repetidas, una null, una "". El handler
+  // debe dedupear preservando orden de aparición y descartar null/"".
+  const { client, spy } = createMockSupabase({
+    selectResponse: {
+      data: [
+        { categoria: "AGUAS" },
+        { categoria: "FIDEOS" },
+        { categoria: "GASEOSAS" },
+        { categoria: "GASEOSAS" }, // duplicado
+        { categoria: null },
+        { categoria: "" },
+        { categoria: "FIDEOS" }, // duplicado
+      ],
+      error: null,
+      count: 7,
+    },
+  });
+
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const result = await listarCategoriasTool.handler({} as never, ctx);
+
+  assertEquals(result.total, 3);
+  assertEquals(result.categorias, ["AGUAS", "FIDEOS", "GASEOSAS"]);
+
+  // Sanity: scoping por sucursal aplicado.
+  const q = spy.queries.find((qq) => qq.table === "productos");
+  assert(q, "no se hizo query a productos");
+  const eqFilters = q!.filters.filter((f) => f.type === "eq");
+  assert(
+    eqFilters.some((f) => f.args[0] === "sucursal_id" && f.args[1] === 1),
+    "no se aplicó filter sucursal_id",
+  );
+});
+
+// ============================================================================
+// 22. listar_categorias: catalogo vacío → total 0, categorias []
+// ============================================================================
+
+Deno.test("listar_categorias retorna shape vacío cuando no hay productos", async () => {
+  const { client } = createMockSupabase({
+    selectResponse: { data: [], error: null, count: 0 },
+  });
+  const ctx = makeCtx(client, { rol: "encargado", sucursal_id: 7 });
+  const result = await listarCategoriasTool.handler({} as never, ctx);
+  assertEquals(result.total, 0);
+  assertEquals(result.categorias, []);
+});
+
+// ============================================================================
+// 23. listar_categorias: rechaza preventista sin sucursal asignada
+// ============================================================================
+
+Deno.test("listar_categorias rechaza preventista sin sucursal asignada", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: null,
+    perfil_id: "11111111-2222-3333-4444-555555555555",
+  });
+
+  let threw = false;
+  try {
+    await listarCategoriasTool.handler({} as never, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Sucursal no asignada",
+    );
+  }
+  assert(threw, "debió lanzar 'Sucursal no asignada'");
+});
+
+// ============================================================================
+// 24. productos_por_categoria: happy path con categoria + q
+// ============================================================================
+
+Deno.test("productos_por_categoria filtra por categoria y refina con q", async () => {
+  const { client, spy } = createMockSupabase({
+    selectResponse: {
+      data: [
+        {
+          id: 10,
+          codigo: "G001",
+          nombre: "Coca Naranja 2.25L",
+          precio: "850.50",
+          stock: 12,
+          stock_minimo: 4,
+          categoria: "GASEOSAS",
+          sucursal_id: 1,
+        },
+      ],
+      error: null,
+      count: 1,
+    },
+  });
+
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const result = await productosPorCategoriaTool.handler(
+    { categoria: "GASEOSAS", q: "naranja" },
+    ctx,
+  );
+
+  assertEquals(result.total, 1);
+  assertEquals(result.categoria, "GASEOSAS");
+  assertEquals(result.productos.length, 1);
+  assertEquals(result.productos[0].id, 10);
+  assertEquals(result.productos[0].nombre, "Coca Naranja 2.25L");
+  assertEquals(result.productos[0].precio, 850.5);
+  assertEquals(result.productos[0].bajo_stock, false); // 12 > 4
+
+  // Verifico shape de la query: ilike sobre categoria + or sobre nombre/codigo.
+  const q = spy.queries.find((qq) => qq.table === "productos");
+  assert(q, "no se hizo query a productos");
+
+  const ilikeFilters = q!.filters.filter((f) => f.type === "ilike");
+  assert(
+    ilikeFilters.some((f) =>
+      f.args[0] === "categoria" && f.args[1] === "GASEOSAS"
+    ),
+    "no se aplicó ilike(categoria)",
+  );
+
+  const orFilter = q!.filters.find((f) => f.type === "or");
+  assert(orFilter, "no se aplicó .or() para refinar con q");
+  assertStringIncludes(orFilter!.args[0] as string, "nombre.ilike.%naranja%");
+  assertStringIncludes(orFilter!.args[0] as string, "codigo.ilike.%naranja%");
+
+  // Sucursal scoping.
+  const eqFilters = q!.filters.filter((f) => f.type === "eq");
+  assert(
+    eqFilters.some((f) => f.args[0] === "sucursal_id" && f.args[1] === 1),
+    "no se aplicó filter sucursal_id",
+  );
+});
+
+// ============================================================================
+// 25. productos_por_categoria: sin q solo filtra por categoria
+// ============================================================================
+
+Deno.test("productos_por_categoria sin q omite el .or() de refinamiento", async () => {
+  const { client, spy } = createMockSupabase({
+    selectResponse: {
+      data: [
+        {
+          id: 1,
+          codigo: "F001",
+          nombre: "Fideo Spaghetti 500g",
+          precio: 350,
+          stock: 20,
+          stock_minimo: 5,
+          categoria: "FIDEOS",
+          sucursal_id: 2,
+        },
+      ],
+      error: null,
+      count: 1,
+    },
+  });
+
+  const ctx = makeCtx(client, { rol: "preventista", sucursal_id: 2, perfil_id: "preventista-uuid" });
+  const result = await productosPorCategoriaTool.handler(
+    { categoria: "FIDEOS" },
+    ctx,
+  );
+
+  assertEquals(result.total, 1);
+  const q = spy.queries.find((qq) => qq.table === "productos");
+  assert(q, "no se hizo query a productos");
+  // No debió haber .or() porque no se pasó q.
+  const orFilter = q!.filters.find((f) => f.type === "or");
+  assertEquals(
+    orFilter,
+    undefined,
+    "no debió aplicarse .or() cuando no se pasa q",
+  );
+});
+
+// ============================================================================
+// 26. productos_por_categoria: rechaza sucursal_id null para no-admin
+// ============================================================================
+
+Deno.test("productos_por_categoria rechaza transportista sin sucursal asignada", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, {
+    rol: "transportista",
+    sucursal_id: null,
+    perfil_id: "trans-no-suc",
+  });
+
+  let threw = false;
+  try {
+    await productosPorCategoriaTool.handler({ categoria: "AGUAS" }, ctx);
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Sucursal no asignada",
+    );
+  }
+  assert(threw, "debió lanzar 'Sucursal no asignada'");
+});
+
+// ============================================================================
+// 27. productos_por_categoria: escapa metacaracteres PostgREST en q
+// ============================================================================
+
+Deno.test("productos_por_categoria escapa metacaracteres PostgREST en q", async () => {
+  const { client, spy } = createMockSupabase({
+    selectResponse: { data: [], error: null, count: 0 },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+
+  await productosPorCategoriaTool.handler(
+    { categoria: "GASEOSAS", q: "foo.bar:baz(x)" },
+    ctx,
+  );
+
+  const q = spy.queries.find((qq) => qq.table === "productos");
+  assert(q, "no se hizo query a productos");
+  const orFilter = q!.filters.find((f) => f.type === "or");
+  assert(orFilter, "no se aplicó .or()");
+  const expr = orFilter!.args[0] as string;
+  assertStringIncludes(expr, "nombre.ilike.%foo\\.bar\\:baz\\(x\\)%");
+});
+
+// ============================================================================
+// 28. productos_por_categoria: limit fuera de rango lanza error
+// ============================================================================
+
+Deno.test("productos_por_categoria rechaza limit fuera de rango", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+
+  let threw = false;
+  try {
+    await productosPorCategoriaTool.handler(
+      { categoria: "GASEOSAS", limit: 100 },
+      ctx,
+    );
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : String(err),
+      "Límite fuera de rango",
+    );
+  }
+  assert(threw, "debió lanzar 'Límite fuera de rango'");
 });
