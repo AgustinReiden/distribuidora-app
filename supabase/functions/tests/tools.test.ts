@@ -33,6 +33,8 @@ import { fichaProductoTool } from "../_shared/tools/common/ficha_producto.ts";
 import { listarCategoriasTool } from "../_shared/tools/common/listar_categorias.ts";
 import { productosPorCategoriaTool } from "../_shared/tools/common/productos_por_categoria.ts";
 import { ventasPeriodoTool } from "../_shared/tools/admin/ventas_periodo.ts";
+import { ventasPorPreventistaTool } from "../_shared/tools/admin/ventas_por_preventista.ts";
+import { misVentasTool } from "../_shared/tools/preventista/mis_ventas.ts";
 import { pendientesPagoTool } from "../_shared/tools/admin/pendientes_pago.ts";
 import { historicoPagosClienteTool } from "../_shared/tools/admin/historico_pagos_cliente.ts";
 import { comprasPeriodoTool } from "../_shared/tools/admin/compras_periodo.ts";
@@ -545,9 +547,11 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("listar_categorias"), "listar_categorias no registrada");
   assert(getTool("productos_por_categoria"), "productos_por_categoria no registrada");
   assert(getTool("ventas_periodo"), "ventas_periodo no registrada");
+  assert(getTool("ventas_por_preventista"), "ventas_por_preventista no registrada");
   assert(getTool("pendientes_pago"), "pendientes_pago no registrada");
   assert(getTool("historico_pagos_cliente"), "historico_pagos_cliente no registrada");
   assert(getTool("compras_periodo"), "compras_periodo no registrada");
+  assert(getTool("mis_ventas"), "mis_ventas no registrada");
   assert(getTool("historico_pedidos_cliente"), "historico_pedidos_cliente no registrada");
   assert(getTool("productos_recurrentes_cliente"), "productos_recurrentes_cliente no registrada");
   assert(getTool("recorrido_resumen"), "recorrido_resumen no registrada");
@@ -563,9 +567,11 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("listar_categorias"), listarCategoriasTool);
   assertEquals(getTool("productos_por_categoria"), productosPorCategoriaTool);
   assertEquals(getTool("ventas_periodo"), ventasPeriodoTool);
+  assertEquals(getTool("ventas_por_preventista"), ventasPorPreventistaTool);
   assertEquals(getTool("pendientes_pago"), pendientesPagoTool);
   assertEquals(getTool("historico_pagos_cliente"), historicoPagosClienteTool);
   assertEquals(getTool("compras_periodo"), comprasPeriodoTool);
+  assertEquals(getTool("mis_ventas"), misVentasTool);
   assertEquals(getTool("historico_pedidos_cliente"), historicoClienteTool);
   assertEquals(getTool("productos_recurrentes_cliente"), productosRecurrentesTool);
   assertEquals(getTool("recorrido_resumen"), recorridoResumenTool);
@@ -1948,4 +1954,202 @@ Deno.test("recorrido_resumen sin recorrido devuelto lanza mensaje claro", async 
     );
   }
   assert(threw, "debió lanzar 'No tenés recorrido'");
+});
+
+// ============================================================================
+// 50. ventas_por_preventista: invoca el RPC y mapea el ranking
+// ============================================================================
+
+Deno.test("ventas_por_preventista invoca el RPC y mapea preventistas", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-04-28",
+        hasta: "2026-04-28",
+        solo_preventistas: true,
+        total_ventas: "1266750",
+        pedidos_count: 47,
+        preventistas_count: 4,
+        preventistas: [
+          {
+            usuario_id: "aaa", nombre: "Christian", rol: "preventista",
+            pedidos: 18, total_vendido: "420020", ticket_promedio: "23334.44",
+          },
+          {
+            usuario_id: "bbb", nombre: "Joaquin", rol: "preventista",
+            pedidos: 12, total_vendido: 355870, ticket_promedio: 29655.83,
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const result = await ventasPorPreventistaTool.handler(
+    { desde: "2026-04-28", hasta: "2026-04-28", limit: 10 },
+    ctx,
+  );
+
+  assertEquals(result.total_ventas, 1266750);
+  assertEquals(result.pedidos_count, 47);
+  assertEquals(result.preventistas_count, 4);
+  assertEquals(result.preventistas.length, 2);
+  assertEquals(result.preventistas[0].nombre, "Christian");
+  assertEquals(result.preventistas[0].total_vendido, 420020);
+  assertEquals(result.preventistas[1].nombre, "Joaquin");
+  assertEquals(result.preventistas[1].ticket_promedio, 29655.83);
+
+  // RPC params correctos.
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_ventas_por_preventista");
+  assertEquals(call.params.p_desde, "2026-04-28");
+  assertEquals(call.params.p_hasta, "2026-04-28");
+  assertEquals(call.params.p_sucursal_id, 1);
+  assertEquals(call.params.p_solo_preventistas, true);
+  assertEquals(call.params.p_limit, 10);
+});
+
+Deno.test("ventas_por_preventista respeta solo_preventistas=false", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-04-28", hasta: "2026-04-28", solo_preventistas: false,
+        total_ventas: 0, pedidos_count: 0, preventistas_count: 0,
+        preventistas: [],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  await ventasPorPreventistaTool.handler(
+    { desde: "2026-04-28", hasta: "2026-04-28", solo_preventistas: false },
+    ctx,
+  );
+  assertEquals(spy.rpcCalls[0].params.p_solo_preventistas, false);
+});
+
+Deno.test("ventas_por_preventista valida fechas y rango", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  let threw = 0;
+  try {
+    await ventasPorPreventistaTool.handler(
+      { desde: "ayer", hasta: "2026-04-28" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(err instanceof Error ? err.message : "", "Fechas inválidas");
+  }
+  try {
+    await ventasPorPreventistaTool.handler(
+      { desde: "2026-04-28", hasta: "2026-04-01" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(err instanceof Error ? err.message : "", "desde");
+  }
+  assertEquals(threw, 2);
+});
+
+// ============================================================================
+// 51. mis_ventas: solo preventista, scopea al perfil_id propio
+// ============================================================================
+
+Deno.test("mis_ventas invoca el RPC con perfil_id del caller y mapea top_clientes", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        desde: "2026-04-01",
+        hasta: "2026-04-29",
+        total_ventas: "1500000",
+        pedidos_count: 25,
+        ticket_promedio: "60000",
+        clientes_distintos: 14,
+        top_clientes: [
+          {
+            cliente_id: 100, cliente_codigo: 12,
+            nombre_fantasia: "Almacén Pepe", razon_social: "Pepe SA",
+            total_comprado: "350000", pedidos: 5,
+          },
+          {
+            cliente_id: 101, cliente_codigo: null,
+            nombre_fantasia: null, razon_social: "María SRL",
+            total_comprado: 200000, pedidos: 3,
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: 1,
+    perfil_id: "PERFIL-CHRISTIAN",
+  });
+  const result = await misVentasTool.handler(
+    { desde: "2026-04-01", hasta: "2026-04-29" },
+    ctx,
+  );
+
+  assertEquals(result.total_ventas, 1500000);
+  assertEquals(result.pedidos_count, 25);
+  assertEquals(result.ticket_promedio, 60000);
+  assertEquals(result.clientes_distintos, 14);
+  assertEquals(result.top_clientes[0].nombre, "Almacén Pepe");
+  assertEquals(result.top_clientes[1].nombre, "María SRL");
+
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_mis_ventas");
+  assertEquals(call.params.p_preventista_id, "PERFIL-CHRISTIAN");
+  assertEquals(call.params.p_desde, "2026-04-01");
+  assertEquals(call.params.p_hasta, "2026-04-29");
+  assertEquals(call.params.p_sucursal_id, 1);
+});
+
+Deno.test("mis_ventas rechaza si el rol no es preventista", async () => {
+  const { client } = createMockSupabase({});
+  const ctxAdmin = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  let threw = false;
+  try {
+    await misVentasTool.handler(
+      { desde: "2026-04-28", hasta: "2026-04-28" },
+      ctxAdmin,
+    );
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : "",
+      "preventista",
+    );
+  }
+  assert(threw, "debió rechazar a admin (defense-in-depth)");
+});
+
+Deno.test("mis_ventas valida fechas y rango", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "preventista", sucursal_id: 1 });
+  let threw = 0;
+  try {
+    await misVentasTool.handler(
+      { desde: "01-01-2026", hasta: "2026-04-28" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(err instanceof Error ? err.message : "", "Fechas inválidas");
+  }
+  try {
+    await misVentasTool.handler(
+      { desde: "2026-05-01", hasta: "2026-04-01" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(err instanceof Error ? err.message : "", "desde");
+  }
+  assertEquals(threw, 2);
 });

@@ -843,3 +843,55 @@ Deno.test("runAgent: tool no reconocida (ej ficha_cliente) NO popula interactabl
     teardownAgentEnv();
   }
 });
+
+// ============================================================================
+// 9. MALFORMED_FUNCTION_CALL → mensaje accionable (no fallback genérico)
+// ============================================================================
+
+Deno.test("runAgent MALFORMED_FUNCTION_CALL devuelve un mensaje accionable", async () => {
+  setupAgentEnv();
+  const { client, spy } = createMockSupabase({ conversacionData: null });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  // Gemini emite parts vacías + finishReason MALFORMED_FUNCTION_CALL
+  // (este es el shape real cuando rechaza un function call mal formado).
+  const fetchStub = installGeminiFetchStub([
+    {
+      candidates: [
+        {
+          content: { role: "model", parts: [] },
+          finishReason: "MALFORMED_FUNCTION_CALL",
+        },
+      ],
+      usageMetadata: { totalTokenCount: 3880 },
+    },
+  ]);
+
+  try {
+    const result = await runAgent({
+      supabase: client,
+      user: makeUser("admin"),
+      telegram_user_id: 42,
+      userMessage: "Decime cuánto vendimos ayer",
+    });
+
+    assertEquals(result.finishReason, "MALFORMED_FUNCTION_CALL");
+    assertEquals(result.toolCallsCount, 0);
+    assertEquals(result.hitMaxIterations, false);
+    assertStringIncludes(result.text, "No logré armar la consulta");
+    assertStringIncludes(result.text, "ej:");
+
+    // Audit con malformed=true.
+    const auditResp = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tipo === "respuesta"
+    );
+    assert(auditResp, "debió haber audit tipo='respuesta'");
+    const meta = auditResp!.row.resultado_meta as Record<string, unknown>;
+    assertEquals(meta.malformed, true);
+    assertEquals(meta.finishReason, "MALFORMED_FUNCTION_CALL");
+  } finally {
+    fetchStub.restore();
+    teardownAgentEnv();
+  }
+});

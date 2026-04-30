@@ -301,3 +301,59 @@ Deno.test("setSystemPromptForTests permite override sin tocar el FS", async () =
   assertEquals(got, "PROMPT_DE_TEST_FAKE");
   clearSystemPromptCache();
 });
+
+// ============================================================================
+// 8. Bloque CONTEXTO DE FECHA: anteponer fechas reales al prompt default
+// ============================================================================
+
+Deno.test("getSystemPrompt antepone bloque CONTEXTO DE FECHA al prompt default", async () => {
+  clearSystemPromptCache();
+  const prompt = await getSystemPrompt("admin");
+  assertStringIncludes(prompt, "CONTEXTO DE FECHA");
+  assertStringIncludes(prompt, "America/Argentina/Buenos_Aires");
+  assertStringIncludes(prompt, "Hoy es ");
+  assertStringIncludes(prompt, "Ayer fue ");
+  assertStringIncludes(prompt, "Esta semana:");
+  assertStringIncludes(prompt, "Este mes:");
+  // Y aún incluye el contenido del prompt admin original.
+  assertStringIncludes(prompt.toLowerCase(), "admin");
+  assertStringIncludes(prompt, "ventas_por_preventista");
+});
+
+Deno.test("buildDateContext usa la fecha override y formato YYYY-MM-DD", async () => {
+  // Importamos buildDateContext y setNowForTests vía el módulo.
+  const mod = await import("../_shared/gemini/prompts/base.ts");
+  // 2026-04-29 es miércoles en TZ AR.
+  const fakeNow = new Date("2026-04-29T15:37:33Z");
+  mod.setNowForTests(fakeNow);
+  try {
+    const ctx = mod.buildDateContext();
+    assertStringIncludes(ctx, "Hoy es miércoles, 2026-04-29");
+    assertStringIncludes(ctx, "Ayer fue 2026-04-28");
+    // Lunes de la semana de 2026-04-29 (mié) = 2026-04-27.
+    assertStringIncludes(ctx, "Esta semana: 2026-04-27 a 2026-04-29");
+    // Primer día del mes.
+    assertStringIncludes(ctx, "Este mes: 2026-04-01 a 2026-04-29");
+    // Últimos 7 días = 2026-04-22; últimos 30 = 2026-03-30.
+    assertStringIncludes(ctx, "Últimos 7 días: 2026-04-22 a 2026-04-29");
+    assertStringIncludes(ctx, "Últimos 30 días: 2026-03-30 a 2026-04-29");
+  } finally {
+    mod.setNowForTests(null);
+  }
+});
+
+Deno.test("buildDateContext maneja inicio de mes (1ro de mes)", async () => {
+  const mod = await import("../_shared/gemini/prompts/base.ts");
+  // 2026-05-01 es viernes. "Ayer" cruza mes → 2026-04-30. Lunes de la semana
+  // del 1ro/05 = 2026-04-27.
+  mod.setNowForTests(new Date("2026-05-01T03:00:00Z"));
+  try {
+    const ctx = mod.buildDateContext();
+    assertStringIncludes(ctx, "Hoy es viernes, 2026-05-01");
+    assertStringIncludes(ctx, "Ayer fue 2026-04-30");
+    assertStringIncludes(ctx, "Esta semana: 2026-04-27 a 2026-05-01");
+    assertStringIncludes(ctx, "Este mes: 2026-05-01 a 2026-05-01");
+  } finally {
+    mod.setNowForTests(null);
+  }
+});
