@@ -328,9 +328,15 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         .filter(isTextPart)
         .map((p) => p.text)
         .join("");
-      let text = textParts.trim().length > 0
-        ? textParts
+      // MALFORMED_FUNCTION_CALL: Gemini intentó emitir un function call
+      // pero el JSON no validó contra el schema. Suele pasar cuando el
+      // modelo no puede resolver un argumento (ej: "ayer" sin saber la
+      // fecha). Damos un mensaje accionable en vez del fallback genérico.
+      const isMalformed = lastFinishReason === "MALFORMED_FUNCTION_CALL";
+      const fallback = isMalformed
+        ? "No logré armar la consulta correctamente. ¿Podés ser más específico con el período (ej: 'ventas del 15 al 22 de abril') o el dato que querés ver?"
         : "No pude generar una respuesta. Probá reformular.";
+      let text = textParts.trim().length > 0 ? textParts : fallback;
 
       // Si Gemini cortó por límite de tokens, avisamos al usuario para que
       // sepa que la respuesta puede estar incompleta y pueda pedir más detalle.
@@ -364,6 +370,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
           iterations: iter + 1,
           toolCallsCount,
           finishReason: lastFinishReason,
+          malformed: isMalformed || undefined,
         },
       }).catch(() => {});
 

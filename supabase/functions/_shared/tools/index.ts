@@ -20,9 +20,11 @@ import { productosRecurrentesTool } from "./preventista/productos_recurrentes.ts
 import { miRecorridoHoyTool } from "./transportista/mi_recorrido_hoy.ts";
 import { recorridoResumenTool } from "./transportista/recorrido_resumen.ts";
 import { ventasPeriodoTool } from "./admin/ventas_periodo.ts";
+import { ventasPorPreventistaTool } from "./admin/ventas_por_preventista.ts";
 import { pendientesPagoTool } from "./admin/pendientes_pago.ts";
 import { historicoPagosClienteTool } from "./admin/historico_pagos_cliente.ts";
 import { comprasPeriodoTool } from "./admin/compras_periodo.ts";
+import { misVentasTool } from "./preventista/mis_ventas.ts";
 
 let _registered = false;
 
@@ -41,9 +43,11 @@ export function registerAllTools(): void {
   registerTool(miRecorridoHoyTool);
   registerTool(recorridoResumenTool);
   registerTool(ventasPeriodoTool);
+  registerTool(ventasPorPreventistaTool);
   registerTool(pendientesPagoTool);
   registerTool(historicoPagosClienteTool);
   registerTool(comprasPeriodoTool);
+  registerTool(misVentasTool);
   _registered = true;
 }
 
