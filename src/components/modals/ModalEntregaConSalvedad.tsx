@@ -4,7 +4,7 @@
  * Validación con Zod
  */
 import React, { useState, useCallback } from 'react'
-import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck } from 'lucide-react'
+import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
@@ -63,9 +63,13 @@ export default function ModalEntregaConSalvedad({
   const itemsSinProblemas = itemsSalvedad.filter(i => !i.seleccionado)
 
   const toggleItem = useCallback((itemId: string) => {
-    setItemsSalvedad(prev => prev.map(i =>
-      i.item.id === itemId ? { ...i, seleccionado: !i.seleccionado } : i
-    ))
+    setItemsSalvedad(prev => {
+      const target = prev.find(i => i.item.id === itemId)
+      if (target?.item.es_bonificacion) return prev
+      return prev.map(i =>
+        i.item.id === itemId ? { ...i, seleccionado: !i.seleccionado } : i
+      )
+    })
     setExpandido(prev => prev === itemId ? null : itemId)
   }, [])
 
@@ -187,6 +191,34 @@ export default function ModalEntregaConSalvedad({
               <div className="space-y-2">
                 {itemsSalvedad.map(itemSalv => {
                   const isExpanded = expandido === itemSalv.item.id
+                  const esRegalo = itemSalv.item.es_bonificacion === true
+
+                  if (esRegalo) {
+                    return (
+                      <div
+                        key={itemSalv.item.id}
+                        className="border rounded-lg overflow-hidden border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 opacity-75"
+                      >
+                        <div className="flex items-center gap-3 p-3">
+                          <Gift className="w-5 h-5 text-emerald-500 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-700 dark:text-gray-200 truncate">
+                              {itemSalv.item.producto?.nombre || 'Producto'}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              Regalo por promocion - se ajusta automaticamente
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm text-gray-500">
+                              {itemSalv.item.cantidad} ud.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  }
+
                   return (
                     <div
                       key={itemSalv.item.id}
