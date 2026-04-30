@@ -34,6 +34,7 @@ import { listarCategoriasTool } from "../_shared/tools/common/listar_categorias.
 import { productosPorCategoriaTool } from "../_shared/tools/common/productos_por_categoria.ts";
 import { ventasPeriodoTool } from "../_shared/tools/admin/ventas_periodo.ts";
 import { ventasPorPreventistaTool } from "../_shared/tools/admin/ventas_por_preventista.ts";
+import { rankingPreventistasPorProductoTool } from "../_shared/tools/admin/ranking_preventistas_por_producto.ts";
 import { misVentasTool } from "../_shared/tools/preventista/mis_ventas.ts";
 import { pendientesPagoTool } from "../_shared/tools/admin/pendientes_pago.ts";
 import { historicoPagosClienteTool } from "../_shared/tools/admin/historico_pagos_cliente.ts";
@@ -548,6 +549,7 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assert(getTool("productos_por_categoria"), "productos_por_categoria no registrada");
   assert(getTool("ventas_periodo"), "ventas_periodo no registrada");
   assert(getTool("ventas_por_preventista"), "ventas_por_preventista no registrada");
+  assert(getTool("ranking_preventistas_por_producto"), "ranking_preventistas_por_producto no registrada");
   assert(getTool("pendientes_pago"), "pendientes_pago no registrada");
   assert(getTool("historico_pagos_cliente"), "historico_pagos_cliente no registrada");
   assert(getTool("compras_periodo"), "compras_periodo no registrada");
@@ -568,6 +570,10 @@ Deno.test("registerAllTools registra todas las tools esperadas", () => {
   assertEquals(getTool("productos_por_categoria"), productosPorCategoriaTool);
   assertEquals(getTool("ventas_periodo"), ventasPeriodoTool);
   assertEquals(getTool("ventas_por_preventista"), ventasPorPreventistaTool);
+  assertEquals(
+    getTool("ranking_preventistas_por_producto"),
+    rankingPreventistasPorProductoTool,
+  );
   assertEquals(getTool("pendientes_pago"), pendientesPagoTool);
   assertEquals(getTool("historico_pagos_cliente"), historicoPagosClienteTool);
   assertEquals(getTool("compras_periodo"), comprasPeriodoTool);
@@ -2145,6 +2151,132 @@ Deno.test("mis_ventas valida fechas y rango", async () => {
   try {
     await misVentasTool.handler(
       { desde: "2026-05-01", hasta: "2026-04-01" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(err instanceof Error ? err.message : "", "desde");
+  }
+  assertEquals(threw, 2);
+});
+
+// ============================================================================
+// 52. ranking_preventistas_por_producto: invoca RPC y mapea ranking
+// ============================================================================
+
+Deno.test("ranking_preventistas_por_producto invoca el RPC y mapea preventistas", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        producto_id: 178,
+        producto_codigo: "M00002",
+        producto_nombre: "MANAOS COLA 3000CC X 6",
+        desde: "2026-04-01",
+        hasta: "2026-04-30",
+        unidades_total: 240,
+        facturado_total: "1200000",
+        preventistas_count: 3,
+        preventistas: [
+          {
+            usuario_id: "aaa",
+            nombre: "Christian",
+            rol: "preventista",
+            unidades: 120,
+            facturado: "600000",
+            pedidos_con_producto: 18,
+          },
+          {
+            usuario_id: "bbb",
+            nombre: "Joaquin",
+            rol: "preventista",
+            unidades: 80,
+            facturado: 400000,
+            pedidos_con_producto: 10,
+          },
+          {
+            usuario_id: null,
+            nombre: null,
+            rol: null,
+            unidades: 40,
+            facturado: 200000,
+            pedidos_con_producto: 5,
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const result = await rankingPreventistasPorProductoTool.handler(
+    {
+      producto_id: 178,
+      desde: "2026-04-01",
+      hasta: "2026-04-30",
+      limit: 10,
+    },
+    ctx,
+  );
+
+  assertEquals(result.producto_id, 178);
+  assertEquals(result.producto_codigo, "M00002");
+  assertEquals(result.producto_nombre, "MANAOS COLA 3000CC X 6");
+  assertEquals(result.unidades_total, 240);
+  assertEquals(result.facturado_total, 1200000);
+  assertEquals(result.preventistas_count, 3);
+  assertEquals(result.preventistas.length, 3);
+  assertEquals(result.preventistas[0].nombre, "Christian");
+  assertEquals(result.preventistas[0].unidades, 120);
+  assertEquals(result.preventistas[1].facturado, 400000);
+  assertEquals(result.preventistas[2].nombre, "(sin asignar)");
+
+  assertEquals(spy.rpcCalls.length, 1);
+  const call = spy.rpcCalls[0];
+  assertEquals(call.fn, "bot_ranking_preventistas_por_producto");
+  assertEquals(call.params.p_producto_id, 178);
+  assertEquals(call.params.p_desde, "2026-04-01");
+  assertEquals(call.params.p_hasta, "2026-04-30");
+  assertEquals(call.params.p_sucursal_id, 1);
+  assertEquals(call.params.p_limit, 10);
+});
+
+Deno.test("ranking_preventistas_por_producto rechaza producto_id <= 0", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  let threw = false;
+  try {
+    await rankingPreventistasPorProductoTool.handler(
+      { producto_id: 0, desde: "2026-04-01", hasta: "2026-04-30" },
+      ctx,
+    );
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : "",
+      "producto_id",
+    );
+  }
+  assert(threw, "debió rechazar producto_id=0");
+});
+
+Deno.test("ranking_preventistas_por_producto valida fechas y rango", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  let threw = 0;
+  try {
+    await rankingPreventistasPorProductoTool.handler(
+      { producto_id: 1, desde: "ayer", hasta: "2026-04-30" },
+      ctx,
+    );
+  } catch (err) {
+    threw++;
+    assertStringIncludes(
+      err instanceof Error ? err.message : "",
+      "Fechas inválidas",
+    );
+  }
+  try {
+    await rankingPreventistasPorProductoTool.handler(
+      { producto_id: 1, desde: "2026-04-30", hasta: "2026-04-01" },
       ctx,
     );
   } catch (err) {

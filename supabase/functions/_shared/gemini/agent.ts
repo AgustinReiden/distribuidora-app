@@ -333,8 +333,16 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       // modelo no puede resolver un argumento (ej: "ayer" sin saber la
       // fecha). Damos un mensaje accionable en vez del fallback genérico.
       const isMalformed = lastFinishReason === "MALFORMED_FUNCTION_CALL";
+      // SILENT STOP: Gemini terminó "limpio" (STOP) pero sin emitir tools
+      // ni texto. Suele pasar con thinking on cuando el modelo "se queda"
+      // sin patrón claro. Pasa cuando el prompt no tiene ejemplo del flujo
+      // que necesita encadenar — distinto al fallback genérico para visibilidad.
+      const isSilentStop = lastFinishReason === "STOP" &&
+        textParts.trim().length === 0;
       const fallback = isMalformed
         ? "No logré armar la consulta correctamente. ¿Podés ser más específico con el período (ej: 'ventas del 15 al 22 de abril') o el dato que querés ver?"
+        : isSilentStop
+        ? "No estoy seguro qué consulta hacer para esto. ¿Podés agregar un poco más de contexto (cliente, producto, período)?"
         : "No pude generar una respuesta. Probá reformular.";
       let text = textParts.trim().length > 0 ? textParts : fallback;
 
@@ -371,6 +379,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
           toolCallsCount,
           finishReason: lastFinishReason,
           malformed: isMalformed || undefined,
+          silent_stop: isSilentStop || undefined,
         },
       }).catch(() => {});
 

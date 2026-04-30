@@ -1466,3 +1466,201 @@ Deno.test("errorMessageFor: error genérico -> mensaje default", async () => {
   const r = errorMessageFor(new Error("ECONNRESET pillin"));
   assertStringIncludes(r, "problema procesando");
 });
+
+// ============================================================================
+// /sucursal command (multi-sucursal)
+// ============================================================================
+
+const dosSucursalesAdmin = [
+  {
+    sucursal_id: 1,
+    sucursales: { id: 1, nombre: "Tucuman", activa: true },
+  },
+  {
+    sucursal_id: 2,
+    sucursales: { id: 2, nombre: "Taco Pozo", activa: true },
+  },
+];
+
+Deno.test("/sucursal sin args lista las asignadas con la activa marcada", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    selectResponseByTable: {
+      usuario_sucursales: {
+        data: dosSucursalesAdmin,
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 999, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Admin" },
+        text: "/sucursal",
+      },
+    });
+
+    const sent = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").includes("Sucursales asignadas")
+    );
+    assert(sent, "no se mandó la lista de sucursales");
+    const body = (sent as { body: string }).body;
+    assertStringIncludes(body, "Tucuman");
+    assertStringIncludes(body, "Taco Pozo");
+    // Tucumán es la activa (linkedAdmin.sucursal_id=1) → debe llevar el ✓.
+    assertStringIncludes(body, "✓");
+    // Inline keyboard con callback_data sucursal_switch:1 y :2.
+    assertStringIncludes(body, "sucursal_switch:1");
+    assertStringIncludes(body, "sucursal_switch:2");
+
+    // No debe haber UPDATE sobre bot_usuarios — solo listó.
+    const upd = spy.updates.find((u) => u.table === "bot_usuarios");
+    assertEquals(upd, undefined, "no debió hacer update solo por listar");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/sucursal 2 cambia la activa y confirma", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    selectResponseByTable: {
+      usuario_sucursales: {
+        data: dosSucursalesAdmin,
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 999, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Admin" },
+        text: "/sucursal 2",
+      },
+    });
+
+    // UPDATE bot_usuarios SET sucursal_id=2 WHERE telegram_user_id=999
+    const upd = spy.updates.find((u) => u.table === "bot_usuarios");
+    assert(upd, "debió updatear bot_usuarios");
+    assertEquals(upd!.row.sucursal_id, 2);
+    const eq = (upd!.filters as Array<Record<string, unknown>>).find((f) =>
+      f.type === "eq" && f.col === "telegram_user_id"
+    );
+    assertEquals(eq!.val, 999);
+
+    // Confirmación.
+    const sent = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").includes("Sucursal activa")
+    );
+    assert(sent, "no se mandó confirmación");
+    assertStringIncludes((sent as { body: string }).body, "Taco Pozo");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/sucursal con id no asignado rechaza sin update", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    selectResponseByTable: {
+      usuario_sucursales: {
+        data: dosSucursalesAdmin,
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 999, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Admin" },
+        text: "/sucursal 99",
+      },
+    });
+
+    // No debe hacer update.
+    const upd = spy.updates.find((u) => u.table === "bot_usuarios");
+    assertEquals(upd, undefined, "no debió updatear bot_usuarios");
+
+    // Mensaje de error claro.
+    const sent = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").includes("no está asignada")
+    );
+    assert(sent, "debió responder con error de no asignada");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("/sucursal con rol preventista es bloqueado por scope", async () => {
+  const handleUpdate = await freshHandleUpdate();
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({
+    maybeSingleByTable: { bot_usuarios: { data: linkedPreventista, error: null } },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1700000000,
+        chat: { id: 888, type: "private" },
+        from: { id: 888, is_bot: false, first_name: "Prev" },
+        text: "/sucursal",
+      },
+    });
+
+    // No debe haber select sobre usuario_sucursales — el router cortó por scope.
+    const sel = spy.selectQueries.find((q) => q.table === "usuario_sucursales");
+    assertEquals(sel, undefined, "no debió tocar usuario_sucursales");
+
+    // Mensaje de "comando es solo para".
+    const sent = fetchMock.sent.find((s) =>
+      ((s as { body?: string }).body ?? "").toLowerCase().includes("solo para")
+    );
+    assert(sent, "debió responder con 'comando solo para X'");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});

@@ -895,3 +895,61 @@ Deno.test("runAgent MALFORMED_FUNCTION_CALL devuelve un mensaje accionable", asy
     teardownAgentEnv();
   }
 });
+
+// ============================================================================
+// 10. Silent STOP (finishReason=STOP, sin tools, sin texto) → mensaje accionable
+// ============================================================================
+
+Deno.test("runAgent silent STOP devuelve mensaje accionable distinto al genérico", async () => {
+  setupAgentEnv();
+  const { client, spy } = createMockSupabase({ conversacionData: null });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  // Gemini emite parts vacías + finishReason STOP — el modelo "pensó" pero
+  // no se anima a tool-callear ni a producir texto. Caso real visto en prod
+  // con Gemini 2.5 Flash con thinking on.
+  const fetchStub = installGeminiFetchStub([
+    {
+      candidates: [
+        {
+          content: { role: "model", parts: [] },
+          finishReason: "STOP",
+        },
+      ],
+      usageMetadata: { totalTokenCount: 5223 },
+    },
+  ]);
+
+  try {
+    const result = await runAgent({
+      supabase: client,
+      user: makeUser("admin"),
+      telegram_user_id: 42,
+      userMessage: "Decime cuál fue la última venta al kiosco arquitectura UNT",
+    });
+
+    assertEquals(result.finishReason, "STOP");
+    assertEquals(result.toolCallsCount, 0);
+    assertEquals(result.hitMaxIterations, false);
+    assertStringIncludes(result.text, "No estoy seguro");
+    assertStringIncludes(result.text, "contexto");
+    // No debe ser ni el de MALFORMED ni el genérico viejo.
+    assert(!result.text.includes("No logré armar"));
+    assert(!result.text.includes("Probá reformular"));
+
+    // Audit con silent_stop=true.
+    const auditResp = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tipo === "respuesta"
+    );
+    assert(auditResp, "debió haber audit tipo='respuesta'");
+    const meta = auditResp!.row.resultado_meta as Record<string, unknown>;
+    assertEquals(meta.silent_stop, true);
+    assertEquals(meta.finishReason, "STOP");
+    // malformed NO debe estar marcado.
+    assertEquals(meta.malformed, undefined);
+  } finally {
+    fetchStub.restore();
+    teardownAgentEnv();
+  }
+});
