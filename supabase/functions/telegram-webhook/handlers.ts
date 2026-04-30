@@ -57,6 +57,7 @@ import { sugerenciasCommand } from "./commands/sugerencias.ts";
 import { menuCommand } from "./commands/menu.ts";
 import { resetCommand } from "./commands/reset.ts";
 import { desvincularCommand } from "./commands/desvincular.ts";
+import { handleSucursalSwitch, sucursalCommand } from "./commands/sucursal.ts";
 
 const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
 
@@ -80,6 +81,7 @@ function bootCommands(): void {
   registerCommand(menuCommand);
   registerCommand(resetCommand);
   registerCommand(desvincularCommand);
+  registerCommand(sucursalCommand);
   _booted = true;
 }
 
@@ -748,6 +750,8 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
       return handleCallbackProducto(cb, toolCtx, parsed.args);
     case "menu":
       return handleCallbackMenu(cb, user, toolCtx, parsed.args);
+    case "sucursal_switch":
+      return handleCallbackSucursalSwitch(cb, user, parsed.args);
     case "visitar":
       // Reservada: confirmamos el callback y respondemos con placeholder.
       // Acciones de write con confirmación están out of scope hasta una
@@ -761,6 +765,61 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
         text: "Acción desconocida.",
       });
       return;
+  }
+}
+
+async function handleCallbackSucursalSwitch(
+  cb: TelegramCallbackQuery,
+  user: BotUser,
+  args: string[],
+): Promise<void> {
+  const chatId = cb.message.chat.id;
+  // Defense-in-depth: el comando /sucursal hoy es solo admin, así que el
+  // botón también debe ser admin-only. (Aún si un usuario se las arregla
+  // para mandar el callback_data crudo, lo bloqueamos acá.)
+  if (user.rol !== "admin") {
+    await answerCallbackQuery(cb.id, {
+      text: "Solo admins pueden cambiar la sucursal activa.",
+      show_alert: true,
+    });
+    return;
+  }
+  const idStr = args[0];
+  const target_id = idStr ? parseInt(idStr, 10) : NaN;
+  if (!Number.isFinite(target_id) || target_id <= 0) {
+    await answerCallbackQuery(cb.id, { text: "ID de sucursal inválido." });
+    return;
+  }
+
+  try {
+    const result = await handleSucursalSwitch({
+      telegram_user_id: cb.from.id,
+      perfil_id: user.perfil_id,
+      current_sucursal_id: user.sucursal_id,
+      target_id,
+    });
+    if (!result.ok) {
+      await answerCallbackQuery(cb.id, {
+        text: result.error,
+        show_alert: true,
+      });
+      return;
+    }
+    await answerCallbackQuery(cb.id, {
+      text: `✅ ${result.nombre}`,
+    });
+    await sendMessage(
+      chatId,
+      `✅ Sucursal activa: ${result.nombre}.\n\n` +
+        `Las próximas consultas (ventas, deuda, etc.) van a ser de esa sucursal.`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[callback sucursal_switch] failed:", msg);
+    await answerCallbackQuery(cb.id, {
+      text: "No pude cambiar la sucursal. Probá de nuevo.",
+      show_alert: true,
+    });
   }
 }
 
