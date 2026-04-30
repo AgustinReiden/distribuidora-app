@@ -2161,16 +2161,19 @@ Deno.test("mis_ventas valida fechas y rango", async () => {
 });
 
 // ============================================================================
-// 52. ranking_preventistas_por_producto: invoca RPC y mapea ranking
+// 52. ranking_preventistas_por_producto: invoca RPC con producto_ids array
 // ============================================================================
 
-Deno.test("ranking_preventistas_por_producto invoca el RPC y mapea preventistas", async () => {
+Deno.test("ranking_preventistas_por_producto invoca el RPC con producto_ids array y mapea ranking agregado", async () => {
   const { client, spy } = createMockSupabase({
     rpcResponse: {
       data: {
-        producto_id: 178,
-        producto_codigo: "M00002",
-        producto_nombre: "MANAOS COLA 3000CC X 6",
+        producto_ids: [10, 17, 23],
+        productos: [
+          { id: 10, codigo: "M0010", nombre: "MANAOS COLA 3000CC X 6" },
+          { id: 17, codigo: "M0017", nombre: "MANAOS NARANJA 3000CC X 6" },
+          { id: 23, codigo: "M0023", nombre: "MANAOS POMELO 3000CC X 6" },
+        ],
         desde: "2026-04-01",
         hasta: "2026-04-30",
         unidades_total: 240,
@@ -2183,7 +2186,8 @@ Deno.test("ranking_preventistas_por_producto invoca el RPC y mapea preventistas"
             rol: "preventista",
             unidades: 120,
             facturado: "600000",
-            pedidos_con_producto: 18,
+            productos_distintos: 3,
+            line_items: 18,
           },
           {
             usuario_id: "bbb",
@@ -2191,7 +2195,8 @@ Deno.test("ranking_preventistas_por_producto invoca el RPC y mapea preventistas"
             rol: "preventista",
             unidades: 80,
             facturado: 400000,
-            pedidos_con_producto: 10,
+            productos_distintos: 2,
+            line_items: 10,
           },
           {
             usuario_id: null,
@@ -2199,7 +2204,8 @@ Deno.test("ranking_preventistas_por_producto invoca el RPC y mapea preventistas"
             rol: null,
             unidades: 40,
             facturado: 200000,
-            pedidos_con_producto: 5,
+            productos_distintos: 1,
+            line_items: 5,
           },
         ],
       },
@@ -2209,7 +2215,7 @@ Deno.test("ranking_preventistas_por_producto invoca el RPC y mapea preventistas"
   const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
   const result = await rankingPreventistasPorProductoTool.handler(
     {
-      producto_id: 178,
+      producto_ids: [10, 17, 23],
       desde: "2026-04-01",
       hasta: "2026-04-30",
       limit: 10,
@@ -2217,45 +2223,120 @@ Deno.test("ranking_preventistas_por_producto invoca el RPC y mapea preventistas"
     ctx,
   );
 
-  assertEquals(result.producto_id, 178);
-  assertEquals(result.producto_codigo, "M00002");
-  assertEquals(result.producto_nombre, "MANAOS COLA 3000CC X 6");
+  assertEquals(result.producto_ids, [10, 17, 23]);
+  assertEquals(result.productos.length, 3);
+  assertEquals(result.productos[0].nombre, "MANAOS COLA 3000CC X 6");
   assertEquals(result.unidades_total, 240);
   assertEquals(result.facturado_total, 1200000);
   assertEquals(result.preventistas_count, 3);
   assertEquals(result.preventistas.length, 3);
   assertEquals(result.preventistas[0].nombre, "Christian");
   assertEquals(result.preventistas[0].unidades, 120);
-  assertEquals(result.preventistas[1].facturado, 400000);
+  assertEquals(result.preventistas[0].productos_distintos, 3);
+  assertEquals(result.preventistas[1].line_items, 10);
   assertEquals(result.preventistas[2].nombre, "(sin asignar)");
 
   assertEquals(spy.rpcCalls.length, 1);
   const call = spy.rpcCalls[0];
   assertEquals(call.fn, "bot_ranking_preventistas_por_producto");
-  assertEquals(call.params.p_producto_id, 178);
+  assertEquals(call.params.p_producto_ids, [10, 17, 23]);
   assertEquals(call.params.p_desde, "2026-04-01");
   assertEquals(call.params.p_hasta, "2026-04-30");
   assertEquals(call.params.p_sucursal_id, 1);
   assertEquals(call.params.p_limit, 10);
 });
 
-Deno.test("ranking_preventistas_por_producto rechaza producto_id <= 0", async () => {
+Deno.test("ranking_preventistas_por_producto acepta un solo producto_id en el array", async () => {
+  const { client, spy } = createMockSupabase({
+    rpcResponse: {
+      data: {
+        producto_ids: [166],
+        productos: [{ id: 166, codigo: "SAL01", nombre: "SAL FINA X 500 GRS" }],
+        desde: "2026-04-01",
+        hasta: "2026-04-30",
+        unidades_total: 780,
+        facturado_total: 160200,
+        preventistas_count: 1,
+        preventistas: [
+          {
+            usuario_id: "aaa",
+            nombre: "Christian",
+            rol: "preventista",
+            unidades: 510,
+            facturado: 104700,
+            productos_distintos: 1,
+            line_items: 22,
+          },
+        ],
+      },
+      error: null,
+    },
+  });
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const result = await rankingPreventistasPorProductoTool.handler(
+    { producto_ids: [166], desde: "2026-04-01", hasta: "2026-04-30" },
+    ctx,
+  );
+  assertEquals(result.producto_ids, [166]);
+  assertEquals(spy.rpcCalls[0].params.p_producto_ids, [166]);
+});
+
+Deno.test("ranking_preventistas_por_producto rechaza array vacío", async () => {
   const { client } = createMockSupabase({});
   const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
   let threw = false;
   try {
     await rankingPreventistasPorProductoTool.handler(
-      { producto_id: 0, desde: "2026-04-01", hasta: "2026-04-30" },
+      { producto_ids: [], desde: "2026-04-01", hasta: "2026-04-30" },
       ctx,
     );
   } catch (err) {
     threw = true;
     assertStringIncludes(
       err instanceof Error ? err.message : "",
-      "producto_id",
+      "al menos 1",
     );
   }
-  assert(threw, "debió rechazar producto_id=0");
+  assert(threw, "debió rechazar array vacío");
+});
+
+Deno.test("ranking_preventistas_por_producto rechaza array con ID inválido", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  let threw = false;
+  try {
+    await rankingPreventistasPorProductoTool.handler(
+      { producto_ids: [10, 0, 23], desde: "2026-04-01", hasta: "2026-04-30" },
+      ctx,
+    );
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : "",
+      "ID inválido",
+    );
+  }
+  assert(threw, "debió rechazar ID 0");
+});
+
+Deno.test("ranking_preventistas_por_producto rechaza array de >25 elementos", async () => {
+  const { client } = createMockSupabase({});
+  const ctx = makeCtx(client, { rol: "admin", sucursal_id: 1 });
+  const big = Array.from({ length: 26 }, (_, i) => i + 1);
+  let threw = false;
+  try {
+    await rankingPreventistasPorProductoTool.handler(
+      { producto_ids: big, desde: "2026-04-01", hasta: "2026-04-30" },
+      ctx,
+    );
+  } catch (err) {
+    threw = true;
+    assertStringIncludes(
+      err instanceof Error ? err.message : "",
+      "más de 25",
+    );
+  }
+  assert(threw, "debió rechazar array > 25");
 });
 
 Deno.test("ranking_preventistas_por_producto valida fechas y rango", async () => {
@@ -2264,7 +2345,7 @@ Deno.test("ranking_preventistas_por_producto valida fechas y rango", async () =>
   let threw = 0;
   try {
     await rankingPreventistasPorProductoTool.handler(
-      { producto_id: 1, desde: "ayer", hasta: "2026-04-30" },
+      { producto_ids: [1], desde: "ayer", hasta: "2026-04-30" },
       ctx,
     );
   } catch (err) {
@@ -2276,7 +2357,7 @@ Deno.test("ranking_preventistas_por_producto valida fechas y rango", async () =>
   }
   try {
     await rankingPreventistasPorProductoTool.handler(
-      { producto_id: 1, desde: "2026-04-30", hasta: "2026-04-01" },
+      { producto_ids: [1], desde: "2026-04-30", hasta: "2026-04-01" },
       ctx,
     );
   } catch (err) {
