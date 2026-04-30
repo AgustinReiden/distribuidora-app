@@ -707,20 +707,41 @@ Deno.test("ficha_cliente rechaza encargado sin sucursal asignada", async () => {
 // 11. Preventista bypass via cliente_id NO asignado
 // ============================================================================
 
-Deno.test("ficha_cliente rechaza acceso de preventista a cliente no asignado", async () => {
-  // Mock supabase: la query a clientes con !inner(cliente_preventistas)
-  // devuelve null (porque el join falla — el cliente no tiene match con
-  // este preventista_id). El filtro `cliente_preventistas.preventista_id`
-  // se aplica con el perfil_id del PREVENTISTA QUE LLAMA, no el del owner real.
+// La regla nueva (migration 028): preventista ve sus asignados + huérfanos,
+// NO ve los asignados a OTRO preventista. La verificación va en 2 queries:
+// (1) clientes, (2) cliente_preventistas. Estos 3 tests cubren los 3 paths.
+
+Deno.test("ficha_cliente preventista — cliente asignado a OTRO preventista → denegado", async () => {
+  const callerPerfilId = "66666666-6666-6666-6666-666666666666";
+  const otroPerfilId = "99999999-9999-9999-9999-999999999999";
   const { client, spy } = createMockSupabase({
     perTable: {
       clientes: {
-        maybeSingleResponse: { data: null, error: null },
+        maybeSingleResponse: {
+          data: {
+            id: 999,
+            codigo: 1,
+            nombre_fantasia: "Cliente Robado",
+            razon_social: "Cliente Robado SA",
+            direccion: null,
+            telefono: null,
+            zona: null,
+            sucursal_id: 1,
+          },
+          error: null,
+        },
+      },
+      cliente_preventistas: {
+        // El cliente está asignado SOLO a otro preventista — sin caller.
+        selectResponse: {
+          data: [{ preventista_id: otroPerfilId }],
+          error: null,
+          count: 1,
+        },
       },
     },
   });
 
-  const callerPerfilId = "66666666-6666-6666-6666-666666666666";
   const ctx = makeCtx(client, {
     rol: "preventista",
     sucursal_id: 1,
@@ -729,35 +750,151 @@ Deno.test("ficha_cliente rechaza acceso de preventista a cliente no asignado", a
 
   let threw = false;
   try {
-    // cliente_id existe pero está asignado a OTRO preventista — el join falla.
     await fichaClienteTool.handler({ cliente_id: 999 }, ctx);
   } catch (err) {
     threw = true;
     assertStringIncludes(
       err instanceof Error ? err.message : String(err),
-      "Cliente no encontrado o sin permiso",
+      "asignado a otro preventista",
     );
   }
-  assert(threw, "debió lanzar 'Cliente no encontrado o sin permiso'");
+  assert(threw, "debió bloquear porque está asignado a otro");
 
-  // Verificación crítica: la query construida debe filtrar por el perfil_id
-  // del preventista que LLAMA (no es algo que un atacante pueda alterar).
+  // Step 1: clientes query SIN inner join.
   const clienteQuery = spy.queries.find((q) => q.table === "clientes");
   assert(clienteQuery, "no se hizo query a clientes");
-  assertStringIncludes(clienteQuery!.selectCols ?? "", "cliente_preventistas!inner");
-
-  const eqFilters = clienteQuery!.filters.filter((f) => f.type === "eq");
-  const hasPreventistaFilter = eqFilters.some((f) =>
-    f.args[0] === "cliente_preventistas.preventista_id" &&
-    f.args[1] === callerPerfilId
-  );
   assert(
-    hasPreventistaFilter,
-    "no se aplicó filter cliente_preventistas.preventista_id con el perfil_id del caller",
+    !(clienteQuery!.selectCols ?? "").includes("cliente_preventistas"),
+    "el select a clientes ya NO debe incluir el inner join",
   );
 
-  // Y NO debe haber llamado al RPC — el lookup falló antes.
-  assertEquals(spy.rpcCalls.length, 0, "no debió invocarse el RPC tras un null en el lookup");
+  // Step 2: cliente_preventistas query con eq cliente_id=999 (NO con perfil_id
+  // del caller — leemos todas las filas y decidimos en TS).
+  const cpQuery = spy.queries.find((q) => q.table === "cliente_preventistas");
+  assert(cpQuery, "debió consultar cliente_preventistas para verificar asignación");
+  assert(
+    cpQuery!.filters.some((f) =>
+      f.type === "eq" && f.args[0] === "cliente_id" && f.args[1] === 999
+    ),
+    "cliente_preventistas debe filtrar por cliente_id",
+  );
+
+  // No invocó RPC.
+  assertEquals(spy.rpcCalls.length, 0);
+});
+
+Deno.test("ficha_cliente preventista — cliente HUÉRFANO (sin asignación) → permitido", async () => {
+  const callerPerfilId = "66666666-6666-6666-6666-666666666666";
+  const { client, spy } = createMockSupabase({
+    perTable: {
+      clientes: {
+        maybeSingleResponse: {
+          data: {
+            id: 500,
+            codigo: 12,
+            nombre_fantasia: "Almacén Huérfano",
+            razon_social: "Huérfano SA",
+            direccion: "Calle 1",
+            telefono: null,
+            zona: "Centro",
+            sucursal_id: 1,
+          },
+          error: null,
+        },
+      },
+      cliente_preventistas: {
+        // Cero asignaciones: huérfano.
+        selectResponse: { data: [], error: null, count: 0 },
+      },
+    },
+    rpcResponse: {
+      data: {
+        saldo_actual: 5000,
+        limite_credito: 10000,
+        credito_disponible: 5000,
+        total_pedidos: 3,
+        total_compras: 12000,
+        total_pagos: 7000,
+        pedidos_pendientes_pago: 1,
+        ultimo_pedido: null,
+        ultimo_pago: null,
+      },
+      error: null,
+    },
+  });
+
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: 1,
+    perfil_id: callerPerfilId,
+  });
+
+  const result = await fichaClienteTool.handler({ cliente_id: 500 }, ctx);
+  assertEquals(result.cliente.nombre, "Almacén Huérfano");
+  assertEquals(result.saldo_actual, 5000);
+  // Confirmamos que TUVO que ir a cliente_preventistas para chequear
+  // (defensa-en-profundidad: aunque sea huérfano, la query corre).
+  assert(spy.queries.find((q) => q.table === "cliente_preventistas"));
+  // RPC sí se invocó porque el cliente es accesible.
+  assertEquals(spy.rpcCalls.length, 1);
+});
+
+Deno.test("ficha_cliente preventista — cliente asignado a MÍ → permitido", async () => {
+  const callerPerfilId = "66666666-6666-6666-6666-666666666666";
+  const { client, spy } = createMockSupabase({
+    perTable: {
+      clientes: {
+        maybeSingleResponse: {
+          data: {
+            id: 100,
+            codigo: 5,
+            nombre_fantasia: "Mi Cliente",
+            razon_social: "Mi Cliente SA",
+            direccion: null,
+            telefono: null,
+            zona: null,
+            sucursal_id: 1,
+          },
+          error: null,
+        },
+      },
+      cliente_preventistas: {
+        // El caller está entre los asignados (incluso si hay otros).
+        selectResponse: {
+          data: [
+            { preventista_id: callerPerfilId },
+            { preventista_id: "otro-id-cualquiera" },
+          ],
+          error: null,
+          count: 2,
+        },
+      },
+    },
+    rpcResponse: {
+      data: {
+        saldo_actual: 0,
+        limite_credito: 5000,
+        credito_disponible: 5000,
+        total_pedidos: 10,
+        total_compras: 50000,
+        total_pagos: 50000,
+        pedidos_pendientes_pago: 0,
+        ultimo_pedido: null,
+        ultimo_pago: null,
+      },
+      error: null,
+    },
+  });
+
+  const ctx = makeCtx(client, {
+    rol: "preventista",
+    sucursal_id: 1,
+    perfil_id: callerPerfilId,
+  });
+
+  const result = await fichaClienteTool.handler({ cliente_id: 100 }, ctx);
+  assertEquals(result.cliente.nombre, "Mi Cliente");
+  assertEquals(spy.rpcCalls.length, 1);
 });
 
 // ============================================================================

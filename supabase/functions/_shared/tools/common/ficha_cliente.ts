@@ -11,9 +11,10 @@
 // `cliente_preventistas` y filtro de sucursal).
 //
 // Antes de invocar la RPC, validamos que el cliente exista Y, si el rol es
-// "preventista", que esté asignado al preventista que invoca. Como las edge
-// functions usan service_role (bypass RLS), este filtrado server-side es
-// crítico — si lo saltamos, un preventista podría leer cualquier cliente.
+// "preventista", que esté asignado al preventista que invoca O que sea
+// huérfano (sin asignación a NINGÚN preventista). Bloqueamos clientes
+// asignados a OTRO preventista. Como las edge functions usan service_role
+// (bypass RLS), este filtrado server-side es crítico.
 //
 // Sobre el shape de ultimo_pedido/ultimo_pago: la RPC actual retorna sólo
 // la timestamp (MAX(created_at)). Acá soportamos AMBOS shapes — string o
@@ -86,7 +87,9 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
   description:
     "Obtiene la ficha financiera completa de un cliente: saldo actual, " +
     "límite de crédito, total comprado/pagado, último pedido y último pago. " +
-    "Para preventistas valida que el cliente esté asignado a ellos.",
+    "Para preventistas: permite consultar clientes asignados a ellos O " +
+    "clientes huérfanos (sin preventista asignado). Bloquea clientes " +
+    "asignados a otro preventista.",
   parameters: {
     type: "object",
     properties: {
@@ -114,24 +117,16 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
     const sb = ctx.supabase;
     const isPreventista = ctx.rol === "preventista";
 
-    const selectCols = isPreventista
-      ? "id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id, cliente_preventistas!inner(preventista_id)"
-      : "id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id";
-
-    // Importante: aplicamos TODOS los .eq() ANTES de .maybeSingle(), porque
-    // maybeSingle() retorna un thenable que ya no soporta más filtros.
+    // Step 1: traer al cliente (sin filtro de preventista — el gate va aparte
+    // para que la regla "asignado a mí O huérfano" sea expresable sin truco
+    // de inner join).
     let clienteQuery = sb.from("clientes")
-      .select(selectCols)
+      .select("id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id")
       .eq("id", cliente_id)
       .eq("activo", true);
-
     if (ctx.sucursal_id != null) {
       clienteQuery = clienteQuery.eq("sucursal_id", ctx.sucursal_id);
     }
-    if (isPreventista) {
-      clienteQuery = clienteQuery.eq("cliente_preventistas.preventista_id", ctx.perfil_id);
-    }
-
     const { data: clienteData, error: cErr } = await clienteQuery.maybeSingle();
     if (cErr) {
       throw new Error(`ficha_cliente: cliente lookup: ${cErr.message}`);
@@ -141,6 +136,28 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
     }
 
     const cliente = clienteData as unknown as ClienteLookupRow;
+
+    // Step 2 (solo preventista): chequear asignaciones del cliente. La regla:
+    //   * asignado a mí → permitido
+    //   * sin asignaciones (huérfano) → permitido
+    //   * asignado a otro preventista (sin incluirme) → denegado
+    if (isPreventista) {
+      const { data: asignaciones, error: aErr } = await sb
+        .from("cliente_preventistas")
+        .select("preventista_id")
+        .eq("cliente_id", cliente_id);
+      if (aErr) {
+        throw new Error(`ficha_cliente: asignación lookup: ${aErr.message}`);
+      }
+      const rows = (asignaciones ?? []) as Array<{ preventista_id: string }>;
+      const tieneAsignaciones = rows.length > 0;
+      const meIncluye = rows.some((r) => r.preventista_id === ctx.perfil_id);
+      // Bloquear: tiene asignaciones Y no me incluye.
+      if (tieneAsignaciones && !meIncluye) {
+        throw new Error("Cliente asignado a otro preventista");
+      }
+      // Si no tiene asignaciones (huérfano) o me incluye → seguimos.
+    }
 
     const { data: resumen, error: rErr } = await sb.rpc(
       "obtener_resumen_cuenta_cliente_bot",
