@@ -1,20 +1,29 @@
 // Tool: ranking_preventistas_por_producto
 //
-// Top de preventistas que más vendieron UN producto puntual en un rango de
-// fechas. Pensada para preguntas de bonificación / sales contest tipo
-// "quién vendió más Manaos 3000 este mes". El modelo debe conseguir el
-// producto_id antes con buscar_producto — esta tool no acepta búsqueda
-// libre por nombre, mantiene el output acotado.
+// Top de preventistas que más vendieron uno o varios productos puntuales en
+// un rango de fechas. Acepta un ARRAY de producto_ids para que el modelo
+// pueda agrupar productos relacionados (ej: "Manaos 3000cc" puede matchear
+// 3 sabores distintos cada uno con su producto_id propio).
 //
-// Delega a la RPC bot_ranking_preventistas_por_producto (migration 026).
-// Mismas convenciones de fecha/estado que ventas_periodo y ventas_por_preventista
-// (filtro por created_at, excluye cancelado/anulado, scoping por sucursal).
+// El modelo encadena:
+//   1. productos_por_categoria("MANAOS", q="3000") → lista de matches
+//   2. Toma los producto_id que correspondan al pedido del usuario
+//   3. ranking_preventistas_por_producto({ producto_ids: [10, 17, 23], ... })
+//
+// Output incluye `productos[]` con id+codigo+nombre de cada uno para que el
+// modelo pueda explicar qué incluyó (auditable y transparente).
+//
+// Delega a la RPC bot_ranking_preventistas_por_producto (migration 027 —
+// reemplazó la firma escalar de la migration 026).
 
 import type { Tool } from "../base.ts";
 
 export interface RankingPreventistasPorProductoParams {
-  /** ID del producto (sacar antes con buscar_producto). */
-  producto_id: number;
+  /**
+   * IDs de los productos a agrupar. Mínimo 1, máximo 25. Conseguilos antes
+   * con buscar_producto o productos_por_categoria.
+   */
+  producto_ids: number[];
   /** Fecha inicio inclusive (YYYY-MM-DD). */
   desde: string;
   /** Fecha fin inclusive (YYYY-MM-DD). */
@@ -24,9 +33,12 @@ export interface RankingPreventistasPorProductoParams {
 }
 
 export interface RankingPreventistasPorProductoResult {
-  producto_id: number;
-  producto_codigo: string | null;
-  producto_nombre: string | null;
+  producto_ids: number[];
+  productos: Array<{
+    id: number;
+    codigo: string | null;
+    nombre: string;
+  }>;
   desde: string;
   hasta: string;
   unidades_total: number;
@@ -38,7 +50,8 @@ export interface RankingPreventistasPorProductoResult {
     rol: string | null;
     unidades: number;
     facturado: number;
-    pedidos_con_producto: number;
+    productos_distintos: number;
+    line_items: number;
   }>;
 }
 
@@ -50,20 +63,27 @@ export const rankingPreventistasPorProductoTool: Tool<
 > = {
   name: "ranking_preventistas_por_producto",
   description:
-    "Ranking de preventistas que más vendieron UN producto específico en " +
-    "un rango de fechas (admin/encargado). Útil para 'quién vendió más " +
-    "[producto]', 'top vendedores de [producto] del mes', bonificaciones " +
-    "por sales contest. Requiere producto_id — conseguilo antes con " +
-    "buscar_producto. Devuelve unidades + facturado + cantidad de pedidos " +
-    "con el producto, por preventista, ordenado por unidades. Filtra por " +
-    "sucursal del bot user. Excluye pedidos cancelados/anulados.",
+    "Ranking de preventistas que más vendieron UN producto o un GRUPO de " +
+    "productos relacionados en un rango de fechas (admin/encargado). Útil " +
+    "para 'quién vendió más [producto]', 'top vendedores de [familia]', " +
+    "bonificaciones por sales contest. Aceptá un array de producto_ids: si " +
+    "el usuario pide algo agregable (ej: 'Manaos 3000cc' puede ser varios " +
+    "sabores), conseguí los IDs antes con productos_por_categoria y pasalos " +
+    "todos juntos. La respuesta agrupa unidades + facturado por preventista " +
+    "y devuelve la lista de productos considerados. Filtra por sucursal del " +
+    "bot user. Excluye pedidos cancelados/anulados.",
   parameters: {
     type: "object",
     properties: {
-      producto_id: {
-        type: "integer",
-        minimum: 1,
-        description: "ID interno del producto. Conseguilo con buscar_producto antes.",
+      producto_ids: {
+        type: "array",
+        items: { type: "integer", minimum: 1 },
+        minItems: 1,
+        maxItems: 25,
+        description:
+          "Lista de IDs de productos a agrupar. Min 1, max 25. " +
+          "Para UN solo producto pasá [id]. Para una familia (ej: 'Manaos 3000') " +
+          "pasá los IDs que matcheen tras buscar con productos_por_categoria.",
       },
       desde: {
         type: "string",
@@ -80,12 +100,20 @@ export const rankingPreventistasPorProductoTool: Tool<
         description: "Top N preventistas (default 10, max 25).",
       },
     },
-    required: ["producto_id", "desde", "hasta"],
+    required: ["producto_ids", "desde", "hasta"],
   },
   allowedRoles: ["admin", "encargado"],
-  handler: async ({ producto_id, desde, hasta, limit = 10 }, ctx) => {
-    if (!Number.isInteger(producto_id) || producto_id < 1) {
-      throw new Error("producto_id inválido (entero > 0)");
+  handler: async ({ producto_ids, desde, hasta, limit = 10 }, ctx) => {
+    if (!Array.isArray(producto_ids) || producto_ids.length === 0) {
+      throw new Error("producto_ids debe tener al menos 1 ID");
+    }
+    if (producto_ids.length > 25) {
+      throw new Error("producto_ids no puede tener más de 25 IDs");
+    }
+    for (const pid of producto_ids) {
+      if (!Number.isInteger(pid) || pid < 1) {
+        throw new Error("producto_ids contiene un ID inválido (debe ser entero > 0)");
+      }
     }
     if (!FECHA_REGEX.test(desde) || !FECHA_REGEX.test(hasta)) {
       throw new Error("Fechas inválidas (esperado YYYY-MM-DD)");
@@ -103,7 +131,7 @@ export const rankingPreventistasPorProductoTool: Tool<
     const { data, error } = await ctx.supabase.rpc(
       "bot_ranking_preventistas_por_producto",
       {
-        p_producto_id: producto_id,
+        p_producto_ids: producto_ids,
         p_desde: desde,
         p_hasta: hasta,
         p_sucursal_id: ctx.sucursal_id,
@@ -121,12 +149,17 @@ export const rankingPreventistasPorProductoTool: Tool<
       rol: string | null;
       unidades: number | string;
       facturado: number | string;
-      pedidos_con_producto: number;
+      productos_distintos: number;
+      line_items: number;
+    };
+    type RpcProducto = {
+      id: number;
+      codigo: string | null;
+      nombre: string | null;
     };
     const r = data as {
-      producto_id: number;
-      producto_codigo: string | null;
-      producto_nombre: string | null;
+      producto_ids: number[];
+      productos: RpcProducto[];
       desde: string;
       hasta: string;
       unidades_total: number | string;
@@ -136,9 +169,12 @@ export const rankingPreventistasPorProductoTool: Tool<
     };
 
     return {
-      producto_id: Number(r.producto_id),
-      producto_codigo: r.producto_codigo ?? null,
-      producto_nombre: r.producto_nombre ?? null,
+      producto_ids: r.producto_ids ?? producto_ids,
+      productos: (r.productos ?? []).map((p) => ({
+        id: Number(p.id),
+        codigo: p.codigo ?? null,
+        nombre: p.nombre?.trim() || "(sin nombre)",
+      })),
       desde: r.desde,
       hasta: r.hasta,
       unidades_total: Number(r.unidades_total ?? 0),
@@ -150,7 +186,8 @@ export const rankingPreventistasPorProductoTool: Tool<
         rol: p.rol ?? null,
         unidades: Number(p.unidades ?? 0),
         facturado: Number(p.facturado ?? 0),
-        pedidos_con_producto: Number(p.pedidos_con_producto ?? 0),
+        productos_distintos: Number(p.productos_distintos ?? 0),
+        line_items: Number(p.line_items ?? 0),
       })),
     };
   },
