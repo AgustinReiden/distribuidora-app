@@ -596,12 +596,16 @@ const ModalPedido = memo(function ModalPedido({
                       {/* Items de bonificación (gratis) */}
                       {promoResolucion.bonificaciones.map(bonif => {
                         const prod = productos.find(p => p.id === bonif.productoId);
+                        // En modo Fracción descripcionRegalo describe el regalo
+                        // como lo cargó el admin (ej: "1 botella Manaos Naranja
+                        // 600cc"). Si no hay, fallback al nombre del producto.
+                        const labelRegalo = bonif.descripcionRegalo?.trim() || prod?.nombre;
                         return (
                           <div key={`bonif-${bonif.productoId}`} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
                             <div className="flex justify-between items-center gap-2">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
-                                  <p className="font-medium text-sm text-green-700 dark:text-green-400 truncate">{prod?.nombre}</p>
+                                  <p className="font-medium text-sm text-green-700 dark:text-green-400 truncate">{labelRegalo}</p>
                                   <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-200 text-green-800 rounded-full font-medium shrink-0">
                                     <Gift className="w-3 h-3" />
                                     Bonificacion

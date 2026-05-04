@@ -104,7 +104,7 @@ async function fetchPedidos(): Promise<PedidoDB[]> {
     .from('pedidos')
     .select(`*,
     cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona),
-    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria))`)
+    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
     .order('created_at', { ascending: false })
     .limit(500) // Limitar carga inicial para evitar consumo excesivo de memoria
 
@@ -150,7 +150,7 @@ async function fetchPedidoById(id: string): Promise<PedidoDB | null> {
     .from('pedidos')
     .select(`*,
     cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona),
-    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria))`)
+    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
     .eq('id', id)
     .single()
 
@@ -163,7 +163,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
     .from('pedidos')
     .select(`*,
     cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona),
-    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria))`)
+    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
     .eq('transportista_id', transportistaId)
     .in('estado', ['asignado', 'en_camino'])
     .order('orden_entrega', { ascending: true, nullsFirst: false })
@@ -175,7 +175,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
 async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*, items:pedido_items(*, producto:productos(id, nombre, codigo, categoria))`)
+    .select(`*, items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -203,8 +203,8 @@ async function fetchPedidosPaginated(
 
   // Use !inner join when searching so PostgREST filters parent rows by client fields
   const selectStr = hasSearch
-    ? '*, cliente:clientes!inner(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona), items:pedido_items(*, producto:productos(id, nombre, codigo, categoria))'
-    : '*, cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona), items:pedido_items(*, producto:productos(id, nombre, codigo, categoria))'
+    ? '*, cliente:clientes!inner(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona), items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))'
+    : '*, cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona), items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))'
 
   let query = supabase
     .from('pedidos')

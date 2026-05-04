@@ -69,6 +69,10 @@ export interface PedidoItemDB {
   es_bonificacion?: boolean;
   promocion_id?: string;
   descripcion_regalo?: string | null;
+  /** Datos de la promo asociada (sólo presente cuando promocion_id está set) */
+  promocion?: {
+    unidades_por_bloque?: number | null;
+  } | null;
   neto_unitario?: number;
   iva_unitario?: number;
   impuestos_internos_unitario?: number;
