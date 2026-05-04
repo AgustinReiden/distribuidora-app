@@ -146,15 +146,43 @@ export function buildMisClientesKeyboard(
 export function buildKeyboardForContext(
   ctx:
     | { kind: "clientes"; items: Array<{ id: number; nombre: string }> }
-    | { kind: "productos"; items: Array<{ id: number; nombre: string }> },
+    | { kind: "productos"; items: Array<{ id: number; nombre: string }> }
+    | {
+      kind: "pedido_confirmacion";
+      confirmacion_id: string;
+      total: number;
+      cliente_nombre: string;
+    },
 ): InlineKeyboardMarkup | undefined {
-  if (ctx.items.length === 0) return undefined;
   switch (ctx.kind) {
     case "clientes":
-      return buildClienteListKeyboard(ctx.items);
+      return ctx.items.length > 0 ? buildClienteListKeyboard(ctx.items) : undefined;
     case "productos":
-      return buildProductoListKeyboard(ctx.items);
+      return ctx.items.length > 0 ? buildProductoListKeyboard(ctx.items) : undefined;
+    case "pedido_confirmacion":
+      return buildPedidoConfirmacionKeyboard(ctx.confirmacion_id);
   }
+}
+
+/**
+ * Keyboard del resumen de pedido pre-confirmación. 2 botones verticales para
+ * mobile-first. NO incluye 'Editar' explícito porque la decisión de UX fue
+ * "cancelar y rearmar" (NL es rápido). El botón 'Cancelar' invalida el
+ * confirmacion_id (lo marca consumido) sin crear nada.
+ */
+function buildPedidoConfirmacionKeyboard(confirmacionId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{
+        text: "✅ Confirmar pedido",
+        callback_data: callbackData("pedido_confirmar", confirmacionId),
+      }],
+      [{
+        text: "❌ Cancelar",
+        callback_data: callbackData("pedido_cancelar", confirmacionId),
+      }],
+    ],
+  };
 }
 
 // ----------------------------------------------------------------------------

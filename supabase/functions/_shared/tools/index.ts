@@ -26,6 +26,8 @@ import { pendientesPagoTool } from "./admin/pendientes_pago.ts";
 import { historicoPagosClienteTool } from "./admin/historico_pagos_cliente.ts";
 import { comprasPeriodoTool } from "./admin/compras_periodo.ts";
 import { misVentasTool } from "./preventista/mis_ventas.ts";
+import { previsualizarPedidoTool } from "./preventista/previsualizar_pedido.ts";
+import { crearPedidoTool } from "./preventista/crear_pedido.ts";
 
 let _registered = false;
 
@@ -50,6 +52,8 @@ export function registerAllTools(): void {
   registerTool(historicoPagosClienteTool);
   registerTool(comprasPeriodoTool);
   registerTool(misVentasTool);
+  registerTool(previsualizarPedidoTool);
+  registerTool(crearPedidoTool);
   _registered = true;
 }
 

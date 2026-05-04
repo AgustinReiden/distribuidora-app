@@ -769,9 +769,13 @@ Deno.test("runAgent: buscar_cliente popula interactableContext={kind:'clientes'}
 
     assert(result.interactableContext, "interactableContext debe estar populado");
     assertEquals(result.interactableContext!.kind, "clientes");
-    assertEquals(result.interactableContext!.items.length, 2);
-    assertEquals(result.interactableContext!.items[0], { id: 42, nombre: "Pepito SA" });
-    assertEquals(result.interactableContext!.items[1], { id: 100, nombre: "Almacén Centro" });
+    // Narrow al kind "clientes" para acceder a items.
+    if (result.interactableContext!.kind !== "clientes") {
+      throw new Error("expected kind='clientes'");
+    }
+    assertEquals(result.interactableContext.items.length, 2);
+    assertEquals(result.interactableContext.items[0], { id: 42, nombre: "Pepito SA" });
+    assertEquals(result.interactableContext.items[1], { id: 100, nombre: "Almacén Centro" });
   } finally {
     fetchStub.restore();
     teardownAgentEnv();
