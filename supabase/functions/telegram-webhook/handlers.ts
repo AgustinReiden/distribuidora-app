@@ -752,6 +752,10 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
       return handleCallbackMenu(cb, user, toolCtx, parsed.args);
     case "sucursal_switch":
       return handleCallbackSucursalSwitch(cb, user, parsed.args);
+    case "pedido_confirmar":
+      return handleCallbackPedidoConfirmar(cb, user, toolCtx, parsed.args);
+    case "pedido_cancelar":
+      return handleCallbackPedidoCancelar(cb, user, parsed.args);
     case "visitar":
       // Reservada: confirmamos el callback y respondemos con placeholder.
       // Acciones de write con confirmación están out of scope hasta una
@@ -821,6 +825,110 @@ async function handleCallbackSucursalSwitch(
       show_alert: true,
     });
   }
+}
+
+// ----------------------------------------------------------------------------
+// Pedido confirmar/cancelar — write tools del bot (Phase A iter 1)
+// ----------------------------------------------------------------------------
+//
+// El flujo:
+//   1. previsualizar_pedido (read-only) deja una row en bot_pedidos_pendientes
+//      con TTL 10 min y devuelve confirmacion_id (UUID).
+//   2. agent.ts arma keyboard inline con [Confirmar / Cancelar] basado en el
+//      InteractableContext "pedido_confirmacion".
+//   3. Tap "Confirmar" → callback v1:pedido_confirmar:<UUID> → invoca tool
+//      crear_pedido (que llama RPC crear_pedido_completo_bot).
+//   4. Tap "Cancelar" → callback v1:pedido_cancelar:<UUID> → marca el pendiente
+//      como consumido (sin crear pedido) + edita el mensaje original con
+//      "❌ Cancelado".
+//
+// Defensa-en-profundidad: solo admin/encargado/preventista pueden invocar.
+// El RPC además valida que el confirmacion_id pertenezca al perfil_id.
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function handleCallbackPedidoConfirmar(
+  cb: TelegramCallbackQuery,
+  user: BotUser,
+  toolCtx: ToolContext,
+  args: string[],
+): Promise<void> {
+  const chatId = cb.message.chat.id;
+  if (!["admin", "encargado", "preventista"].includes(user.rol)) {
+    await answerCallbackQuery(cb.id, {
+      text: "No tenés permiso para crear pedidos.",
+      show_alert: true,
+    });
+    return;
+  }
+  const confirmacionId = args[0];
+  if (!confirmacionId || !UUID_REGEX.test(confirmacionId)) {
+    await answerCallbackQuery(cb.id, { text: "Confirmación inválida." });
+    return;
+  }
+
+  // Apagar el spinner ya — el resto puede tomar 1-2 seg.
+  await answerCallbackQuery(cb.id, { text: "Creando pedido..." });
+
+  const result = await invokeTool(
+    "crear_pedido",
+    { confirmacion_id: confirmacionId },
+    toolCtx,
+  );
+
+  if (!result.ok) {
+    const errMsg = result.error === "permiso_denegado"
+      ? "No tenés permiso para crear pedidos."
+      : `❌ No pude crear el pedido: ${result.error}`;
+    await sendMessage(chatId, errMsg);
+    return;
+  }
+
+  const data = result.data as { pedido_id: number; total: number };
+  const totalFmt = new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(data.total);
+  await sendMessage(
+    chatId,
+    `✅ Pedido #${data.pedido_id} creado por ${totalFmt}.\n\n` +
+      `Lo podés ver/ajustar en la app web (filtrá por "cargados via bot" si lo querés revisar).`,
+  );
+}
+
+async function handleCallbackPedidoCancelar(
+  cb: TelegramCallbackQuery,
+  user: BotUser,
+  args: string[],
+): Promise<void> {
+  const chatId = cb.message.chat.id;
+  const confirmacionId = args[0];
+  if (!confirmacionId || !UUID_REGEX.test(confirmacionId)) {
+    await answerCallbackQuery(cb.id, { text: "Confirmación inválida." });
+    return;
+  }
+  // Marcar el pendiente como consumido (sin crear pedido). UPDATE limitado a
+  // pendientes del propio user — defensa contra hijack del callback_data.
+  const sb = getServiceRoleClient();
+  const { error } = await sb
+    .from("bot_pedidos_pendientes")
+    .update({ consumido: true })
+    .eq("id", confirmacionId)
+    .eq("perfil_id", user.perfil_id);
+  if (error) {
+    console.error("[callback pedido_cancelar]:", error.message);
+    await answerCallbackQuery(cb.id, {
+      text: "No pude cancelar. Igual el borrador expira en 10 min.",
+      show_alert: false,
+    });
+    return;
+  }
+  await answerCallbackQuery(cb.id, { text: "Cancelado" });
+  await sendMessage(
+    chatId,
+    "❌ Cancelado. Si querés cargarlo de nuevo, mandame el pedido completo otra vez.",
+  );
 }
 
 async function handleCallbackCliente(

@@ -125,7 +125,13 @@ export interface RunAgentOptions {
  */
 export type InteractableContext =
   | { kind: "clientes"; items: Array<{ id: number; nombre: string }> }
-  | { kind: "productos"; items: Array<{ id: number; nombre: string }> };
+  | { kind: "productos"; items: Array<{ id: number; nombre: string }> }
+  | {
+    kind: "pedido_confirmacion";
+    confirmacion_id: string;
+    total: number;
+    cliente_nombre: string;
+  };
 
 export interface RunAgentResult {
   /** Texto final que el caller debe mandar al usuario. */
@@ -208,6 +214,23 @@ function extractInteractableContext(
     case "buscar_producto":
     case "productos_por_categoria":
       return Array.isArray(d.productos) ? mapProductos(d.productos) : undefined;
+    case "previsualizar_pedido": {
+      // El resultado tiene confirmacion_id + cliente.nombre + total. Si esos
+      // 3 están, armamos el keyboard de Confirmar/Cancelar.
+      const confirmId = typeof d.confirmacion_id === "string" ? d.confirmacion_id : null;
+      const total = Number(d.total ?? 0);
+      const cliente = d.cliente as { nombre?: string } | undefined;
+      const nombre = cliente?.nombre?.toString().trim() ?? "";
+      if (!confirmId || !Number.isFinite(total) || nombre.length === 0) {
+        return undefined;
+      }
+      return {
+        kind: "pedido_confirmacion",
+        confirmacion_id: confirmId,
+        total,
+        cliente_nombre: nombre,
+      };
+    }
     default:
       return undefined;
   }
