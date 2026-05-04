@@ -29,6 +29,12 @@ export interface PromocionActiva {
   prioridad?: number
   regaloMueveStock?: boolean
   modoExclusion?: ModoExclusion
+  /** Producto contenedor del que se descuenta stock por bloques (modo Fracción). */
+  ajusteProductoId?: string
+  /** Subunidades que forman 1 unidad del producto contenedor (modo Fracción). */
+  unidadesPorBloque?: number
+  /** Texto manual del regalo a mostrar en pedido/PDF (ej: "1 botella Manaos Naranja 600cc"). */
+  descripcionRegalo?: string
 }
 
 /** Mapa de productoId → promos activas que aplican */
@@ -39,6 +45,8 @@ export interface BonificacionResult {
   promoId: string
   promoNombre: string
   cantidadBonificacion: number
+  descripcionRegalo?: string
+  unidadesPorBloque?: number
 }
 
 export interface PromoResolucion {
@@ -98,11 +106,17 @@ export function resolverPromociones(
     const cantCompra = promo.reglas['cantidad_compra']
     const cantBonif = promo.reglas['cantidad_bonificacion']
     const bloques = Math.floor(totalQty / cantCompra)
+    // Resolución del producto regalo: producto_regalo_id (configurado en form),
+    // luego ajuste_producto_id (contenedor en modo Fracción — defensa por si la
+    // promo quedó con regalo NULL antes del fix), y como último recurso el
+    // primer disparador (mantiene el comportamiento previo para promos legacy).
     bonificaciones.push({
-      productoId: promo.productoRegaloId || primerProductoId,
+      productoId: promo.productoRegaloId || promo.ajusteProductoId || primerProductoId,
       promoId: promo.id,
       promoNombre: promo.nombre,
       cantidadBonificacion: bloques * cantBonif,
+      descripcionRegalo: promo.descripcionRegalo,
+      unidadesPorBloque: promo.unidadesPorBloque,
     })
   }
 
