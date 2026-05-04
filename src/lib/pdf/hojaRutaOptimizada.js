@@ -147,7 +147,13 @@ function buildCardOps(doc, pedido, orderNumber) {
   const priceColWidth = 24
   const productWrapWidth = CARD_CONTENT_WIDTH - priceColWidth
   ;(pedido.items || []).forEach((item) => {
-    const nombre = item.producto?.nombre || 'Producto'
+    // Para regalos de tipo Fracción, descripcion_regalo es el texto manual
+    // que el admin cargó (ej: "1 botella Manaos Naranja 600cc"). Cae al
+    // nombre del producto cuando no hay snapshot (regalos antiguos / unidad
+    // entera).
+    const nombre = (item.es_bonificacion && item.descripcion_regalo?.trim())
+      ? item.descripcion_regalo.trim()
+      : (item.producto?.nombre || 'Producto')
     const subtotal = (item.precio_unitario || 0) * item.cantidad
     const itemLines = doc.splitTextToSize(`${item.cantidad}x ${nombre}`, productWrapWidth)
     itemLines.forEach((line, idx) => {
@@ -273,21 +279,54 @@ function buildCierreOps(pedidos) {
 /**
  * Suma todas las cantidades por producto entre todos los pedidos y
  * produce operaciones de layout para el manifiesto de carga del camion.
+ *
+ * Para regalos de tipo Fracción (item.es_bonificacion + unidades_por_bloque):
+ * convierte la cantidad en subunidades a "fardos completos + botellas sueltas".
+ * Los fardos se suman al producto contenedor (mismo producto_id que el item).
+ * Las botellas sueltas se listan en una fila aparte usando descripcion_regalo,
+ * para que el chofer sepa que carga 1 fardo + N botellas individuales.
  */
 function buildManifiestoOps(pedidos) {
-  const totales = {}
+  const totalesFardos = {} // por producto_id (fardos enteros)
+  const totalesBotellas = {} // por descripcion_regalo (botellas sueltas)
+
   pedidos.forEach((pedido) => {
     ;(pedido.items || []).forEach((item) => {
+      const cantidad = Number(item.cantidad) || 0
+      if (cantidad <= 0) return
+
       const key = item.producto_id ?? item.producto?.id ?? item.producto?.nombre ?? 'sin-id'
-      const nombre = item.producto?.nombre || 'Producto'
-      if (!totales[key]) {
-        totales[key] = { nombre, cantidad: 0 }
+      const nombreProducto = item.producto?.nombre || 'Producto'
+      const upb = item.promocion?.unidades_por_bloque
+      const desc = item.descripcion_regalo?.trim()
+
+      // Caso A: regalo Fracción → split en fardos + botellas sueltas.
+      if (item.es_bonificacion && upb && upb > 1 && desc) {
+        const fardos = Math.floor(cantidad / upb)
+        const sueltas = cantidad % upb
+        if (fardos > 0) {
+          if (!totalesFardos[key]) totalesFardos[key] = { nombre: nombreProducto, cantidad: 0 }
+          totalesFardos[key].cantidad += fardos
+        }
+        if (sueltas > 0) {
+          const sueltasKey = `bonif:${desc}`
+          if (!totalesBotellas[sueltasKey]) totalesBotellas[sueltasKey] = { nombre: desc, cantidad: 0 }
+          totalesBotellas[sueltasKey].cantidad += sueltas
+        }
+        return
       }
-      totales[key].cantidad += Number(item.cantidad) || 0
+
+      // Caso B: items normales (compras o regalos de unidad entera) → suma directa.
+      if (!totalesFardos[key]) totalesFardos[key] = { nombre: nombreProducto, cantidad: 0 }
+      totalesFardos[key].cantidad += cantidad
     })
   })
 
-  const filas = Object.values(totales)
+  const filasFardos = Object.values(totalesFardos)
+    .filter((t) => t.cantidad > 0)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+
+  const filasBotellas = Object.values(totalesBotellas)
     .filter((t) => t.cantidad > 0)
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
 
@@ -298,7 +337,7 @@ function buildManifiestoOps(pedidos) {
     text: 'Total de productos a cargar en el vehiculo',
     advance: 5
   })
-  filas.forEach((f) => {
+  filasFardos.forEach((f) => {
     ops.push({
       kind: 'manifiesto-line',
       cantidad: `${f.cantidad}x`,
@@ -306,6 +345,22 @@ function buildManifiestoOps(pedidos) {
       advance: 4.5
     })
   })
+  if (filasBotellas.length > 0) {
+    ops.push({ kind: 'spacer', advance: 1.5 })
+    ops.push({
+      kind: 'manifiesto-subtitle',
+      text: 'Bonificaciones sueltas (de fardo abierto)',
+      advance: 4.5
+    })
+    filasBotellas.forEach((f) => {
+      ops.push({
+        kind: 'manifiesto-line',
+        cantidad: `${f.cantidad}x`,
+        nombre: f.nombre,
+        advance: 4.5
+      })
+    })
+  }
   ops.push({ kind: 'spacer', advance: 2 })
   ops.push({ kind: 'manifiesto-firma', advance: 5.5 })
   return ops

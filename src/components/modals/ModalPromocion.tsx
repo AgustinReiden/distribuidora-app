@@ -173,6 +173,12 @@ export default function ModalPromocion({
     // stock_por_bloque siempre es 1 en el modelo fraccional (no es un campo
     // visible al usuario). El backend lo usa al cerrar un bloque.
     const stockBloque = 1
+    // En fracción el "producto de regalo" canónico es el fardo contenedor:
+    // de él se descuenta stock por bloques y es lo que el chofer carga.
+    // La UI sólo muestra el campo en unidad_entera; en fracción derivamos.
+    const finalProductoRegaloId = esFraccion
+      ? (ajusteProductoId || null)
+      : (productoRegaloId || null)
     const result = await onSave({
       nombre: nombre.trim(),
       tipo: 'bonificacion',
@@ -180,7 +186,7 @@ export default function ModalPromocion({
       fechaFin: fechaFin || null,
       limiteUsos: limite && limite > 0 ? limite : null,
       productoIds: Array.from(productoIds),
-      productoRegaloId: productoRegaloId || null,
+      productoRegaloId: finalProductoRegaloId,
       reglas: [
         { clave: 'cantidad_compra', valor: compra },
         { clave: 'cantidad_bonificacion', valor: bonif },

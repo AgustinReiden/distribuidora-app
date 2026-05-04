@@ -125,6 +125,9 @@ async function fetchPromoMap(fechaReferencia?: string): Promise<PromoMap> {
       prioridad: promo.prioridad ?? 0,
       regaloMueveStock: promo.regalo_mueve_stock ?? false,
       modoExclusion: promo.modo_exclusion ?? 'acumulable',
+      ajusteProductoId: promo.ajuste_producto_id ? String(promo.ajuste_producto_id) : undefined,
+      unidadesPorBloque: promo.unidades_por_bloque ?? undefined,
+      descripcionRegalo: promo.descripcion_regalo ?? undefined,
     }
 
     for (const productoId of productoIds) {
