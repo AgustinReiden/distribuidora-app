@@ -40,13 +40,14 @@ async function fetchPreventistaZonas(perfilId: string): Promise<string[]> {
   return (data || []).map(d => String(d.zona_id))
 }
 
-async function crearZona(nombre: string): Promise<ZonaDB> {
+async function crearZona(nombre: string, sucursalId: number): Promise<ZonaDB> {
   const trimmed = nombre.trim()
   if (!trimmed) throw new Error('El nombre de la zona es requerido')
+  if (!sucursalId) throw new Error('Se requiere sucursal para crear la zona')
 
   const { data, error } = await supabase
     .from('zonas')
-    .insert({ nombre: trimmed })
+    .insert({ nombre: trimmed, sucursal_id: sucursalId })
     .select()
     .single()
 
@@ -134,7 +135,12 @@ export function useCrearZonaMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
   return useMutation({
-    mutationFn: crearZona,
+    mutationFn: (nombre: string) => {
+      if (!currentSucursalId) {
+        return Promise.reject(new Error('No hay sucursal activa'))
+      }
+      return crearZona(nombre, currentSucursalId)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: zonasKeys.all(currentSucursalId) })
     },
