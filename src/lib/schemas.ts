@@ -613,7 +613,7 @@ export const modalProductoSchema = z.object({
   // Permite decimales (0.5) por si alguien vende "doble fardo" como 1 unidad.
   unidades_de_venta_por_fardo: z.coerce
     .number({ error: 'Debe ser un número' })
-    .nonnegative({ message: 'No puede ser negativo' })
+    .positive({ message: 'Debe ser mayor a 0' })
     .optional(),
 
   // Etiqueta del bulto: FARDO, CAJA, PACK, BULTO...
@@ -623,7 +623,10 @@ export const modalProductoSchema = z.object({
     .trim()
     .max(20, { message: 'Máximo 20 caracteres' })
     .optional()
-})
+}).refine(
+  d => !d.etiqueta_bulto || d.unidades_de_venta_por_fardo,
+  { message: 'Si configurás una etiqueta de bulto, también poné las unidades por fardo', path: ['unidades_de_venta_por_fardo'] }
+)
 
 /** Inferred type for ModalProducto schema */
 export type ModalProductoFormData = z.infer<typeof modalProductoSchema>
