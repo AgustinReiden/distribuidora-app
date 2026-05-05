@@ -77,7 +77,7 @@ class PedidoService extends BaseService<Pedido> {
           cantidad,
           precio_unitario,
           subtotal,
-          producto:productos(id, nombre, codigo)
+          producto:productos(id, nombre, codigo, unidades_de_venta_por_fardo, etiqueta_bulto)
         )
       `
     })
