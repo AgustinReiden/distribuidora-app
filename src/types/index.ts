@@ -59,6 +59,8 @@ export interface Producto extends BaseEntity {
   categoria_id?: string;
   activo: boolean;
   unidad?: string;
+  unidades_de_venta_por_fardo?: number;
+  etiqueta_bulto?: string;
 }
 
 export interface ProductoInput {
@@ -71,6 +73,8 @@ export interface ProductoInput {
   stock_minimo?: number;
   categoria_id?: string;
   unidad?: string;
+  unidades_de_venta_por_fardo?: number;
+  etiqueta_bulto?: string;
 }
 
 export interface Categoria extends BaseEntity {

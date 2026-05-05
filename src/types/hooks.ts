@@ -56,6 +56,8 @@ export interface ProductoDB {
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
+  unidades_de_venta_por_fardo?: number | null;
+  etiqueta_bulto?: string | null;
 }
 
 export interface PedidoItemDB {
