@@ -91,17 +91,28 @@ async function renombrarZona(id: string, nombre: string): Promise<void> {
 }
 
 async function eliminarZona(id: string): Promise<void> {
-  // Validar que no haya clientes asignados
-  const { count, error: countError } = await supabase
-    .from('clientes')
-    .select('id', { count: 'exact', head: true })
-    .eq('zona_id', id);
-  if (countError) throw countError;
-  if ((count ?? 0) > 0) {
-    throw new Error(`No se puede eliminar: hay ${count} cliente(s) asignados a esta zona. Reasignalos primero.`);
-  }
+  // Best-effort UX hint: count related rows for a friendlier message if delete fails.
+  // The DB is the source of truth — clientes_fk and proveedores_fk are both RESTRICT.
   const { error } = await supabase.from('zonas').delete().eq('id', id);
-  if (error) throw error;
+  if (error) {
+    if (error.code === '23503') {
+      // Try to enrich the message with a count (best effort, ignore if it fails)
+      const { count: nClientes } = await supabase
+        .from('clientes')
+        .select('id', { count: 'exact', head: true })
+        .eq('zona_id', id);
+      const { count: nProveedores } = await supabase
+        .from('proveedores')
+        .select('id', { count: 'exact', head: true })
+        .eq('zona_id', id);
+      const partes: string[] = [];
+      if (nClientes && nClientes > 0) partes.push(`${nClientes} cliente${nClientes === 1 ? '' : 's'}`);
+      if (nProveedores && nProveedores > 0) partes.push(`${nProveedores} proveedor${nProveedores === 1 ? '' : 'es'}`);
+      const ref = partes.length > 0 ? partes.join(' y ') : 'registros';
+      throw new Error(`No se puede eliminar: hay ${ref} asignados a esta zona. Reasignalos primero.`);
+    }
+    throw error;
+  }
 }
 
 async function toggleZonaActiva(id: string, activo: boolean): Promise<void> {
@@ -187,6 +198,10 @@ export function useToggleZonaActivaMutation() {
   return useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) => toggleZonaActiva(id, activo),
     onSuccess: () => {
+      // zonasKeys.all is the prefix that includes both `lists(*, includeInactive)` and
+      // `preventista(*)` keys — TanStack prefix-match clears all variants in one call.
+      // CASCADE on preventista_zonas means deleted zonas already have their assignments
+      // wiped DB-side; toggling activo just hides them from selectors.
       queryClient.invalidateQueries({ queryKey: zonasKeys.all(currentSucursalId) })
     },
   })
