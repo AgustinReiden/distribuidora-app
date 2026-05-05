@@ -202,7 +202,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const isEncargado = effectiveRol === 'encargado'
   const isAdminOrEncargado = isAdmin || isEncargado
 
-  const defaultRoute = (isAdmin || isPreventista || isEncargado) ? '/dashboard' : '/pedidos'
+  const defaultRoute = '/pedidos'
 
   const authDataValue = useMemo<AuthDataContextValue>(() => ({
     user,
