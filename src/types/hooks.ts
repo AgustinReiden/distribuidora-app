@@ -230,6 +230,8 @@ export interface ProductoFormInput {
   costo_con_iva?: number | string;
   impuestos_internos?: number | string;
   precio_sin_iva?: number | string;
+  unidades_de_venta_por_fardo?: number | null;
+  etiqueta_bulto?: string | null;
 }
 
 export interface PedidoFormInput {
