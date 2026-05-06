@@ -28,6 +28,10 @@ vi.mock('./base', () => ({
   notifyError: vi.fn()
 }))
 
+vi.mock('../../contexts/SucursalContext', () => ({
+  useSucursal: () => ({ currentSucursalId: 1 })
+}))
+
 import { supabase, notifyError } from './base'
 
 describe('usePagos', () => {

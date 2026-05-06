@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase, notifyError } from './base'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type {
   PagoDBWithUsuario,
   PagoFormInput,
@@ -12,6 +13,7 @@ import type {
 } from '../../types'
 
 export function usePagos(): UsePagosReturnExtended {
+  const { currentSucursalId } = useSucursal()
   const [pagos, setPagos] = useState<PagoDBWithUsuario[]>([])
   const [loading, setLoading] = useState<boolean>(false)
 
@@ -52,6 +54,9 @@ export function usePagos(): UsePagosReturnExtended {
 
   const registrarPago = async (pago: PagoFormInput): Promise<PagoDBWithUsuario> => {
     try {
+      if (currentSucursalId == null) {
+        throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+      }
       const insertRow: Record<string, unknown> = {
         cliente_id: pago.clienteId,
         pedido_id: pago.pedidoId || null,
@@ -59,7 +64,8 @@ export function usePagos(): UsePagosReturnExtended {
         forma_pago: pago.formaPago || 'efectivo',
         referencia: pago.referencia || null,
         notas: pago.notas || null,
-        usuario_id: pago.usuarioId || null
+        usuario_id: pago.usuarioId || null,
+        sucursal_id: currentSucursalId
       }
       // fecha (YYYY-MM-DD) se pasa solo si el caller la especificó; si no,
       // la BD usa CURRENT_DATE (default de la columna pagos.fecha).
@@ -87,6 +93,9 @@ export function usePagos(): UsePagosReturnExtended {
     input: RegistrarPagoBatchInput
   ): Promise<PagoDBWithUsuario[]> => {
     try {
+      if (currentSucursalId == null) {
+        throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+      }
       const rows = input.pagos
         .filter(p => p.monto > 0)
         .map(p => ({
@@ -97,6 +106,7 @@ export function usePagos(): UsePagosReturnExtended {
           fecha: input.fecha,
           notas: input.observaciones || null,
           usuario_id: input.usuarioId || null,
+          sucursal_id: currentSucursalId,
         }))
       if (rows.length === 0) {
         throw new Error('No hay pagos validos para registrar')
