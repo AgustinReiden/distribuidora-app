@@ -105,8 +105,10 @@ interface ClienteCreateInput {
   direccion: string
   telefono?: string
   cuit?: string
-  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release. */
-  zona?: string
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release.
+   *  Acepta null para que el container pueda limpiar el espejo legacy cuando
+   *  el usuario selecciona "(Sin zona)". */
+  zona?: string | null
   zona_id?: string | null
   latitud?: number | null
   longitud?: number | null

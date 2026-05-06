@@ -10,7 +10,8 @@ import {
   useClientesQuery,
   useCrearClienteMutation,
   useActualizarClienteMutation,
-  useEliminarClienteMutation
+  useEliminarClienteMutation,
+  useZonasEstandarizadasQuery
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -47,6 +48,10 @@ export default function ClientesContainer(): React.ReactElement {
 
   // Queries
   const { data: clientes = [], isLoading } = useClientesQuery()
+  // includeInactive: true para no perder el texto cuando una zona se desactiva
+  // entre ediciones del cliente — el espejo legacy debe seguir resolviendo
+  // aunque la zona ya no esté disponible en el selector activo.
+  const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true })
 
   // Mutations
   const crearCliente = useCrearClienteMutation()
@@ -127,14 +132,23 @@ export default function ClientesContainer(): React.ReactElement {
         : baseIds
     }
 
+    // Dual-write zona text + zona_id durante el deprecation window:
+    // muchos read paths legacy (PDFs, reportes, bot Telegram) leen cliente.zona
+    // como string. Cuando se borre clientes.zona del schema, eliminar este lookup.
+    const zonaSeleccionada = data.zona_id
+      ? zonas.find(z => String(z.id) === String(data.zona_id))
+      : null
+
     const dbData = {
       razon_social: data.razonSocial || data.nombreFantasia,
       nombre_fantasia: data.nombreFantasia,
       direccion: data.direccion,
       telefono: data.telefono || undefined,
       cuit: data.cuit || undefined,
-      // zona (texto) está deprecada — se mantiene un release por compat de lecturas legacy.
-      zona: data.zona || undefined,
+      // zona (texto) deprecada — se espeja desde zona_id resolviendo contra el
+      // cache de zonas (incluye inactivas) para que PDFs/reportes/bot vean el
+      // nombre correcto. Sin esto, clientes nuevos mostraban "Sin zona".
+      zona: zonaSeleccionada?.nombre ?? null,
       // La coerción '' → null para zona_id vive en useClientesQuery (createCliente y
       // updateCliente). Acá solo pasamos el valor del form sin transform.
       zona_id: data.zona_id,
@@ -163,7 +177,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, user])
+  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, user, zonas])
 
   return (
     <>
