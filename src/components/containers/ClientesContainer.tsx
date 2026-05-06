@@ -23,6 +23,7 @@ const VistaClientes = lazy(() => import('../vistas/VistaClientes'))
 const ModalCliente = lazy(() => import('../modals/ModalCliente'))
 const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
+const ModalZonas = lazy(() => import('../modals/ModalZonas'))
 
 function LoadingState() {
   return (
@@ -55,6 +56,7 @@ export default function ClientesContainer(): React.ReactElement {
   // Estado de modales
   const [modalClienteOpen, setModalClienteOpen] = useState(false)
   const [modalFichaOpen, setModalFichaOpen] = useState(false)
+  const [modalZonasOpen, setModalZonasOpen] = useState(false)
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
 
   // Ficha cliente hook - ModalFichaCliente lo usa internamente
@@ -98,6 +100,10 @@ export default function ClientesContainer(): React.ReactElement {
   const handleVerFichaCliente = useCallback((cliente: ClienteDB) => {
     setClienteFichaId(cliente.id)
     setModalFichaOpen(true)
+  }, [])
+
+  const handleGestionarZonas = useCallback(() => {
+    setModalZonasOpen(true)
   }, [])
 
   const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
@@ -171,6 +177,7 @@ export default function ClientesContainer(): React.ReactElement {
           onEditarCliente={handleEditarCliente}
           onEliminarCliente={handleEliminarCliente}
           onVerFichaCliente={handleVerFichaCliente}
+          onGestionarZonas={isAdmin ? handleGestionarZonas : undefined}
         />
       </Suspense>
 
@@ -200,6 +207,13 @@ export default function ClientesContainer(): React.ReactElement {
               setClienteFichaId(null)
             }}
           />
+        </Suspense>
+      )}
+
+      {/* Modal Zonas (admin) */}
+      {modalZonasOpen && (
+        <Suspense fallback={null}>
+          <ModalZonas onClose={() => setModalZonasOpen(false)} />
         </Suspense>
       )}
 

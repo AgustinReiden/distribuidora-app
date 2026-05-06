@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2 } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
+import { useZonasEstandarizadasQuery } from '../../hooks/queries';
 import type { ClienteDB } from '../../types';
 
 const ITEMS_PER_PAGE = 18;
@@ -24,6 +25,8 @@ export interface VistaClientesProps {
   onEditarCliente: (cliente: ClienteDB) => void;
   onEliminarCliente: (id: string) => void;
   onVerFichaCliente?: (cliente: ClienteDB) => void;
+  /** Solo se pasa cuando el usuario es admin (gating en el container). */
+  onGestionarZonas?: () => void;
 }
 
 export default function VistaClientes({
@@ -34,7 +37,8 @@ export default function VistaClientes({
   onNuevoCliente,
   onEditarCliente,
   onEliminarCliente,
-  onVerFichaCliente
+  onVerFichaCliente,
+  onGestionarZonas
 }: VistaClientesProps) {
   const [busqueda, setBusqueda] = useState<string>('');
   const [paginaActual, setPaginaActual] = useState(1);
@@ -46,6 +50,14 @@ export default function VistaClientes({
   }, [clientes]);
 
   const [filtroRubro, setFiltroRubro] = useState<string>('todos');
+  // '' = todas las zonas (incluye clientes sin zona). Filtramos por id de zona
+  // estandarizada — ignoramos el campo legado `zona` (texto).
+  const [filtroZonaId, setFiltroZonaId] = useState<string>('');
+  const [filtroSaldo, setFiltroSaldo] = useState<'todos' | 'deben' | 'no_deben'>('todos');
+
+  // Solo zonas activas para el dropdown de filtro (las inactivas no son
+  // útiles aquí — para verlas/reactivarlas está el ModalZonas).
+  const { data: zonas = [] } = useZonasEstandarizadasQuery();
 
   // Filtrar clientes
   const clientesFiltrados = useMemo((): ClienteDB[] => {
@@ -61,9 +73,18 @@ export default function VistaClientes({
 
       const matchRubro = filtroRubro === 'todos' || c.rubro === filtroRubro;
 
-      return matchBusqueda && matchRubro;
+      const matchZona = !filtroZonaId || (c.zona_id != null && String(c.zona_id) === filtroZonaId);
+
+      // Saldo positivo = el cliente debe. 0 o ausente = no debe.
+      const saldo = c.saldo_cuenta ?? 0;
+      const matchSaldo =
+        filtroSaldo === 'todos' ||
+        (filtroSaldo === 'deben' && saldo > 0) ||
+        (filtroSaldo === 'no_deben' && saldo <= 0);
+
+      return matchBusqueda && matchRubro && matchZona && matchSaldo;
     });
-  }, [clientes, busqueda, filtroRubro]);
+  }, [clientes, busqueda, filtroRubro, filtroZonaId, filtroSaldo]);
 
   // Pagination
   const totalPaginas = Math.ceil(clientesFiltrados.length / ITEMS_PER_PAGE);
@@ -75,6 +96,13 @@ export default function VistaClientes({
   // Reset page when filters change
   const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
   const handleRubro = (e: ChangeEvent<HTMLSelectElement>) => { setFiltroRubro(e.target.value); setPaginaActual(1); };
+  const handleZona = (e: ChangeEvent<HTMLSelectElement>) => { setFiltroZonaId(e.target.value); setPaginaActual(1); };
+  const handleSaldo = (e: ChangeEvent<HTMLSelectElement>) => {
+    setFiltroSaldo(e.target.value as 'todos' | 'deben' | 'no_deben');
+    setPaginaActual(1);
+  };
+
+  const filtrosActivos = busqueda || filtroRubro !== 'todos' || filtroZonaId !== '' || filtroSaldo !== 'todos';
 
   return (
     <div className="space-y-4">
@@ -84,15 +112,26 @@ export default function VistaClientes({
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Clientes</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{clientes.length} clientes registrados</p>
         </div>
-        {(isAdmin || isPreventista) && (
-          <button
-            onClick={onNuevoCliente}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Nuevo Cliente</span>
-          </button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {isAdmin && onGestionarZonas && (
+            <button
+              onClick={onGestionarZonas}
+              className="flex items-center space-x-2 px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+            >
+              <MapPin className="w-5 h-5" />
+              <span>Gestionar Zonas</span>
+            </button>
+          )}
+          {(isAdmin || isPreventista) && (
+            <button
+              onClick={onNuevoCliente}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Nuevo Cliente</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filtros */}
@@ -125,10 +164,39 @@ export default function VistaClientes({
             </select>
           </div>
         )}
+        {zonas.length > 0 && (
+          <div>
+            <label htmlFor="filtro-zona-clientes" className="sr-only">Filtrar clientes por zona</label>
+            <select
+              id="filtro-zona-clientes"
+              value={filtroZonaId}
+              onChange={handleZona}
+              className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Todas las zonas</option>
+              {zonas.map(z => (
+                <option key={z.id} value={z.id}>{z.nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label htmlFor="filtro-saldo-clientes" className="sr-only">Filtrar clientes por estado de cuenta</label>
+          <select
+            id="filtro-saldo-clientes"
+            value={filtroSaldo}
+            onChange={handleSaldo}
+            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          >
+            <option value="todos">Estado de cuenta: Todos</option>
+            <option value="deben">Deben</option>
+            <option value="no_deben">No deben</option>
+          </select>
+        </div>
       </div>
 
       {/* Contador de resultados */}
-      {(busqueda || filtroRubro !== 'todos') && (
+      {filtrosActivos && (
         <div className="text-sm text-gray-600 dark:text-gray-400">
           Mostrando {clientesFiltrados.length} de {clientes.length} clientes
         </div>
@@ -138,7 +206,7 @@ export default function VistaClientes({
       {loading ? <LoadingSpinner /> : clientesFiltrados.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>{busqueda || filtroRubro !== 'todos' ? 'No se encontraron clientes con esos criterios' : 'No hay clientes'}</p>
+          <p>{filtrosActivos ? 'No se encontraron clientes con esos criterios' : 'No hay clientes'}</p>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
