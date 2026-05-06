@@ -67,6 +67,15 @@ interface ActualizarPagoInput {
   montoPagado?: number | null
 }
 
+// SELECT shape compartido por las consultas de pedidos con cliente + items.
+// Se usan template literals con `as const` para que `.select()` conserve la
+// inferencia de PostgREST: un string sin literal-type degradaria el resultado
+// a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
+const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria' as const
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona' as const
+const PEDIDO_SELECT = `*, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const
+const PEDIDO_SELECT_CLIENTE_INNER = `*, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const
+
 // Helper: cargar salvedades para un conjunto de pedidos
 async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise<Record<string, PedidoSalvedadResumen[]>> {
   const pedidosEntregadosIds = pedidos
@@ -102,9 +111,7 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
 async function fetchPedidos(): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*,
-    cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona),
-    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
+    .select(PEDIDO_SELECT)
     .order('created_at', { ascending: false })
     .limit(500) // Limitar carga inicial para evitar consumo excesivo de memoria
 
@@ -148,9 +155,7 @@ async function fetchPedidos(): Promise<PedidoDB[]> {
 async function fetchPedidoById(id: string): Promise<PedidoDB | null> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*,
-    cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona),
-    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
+    .select(PEDIDO_SELECT)
     .eq('id', id)
     .single()
 
@@ -161,9 +166,7 @@ async function fetchPedidoById(id: string): Promise<PedidoDB | null> {
 async function fetchPedidosByTransportista(transportistaId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*,
-    cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona),
-    items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
+    .select(PEDIDO_SELECT)
     .eq('transportista_id', transportistaId)
     .in('estado', ['asignado', 'en_camino'])
     .order('orden_entrega', { ascending: true, nullsFirst: false })
@@ -175,7 +178,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
 async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*, items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))`)
+    .select(`*, items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const)
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -202,9 +205,7 @@ async function fetchPedidosPaginated(
   const hasSearch = search && search.trim().length > 0
 
   // Use !inner join when searching so PostgREST filters parent rows by client fields
-  const selectStr = hasSearch
-    ? '*, cliente:clientes!inner(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona), items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))'
-    : '*, cliente:clientes(id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona), items:pedido_items(*, producto:productos(id, nombre, codigo, categoria), promocion:promociones(unidades_por_bloque))'
+  const selectStr = hasSearch ? PEDIDO_SELECT_CLIENTE_INNER : PEDIDO_SELECT
 
   let query = supabase
     .from('pedidos')
