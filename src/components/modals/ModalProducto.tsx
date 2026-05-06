@@ -26,6 +26,10 @@ export interface ProductoFormData {
   impuestos_internos: number | string;
   precio_sin_iva: number | string;
   precio: number | string;
+  /** Cuántas unidades de venta hacen 1 fardo/bulto (ej: 2 = vendés medio fardo) */
+  unidades_de_venta_por_fardo?: number;
+  /** Etiqueta del bulto: FARDO, CAJA, PACK, BULTO... */
+  etiqueta_bulto?: string;
 }
 
 /** Opción de IVA */
@@ -94,7 +98,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     costo_con_iva: producto.costo_con_iva ?? '',
     impuestos_internos: producto.impuestos_internos ?? '',
     precio_sin_iva: producto.precio_sin_iva ?? '',
-    precio: producto.precio ?? ''
+    precio: producto.precio ?? '',
+    // ProductoDB usa `?: T | null`; el form usa `?: T`. Mapeo explícito null → undefined.
+    unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo ?? undefined,
+    etiqueta_bulto: producto.etiqueta_bulto ?? undefined
   } : {
     nombre: '',
     codigo: '',
@@ -107,7 +114,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     costo_con_iva: '',
     impuestos_internos: '',
     precio_sin_iva: '',
-    precio: '' // precio_con_iva (precio final al cliente)
+    precio: '', // precio_con_iva (precio final al cliente)
+    unidades_de_venta_por_fardo: undefined,
+    etiqueta_bulto: undefined
   });
   const [nuevaCategoria, setNuevaCategoria] = useState<string>('');
   const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState<boolean>(false);
@@ -280,6 +289,47 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             </select>
           </div>
         )}
+
+        {/* Bulto / Fardo: cuántas unidades de venta hacen un fardo y cómo lo llamamos */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium mb-1">Unidades por bulto/fardo</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.5"
+              min="0"
+              value={form.unidades_de_venta_por_fardo ?? ''}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                const val = e.target.value
+                setForm({
+                  ...form,
+                  unidades_de_venta_por_fardo: val === '' ? undefined : Number(val)
+                })
+              }}
+              className="w-full px-3 py-2 border rounded-lg"
+              placeholder="ej. 2"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Cuántas unidades de venta hacen 1 fardo. Si 1 unidad = medio fardo, poné 2.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Etiqueta del bulto</label>
+            <input
+              type="text"
+              value={form.etiqueta_bulto ?? ''}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setForm({
+                ...form,
+                etiqueta_bulto: e.target.value === '' ? undefined : e.target.value.toUpperCase()
+              })}
+              className="w-full px-3 py-2 border rounded-lg uppercase"
+              placeholder="FARDO"
+              maxLength={20}
+            />
+            <p className="text-xs text-gray-500 mt-1">FARDO, CAJA, PACK, BULTO...</p>
+          </div>
+        </div>
 
         {/* Seccion de IVA */}
         <div className="border-t pt-4">

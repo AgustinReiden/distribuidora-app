@@ -10,7 +10,8 @@ import {
   useClientesQuery,
   useCrearClienteMutation,
   useActualizarClienteMutation,
-  useEliminarClienteMutation
+  useEliminarClienteMutation,
+  useZonasEstandarizadasQuery
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -23,6 +24,7 @@ const VistaClientes = lazy(() => import('../vistas/VistaClientes'))
 const ModalCliente = lazy(() => import('../modals/ModalCliente'))
 const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
+const ModalZonas = lazy(() => import('../modals/ModalZonas'))
 
 function LoadingState() {
   return (
@@ -46,6 +48,10 @@ export default function ClientesContainer(): React.ReactElement {
 
   // Queries
   const { data: clientes = [], isLoading } = useClientesQuery()
+  // includeInactive: true para no perder el texto cuando una zona se desactiva
+  // entre ediciones del cliente — el espejo legacy debe seguir resolviendo
+  // aunque la zona ya no esté disponible en el selector activo.
+  const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true })
 
   // Mutations
   const crearCliente = useCrearClienteMutation()
@@ -55,6 +61,7 @@ export default function ClientesContainer(): React.ReactElement {
   // Estado de modales
   const [modalClienteOpen, setModalClienteOpen] = useState(false)
   const [modalFichaOpen, setModalFichaOpen] = useState(false)
+  const [modalZonasOpen, setModalZonasOpen] = useState(false)
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
 
   // Ficha cliente hook - ModalFichaCliente lo usa internamente
@@ -100,6 +107,10 @@ export default function ClientesContainer(): React.ReactElement {
     setModalFichaOpen(true)
   }, [])
 
+  const handleGestionarZonas = useCallback(() => {
+    setModalZonasOpen(true)
+  }, [])
+
   const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
     // Transform from camelCase (form) to snake_case (database)
     // preventista_ids (N-a-N) es la fuente de verdad; preventista_id (legado)
@@ -121,13 +132,26 @@ export default function ClientesContainer(): React.ReactElement {
         : baseIds
     }
 
+    // Dual-write zona text + zona_id durante el deprecation window:
+    // muchos read paths legacy (PDFs, reportes, bot Telegram) leen cliente.zona
+    // como string. Cuando se borre clientes.zona del schema, eliminar este lookup.
+    const zonaSeleccionada = data.zona_id
+      ? zonas.find(z => String(z.id) === String(data.zona_id))
+      : null
+
     const dbData = {
       razon_social: data.razonSocial || data.nombreFantasia,
       nombre_fantasia: data.nombreFantasia,
       direccion: data.direccion,
       telefono: data.telefono || undefined,
       cuit: data.cuit || undefined,
-      zona: data.zona || undefined,
+      // zona (texto) deprecada — se espeja desde zona_id resolviendo contra el
+      // cache de zonas (incluye inactivas) para que PDFs/reportes/bot vean el
+      // nombre correcto. Sin esto, clientes nuevos mostraban "Sin zona".
+      zona: zonaSeleccionada?.nombre ?? null,
+      // La coerción '' → null para zona_id vive en useClientesQuery (createCliente y
+      // updateCliente). Acá solo pasamos el valor del form sin transform.
+      zona_id: data.zona_id,
       latitud: data.latitud,
       longitud: data.longitud,
       limite_credito: data.limiteCredito,
@@ -153,7 +177,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, user])
+  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, user, zonas])
 
   return (
     <>
@@ -167,6 +191,7 @@ export default function ClientesContainer(): React.ReactElement {
           onEditarCliente={handleEditarCliente}
           onEliminarCliente={handleEliminarCliente}
           onVerFichaCliente={handleVerFichaCliente}
+          onGestionarZonas={isAdmin ? handleGestionarZonas : undefined}
         />
       </Suspense>
 
@@ -196,6 +221,13 @@ export default function ClientesContainer(): React.ReactElement {
               setClienteFichaId(null)
             }}
           />
+        </Suspense>
+      )}
+
+      {/* Modal Zonas (admin) */}
+      {modalZonasOpen && (
+        <Suspense fallback={null}>
+          <ModalZonas onClose={() => setModalZonasOpen(false)} />
         </Suspense>
       )}
 

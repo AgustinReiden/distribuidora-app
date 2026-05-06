@@ -4,7 +4,7 @@ import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
-import { usePreventistasQuery } from '../../hooks/queries';
+import { usePreventistasQuery, useZonasEstandarizadasQuery } from '../../hooks/queries';
 import {
   formatCuitInput,
   formatDniInput,
@@ -28,7 +28,10 @@ export interface ClienteFormData {
   longitud: number | null;
   telefono: string;
   contacto: string;
+  /** @deprecated usar zona_id. Se mantiene para compat de lecturas. */
   zona: string;
+  /** FK a tabla zonas. Cadena vacía representa "sin zona". */
+  zona_id: string;
   horarios_atencion: string;
   rubro: string;
   notas: string;
@@ -63,8 +66,6 @@ export interface ModalClienteProps {
   guardando: boolean;
   /** Si el usuario es admin (puede editar crédito) */
   isAdmin?: boolean;
-  /** Zonas existentes para sugerencias */
-  zonasExistentes?: string[];
 }
 
 // Las zonas ahora vienen de la tabla `zonas` via useZonasEstandarizadasQuery
@@ -88,6 +89,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
   const { data: preventistas = [] } = usePreventistasQuery();
+  const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true });
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -107,6 +109,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     telefono: cliente.telefono || '',
     contacto: cliente.contacto || '',
     zona: cliente.zona || '',
+    zona_id: cliente.zona_id ? String(cliente.zona_id) : '',
     horarios_atencion: cliente.horarios_atencion || '',
     rubro: cliente.rubro || '',
     notas: cliente.notas || '',
@@ -125,6 +128,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     telefono: '',
     contacto: '',
     zona: '',
+    zona_id: '',
     horarios_atencion: '',
     rubro: '',
     notas: '',
@@ -349,7 +353,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           </div>
         </div>
 
-        {/* Rubro */}
+        {/* Rubro y Zona */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
@@ -364,6 +368,24 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               <option value="">Seleccionar rubro...</option>
               {RUBROS_OPCIONES.map(rubro => (
                 <option key={rubro} value={rubro}>{rubro}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+              <MapPin className="w-4 h-4" />
+              Zona
+            </label>
+            <select
+              value={form.zona_id}
+              onChange={e => handleFieldChange('zona_id', e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">(Sin zona)</option>
+              {zonas.map(z => (
+                <option key={z.id} value={String(z.id)}>
+                  {z.nombre}{z.activo === false ? ' (inactiva)' : ''}
+                </option>
               ))}
             </select>
           </div>

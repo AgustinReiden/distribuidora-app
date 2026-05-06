@@ -560,7 +560,9 @@ export const modalClienteSchema = z.object({
     .nullable()
     .optional(),
   contacto: z.string().optional(),
+  /** @deprecated usar zona_id. Se mantiene para compat. */
   zona: z.string().optional(),
+  zona_id: z.string().optional().nullable(),
   horarios_atencion: z.string().optional(),
   rubro: z.string().optional(),
   notas: z.string().optional(),
@@ -606,8 +608,27 @@ export const modalProductoSchema = z.object({
 
   precio: z.coerce
     .number({ error: 'El precio debe ser un número' })
-    .positive({ message: 'El precio debe ser mayor a 0' })
-})
+    .positive({ message: 'El precio debe ser mayor a 0' }),
+
+  // Cuántas unidades de venta hacen 1 fardo/bulto.
+  // Ej: si vendés "medio fardo" como 1 unidad, acá poné 2.
+  // Permite decimales (0.5) por si alguien vende "doble fardo" como 1 unidad.
+  unidades_de_venta_por_fardo: z.coerce
+    .number({ error: 'Debe ser un número' })
+    .positive({ message: 'Debe ser mayor a 0' })
+    .optional(),
+
+  // Etiqueta del bulto: FARDO, CAJA, PACK, BULTO...
+  // Default a 'FARDO' en el form; si queda vacío se persiste como null.
+  etiqueta_bulto: z
+    .string()
+    .trim()
+    .max(20, { message: 'Máximo 20 caracteres' })
+    .optional()
+}).refine(
+  d => !d.etiqueta_bulto || d.unidades_de_venta_por_fardo,
+  { message: 'Si configurás una etiqueta de bulto, también poné las unidades por fardo', path: ['unidades_de_venta_por_fardo'] }
+)
 
 /** Inferred type for ModalProducto schema */
 export type ModalProductoFormData = z.infer<typeof modalProductoSchema>

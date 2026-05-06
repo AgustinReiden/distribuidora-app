@@ -71,7 +71,7 @@ interface ActualizarPagoInput {
 // Se usan template literals con `as const` para que `.select()` conserve la
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
-const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria' as const
+const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
 const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona' as const
 const PEDIDO_SELECT = `*, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const
 const PEDIDO_SELECT_CLIENTE_INNER = `*, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const

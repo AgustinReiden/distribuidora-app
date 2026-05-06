@@ -85,6 +85,9 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
       impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
       precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null,
+      // Bulto/fardo (migración 031): 0 es válido, sólo usamos null cuando viene undefined
+      unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo == null ? null : producto.unidades_de_venta_por_fardo,
+      etiqueta_bulto: producto.etiqueta_bulto || null,
       sucursal_id: sucursalId
     }])
     .select()
@@ -107,6 +110,13 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
   if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null
   if (producto.precio_sin_iva !== undefined) updateData.precio_sin_iva = producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
+  // Bulto/fardo (migración 031): tratá undefined como "no tocar", null como "limpiar"
+  if (producto.unidades_de_venta_por_fardo !== undefined) {
+    updateData.unidades_de_venta_por_fardo = producto.unidades_de_venta_por_fardo
+  }
+  if (producto.etiqueta_bulto !== undefined) {
+    updateData.etiqueta_bulto = producto.etiqueta_bulto || null
+  }
 
   const { data, error } = await supabase
     .from('productos')

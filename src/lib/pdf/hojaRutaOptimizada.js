@@ -10,6 +10,7 @@ import {
   generateFilename,
   drawCheckbox
 } from './utils'
+import { formatAclaracionBulto } from './utils/formatBulto'
 
 // === Layout A4 horizontal ===
 const PAGE_WIDTH = 297
@@ -155,7 +156,15 @@ function buildCardOps(doc, pedido, orderNumber) {
       ? item.descripcion_regalo.trim()
       : (item.producto?.nombre || 'Producto')
     const subtotal = (item.precio_unitario || 0) * item.cantidad
-    const itemLines = doc.splitTextToSize(`${item.cantidad}x ${nombre}`, productWrapWidth)
+    const aclaracion = formatAclaracionBulto(
+      item.cantidad,
+      item.producto?.unidades_de_venta_por_fardo,
+      item.producto?.etiqueta_bulto,
+    )
+    const linea = aclaracion
+      ? `${item.cantidad}x ${nombre} ${aclaracion}`
+      : `${item.cantidad}x ${nombre}`
+    const itemLines = doc.splitTextToSize(linea, productWrapWidth)
     itemLines.forEach((line, idx) => {
       ops.push({
         kind: 'product',
@@ -307,6 +316,10 @@ function buildManifiestoOps(pedidos) {
         if (fardos > 0) {
           if (!totalesFardos[key]) totalesFardos[key] = { nombre: nombreProducto, cantidad: 0 }
           totalesFardos[key].cantidad += fardos
+          // La cantidad acumulada para esta key ya no está en unidades de venta
+          // (mezcla fardos enteros pre-convertidos), así que no aplicar la
+          // aclaración (N FARDO) sobre el total consolidado para esta key.
+          totalesFardos[key].mixedFardo = true
         }
         if (sueltas > 0) {
           const sueltasKey = `bonif:${desc}`
@@ -319,6 +332,16 @@ function buildManifiestoOps(pedidos) {
       // Caso B: items normales (compras o regalos de unidad entera) → suma directa.
       if (!totalesFardos[key]) totalesFardos[key] = { nombre: nombreProducto, cantidad: 0 }
       totalesFardos[key].cantidad += cantidad
+      // Capturar campos de fardo del producto para mostrar la aclaración
+      // (N FARDO) sobre la cantidad consolidada. Solo aplican a Caso B; si la
+      // entrada también recibió Caso A, mixedFardo bloquea la aclaración.
+      if (totalesFardos[key].unidades_de_venta_por_fardo == null) {
+        totalesFardos[key].unidades_de_venta_por_fardo =
+          item.producto?.unidades_de_venta_por_fardo ?? null
+      }
+      if (totalesFardos[key].etiqueta_bulto == null) {
+        totalesFardos[key].etiqueta_bulto = item.producto?.etiqueta_bulto ?? null
+      }
     })
   })
 
@@ -338,10 +361,17 @@ function buildManifiestoOps(pedidos) {
     advance: 5
   })
   filasFardos.forEach((f) => {
+    const aclaracion = f.mixedFardo
+      ? null
+      : formatAclaracionBulto(
+          f.cantidad,
+          f.unidades_de_venta_por_fardo,
+          f.etiqueta_bulto,
+        )
     ops.push({
       kind: 'manifiesto-line',
       cantidad: `${f.cantidad}x`,
-      nombre: f.nombre,
+      nombre: aclaracion ? `${f.nombre} ${aclaracion}` : f.nombre,
       advance: 4.5
     })
   })

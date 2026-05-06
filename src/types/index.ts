@@ -25,7 +25,9 @@ export interface Cliente extends BaseEntity {
   direccion?: string;
   telefono?: string;
   email?: string;
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string;
+  zona_id?: string;
   tipo?: 'minorista' | 'mayorista' | 'distribuidor';
   activo: boolean;
   saldo_pendiente?: number;
@@ -39,7 +41,9 @@ export interface ClienteInput {
   direccion?: string;
   telefono?: string;
   email?: string;
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string;
+  zona_id?: string;
   tipo?: 'minorista' | 'mayorista' | 'distribuidor';
   notas?: string;
 }
@@ -59,6 +63,8 @@ export interface Producto extends BaseEntity {
   categoria_id?: string;
   activo: boolean;
   unidad?: string;
+  unidades_de_venta_por_fardo?: number;
+  etiqueta_bulto?: string;
 }
 
 export interface ProductoInput {
@@ -71,6 +77,8 @@ export interface ProductoInput {
   stock_minimo?: number;
   categoria_id?: string;
   unidad?: string;
+  unidades_de_venta_por_fardo?: number;
+  etiqueta_bulto?: string;
 }
 
 export interface Categoria extends BaseEntity {

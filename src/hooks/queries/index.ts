@@ -133,6 +133,9 @@ export {
   usePreventistaZonasQuery,
   useCrearZonaMutation,
   useAsignarZonasPrevMutation,
+  useRenombrarZonaMutation,
+  useEliminarZonaMutation,
+  useToggleZonaActivaMutation,
 } from './useZonasQuery'
 export type { ZonaDB } from './useZonasQuery'
 

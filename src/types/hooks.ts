@@ -20,7 +20,9 @@ export interface ClienteDB {
   telefono?: string | null;
   email?: string | null;
   contacto?: string | null;
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string | null;
+  zona_id?: string | null;
   horarios_atencion?: string | null;
   rubro?: string | null;
   notas?: string | null;
@@ -56,6 +58,8 @@ export interface ProductoDB {
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
+  unidades_de_venta_por_fardo?: number | null;
+  etiqueta_bulto?: string | null;
 }
 
 export interface PedidoItemDB {
@@ -206,7 +210,9 @@ export interface ClienteFormInput {
   telefono?: string;
   email?: string;
   contacto?: string;
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string;
+  zona_id?: string | null;
   horarios_atencion?: string;
   rubro?: string;
   notas?: string;
@@ -228,6 +234,8 @@ export interface ProductoFormInput {
   costo_con_iva?: number | string;
   impuestos_internos?: number | string;
   precio_sin_iva?: number | string;
+  unidades_de_venta_por_fardo?: number | null;
+  etiqueta_bulto?: string | null;
 }
 
 export interface PedidoFormInput {

@@ -105,7 +105,11 @@ interface ClienteCreateInput {
   direccion: string
   telefono?: string
   cuit?: string
-  zona?: string
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release.
+   *  Acepta null para que el container pueda limpiar el espejo legacy cuando
+   *  el usuario selecciona "(Sin zona)". */
+  zona?: string | null
+  zona_id?: string | null
   latitud?: number | null
   longitud?: number | null
   limite_credito?: number
@@ -156,7 +160,10 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       direccion: clienteFields.direccion,
       telefono: clienteFields.telefono || null,
       cuit: clienteFields.cuit || null,
+      // zona (texto) deprecada: se sigue escribiendo un release por compat de lecturas legacy.
       zona: clienteFields.zona || null,
+      // zona_id es la FK canónica. '' (string vacío) y undefined → null para limpiar la FK.
+      zona_id: clienteFields.zona_id ? clienteFields.zona_id : null,
       latitud: clienteFields.latitud || null,
       longitud: clienteFields.longitud || null,
       limite_credito: clienteFields.limite_credito || 0,
@@ -185,9 +192,17 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
 async function updateCliente({ id, data: cliente }: { id: string; data: Partial<ClienteCreateInput> }): Promise<ClienteDB> {
   const { preventista_ids, ...clienteFields } = cliente
 
+  // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
+  // Solo aplicamos si el campo viene en el patch (Partial), preservando undefined
+  // para no sobrescribir campos no enviados.
+  const payload: Partial<ClienteCreateInput> = { ...clienteFields }
+  if ('zona_id' in payload) {
+    payload.zona_id = payload.zona_id ? payload.zona_id : null
+  }
+
   const { data, error } = await supabase
     .from('clientes')
-    .update(clienteFields)
+    .update(payload)
     .eq('id', id)
     .select()
     .single()

@@ -17,6 +17,7 @@ import {
   setNormalStyle,
   setItalicStyle
 } from './utils'
+import { formatAclaracionBulto } from './utils/formatBulto'
 
 // Colores de marca Crecer Distribuciones
 const BRAND = {
@@ -167,7 +168,15 @@ function generarReciboA4(pedido) {
 
     // Nombre completo del producto (sin truncar, con wrap si necesario)
     const productoNombre = item.producto?.nombre || 'Producto'
-    const nombreLines = doc.splitTextToSize(productoNombre, 90)
+    const aclaracion = formatAclaracionBulto(
+      item.cantidad,
+      item.producto?.unidades_de_venta_por_fardo,
+      item.producto?.etiqueta_bulto,
+    )
+    const nombreCompleto = aclaracion
+      ? `${productoNombre} ${aclaracion}`
+      : productoNombre
+    const nombreLines = doc.splitTextToSize(nombreCompleto, 90)
     doc.text(nombreLines[0], margin + 5, y)
 
     doc.text(String(item.cantidad), margin + 105, y, { align: 'center' })
@@ -383,7 +392,16 @@ function dibujarComanda(doc, pedido) {
     const productoNombre = item.producto?.nombre || 'Producto'
     const subtotal = item.subtotal || item.precio_unitario * item.cantidad
 
-    const nombreLines = doc.splitTextToSize(`${item.cantidad}x ${productoNombre}`, contentWidth - 26)
+    const aclaracion = formatAclaracionBulto(
+      item.cantidad,
+      item.producto?.unidades_de_venta_por_fardo,
+      item.producto?.etiqueta_bulto,
+    )
+    const lineaProducto = aclaracion
+      ? `${item.cantidad}x ${productoNombre} ${aclaracion}`
+      : `${item.cantidad}x ${productoNombre}`
+
+    const nombreLines = doc.splitTextToSize(lineaProducto, contentWidth - 26)
     nombreLines.forEach((line, idx) => {
       doc.text(line, margin, y)
       if (idx === 0) {
