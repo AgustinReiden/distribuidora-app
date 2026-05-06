@@ -66,8 +66,6 @@ export interface ModalClienteProps {
   guardando: boolean;
   /** Si el usuario es admin (puede editar crédito) */
   isAdmin?: boolean;
-  /** Zonas existentes para sugerencias */
-  zonasExistentes?: string[];
 }
 
 // Las zonas ahora vienen de la tabla `zonas` via useZonasEstandarizadasQuery
@@ -91,7 +89,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
   const { data: preventistas = [] } = usePreventistasQuery();
-  const { data: zonas = [] } = useZonasEstandarizadasQuery();
+  const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true });
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -385,7 +383,9 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             >
               <option value="">(Sin zona)</option>
               {zonas.map(z => (
-                <option key={z.id} value={String(z.id)}>{z.nombre}</option>
+                <option key={z.id} value={String(z.id)}>
+                  {z.nombre}{z.activo === false ? ' (inactiva)' : ''}
+                </option>
               ))}
             </select>
           </div>

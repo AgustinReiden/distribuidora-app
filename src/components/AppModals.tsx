@@ -328,8 +328,6 @@ export default function AppModals({
     setFiltros
   } = appState;
 
-  const zonasExistentes: string[] = [...new Set(clientes.map(c => c.zona).filter((z): z is string => Boolean(z)))];
-
   // Handlers para PDF con lazy loading
   const handleExportarOrdenPreparacion = async (pedidosSeleccionados: PedidoDB[]): Promise<void> => {
     const { generarOrdenPreparacion } = await loadPdfUtils();
@@ -375,7 +373,6 @@ export default function AppModals({
             onClose={() => { modales.cliente.setOpen(false); setClienteEditando(null); }}
             guardando={guardando}
             isAdmin={isAdmin}
-            zonasExistentes={zonasExistentes}
           />
         </Suspense>
       )}

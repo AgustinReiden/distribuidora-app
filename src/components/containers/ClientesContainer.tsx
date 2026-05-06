@@ -129,8 +129,9 @@ export default function ClientesContainer(): React.ReactElement {
       cuit: data.cuit || undefined,
       // zona (texto) está deprecada — se mantiene un release por compat de lecturas legacy.
       zona: data.zona || undefined,
-      // Empty string from "(Sin zona)" → null para limpiar la FK (no '' que rompe FK validation).
-      zona_id: data.zona_id ? data.zona_id : null,
+      // La coerción '' → null para zona_id vive en useClientesQuery (createCliente y
+      // updateCliente). Acá solo pasamos el valor del form sin transform.
+      zona_id: data.zona_id,
       latitud: data.latitud,
       longitud: data.longitud,
       limite_credito: data.limiteCredito,

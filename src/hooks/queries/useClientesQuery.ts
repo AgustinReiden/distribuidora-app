@@ -190,9 +190,17 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
 async function updateCliente({ id, data: cliente }: { id: string; data: Partial<ClienteCreateInput> }): Promise<ClienteDB> {
   const { preventista_ids, ...clienteFields } = cliente
 
+  // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
+  // Solo aplicamos si el campo viene en el patch (Partial), preservando undefined
+  // para no sobrescribir campos no enviados.
+  const payload: Partial<ClienteCreateInput> = { ...clienteFields }
+  if ('zona_id' in payload) {
+    payload.zona_id = payload.zona_id ? payload.zona_id : null
+  }
+
   const { data, error } = await supabase
     .from('clientes')
-    .update(clienteFields)
+    .update(payload)
     .eq('id', id)
     .select()
     .single()
