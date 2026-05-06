@@ -17,6 +17,7 @@ import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstad
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
 import { PedidoActionsCtx } from '../../contexts/HandlersContext';
+import { useAuthData } from '../../contexts/AuthDataContext';
 import type { PedidoDB, MotivoSalvedad } from '../../types';
 
 // =============================================================================
@@ -49,6 +50,7 @@ export interface PedidoCardProps {
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
+  onRegistrarPago?: (pedido: PedidoDB) => void;
 }
 
 interface EstadoConfig {
@@ -154,12 +156,14 @@ function PedidoCard({
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onCancelarPedido,
+  onRegistrarPago,
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
   const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
 
   // Intentar usar contexto si está disponible (migración gradual)
   const pedidoActions = useContext(PedidoActionsCtx);
+  const { user } = useAuthData();
 
   // Usar handlers del contexto si están disponibles, de lo contrario usar props
   const handleVerHistorial = onVerHistorial ?? pedidoActions?.handleVerHistorial;
@@ -168,6 +172,7 @@ function PedidoCard({
   const handleVolverAPendiente = onVolverAPendiente ?? pedidoActions?.handleVolverAPendiente;
   const handleMarcarEntregado = onMarcarEntregado ?? pedidoActions?.handleMarcarEntregado;
   const handleDesmarcarEntregado = onDesmarcarEntregado ?? pedidoActions?.handleDesmarcarEntregado;
+  const handleRegistrarPago = onRegistrarPago ?? pedidoActions?.handleRegistrarPago;
   return (
     <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
       {/* Header del pedido */}
@@ -226,6 +231,7 @@ function PedidoCard({
             isPreventista={isPreventista}
             isTransportista={isTransportista}
             isEncargado={isEncargado}
+            currentUserId={user?.id}
             onHistorial={handleVerHistorial}
             onEditar={handleEditarPedido}
             onEditarNotas={onEditarNotas}
@@ -236,6 +242,7 @@ function PedidoCard({
             onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
             onRevertir={handleDesmarcarEntregado}
             onCancelarPedido={onCancelarPedido}
+            onRegistrarPago={handleRegistrarPago}
           />
         </div>
       </div>

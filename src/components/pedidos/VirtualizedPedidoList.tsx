@@ -49,6 +49,8 @@ export interface VirtualizedPedidoListProps {
   onMarcarEntregado?: (pedido: PedidoDB) => void;
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
+  onCancelarPedido?: (pedido: PedidoDB) => void;
+  onRegistrarPago?: (pedido: PedidoDB) => void;
   height?: number;
 }
 
@@ -100,6 +102,8 @@ const PedidoRow = memo(function PedidoRow({ index, style, ariaAttributes }: Pedi
           onMarcarEntregado={handlers?.onMarcarEntregado}
           onMarcarEntregadoConSalvedad={handlers?.onMarcarEntregadoConSalvedad}
           onDesmarcarEntregado={handlers?.onDesmarcarEntregado}
+          onCancelarPedido={handlers?.onCancelarPedido}
+          onRegistrarPago={handlers?.onRegistrarPago}
         />
       </div>
     </div>
@@ -184,6 +188,8 @@ function VirtualizedPedidoList({
   onMarcarEntregado,
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
+  onCancelarPedido,
+  onRegistrarPago,
   height: propHeight
 }: VirtualizedPedidoListProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -220,8 +226,10 @@ function VirtualizedPedidoList({
     onAsignarTransportista,
     onMarcarEntregado,
     onMarcarEntregadoConSalvedad,
-    onDesmarcarEntregado
-  }), [onVerHistorial, onEditarPedido, onMarcarEnPreparacion, onVolverAPendiente, onAsignarTransportista, onMarcarEntregado, onMarcarEntregadoConSalvedad, onDesmarcarEntregado])
+    onDesmarcarEntregado,
+    onCancelarPedido,
+    onRegistrarPago
+  }), [onVerHistorial, onEditarPedido, onMarcarEnPreparacion, onVolverAPendiente, onAsignarTransportista, onMarcarEntregado, onMarcarEntregadoConSalvedad, onDesmarcarEntregado, onCancelarPedido, onRegistrarPago])
 
   // Preparar permisos para el Context (memoizados)
   const permissions = useMemo<VirtualizedListPermissions>(() => ({

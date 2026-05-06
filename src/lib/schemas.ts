@@ -880,17 +880,11 @@ export const modalCompraSchema = z.object({
 export type ModalCompraFormData = z.infer<typeof modalCompraSchema>
 
 /**
- * Schema para ModalEditarPedido
+ * Schema para ModalEditarPedido.
+ * Pago se gestiona en ModalRegistrarPago (separate flow), no aqui.
  */
 export const modalEditarPedidoSchema = z.object({
-  notas: z.string().optional(),
-  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta', 'combinado'], {
-    error: 'Forma de pago inválida'
-  }),
-  estadoPago: z.enum(['pendiente', 'pagado', 'parcial'], {
-    error: 'Estado de pago inválido'
-  }),
-  montoPagado: z.coerce.number().nonnegative({ message: 'El monto no puede ser negativo' })
+  notas: z.string().optional()
 })
 
 export type ModalEditarPedidoFormData = z.infer<typeof modalEditarPedidoSchema>

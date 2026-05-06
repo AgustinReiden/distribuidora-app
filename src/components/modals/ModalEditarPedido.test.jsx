@@ -124,145 +124,8 @@ describe('ModalEditarPedido', () => {
     })
   })
 
-  describe('Forma de pago', () => {
-    it('muestra la forma de pago inicial', () => {
-      render(<ModalEditarPedido {...defaultProps} />)
-      const select = screen.getByRole('combobox')
-      expect(select.value).toBe('efectivo')
-    })
-
-    it('permite cambiar la forma de pago', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const select = screen.getByRole('combobox')
-      await user.selectOptions(select, 'transferencia')
-
-      expect(select.value).toBe('transferencia')
-    })
-  })
-
-  describe('Estado de pago', () => {
-    it('muestra estado pendiente por defecto', () => {
-      render(<ModalEditarPedido {...defaultProps} />)
-      const btnPendiente = screen.getByRole('button', { name: 'Pendiente' })
-      expect(btnPendiente.className).toContain('border-red-500')
-    })
-
-    it('cambia a pagado y actualiza monto al total', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const btnPagado = screen.getByRole('button', { name: 'Pagado' })
-      await user.click(btnPagado)
-
-      expect(btnPagado.className).toContain('border-green-500')
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      expect(inputMonto.value).toBe('1000')
-    })
-
-    it('cambia a pendiente y resetea monto a 0', async () => {
-      const user = userEvent.setup()
-      const pedidoPagado = { ...mockPedido, estado_pago: 'pagado', monto_pagado: 1000 }
-      render(<ModalEditarPedido {...defaultProps} pedido={pedidoPagado} />)
-
-      const btnPendiente = screen.getByRole('button', { name: 'Pendiente' })
-      await user.click(btnPendiente)
-
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      expect(inputMonto.value).toBe('0')
-    })
-
-    it('muestra alerta de pago parcial con saldo pendiente', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const btnParcial = screen.getByRole('button', { name: 'Parcial' })
-      await user.click(btnParcial)
-
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      await user.clear(inputMonto)
-      await user.type(inputMonto, '300')
-
-      expect(screen.getByText('Pago Parcial')).toBeInTheDocument()
-      // Verify the paid amount shows in the partial payment section
-      expect(screen.getByText(/Pagado:/)).toBeInTheDocument()
-    })
-  })
-
-  describe('Botones de porcentaje', () => {
-    it('aplica 25% del total', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const btn25 = screen.getByRole('button', { name: '25%' })
-      await user.click(btn25)
-
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      expect(inputMonto.value).toBe('250')
-    })
-
-    it('aplica 50% del total', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const btn50 = screen.getByRole('button', { name: '50%' })
-      await user.click(btn50)
-
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      expect(inputMonto.value).toBe('500')
-    })
-
-    it('aplica 100% y cambia estado a pagado', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const btn100 = screen.getByRole('button', { name: '100%' })
-      await user.click(btn100)
-
-      const btnPagado = screen.getByRole('button', { name: 'Pagado' })
-      expect(btnPagado.className).toContain('border-green-500')
-    })
-  })
-
-  describe('Lógica de monto y estado', () => {
-    it('cambia a pagado cuando monto >= total', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      await user.clear(inputMonto)
-      await user.type(inputMonto, '1000')
-
-      const btnPagado = screen.getByRole('button', { name: 'Pagado' })
-      expect(btnPagado.className).toContain('border-green-500')
-    })
-
-    it('cambia a parcial cuando monto > 0 y < total', async () => {
-      const user = userEvent.setup()
-      render(<ModalEditarPedido {...defaultProps} />)
-
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      await user.clear(inputMonto)
-      await user.type(inputMonto, '500')
-
-      const btnParcial = screen.getByRole('button', { name: 'Parcial' })
-      expect(btnParcial.className).toContain('border-yellow-500')
-    })
-
-    it('cambia a pendiente cuando monto = 0', async () => {
-      const user = userEvent.setup()
-      const pedidoParcial = { ...mockPedido, estado_pago: 'parcial', monto_pagado: 500 }
-      render(<ModalEditarPedido {...defaultProps} pedido={pedidoParcial} />)
-
-      const inputMonto = screen.getByPlaceholderText('0.00')
-      await user.clear(inputMonto)
-      await user.type(inputMonto, '0')
-
-      const btnPendiente = screen.getByRole('button', { name: 'Pendiente' })
-      expect(btnPendiente.className).toContain('border-red-500')
-    })
-  })
+  // Nota: La gestion de pago (forma, estado, monto, combinado, %) fue movida a
+  // ModalRegistrarPago. Sus tests viven en src/components/modals/ModalRegistrarPago.test.tsx.
 
   describe('Pedido entregado', () => {
     it('muestra alerta cuando el pedido está entregado', () => {
@@ -351,12 +214,7 @@ describe('ModalEditarPedido', () => {
       const btnGuardar = screen.getByRole('button', { name: 'Guardar' })
       await user.click(btnGuardar)
 
-      expect(onSave).toHaveBeenCalledWith({
-        notas: 'Nota inicial',
-        formaPago: 'efectivo',
-        estadoPago: 'pendiente',
-        montoPagado: 0
-      })
+      expect(onSave).toHaveBeenCalledWith({ notas: 'Nota inicial' })
     })
 
     it('llama onSaveItems cuando hay items modificados (admin)', async () => {

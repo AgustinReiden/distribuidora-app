@@ -1,5 +1,5 @@
 import { useState, memo, useEffect, useMemo } from 'react';
-import { Loader2, DollarSign, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift } from 'lucide-react';
+import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { formatPrecio } from '../../utils/formatters';
@@ -27,12 +27,9 @@ export interface PedidoEditItem {
   porcentaje_iva?: number;
 }
 
-/** Datos a guardar del pedido */
+/** Datos a guardar del pedido. Pago se gestiona en ModalRegistrarPago. */
 export interface PedidoSaveData {
   notas: string;
-  formaPago: string;
-  estadoPago: string;
-  montoPagado: number;
   fecha?: string;
   fechaEntrega?: string;
   fechaEntregaProgramada?: string;
@@ -44,7 +41,13 @@ export interface ModalEditarPedidoProps {
   pedido: PedidoDB | null;
   /** Lista de productos disponibles */
   productos?: ProductoDB[];
-  /** Si es admin (puede editar items) */
+  /** Permite agregar/eliminar items y modificar cantidades. Default: isAdmin. */
+  canEditItems?: boolean;
+  /** Permite editar precios unitarios. Default: isAdmin. */
+  canEditPrices?: boolean;
+  /** Permite cambiar fecha de pedido / entrega / entrega programada. Default: isAdmin. */
+  canEditFechaEntrega?: boolean;
+  /** @deprecated usar canEditItems/canEditPrices/canEditFechaEntrega. Mantiene compat. */
   isAdmin?: boolean;
   /** Callback al guardar datos */
   onSave: (data: PedidoSaveData) => void | Promise<void>;
@@ -59,56 +62,31 @@ export interface ModalEditarPedidoProps {
 const ModalEditarPedido = memo(function ModalEditarPedido({
   pedido,
   productos = [],
+  canEditItems,
+  canEditPrices,
+  canEditFechaEntrega,
   isAdmin = false,
   onSave,
   onSaveItems,
   onClose,
   guardando
 }: ModalEditarPedidoProps) {
+  // Resolver flags de permiso. Si el caller pasa los flags nuevos los usamos;
+  // si no, fallback al isAdmin legacy.
+  const puedeEditarItems = canEditItems ?? isAdmin;
+  const puedeEditarPrecios = canEditPrices ?? isAdmin;
+  const puedeEditarFechas = canEditFechaEntrega ?? isAdmin;
+
   const [notas, setNotas] = useState<string>(pedido?.notas || "");
   const [fecha, setFecha] = useState<string>(pedido?.fecha || "");
   const fechaEntregaOriginal = pedido?.fecha_entrega ? pedido.fecha_entrega.split('T')[0] : "";
   const [fechaEntrega, setFechaEntrega] = useState<string>(fechaEntregaOriginal);
   const fechaEntregaProgramadaOriginal = pedido?.fecha_entrega_programada || "";
   const [fechaEntregaProgramada, setFechaEntregaProgramada] = useState<string>(fechaEntregaProgramadaOriginal);
-  const [formaPago, setFormaPago] = useState<string>(pedido?.forma_pago === 'combinado' ? 'combinado' : (pedido?.forma_pago || "efectivo"));
-  const [estadoPago, setEstadoPago] = useState<string>(pedido?.estado_pago || "pendiente");
-  const [montoPagado, setMontoPagado] = useState<number>(pedido?.monto_pagado || 0);
   const [errorValidacion, setErrorValidacion] = useState<string>('');
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
 
-  // Pago combinado
-  const [pagoCombinado, setPagoCombinado] = useState<boolean>(pedido?.forma_pago === 'combinado');
-  // Parseo pragmático del detalle guardado en notas — formato frágil (depende de es-AR toLocaleString).
-  // Si falla, cae al default. Fix robusto requeriría columna metadata_pago jsonb (fuera de alcance).
-  const [pagosCombinados, setPagosCombinados] = useState<{ monto: string; formaPago: string }[]>(() => {
-    if (pedido?.forma_pago === 'combinado' && pedido?.notas) {
-      const match = pedido.notas.match(/\[Pago combinado:\s*([^\]]+)\]/);
-      if (match) {
-        const mapaLabels: Record<string, string> = {
-          'efectivo': 'efectivo',
-          'transferencia': 'transferencia',
-          'cheque': 'cheque',
-          'tarjeta': 'tarjeta',
-          'cuenta corriente': 'cuenta_corriente',
-        };
-        const parsed = match[1].split('+').map(s => s.trim()).map(parte => {
-          const m = parte.match(/^(.+?)\s*\$([0-9.,]+)$/);
-          if (!m) return null;
-          const key = m[1].trim().toLowerCase();
-          const montoNum = m[2].replace(/\./g, '').replace(',', '.');
-          return { formaPago: mapaLabels[key] || 'efectivo', monto: montoNum };
-        }).filter((x): x is { formaPago: string; monto: string } => x !== null);
-        if (parsed.length >= 2) return parsed;
-      }
-    }
-    return [
-      { monto: '', formaPago: 'efectivo' },
-      { monto: '', formaPago: 'transferencia' },
-    ];
-  });
-
-  // Zod validation
+  // Zod validation (solo notas; el pago se maneja en ModalRegistrarPago)
   const { validate } = useZodValidation(modalEditarPedidoSchema);
 
   // Consulta de control de rendición (para warning al cambiar fecha_entrega)
@@ -227,7 +205,6 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   }, [promosLoading, pedido, items, bonificacionesCalculadas]);
 
   const total = itemsModificados ? totalFinal : (pedido?.total || 0);
-  const saldoPendiente = total - montoPagado;
 
   // Detectar si hubo cambios en items (cantidad, precio, agregados o eliminados)
   useEffect(() => {
@@ -259,35 +236,6 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       )
       .slice(0, 10);
   }, [productos, items, busquedaProducto]);
-
-  // Cuando cambia el estado de pago, ajustar el monto
-  // NOTE: Only react to estadoPago changes, NOT total changes.
-  // If total is in deps, editing items while estadoPago='pagado' silently overwrites montoPagado.
-  useEffect(() => {
-    if (estadoPago === 'pagado') {
-      setMontoPagado(total);
-    } else if (estadoPago === 'pendiente') {
-      setMontoPagado(0);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estadoPago]);
-
-  const handleMontoPagadoChange = (valor: string): void => {
-    const monto = Math.min(parsePrecio(valor), total);
-    setMontoPagado(monto);
-    if (monto >= total) {
-      setEstadoPago('pagado');
-    } else if (monto > 0) {
-      setEstadoPago('parcial');
-    } else {
-      setEstadoPago('pendiente');
-    }
-  };
-
-  const aplicarPorcentaje = (porcentaje: number): void => {
-    const monto = (total * porcentaje) / 100;
-    handleMontoPagadoChange(String(monto));
-  };
 
   // Funciones para editar items
   const handleCantidadChange = (productoId: string, delta: number): void => {
@@ -344,46 +292,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setErrorValidacion('');
     setErrorStock(null);
 
-    // Preparar datos de pago
-    let formaPagoFinal = formaPago;
-    let montoPagadoFinal = montoPagado || 0;
-    let notasFinal = notas;
-
-    if (pagoCombinado) {
-      const pagosValidos = pagosCombinados.filter(p => parsePrecio(p.monto) > 0);
-      if (pagosValidos.length < 2) {
-        setErrorValidacion('Ingresa al menos 2 formas de pago con monto mayor a 0');
-        return;
-      }
-      formaPagoFinal = 'combinado';
-      montoPagadoFinal = Math.min(pagosValidos.reduce((sum, p) => sum + parsePrecio(p.monto), 0), total);
-      if (pagosValidos.reduce((sum, p) => sum + parsePrecio(p.monto), 0) > total) {
-        setErrorValidacion(`El total combinado no puede superar el total del pedido (${formatPrecio(total)})`);
-        return;
-      }
-      // Agregar detalle de pagos combinados a las notas
-      const formasPagoLabels: Record<string, string> = {
-        efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque',
-        tarjeta: 'Tarjeta', cuenta_corriente: 'Cuenta Corriente'
-      };
-      const detalle = pagosValidos.map(p =>
-        `${formasPagoLabels[p.formaPago] || p.formaPago} $${parsePrecio(p.monto).toLocaleString('es-AR')}`
-      ).join(' + ');
-      // Reemplazar detalle previo si existe, o agregar
-      const notaSinDetalle = notas.replace(/\s*\[Pago combinado:.*?\]/g, '').trim();
-      notasFinal = notaSinDetalle ? `${notaSinDetalle} [Pago combinado: ${detalle}]` : `[Pago combinado: ${detalle}]`;
-    }
-
-    // Validar con Zod
-    const result = validate({ notas: notasFinal, formaPago: formaPagoFinal, estadoPago, montoPagado: montoPagadoFinal });
+    // Validar con Zod (solo notas)
+    const result = validate({ notas });
     if (!result.success) {
       const firstError = Object.values(result.errors || {})[0] || 'Error de validación';
       setErrorValidacion(firstError);
       return;
     }
 
-    // Si cambió la fecha_entrega (solo admin + pedido entregado), consultar control de rendición
-    const fechaEntregaCambio = isAdmin && pedidoEntregado && fechaEntrega && fechaEntrega !== fechaEntregaOriginal;
+    // Si cambió la fecha_entrega (admin/encargado + pedido entregado), consultar control de rendición
+    const fechaEntregaCambio = puedeEditarFechas && pedidoEntregado && fechaEntrega && fechaEntrega !== fechaEntregaOriginal;
     if (fechaEntregaCambio && pedido?.transportista_id) {
       try {
         const [origen, destino] = await Promise.all([
@@ -406,7 +324,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             mensaje,
             onConfirm: () => {
               setConfirmConfig(null);
-              void doGuardar(notasFinal, formaPagoFinal, montoPagadoFinal, true);
+              void doGuardar(notas, true);
             },
           });
           return;
@@ -416,19 +334,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       }
     }
 
-    await doGuardar(notasFinal, formaPagoFinal, montoPagadoFinal, !!fechaEntregaCambio);
+    await doGuardar(notas, !!fechaEntregaCambio);
   };
 
   const doGuardar = async (
     notasFinal: string,
-    formaPagoFinal: string,
-    montoPagadoFinal: number,
     fechaEntregaCambio: boolean,
   ): Promise<void> => {
     try {
-      // Si hay cambios en items y es admin, guardar items con precios mayoristas
-      // resueltos, desglose fiscal y bonificaciones recalculadas por el hook.
-      if (itemsModificados && isAdmin && onSaveItems) {
+      // Si hay cambios en items y el usuario puede editarlos, guardar items con
+      // precios mayoristas resueltos, desglose fiscal y bonificaciones recalculadas.
+      if (itemsModificados && puedeEditarItems && onSaveItems) {
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
 
         // Items no-bonif del estado → con precio resuelto + desglose fiscal
@@ -466,13 +382,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         await onSaveItems([...itemsNoBonif, ...itemsBonif]);
       }
       // Guardar el resto de los datos
-      const fechaEntregaProgramadaCambio = isAdmin && !pedidoEntregado && fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
+      const fechaEntregaProgramadaCambio = puedeEditarFechas && !pedidoEntregado && fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
       await onSave({
         notas: notasFinal,
-        formaPago: formaPagoFinal,
-        estadoPago,
-        montoPagado: montoPagadoFinal,
-        ...(isAdmin && fecha ? { fecha } : {}),
+        ...(puedeEditarFechas && fecha ? { fecha } : {}),
         ...(fechaEntregaCambio ? { fechaEntrega } : {}),
         ...(fechaEntregaProgramadaCambio ? { fechaEntregaProgramada } : {})
       });
@@ -491,7 +404,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   return (
     <ModalBase
       title={`Editar Pedido #${pedido?.id}`}
-      description="Editar notas, forma de pago, estado de pago y productos del pedido"
+      description="Editar items, fechas y notas del pedido. El pago se gestiona desde el menú del pedido."
       onClose={onClose}
       maxWidth="max-w-2xl"
     >
@@ -515,8 +428,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
-        {/* Sección de productos - Vista de solo lectura para no-admin o pedido entregado */}
-        {(!isAdmin || pedidoEntregado) && pedido && (pedido.items?.length ?? 0) > 0 && (
+        {/* Sección de productos - Vista de solo lectura cuando no se pueden editar items o el pedido está entregado */}
+        {(!puedeEditarItems || pedidoEntregado) && pedido && (pedido.items?.length ?? 0) > 0 && (
           <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-blue-600" />
@@ -540,8 +453,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
-        {/* Sección de productos editable (solo admin y pedido no entregado) */}
-        {isAdmin && !pedidoEntregado && (
+        {/* Sección de productos editable (puede editar items y pedido no entregado) */}
+        {puedeEditarItems && !pedidoEntregado && (
           <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
             <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -668,16 +581,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                             </div>
                           ) : (
                             <span
-                              className={`${item.precioOverride ? 'text-orange-600 font-medium' : ''} ${isAdmin ? 'cursor-pointer hover:underline' : ''}`}
+                              className={`${item.precioOverride ? 'text-orange-600 font-medium' : ''} ${puedeEditarPrecios ? 'cursor-pointer hover:underline' : ''}`}
                               onClick={() => {
-                                if (isAdmin) {
+                                if (puedeEditarPrecios) {
                                   setEditingPriceId(item.productoId);
                                   setEditingPriceValue(String(precioResuelto));
                                 }
                               }}
                             >
                               {formatPrecio(precioResuelto)} c/u
-                              {isAdmin && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
+                              {puedeEditarPrecios && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
                             </span>
                           )}
                           <span>-</span>
@@ -771,8 +684,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         </div>
 
-        {/* Fecha del pedido (solo admin) */}
-        {isAdmin && (
+        {/* Fecha del pedido (solo admin/encargado) */}
+        {puedeEditarFechas && (
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Fecha del Pedido</label>
             <input
@@ -784,8 +697,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
-        {/* Fecha programada de entrega (solo admin + pedido NO entregado) */}
-        {isAdmin && !pedidoEntregado && (
+        {/* Fecha programada de entrega (puede editar fechas + pedido NO entregado) */}
+        {puedeEditarFechas && !pedidoEntregado && (
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">
               Fecha programada de entrega
@@ -804,8 +717,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
-        {/* Fecha de entrega (solo admin + pedido entregado) - determina el día de rendición */}
-        {isAdmin && pedidoEntregado && (
+        {/* Fecha de entrega (admin/encargado + pedido entregado) - determina el día de rendición */}
+        {puedeEditarFechas && pedidoEntregado && (
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">
               Fecha de Entrega
@@ -836,205 +749,6 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             rows={2}
           />
         </div>
-
-        {/* Forma de Pago */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="block text-sm font-medium dark:text-gray-200">Forma de Pago</label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={pagoCombinado}
-                onChange={e => {
-                  setPagoCombinado(e.target.checked);
-                  if (!e.target.checked) {
-                    setFormaPago('efectivo');
-                    setMontoPagado(pedido?.monto_pagado || 0);
-                    setEstadoPago(pedido?.estado_pago || 'pendiente');
-                  }
-                }}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600"
-              />
-              <span className="text-xs text-gray-500 dark:text-gray-400">Pago combinado</span>
-            </label>
-          </div>
-
-          {pagoCombinado ? (
-            <div className="space-y-2">
-              {pagosCombinados.map((pago, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <select
-                    value={pago.formaPago}
-                    onChange={e => setPagosCombinados(prev => prev.map((p, i) => i === index ? { ...p, formaPago: e.target.value } : p))}
-                    className="flex-1 px-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  >
-                    <option value="efectivo">Efectivo</option>
-                    <option value="transferencia">Transferencia</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="cuenta_corriente">Cuenta Corriente</option>
-                    <option value="tarjeta">Tarjeta</option>
-                  </select>
-                  <div className="relative flex-1">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      min="0"
-                      value={pago.monto}
-                      onChange={e => {
-                        const nuevos = pagosCombinados.map((p, i) => i === index ? { ...p, monto: e.target.value } : p);
-                        setPagosCombinados(nuevos);
-                        const totalComb = nuevos.reduce((sum, p) => sum + parsePrecio(p.monto), 0);
-                        setMontoPagado(totalComb);
-                        if (totalComb >= total) setEstadoPago('pagado');
-                        else if (totalComb > 0) setEstadoPago('parcial');
-                        else setEstadoPago('pendiente');
-                      }}
-                      placeholder="0.00"
-                      className="w-full pl-6 pr-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-semibold"
-                    />
-                  </div>
-                  {pagosCombinados.length > 2 && (
-                    <button
-                      type="button"
-                      onClick={() => setPagosCombinados(prev => prev.filter((_, i) => i !== index))}
-                      className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => setPagosCombinados(prev => [...prev, { monto: '', formaPago: 'efectivo' }])}
-                className="w-full flex items-center justify-center gap-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg border border-dashed border-blue-300 dark:border-blue-700"
-              >
-                <Plus className="w-3 h-3" />
-                Agregar forma de pago
-              </button>
-              {(() => {
-                const totalComb = pagosCombinados.reduce((s, p) => s + parsePrecio(p.monto), 0);
-                const excede = totalComb > total;
-                return (
-                  <div className={`text-right text-sm ${excede ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                    Total combinado: <span className={`font-bold ${excede ? 'text-red-600 dark:text-red-400' : 'text-gray-800 dark:text-white'}`}>{formatPrecio(totalComb)}</span>
-                    {excede && <span className="block text-xs">Excede el total del pedido ({formatPrecio(total)})</span>}
-                  </div>
-                );
-              })()}
-            </div>
-          ) : (
-            <select
-              value={formaPago}
-              onChange={e => setFormaPago(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            >
-              <option value="efectivo">Efectivo</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="cheque">Cheque</option>
-              <option value="cuenta_corriente">Cuenta Corriente</option>
-              <option value="tarjeta">Tarjeta</option>
-            </select>
-          )}
-        </div>
-
-        {/* Sección de pago */}
-        <div className="border dark:border-gray-600 rounded-lg p-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <DollarSign className="w-5 h-5 text-green-600" />
-            <span className="font-medium dark:text-gray-200">Estado de Pago</span>
-          </div>
-
-          {/* Estado de pago */}
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => setEstadoPago('pendiente')}
-              className={`py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                estadoPago === 'pendiente'
-                  ? 'bg-red-100 text-red-700 border-2 border-red-500 dark:bg-red-900/30 dark:text-red-400 dark:border-red-600'
-                  : 'bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:border-gray-600'
-              }`}
-            >
-              Pendiente
-            </button>
-            <button
-              type="button"
-              onClick={() => setEstadoPago('parcial')}
-              className={`py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                estadoPago === 'parcial'
-                  ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-500 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-600'
-                  : 'bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:border-gray-600'
-              }`}
-            >
-              Parcial
-            </button>
-            <button
-              type="button"
-              onClick={() => setEstadoPago('pagado')}
-              className={`py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                estadoPago === 'pagado'
-                  ? 'bg-green-100 text-green-700 border-2 border-green-500 dark:bg-green-900/30 dark:text-green-400 dark:border-green-600'
-                  : 'bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:border-gray-600'
-              }`}
-            >
-              Pagado
-            </button>
-          </div>
-
-          {/* Monto pagado */}
-          <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200">
-              Monto Pagado
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                max={total}
-                step="0.01"
-                value={montoPagado}
-                onChange={e => handleMontoPagadoChange(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                placeholder="0.00"
-              />
-            </div>
-
-            {/* Botones de porcentaje rápido */}
-            <div className="flex gap-2 mt-2">
-              {[25, 50, 75, 100].map(pct => (
-                <button
-                  key={pct}
-                  type="button"
-                  onClick={() => aplicarPorcentaje(pct)}
-                  className="flex-1 py-1 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded transition-colors dark:text-gray-300"
-                >
-                  {pct}%
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Resumen de pagos */}
-          {estadoPago === 'parcial' && saldoPendiente > 0 && (
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                <div className="text-sm">
-                  <p className="font-medium text-yellow-800 dark:text-yellow-300">Pago Parcial</p>
-                  <div className="mt-1 space-y-1 text-yellow-700 dark:text-yellow-400">
-                    <p>Pagado: <span className="font-semibold">{formatPrecio(montoPagado)}</span></p>
-                    <p>Pendiente: <span className="font-semibold text-red-600 dark:text-red-400">{formatPrecio(saldoPendiente)}</span></p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Error de stock */}
@@ -1060,7 +774,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </button>
         <button
           onClick={handleGuardar}
-          disabled={guardando || (isAdmin && !pedidoEntregado && items.length === 0)}
+          disabled={guardando || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
           {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}

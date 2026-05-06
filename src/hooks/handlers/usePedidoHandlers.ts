@@ -113,10 +113,9 @@ export interface OrdenOptimizadoData {
 
 export interface EdicionPedidoData {
   notas: string;
-  formaPago: string;
-  estadoPago: string;
-  montoPagado?: number;
+  fecha?: string;
   fechaEntrega?: string;
+  fechaEntregaProgramada?: string;
 }
 
 // =============================================================================
@@ -239,8 +238,8 @@ export function usePedidoHandlers({
   asignarTransportista,
   eliminarPedido,
   actualizarNotasPedido,
-  actualizarEstadoPago,
-  actualizarFormaPago,
+  actualizarEstadoPago: _actualizarEstadoPago, // pago se gestiona en ModalRegistrarPago
+  actualizarFormaPago: _actualizarFormaPago,
   actualizarFechaEntrega,
   actualizarOrdenEntrega,
   actualizarItemsPedido: _actualizarItemsPedido, // Passed for potential future use
@@ -683,14 +682,12 @@ export function usePedidoHandlers({
     modales.editarPedido.setOpen(true)
   }, [setPedidoEditando, modales.editarPedido])
 
-  const handleGuardarEdicionPedido = useCallback(async ({ notas, formaPago, estadoPago, montoPagado, fechaEntrega }: EdicionPedidoData): Promise<void> => {
+  const handleGuardarEdicionPedido = useCallback(async ({ notas, fechaEntrega }: EdicionPedidoData): Promise<void> => {
     const pedidoEditando = pedidoEditandoRef.current
     if (!pedidoEditando) return
     setGuardando(true)
     try {
       await actualizarNotasPedido(pedidoEditando.id, notas)
-      await actualizarFormaPago(pedidoEditando.id, formaPago)
-      await actualizarEstadoPago(pedidoEditando.id, estadoPago, montoPagado)
       if (fechaEntrega && fechaEntrega !== pedidoEditando.fecha_entrega?.split('T')[0]) {
         await actualizarFechaEntrega(pedidoEditando.id, fechaEntrega)
       }
@@ -702,7 +699,7 @@ export function usePedidoHandlers({
       notify.error('Error al actualizar pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [pedidoEditandoRef, actualizarNotasPedido, actualizarFormaPago, actualizarEstadoPago, actualizarFechaEntrega, modales.editarPedido, setPedidoEditando, notify, setGuardando])
+  }, [pedidoEditandoRef, actualizarNotasPedido, actualizarFechaEntrega, modales.editarPedido, setPedidoEditando, notify, setGuardando])
 
   // Route optimization
   const handleAplicarOrdenOptimizado = useCallback(async (data: OrdenOptimizadoData | OrdenOptimizadoItem[]): Promise<void> => {

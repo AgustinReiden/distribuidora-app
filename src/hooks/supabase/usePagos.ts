@@ -3,6 +3,7 @@ import { supabase, notifyError } from './base'
 import type {
   PagoDBWithUsuario,
   PagoFormInput,
+  RegistrarPagoBatchInput,
   ResumenCuenta,
   UsePagosReturnExtended,
   ClienteDB,
@@ -34,6 +35,21 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  const fetchPagosPedido = async (pedidoId: string): Promise<PagoDBWithUsuario[]> => {
+    try {
+      const { data, error } = await supabase
+        .from('pagos')
+        .select('*, usuario:perfiles(id, nombre)')
+        .eq('pedido_id', pedidoId)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return (data || []) as PagoDBWithUsuario[]
+    } catch (error) {
+      notifyError('Error al cargar pagos del pedido: ' + (error as Error).message)
+      return []
+    }
+  }
+
   const registrarPago = async (pago: PagoFormInput): Promise<PagoDBWithUsuario> => {
     try {
       const insertRow: Record<string, unknown> = {
@@ -57,6 +73,44 @@ export function usePagos(): UsePagosReturnExtended {
       return pagoData
     } catch (error) {
       notifyError('Error al registrar pago: ' + (error as Error).message)
+      throw error
+    }
+  }
+
+  /**
+   * Registra N pagos del mismo pedido en una sola operacion (uno por forma_pago).
+   * Util para pagos combinados: cada forma genera una row separada en `pagos`,
+   * facilitando los reportes. El trigger SQL `actualizar_estado_pago_pedido`
+   * recalcula `pedidos.monto_pagado` y `pedidos.estado_pago` automaticamente.
+   */
+  const registrarPagosBatch = async (
+    input: RegistrarPagoBatchInput
+  ): Promise<PagoDBWithUsuario[]> => {
+    try {
+      const rows = input.pagos
+        .filter(p => p.monto > 0)
+        .map(p => ({
+          cliente_id: input.clienteId,
+          pedido_id: input.pedidoId,
+          monto: p.monto,
+          forma_pago: p.formaPago,
+          fecha: input.fecha,
+          notas: input.observaciones || null,
+          usuario_id: input.usuarioId || null,
+        }))
+      if (rows.length === 0) {
+        throw new Error('No hay pagos validos para registrar')
+      }
+      const { data, error } = await supabase
+        .from('pagos')
+        .insert(rows)
+        .select('*, usuario:perfiles(id, nombre)')
+      if (error) throw error
+      const pagosData = (data || []) as PagoDBWithUsuario[]
+      setPagos(prev => [...pagosData, ...prev])
+      return pagosData
+    } catch (error) {
+      notifyError('Error al registrar pagos: ' + (error as Error).message)
       throw error
     }
   }
@@ -121,5 +175,14 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
-  return { pagos, loading, fetchPagosCliente, registrarPago, eliminarPago, obtenerResumenCuenta }
+  return {
+    pagos,
+    loading,
+    fetchPagosCliente,
+    fetchPagosPedido,
+    registrarPago,
+    registrarPagosBatch,
+    eliminarPago,
+    obtenerResumenCuenta,
+  }
 }

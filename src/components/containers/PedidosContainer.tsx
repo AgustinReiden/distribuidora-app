@@ -8,6 +8,7 @@
 import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { fechaLocalISO } from '../../utils/formatters'
+import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
@@ -33,7 +34,7 @@ import { usePromocionPedido } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { supabase } from '../../hooks/supabase/base'
 import { usePagos } from '../../hooks/supabase/usePagos'
-import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
+import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 
 // Lazy load de componentes
@@ -43,6 +44,7 @@ const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalAsignarTransportista = lazy(() => import('../modals/ModalAsignarTransportista'))
 const ModalHistorialPedido = lazy(() => import('../modals/ModalHistorialPedido'))
 const ModalEditarPedido = lazy(() => import('../modals/ModalEditarPedido'))
+const ModalPagoPedido = lazy(() => import('../modals/ModalPagoPedido'))
 const ModalEditarNotas = lazy(() => import('../modals/ModalEditarNotas'))
 const ModalFiltroFecha = lazy(() => import('../modals/ModalFiltroFecha'))
 const ModalExportarPDF = lazy(() => import('../modals/ModalExportarPDF'))
@@ -95,7 +97,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [filtros, setFiltros] = useState<FiltrosPedidosState>(DEFAULT_FILTROS)
 
   // Queries - use debounced search to avoid firing on every keystroke
-  const { registrarPago } = usePagos()
+  const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago } = usePagos()
 
   const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
@@ -146,6 +148,10 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalPagosMasivosOpen, setModalPagosMasivosOpen] = useState(false)
   const [modalAsignarMasivoOpen, setModalAsignarMasivoOpen] = useState(false)
   const [modalNotasOpen, setModalNotasOpen] = useState(false)
+  const [modalPagoPedidoOpen, setModalPagoPedidoOpen] = useState(false)
+  const [pedidoPago, setPedidoPago] = useState<PedidoDB | null>(null)
+  const [pagosPreviosPedido, setPagosPreviosPedido] = useState<PagoDBWithUsuario[]>([])
+  const [loadingPagosPrevios, setLoadingPagosPrevios] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // Pedido-specific state for modals
@@ -203,20 +209,46 @@ export default function PedidosContainer(): React.ReactElement {
     setPaginaActual(page)
   }, [])
 
-  // Estado changes with confirmation dialog
-  const handleMarcarEntregado = useCallback((pedido: PedidoDB) => {
-    setConfirmConfig({
-      visible: true, titulo: 'Confirmar entrega',
-      mensaje: `¿Confirmar entrega del pedido #${pedido.id}?`, tipo: 'success',
-      onConfirm: async () => {
-        try {
-          await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
-          notify.success('Pedido entregado')
-        } catch (e) { notify.error((e as Error).message) }
-        setConfirmConfig({ visible: false })
-      },
-    })
-  }, [cambiarEstado, notify])
+  // Estado: marcar entregado.
+  // Si el pedido ya esta pagado completamente → confirm simple.
+  // Si queda saldo pendiente → abrir ModalPagoPedido en modoEntregaTransportista
+  // para que el usuario pueda registrar el cobro o entregar sin pago en el mismo gesto.
+  const [pedidoEntregaConPago, setPedidoEntregaConPago] = useState<PedidoDB | null>(null)
+
+  // Cargar pagos previos del pedido seleccionado para mostrar en el modal de pago.
+  // Definido antes de handleMarcarEntregado porque este lo invoca al abrir el modal.
+  const refreshPagosPedido = useCallback(async (pedidoId: string) => {
+    setLoadingPagosPrevios(true)
+    try {
+      const previos = await fetchPagosPedido(pedidoId)
+      setPagosPreviosPedido(previos)
+    } finally {
+      setLoadingPagosPrevios(false)
+    }
+  }, [fetchPagosPedido])
+
+  const handleMarcarEntregado = useCallback(async (pedido: PedidoDB) => {
+    if (pedido.estado_pago === 'pagado') {
+      setConfirmConfig({
+        visible: true, titulo: 'Confirmar entrega',
+        mensaje: `¿Confirmar entrega del pedido #${pedido.id}?`, tipo: 'success',
+        onConfirm: async () => {
+          try {
+            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+            notify.success('Pedido entregado')
+          } catch (e) { notify.error((e as Error).message) }
+          setConfirmConfig({ visible: false })
+        },
+      })
+      return
+    }
+    // Saldo pendiente: abrir modal de pago en modo entrega
+    setPedidoEntregaConPago(pedido)
+    setPedidoPago(pedido)
+    setPagosPreviosPedido([])
+    setModalPagoPedidoOpen(true)
+    await refreshPagosPedido(String(pedido.id))
+  }, [cambiarEstado, notify, refreshPagosPedido])
 
   const handleDesmarcarEntregado = useCallback((pedido: PedidoDB) => {
     setConfirmConfig({
@@ -516,15 +548,13 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pedidoAsignando, asignarTransportistaMut, cambiarEstado, notify])
 
-  // ModalEditarPedido: onSave({ notas, formaPago, estadoPago, montoPagado, fecha?, fechaEntrega?, fechaEntregaProgramada? })
-  const handleGuardarEdicion = useCallback(async (data: { notas: string; formaPago: string; estadoPago: string; montoPagado: number; fecha?: string; fechaEntrega?: string; fechaEntregaProgramada?: string }) => {
+  // ModalEditarPedido: onSave({ notas, fecha?, fechaEntrega?, fechaEntregaProgramada? })
+  // Pago se gestiona desde ModalRegistrarPago (separate flow).
+  const handleGuardarEdicion = useCallback(async (data: { notas: string; fecha?: string; fechaEntrega?: string; fechaEntregaProgramada?: string }) => {
     if (!pedidoEditando) return
     setGuardando(true)
     try {
-      const updateData: Record<string, unknown> = {
-        notas: data.notas, forma_pago: data.formaPago,
-        estado_pago: data.estadoPago, monto_pagado: data.montoPagado ?? 0,
-      }
+      const updateData: Record<string, unknown> = { notas: data.notas }
       if (data.fecha) updateData.fecha = data.fecha
       if (data.fechaEntrega) {
         updateData.fecha_entrega = data.fechaEntrega.includes('T') ? data.fechaEntrega : `${data.fechaEntrega}T12:00:00Z`
@@ -571,6 +601,111 @@ export default function PedidosContainer(): React.ReactElement {
     // Invalidar cache de pedidos para refrescar datos
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
   }, [pedidoEditando, user, queryClient])
+
+  // ===========================================================================
+  // ModalPagoPedido handlers (registrar/anular pagos sobre un pedido)
+  // ===========================================================================
+
+  const handleAbrirRegistrarPago = useCallback(async (pedido: PedidoDB) => {
+    setPedidoPago(pedido)
+    setPagosPreviosPedido([])
+    setModalPagoPedidoOpen(true)
+    await refreshPagosPedido(String(pedido.id))
+  }, [refreshPagosPedido])
+
+  // El error ya fue notificado por usePagos.registrarPagosBatch via notifyError;
+  // dejamos que se propague para que el modal lo muestre tambien.
+  const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }> }) => {
+    setGuardando(true)
+    try {
+      await registrarPagosBatch({
+        clienteId: payload.clienteId,
+        pedidoId: payload.pedidoId,
+        fecha: payload.fechaPago,
+        observaciones: payload.observaciones || null,
+        pagos: payload.pagos,
+        usuarioId: user?.id ?? null,
+      })
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      setModalPagoPedidoOpen(false)
+      setPedidoPago(null)
+      notify.success('Pago registrado')
+    } finally {
+      setGuardando(false)
+    }
+  }, [registrarPagosBatch, user, queryClient, notify])
+
+  // Modo entrega transportista: "Entregar sin pago" → solo cambia estado.
+  const handleEntregarSinPago = useCallback(async () => {
+    const pedido = pedidoEntregaConPago
+    if (!pedido) return
+    setGuardando(true)
+    try {
+      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      setModalPagoPedidoOpen(false)
+      setPedidoPago(null)
+      setPedidoEntregaConPago(null)
+      notify.success('Pedido entregado sin pago registrado')
+    } catch (e) { notify.error((e as Error).message) }
+    setGuardando(false)
+  }, [pedidoEntregaConPago, cambiarEstado, queryClient, notify])
+
+  // Modo entrega transportista: "Entregar y registrar pago" → cambia estado y registra pagos.
+  // Orden: primero entrega (mas critica), luego pagos. Si falla algun pago, queda
+  // entregado y el usuario puede usar "Registrar Pago" desde el dropdown.
+  const handleEntregarConPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }> }) => {
+    const pedido = pedidoEntregaConPago
+    if (!pedido) {
+      // Fallback: comportamiento normal de registrar pago sin entrega
+      await handleConfirmarPago(payload)
+      return
+    }
+    setGuardando(true)
+    try {
+      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+      try {
+        await registrarPagosBatch({
+          clienteId: payload.clienteId,
+          pedidoId: payload.pedidoId,
+          fecha: payload.fechaPago,
+          observaciones: payload.observaciones || null,
+          pagos: payload.pagos,
+          usuarioId: user?.id ?? null,
+        })
+      } catch (pagoErr) {
+        notify.error('Pedido entregado pero falló el pago: ' + (pagoErr as Error).message + '. Registralo desde el menú de pago.')
+        queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+        setModalPagoPedidoOpen(false)
+        setPedidoPago(null)
+        setPedidoEntregaConPago(null)
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      setModalPagoPedidoOpen(false)
+      setPedidoPago(null)
+      setPedidoEntregaConPago(null)
+      notify.success('Pedido entregado y pago registrado')
+    } catch (e) {
+      notify.error((e as Error).message)
+      throw e
+    } finally {
+      setGuardando(false)
+    }
+  }, [pedidoEntregaConPago, cambiarEstado, registrarPagosBatch, user, queryClient, notify, handleConfirmarPago])
+
+  const handleAnularPagoPedido = useCallback(async (pagoId: string) => {
+    if (!pedidoPago) return
+    if (!(isAdmin || isEncargado)) return
+    setGuardando(true)
+    try {
+      await eliminarPago(pagoId)
+      await refreshPagosPedido(String(pedidoPago.id))
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      notify.success('Pago anulado')
+    } catch (e) { notify.error((e as Error).message) }
+    setGuardando(false)
+  }, [pedidoPago, isAdmin, isEncargado, eliminarPago, refreshPagosPedido, queryClient, notify])
 
   // ModalPedido handlers
   const handleGuardarPedido = useCallback(async () => {
@@ -822,6 +957,7 @@ export default function PedidosContainer(): React.ReactElement {
           onAsignarTransportistaMasivo={() => setModalAsignarMasivoOpen(true)}
           onRegistrarSalvedad={handleRegistrarSalvedadSingle}
           onRegistrarPago={handleRegistrarPagoTransportista}
+          onAbrirPagoPedido={handleAbrirRegistrarPago}
         />
       </Suspense>
 
@@ -938,10 +1074,42 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalEditarPedido
             pedido={pedidoEditando}
             productos={productos}
-            isAdmin={isAdmin}
+            canEditItems={
+              isAdmin || isEncargado ||
+              (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
+            }
+            canEditPrices={isAdmin || isEncargado}
+            canEditFechaEntrega={
+              isAdmin || isEncargado ||
+              (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
+            }
             onSave={handleGuardarEdicion}
             onSaveItems={handleGuardarItemsEdicion}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}
+            guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Pago Pedido — registrar/anular pagos sobre un pedido.
+          modoEntregaTransportista=true cuando el pedido fue abierto via Marcar Entregado
+          (estado_pago != 'pagado'); habilita "Entregar sin pago" + "Entregar y registrar pago". */}
+      {modalPagoPedidoOpen && pedidoPago && (
+        <Suspense fallback={null}>
+          <ModalPagoPedido
+            pedido={pedidoPago}
+            pagosPrevios={pagosPreviosPedido}
+            loadingPagosPrevios={loadingPagosPrevios}
+            onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
+            onAnularPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
+            modoEntregaTransportista={!!pedidoEntregaConPago}
+            onEntregarSinPago={pedidoEntregaConPago ? handleEntregarSinPago : undefined}
+            onClose={() => {
+              setModalPagoPedidoOpen(false)
+              setPedidoPago(null)
+              setPedidoEntregaConPago(null)
+              setPagosPreviosPedido([])
+            }}
             guardando={guardando}
           />
         </Suspense>
