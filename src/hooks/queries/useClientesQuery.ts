@@ -105,7 +105,9 @@ interface ClienteCreateInput {
   direccion: string
   telefono?: string
   cuit?: string
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release. */
   zona?: string
+  zona_id?: string | null
   latitud?: number | null
   longitud?: number | null
   limite_credito?: number
@@ -156,7 +158,10 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       direccion: clienteFields.direccion,
       telefono: clienteFields.telefono || null,
       cuit: clienteFields.cuit || null,
+      // zona (texto) deprecada: se sigue escribiendo un release por compat de lecturas legacy.
       zona: clienteFields.zona || null,
+      // zona_id es la FK canónica. '' (string vacío) y undefined → null para limpiar la FK.
+      zona_id: clienteFields.zona_id ? clienteFields.zona_id : null,
       latitud: clienteFields.latitud || null,
       longitud: clienteFields.longitud || null,
       limite_credito: clienteFields.limite_credito || 0,

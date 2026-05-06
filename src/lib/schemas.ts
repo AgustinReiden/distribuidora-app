@@ -560,7 +560,9 @@ export const modalClienteSchema = z.object({
     .nullable()
     .optional(),
   contacto: z.string().optional(),
+  /** @deprecated usar zona_id. Se mantiene para compat. */
   zona: z.string().optional(),
+  zona_id: z.string().optional().nullable(),
   horarios_atencion: z.string().optional(),
   rubro: z.string().optional(),
   notas: z.string().optional(),

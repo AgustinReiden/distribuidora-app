@@ -127,7 +127,10 @@ export default function ClientesContainer(): React.ReactElement {
       direccion: data.direccion,
       telefono: data.telefono || undefined,
       cuit: data.cuit || undefined,
+      // zona (texto) está deprecada — se mantiene un release por compat de lecturas legacy.
       zona: data.zona || undefined,
+      // Empty string from "(Sin zona)" → null para limpiar la FK (no '' que rompe FK validation).
+      zona_id: data.zona_id ? data.zona_id : null,
       latitud: data.latitud,
       longitud: data.longitud,
       limite_credito: data.limiteCredito,

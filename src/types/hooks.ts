@@ -20,7 +20,9 @@ export interface ClienteDB {
   telefono?: string | null;
   email?: string | null;
   contacto?: string | null;
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string | null;
+  zona_id?: string | null;
   horarios_atencion?: string | null;
   rubro?: string | null;
   notas?: string | null;
@@ -208,7 +210,9 @@ export interface ClienteFormInput {
   telefono?: string;
   email?: string;
   contacto?: string;
+  /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string;
+  zona_id?: string | null;
   horarios_atencion?: string;
   rubro?: string;
   notas?: string;
