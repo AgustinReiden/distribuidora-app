@@ -47,6 +47,7 @@ export interface PedidoActionsContext {
   handleVolverAPendiente: (pedido: PedidoDB) => void;
   handleAsignarTransportista: (transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
   handleEliminarPedido: (id: string) => void;
+  handleRegistrarPago?: (pedido: PedidoDB) => void;
 
   // Historial y edición
   handleVerHistorial: (pedido: PedidoDB) => Promise<void>;

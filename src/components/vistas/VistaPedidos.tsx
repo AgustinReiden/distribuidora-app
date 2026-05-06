@@ -77,7 +77,7 @@ export interface VistaPedidosProps {
     fotoUrl?: string;
     devolverStock: boolean;
   }) => Promise<RegistrarSalvedadResult>;
-  /** Handler para registrar un pago (reutiliza el flujo del admin). */
+  /** Handler legacy para registrar un pago desde la vista transportista (modal cliente). */
   onRegistrarPago?: (data: {
     clienteId: string;
     pedidoId: string | null;
@@ -87,6 +87,8 @@ export interface VistaPedidosProps {
     notas: string;
     fecha: string;
   }) => Promise<unknown>;
+  /** Handler para abrir ModalPagoPedido desde el dropdown del PedidoCard. */
+  onAbrirPagoPedido?: (pedido: PedidoDB) => void;
 }
 
 export default function VistaPedidos({
@@ -131,6 +133,7 @@ export default function VistaPedidos({
   onAsignarTransportistaMasivo,
   onRegistrarSalvedad,
   onRegistrarPago,
+  onAbrirPagoPedido,
 }: VistaPedidosProps) {
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
@@ -257,6 +260,7 @@ export default function VistaPedidos({
                 onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
                 onDesmarcarEntregado={onDesmarcarEntregado}
                 onCancelarPedido={onCancelarPedido}
+                onRegistrarPago={onAbrirPagoPedido}
               />
             ))}
           </div>

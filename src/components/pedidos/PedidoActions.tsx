@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, LucideIcon } from 'lucide-react';
+import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, DollarSign, LucideIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -18,6 +18,7 @@ import {
   DropdownMenuSeparator
 } from '../ui/DropdownMenu';
 import type { PedidoDB } from '../../types';
+import { preventistaPuedeEditar } from '../../utils/permisosPedido';
 
 // =============================================================================
 // PROPS INTERFACES
@@ -29,6 +30,7 @@ export interface AccionesDropdownProps {
   isPreventista?: boolean;
   isTransportista?: boolean;
   isEncargado?: boolean;
+  currentUserId?: string;
   onHistorial?: (pedido: PedidoDB) => void;
   onEditar?: (pedido: PedidoDB) => void;
   onEditarNotas?: (pedido: PedidoDB) => void;
@@ -39,6 +41,7 @@ export interface AccionesDropdownProps {
   onEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
+  onRegistrarPago?: (pedido: PedidoDB) => void;
 }
 
 interface AccionItem {
@@ -59,6 +62,7 @@ function AccionesDropdown({
   isPreventista,
   isTransportista,
   isEncargado,
+  currentUserId,
   onHistorial,
   onEditar,
   onEditarNotas,
@@ -69,6 +73,7 @@ function AccionesDropdown({
   onEntregadoConSalvedad,
   onRevertir,
   onCancelarPedido,
+  onRegistrarPago,
 }: AccionesDropdownProps): React.ReactElement {
   // Memoizar acciones para evitar recalculos innecesarios
   const acciones = useMemo((): AccionItem[] => {
@@ -92,15 +97,39 @@ function AccionesDropdown({
         onClick: () => onEditar(pedido),
         className: 'text-blue-700 dark:text-blue-400'
       });
-    }
-
-    // Preventista solo puede editar observaciones
-    if (isPreventista && !isAdmin && !isEncargado && onEditarNotas) {
+    } else if (
+      isPreventista && !isAdmin && !isEncargado &&
+      onEditar && preventistaPuedeEditar(pedido, currentUserId)
+    ) {
+      // Preventista creador: edicion limitada del pedido (items, fechas) hasta 17:00 ARG
+      items.push({
+        label: 'Editar Pedido',
+        icon: Edit2,
+        onClick: () => onEditar(pedido),
+        className: 'text-blue-700 dark:text-blue-400'
+      });
+    } else if (isPreventista && !isAdmin && !isEncargado && onEditarNotas) {
+      // Preventista fuera de ventana: solo observaciones
       items.push({
         label: 'Editar Observaciones',
         icon: Edit2,
         onClick: () => onEditarNotas(pedido),
         className: 'text-blue-700 dark:text-blue-400'
+      });
+    }
+
+    // Registrar pago (admin o encargado, mientras no este pagado/cancelado)
+    if (
+      (isAdmin || isEncargado) &&
+      pedido.estado !== 'cancelado' &&
+      pedido.estado_pago !== 'pagado' &&
+      onRegistrarPago
+    ) {
+      items.push({
+        label: 'Registrar Pago',
+        icon: DollarSign,
+        onClick: () => onRegistrarPago(pedido),
+        className: 'text-green-700 dark:text-green-400'
       });
     }
 
@@ -176,7 +205,7 @@ function AccionesDropdown({
     }
 
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago]);
 
   return (
     <DropdownMenu>

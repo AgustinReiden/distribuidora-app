@@ -665,11 +665,22 @@ export interface ResumenCuenta {
   ultimo_pago: string | null;
 }
 
+export interface RegistrarPagoBatchInput {
+  clienteId: string;
+  pedidoId: string;
+  fecha: string; // YYYY-MM-DD
+  observaciones?: string | null;
+  pagos: Array<{ formaPago: string; monto: number }>;
+  usuarioId?: string | null;
+}
+
 export interface UsePagosReturnExtended {
   pagos: PagoDBWithUsuario[];
   loading: boolean;
   fetchPagosCliente: (clienteId: string) => Promise<PagoDBWithUsuario[]>;
+  fetchPagosPedido: (pedidoId: string) => Promise<PagoDBWithUsuario[]>;
   registrarPago: (pago: PagoFormInput) => Promise<PagoDBWithUsuario>;
+  registrarPagosBatch: (input: RegistrarPagoBatchInput) => Promise<PagoDBWithUsuario[]>;
   eliminarPago: (pagoId: string) => Promise<void>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 }
