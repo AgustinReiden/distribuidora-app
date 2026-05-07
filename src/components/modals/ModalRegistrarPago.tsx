@@ -19,7 +19,8 @@ const FORMAS_PAGO: FormaPagoOption[] = [
   { value: 'transferencia', label: 'Transferencia' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'tarjeta', label: 'Tarjeta' },
-  { value: 'cuenta_corriente', label: 'Cuenta Corriente' }
+  { value: 'cuenta_corriente', label: 'Cuenta Corriente' },
+  { value: 'vale_blanco', label: 'Vale Blanco' }
 ]
 
 interface PagoData {

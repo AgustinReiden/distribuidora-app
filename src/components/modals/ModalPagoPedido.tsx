@@ -57,6 +57,7 @@ const FORMAS_PAGO_OPCIONES: Array<{ value: string; label: string }> = [
   { value: 'cheque', label: 'Cheque' },
   { value: 'cuenta_corriente', label: 'Cuenta Corriente' },
   { value: 'tarjeta', label: 'Tarjeta' },
+  { value: 'vale_blanco', label: 'Vale Blanco' },
 ]
 
 const ModalPagoPedido = memo(function ModalPagoPedido({
@@ -100,7 +101,13 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const algunMontoValido = lineas.some(l => parsePrecio(l.monto) > 0)
 
   const handleAgregarLinea = (): void => {
-    setLineas(prev => [...prev, { formaPago: 'transferencia', monto: '' }])
+    // Auto-sugerir el saldo restante: cliente pidio que el monto del nuevo
+    // renglon se prellene con (saldo - sumaActual). Sigue siendo editable.
+    const restante = Math.max(0, saldoPendiente - totalIngresado)
+    setLineas(prev => [
+      ...prev,
+      { formaPago: 'transferencia', monto: restante > 0 ? restante.toFixed(2) : '' },
+    ])
   }
 
   const handleQuitarLinea = (index: number): void => {

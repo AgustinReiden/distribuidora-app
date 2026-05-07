@@ -224,7 +224,7 @@ export const pedidoSchema = z.object({
     .array(itemPedidoSchema)
     .min(1, { message: 'Debe agregar al menos un producto' }),
 
-  forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
+  forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta', 'vale_blanco'], {
     error: 'Forma de pago inválida'
   }),
 
@@ -251,7 +251,7 @@ export const pedidoSchema = z.object({
 export type PedidoFormData = z.infer<typeof pedidoSchema>
 
 /** Valid payment methods for orders */
-export type FormaPagoPedido = 'efectivo' | 'transferencia' | 'cheque' | 'cuenta_corriente' | 'tarjeta'
+export type FormaPagoPedido = 'efectivo' | 'transferencia' | 'cheque' | 'cuenta_corriente' | 'tarjeta' | 'vale_blanco'
 
 // ============================================
 // SCHEMAS DE PAGO
@@ -262,7 +262,7 @@ export const pagoSchema = z.object({
 
   monto: montoPositivoSchema,
 
-  forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta'], {
+  forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'vale_blanco'], {
     error: 'Forma de pago inválida'
   }),
 
@@ -288,7 +288,7 @@ export const pagoSchema = z.object({
 export type PagoFormData = z.infer<typeof pagoSchema>
 
 /** Valid payment methods */
-export type FormaPago = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta'
+export type FormaPago = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'vale_blanco'
 
 // ============================================
 // SCHEMAS DE COMPRA
@@ -641,7 +641,7 @@ export const modalPagoSchema = z.object({
     .number({ error: 'El monto debe ser un número' })
     .positive({ message: 'El monto debe ser mayor a $0' }),
 
-  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente'], {
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente', 'vale_blanco'], {
     error: 'Forma de pago inválida'
   }),
 
@@ -662,7 +662,7 @@ export const modalPagoSchema = z.object({
 export type ModalPagoFormData = z.infer<typeof modalPagoSchema>
 
 /** Valid payment methods for modal */
-export type ModalFormaPago = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'cuenta_corriente'
+export type ModalFormaPago = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'cuenta_corriente' | 'vale_blanco'
 
 /**
  * Schema para ModalMermaStock

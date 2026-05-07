@@ -1163,6 +1163,7 @@ export interface ResumenRendicionDiaria {
   total_cheque: number;
   total_cuenta_corriente: number;
   total_tarjeta: number;
+  total_vale_blanco: number;
   total_otros: number;
   /** Total cobrado ese día (suma de pagos) */
   total_general: number;

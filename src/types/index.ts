@@ -105,6 +105,7 @@ export type FormaPago =
   | 'tarjeta'
   | 'cuenta_corriente'
   | 'cheque'
+  | 'vale_blanco'
   | 'otros';
 
 export type EstadoPago = 'pendiente' | 'parcial' | 'pagado';
