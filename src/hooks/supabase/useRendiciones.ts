@@ -46,6 +46,7 @@ export function useRendiciones(): UseRendicionesReturn {
         total_cheque: Number(r.total_cheque) || 0,
         total_cuenta_corriente: Number(r.total_cuenta_corriente) || 0,
         total_tarjeta: Number(r.total_tarjeta) || 0,
+        total_vale_blanco: Number(r.total_vale_blanco) || 0,
         total_otros: Number(r.total_otros) || 0,
         total_general: Number(r.total_general) || 0,
         cantidad_pedidos: Number(r.cantidad_pedidos) || 0,

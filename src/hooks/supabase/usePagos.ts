@@ -86,8 +86,10 @@ export function usePagos(): UsePagosReturnExtended {
   /**
    * Registra N pagos del mismo pedido en una sola operacion (uno por forma_pago).
    * Util para pagos combinados: cada forma genera una row separada en `pagos`,
-   * facilitando los reportes. El trigger SQL `actualizar_estado_pago_pedido`
-   * recalcula `pedidos.monto_pagado` y `pedidos.estado_pago` automaticamente.
+   * facilitando los reportes. El trigger SQL `recalcular_monto_pagado_pedido`
+   * (migration 035) recalcula `pedidos.monto_pagado` al insertar/anular pagos,
+   * y a su vez el trigger BEFORE `actualizar_estado_pago_pedido` recalcula
+   * `pedidos.estado_pago` en cascada.
    */
   const registrarPagosBatch = async (
     input: RegistrarPagoBatchInput

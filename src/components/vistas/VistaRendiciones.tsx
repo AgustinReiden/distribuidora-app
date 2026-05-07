@@ -78,6 +78,7 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
       cheque: resumen.total_cheque,
       cuenta_corriente: resumen.total_cuenta_corriente,
       tarjeta: resumen.total_tarjeta,
+      vale_blanco: resumen.total_vale_blanco,
       otros: resumen.total_otros
     }
     return FORMAS_PAGO
@@ -246,6 +247,7 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                 <div><span className="text-gray-500">Cheque:</span> <span className="font-medium">{formatMoney(resumen.total_cheque)}</span></div>
                 <div><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
                 <div><span className="text-gray-500">Tarjeta:</span> <span className="font-medium">{formatMoney(resumen.total_tarjeta)}</span></div>
+                <div><span className="text-gray-500">Vale Blanco:</span> <span className="font-medium">{formatMoney(resumen.total_vale_blanco)}</span></div>
                 <div><span className="text-gray-500">Otros:</span> <span className="font-medium">{formatMoney(resumen.total_otros)}</span></div>
               </div>
             </div>

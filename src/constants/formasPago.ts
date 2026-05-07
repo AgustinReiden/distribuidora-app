@@ -1,11 +1,11 @@
 /**
  * Formas de pago soportadas por la app.
  *
- * Sincronizado con la RPC `obtener_resumen_rendiciones` (migraciones 003+): las
- * columnas `total_efectivo`, `total_transferencia`, `total_cheque`,
- * `total_cuenta_corriente`, `total_tarjeta` y `total_otros` se calculan según
- * estas claves. Cualquier forma de pago que se guarde en `pagos.forma_pago`
- * fuera de este set cae en el bucket `otros`.
+ * Sincronizado con la RPC `obtener_resumen_rendiciones` (migraciones 003+ y 036):
+ * las columnas `total_efectivo`, `total_transferencia`, `total_cheque`,
+ * `total_cuenta_corriente`, `total_tarjeta`, `total_vale_blanco` y `total_otros`
+ * se calculan según estas claves. Cualquier forma de pago que se guarde en
+ * `pagos.forma_pago` fuera de este set cae en el bucket `otros`.
  */
 
 import type { FormaPago } from '../types'
@@ -26,6 +26,7 @@ export const FORMAS_PAGO: readonly FormaPagoMeta[] = [
   { value: 'cheque', label: 'Cheque', short: 'Ch.', color: 'purple' },
   { value: 'cuenta_corriente', label: 'Cuenta corriente', short: 'Cta. Cte.', color: 'amber' },
   { value: 'tarjeta', label: 'Tarjeta', short: 'Tj.', color: 'indigo' },
+  { value: 'vale_blanco', label: 'Vale Blanco', short: 'V.B.', color: 'rose' },
   { value: 'otros', label: 'Otros', short: 'Otros', color: 'slate' }
 ] as const
 
