@@ -173,7 +173,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         ? nuevaCategoria.trim()
         : form.categoria;
       onSave({ ...form, categoria: categoriaFinal, id: producto?.id });
+      return;
     }
+    // Validación falló: scrollear al primer mensaje de error inline para que sea visible
+    // (el body del modal tiene overflow-y-auto y el error puede quedar fuera del viewport).
+    requestAnimationFrame(() => {
+      const firstErrorMsg = document.querySelector<HTMLElement>('p.text-red-500');
+      firstErrorMsg?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
   };
 
   const inputClass = (field: string): string => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
@@ -306,28 +313,42 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
                   ...form,
                   unidades_de_venta_por_fardo: val === '' ? undefined : Number(val)
                 })
+                if (intentoGuardar && errores.unidades_de_venta_por_fardo) {
+                  clearFieldError('unidades_de_venta_por_fardo');
+                }
               }}
-              className="w-full px-3 py-2 border rounded-lg"
+              className={inputClass('unidades_de_venta_por_fardo')}
               placeholder="ej. 2"
             />
             <p className="text-xs text-gray-500 mt-1">
               Cuántas unidades de venta hacen 1 fardo. Si 1 unidad = medio fardo, poné 2.
             </p>
+            {errores.unidades_de_venta_por_fardo && (
+              <p className="text-red-500 text-xs mt-1">{errores.unidades_de_venta_por_fardo}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Etiqueta del bulto</label>
             <input
               type="text"
               value={form.etiqueta_bulto ?? ''}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setForm({
-                ...form,
-                etiqueta_bulto: e.target.value === '' ? undefined : e.target.value.toUpperCase()
-              })}
-              className="w-full px-3 py-2 border rounded-lg uppercase"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                setForm({
+                  ...form,
+                  etiqueta_bulto: e.target.value === '' ? undefined : e.target.value.toUpperCase()
+                })
+                if (intentoGuardar && errores.etiqueta_bulto) {
+                  clearFieldError('etiqueta_bulto');
+                }
+              }}
+              className={`${inputClass('etiqueta_bulto')} uppercase`}
               placeholder="FARDO"
               maxLength={20}
             />
             <p className="text-xs text-gray-500 mt-1">FARDO, CAJA, PACK, BULTO...</p>
+            {errores.etiqueta_bulto && (
+              <p className="text-red-500 text-xs mt-1">{errores.etiqueta_bulto}</p>
+            )}
           </div>
         </div>
 
