@@ -40,3 +40,13 @@ temp/
 .cache/
 .parcel-cache/
 .eslintcache
+
+# Backups locales (dumps Supabase)
+*.sql
+*.sql.gpg
+*.dump
+backups/
+!supabase/migrations/*.sql
+!scripts/verify-multi-tenant.sql
+!migrations/*.sql
+!migrations/**/*.sql
