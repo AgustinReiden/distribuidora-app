@@ -167,12 +167,18 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   };
 
   const handleSubmit = (): void => {
-    const result = validate(form);
+    // La etiqueta es accesoria al fardo: sin unidades configuradas no tiene
+    // sentido persistirla. Normalizar acá hace de defensa en profundidad por
+    // si la UI dejó pasar un valor (ej. autocompletado del browser).
+    const formNormalizado: ProductoFormData = form.unidades_de_venta_por_fardo
+      ? form
+      : { ...form, etiqueta_bulto: undefined };
+    const result = validate(formNormalizado);
     if (result.success) {
       const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
         ? nuevaCategoria.trim()
-        : form.categoria;
-      onSave({ ...form, categoria: categoriaFinal, id: producto?.id });
+        : formNormalizado.categoria;
+      onSave({ ...formNormalizado, categoria: categoriaFinal, id: producto?.id });
       return;
     }
     // Validación falló: scrollear al primer mensaje de error inline para que sea visible
@@ -298,6 +304,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         )}
 
         {/* Bulto / Fardo: cuántas unidades de venta hacen un fardo y cómo lo llamamos */}
+        {/* La etiqueta es accesoria al fardo: si no hay unidades configuradas, */}
+        {/* la etiqueta queda deshabilitada y no se persiste. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">Unidades por bulto/fardo</label>
@@ -309,9 +317,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               value={form.unidades_de_venta_por_fardo ?? ''}
               onChange={(e: ChangeEvent<HTMLInputElement>) => {
                 const val = e.target.value
+                const nuevasUnidades = val === '' ? undefined : Number(val)
                 setForm({
                   ...form,
-                  unidades_de_venta_por_fardo: val === '' ? undefined : Number(val)
+                  unidades_de_venta_por_fardo: nuevasUnidades,
+                  // Si dejan unidades vacío, también limpiar la etiqueta — la etiqueta
+                  // sola no tiene sentido y antes generaba un guardado bloqueado.
+                  ...(nuevasUnidades ? {} : { etiqueta_bulto: undefined })
                 })
                 if (intentoGuardar && errores.unidades_de_venta_por_fardo) {
                   clearFieldError('unidades_de_venta_por_fardo');
@@ -331,7 +343,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             <label className="block text-sm font-medium mb-1">Etiqueta del bulto</label>
             <input
               type="text"
-              value={form.etiqueta_bulto ?? ''}
+              value={form.unidades_de_venta_por_fardo ? (form.etiqueta_bulto ?? '') : ''}
               onChange={(e: ChangeEvent<HTMLInputElement>) => {
                 setForm({
                   ...form,
@@ -341,8 +353,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
                   clearFieldError('etiqueta_bulto');
                 }
               }}
-              className={`${inputClass('etiqueta_bulto')} uppercase`}
-              placeholder="FARDO"
+              disabled={!form.unidades_de_venta_por_fardo}
+              className={`${inputClass('etiqueta_bulto')} uppercase disabled:bg-gray-100 disabled:cursor-not-allowed`}
+              placeholder={form.unidades_de_venta_por_fardo ? 'FARDO' : 'Configura unidades primero'}
               maxLength={20}
             />
             <p className="text-xs text-gray-500 mt-1">FARDO, CAJA, PACK, BULTO...</p>

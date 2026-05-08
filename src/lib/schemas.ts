@@ -619,16 +619,14 @@ export const modalProductoSchema = z.object({
     .optional(),
 
   // Etiqueta del bulto: FARDO, CAJA, PACK, BULTO...
-  // Default a 'FARDO' en el form; si queda vacío se persiste como null.
+  // Solo se persiste con valor cuando hay unidades_de_venta_por_fardo.
+  // Sin unidades, el form normaliza la etiqueta a undefined antes de mandar.
   etiqueta_bulto: z
     .string()
     .trim()
     .max(20, { message: 'Máximo 20 caracteres' })
     .optional()
-}).refine(
-  d => !d.etiqueta_bulto || d.unidades_de_venta_por_fardo,
-  { message: 'Si configurás una etiqueta de bulto, también poné las unidades por fardo', path: ['unidades_de_venta_por_fardo'] }
-)
+})
 
 /** Inferred type for ModalProducto schema */
 export type ModalProductoFormData = z.infer<typeof modalProductoSchema>
