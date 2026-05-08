@@ -1,0 +1,233 @@
+name: Backup Supabase DB
+
+on:
+  schedule:
+    # 06:00 UTC = 03:00 ART (Argentina, baja carga operativa)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Forzar tier de retencion (auto detecta por fecha si se deja en auto)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - daily
+          - weekly
+          - monthly
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: pg_dump + encrypt + upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BACKUP_DIR: /tmp/supabase-backup
+      RCLONE_REMOTE: gdrive:Backups/distribuidora-app
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install postgresql-client-17 and rclone
+        run: |
+          set -euo pipefail
+          # PostgreSQL 17 client (matchea la version de produccion en Supabase)
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          # rclone (oficial)
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          pg_dump --version
+          rclone --version | head -n1
+
+      - name: Configure rclone from secret
+        env:
+          RCLONE_CONFIG_BASE64: ${{ secrets.RCLONE_CONFIG_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RCLONE_CONFIG_BASE64:-}" ]; then
+            echo "ERROR: RCLONE_CONFIG_BASE64 no esta configurado en secrets"
+            exit 1
+          fi
+          mkdir -p "$HOME/.config/rclone"
+          echo "$RCLONE_CONFIG_BASE64" | base64 -d > "$HOME/.config/rclone/rclone.conf"
+          chmod 600 "$HOME/.config/rclone/rclone.conf"
+          # Sanity: verificar que el remote existe
+          rclone listremotes | grep -q '^gdrive:$' || { echo "ERROR: remote gdrive: no encontrado en rclone.conf"; exit 1; }
+
+      - name: pg_dump
+        id: dump
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "ERROR: SUPABASE_DB_URL no esta configurado en secrets"
+            exit 1
+          fi
+          mkdir -p "$BACKUP_DIR"
+          DUMP_FILE="$BACKUP_DIR/dump.sql"
+          # -Fc = custom format (comprimido + restaurable selectivamente)
+          # --no-owner / --no-acl = portable a otro proyecto Supabase
+          pg_dump \
+            --format=custom \
+            --no-owner \
+            --no-acl \
+            --verbose \
+            --file="$DUMP_FILE" \
+            "$SUPABASE_DB_URL" 2>"$BACKUP_DIR/pg_dump.log" || {
+              echo "pg_dump fallo. Ultimas lineas del log:"
+              tail -n 30 "$BACKUP_DIR/pg_dump.log"
+              exit 1
+            }
+          SIZE_BYTES=$(stat -c%s "$DUMP_FILE")
+          echo "Dump size: $SIZE_BYTES bytes"
+          # Sanity: dump < 100KB casi seguro indica falla parcial
+          if [ "$SIZE_BYTES" -lt 102400 ]; then
+            echo "ERROR: dump menor a 100KB ($SIZE_BYTES bytes), probablemente fallo"
+            tail -n 30 "$BACKUP_DIR/pg_dump.log"
+            exit 1
+          fi
+          echo "size_bytes=$SIZE_BYTES" >> "$GITHUB_OUTPUT"
+          echo "size_human=$(numfmt --to=iec --suffix=B $SIZE_BYTES)" >> "$GITHUB_OUTPUT"
+
+      - name: Encrypt with gpg
+        id: encrypt
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_PASSPHRASE:-}" ]; then
+            echo "ERROR: BACKUP_PASSPHRASE no esta configurado en secrets"
+            exit 1
+          fi
+          DUMP_FILE="$BACKUP_DIR/dump.sql"
+          ENC_FILE="$DUMP_FILE.gpg"
+          gpg --batch --yes --quiet \
+            --passphrase "$BACKUP_PASSPHRASE" \
+            --symmetric --cipher-algo AES256 \
+            --output "$ENC_FILE" \
+            "$DUMP_FILE"
+          rm -f "$DUMP_FILE"
+          SHA=$(sha256sum "$ENC_FILE" | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "enc_file=$ENC_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Determine retention tier
+        id: tier
+        run: |
+          set -euo pipefail
+          INPUT_TIER="${{ github.event.inputs.tier }}"
+          if [ -n "$INPUT_TIER" ] && [ "$INPUT_TIER" != "auto" ]; then
+            TIER="$INPUT_TIER"
+          else
+            DAY_OF_MONTH=$(date -u +%d)
+            DAY_OF_WEEK=$(date -u +%u)  # 1=Mon ... 7=Sun
+            if [ "$DAY_OF_MONTH" = "01" ]; then
+              TIER=monthly
+            elif [ "$DAY_OF_WEEK" = "7" ]; then
+              TIER=weekly
+            else
+              TIER=daily
+            fi
+          fi
+          DATE_TAG=$(date -u +%Y-%m-%d)
+          echo "tier=$TIER" >> "$GITHUB_OUTPUT"
+          echo "date_tag=$DATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "Tier seleccionado: $TIER (date $DATE_TAG)"
+
+      - name: Upload to Google Drive
+        id: upload
+        run: |
+          set -euo pipefail
+          REMOTE_PATH="$RCLONE_REMOTE/${{ steps.tier.outputs.tier }}/${{ steps.tier.outputs.date_tag }}.sql.gpg"
+          rclone copyto "${{ steps.encrypt.outputs.enc_file }}" "$REMOTE_PATH" --progress
+          # Verificar tamaño remoto
+          REMOTE_SIZE=$(rclone size "$REMOTE_PATH" --json | python3 -c "import sys,json;print(json.load(sys.stdin)['bytes'])")
+          if [ "$REMOTE_SIZE" -lt 100 ]; then
+            echo "ERROR: archivo subido tiene tamaño anomalo ($REMOTE_SIZE bytes)"
+            exit 1
+          fi
+          echo "remote_path=$REMOTE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Apply retention policy
+        run: |
+          set -euo pipefail
+          chmod +x scripts/backup/retention.sh
+          ./scripts/backup/retention.sh "$RCLONE_REMOTE"
+
+      - name: Notify Telegram (success)
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_BACKUP_CHAT_ID }}
+          TIER: ${{ steps.tier.outputs.tier }}
+          DATE_TAG: ${{ steps.tier.outputs.date_tag }}
+          SIZE_HUMAN: ${{ steps.dump.outputs.size_human }}
+          SHA256: ${{ steps.encrypt.outputs.sha256 }}
+          REMOTE_PATH: ${{ steps.upload.outputs.remote_path }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "Telegram no configurado, skipping notify"
+            exit 0
+          fi
+          MSG=$(printf '[OK] Backup Supabase\nFecha: %s\nTier: %s\nTamaño dump: %s\nSHA256: %s\nPath: %s\nRun: %s' \
+            "$DATE_TAG" "$TIER" "$SIZE_HUMAN" "$SHA256" "$REMOTE_PATH" "$RUN_URL")
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MSG}" \
+            --data-urlencode "disable_web_page_preview=true" \
+            -o /dev/null
+
+      - name: Notify Telegram (failure)
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_BACKUP_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "Telegram no configurado, skipping notify"
+            exit 0
+          fi
+          DATE_TAG=$(date -u +%Y-%m-%d)
+          MSG=$(printf '[FAIL] Backup Supabase fallo\nFecha: %s\nRun: %s\nRevisar logs y arreglar antes del proximo cron.' \
+            "$DATE_TAG" "$RUN_URL")
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MSG}" \
+            --data-urlencode "disable_web_page_preview=true" \
+            -o /dev/null || true
+
+      - name: Cleanup local files
+        if: always()
+        run: |
+          rm -rf "$BACKUP_DIR" || true
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Backup Supabase"
+            echo "- **Fecha:** ${{ steps.tier.outputs.date_tag }}"
+            echo "- **Tier:** ${{ steps.tier.outputs.tier }}"
+            echo "- **Tamaño dump:** ${{ steps.dump.outputs.size_human }}"
+            echo "- **SHA256:** \`${{ steps.encrypt.outputs.sha256 }}\`"
+            echo "- **Path remoto:** \`${{ steps.upload.outputs.remote_path }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
