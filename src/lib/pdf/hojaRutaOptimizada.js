@@ -396,15 +396,55 @@ function buildManifiestoOps(pedidos) {
   return ops
 }
 
-function drawManifiestoOps(doc, ops, x, yStart) {
-  const innerX = x + CARD_INNER_PADDING
-  let y = yStart
+/**
+ * Dibuja el manifiesto fluyendo a traves de columnas/paginas.
+ * El ctx provee acceso dinamico a la columna actual y al limite inferior, mas
+ * un advanceColumn() que salta a la siguiente columna (o agrega pagina nueva).
+ * Cada fila chequea si entra antes de dibujarse, garantizando que la lista
+ * completa quede visible aunque exceda una columna o una hoja.
+ */
+function drawManifiestoOps(doc, ops, ctx) {
+  let x = ctx.columnX()
+  let innerX = x + CARD_INNER_PADDING
+  let y = ctx.startY
 
-  doc.setDrawColor(80, 80, 80)
-  doc.setLineWidth(0.4)
-  doc.line(x + 1, y - 1, x + COLUMN_WIDTH - 1, y - 1)
+  const drawSeparator = () => {
+    doc.setDrawColor(80, 80, 80)
+    doc.setLineWidth(0.4)
+    doc.line(x + 1, y - 1, x + COLUMN_WIDTH - 1, y - 1)
+  }
 
-  ops.forEach((op) => {
+  const advanceForOverflow = () => {
+    ctx.advanceColumn()
+    x = ctx.columnX()
+    innerX = x + CARD_INNER_PADDING
+    y = ctx.columnTop
+    drawSeparator()
+  }
+
+  drawSeparator()
+
+  // Orphan-prevention: si el header (titulo + subtitulo + al menos 1 fila) no
+  // entra en lo que queda de la columna, saltar antes de empezar a dibujar.
+  const titleIdx = ops.findIndex(o => o.kind === 'manifiesto-title')
+  if (titleIdx >= 0) {
+    const headerHeight = (ops[titleIdx]?.advance || 0)
+      + (ops[titleIdx + 1]?.advance || 0)
+      + (ops[titleIdx + 2]?.advance || 0)
+    if (y + headerHeight > ctx.columnBottom) {
+      advanceForOverflow()
+    }
+  }
+
+  for (const op of ops) {
+    const advance = op.advance || 0
+
+    // Si la op no entra en la columna actual, avanzar. El titulo se exime
+    // porque ya lo manejo el bloque de orphan-prevention.
+    if (op.kind !== 'manifiesto-title' && y + advance > ctx.columnBottom) {
+      advanceForOverflow()
+    }
+
     switch (op.kind) {
       case 'manifiesto-title': {
         doc.setFont('helvetica', 'bold')
@@ -448,8 +488,8 @@ function drawManifiestoOps(doc, ops, x, yStart) {
       default:
         break
     }
-    y += op.advance || 0
-  })
+    y += advance
+  }
 
   return y
 }
@@ -538,17 +578,19 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
 
   y = drawCierreOps(doc, cierreOps, columnX(), y)
 
-  // Manifiesto de carga: resumen consolidado de productos para el chofer
+  // Manifiesto de carga: resumen consolidado de productos para el chofer.
+  // La paginacion la maneja drawManifiestoOps fila-por-fila para que la lista
+  // completa quede visible aunque exceda una columna o una hoja.
   const manifiestoOps = buildManifiestoOps(pedidos)
-  const manifiestoHeight = manifiestoOps.reduce((s, o) => s + (o.advance || 0), 0) + 4
+  y += 3
 
-  if (y + manifiestoHeight > columnBottom) {
-    advanceColumn()
-  } else {
-    y += 3
-  }
-
-  drawManifiestoOps(doc, manifiestoOps, columnX(), y)
+  drawManifiestoOps(doc, manifiestoOps, {
+    columnX,
+    advanceColumn,
+    get columnTop() { return columnTop },
+    columnBottom,
+    startY: y,
+  })
 
   doc.save(generateFilename('ruta', transportista?.nombre))
 }

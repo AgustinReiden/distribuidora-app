@@ -73,8 +73,12 @@ interface ActualizarPagoInput {
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
 const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
 const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, telefono, contacto, latitud, longitud, horarios_atencion, zona' as const
-const PEDIDO_SELECT = `*, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const
-const PEDIDO_SELECT_CLIENTE_INNER = `*, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const
+// pagos(forma_pago, monto): permite a la card derivar la forma de pago real
+// (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
+// como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
+// valor original al crear el pedido y queda desactualizado tras un combinado.
+const PEDIDO_SELECT = `*, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
+const PEDIDO_SELECT_CLIENTE_INNER = `*, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
 
 // Helper: cargar salvedades para un conjunto de pedidos
 async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise<Record<string, PedidoSalvedadResumen[]>> {
@@ -178,7 +182,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
 async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*, items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque))` as const)
+    .select(`*, items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const)
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)

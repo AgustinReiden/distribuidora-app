@@ -122,6 +122,9 @@ export interface PedidoDB {
   orden_entrega?: number | null;
   items?: PedidoItemDB[];
   salvedades?: PedidoSalvedadResumen[];
+  // Subset de pagos.* embebido por usePedidosQuery para que la card derive
+  // la forma de pago real (ej: "Combinado") sin queries adicionales.
+  pagos?: Array<{ forma_pago: string; monto: number }>;
   stock_descontado?: boolean;
   fecha?: string;
   fecha_entrega?: string | null;
