@@ -352,6 +352,22 @@ export const getFormaPagoLabel = (forma: FormaPago | string | null | undefined):
   forma === 'vale_blanco' ? 'Vale Blanco' :
   forma || '';
 
+// Deriva la etiqueta a mostrar en la card del pedido. Los pagos combinados se
+// guardan como N filas en `pagos` con distintos forma_pago, pero pedidos.forma_pago
+// queda con el valor original; sin esto se mostraria "Efectivo" para combinados.
+//   - 0 pagos registrados: usa pedido.forma_pago (legacy / antes de cobrar).
+//   - 1 forma distinta: muestra esa forma (la real del pago).
+//   - 2+ formas distintas: "Combinado".
+export const getFormaPagoDisplay = (
+  pedido: { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }
+): string => {
+  const formas = (pedido.pagos || []).map(p => p.forma_pago).filter(Boolean);
+  const distintas = Array.from(new Set(formas));
+  if (distintas.length === 0) return getFormaPagoLabel(pedido.forma_pago);
+  if (distintas.length === 1) return getFormaPagoLabel(distintas[0]);
+  return 'Combinado';
+};
+
 // ============================================
 // UTILIDADES GENERALES
 // ============================================
@@ -435,6 +451,7 @@ export default {
   getEstadoPagoColor,
   getEstadoPagoLabel,
   getFormaPagoLabel,
+  getFormaPagoDisplay,
   truncate,
   capitalize,
   formatPercent,

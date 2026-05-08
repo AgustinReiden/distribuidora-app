@@ -13,7 +13,7 @@ const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { f
   const mod = await import('../../lib/pdfExport') as any
   return mod.generarReciboPedido(pedido, _empresa, options)
 };
-import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel } from '../../utils/formatters';
+import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
 import { PedidoActionsCtx } from '../../contexts/HandlersContext';
@@ -263,10 +263,10 @@ function PedidoCard({
         <div className="flex flex-wrap justify-between items-center gap-2">
           <div className="flex flex-col">
             <p className="text-lg font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
-            {pedido.forma_pago && (
+            {(pedido.forma_pago || (pedido.pagos && pedido.pagos.length > 0)) && (
               <p className="text-xs text-gray-500 flex items-center">
                 <CreditCard className="w-3 h-3 mr-1" />
-                {getFormaPagoLabel(pedido.forma_pago)}
+                {getFormaPagoDisplay(pedido)}
               </p>
             )}
           </div>
@@ -449,8 +449,29 @@ function PedidoCard({
               <p className="text-xs text-gray-500 dark:text-gray-400">Forma de pago</p>
               <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1">
                 <CreditCard className="w-4 h-4" />
-                {getFormaPagoLabel(pedido.forma_pago)}
+                {getFormaPagoDisplay(pedido)}
               </p>
+              {/* Desglose cuando el pago fue combinado: muestra cuanto se cobro
+                  por cada forma sin abrir el modal de pagos. */}
+              {(() => {
+                const pagos = pedido.pagos || [];
+                const formas = Array.from(new Set(pagos.map(p => p.forma_pago).filter(Boolean)));
+                if (formas.length < 2) return null;
+                const desglose = formas.map(f => ({
+                  forma: f,
+                  monto: pagos.filter(p => p.forma_pago === f).reduce((s, p) => s + (p.monto || 0), 0),
+                }));
+                return (
+                  <div className="mt-1.5 pt-1.5 border-t border-gray-200 dark:border-gray-600 space-y-0.5 text-xs text-gray-600 dark:text-gray-400">
+                    {desglose.map(d => (
+                      <div key={d.forma} className="flex justify-between">
+                        <span>{getFormaPagoLabel(d.forma)}</span>
+                        <span className="font-medium">{formatPrecio(d.monto)}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
             <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <p className="text-xs text-gray-500 dark:text-gray-400">Transportista</p>
