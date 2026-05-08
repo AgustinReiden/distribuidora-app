@@ -48,6 +48,10 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
+          # PG 17 binarios viven en /usr/lib/postgresql/17/bin; el runner trae PG 16
+          # por default en /usr/bin. Anteponer al PATH para todos los steps siguientes.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
           # rclone (oficial)
           curl -fsSL https://rclone.org/install.sh | sudo bash
           pg_dump --version
