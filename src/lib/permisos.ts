@@ -51,6 +51,10 @@ export function puedeAccederTransferencias(rol: RolUsuario | null | undefined): 
   return rol === 'admin'
 }
 
+export function puedeAccederGeolocalizacion(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 export type PedidoStatKey =
   | 'pendientes'
   | 'enPreparacion'

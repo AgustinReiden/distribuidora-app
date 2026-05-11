@@ -158,6 +158,19 @@ export {
   useInvalidateMetricas,
 } from './useMetricasQuery'
 
+// Geolocalización de preventistas (panel admin)
+export {
+  geolocalizacionKeys,
+  useGeolocalizacionPreventistasQuery,
+} from './useGeolocalizacionPreventistasQuery'
+export type {
+  GpsStatus,
+  UltimaUbicacion,
+  PreventistaResumen,
+  PedidoConGps,
+  GeolocalizacionPanelData,
+} from './useGeolocalizacionPreventistasQuery'
+
 // Promociones
 export {
   promocionesKeys,

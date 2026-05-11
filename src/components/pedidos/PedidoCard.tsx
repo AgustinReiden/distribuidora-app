@@ -18,6 +18,7 @@ import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
 import { PedidoActionsCtx } from '../../contexts/HandlersContext';
 import { useAuthData } from '../../contexts/AuthDataContext';
+import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo';
 import type { PedidoDB, MotivoSalvedad } from '../../types';
 
 // =============================================================================
@@ -93,6 +94,71 @@ function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactEle
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${colorClass}`}>
       <Timer className="w-3 h-3" />
       {dias}d
+    </span>
+  );
+}
+
+// Badge: distancia entre el GPS del check-in del preventista y la dirección
+// del cliente. Solo se muestra a admin (y al preventista dueño). Si no hubo
+// check-in (gps_status null), no renderiza nada para no contaminar las cards
+// históricas previas a la migración 040.
+interface BadgeGeolocalizacionProps {
+  pedido: PedidoDB;
+}
+
+function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.ReactElement | null {
+  if (!pedido.gps_status) return null;
+
+  // GPS fallido: mostrar chip neutro indicando el motivo.
+  if (pedido.gps_status !== 'ok') {
+    const motivo =
+      pedido.gps_status === 'denied' ? 'GPS denegado' :
+      pedido.gps_status === 'timeout' ? 'GPS sin respuesta' :
+      pedido.gps_status === 'unavailable' ? 'GPS no disponible' :
+      'GPS con error';
+    return (
+      <span
+        title={motivo}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
+      >
+        <MapPin className="w-3 h-3" />
+        Sin GPS
+      </span>
+    );
+  }
+
+  // GPS ok: si el cliente no tiene coordenadas, no podemos calcular distancia.
+  const clienteLat = pedido.cliente?.latitud;
+  const clienteLng = pedido.cliente?.longitud;
+  const pedidoLat = pedido.gps_lat;
+  const pedidoLng = pedido.gps_lng;
+
+  if (clienteLat == null || clienteLng == null || pedidoLat == null || pedidoLng == null) {
+    return (
+      <span
+        title="Cliente sin coordenadas cargadas"
+        className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
+      >
+        <MapPin className="w-3 h-3" />
+        s/ref
+      </span>
+    );
+  }
+
+  const metros = haversineMeters(
+    { lat: Number(pedidoLat), lng: Number(pedidoLng) },
+    { lat: Number(clienteLat), lng: Number(clienteLng) },
+  );
+  const clasif = clasificarDistancia(metros);
+  const cfg = SEMAFORO_COLORS[clasif];
+
+  return (
+    <span
+      title={`${cfg.label} · ${formatDistancia(metros)}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border border-transparent ${cfg.bg}`}
+    >
+      <MapPin className="w-3 h-3" />
+      {formatDistancia(metros)}
     </span>
   );
 }
@@ -193,6 +259,9 @@ function PedidoCard({
                   </span>
                 )}
                 <BadgeAntiguedad dias={calcularDiasAntiguedad(pedido.fecha || pedido.created_at)} estado={pedido.estado} />
+                {(isAdmin || (isPreventista && user?.id === pedido.usuario_id)) && (
+                  <BadgeGeolocalizacion pedido={pedido} />
+                )}
               </p>
             </div>
           </div>

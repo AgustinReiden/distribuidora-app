@@ -132,6 +132,13 @@ export interface PedidoDB {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+  // Geolocalizacion del check-in del preventista al confirmar el pedido.
+  // Null en pedidos previos a migration 040 o creados por roles que no capturan GPS.
+  gps_lat?: number | null;
+  gps_lng?: number | null;
+  gps_accuracy?: number | null;
+  gps_capturado_at?: string | null;
+  gps_status?: 'ok' | 'denied' | 'unavailable' | 'timeout' | 'error' | null;
 }
 
 export interface MermaDB {
