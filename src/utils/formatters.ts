@@ -65,6 +65,17 @@ export function fechaLocalISO(date: Date = new Date()): string {
 }
 
 /**
+ * Restar N dias a la fecha base (default hoy) y devolver YYYY-MM-DD en
+ * TZ Argentina. Usa setDate del Date local, que normaliza correctamente
+ * el rollover entre meses (ej. 11 mayo - 30 dias = 11 abril).
+ */
+export function fechaHaceDias(dias: number, base: Date = new Date()): string {
+  const d = new Date(base)
+  d.setDate(d.getDate() - dias)
+  return fechaLocalISO(d)
+}
+
+/**
  * Parsea un string de fecha de forma segura.
  * Para strings date-only (YYYY-MM-DD), agrega T12:00:00 para evitar
  * que JavaScript los interprete como UTC medianoche (lo cual causa
@@ -429,6 +440,7 @@ export default {
   formatCurrency,
   formatCurrencyCompact,
   fechaLocalISO,
+  fechaHaceDias,
   formatFecha,
   formatDate,
   formatDateTime,
