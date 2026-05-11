@@ -69,7 +69,7 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
     },
     required: ["desde", "hasta"],
   },
-  allowedRoles: ["admin", "encargado"],
+  allowedRoles: ["admin"],
   handler: async ({ desde, hasta, limit = 10 }, ctx) => {
     if (!FECHA_REGEX.test(desde) || !FECHA_REGEX.test(hasta)) {
       throw new Error("Fechas inválidas (esperado YYYY-MM-DD)");

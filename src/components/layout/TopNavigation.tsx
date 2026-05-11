@@ -47,7 +47,7 @@ const menuGroups: MenuGroup[] = [
     id: 'principal',
     label: null, // Items sin grupo (se muestran directo)
     items: [
-      { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'encargado', 'preventista'] },
+      { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
       { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'] },
     ]
   },
@@ -58,10 +58,10 @@ const menuGroups: MenuGroup[] = [
     roles: ['admin', 'encargado', 'preventista'],
     items: [
       { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'] },
-      { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin', 'encargado'], hidden: true },
-      { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin', 'encargado'] },
-      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin', 'encargado'], hidden: true },
-      { id: 'comisiones', icon: Percent, label: 'Comisiones', roles: ['admin', 'encargado'] },
+      { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin'], hidden: true },
+      { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
+      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin'], hidden: true },
+      { id: 'comisiones', icon: Percent, label: 'Comisiones', roles: ['admin'] },
     ]
   },
   {
@@ -72,10 +72,10 @@ const menuGroups: MenuGroup[] = [
     items: [
       { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'encargado', 'preventista', 'deposito'] },
       { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin', 'encargado'] },
-      { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin', 'encargado'] },
-      { id: 'condiciones-mayoristas', icon: Tag, label: 'Condiciones Mayoristas', roles: ['admin', 'encargado'] },
-      { id: 'promociones', icon: Gift, label: 'Promociones', roles: ['admin', 'encargado'] },
-      { id: 'transferencias', icon: ArrowRightLeft, label: 'Mov. Sucursales', roles: ['admin', 'encargado'] },
+      { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
+      { id: 'condiciones-mayoristas', icon: Tag, label: 'Condiciones Mayoristas', roles: ['admin'] },
+      { id: 'promociones', icon: Gift, label: 'Promociones', roles: ['admin'] },
+      { id: 'transferencias', icon: ArrowRightLeft, label: 'Mov. Sucursales', roles: ['admin'] },
     ]
   },
   {

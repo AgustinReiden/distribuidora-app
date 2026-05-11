@@ -14,7 +14,7 @@
  * y `pedidos.monto_pagado` automaticamente.
  *
  * Sobrepago bloqueado en frontend (totalIngresado > saldoPendiente). Anulacion
- * de pagos previos solo si el caller pasa `onAnularPago` (admin/encargado).
+ * de pagos previos solo si el caller pasa `onAnularPago` (solo admin).
  */
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Loader2, DollarSign, Plus, Trash2, AlertCircle, X } from 'lucide-react'

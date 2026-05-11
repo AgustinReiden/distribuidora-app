@@ -48,8 +48,8 @@ interface ConfirmConfig {
 }
 
 export default function ProductosContainer(): React.ReactElement {
-  const { isAdmin, isEncargado } = useAuthData()
-  const puedeCambiarProductos = isAdmin || isEncargado
+  const { isAdmin } = useAuthData()
+  const puedeCambiarProductos = isAdmin
   const notify = useNotification()
 
   // Queries

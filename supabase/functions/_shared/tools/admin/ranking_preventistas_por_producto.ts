@@ -102,7 +102,7 @@ export const rankingPreventistasPorProductoTool: Tool<
     },
     required: ["producto_ids", "desde", "hasta"],
   },
-  allowedRoles: ["admin", "encargado"],
+  allowedRoles: ["admin"],
   handler: async ({ producto_ids, desde, hasta, limit = 10 }, ctx) => {
     if (!Array.isArray(producto_ids) || producto_ids.length === 0) {
       throw new Error("producto_ids debe tener al menos 1 ID");

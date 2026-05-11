@@ -234,6 +234,23 @@ Deno.test("canInvoke deniega rol no autorizado", () => {
   assertEquals(canInvoke("transportista", adminOnly), false);
 });
 
+// Las tools de reporte agregado son admin-only desde migracion 039:
+// encargado pierde acceso a ventas_periodo, ventas_por_preventista,
+// ranking_preventistas_por_producto y compras_periodo (defensa en profundidad
+// para el filtrado de tools que ve Gemini).
+Deno.test("canInvoke bloquea reportes agregados al encargado", () => {
+  const adminOnlyReports = [
+    ventasPeriodoTool,
+    ventasPorPreventistaTool,
+    rankingPreventistasPorProductoTool,
+    comprasPeriodoTool,
+  ] as unknown as Tool[];
+  for (const t of adminOnlyReports) {
+    assertEquals(canInvoke("encargado", t), false);
+    assertEquals(canInvoke("admin", t), true);
+  }
+});
+
 // ============================================================================
 // 3. buscar_cliente: invoca el RPC bot_buscar_cliente con los params correctos
 // ============================================================================
