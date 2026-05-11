@@ -37,6 +37,7 @@ import UsuariosContainer from './components/containers/UsuariosContainer'
 
 const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'))
 const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'))
+const VistaGeolocalizacion = lazy(() => import('./components/vistas/VistaGeolocalizacion'))
 const AnalyticsContainer = lazy(() => import('./components/containers/AnalyticsContainer'))
 const ReportesContainer = lazy(() => import('./components/containers/ReportesContainer'))
 const ComisionesContainer = lazy(() => import('./components/containers/ComisionesContainer'))
@@ -320,6 +321,11 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/bot-telegram"
                   element={isAdmin ? <VistaBotTelegramContainer /> : <Navigate to="/dashboard" replace />}
+                />
+
+                <Route
+                  path="/geolocalizacion"
+                  element={isAdmin ? <VistaGeolocalizacion /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="*" element={<Navigate to={defaultRoute} replace />} />
