@@ -16,6 +16,7 @@ import { useMermasQuery, useRegistrarMermaMutation } from '../../hooks/queries'
 import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
+import { useCategoriasQuery } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { formatPrecio } from '../../utils/formatters'
@@ -57,6 +58,7 @@ export default function ProductosContainer(): React.ReactElement {
   const { data: mermas = [] } = useMermasQuery()
   const { data: proveedores = [] } = useProveedoresActivosQuery()
   const { data: clientes = [] } = useClientesQuery()
+  const { data: categoriasTabla = [] } = useCategoriasQuery()
 
   // Mutations
   const crearProducto = useCrearProductoMutation()
@@ -80,14 +82,20 @@ export default function ProductosContainer(): React.ReactElement {
   // Confirm modal state
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
-  // Categorías derivadas
+  // Categorías para el selector del modal: une la tabla `categorias` (solo
+  // activas) con las categorías derivadas de productos (strings heredados que
+  // todavía no se migraron a la tabla). Sin esto, una categoría recién creada
+  // no aparece hasta que se le asigna a algún producto.
   const categorias = useMemo(() => {
-    const cats = new Set<string>()
-    productos.forEach(p => {
-      if (p.categoria) cats.add(p.categoria)
+    const set = new Set<string>()
+    categoriasTabla.forEach(c => {
+      if (c.activa !== false) set.add(c.nombre)
     })
-    return Array.from(cats).sort()
-  }, [productos])
+    productos.forEach(p => {
+      if (p.categoria) set.add(p.categoria)
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [categoriasTabla, productos])
 
   // Handlers
   const handleNuevoProducto = useCallback(() => {
