@@ -32,6 +32,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
 import { usePromocionPedido } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
+import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
 import { supabase } from '../../hooks/supabase/base'
 import { usePagos } from '../../hooks/supabase/usePagos'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
@@ -123,6 +124,10 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Mutations
   const crearPedido = useCrearPedidoMutation()
+  // Geolocalización: solo se captura cuando el usuario es preventista. El
+  // RPC backend valida igualmente la autorización; este flag solo evita
+  // mostrar el prompt nativo de GPS a roles que no son target.
+  const { capturarGps, registrarGpsPedido } = useRegistrarGeolocalizacionPedido()
   const cambiarEstado = useCambiarEstadoMutation()
   const asignarTransportistaMut = useAsignarTransportistaMutation()
   const entregasMasivas = useEntregasMasivasMutation()
@@ -721,6 +726,10 @@ export default function PedidosContainer(): React.ReactElement {
       return
     }
     setGuardando(true)
+    // Disparamos la captura de GPS en paralelo a la creación del pedido para
+    // no agregar latencia al flujo. Sólo si el usuario es preventista (target
+    // del feature). El RPC vuelve a validar la autorización en el backend.
+    const gpsPromise = isPreventista ? capturarGps() : null
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
@@ -755,7 +764,7 @@ export default function PedidosContainer(): React.ReactElement {
           porcentaje_iva: pctIva,
         }
       })
-      await crearPedido.mutateAsync({
+      const pedidoCreado = await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
         total: totalFinal,
@@ -770,6 +779,13 @@ export default function PedidosContainer(): React.ReactElement {
         totalIva,
         fechaEntregaProgramada: nuevoPedido.fechaEntregaProgramada,
       })
+      // Check-in GPS: fire-and-forget. La promesa de captura ya está corriendo
+      // en paralelo desde el inicio del handler; cuando resuelva, mandamos el
+      // resultado al RPC. No bloquea el toast de éxito.
+      if (gpsPromise && pedidoCreado?.id) {
+        const pedidoId = pedidoCreado.id
+        gpsPromise.then(gps => { void registrarGpsPedido(pedidoId, gps) })
+      }
       resetNuevoPedido()
       setModalPedidoOpen(false)
       notify.success('Pedido creado correctamente')
@@ -777,7 +793,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos])
+  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos, isPreventista, capturarGps, registrarGpsPedido])
 
   // ModalFiltroFecha: onApply({ fechaDesde, fechaHasta })
   const handleFiltroFechaApply = useCallback((f: { fechaDesde: string | null; fechaHasta: string | null }) => {

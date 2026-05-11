@@ -26,6 +26,7 @@ const VistaCompras = lazy(() => import('./vistas/VistaCompras'))
 const VistaProveedores = lazy(() => import('./vistas/VistaProveedores'))
 const VistaRendiciones = lazy(() => import('./vistas/VistaRendiciones'))
 const VistaSalvedades = lazy(() => import('./vistas/VistaSalvedades'))
+const VistaGeolocalizacion = lazy(() => import('./vistas/VistaGeolocalizacion'))
 
 // =============================================================================
 // LOADING FALLBACK
@@ -197,6 +198,16 @@ export default function AppRouter({ vistaProps }: AppRouterProps): ReactElement 
           element={
             <ProtectedRoute requireAdmin>
               <VistaSalvedades />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Geolocalización - solo admin */}
+        <Route
+          path="/geolocalizacion"
+          element={
+            <ProtectedRoute requireAdmin>
+              <VistaGeolocalizacion />
             </ProtectedRoute>
           }
         />
