@@ -19,7 +19,9 @@ import {
   capitalize,
   formatPercent,
   formatNumber,
-  isValidEmail
+  isValidEmail,
+  fechaLocalISO,
+  fechaHaceDias,
 } from './formatters'
 
 describe('Formatters de Moneda', () => {
@@ -367,6 +369,40 @@ describe('Utilidades Generales', () => {
       expect(isValidEmail('@domain.com')).toBe(false)
       expect(isValidEmail('')).toBe(false)
       expect(isValidEmail(null)).toBe(false)
+    })
+  })
+})
+
+describe('Fechas', () => {
+  describe('fechaHaceDias', () => {
+    // base fija al mediodia para evitar bordes de TZ ARG (UTC-3)
+    const base = new Date('2026-05-11T15:00:00Z') // 12:00 ARG
+
+    it('0 dias = mismo dia que la base', () => {
+      expect(fechaHaceDias(0, base)).toBe(fechaLocalISO(base))
+    })
+
+    it('30 dias atras desde 11 mayo = 11 abril', () => {
+      expect(fechaHaceDias(30, base)).toBe('2026-04-11')
+    })
+
+    it('maneja cruce de mes corto (28 dias atras desde 5 marzo cae en febrero)', () => {
+      const marzo5 = new Date('2026-03-05T15:00:00Z')
+      expect(fechaHaceDias(28, marzo5)).toBe('2026-02-05')
+    })
+
+    it('maneja cruce de año (10 dias atras desde 5 enero = 26 diciembre)', () => {
+      const enero5 = new Date('2026-01-05T15:00:00Z')
+      expect(fechaHaceDias(10, enero5)).toBe('2025-12-26')
+    })
+
+    it('default base = hoy', () => {
+      const hoy = fechaLocalISO()
+      const ayer = fechaHaceDias(1)
+      // No comparamos un valor fijo (depende de cuando corre el test) pero
+      // ayer debe ser un string YYYY-MM-DD distinto de hoy.
+      expect(ayer).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      expect(ayer).not.toBe(hoy)
     })
   })
 })

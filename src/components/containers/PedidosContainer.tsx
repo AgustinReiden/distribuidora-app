@@ -7,7 +7,7 @@
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
 import { calcularNetoVenta } from '../../utils/calculations'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
@@ -57,15 +57,22 @@ const ModalAsignarTransportistaMasivo = lazy(() => import('../modals/ModalAsigna
 
 const ITEMS_PER_PAGE = 15
 
-const DEFAULT_FILTROS: FiltrosPedidosState = {
-  fechaDesde: null,
-  fechaHasta: null,
-  estado: 'todos',
-  estadoPago: 'todos',
-  transportistaId: 'todos',
-  usuarioId: 'todos',
-  busqueda: '',
-  conSalvedad: 'todos',
+// Ventana por defecto al abrir /pedidos: ultimos N dias.
+// El usuario puede ampliar/limpiar el rango con el chip o el modal de filtro
+// de fecha. La eleccion no persiste entre sesiones (cada visita arranca aca).
+const VENTANA_DEFAULT_DIAS = 30
+
+function buildDefaultFiltros(): FiltrosPedidosState {
+  return {
+    fechaDesde: fechaHaceDias(VENTANA_DEFAULT_DIAS),
+    fechaHasta: null,
+    estado: 'todos',
+    estadoPago: 'todos',
+    transportistaId: 'todos',
+    usuarioId: 'todos',
+    busqueda: '',
+    conSalvedad: 'todos',
+  }
 }
 
 function LoadingState() {
@@ -94,7 +101,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [paginaActual, setPaginaActual] = useState(1)
   const [busqueda, setBusqueda] = useState('')
   const debouncedBusqueda = useDebounce(busqueda, 350)
-  const [filtros, setFiltros] = useState<FiltrosPedidosState>(DEFAULT_FILTROS)
+  const [filtros, setFiltros] = useState<FiltrosPedidosState>(buildDefaultFiltros)
 
   // Queries - use debounced search to avoid firing on every keystroke
   const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago } = usePagos()
