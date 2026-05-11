@@ -82,7 +82,7 @@ export const ventasPorPreventistaTool: Tool<
     },
     required: ["desde", "hasta"],
   },
-  allowedRoles: ["admin", "encargado"],
+  allowedRoles: ["admin"],
   handler: async (
     { desde, hasta, solo_preventistas = true, limit = 10 },
     ctx,

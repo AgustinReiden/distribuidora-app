@@ -1,7 +1,7 @@
 import { useState, useMemo, memo } from 'react'
-import { Loader2, Search, Calendar } from 'lucide-react'
+import { Loader2, Search, Calendar, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
-import { usePedidosNoPagadosQuery } from '../../hooks/queries'
+import { usePedidosNoPagadosQuery, useRendicionCerradaQuery } from '../../hooks/queries'
 import { getEstadoPagoColor, getEstadoPagoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { FORMAS_PAGO } from '../../constants/formasPago'
 
@@ -15,21 +15,29 @@ export interface ModalPagosMasivosProps {
   onConfirm: (formaPago: string, pedidoIds: string[], fechaPago: string) => Promise<void>
   onClose: () => void
   guardando: boolean
+  /** Si el caller es encargado (no admin): fecha bloqueada a hoy y check de rendicion. */
+  isEncargado?: boolean
+  isAdmin?: boolean
 }
 
 const ModalPagosMasivos = memo(function ModalPagosMasivos({
   onConfirm,
   onClose,
   guardando,
+  isEncargado = false,
+  isAdmin = false,
 }: ModalPagosMasivosProps) {
+  const hoy = fechaLocalISO()
+  const fechaBloqueada = isEncargado && !isAdmin
   const [selectedFormaPago, setSelectedFormaPago] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
-  const [fechaPago, setFechaPago] = useState<string>(fechaLocalISO())
+  const [fechaPago, setFechaPago] = useState<string>(hoy)
 
   const { data: pedidos = [], isLoading } = usePedidosNoPagadosQuery(true)
+  const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fechaPago, fechaBloqueada)
 
   const pedidosFiltrados = useMemo(() => {
     let resultado = pedidos
@@ -64,7 +72,13 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   }
 
   const allSelected = pedidosFiltrados.length > 0 && selectedIds.size === pedidosFiltrados.length
-  const canConfirm = selectedFormaPago && selectedIds.size > 0 && !guardando && !!fechaPago
+  const bloqueadoPorRendicion = fechaBloqueada && rendicionCerrada
+  const canConfirm =
+    !!selectedFormaPago &&
+    selectedIds.size > 0 &&
+    !guardando &&
+    !!fechaPago &&
+    !bloqueadoPorRendicion
 
   // Calculate total of selected orders
   const totalSeleccionado = useMemo(() => {
@@ -104,13 +118,28 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
               type="date"
               value={fechaPago}
               onChange={e => setFechaPago(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              disabled={fechaBloqueada}
+              min={fechaBloqueada ? hoy : undefined}
+              max={fechaBloqueada ? hoy : undefined}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
             />
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Se imputa a la rendición de esa fecha. Por defecto hoy.
+              {fechaBloqueada
+                ? 'Como encargado solo podés registrar pagos con fecha de hoy. Si necesitás otra fecha pedíselo a un admin.'
+                : 'Se imputa a la rendición de esa fecha. Por defecto hoy.'}
             </p>
           </div>
         </div>
+
+        {bloqueadoPorRendicion && (
+          <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700">
+            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-amber-900 dark:text-amber-200">
+              <p className="font-medium">Rendición cerrada</p>
+              <p>La rendición de hoy ya fue confirmada. No podés registrar más pagos a esta fecha. Pedile a un admin si necesitás corregir algo.</p>
+            </div>
+          </div>
+        )}
 
         {/* Filtro por fechas */}
         <div className="grid grid-cols-2 gap-3">

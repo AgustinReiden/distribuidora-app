@@ -193,8 +193,9 @@ function AccionesDropdown({
       });
     }
 
-    // Admin o encargado puede cancelar si no esta entregado ni cancelado
-    if ((isAdmin || isEncargado) && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
+    // Solo admin puede cancelar pedidos (encargado bloqueado por defensa en profundidad
+    // en cancelar_pedido_con_stock; ver migracion 039).
+    if (isAdmin && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && onCancelarPedido) {
       items.push({
         label: 'Cancelar Pedido',
         icon: XCircle,

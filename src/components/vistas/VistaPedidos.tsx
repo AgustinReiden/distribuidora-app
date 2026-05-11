@@ -229,7 +229,7 @@ export default function VistaPedidos({
       />
 
       {/* Resumen de estados (totales sobre todos los pedidos filtrados) */}
-      <PedidoStats summary={statsSummary} />
+      <PedidoStats summary={statsSummary} isEncargado={isEncargado} />
 
       {/* Lista de pedidos */}
       {loading ? (

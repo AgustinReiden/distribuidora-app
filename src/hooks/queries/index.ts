@@ -183,6 +183,12 @@ export {
 } from './useNotasCreditoQuery'
 export type { NCResumen } from './useNotasCreditoQuery'
 
+// Rendicion del dia (helper para pagos masivos)
+export {
+  rendicionCerradaKeys,
+  useRendicionCerradaQuery,
+} from './useRendicionCerradaQuery'
+
 // Bot Telegram - Vinculación
 export {
   botVinculacionKeys,

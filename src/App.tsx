@@ -245,7 +245,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/dashboard"
-                  element={(isAdminOrEncargado || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                  element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="/pedidos" element={<PedidosContainer />} />
@@ -254,7 +254,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/reportes"
-                  element={isAdminOrEncargado ? <ReportesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdmin ? <ReportesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
@@ -279,22 +279,22 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/proveedores"
-                  element={isAdminOrEncargado ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/condiciones-mayoristas"
-                  element={isAdminOrEncargado ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/promociones"
-                  element={isAdminOrEncargado ? <PromocionesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdmin ? <PromocionesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/transferencias"
-                  element={isAdminOrEncargado ? <TransferenciasContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdmin ? <TransferenciasContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
@@ -309,12 +309,12 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/analytics"
-                  element={isAdminOrEncargado ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdmin ? <AnalyticsContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
                   path="/comisiones"
-                  element={isAdminOrEncargado ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdmin ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route

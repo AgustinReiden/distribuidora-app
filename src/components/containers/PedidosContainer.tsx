@@ -696,7 +696,7 @@ export default function PedidosContainer(): React.ReactElement {
 
   const handleAnularPagoPedido = useCallback(async (pagoId: string) => {
     if (!pedidoPago) return
-    if (!(isAdmin || isEncargado)) return
+    if (!isAdmin) return
     setGuardando(true)
     try {
       await eliminarPago(pagoId)
@@ -705,7 +705,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.success('Pago anulado')
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
-  }, [pedidoPago, isAdmin, isEncargado, eliminarPago, refreshPagosPedido, queryClient, notify])
+  }, [pedidoPago, isAdmin, eliminarPago, refreshPagosPedido, queryClient, notify])
 
   // ModalPedido handlers
   const handleGuardarPedido = useCallback(async () => {
@@ -1078,7 +1078,7 @@ export default function PedidosContainer(): React.ReactElement {
               isAdmin || isEncargado ||
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
             }
-            canEditPrices={isAdmin || isEncargado}
+            canEditPrices={isAdmin}
             canEditFechaEntrega={
               isAdmin || isEncargado ||
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
@@ -1101,7 +1101,7 @@ export default function PedidosContainer(): React.ReactElement {
             pagosPrevios={pagosPreviosPedido}
             loadingPagosPrevios={loadingPagosPrevios}
             onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
-            onAnularPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
+            onAnularPago={isAdmin && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
             modoEntregaTransportista={!!pedidoEntregaConPago}
             onEntregarSinPago={pedidoEntregaConPago ? handleEntregarSinPago : undefined}
             onClose={() => {
@@ -1226,6 +1226,8 @@ export default function PedidosContainer(): React.ReactElement {
             onConfirm={handlePagosMasivos}
             onClose={() => setModalPagosMasivosOpen(false)}
             guardando={guardando}
+            isEncargado={isEncargado}
+            isAdmin={isAdmin}
           />
         </Suspense>
       )}

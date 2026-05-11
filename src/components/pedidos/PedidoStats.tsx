@@ -8,6 +8,7 @@ import React, { memo } from 'react';
 import { Clock, Package, Truck, Check, DollarSign, ShoppingCart, LucideIcon } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import type { PedidoStatsSummary } from '../../hooks/queries';
+import { mostrarMontosEnStats, type PedidoStatKey } from '../../lib/permisos';
 
 // =============================================================================
 // PROPS INTERFACES
@@ -15,10 +16,11 @@ import type { PedidoStatsSummary } from '../../hooks/queries';
 
 export interface PedidoStatsProps {
   summary: PedidoStatsSummary;
+  isEncargado?: boolean;
 }
 
 interface StatItem {
-  key: string;
+  key: PedidoStatKey;
   label: string;
   icon: LucideIcon;
   count: number;
@@ -32,7 +34,8 @@ interface StatItem {
 // COMPONENT
 // =============================================================================
 
-function PedidoStats({ summary }: PedidoStatsProps): React.ReactElement {
+function PedidoStats({ summary, isEncargado }: PedidoStatsProps): React.ReactElement {
+  const rol = isEncargado ? 'encargado' : 'admin';
   const items: StatItem[] = [
     {
       key: 'pendientes',
@@ -104,7 +107,9 @@ function PedidoStats({ summary }: PedidoStatsProps): React.ReactElement {
           <div key={item.key} className={`border rounded-lg p-3 ${item.colorClass}`}>
             <div className="flex items-center justify-between">
               <IconComponent className={`w-5 h-5 ${item.iconColor}`} />
-              <span className={`text-xs ${item.iconColor}`}>{formatPrecio(item.total)}</span>
+              {mostrarMontosEnStats(rol, item.key) && (
+                <span className={`text-xs ${item.iconColor}`}>{formatPrecio(item.total)}</span>
+              )}
             </div>
             <p className={`text-xl font-bold ${item.iconColor}`}>{item.count}</p>
             <p className={`text-sm ${item.textColor}`}>{item.label}</p>
