@@ -14,6 +14,7 @@ import { MapPin, Users, ShoppingCart, AlertTriangle, RefreshCw, Calendar } from 
 import {
   useGeolocalizacionPreventistasQuery,
   type PedidoConGps,
+  type VisitaConGps,
 } from '../../hooks/queries'
 import { fechaLocalISO } from '../../utils/formatters'
 import KpiCard from '../geolocalizacion/KpiCard'
@@ -79,23 +80,30 @@ export default function VistaGeolocalizacion(): React.ReactElement {
   // re-disparen en cada render cuando `data` es undefined.
   const preventistas = useMemo(() => data?.preventistas ?? [], [data?.preventistas])
   const pedidos: PedidoConGps[] = useMemo(() => data?.pedidos ?? [], [data?.pedidos])
+  const visitas: VisitaConGps[] = useMemo(() => data?.visitas ?? [], [data?.visitas])
 
   // KPIs
   const kpis = useMemo(() => {
     const total = pedidos.length
     const conGps = pedidos.filter(p => p.gps_status === 'ok').length
     const sinGps = total - conGps
-    const anomalias = pedidos.filter(p => {
+    const visitasTotal = visitas.length
+    const anomaliasPedidos = pedidos.filter(p => {
       if (p.gps_status !== 'ok') return true
       return p.distancia_m != null && p.distancia_m >= 2000
+    }).length
+    const anomaliasVisitas = visitas.filter(v => {
+      if (v.gps_status !== 'ok') return true
+      return v.distancia_m != null && v.distancia_m >= 2000
     }).length
     return {
       preventistasActivos: preventistas.length,
       conGps,
       sinGps,
-      anomalias,
+      visitas: visitasTotal,
+      anomalias: anomaliasPedidos + anomaliasVisitas,
     }
-  }, [pedidos, preventistas])
+  }, [pedidos, visitas, preventistas])
 
   const preventistaSelectedNombre = useMemo(() => {
     if (!preventistaSelectedId) return null
@@ -186,7 +194,7 @@ export default function VistaGeolocalizacion(): React.ReactElement {
       </header>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard
           label="Preventistas activos"
           value={kpis.preventistasActivos}
@@ -197,13 +205,20 @@ export default function VistaGeolocalizacion(): React.ReactElement {
         <KpiCard
           label="Pedidos con GPS"
           value={kpis.conGps}
-          icon={MapPin}
+          icon={ShoppingCart}
           tone="green"
+        />
+        <KpiCard
+          label="Visitas marcadas"
+          value={kpis.visitas}
+          icon={MapPin}
+          tone="blue"
+          hint="Pings sin pedido asociado"
         />
         <KpiCard
           label="Sin ubicación"
           value={kpis.sinGps}
-          icon={ShoppingCart}
+          icon={MapPin}
           tone="slate"
         />
         <KpiCard
@@ -240,6 +255,7 @@ export default function VistaGeolocalizacion(): React.ReactElement {
           <MapaPreventistas
             preventistas={preventistas}
             pedidos={pedidos}
+            visitas={visitas}
             preventistaSelectedId={preventistaSelectedId}
             pedidoSelectedId={pedidoSelectedId}
             onSelectPreventista={handleSelectPreventista}
@@ -285,6 +301,7 @@ export default function VistaGeolocalizacion(): React.ReactElement {
           {tab === 'timeline' ? (
             <TimelineRecorrido
               pedidos={pedidos}
+              visitas={visitas}
               preventistaId={preventistaSelectedId}
               preventistaNombre={preventistaSelectedNombre}
               selectedPedidoId={pedidoSelectedId}
@@ -293,8 +310,14 @@ export default function VistaGeolocalizacion(): React.ReactElement {
           ) : (
             <TablaAnomalias
               pedidos={pedidos}
+              visitas={visitas}
               preventistas={preventistas}
               onSelectPedido={handleSelectAnomalia}
+              onSelectVisitaPreventista={(preventistaId) => {
+                setPreventistaSelectedId(preventistaId)
+                setPedidoSelectedId(null)
+                setTab('timeline')
+              }}
             />
           )}
         </div>

@@ -5,7 +5,7 @@
  * Renderiza lista + controles de paginación.
  */
 import { useState, useRef, useEffect } from 'react';
-import { ShoppingCart, Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown, Truck } from 'lucide-react';
+import { ShoppingCart, Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown, Truck, MapPin, History } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
@@ -67,6 +67,10 @@ export interface VistaPedidosProps {
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
   onAsignarTransportistaMasivo?: () => void;
+  /** Abre el modal para que el preventista marque una visita a un cliente. */
+  onMarcarVisita?: () => void;
+  /** Abre el modal con el timeline de visitas del día del preventista logueado. */
+  onVerVisitasHoy?: () => void;
   /** Handler para registrar una salvedad individual desde la vista transportista. */
   onRegistrarSalvedad?: (data: {
     pedidoId: string;
@@ -131,6 +135,8 @@ export default function VistaPedidos({
   onEntregasMasivas,
   onPagosMasivos,
   onAsignarTransportistaMasivo,
+  onMarcarVisita,
+  onVerVisitasHoy,
   onRegistrarSalvedad,
   onRegistrarPago,
   onAbrirPagoPedido,
@@ -202,6 +208,26 @@ export default function VistaPedidos({
             >
               <Banknote className="w-5 h-5" />
               <span className="hidden sm:inline">Pagos Masivos</span>
+            </button>
+          )}
+          {isPreventista && onVerVisitasHoy && (
+            <button
+              onClick={onVerVisitasHoy}
+              className="flex items-center space-x-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              title="Ver clientes que visitaste hoy"
+            >
+              <History className="w-5 h-5" />
+              <span className="hidden sm:inline">Visitas del día</span>
+            </button>
+          )}
+          {isPreventista && onMarcarVisita && (
+            <button
+              onClick={onMarcarVisita}
+              className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              title="Marcar visita a un cliente sin necesidad de cargar pedido"
+            >
+              <MapPin className="w-5 h-5" />
+              <span>Marcar visita</span>
             </button>
           )}
           {(isAdmin || isEncargado || isPreventista) && (

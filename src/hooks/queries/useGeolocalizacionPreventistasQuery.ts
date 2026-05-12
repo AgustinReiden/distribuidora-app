@@ -15,11 +15,16 @@ import { useSucursal } from '../../contexts/SucursalContext'
 
 export type GpsStatus = 'ok' | 'denied' | 'unavailable' | 'timeout' | 'error'
 
+export type EventoTipo = 'pedido' | 'visita'
+
 export interface UltimaUbicacion {
   lat: number
   lng: number
   capturado_at: string
-  pedido_id: number
+  /** Origen del último ping: confirmación de pedido o ping de visita manual. */
+  tipo: EventoTipo
+  /** ID del evento (pedido_id si tipo='pedido', visita_id si tipo='visita'). */
+  id: number
 }
 
 export interface PreventistaResumen {
@@ -29,6 +34,8 @@ export interface PreventistaResumen {
   pedidos_con_gps: number
   pedidos_sin_gps: number
   pedidos_lejos: number
+  /** Total de visitas (sin distinguir GPS ok) en el rango. */
+  total_visitas: number
   ultima_ubicacion: UltimaUbicacion | null
 }
 
@@ -55,11 +62,28 @@ export interface PedidoConGps {
   distancia_m: number | null
 }
 
+export interface VisitaConGps {
+  visita_id: number
+  preventista_id: string
+  visita_created_at: string
+  gps_lat: number | null
+  gps_lng: number | null
+  gps_accuracy: number | null
+  gps_capturado_at: string | null
+  gps_status: GpsStatus | null
+  cliente_id: number | null
+  cliente_nombre: string | null
+  cliente_lat: number | null
+  cliente_lng: number | null
+  distancia_m: number | null
+}
+
 export interface GeolocalizacionPanelData {
   fecha_desde: string
   fecha_hasta: string
   preventistas: PreventistaResumen[]
   pedidos: PedidoConGps[]
+  visitas: VisitaConGps[]
 }
 
 const EMPTY: GeolocalizacionPanelData = {
@@ -67,6 +91,7 @@ const EMPTY: GeolocalizacionPanelData = {
   fecha_hasta: '',
   preventistas: [],
   pedidos: [],
+  visitas: [],
 }
 
 async function fetchGeolocalizacion(
