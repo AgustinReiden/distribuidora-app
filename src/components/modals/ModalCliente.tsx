@@ -299,7 +299,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           </div>
           <div>
             <label htmlFor="numero_documento" className="block text-sm font-medium mb-1 dark:text-gray-200">
-              {form.tipo_documento === 'CUIT' ? 'CUIT' : 'DNI'} *
+              {form.tipo_documento === 'CUIT' ? 'CUIT' : 'DNI'}
             </label>
             <input
               id="numero_documento"
@@ -314,7 +314,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             {errores.numero_documento && <p {...getErrorMessageProps('numero_documento')} className="text-red-500 text-xs mt-1">{errores.numero_documento}</p>}
           </div>
           <div>
-            <label htmlFor="razonSocial" className="block text-sm font-medium mb-1 dark:text-gray-200">Razón Social *</label>
+            <label htmlFor="razonSocial" className="block text-sm font-medium mb-1 dark:text-gray-200">Razón social/Nombre Cliente *</label>
             <input
               id="razonSocial"
               type="text"
