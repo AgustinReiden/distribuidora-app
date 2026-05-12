@@ -1,10 +1,11 @@
 import { useState, memo, useRef } from 'react';
-import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users } from 'lucide-react';
+import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
 import { usePreventistasQuery, useZonasEstandarizadasQuery } from '../../hooks/queries';
+import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import {
   formatCuitInput,
   formatDniInput,
@@ -138,6 +139,38 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     preventista_ids: []
   });
 
+  // State para captura de GPS del navegador (botón "Usar mi ubicación actual").
+  // gpsAccuracy se mantiene solo en memoria para mostrar precisión en la UI;
+  // no se persiste en la tabla `clientes`.
+  const [gpsCapturando, setGpsCapturando] = useState<boolean>(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const capturarGps = useGeolocationCapture();
+
+  const handleCapturarGps = async (): Promise<void> => {
+    if (gpsCapturando) return;
+    setGpsError(null);
+    setGpsCapturando(true);
+    try {
+      const result = await capturarGps();
+      if (result.status === 'ok') {
+        setForm(prev => ({ ...prev, latitud: result.lat, longitud: result.lng }));
+        setGpsAccuracy(result.accuracy);
+        if (errores.direccion) clearFieldError('direccion');
+      } else {
+        const mensajes: Record<typeof result.status, string> = {
+          denied: 'Permiso de ubicación denegado. Aceptá el permiso en la configuración del navegador y volvé a intentar.',
+          timeout: 'No respondió el GPS en 10 s. Asegurate de estar al aire libre y reintentá.',
+          unavailable: 'GPS no disponible en este dispositivo.',
+          error: 'Error capturando ubicación. Intentá de nuevo.',
+        };
+        setGpsError(mensajes[result.status]);
+      }
+    } finally {
+      setGpsCapturando(false);
+    }
+  };
+
   const [preventistasFiltro, setPreventistasFiltro] = useState('');
   const togglePreventista = (id: string): void => {
     setForm(prev => {
@@ -161,6 +194,10 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       latitud: result.latitud,
       longitud: result.longitud
     }));
+    // Las coords vienen del autocomplete ahora — descartamos la accuracy GPS
+    // previa para no mostrar un dato engañoso en el bloque "Coordenadas".
+    setGpsAccuracy(null);
+    setGpsError(null);
     if (errores.direccion) clearFieldError('direccion');
   };
 
@@ -317,10 +354,72 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             className={errores.direccion ? 'border-red-500' : ''}
           />
           {errores.direccion && <p {...getErrorMessageProps('direccion')} className="text-red-500 text-xs mt-1">{errores.direccion}</p>}
-          {form.latitud && form.longitud && (
-            <div className="mt-2 flex items-center text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
-              <MapPin className="w-4 h-4 mr-2" />
-              <span>Coordenadas: {form.latitud.toFixed(6)}, {form.longitud.toFixed(6)}</span>
+
+          {/* Botón "Usar mi ubicación actual": complementa al autocomplete cuando
+              la dirección no se encuentra o devuelve coords de otra localidad.
+              Útil si el preventista/admin está parado en el local del cliente. */}
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={handleCapturarGps}
+              disabled={gpsCapturando}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              aria-label="Usar mi ubicación actual para fijar las coordenadas del cliente"
+            >
+              {gpsCapturando ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Obteniendo ubicación…
+                </>
+              ) : (
+                <>
+                  <LocateFixed className="w-4 h-4" />
+                  Usar mi ubicación actual
+                </>
+              )}
+            </button>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Útil si estás parado en el local del cliente.
+            </p>
+          </div>
+
+          {gpsError && (
+            <div className="mt-2 flex items-start gap-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{gpsError}</span>
+            </div>
+          )}
+
+          {form.latitud != null && form.longitud != null && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300">
+              <MapPin className="w-4 h-4" />
+              <span className="tabular-nums">
+                {form.latitud.toFixed(6)}, {form.longitud.toFixed(6)}
+              </span>
+              {gpsAccuracy != null && (
+                <>
+                  <span
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-semibold tracking-wide uppercase"
+                    title="Coordenadas capturadas con GPS del dispositivo"
+                  >
+                    GPS
+                  </span>
+                  <span
+                    className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium ${
+                      gpsAccuracy > 50
+                        ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    }`}
+                  >
+                    ±{Math.round(gpsAccuracy)} m
+                  </span>
+                  {gpsAccuracy > 50 && (
+                    <span className="text-amber-700 dark:text-amber-400 text-[11px]">
+                      Precisión baja — afiná posición si podés.
+                    </span>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>
