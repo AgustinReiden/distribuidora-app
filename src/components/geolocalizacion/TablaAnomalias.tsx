@@ -1,17 +1,24 @@
 import React, { useMemo } from 'react'
-import { AlertTriangle, ZapOff, Search } from 'lucide-react'
+import { AlertTriangle, ZapOff, Search, ShoppingCart, MapPin } from 'lucide-react'
 import { formatPrecio, formatHora } from '../../utils/formatters'
 import { clasificarDistancia, formatDistancia, SEMAFORO_COLORS } from '../../utils/geo'
-import type { PedidoConGps, PreventistaResumen } from '../../hooks/queries'
+import type { PedidoConGps, PreventistaResumen, VisitaConGps } from '../../hooks/queries'
 
 interface TablaAnomaliasProps {
   pedidos: PedidoConGps[]
+  visitas: VisitaConGps[]
   preventistas: PreventistaResumen[]
+  /** Click "Ver" en una fila pedido: lleva al mapa centrando ese pedido. */
   onSelectPedido: (pedidoId: number, preventistaId: string) => void
+  /** Click "Ver" en una fila visita: selecciona el preventista (drill-down). */
+  onSelectVisitaPreventista: (preventistaId: string) => void
 }
 
 interface AnomaliaRow {
-  pedido_id: number
+  key: string
+  tipo: 'pedido' | 'visita'
+  /** ID del pedido o visita (para el handler del botón Ver). */
+  refId: number
   preventista_id: string
   preventista_nombre: string
   cliente_nombre: string
@@ -19,10 +26,26 @@ interface AnomaliaRow {
   motivo: 'sin_gps' | 'lejos'
   motivo_label: string
   distancia_m: number | null
-  total: number
+  total: number | null
 }
 
-export default function TablaAnomalias({ pedidos, preventistas, onSelectPedido }: TablaAnomaliasProps): React.ReactElement {
+function statusToLabel(s: string | null | undefined): string {
+  switch (s) {
+    case 'denied': return 'GPS denegado'
+    case 'timeout': return 'GPS sin respuesta'
+    case 'unavailable': return 'GPS no disponible'
+    case 'error': return 'GPS con error'
+    default: return 'Sin check-in'
+  }
+}
+
+export default function TablaAnomalias({
+  pedidos,
+  visitas,
+  preventistas,
+  onSelectPedido,
+  onSelectVisitaPreventista,
+}: TablaAnomaliasProps): React.ReactElement {
   const nombresMap = useMemo(() => {
     const map: Record<string, string> = {}
     for (const p of preventistas) map[p.preventista_id] = p.preventista_nombre || 'Sin nombre'
@@ -36,29 +59,43 @@ export default function TablaAnomalias({ pedidos, preventistas, onSelectPedido }
       const lejos = !sinGps && p.distancia_m != null && p.distancia_m >= 2000
       if (!sinGps && !lejos) continue
       result.push({
-        pedido_id: p.pedido_id,
+        key: `p-${p.pedido_id}`,
+        tipo: 'pedido',
+        refId: p.pedido_id,
         preventista_id: p.preventista_id,
         preventista_nombre: nombresMap[p.preventista_id] ?? '—',
         cliente_nombre: p.cliente_nombre || 'Sin cliente',
         hora: formatHora(p.pedido_created_at ?? p.gps_capturado_at),
         motivo: sinGps ? 'sin_gps' : 'lejos',
-        motivo_label: sinGps
-          ? (p.gps_status === 'denied' ? 'GPS denegado'
-            : p.gps_status === 'timeout' ? 'GPS sin respuesta'
-            : p.gps_status === 'unavailable' ? 'GPS no disponible'
-            : p.gps_status === 'error' ? 'GPS con error'
-            : 'Sin check-in')
-          : 'Lejos del cliente',
+        motivo_label: sinGps ? statusToLabel(p.gps_status) : 'Pedido lejos del cliente',
         distancia_m: p.distancia_m,
         total: Number(p.total) || 0,
       })
     }
-    // Ordenar: lejos primero, luego sin GPS
+    for (const v of visitas) {
+      const sinGps = v.gps_status !== 'ok'
+      const lejos = !sinGps && v.distancia_m != null && v.distancia_m >= 2000
+      if (!sinGps && !lejos) continue
+      result.push({
+        key: `v-${v.visita_id}`,
+        tipo: 'visita',
+        refId: v.visita_id,
+        preventista_id: v.preventista_id,
+        preventista_nombre: nombresMap[v.preventista_id] ?? '—',
+        cliente_nombre: v.cliente_nombre || 'Sin cliente',
+        hora: formatHora(v.visita_created_at),
+        motivo: sinGps ? 'sin_gps' : 'lejos',
+        motivo_label: sinGps ? statusToLabel(v.gps_status) : 'Visita lejos del cliente',
+        distancia_m: v.distancia_m,
+        total: null,
+      })
+    }
+    // Ordenar: lejos primero, luego sin GPS; dentro de cada grupo por distancia desc.
     return result.sort((a, b) => {
       if (a.motivo !== b.motivo) return a.motivo === 'lejos' ? -1 : 1
       return (b.distancia_m ?? 0) - (a.distancia_m ?? 0)
     })
-  }, [pedidos, nombresMap])
+  }, [pedidos, visitas, nombresMap])
 
   if (rows.length === 0) {
     return (
@@ -80,6 +117,7 @@ export default function TablaAnomalias({ pedidos, preventistas, onSelectPedido }
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-900/40 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
             <tr>
+              <th className="px-4 py-2 text-left font-medium">Tipo</th>
               <th className="px-4 py-2 text-left font-medium">Preventista</th>
               <th className="px-4 py-2 text-left font-medium">Hora</th>
               <th className="px-4 py-2 text-left font-medium">Cliente</th>
@@ -94,7 +132,13 @@ export default function TablaAnomalias({ pedidos, preventistas, onSelectPedido }
               const clasif = r.motivo === 'sin_gps' ? 'sin_dato' : clasificarDistancia(r.distancia_m)
               const cfg = SEMAFORO_COLORS[clasif]
               return (
-                <tr key={r.pedido_id} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                <tr key={r.key} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                  <td className="px-4 py-2 text-gray-600 dark:text-gray-300">
+                    <span className="inline-flex items-center gap-1 text-xs">
+                      {r.tipo === 'pedido' ? <ShoppingCart className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
+                      {r.tipo === 'pedido' ? 'Pedido' : 'Visita'}
+                    </span>
+                  </td>
                   <td className="px-4 py-2 text-gray-900 dark:text-white">{r.preventista_nombre}</td>
                   <td className="px-4 py-2 text-gray-700 dark:text-gray-300 tabular-nums">{r.hora}</td>
                   <td className="px-4 py-2 text-gray-900 dark:text-white">{r.cliente_nombre}</td>
@@ -108,12 +152,15 @@ export default function TablaAnomalias({ pedidos, preventistas, onSelectPedido }
                     {r.motivo === 'sin_gps' ? '—' : formatDistancia(r.distancia_m)}
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
-                    {formatPrecio(r.total)}
+                    {r.total == null ? '—' : formatPrecio(r.total)}
                   </td>
                   <td className="px-4 py-2 text-right">
                     <button
                       type="button"
-                      onClick={() => onSelectPedido(r.pedido_id, r.preventista_id)}
+                      onClick={() => {
+                        if (r.tipo === 'pedido') onSelectPedido(r.refId, r.preventista_id)
+                        else onSelectVisitaPreventista(r.preventista_id)
+                      }}
                       className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
                       title="Ver en el mapa"
                     >

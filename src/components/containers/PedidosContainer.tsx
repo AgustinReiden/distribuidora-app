@@ -55,6 +55,8 @@ const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas')
 const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
 const ModalPagosMasivos = lazy(() => import('../modals/ModalPagosMasivos'))
 const ModalAsignarTransportistaMasivo = lazy(() => import('../modals/ModalAsignarTransportistaMasivo'))
+const ModalMarcarVisita = lazy(() => import('../modals/ModalMarcarVisita'))
+const ModalVisitasHoy = lazy(() => import('../modals/ModalVisitasHoy'))
 
 const ITEMS_PER_PAGE = 15
 
@@ -161,6 +163,8 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalAsignarMasivoOpen, setModalAsignarMasivoOpen] = useState(false)
   const [modalNotasOpen, setModalNotasOpen] = useState(false)
   const [modalPagoPedidoOpen, setModalPagoPedidoOpen] = useState(false)
+  const [modalMarcarVisitaOpen, setModalMarcarVisitaOpen] = useState(false)
+  const [modalVisitasHoyOpen, setModalVisitasHoyOpen] = useState(false)
   const [pedidoPago, setPedidoPago] = useState<PedidoDB | null>(null)
   const [pagosPreviosPedido, setPagosPreviosPedido] = useState<PagoDBWithUsuario[]>([])
   const [loadingPagosPrevios, setLoadingPagosPrevios] = useState(false)
@@ -978,6 +982,8 @@ export default function PedidosContainer(): React.ReactElement {
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
           onAsignarTransportistaMasivo={() => setModalAsignarMasivoOpen(true)}
+          onMarcarVisita={() => setModalMarcarVisitaOpen(true)}
+          onVerVisitasHoy={() => setModalVisitasHoyOpen(true)}
           onRegistrarSalvedad={handleRegistrarSalvedadSingle}
           onRegistrarPago={handleRegistrarPagoTransportista}
           onAbrirPagoPedido={handleAbrirRegistrarPago}
@@ -1251,6 +1257,28 @@ export default function PedidosContainer(): React.ReactElement {
             guardando={guardando}
             isEncargado={isEncargado}
             isAdmin={isAdmin}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Marcar Visita (preventista) */}
+      {modalMarcarVisitaOpen && (
+        <Suspense fallback={null}>
+          <ModalMarcarVisita
+            clientes={clientes}
+            userId={user?.id ?? null}
+            isAdmin={isAdmin}
+            onClose={() => setModalMarcarVisitaOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Visitas del día (preventista) */}
+      {modalVisitasHoyOpen && (
+        <Suspense fallback={null}>
+          <ModalVisitasHoy
+            userId={user?.id ?? null}
+            onClose={() => setModalVisitasHoyOpen(false)}
           />
         </Suspense>
       )}

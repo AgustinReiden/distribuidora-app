@@ -4,11 +4,12 @@ import { Loader2, MapPin } from 'lucide-react'
 import { useGoogleMaps } from '../../hooks/useGoogleMaps'
 import { colorPreventista, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo'
 import { formatPrecio, formatHora } from '../../utils/formatters'
-import type { PreventistaResumen, PedidoConGps } from '../../hooks/queries'
+import type { PreventistaResumen, PedidoConGps, VisitaConGps } from '../../hooks/queries'
 
 interface MapaPreventistasProps {
   preventistas: PreventistaResumen[]
   pedidos: PedidoConGps[]
+  visitas: VisitaConGps[]
   preventistaSelectedId: string | null
   pedidoSelectedId: number | null
   onSelectPreventista: (id: string | null) => void
@@ -32,11 +33,11 @@ function escapeHtml(s: string): string {
   })
 }
 
-function pinSymbol(color: string, scale = 8): google.maps.Symbol {
+function pinSymbol(color: string, scale = 8, opacity = 1): google.maps.Symbol {
   return {
     path: google.maps.SymbolPath.CIRCLE,
     fillColor: color,
-    fillOpacity: 1,
+    fillOpacity: opacity,
     strokeColor: '#ffffff',
     strokeWeight: 2,
     scale,
@@ -46,6 +47,7 @@ function pinSymbol(color: string, scale = 8): google.maps.Symbol {
 export default function MapaPreventistas({
   preventistas,
   pedidos,
+  visitas,
   preventistaSelectedId,
   pedidoSelectedId,
   onSelectPreventista,
@@ -97,59 +99,101 @@ export default function MapaPreventistas({
     let pointCount = 0
 
     if (preventistaSelectedId) {
-      // Vista de recorrido: pins por pedido del preventista seleccionado +
-      // markers gris claro para los clientes (contexto) + polilínea conectando
-      // por hora.
-      const propios = pedidos
+      // Vista de recorrido: pedidos del preventista (pins numerados + grandes)
+      // + visitas del preventista (pins pequeños sin número) + clientes
+      // referenciados en gris claro + polilínea cronológica que conecta
+      // pedidos y visitas en una sola secuencia.
+      const pedidosPropios = pedidos
         .filter(p => p.preventista_id === preventistaSelectedId)
-        .sort((a, b) => {
-          const ta = a.gps_capturado_at ? Date.parse(a.gps_capturado_at) : 0
-          const tb = b.gps_capturado_at ? Date.parse(b.gps_capturado_at) : 0
-          return ta - tb
-        })
+      const visitasPropias = visitas
+        .filter(v => v.preventista_id === preventistaSelectedId)
 
       const color = colorPreventista(preventistaSelectedId)
-      const path: google.maps.LatLngLiteral[] = []
 
-      // Markers de clientes (contexto): pequeños grises
-      for (const p of propios) {
-        if (p.cliente_lat != null && p.cliente_lng != null) {
-          const marker = new g.Marker({
-            position: { lat: Number(p.cliente_lat), lng: Number(p.cliente_lng) },
-            map,
-            title: p.cliente_nombre || 'Cliente',
-            icon: pinSymbol('#cbd5e1', 5),
-            zIndex: 1,
-          })
-          markersRef.current.push(marker)
-          bounds.extend({ lat: Number(p.cliente_lat), lng: Number(p.cliente_lng) })
-          pointCount++
-        }
+      // Markers de clientes (contexto): pequeños grises, sin duplicar si el
+      // mismo cliente aparece en pedido y visita.
+      const clientesDibujados = new Set<number>()
+      const dibujarCliente = (id: number | null, lat: number | null, lng: number | null, nombre: string | null) => {
+        if (id == null || lat == null || lng == null) return
+        if (clientesDibujados.has(id)) return
+        clientesDibujados.add(id)
+        const marker = new g.Marker({
+          position: { lat: Number(lat), lng: Number(lng) },
+          map,
+          title: nombre || 'Cliente',
+          icon: pinSymbol('#cbd5e1', 5),
+          zIndex: 1,
+        })
+        markersRef.current.push(marker)
+        bounds.extend({ lat: Number(lat), lng: Number(lng) })
+        pointCount++
       }
+      for (const p of pedidosPropios) dibujarCliente(p.cliente_id, p.cliente_lat, p.cliente_lng, p.cliente_nombre)
+      for (const v of visitasPropias) dibujarCliente(v.cliente_id, v.cliente_lat, v.cliente_lng, v.cliente_nombre)
 
-      // Markers de check-ins (numerados)
-      propios
-        .filter(p => p.gps_status === 'ok' && p.gps_lat != null && p.gps_lng != null)
-        .forEach((p, idx) => {
+      // Secuencia cronológica unificada para la polilínea y la numeración.
+      type Evento =
+        | { tipo: 'pedido'; ts: number; pedido: PedidoConGps }
+        | { tipo: 'visita'; ts: number; visita: VisitaConGps }
+      const eventos: Evento[] = []
+      for (const p of pedidosPropios) {
+        if (p.gps_status !== 'ok' || p.gps_lat == null || p.gps_lng == null) continue
+        const ts = Date.parse(p.pedido_created_at ?? p.gps_capturado_at ?? '') || 0
+        eventos.push({ tipo: 'pedido', ts, pedido: p })
+      }
+      for (const v of visitasPropias) {
+        if (v.gps_status !== 'ok' || v.gps_lat == null || v.gps_lng == null) continue
+        const ts = Date.parse(v.visita_created_at ?? v.gps_capturado_at ?? '') || 0
+        eventos.push({ tipo: 'visita', ts, visita: v })
+      }
+      eventos.sort((a, b) => a.ts - b.ts)
+
+      const path: google.maps.LatLngLiteral[] = []
+      let pedidoIdx = 0
+      let selectedAnchor: { marker: google.maps.Marker; pedido: PedidoConGps } | null = null
+
+      for (const ev of eventos) {
+        if (ev.tipo === 'pedido') {
+          const p = ev.pedido
           const pos = { lat: Number(p.gps_lat!), lng: Number(p.gps_lng!) }
           const isSelected = pedidoSelectedId === p.pedido_id
+          pedidoIdx++
           const marker = new g.Marker({
             position: pos,
             map,
             title: p.cliente_nombre || `Pedido #${p.pedido_id}`,
-            label: { text: String(idx + 1), color: '#ffffff', fontWeight: '700', fontSize: '11px' },
+            label: { text: String(pedidoIdx), color: '#ffffff', fontWeight: '700', fontSize: '11px' },
             icon: pinSymbol(color, isSelected ? 14 : 11),
-            zIndex: isSelected ? 1000 : 100 + idx,
+            zIndex: isSelected ? 1000 : 100 + pedidoIdx,
           })
           marker.addListener('click', () => {
             onSelectPedido(p.pedido_id)
             openPedidoInfoWindow(p, marker)
           })
           markersRef.current.push(marker)
+          if (isSelected) selectedAnchor = { marker, pedido: p }
           path.push(pos)
           bounds.extend(pos)
           pointCount++
-        })
+        } else {
+          const v = ev.visita
+          const pos = { lat: Number(v.gps_lat!), lng: Number(v.gps_lng!) }
+          const marker = new g.Marker({
+            position: pos,
+            map,
+            title: `Visita · ${v.cliente_nombre || 'Cliente'} · ${formatHora(v.visita_created_at)}`,
+            icon: pinSymbol(color, 6, 0.75),
+            zIndex: 50,
+          })
+          marker.addListener('click', () => {
+            openVisitaInfoWindow(v, marker)
+          })
+          markersRef.current.push(marker)
+          path.push(pos)
+          bounds.extend(pos)
+          pointCount++
+        }
+      }
 
       if (path.length >= 2) {
         polylineRef.current = new g.Polyline({
@@ -162,17 +206,13 @@ export default function MapaPreventistas({
         })
       }
 
-      // Si hay un pedido seleccionado, abrir su info window al final.
-      if (pedidoSelectedId != null) {
-        const idx = propios.findIndex(p => p.pedido_id === pedidoSelectedId && p.gps_status === 'ok')
-        if (idx >= 0) {
-          const clienteMarkersOffset = propios.filter(p => p.cliente_lat != null && p.cliente_lng != null).length
-          const target = markersRef.current[clienteMarkersOffset + idx]
-          if (target) openPedidoInfoWindow(propios[idx], target)
-        }
+      if (selectedAnchor) {
+        openPedidoInfoWindow(selectedAnchor.pedido, selectedAnchor.marker)
       }
     } else {
-      // Vista global: 1 pin por preventista (su última ubicación).
+      // Vista global: 1 pin grande por preventista (última ubicación) + puntos
+      // pequeños semi-transparentes para todas las visitas del rango. Esto
+      // permite ver "dónde anduvieron" sin sobrecargar.
       for (const p of preventistas) {
         const ult = p.ultima_ubicacion
         if (!ult || ult.lat == null || ult.lng == null) continue
@@ -182,13 +222,31 @@ export default function MapaPreventistas({
         const marker = new g.Marker({
           position: pos,
           map,
-          title: `${p.preventista_nombre} · ${formatHora(ult.capturado_at)}`,
+          title: `${p.preventista_nombre} · ${formatHora(ult.capturado_at)} (${ult.tipo === 'visita' ? 'visita' : 'pedido'})`,
           label: { text: inicial, color: '#ffffff', fontWeight: '700', fontSize: '11px' },
           icon: pinSymbol(color, 13),
         })
         marker.addListener('click', () => {
           onSelectPreventista(p.preventista_id)
         })
+        markersRef.current.push(marker)
+        bounds.extend(pos)
+        pointCount++
+      }
+
+      // Visitas globales como puntitos discretos (no clickeables, contexto).
+      for (const v of visitas) {
+        if (v.gps_status !== 'ok' || v.gps_lat == null || v.gps_lng == null) continue
+        const pos = { lat: Number(v.gps_lat), lng: Number(v.gps_lng) }
+        const color = colorPreventista(v.preventista_id)
+        const marker = new g.Marker({
+          position: pos,
+          map,
+          title: `Visita · ${v.cliente_nombre || 'Cliente'}`,
+          icon: pinSymbol(color, 4, 0.45),
+          zIndex: 10,
+        })
+        marker.addListener('click', () => onSelectPreventista(v.preventista_id))
         markersRef.current.push(marker)
         bounds.extend(pos)
         pointCount++
@@ -229,7 +287,29 @@ export default function MapaPreventistas({
       infoWindowRef.current.setContent(html)
       infoWindowRef.current.open(mapRef.current, anchor)
     }
-  }, [mapReady, preventistas, pedidos, preventistaSelectedId, pedidoSelectedId, onSelectPedido, onSelectPreventista])
+
+    function openVisitaInfoWindow(v: VisitaConGps, anchor: google.maps.Marker) {
+      if (!infoWindowRef.current || !mapRef.current) return
+      const clasif = clasificarDistancia(v.distancia_m)
+      const cfg = SEMAFORO_COLORS[clasif]
+      const html = `
+        <div style="font-family: ui-sans-serif, system-ui; padding: 4px 2px; max-width: 260px;">
+          <div style="font-weight: 600; color: #111827; font-size: 13px;">${escapeHtml(v.cliente_nombre || 'Cliente sin nombre')}</div>
+          <div style="color: #6b7280; font-size: 11px; margin-top: 2px;">
+            Visita · ${formatHora(v.visita_created_at)}
+          </div>
+          <div style="margin-top: 6px; font-size: 12px;">
+            <span style="padding: 1px 6px; border-radius: 9999px; font-size: 11px;"
+                  class="${cfg.bg}">
+              ${cfg.label} · ${escapeHtml(formatDistancia(v.distancia_m))}
+            </span>
+          </div>
+        </div>
+      `
+      infoWindowRef.current.setContent(html)
+      infoWindowRef.current.open(mapRef.current, anchor)
+    }
+  }, [mapReady, preventistas, pedidos, visitas, preventistaSelectedId, pedidoSelectedId, onSelectPedido, onSelectPreventista])
 
   // Cleanup
   useEffect(() => {

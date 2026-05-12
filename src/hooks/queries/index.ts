@@ -168,8 +168,17 @@ export type {
   UltimaUbicacion,
   PreventistaResumen,
   PedidoConGps,
+  VisitaConGps,
   GeolocalizacionPanelData,
 } from './useGeolocalizacionPreventistasQuery'
+
+// Visitas (ping de preventista a cliente)
+export {
+  visitasKeys,
+  useVisitasHoyQuery,
+  useRegistrarVisitaMutation,
+} from './useVisitasQuery'
+export type { VisitaHoy, RegistrarVisitaInput } from './useVisitasQuery'
 
 // Promociones
 export {
