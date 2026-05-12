@@ -47,7 +47,13 @@ export default defineConfig({
     react(),
     VitePWA({
       injectRegister: false,
-      registerType: 'prompt',
+      // autoUpdate: el SW nuevo se descarga en segundo plano y la página se
+      // recarga sola cuando está listo. Sin cartel manual "Actualizar ahora".
+      // Trade-off conocido: si el preventista está cargando un pedido cuando
+      // baja el update, el reload pierde lo tipeado. En esta app ese caso es
+      // raro (sesiones cortas, pedidos rápidos) y vale la pena para evitar
+      // que se queden con bundles viejos por días.
+      registerType: 'autoUpdate',
       // selfDestroying debe estar en false para que el SW persista y la PWA
       // funcione offline (Workbox precache + Dexie). El deploy previo con
       // selfDestroying:true ya desregistró SW corruptos; ahora los usuarios
@@ -161,8 +167,11 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         globIgnores: ['**/*.map'],
         cleanupOutdatedCaches: true,
-        skipWaiting: false,
-        clientsClaim: false
+        // Pareja con registerType:'autoUpdate'. El SW nuevo activa de inmediato
+        // (skipWaiting) y toma control de las pestañas existentes (clientsClaim)
+        // sin esperar a que se cierren. El reload lo dispara el plugin.
+        skipWaiting: true,
+        clientsClaim: true
       },
       devOptions: {
         enabled: false,
