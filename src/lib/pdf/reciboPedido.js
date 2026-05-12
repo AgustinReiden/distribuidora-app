@@ -357,6 +357,13 @@ function dibujarComanda(doc, pedido) {
   doc.text(pedido.cliente?.nombre_fantasia || 'Cliente', margin, y)
   y += 5
   setNormalStyle(doc, 9)
+  if (pedido.cliente?.razon_social && pedido.cliente.razon_social !== pedido.cliente.nombre_fantasia) {
+    const razonLines = doc.splitTextToSize(pedido.cliente.razon_social, contentWidth)
+    razonLines.slice(0, 2).forEach(line => {
+      doc.text(line, margin, y)
+      y += 4
+    })
+  }
   if (pedido.cliente?.direccion) {
     const dirLines = doc.splitTextToSize(pedido.cliente.direccion, contentWidth)
     dirLines.slice(0, 2).forEach(line => {
