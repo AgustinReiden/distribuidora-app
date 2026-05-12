@@ -1,9 +1,10 @@
 import { useState, useMemo, memo, useRef } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle } from 'lucide-react';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
+import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import ModalBase from './ModalBase';
 import type { ProductoDB, ClienteDB } from '../../types';
 
@@ -134,6 +135,14 @@ const ModalPedido = memo(function ModalPedido({
   const [errorCliente, setErrorCliente] = useState<string>('');
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
 
+  // GPS capture para cliente rapido. `gpsAccuracy` sirve como flag: si esta
+  // seteado, las coords vinieron del GPS (mostramos badge + precision); si es
+  // null pero hay lat/lng, vinieron del autocomplete.
+  const capturarGps = useGeolocationCapture();
+  const [gpsCapturando, setGpsCapturando] = useState<boolean>(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+
   const productosFiltrados = useMemo(() => {
     return productos.filter(p => {
       const matchNombre = p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase());
@@ -164,6 +173,24 @@ const ModalPedido = memo(function ModalPedido({
     return clientes.find(c => String(c.id) === String(nuevoPedido.clienteId)) || null;
   }, [clientes, nuevoPedido.clienteId]);
 
+  const handleCapturarGps = async (): Promise<void> => {
+    setGpsCapturando(true);
+    setGpsError(null);
+    const result = await capturarGps();
+    setGpsCapturando(false);
+    if (result.status === 'ok') {
+      setNuevoCliente(prev => ({ ...prev, latitud: result.lat, longitud: result.lng }));
+      setGpsAccuracy(result.accuracy);
+    } else {
+      const msg =
+        result.status === 'denied'      ? 'Permiso de ubicación denegado. Habilitalo en el navegador.' :
+        result.status === 'timeout'     ? 'Se tardó demasiado. Probá moverte a un área con mejor señal.' :
+        result.status === 'unavailable' ? 'GPS no disponible en este dispositivo.' :
+                                          'No se pudo obtener la ubicación.';
+      setGpsError(msg);
+    }
+  };
+
   const handleCrearClienteRapido = async (): Promise<void> => {
     const nombre = nuevoCliente.nombre?.trim();
     const nombreFantasia = nuevoCliente.nombreFantasia?.trim();
@@ -191,6 +218,8 @@ const ModalPedido = memo(function ModalPedido({
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
       setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
+      setGpsAccuracy(null);
+      setGpsError(null);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Error al crear cliente';
       setErrorCliente(errorMsg);
@@ -242,7 +271,7 @@ const ModalPedido = memo(function ModalPedido({
             <div className="flex justify-between items-center mb-1">
               <label className="block text-sm font-medium dark:text-gray-200">Cliente *</label>
               {(isAdmin || isPreventista) && (
-                <button onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); }} className="text-sm text-blue-600">
+                <button onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); setGpsError(null); setGpsAccuracy(null); }} className="text-sm text-blue-600">
                   {mostrarNuevoCliente ? 'Cancelar' : '+ Nuevo'}
                 </button>
               )}
@@ -257,13 +286,79 @@ const ModalPedido = memo(function ModalPedido({
                   onChange={(val: string) => setNuevoCliente(prev => ({ ...prev, direccion: val }))}
                   onSelect={(result) => {
                     setNuevoCliente(prev => ({ ...prev, direccion: result.direccion, latitud: result.latitud, longitud: result.longitud }));
+                    // Direccion elegida del autocomplete: las coords ya no son del GPS.
+                    setGpsAccuracy(null);
+                    setGpsError(null);
                   }}
                   placeholder="Buscar dirección... *"
                 />
-                {nuevoCliente.latitud && nuevoCliente.longitud && (
-                  <div className="flex items-center text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
-                    <MapPin className="w-3 h-3 mr-1" />
-                    <span>Ubicación guardada</span>
+                {/* Boton "Usar mi ubicacion actual": complementa el autocomplete cuando
+                    la direccion no se encuentra o devuelve coords de otra localidad.
+                    Para preventistas, es el flujo mas comun (estan parados en el local). */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleCapturarGps}
+                    disabled={gpsCapturando}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Usar mi ubicación actual para fijar las coordenadas del cliente"
+                  >
+                    {gpsCapturando ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Obteniendo ubicación…
+                      </>
+                    ) : (
+                      <>
+                        <LocateFixed className="w-4 h-4" />
+                        Usar mi ubicación actual
+                      </>
+                    )}
+                  </button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Útil si estás parado en el local del cliente.
+                  </p>
+                </div>
+
+                {gpsError && (
+                  <div className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">
+                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>{gpsError}</span>
+                  </div>
+                )}
+
+                {nuevoCliente.latitud != null && nuevoCliente.longitud != null && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300">
+                    <MapPin className="w-4 h-4" />
+                    {gpsAccuracy != null ? (
+                      <>
+                        <span className="tabular-nums">
+                          {nuevoCliente.latitud.toFixed(6)}, {nuevoCliente.longitud.toFixed(6)}
+                        </span>
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-semibold tracking-wide uppercase"
+                          title="Coordenadas capturadas con GPS del dispositivo"
+                        >
+                          GPS
+                        </span>
+                        <span
+                          className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium ${
+                            gpsAccuracy > 50
+                              ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                              : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                          }`}
+                        >
+                          ±{Math.round(gpsAccuracy)} m
+                        </span>
+                        {gpsAccuracy > 50 && (
+                          <span className="text-amber-700 dark:text-amber-400 text-[11px]">
+                            Precisión baja — afiná posición si podés.
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span>Ubicación guardada</span>
+                    )}
                   </div>
                 )}
                 {errorCliente && (
