@@ -101,7 +101,7 @@ function AccionesDropdown({
       isPreventista && !isAdmin && !isEncargado &&
       onEditar && preventistaPuedeEditar(pedido, currentUserId)
     ) {
-      // Preventista creador: edicion limitada del pedido (items, fechas) hasta 17:00 ARG
+      // Preventista creador: edicion limitada del pedido (items, fechas) hasta 15:30 ARG
       items.push({
         label: 'Editar Pedido',
         icon: Edit2,
