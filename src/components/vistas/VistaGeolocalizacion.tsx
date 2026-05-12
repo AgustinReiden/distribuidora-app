@@ -17,6 +17,7 @@ import {
   type VisitaConGps,
 } from '../../hooks/queries'
 import { fechaLocalISO } from '../../utils/formatters'
+import { ANOMALIA_DISTANCIA_METROS } from '../../utils/geo'
 import KpiCard from '../geolocalizacion/KpiCard'
 import SidebarPreventistas from '../geolocalizacion/SidebarPreventistas'
 import MapaPreventistas from '../geolocalizacion/MapaPreventistas'
@@ -90,11 +91,11 @@ export default function VistaGeolocalizacion(): React.ReactElement {
     const visitasTotal = visitas.length
     const anomaliasPedidos = pedidos.filter(p => {
       if (p.gps_status !== 'ok') return true
-      return p.distancia_m != null && p.distancia_m >= 2000
+      return p.distancia_m != null && p.distancia_m >= ANOMALIA_DISTANCIA_METROS
     }).length
     const anomaliasVisitas = visitas.filter(v => {
       if (v.gps_status !== 'ok') return true
-      return v.distancia_m != null && v.distancia_m >= 2000
+      return v.distancia_m != null && v.distancia_m >= ANOMALIA_DISTANCIA_METROS
     }).length
     return {
       preventistasActivos: preventistas.length,
@@ -226,7 +227,7 @@ export default function VistaGeolocalizacion(): React.ReactElement {
           value={kpis.anomalias}
           icon={AlertTriangle}
           tone={kpis.anomalias > 0 ? 'red' : 'green'}
-          hint="Sin GPS o ≥2 km del cliente"
+          hint="Sin GPS o ≥1 km del cliente"
         />
       </div>
 

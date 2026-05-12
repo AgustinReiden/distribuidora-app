@@ -10,6 +10,14 @@
 
 const EARTH_RADIUS_M = 6_371_000
 
+/**
+ * Umbral en metros para considerar que un pedido o visita fue hecho "lejos"
+ * del cliente registrado. Usado tanto para el semáforo en frontend como
+ * para el campo `pedidos_lejos` del RPC del panel admin (que tiene un
+ * literal espejo en SQL — mantener en sync).
+ */
+export const ANOMALIA_DISTANCIA_METROS = 1000
+
 const PALETA_PREVENTISTAS = [
   '#2563eb', // azul
   '#dc2626', // rojo
@@ -46,7 +54,7 @@ export type ClasificacionDistancia = 'ok' | 'cerca' | 'lejos' | 'sin_dato'
 export function clasificarDistancia(metros: number | null | undefined): ClasificacionDistancia {
   if (metros == null || !Number.isFinite(metros)) return 'sin_dato'
   if (metros < 500) return 'ok'
-  if (metros < 2000) return 'cerca'
+  if (metros < ANOMALIA_DISTANCIA_METROS) return 'cerca'
   return 'lejos'
 }
 
