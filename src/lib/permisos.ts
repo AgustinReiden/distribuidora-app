@@ -55,6 +55,14 @@ export function puedeAccederGeolocalizacion(rol: RolUsuario | null | undefined):
   return rol === 'admin'
 }
 
+export function puedeCrearCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'preventista' || rol === 'encargado'
+}
+
+export function puedeCrearPedido(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'preventista' || rol === 'encargado'
+}
+
 export type PedidoStatKey =
   | 'pendientes'
   | 'enPreparacion'

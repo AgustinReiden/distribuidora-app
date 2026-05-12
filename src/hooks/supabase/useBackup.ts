@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { supabase } from './base'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, getFormaPagoDisplay } from '../../utils/formatters'
 import type {
   BackupData,
   FiltrosExportacion,
@@ -32,6 +32,7 @@ interface PedidoExportacion {
     subtotal?: number;
     producto?: ProductoDB | null;
   }>;
+  pagos?: Array<{ forma_pago: string; monto: number }>;
 }
 
 interface InfoFiltro {
@@ -101,7 +102,7 @@ export function useBackup(): UseBackupReturnExtended {
         backup.productos = (data || []) as ProductoDB[]
       }
       if (tipo === 'completo' || tipo === 'pedidos') {
-        const { data } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+        const { data } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)`)
         backup.pedidos = (data || []) as PedidoDB[]
       }
       return backup
@@ -139,14 +140,6 @@ export function useBackup(): UseBackupReturnExtended {
         parcial: 'Parcial',
         pagado: 'Pagado'
       }
-      const formaPagoLabels: Record<string, string> = {
-        efectivo: 'Efectivo',
-        transferencia: 'Transferencia',
-        cheque: 'Cheque',
-        cuenta_corriente: 'Cuenta Corriente',
-        tarjeta: 'Tarjeta'
-      }
-
       const getTransportistaNombre = (id: string | null | undefined): string | null => {
         if (!id || id === 'todos') return null
         if (id === 'sin_asignar') return 'Sin asignar'
@@ -200,7 +193,7 @@ export function useBackup(): UseBackupReturnExtended {
         'Zona': p.cliente?.zona || '-',
         'Estado Pedido': estadoLabels[p.estado] || p.estado,
         'Estado Pago': estadoPagoLabels[p.estado_pago || ''] || p.estado_pago || 'Pendiente',
-        'Forma de Pago': formaPagoLabels[p.forma_pago || ''] || p.forma_pago || 'Efectivo',
+        'Forma de Pago': getFormaPagoDisplay(p),
         'Transportista': p.transportista?.nombre || 'Sin asignar',
         'Preventista': p.usuario?.nombre || '-',
         'Productos': p.items?.map(i => `${i.producto?.nombre || 'Producto'} x${i.cantidad}`).join(', ') || '-',

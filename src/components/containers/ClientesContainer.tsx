@@ -43,7 +43,7 @@ interface ConfirmConfig {
 }
 
 export default function ClientesContainer(): React.ReactElement {
-  const { user, isAdmin, isPreventista } = useAuthData()
+  const { user, isAdmin, isPreventista, isEncargado } = useAuthData()
   const notify = useNotification()
 
   // Queries
@@ -187,6 +187,7 @@ export default function ClientesContainer(): React.ReactElement {
           loading={isLoading}
           isAdmin={isAdmin}
           isPreventista={isPreventista}
+          isEncargado={isEncargado}
           onNuevoCliente={handleNuevoCliente}
           onEditarCliente={handleEditarCliente}
           onEliminarCliente={handleEliminarCliente}

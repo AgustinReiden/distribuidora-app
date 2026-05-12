@@ -21,6 +21,7 @@ export interface VistaClientesProps {
   loading: boolean;
   isAdmin: boolean;
   isPreventista: boolean;
+  isEncargado: boolean;
   onNuevoCliente: () => void;
   onEditarCliente: (cliente: ClienteDB) => void;
   onEliminarCliente: (id: string) => void;
@@ -34,6 +35,7 @@ export default function VistaClientes({
   loading,
   isAdmin,
   isPreventista,
+  isEncargado,
   onNuevoCliente,
   onEditarCliente,
   onEliminarCliente,
@@ -122,7 +124,7 @@ export default function VistaClientes({
               <span>Gestionar Zonas</span>
             </button>
           )}
-          {(isAdmin || isPreventista) && (
+          {(isAdmin || isPreventista || isEncargado) && (
             <button
               onClick={onNuevoCliente}
               className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"

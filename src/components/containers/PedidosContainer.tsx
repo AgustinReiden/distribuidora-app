@@ -7,7 +7,7 @@
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
 import { calcularNetoVenta } from '../../utils/calculations'
-import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
+import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
@@ -420,8 +420,8 @@ export default function PedidosContainer(): React.ReactElement {
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
     const hasSearch = debouncedBusqueda && debouncedBusqueda.trim().length > 0
     const selectStr = hasSearch
-      ? '*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(*))'
-      : '*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))'
+      ? '*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
+      : '*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
 
     let query = supabase
       .from('pedidos')
@@ -483,7 +483,7 @@ export default function PedidosContainer(): React.ReactElement {
         Direccion: (p.cliente as { direccion?: string })?.direccion || '',
         Telefono: (p.cliente as { telefono?: string })?.telefono || '',
         Estado: p.estado,
-        'Forma Pago': p.forma_pago || '',
+        'Forma Pago': getFormaPagoDisplay(p as { forma_pago?: string | null; pagos?: Array<{ forma_pago: string }> }),
         'Estado Pago': p.estado_pago || '',
         Total: p.total,
         'Monto Pagado': p.monto_pagado || 0,
