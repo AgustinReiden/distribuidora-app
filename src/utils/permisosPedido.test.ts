@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { preventistaPuedeEditar, HORA_CORTE_PREVENTISTA } from './permisosPedido'
+import { preventistaPuedeEditar } from './permisosPedido'
 
 const USER_ID = 'user-1'
 const OTRO_USER = 'user-2'
@@ -49,13 +49,13 @@ describe('preventistaPuedeEditar', () => {
       expect(preventistaPuedeEditar(pedido, USER_ID, now)).toBe(false)
     })
 
-    it('niega justo a las 17:00:00 ARG', () => {
+    it('niega justo a las 15:30:00 ARG', () => {
       const pedido = { usuario_id: USER_ID, created_at: argDate('2026-05-06', 10).toISOString(), estado: 'pendiente' as const }
-      const now = argDate('2026-05-06', HORA_CORTE_PREVENTISTA)
+      const now = argDate('2026-05-06', 15, 30)
       expect(preventistaPuedeEditar(pedido, USER_ID, now)).toBe(false)
     })
 
-    it('niega despues de las 17:00 ARG', () => {
+    it('niega despues de las 15:30 ARG', () => {
       const pedido = { usuario_id: USER_ID, created_at: argDate('2026-05-06', 10).toISOString(), estado: 'pendiente' as const }
       const now = argDate('2026-05-06', 18, 30)
       expect(preventistaPuedeEditar(pedido, USER_ID, now)).toBe(false)
@@ -63,15 +63,15 @@ describe('preventistaPuedeEditar', () => {
   })
 
   describe('cuando SI debe permitir edicion', () => {
-    it('permite si es el creador, mismo dia ARG, antes de 17:00, estado pendiente', () => {
+    it('permite si es el creador, mismo dia ARG, antes de 15:30, estado pendiente', () => {
       const pedido = { usuario_id: USER_ID, created_at: argDate('2026-05-06', 10).toISOString(), estado: 'pendiente' as const }
       const now = argDate('2026-05-06', 14)
       expect(preventistaPuedeEditar(pedido, USER_ID, now)).toBe(true)
     })
 
-    it('permite a las 16:59 ARG (justo antes del corte)', () => {
+    it('permite a las 15:29 ARG (justo antes del corte)', () => {
       const pedido = { usuario_id: USER_ID, created_at: argDate('2026-05-06', 8).toISOString(), estado: 'pendiente' as const }
-      const now = argDate('2026-05-06', 16, 59)
+      const now = argDate('2026-05-06', 15, 29)
       expect(preventistaPuedeEditar(pedido, USER_ID, now)).toBe(true)
     })
 
