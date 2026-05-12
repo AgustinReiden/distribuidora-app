@@ -99,6 +99,16 @@ function buildCardOps(doc, pedido, orderNumber) {
     ops.push({ kind: 'text', text: line, fontSize: 11, bold: true, advance: 5 })
   })
 
+  // Razon social en linea aparte si existe y difiere del nombre de fantasia
+  if (pedido.cliente?.razon_social && pedido.cliente.razon_social !== pedido.cliente.nombre_fantasia) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    const razonLines = doc.splitTextToSize(pedido.cliente.razon_social, CARD_CONTENT_WIDTH)
+    razonLines.slice(0, 2).forEach((line) => {
+      ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
+    })
+  }
+
   // Direccion
   if (pedido.cliente?.direccion) {
     doc.setFont('helvetica', 'normal')
