@@ -48,14 +48,14 @@ describe('formatDistancia', () => {
 })
 
 describe('clasificarDistancia', () => {
-  it('classifies thresholds correctly', () => {
+  it('classifies thresholds correctly (ok <500m, cerca <1km, lejos >=1km)', () => {
     expect(clasificarDistancia(null)).toBe('sin_dato')
     expect(clasificarDistancia(undefined)).toBe('sin_dato')
     expect(clasificarDistancia(0)).toBe('ok')
     expect(clasificarDistancia(499)).toBe('ok')
     expect(clasificarDistancia(500)).toBe('cerca')
-    expect(clasificarDistancia(1999)).toBe('cerca')
-    expect(clasificarDistancia(2000)).toBe('lejos')
+    expect(clasificarDistancia(999)).toBe('cerca')
+    expect(clasificarDistancia(1000)).toBe('lejos')
     expect(clasificarDistancia(10_000)).toBe('lejos')
   })
 })

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { AlertTriangle, ZapOff, Search, ShoppingCart, MapPin } from 'lucide-react'
 import { formatPrecio, formatHora } from '../../utils/formatters'
-import { clasificarDistancia, formatDistancia, SEMAFORO_COLORS } from '../../utils/geo'
+import { clasificarDistancia, formatDistancia, SEMAFORO_COLORS, ANOMALIA_DISTANCIA_METROS } from '../../utils/geo'
 import type { PedidoConGps, PreventistaResumen, VisitaConGps } from '../../hooks/queries'
 
 interface TablaAnomaliasProps {
@@ -56,7 +56,7 @@ export default function TablaAnomalias({
     const result: AnomaliaRow[] = []
     for (const p of pedidos) {
       const sinGps = p.gps_status !== 'ok'
-      const lejos = !sinGps && p.distancia_m != null && p.distancia_m >= 2000
+      const lejos = !sinGps && p.distancia_m != null && p.distancia_m >= ANOMALIA_DISTANCIA_METROS
       if (!sinGps && !lejos) continue
       result.push({
         key: `p-${p.pedido_id}`,
@@ -74,7 +74,7 @@ export default function TablaAnomalias({
     }
     for (const v of visitas) {
       const sinGps = v.gps_status !== 'ok'
-      const lejos = !sinGps && v.distancia_m != null && v.distancia_m >= 2000
+      const lejos = !sinGps && v.distancia_m != null && v.distancia_m >= ANOMALIA_DISTANCIA_METROS
       if (!sinGps && !lejos) continue
       result.push({
         key: `v-${v.visita_id}`,
