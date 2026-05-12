@@ -102,6 +102,24 @@ export const formatFecha = (f: string | Date | null | undefined): string => {
 }
 
 /**
+ * Formatea sólo la hora (HH:mm) en horario Argentina. Para fechas date-only
+ * devuelve '—' porque no hay hora que mostrar.
+ */
+export const formatHora = (f: string | Date | null | undefined): string => {
+  if (!f) return '—'
+  if (typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f)) return '—'
+  try {
+    return parseDateSafe(f).toLocaleTimeString('es-AR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    })
+  } catch {
+    return '—'
+  }
+}
+
+/**
  * Formatea una fecha en formato local
  */
 export function formatDate(date: string | Date | null | undefined, options: Intl.DateTimeFormatOptions = {}): string {
@@ -442,6 +460,7 @@ export default {
   fechaLocalISO,
   fechaHaceDias,
   formatFecha,
+  formatHora,
   formatDate,
   formatDateTime,
   formatTimeAgo,

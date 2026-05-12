@@ -13,7 +13,7 @@ const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { f
   const mod = await import('../../lib/pdfExport') as any
   return mod.generarReciboPedido(pedido, _empresa, options)
 };
-import { formatPrecio, formatFecha, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
+import { formatPrecio, formatFecha, formatHora, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
 import { PedidoActionsCtx } from '../../contexts/HandlersContext';
@@ -252,6 +252,12 @@ function PedidoCard({
               <p className="text-sm text-gray-500 dark:text-gray-400">{pedido.cliente?.direccion}</p>
               <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                 <span>#{pedido.id} - {formatFecha(pedido.fecha || pedido.created_at)}</span>
+                {pedido.created_at && (
+                  <span className="inline-flex items-center gap-0.5 text-xs text-gray-400 dark:text-gray-500" title="Hora de creación del pedido">
+                    <Clock className="w-3 h-3" />
+                    {formatHora(pedido.created_at)}
+                  </span>
+                )}
                 {pedido.fecha_entrega_programada && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && (
                   <span className="inline-flex items-center gap-0.5 text-xs text-orange-600 dark:text-orange-400">
                     <Truck className="w-3 h-3" />

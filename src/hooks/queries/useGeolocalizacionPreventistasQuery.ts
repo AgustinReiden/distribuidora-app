@@ -36,6 +36,12 @@ export interface PedidoConGps {
   pedido_id: number
   preventista_id: string
   fecha: string
+  /**
+   * Timestamp ISO en que se creó el pedido (`pedidos.created_at`). Se usa
+   * para mostrar la hora de creación en el panel admin. Disponible a partir
+   * de la migración 041; antes de eso el RPC no lo devolvía y queda null.
+   */
+  pedido_created_at: string | null
   total: number
   gps_lat: number | null
   gps_lng: number | null
