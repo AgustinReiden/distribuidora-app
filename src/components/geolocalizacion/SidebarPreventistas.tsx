@@ -1,21 +1,13 @@
 import React, { useMemo } from 'react'
 import { MapPin, ShoppingCart, AlertTriangle } from 'lucide-react'
 import { colorPreventista } from '../../utils/geo'
+import { formatHora } from '../../utils/formatters'
 import type { PreventistaResumen } from '../../hooks/queries'
 
 interface SidebarPreventistasProps {
   preventistas: PreventistaResumen[]
   selectedId: string | null
   onSelect: (id: string | null) => void
-}
-
-function formatHora(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return '—'
-  }
 }
 
 export default function SidebarPreventistas({ preventistas, selectedId, onSelect }: SidebarPreventistasProps): React.ReactElement {

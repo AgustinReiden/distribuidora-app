@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react'
 import { AlertTriangle, ZapOff, Search } from 'lucide-react'
-import { formatPrecio } from '../../utils/formatters'
+import { formatPrecio, formatHora } from '../../utils/formatters'
 import { clasificarDistancia, formatDistancia, SEMAFORO_COLORS } from '../../utils/geo'
 import type { PedidoConGps, PreventistaResumen } from '../../hooks/queries'
 
@@ -22,15 +22,6 @@ interface AnomaliaRow {
   total: number
 }
 
-function formatHora(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return '—'
-  }
-}
-
 export default function TablaAnomalias({ pedidos, preventistas, onSelectPedido }: TablaAnomaliasProps): React.ReactElement {
   const nombresMap = useMemo(() => {
     const map: Record<string, string> = {}
@@ -49,7 +40,7 @@ export default function TablaAnomalias({ pedidos, preventistas, onSelectPedido }
         preventista_id: p.preventista_id,
         preventista_nombre: nombresMap[p.preventista_id] ?? '—',
         cliente_nombre: p.cliente_nombre || 'Sin cliente',
-        hora: formatHora(p.gps_capturado_at),
+        hora: formatHora(p.pedido_created_at ?? p.gps_capturado_at),
         motivo: sinGps ? 'sin_gps' : 'lejos',
         motivo_label: sinGps
           ? (p.gps_status === 'denied' ? 'GPS denegado'

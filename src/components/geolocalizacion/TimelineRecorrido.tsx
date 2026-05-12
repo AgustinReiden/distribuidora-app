@@ -1,6 +1,6 @@
 import React from 'react'
 import { Clock, MapPin, AlertCircle } from 'lucide-react'
-import { formatPrecio } from '../../utils/formatters'
+import { formatPrecio, formatHora } from '../../utils/formatters'
 import { clasificarDistancia, formatDistancia, SEMAFORO_COLORS, colorPreventista } from '../../utils/geo'
 import type { PedidoConGps } from '../../hooks/queries'
 
@@ -10,15 +10,6 @@ interface TimelineRecorridoProps {
   preventistaNombre: string | null
   selectedPedidoId: number | null
   onSelectPedido: (pedidoId: number | null) => void
-}
-
-function formatHora(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return '—'
-  }
 }
 
 export default function TimelineRecorrido({
@@ -36,11 +27,14 @@ export default function TimelineRecorrido({
     )
   }
 
+  // Ordenamos por created_at del pedido para que el timeline refleje el
+  // orden real de creación, independiente de si hubo o no check-in GPS.
+  // Fallback a gps_capturado_at para pedidos previos a la migración 041.
   const propios = pedidos
     .filter(p => p.preventista_id === preventistaId)
     .sort((a, b) => {
-      const ta = a.gps_capturado_at ? Date.parse(a.gps_capturado_at) : 0
-      const tb = b.gps_capturado_at ? Date.parse(b.gps_capturado_at) : 0
+      const ta = Date.parse(a.pedido_created_at ?? a.gps_capturado_at ?? '') || 0
+      const tb = Date.parse(b.pedido_created_at ?? b.gps_capturado_at ?? '') || 0
       return ta - tb
     })
 
@@ -101,9 +95,12 @@ export default function TimelineRecorrido({
                     <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                       {p.cliente_nombre || 'Cliente sin nombre'}
                     </p>
-                    <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-1">
+                    <span
+                      className="shrink-0 text-xs text-gray-500 dark:text-gray-400 inline-flex items-center gap-1"
+                      title="Hora de creación del pedido"
+                    >
                       <Clock className="w-3 h-3" />
-                      {formatHora(p.gps_capturado_at)}
+                      {formatHora(p.pedido_created_at ?? p.gps_capturado_at)}
                     </span>
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2 flex-wrap">

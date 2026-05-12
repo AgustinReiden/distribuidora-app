@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Loader2, MapPin } from 'lucide-react'
 import { useGoogleMaps } from '../../hooks/useGoogleMaps'
 import { colorPreventista, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo'
-import { formatPrecio } from '../../utils/formatters'
+import { formatPrecio, formatHora } from '../../utils/formatters'
 import type { PreventistaResumen, PedidoConGps } from '../../hooks/queries'
 
 interface MapaPreventistasProps {
@@ -30,15 +30,6 @@ function escapeHtml(s: string): string {
       default: return ch
     }
   })
-}
-
-function formatHora(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return '—'
-  }
 }
 
 function pinSymbol(color: string, scale = 8): google.maps.Symbol {
@@ -224,7 +215,7 @@ export default function MapaPreventistas({
         <div style="font-family: ui-sans-serif, system-ui; padding: 4px 2px; max-width: 260px;">
           <div style="font-weight: 600; color: #111827; font-size: 13px;">${escapeHtml(p.cliente_nombre || 'Cliente sin nombre')}</div>
           <div style="color: #6b7280; font-size: 11px; margin-top: 2px;">
-            Pedido #${p.pedido_id} · ${formatHora(p.gps_capturado_at)}
+            Pedido #${p.pedido_id} · ${formatHora(p.pedido_created_at ?? p.gps_capturado_at)}
           </div>
           <div style="margin-top: 6px; font-size: 12px; color: #374151;">
             <strong>${formatPrecio(Number(p.total) || 0)}</strong>
