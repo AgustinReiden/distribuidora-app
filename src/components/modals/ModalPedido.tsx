@@ -258,7 +258,7 @@ const ModalPedido = memo(function ModalPedido({
                   onSelect={(result) => {
                     setNuevoCliente(prev => ({ ...prev, direccion: result.direccion, latitud: result.latitud, longitud: result.longitud }));
                   }}
-                  placeholder="Buscar dirección..."
+                  placeholder="Buscar dirección... *"
                 />
                 {nuevoCliente.latitud && nuevoCliente.longitud && (
                   <div className="flex items-center text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
