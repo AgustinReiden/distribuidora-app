@@ -30,7 +30,6 @@ export interface AppHandlersContextValue extends UseAppHandlersReturn {
   fetchPedidosEliminados: () => Promise<unknown[]>
   setFiltros: (filtros: FiltrosPedidosState) => void
   actualizarItemsPedido: (pedidoId: string, items: unknown[]) => Promise<unknown>
-  actualizarPreciosMasivo: (precios: unknown[]) => Promise<unknown>
   optimizarRuta: (pedidos: unknown[]) => Promise<unknown>
 
   // Funciones de Recorridos

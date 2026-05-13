@@ -14,7 +14,6 @@
 
 import { useState, useEffect } from 'react'
 import { supabase, notifyError } from './base'
-import { logger } from '../../utils/logger'
 import type { ProductoDB, ProductoFormInput, UseProductosReturn } from '../../types'
 
 interface StockItem {
@@ -31,19 +30,6 @@ interface StockValidationItem {
 interface StockError {
   productoId: string;
   mensaje: string;
-}
-
-interface PrecioMasivoItem {
-  productoId: string;
-  precioNeto?: number;
-  impInternos?: number;
-  precioFinal?: number;
-}
-
-interface ActualizarPreciosResult {
-  success: boolean;
-  actualizados: number;
-  errores: string[];
 }
 
 interface DescontarStockRPCResult {
@@ -192,78 +178,6 @@ export function useProductos(): UseProductosReturn {
     }))
   }
 
-  const actualizarPreciosMasivo = async (productosData: PrecioMasivoItem[]): Promise<ActualizarPreciosResult> => {
-    // Filtrar productos sin ID valido
-    const productosValidos = productosData.filter(p => p.productoId != null)
-
-    if (productosValidos.length === 0) {
-      throw new Error('No hay productos validos para actualizar')
-    }
-
-    const productosParaRPC = productosValidos.map(p => ({
-      producto_id: p.productoId,
-      precio_neto: p.precioNeto || 0,
-      imp_internos: p.impInternos || 0,
-      precio_final: p.precioFinal || 0
-    }))
-
-    // Intentar usar la funcion RPC primero
-    const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
-      p_productos: productosParaRPC
-    })
-
-    // Si la funcion RPC no existe o falla, usar fallback con updates individuales
-    if (error) {
-      logger.warn('RPC actualizar_precios_masivo fallo, usando fallback:', error.message)
-
-      let actualizados = 0
-      const errores: string[] = []
-
-      for (const p of productosValidos) {
-        const updateData: Record<string, number> = {
-          precio: p.precioFinal || 0
-        }
-        // Solo incluir campos si tienen valor
-        if (p.precioNeto) updateData.precio_sin_iva = p.precioNeto
-        if (p.impInternos) updateData.impuestos_internos = p.impInternos
-
-        const { error: updateError } = await supabase
-          .from('productos')
-          .update(updateData)
-          .eq('id', p.productoId)
-
-        if (updateError) {
-          errores.push(`Error en producto ${p.productoId}: ${updateError.message}`)
-        } else {
-          actualizados++
-        }
-      }
-
-      // Refrescar productos despues de actualizar
-      await fetchProductos()
-
-      if (errores.length > 0 && actualizados === 0) {
-        throw new Error(errores.join(', '))
-      }
-
-      return { success: true, actualizados, errores }
-    }
-
-    // Verificar si la funcion RPC retorno exito
-    const rpcResult = data as ActualizarPreciosResult | null
-    if (rpcResult && rpcResult.success === false) {
-      const erroresMsg = rpcResult.errores?.length > 0
-        ? rpcResult.errores.join(', ')
-        : 'Error en la actualizacion'
-      throw new Error(erroresMsg)
-    }
-
-    // Refrescar productos despues de actualizar
-    await fetchProductos()
-
-    return rpcResult || { success: true, actualizados: productosValidos.length, errores: [] }
-  }
-
   return {
     productos,
     loading,
@@ -273,7 +187,6 @@ export function useProductos(): UseProductosReturn {
     validarStock,
     descontarStock,
     restaurarStock,
-    actualizarPreciosMasivo,
     refetch: fetchProductos
   }
 }

@@ -328,3 +328,49 @@ export function useRestaurarStockMutation() {
     },
   })
 }
+
+// ===========================================================================
+// Actualización masiva de precios
+// ===========================================================================
+
+export interface ActualizarPreciosMasivoItem {
+  producto_id: string
+  precio_neto: number | null
+  imp_internos: number | null
+  precio_final: number | null
+}
+
+export interface ActualizarPreciosMasivoResult {
+  success: boolean
+  actualizados: number
+  errores: string[]
+}
+
+/**
+ * Hook que actualiza precios de múltiples productos vía RPC.
+ *
+ * El RPC `actualizar_precios_masivo` valida `es_admin()` y usa COALESCE
+ * para mantener el valor previo si un campo entra `null` en el payload.
+ */
+export function useActualizarPreciosMasivoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (items: ActualizarPreciosMasivoItem[]): Promise<ActualizarPreciosMasivoResult> => {
+      const { data, error } = await supabase.rpc('actualizar_precios_masivo', {
+        p_productos: items,
+      })
+      if (error) throw error
+      const result = data as ActualizarPreciosMasivoResult | null
+      if (!result || result.success === false) {
+        throw new Error(result?.errores?.join(', ') || 'Error actualizando precios')
+      }
+      return result
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
+    },
+  })
+}

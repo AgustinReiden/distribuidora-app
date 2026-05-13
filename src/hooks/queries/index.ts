@@ -16,7 +16,9 @@ export {
   useEliminarProductoMutation,
   useDescontarStockMutation,
   useRestaurarStockMutation,
+  useActualizarPreciosMasivoMutation,
 } from './useProductosQuery'
+export type { ActualizarPreciosMasivoItem, ActualizarPreciosMasivoResult } from './useProductosQuery'
 
 // Categorías
 export {

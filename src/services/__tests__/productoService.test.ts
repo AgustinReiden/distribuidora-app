@@ -40,7 +40,7 @@ vi.mock('../../hooks/supabase/base', () => ({
 
 import { supabase, notifyError } from '../../hooks/supabase/base'
 import { productoService } from '../api/productoService'
-import type { StockItem, PrecioUpdate } from '../api/productoService'
+import type { StockItem } from '../api/productoService'
 
 // Helper to create a chainable mock query with a terminal resolution
 function createMockQuery(overrides: Record<string, unknown> = {}) {
@@ -272,83 +272,6 @@ describe('ProductoService', () => {
 
       await expect(productoService.restaurarStock([{ producto_id: 'p1', cantidad: 2 }]))
         .rejects.toThrow('Error restaurando stock para p1')
-    })
-  })
-
-  // ===========================================================================
-  // actualizarPreciosMasivo
-  // ===========================================================================
-  describe('actualizarPreciosMasivo', () => {
-    it('debe usar RPC cuando está disponible', async () => {
-      const precios: PrecioUpdate[] = [
-        { codigo: 'CC500', precio_final: 1500 },
-        { codigo: 'FA330', precio_final: 800 }
-      ]
-      const mockResult = { actualizados: 2, errores: [] }
-
-      vi.mocked(supabase.rpc).mockResolvedValue({ data: mockResult, error: null } as any)
-
-      const result = await productoService.actualizarPreciosMasivo(precios)
-
-      expect(supabase.rpc).toHaveBeenCalledWith('actualizar_precios_masivo', {
-        precios: JSON.stringify(precios)
-      })
-      expect(result).toEqual(mockResult)
-    })
-
-    it('debe hacer fallback uno por uno cuando la RPC falla', async () => {
-      const precios: PrecioUpdate[] = [
-        { codigo: 'CC500', precio_neto: 1200, precio_final: 1500 }
-      ]
-
-      // RPC fails
-      vi.mocked(supabase.rpc).mockResolvedValue({
-        data: null,
-        error: { message: 'function not found', code: '42883', details: null, hint: null }
-      } as any)
-
-      // Fallback: find by codigo (select.eq.single), then update
-      const findQuery = createMockQuery({
-        single: vi.fn().mockResolvedValue({ data: { id: 'p1' }, error: null })
-      })
-      const updateQuery = createMockQuery({
-        single: vi.fn().mockResolvedValue({
-          data: { id: 'p1', codigo: 'CC500', precio_final: 1500 },
-          error: null
-        })
-      })
-
-      vi.mocked(supabase.from)
-        .mockReturnValueOnce(findQuery as any)
-        .mockReturnValueOnce(updateQuery as any)
-
-      const result = await productoService.actualizarPreciosMasivo(precios)
-
-      expect(result.actualizados).toBe(1)
-      expect(result.errores).toHaveLength(0)
-    })
-
-    it('debe registrar errores en el fallback cuando un producto no se encuentra', async () => {
-      const precios: PrecioUpdate[] = [
-        { codigo: 'NOEXISTE', precio_final: 999 }
-      ]
-
-      // RPC fails
-      vi.mocked(supabase.rpc).mockResolvedValue({
-        data: null,
-        error: { message: 'function not found', code: '42883', details: null, hint: null }
-      } as any)
-
-      // Fallback: product not found
-      const findQuery = createMockQuery({
-        single: vi.fn().mockResolvedValue({ data: null, error: null })
-      })
-      vi.mocked(supabase.from).mockReturnValue(findQuery as any)
-
-      const result = await productoService.actualizarPreciosMasivo(precios)
-
-      expect(result.actualizados).toBe(0)
-      expect(result.errores).toContain('Producto NOEXISTE no encontrado')
     })
   })
 

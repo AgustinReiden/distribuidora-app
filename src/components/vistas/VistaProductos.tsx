@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react';
 import type { ChangeEvent } from 'react';
-import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, FileSpreadsheet, ClipboardCheck, Tag, ChevronLeft, ChevronRight, ArrowLeftRight } from 'lucide-react';
+import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, Percent, ClipboardCheck, Tag, ChevronLeft, ChevronRight, ArrowLeftRight } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
@@ -22,7 +22,7 @@ export interface VistaProductosProps {
   onEliminarProducto: (id: string) => void;
   onBajaStock?: (producto: ProductoDB) => void;
   onVerHistorialMermas?: () => void;
-  onImportarPrecios?: () => void;
+  onActualizacionMasivaPrecios?: () => void;
   onGestionarCategorias?: () => void;
   onCambioProducto?: () => void;
 }
@@ -37,7 +37,7 @@ export default function VistaProductos({
   onEliminarProducto,
   onBajaStock,
   onVerHistorialMermas,
-  onImportarPrecios,
+  onActualizacionMasivaPrecios,
   onGestionarCategorias,
   onCambioProducto
 }: VistaProductosProps) {
@@ -138,13 +138,13 @@ export default function VistaProductos({
                 <span>Historial Mermas</span>
               </button>
             )}
-            {isAdmin && onImportarPrecios && (
+            {isAdmin && onActualizacionMasivaPrecios && (
               <button
-                onClick={onImportarPrecios}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
+                onClick={onActualizacionMasivaPrecios}
+                className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
               >
-                <FileSpreadsheet className="w-5 h-5" />
-                <span>Importar Precios</span>
+                <Percent className="w-5 h-5" />
+                <span>Actualización masiva</span>
               </button>
             )}
             {onCambioProducto && (

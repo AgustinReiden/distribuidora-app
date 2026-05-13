@@ -327,7 +327,6 @@ export interface UseProductosReturn {
   validarStock: (items: Array<{ productoId: string; cantidad: number }>) => { valido: boolean; errores: Array<{ productoId: string; mensaje: string }> };
   descontarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>;
   restaurarStock: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>;
-  actualizarPreciosMasivo: (productos: Array<{ productoId: string; precioNeto?: number; impInternos?: number; precioFinal?: number }>) => Promise<{ success: boolean; actualizados: number; errores: string[] }>;
   refetch: () => Promise<void>;
 }
 
@@ -483,7 +482,6 @@ export interface AppModalesState {
   fichaCliente: ModalState;
   merma: ModalState;
   historialMermas: ModalState;
-  importarPrecios: ModalState;
   compra: ModalState;
   detalleCompra: ModalState;
   proveedor: ModalState;

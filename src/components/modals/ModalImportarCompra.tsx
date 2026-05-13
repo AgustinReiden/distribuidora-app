@@ -3,7 +3,6 @@
  *
  * Permite importar ítems de compra desde un archivo Excel.
  * Mapea código de producto, cantidad, costo unitario y bonificación.
- * Sigue el patrón de ModalImportarPrecios.tsx.
  */
 import { useState, useCallback } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
