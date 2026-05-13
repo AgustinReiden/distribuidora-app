@@ -220,6 +220,73 @@ export function useRegistrarCompraMutation() {
 }
 
 /**
+ * Input para editar items de una compra (admin only, ventana 7 dias).
+ * La cabecera de la compra (proveedor, fecha, factura, tipo_factura, forma_pago)
+ * queda inmutable; solo se actualizan los items y los totales recalculados.
+ */
+export interface ActualizarCompraItemsInput {
+  compraId: string
+  usuarioId: string | null
+  subtotal: number
+  iva: number
+  total: number
+  items: Array<{
+    productoId: string
+    cantidad: number
+    costoUnitario: number
+    subtotal: number
+    bonificacion?: number
+    porcentajeIva?: number
+    impuestosInternos?: number
+  }>
+}
+
+async function actualizarCompraItems(input: ActualizarCompraItemsInput): Promise<{ compraId: string }> {
+  const itemsParaRPC: CompraItemRPC[] = input.items.map(item => ({
+    producto_id: item.productoId,
+    cantidad: item.cantidad,
+    costo_unitario: item.costoUnitario,
+    subtotal: item.subtotal,
+    bonificacion: item.bonificacion ?? 0,
+    porcentaje_iva: item.porcentajeIva ?? 21,
+    impuestos_internos: item.impuestosInternos ?? 0,
+  }))
+
+  const { data, error } = await supabase.rpc('actualizar_compra_items', {
+    p_compra_id: input.compraId,
+    p_items_nuevos: itemsParaRPC,
+    p_subtotal: input.subtotal,
+    p_iva: input.iva,
+    p_total: input.total,
+    p_usuario_id: input.usuarioId,
+  })
+
+  if (error) throw error
+  const result = data as { success: boolean; compra_id: string; error?: string }
+  if (!result.success) {
+    throw new Error(result.error || 'Error al actualizar compra')
+  }
+  return { compraId: result.compra_id }
+}
+
+/**
+ * Hook para editar items de una compra existente (admin, 7 dias).
+ * Solo modifica items y totales — cabecera queda intacta.
+ */
+export function useActualizarCompraMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: actualizarCompraItems,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: ['productos'] })
+    },
+  })
+}
+
+/**
  * Hook para anular una compra
  */
 export function useAnularCompraMutation() {
