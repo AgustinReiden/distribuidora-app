@@ -49,7 +49,6 @@ const ModalHistorialMermas = lazy(() => import('./modals/ModalHistorialMermas'))
 const ModalCompra = lazy(() => import('./modals/ModalCompra'));
 const ModalDetalleCompra = lazy(() => import('./modals/ModalDetalleCompra'));
 const ModalProveedor = lazy(() => import('./modals/ModalProveedor'));
-const ModalImportarPrecios = lazy(() => import('./modals/ModalImportarPrecios'));
 const ModalPedidosEliminados = lazy(() => import('./modals/ModalPedidosEliminados'));
 const ModalEntregaConSalvedad = lazy(() => import('./modals/ModalEntregaConSalvedad'));
 
@@ -96,7 +95,6 @@ export interface ModalesState {
   compra: ModalState;
   detalleCompra: ModalState;
   proveedor: ModalState;
-  importarPrecios: ModalState;
   pedidosEliminados: ModalState;
   entregaConSalvedad: ModalState;
 }
@@ -232,7 +230,6 @@ export interface AppModalsProps {
    
   fetchPedidosEliminados: () => Promise<any[]>;
   actualizarItemsPedido: (...args: any[]) => Promise<any>;
-  actualizarPreciosMasivo: (productos: Array<{ productoId: string; precioNeto?: number; impInternos?: number; precioFinal?: number }>) => Promise<{ success: boolean; actualizados: number; errores: string[] }>;
   optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[]) => Promise<any>;
    
 
@@ -279,7 +276,6 @@ export default function AppModals({
   // Funciones de datos
   fetchPedidosEliminados,
   actualizarItemsPedido,
-  actualizarPreciosMasivo,
   optimizarRuta,
 
   // Estado de carga
@@ -606,19 +602,6 @@ export default function AppModals({
         </Suspense>
       )}
       { }
-
-      {/* Modal de Importar Precios */}
-      {modales.importarPrecios.open && (
-        <Suspense fallback={<ModalFallback />}>
-          <CompactErrorBoundary componentName="ModalImportarPrecios" onClose={() => modales.importarPrecios.setOpen(false)}>
-            <ModalImportarPrecios
-              productos={productos}
-              onActualizarPrecios={actualizarPreciosMasivo as any}
-              onClose={() => modales.importarPrecios.setOpen(false)}
-            />
-          </CompactErrorBoundary>
-        </Suspense>
-      )}
 
       {/* Modal de Pedidos Eliminados */}
       {modales.pedidosEliminados.open && (

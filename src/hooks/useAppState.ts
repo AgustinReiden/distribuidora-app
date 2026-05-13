@@ -35,7 +35,6 @@ export type ModalName =
   | 'compra'
   | 'detalleCompra'
   | 'proveedor'
-  | 'importarPrecios'
   | 'pedidosEliminados'
   | 'entregaConSalvedad';
 
@@ -65,7 +64,6 @@ export interface ModalsState {
   compra: boolean;
   detalleCompra: boolean;
   proveedor: boolean;
-  importarPrecios: boolean;
   pedidosEliminados: boolean;
   entregaConSalvedad: boolean;
   confirm: ConfirmConfig;
@@ -144,7 +142,6 @@ export interface ModalesApi {
   compra: ModalApi;
   detalleCompra: ModalApi;
   proveedor: ModalApi;
-  importarPrecios: ModalApi;
   pedidosEliminados: ModalApi;
   entregaConSalvedad: ModalApi;
   confirm: ConfirmModalApi;
@@ -226,7 +223,7 @@ const MODAL_NAMES: ModalName[] = [
   'cliente', 'producto', 'pedido', 'usuario', 'asignar', 'filtroFecha',
   'historial', 'editarPedido', 'exportarPDF', 'optimizarRuta', 'fichaCliente',
   'registrarPago', 'mermaStock', 'historialMermas', 'compra', 'detalleCompra',
-  'proveedor', 'importarPrecios', 'pedidosEliminados', 'entregaConSalvedad'
+  'proveedor', 'pedidosEliminados', 'entregaConSalvedad'
 ];
 
 const initialModalsState: ModalsState = {
@@ -364,7 +361,6 @@ export function useAppState(perfil: PerfilDB | null): UseAppStateReturn {
       compra: createModalApi('compra'),
       detalleCompra: createModalApi('detalleCompra'),
       proveedor: createModalApi('proveedor'),
-      importarPrecios: createModalApi('importarPrecios'),
       pedidosEliminados: createModalApi('pedidosEliminados'),
       entregaConSalvedad: createModalApi('entregaConSalvedad'),
       confirm: {

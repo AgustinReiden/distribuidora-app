@@ -16,7 +16,7 @@ export { clienteService } from './api/clienteService'
 export type { ClienteWithPedidos, ResumenCuenta, ValidationResult as ClienteValidationResult } from './api/clienteService'
 
 export { productoService } from './api/productoService'
-export type { StockItem, PrecioUpdate, ActualizarPreciosResult, ProductoVendido, ValidationResult as ProductoValidationResult } from './api/productoService'
+export type { StockItem, ProductoVendido, ValidationResult as ProductoValidationResult } from './api/productoService'
 
 export { pedidoService } from './api/pedidoService'
 export type {

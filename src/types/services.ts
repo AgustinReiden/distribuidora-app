@@ -102,16 +102,6 @@ export interface ProductoService extends BaseService<Producto, ProductoInput> {
     operacion: 'incrementar' | 'decrementar' | 'establecer'
   ): Promise<ServiceResponse<Producto>>;
 
-  /**
-   * Actualizar precios masivamente
-   */
-  actualizarPreciosMasivo(
-    actualizaciones: Array<{
-      id: string;
-      precio_unitario?: number;
-      precio_mayorista?: number;
-    }>
-  ): Promise<ServiceResponse<Producto[]>>;
 }
 
 // =============================================================================

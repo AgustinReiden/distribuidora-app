@@ -10,7 +10,7 @@ import {
   useProductosQuery,
   useCrearProductoMutation,
   useActualizarProductoMutation,
-  useEliminarProductoMutation
+  useEliminarProductoMutation,
 } from '../../hooks/queries'
 import { useMermasQuery, useRegistrarMermaMutation } from '../../hooks/queries'
 import { useProveedoresActivosQuery } from '../../hooks/queries'
@@ -27,7 +27,7 @@ const VistaProductos = lazy(() => import('../vistas/VistaProductos'))
 const ModalProducto = lazy(() => import('../modals/ModalProducto'))
 const ModalMermaStock = lazy(() => import('../modals/ModalMermaStock'))
 const ModalHistorialMermas = lazy(() => import('../modals/ModalHistorialMermas'))
-const ModalImportarPrecios = lazy(() => import('../modals/ModalImportarPrecios'))
+const ModalActualizacionMasivaPrecios = lazy(() => import('../modals/ModalActualizacionMasivaPrecios'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
 const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
@@ -71,7 +71,7 @@ export default function ProductosContainer(): React.ReactElement {
   const [modalProductoOpen, setModalProductoOpen] = useState(false)
   const [modalMermaOpen, setModalMermaOpen] = useState(false)
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
-  const [modalImportarOpen, setModalImportarOpen] = useState(false)
+  const [modalActualizacionMasivaOpen, setModalActualizacionMasivaOpen] = useState(false)
   const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
   const [modalCambioOpen, setModalCambioOpen] = useState(false)
 
@@ -135,8 +135,8 @@ export default function ProductosContainer(): React.ReactElement {
     setModalHistorialOpen(true)
   }, [])
 
-  const handleImportarPrecios = useCallback(() => {
-    setModalImportarOpen(true)
+  const handleAbrirActualizacionMasiva = useCallback(() => {
+    setModalActualizacionMasivaOpen(true)
   }, [])
 
   const handleGestionarCategorias = useCallback(() => {
@@ -198,21 +198,6 @@ export default function ProductosContainer(): React.ReactElement {
     }
   }, [registrarMerma, notify])
 
-  const handleActualizarPreciosMasivo = useCallback(async (items: Array<{ productoId: string | null; precioFinal: number }>) => {
-    try {
-      const updates = items
-        .filter(item => item.productoId)
-        .map(item => actualizarProducto.mutateAsync({
-          id: item.productoId!,
-          data: { precio: item.precioFinal } as ProductoFormInput
-        }))
-      await Promise.all(updates)
-      return { success: true, actualizados: items.length }
-    } catch {
-      return { success: false, error: 'Error al actualizar precios' }
-    }
-  }, [actualizarProducto])
-
   return (
     <>
       <Suspense fallback={<LoadingState />}>
@@ -226,7 +211,7 @@ export default function ProductosContainer(): React.ReactElement {
           onEliminarProducto={handleEliminarProducto}
           onBajaStock={handleBajaStock}
           onVerHistorialMermas={handleVerHistorialMermas}
-          onImportarPrecios={handleImportarPrecios}
+          onActualizacionMasivaPrecios={handleAbrirActualizacionMasiva}
           onGestionarCategorias={handleGestionarCategorias}
           onCambioProducto={puedeCambiarProductos ? handleAbrirCambioProducto : undefined}
         />
@@ -274,13 +259,14 @@ export default function ProductosContainer(): React.ReactElement {
         </Suspense>
       )}
 
-      {/* Modal Importar Precios */}
-      {modalImportarOpen && (
+      {/* Modal Actualización masiva de precios */}
+      {modalActualizacionMasivaOpen && (
         <Suspense fallback={null}>
-          <ModalImportarPrecios
+          <ModalActualizacionMasivaPrecios
             productos={productos}
-            onActualizarPrecios={handleActualizarPreciosMasivo}
-            onClose={() => setModalImportarOpen(false)}
+            proveedores={proveedores}
+            categorias={categorias}
+            onClose={() => setModalActualizacionMasivaOpen(false)}
           />
         </Suspense>
       )}

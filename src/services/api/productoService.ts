@@ -11,18 +11,6 @@ export interface StockItem {
   cantidad: number;
 }
 
-export interface PrecioUpdate {
-  codigo: string;
-  precio_neto?: number;
-  imp_internos?: number;
-  precio_final?: number;
-}
-
-export interface ActualizarPreciosResult {
-  actualizados: number;
-  errores: string[];
-}
-
 export interface ProductoVendido extends Producto {
   cantidad_vendida: number;
 }
@@ -148,48 +136,6 @@ class ProductoService extends BaseService<Producto> {
     }
 
     return result
-  }
-
-  /**
-   * Actualiza precios masivamente
-   */
-  async actualizarPreciosMasivo(precios: PrecioUpdate[]): Promise<ActualizarPreciosResult> {
-    // Intentar con RPC primero
-    try {
-      const result = await this.rpc<ActualizarPreciosResult>('actualizar_precios_masivo', {
-        precios: JSON.stringify(precios)
-      })
-      return result
-    } catch {
-      // Fallback: actualizar uno por uno
-      const errores: string[] = []
-      let actualizados = 0
-
-      for (const precio of precios) {
-        try {
-          const { data: productos } = await this.db
-            .from(this.table)
-            .select('id')
-            .eq('codigo', precio.codigo)
-            .single()
-
-          if (productos) {
-            await this.update(productos.id, {
-              precio_neto: precio.precio_neto,
-              imp_internos: precio.imp_internos,
-              precio_final: precio.precio_final
-            } as Partial<Producto>)
-            actualizados++
-          } else {
-            errores.push(`Producto ${precio.codigo} no encontrado`)
-          }
-        } catch (error) {
-          errores.push(`Error en ${precio.codigo}: ${(error as Error).message}`)
-        }
-      }
-
-      return { actualizados, errores }
-    }
   }
 
   /**
