@@ -1,7 +1,8 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
-import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle, FileText } from 'lucide-react';
+import { ShoppingCart, Plus, Search, Eye, Calendar, Building2, Package, DollarSign, XCircle, FileText, Pencil } from 'lucide-react';
 import type { NCResumen } from '../../hooks/queries';
 import { formatPrecio } from '../../utils/formatters';
+import { adminPuedeEditarCompra } from '../../utils/permisosCompra';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from '../../types';
@@ -40,6 +41,7 @@ export interface VistaComprasProps {
   onVerDetalle: (compra: CompraDBExtended) => void;
   onAnularCompra: (compraId: string) => void;
   onNotaCredito?: (compra: CompraDBExtended) => void;
+  onEditarCompra?: (compra: CompraDBExtended) => void;
   ncResumen?: NCResumen[];
   resumen?: ResumenCompras | null;
 }
@@ -71,6 +73,7 @@ export default function VistaCompras({
   onVerDetalle,
   onAnularCompra,
   onNotaCredito,
+  onEditarCompra,
   ncResumen = [],
   resumen: _resumen
 }: VistaComprasProps): React.ReactElement {
@@ -430,6 +433,15 @@ export default function VistaCompras({
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+                          {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin) && (
+                            <button
+                              onClick={() => onEditarCompra(compra)}
+                              className="p-2 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition-colors"
+                              title="Editar compra (hasta 7 dias desde la creacion)"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
                           {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
                             <button
                               onClick={() => onNotaCredito(compra)}
@@ -524,6 +536,16 @@ export default function VistaCompras({
                     >
                       <Eye className="w-4 h-4" />
                     </button>
+                    {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin) && (
+                      <button
+                        onClick={() => onEditarCompra(compra)}
+                        className="p-2 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                        title="Editar compra"
+                        aria-label="Editar compra"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    )}
                     {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
                       <button
                         onClick={() => onNotaCredito(compra)}

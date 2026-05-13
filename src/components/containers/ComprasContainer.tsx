@@ -9,6 +9,7 @@ import {
   useComprasQuery,
   useProveedoresQuery,
   useRegistrarCompraMutation,
+  useActualizarCompraMutation,
   useAnularCompraMutation,
   useProductosQuery,
   useCrearProductoMutation,
@@ -17,6 +18,7 @@ import {
   useNotasCreditoResumenQuery,
   useRegistrarNotaCreditoMutation,
 } from '../../hooks/queries'
+import type { ActualizarCompraItemsInput } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
@@ -26,6 +28,7 @@ const VistaCompras = lazy(() => import('../vistas/VistaCompras'))
 const ModalCompra = lazy(() => import('../modals/ModalCompra'))
 const ModalDetalleCompra = lazy(() => import('../modals/ModalDetalleCompra'))
 const ModalNotaCredito = lazy(() => import('../modals/ModalNotaCredito'))
+const ModalEditarCompra = lazy(() => import('../modals/ModalEditarCompra'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
@@ -55,6 +58,7 @@ export default function ComprasContainer(): React.ReactElement {
 
   // Mutations
   const registrarCompra = useRegistrarCompraMutation()
+  const actualizarCompra = useActualizarCompraMutation()
   const anularCompra = useAnularCompraMutation()
   const crearProducto = useCrearProductoMutation()
   const crearProveedor = useCrearProveedorMutation()
@@ -64,10 +68,12 @@ export default function ComprasContainer(): React.ReactElement {
   const [modalCompraOpen, setModalCompraOpen] = useState(false)
   const [modalDetalleOpen, setModalDetalleOpen] = useState(false)
   const [modalNotaCreditoOpen, setModalNotaCreditoOpen] = useState(false)
+  const [modalEditarOpen, setModalEditarOpen] = useState(false)
 
   // Estado de detalle
   const [compraDetalle, setCompraDetalle] = useState<CompraDBExtended | null>(null)
   const [compraParaNC, setCompraParaNC] = useState<CompraDBExtended | null>(null)
+  const [compraParaEditar, setCompraParaEditar] = useState<CompraDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // NC resumen for badges in list
@@ -131,6 +137,24 @@ export default function ComprasContainer(): React.ReactElement {
     setModalNotaCreditoOpen(true)
   }, [])
 
+  const handleEditarCompra = useCallback((compra: CompraDBExtended) => {
+    setCompraParaEditar(compra)
+    setModalEditarOpen(true)
+  }, [])
+
+  const handleGuardarEdicionCompra = useCallback(async (input: ActualizarCompraItemsInput) => {
+    try {
+      await actualizarCompra.mutateAsync(input)
+      notify.success('Compra actualizada')
+      setModalEditarOpen(false)
+      setCompraParaEditar(null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al actualizar compra'
+      notify.error(msg)
+      throw err
+    }
+  }, [actualizarCompra, notify])
+
   const handleGuardarNC = useCallback(async (data: NotaCreditoFormInput) => {
     try {
       await registrarNC.mutateAsync(data)
@@ -162,6 +186,7 @@ export default function ComprasContainer(): React.ReactElement {
           onVerDetalle={handleVerDetalle}
           onAnularCompra={handleAnularCompra}
           onNotaCredito={handleNotaCredito}
+          onEditarCompra={handleEditarCompra}
           ncResumen={ncResumen}
         />
       </Suspense>
@@ -192,6 +217,22 @@ export default function ComprasContainer(): React.ReactElement {
             onAnular={handleAnularCompra}
             onNotaCredito={(c) => handleNotaCredito(c as CompraDBExtended)}
             notasCredito={notasCreditoQuery.data as any}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Editar Compra (admin, 7 dias) */}
+      {modalEditarOpen && compraParaEditar && (
+        <Suspense fallback={null}>
+          <ModalEditarCompra
+            compra={compraParaEditar}
+            usuarioId={user?.id ?? null}
+            onGuardar={handleGuardarEdicionCompra}
+            onClose={() => {
+              setModalEditarOpen(false)
+              setCompraParaEditar(null)
+            }}
+            guardando={actualizarCompra.isPending}
           />
         </Suspense>
       )}
