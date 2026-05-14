@@ -35,6 +35,7 @@ import { useDebounce } from '../../hooks/useAsync'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
 import { supabase } from '../../hooks/supabase/base'
 import { usePagos } from '../../hooks/supabase/usePagos'
+import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 
@@ -853,26 +854,56 @@ export default function PedidosContainer(): React.ReactElement {
   }, [notify])
 
   // ModalEntregaConSalvedad handlers
+  // Idempotente via client_request_id (mig 049): un UUID por salvedad persiste
+  // entre reintentos. El RPC short-circuit si ya creo la salvedad con ese UUID.
+  // Retry automatico con backoff cubre "TypeError: Load failed" (iOS Safari /
+  // PWA) y otros errores transient de red sin riesgo de duplicar.
   const handleSaveSalvedades = useCallback(async (salvedades: RegistrarSalvedadInput[]): Promise<RegistrarSalvedadResult[]> => {
     const results: RegistrarSalvedadResult[] = []
     for (const salvedad of salvedades) {
-      const { data, error } = await supabase.rpc('registrar_salvedad', {
-        p_pedido_id: parseInt(String(salvedad.pedidoId), 10),
-        p_pedido_item_id: parseInt(String(salvedad.pedidoItemId), 10),
-        p_cantidad_afectada: salvedad.cantidadAfectada,
-        p_motivo: salvedad.motivo,
-        p_descripcion: salvedad.descripcion || null,
-        p_foto_url: salvedad.fotoUrl || null,
-        p_devolver_stock: salvedad.devolverStock !== false
-      })
-      if (error) {
-        results.push({ success: false, error: error.message })
-      } else {
-        const result = data as Record<string, unknown> | null
-        results.push({
-          success: !!result?.success,
-          error: result?.success ? undefined : String(result?.error || 'Error desconocido')
-        })
+      const clientRequestId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      try {
+        const { data, error } = await retryWithBackoff(
+          async () => {
+            const response = await supabase.rpc('registrar_salvedad', {
+              p_pedido_id: parseInt(String(salvedad.pedidoId), 10),
+              p_pedido_item_id: parseInt(String(salvedad.pedidoItemId), 10),
+              p_cantidad_afectada: salvedad.cantidadAfectada,
+              p_motivo: salvedad.motivo,
+              p_descripcion: salvedad.descripcion || null,
+              p_foto_url: salvedad.fotoUrl || null,
+              p_devolver_stock: salvedad.devolverStock !== false,
+              p_client_request_id: clientRequestId,
+            })
+            // supabase-js puede devolver errores de red en `error` en lugar de
+            // lanzarlos. Re-lanzamos como Error para que retryWithBackoff
+            // pueda capturarlo y decidir reintentar.
+            if (response.error && isTransientNetworkError(response.error)) {
+              const e = new Error(response.error.message || 'Load failed')
+              throw e
+            }
+            return response
+          },
+          { shouldRetry: isTransientNetworkError },
+        )
+        if (error) {
+          results.push({ success: false, error: error.message })
+        } else {
+          const result = data as Record<string, unknown> | null
+          results.push({
+            success: !!result?.success,
+            error: result?.success ? undefined : String(result?.error || 'Error desconocido'),
+          })
+        }
+      } catch (err) {
+        const msg = err instanceof Error
+          ? (isTransientNetworkError(err)
+              ? 'Sin conexion estable. Volve a intentar cuando tengas senal.'
+              : err.message)
+          : 'Error desconocido'
+        results.push({ success: false, error: msg })
       }
     }
     // Invalidar cache de productos y pedidos para reflejar cambios de stock y totales
