@@ -271,6 +271,12 @@ function PedidoCard({
               </p>
             </div>
           </div>
+          {pedido.usuario?.nombre && (
+            <div className="mt-2 inline-flex items-center px-2 py-1 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded-full text-sm" title="Pedido cargado por">
+              <User className="w-4 h-4 mr-1" />
+              Cargado por {pedido.usuario.nombre}
+            </div>
+          )}
           {pedido.transportista && (
             <div className="mt-2 inline-flex items-center px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">
               <Truck className="w-4 h-4 mr-1" />
