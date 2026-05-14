@@ -231,6 +231,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return productos
       .filter(p =>
         !items.find(i => i.productoId === p.id) &&
+        p.stock > 0 &&
         (p.nombre?.toLowerCase().includes(busquedaLower) ||
           p.codigo?.toLowerCase().includes(busquedaLower))
       )
