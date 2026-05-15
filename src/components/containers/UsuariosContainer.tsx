@@ -47,7 +47,7 @@ export default function UsuariosContainer(): React.ReactElement {
           nombre: usuario.nombre,
           rol: usuario.rol,
           activo: usuario.activo,
-          zona: usuario.rol === 'preventista' ? usuario.zona || null : null
+          zona: (usuario.rol === 'preventista' || usuario.rol === 'preventista_taco') ? usuario.zona || null : null
         }
       })
       notify.success('Usuario actualizado')
