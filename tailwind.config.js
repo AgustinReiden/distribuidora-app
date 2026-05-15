@@ -14,6 +14,8 @@ export default {
         'scale-in': 'scale-in 0.2s ease-out',
         'fadeSlideIn': 'fadeSlideIn 0.3s ease-out',
         'card-in': 'card-in 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
+        'slide-up': 'slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
+        'slide-down': 'slide-down 0.22s cubic-bezier(0.55, 0, 0.55, 0.2)',
       },
       keyframes: {
         'slide-in': {
@@ -41,6 +43,15 @@ export default {
         'card-in': {
           '0%': { opacity: '0', transform: 'translateY(6px) scale(0.99)' },
           '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        /* Bottom sheet: sube desde el borde inferior. */
+        'slide-up': {
+          '0%': { transform: 'translateY(100%)' },
+          '100%': { transform: 'translateY(0)' },
+        },
+        'slide-down': {
+          '0%': { transform: 'translateY(0)' },
+          '100%': { transform: 'translateY(100%)' },
         },
       },
       /* Sombras cálidas (tinte stone en vez de gray puro) */
