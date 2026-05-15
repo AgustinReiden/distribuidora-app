@@ -162,7 +162,7 @@ export interface PedidoInput {
 // USUARIO
 // =============================================================================
 
-export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
+export type RolUsuario = 'admin' | 'preventista' | 'preventista_taco' | 'transportista' | 'deposito' | 'encargado';
 
 export interface Usuario extends BaseEntity {
   email: string;

@@ -102,6 +102,7 @@ export function useClienteHandlersContext() {
     handleVerFichaCliente: handlers.handleVerFichaCliente,
     handleAbrirRegistrarPago: handlers.handleAbrirRegistrarPago,
     handleRegistrarPago: handlers.handleRegistrarPago,
+    handleRegistrarPagoFIFO: handlers.handleRegistrarPagoFIFO,
     handleGenerarReciboPago: handlers.handleGenerarReciboPago
   }
 }

@@ -442,6 +442,11 @@ function PedidoCard({
           >
             {formatPrecio(pedido.total)}
           </p>
+          {pedido.estado_pago === 'parcial' && (
+            <p className="mt-1.5 text-[13px] font-medium text-amber-700 dark:text-amber-400 tabular-nums">
+              Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
+            </p>
+          )}
           {(pedido.forma_pago || (pedido.pagos && pedido.pagos.length > 0)) && (
             <p className="mt-1.5 text-[13px] text-stone-500 dark:text-gray-400 flex items-center gap-1.5">
               <CreditCard className="w-3.5 h-3.5" aria-hidden="true" />

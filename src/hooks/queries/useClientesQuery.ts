@@ -114,6 +114,7 @@ interface ClienteCreateInput {
   longitud?: number | null
   limite_credito?: number
   dias_credito?: number
+  descuento_porcentaje?: number
   contacto?: string
   horarios_atencion?: string
   rubro?: string
@@ -168,6 +169,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       longitud: clienteFields.longitud || null,
       limite_credito: clienteFields.limite_credito || 0,
       dias_credito: clienteFields.dias_credito || 30,
+      descuento_porcentaje: clienteFields.descuento_porcentaje ?? 0,
       contacto: clienteFields.contacto || null,
       horarios_atencion: clienteFields.horarios_atencion || null,
       rubro: clienteFields.rubro || null,

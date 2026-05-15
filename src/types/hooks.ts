@@ -29,6 +29,7 @@ export interface ClienteDB {
   limite_credito?: number;
   dias_credito?: number;
   saldo_cuenta?: number;
+  descuento_porcentaje?: number;
   preventista_id?: string | null;
   /**
    * IDs de preventistas asignados (N-a-N via tabla cliente_preventistas).
@@ -87,7 +88,7 @@ export interface PerfilDB {
   id: string;
   nombre: string;
   email: string;
-  rol?: 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
+  rol?: 'admin' | 'preventista' | 'preventista_taco' | 'transportista' | 'deposito' | 'encargado';
   zona?: string;
   activo?: boolean;
 }
@@ -228,6 +229,7 @@ export interface ClienteFormInput {
   notas?: string;
   limiteCredito?: string | number;
   diasCredito?: string | number;
+  descuentoPorcentaje?: string | number;
   preventistaId?: string | null;
   preventista_ids?: string[];
 }
@@ -682,6 +684,30 @@ export interface RegistrarPagoBatchInput {
   usuarioId?: string | null;
 }
 
+export interface PagoFifoAplicacion {
+  pago_id: number;
+  pedido_id: number | null;
+  pedido_fecha?: string;
+  monto: number;
+  saldo_a_favor?: boolean;
+}
+
+export interface RegistrarPagoFifoInput {
+  clienteId: string;
+  monto: number;
+  formaPago: string;
+  fecha?: string;
+  referencia?: string;
+  notas?: string;
+}
+
+export interface RegistrarPagoFifoResult {
+  pagoIds: number[];
+  sobrante: number;
+  montoTotal: number;
+  aplicaciones: PagoFifoAplicacion[];
+}
+
 export interface UsePagosReturnExtended {
   pagos: PagoDBWithUsuario[];
   loading: boolean;
@@ -689,6 +715,7 @@ export interface UsePagosReturnExtended {
   fetchPagosPedido: (pedidoId: string) => Promise<PagoDBWithUsuario[]>;
   registrarPago: (pago: PagoFormInput) => Promise<PagoDBWithUsuario>;
   registrarPagosBatch: (input: RegistrarPagoBatchInput) => Promise<PagoDBWithUsuario[]>;
+  registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   eliminarPago: (pagoId: string) => Promise<void>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 }

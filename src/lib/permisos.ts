@@ -24,7 +24,7 @@ export function puedeAnularPago(rol: RolUsuario | null | undefined): boolean {
 }
 
 export function puedeAccederDashboard(rol: RolUsuario | null | undefined): boolean {
-  return rol === 'admin' || rol === 'preventista'
+  return rol === 'admin' || rol === 'preventista' || rol === 'preventista_taco'
 }
 
 export function puedeAccederReportes(rol: RolUsuario | null | undefined): boolean {
@@ -56,11 +56,49 @@ export function puedeAccederGeolocalizacion(rol: RolUsuario | null | undefined):
 }
 
 export function puedeCrearCliente(rol: RolUsuario | null | undefined): boolean {
-  return rol === 'admin' || rol === 'preventista' || rol === 'encargado'
+  return rol === 'admin' || rol === 'preventista' || rol === 'preventista_taco' || rol === 'encargado'
 }
 
 export function puedeCrearPedido(rol: RolUsuario | null | undefined): boolean {
-  return rol === 'admin' || rol === 'preventista' || rol === 'encargado'
+  return rol === 'admin' || rol === 'preventista' || rol === 'preventista_taco' || rol === 'encargado'
+}
+
+/**
+ * Si el rol puede ver montos comerciales (ventas, totales, ticket promedio, saldos
+ * de cuenta corriente, historicos de compra). Falso para preventista_taco.
+ */
+export function puedeVerMontosYVentas(rol: RolUsuario | null | undefined): boolean {
+  return rol !== 'preventista_taco'
+}
+
+/** Si el rol puede ver el saldo de cuenta corriente en la ficha de cliente. */
+export function puedeVerSaldoCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol !== 'preventista_taco'
+}
+
+/** Si el rol puede ver el historial de ventas/compras de un cliente. */
+export function puedeVerHistorialVentasCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol !== 'preventista_taco'
+}
+
+/** Si el rol puede ver la facturacion total en el dashboard. Solo admin. */
+export function puedeVerFacturacionTotal(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
+/** Si el rol puede ver agregados comerciales (top productos por venta, ticket promedio). Solo admin. */
+export function puedeVerAgregadosDashboard(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
+/** Si el rol puede registrar pagos desde la ficha de cliente (admin o encargado). */
+export function puedeRegistrarPagoCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado'
+}
+
+/** Si el rol puede editar el descuento porcentual precargado del cliente. */
+export function puedeEditarDescuentoCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
 }
 
 export type PedidoStatKey =
@@ -75,6 +113,7 @@ export function mostrarMontosEnStats(
   rol: RolUsuario | null | undefined,
   key: PedidoStatKey,
 ): boolean {
+  if (rol === 'preventista_taco') return false
   if (rol === 'encargado') return key === 'impagos'
   return true
 }

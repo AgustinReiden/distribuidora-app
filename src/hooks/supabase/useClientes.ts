@@ -54,7 +54,8 @@ export function useClientes(): UseClientesReturn {
     rubro: cliente.rubro || null,
     notas: cliente.notas || null,
     limite_credito: cliente.limiteCredito ? parseFloat(String(cliente.limiteCredito)) : 0,
-    dias_credito: cliente.diasCredito ? parseInt(String(cliente.diasCredito)) : 30
+    dias_credito: cliente.diasCredito ? parseInt(String(cliente.diasCredito)) : 30,
+    descuento_porcentaje: cliente.descuentoPorcentaje != null ? parseFloat(String(cliente.descuentoPorcentaje)) : 0
   })
 
   const agregarCliente = useCallback(async (cliente: ClienteFormInput): Promise<ClienteDB> => {
@@ -101,6 +102,9 @@ export function useClientes(): UseClientesReturn {
     }
     if (cliente.diasCredito !== undefined) {
       updateData.dias_credito = parseInt(String(cliente.diasCredito)) || 30
+    }
+    if (cliente.descuentoPorcentaje !== undefined) {
+      updateData.descuento_porcentaje = parseFloat(String(cliente.descuentoPorcentaje)) || 0
     }
 
     const data = await clienteService.update(id, updateData) as unknown as ClienteDB

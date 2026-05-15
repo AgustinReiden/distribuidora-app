@@ -22,7 +22,7 @@ export function useRegistrarGeolocalizacionPedido() {
   const capturarGps = useGeolocationCapture()
 
   const registrarGpsPedido = useCallback(
-    async (pedidoId: string | number, gps: GpsResult): Promise<void> => {
+    async (pedidoId: string | number, gps: GpsResult, motivoOmision?: string | null): Promise<void> => {
       try {
         const params: Record<string, unknown> = {
           p_pedido_id: typeof pedidoId === 'string' ? Number(pedidoId) : pedidoId,
@@ -33,6 +33,8 @@ export function useRegistrarGeolocalizacionPedido() {
           params.p_lng = gps.lng
           params.p_accuracy = gps.accuracy
           params.p_capturado_at = gps.capturadoAt
+        } else if (motivoOmision && motivoOmision.trim().length > 0) {
+          params.p_motivo_omision = motivoOmision.trim()
         }
         const { error } = await supabase.rpc('registrar_geolocalizacion_pedido', params)
         if (error) {
