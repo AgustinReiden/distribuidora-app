@@ -4,11 +4,12 @@
  * Recibe datos ya paginados server-side desde PedidosContainer.
  * Renderiza lista + controles de paginación.
  */
-import { useState, useRef, useEffect } from 'react';
-import { ShoppingCart, Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown, Truck, MapPin, History } from 'lucide-react';
+import { ShoppingCart } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
+import PedidosViewHeader from '../pedidos/PedidosViewHeader';
+import PedidoToolbar from '../pedidos/PedidoToolbar';
 import type {
   PedidoDB,
   ClienteDB,
@@ -158,89 +159,30 @@ export default function VistaPedidos({
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Pedidos</h1>
-        <div className="flex flex-wrap gap-2">
-          {(isAdmin || isEncargado) && (
-            <button
-              onClick={onOptimizarRuta}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Route className="w-5 h-5" />
-              <span>Optimizar Ruta</span>
-            </button>
-          )}
-          {(isAdmin || isEncargado) && (
-            <button
-              onClick={onExportarPDF}
-              className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-            >
-              <FileDown className="w-5 h-5" />
-              <span>Exportar PDF</span>
-            </button>
-          )}
-          {(isAdmin || isEncargado) && (
-            <ExcelExportDropdown exportando={exportando} onExportarExcel={onExportarExcel} totalCount={totalCount} />
-          )}
-          {(isAdmin || isEncargado) && onEntregasMasivas && (
-            <button
-              onClick={onEntregasMasivas}
-              className="flex items-center space-x-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
-            >
-              <PackageCheck className="w-5 h-5" />
-              <span className="hidden sm:inline">Entregas Masivas</span>
-            </button>
-          )}
-          {(isAdmin || isEncargado) && onAsignarTransportistaMasivo && (
-            <button
-              onClick={onAsignarTransportistaMasivo}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Truck className="w-5 h-5" />
-              <span className="hidden sm:inline">Asignar Transportista</span>
-            </button>
-          )}
-          {(isAdmin || isEncargado) && onPagosMasivos && (
-            <button
-              onClick={onPagosMasivos}
-              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              <Banknote className="w-5 h-5" />
-              <span className="hidden sm:inline">Pagos Masivos</span>
-            </button>
-          )}
-          {isPreventista && onVerVisitasHoy && (
-            <button
-              onClick={onVerVisitasHoy}
-              className="flex items-center space-x-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              title="Ver clientes que visitaste hoy"
-            >
-              <History className="w-5 h-5" />
-              <span className="hidden sm:inline">Visitas del día</span>
-            </button>
-          )}
-          {isPreventista && onMarcarVisita && (
-            <button
-              onClick={onMarcarVisita}
-              className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-              title="Marcar visita a un cliente sin necesidad de cargar pedido"
-            >
-              <MapPin className="w-5 h-5" />
-              <span>Marcar visita</span>
-            </button>
-          )}
-          {(isAdmin || isEncargado || isPreventista) && (
-            <button
-              onClick={onNuevoPedido}
-              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Nuevo</span>
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Header con título dinámico + toolbar */}
+      <PedidosViewHeader
+        filtros={filtros}
+        totalCount={totalCount}
+        loading={loading}
+        actions={
+          <PedidoToolbar
+            isAdmin={isAdmin}
+            isEncargado={isEncargado}
+            isPreventista={isPreventista}
+            exportando={exportando}
+            totalCount={totalCount}
+            onNuevoPedido={onNuevoPedido}
+            onOptimizarRuta={onOptimizarRuta}
+            onExportarPDF={onExportarPDF}
+            onExportarExcel={onExportarExcel}
+            onEntregasMasivas={onEntregasMasivas}
+            onPagosMasivos={onPagosMasivos}
+            onAsignarTransportistaMasivo={onAsignarTransportistaMasivo}
+            onMarcarVisita={onMarcarVisita}
+            onVerVisitasHoy={onVerVisitasHoy}
+          />
+        }
+      />
 
       {/* Filtros */}
       <PedidoFilters
@@ -268,26 +210,35 @@ export default function VistaPedidos({
       ) : (
         <>
           <div className="space-y-3">
-            {pedidos.map(pedido => (
-              <PedidoCard
+            {pedidos.map((pedido, idx) => (
+              <div
                 key={pedido.id}
-                pedido={pedido}
-                isAdmin={isAdmin}
-                isPreventista={isPreventista}
-                isTransportista={isTransportista}
-                isEncargado={isEncargado}
-                onVerHistorial={onVerHistorial}
-                onEditarPedido={onEditarPedido}
-                onEditarNotas={onEditarNotas}
-                onMarcarEnPreparacion={onMarcarEnPreparacion}
-                onVolverAPendiente={onVolverAPendiente}
-                onAsignarTransportista={onAsignarTransportista}
-                onMarcarEntregado={onMarcarEntregado}
-                onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
-                onDesmarcarEntregado={onDesmarcarEntregado}
-                onCancelarPedido={onCancelarPedido}
-                onRegistrarPago={onAbrirPagoPedido}
-              />
+                style={{
+                  // Stagger fade-in: cada card entra 40ms después de la anterior,
+                  // cap a 12 items para que no se sienta lento en páginas largas.
+                  animation: 'card-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both',
+                  animationDelay: `${Math.min(idx, 12) * 40}ms`,
+                }}
+              >
+                <PedidoCard
+                  pedido={pedido}
+                  isAdmin={isAdmin}
+                  isPreventista={isPreventista}
+                  isTransportista={isTransportista}
+                  isEncargado={isEncargado}
+                  onVerHistorial={onVerHistorial}
+                  onEditarPedido={onEditarPedido}
+                  onEditarNotas={onEditarNotas}
+                  onMarcarEnPreparacion={onMarcarEnPreparacion}
+                  onVolverAPendiente={onVolverAPendiente}
+                  onAsignarTransportista={onAsignarTransportista}
+                  onMarcarEntregado={onMarcarEntregado}
+                  onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
+                  onDesmarcarEntregado={onDesmarcarEntregado}
+                  onCancelarPedido={onCancelarPedido}
+                  onRegistrarPago={onAbrirPagoPedido}
+                />
+              </div>
             ))}
           </div>
 
@@ -304,59 +255,3 @@ export default function VistaPedidos({
   );
 }
 
-// =============================================================================
-// EXCEL EXPORT DROPDOWN
-// =============================================================================
-
-function ExcelExportDropdown({
-  exportando,
-  onExportarExcel,
-  totalCount
-}: {
-  exportando: boolean;
-  onExportarExcel: (modo: 'pagina' | 'filtro') => void;
-  totalCount: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    if (open) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        disabled={exportando}
-        className="flex items-center space-x-2 px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50"
-      >
-        <FileDown className="w-5 h-5" />
-        <span>{exportando ? 'Exportando...' : 'Excel'}</span>
-        <ChevronDown className="w-4 h-4" />
-      </button>
-      {open && !exportando && (
-        <div className="absolute right-0 mt-1 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border dark:border-gray-700 z-50 overflow-hidden">
-          <button
-            onClick={() => { onExportarExcel('pagina'); setOpen(false); }}
-            className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white border-b dark:border-gray-700"
-          >
-            <p className="font-medium">Página actual</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Solo los pedidos visibles en pantalla</p>
-          </button>
-          <button
-            onClick={() => { onExportarExcel('filtro'); setOpen(false); }}
-            className="w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white"
-          >
-            <p className="font-medium">Filtro actual ({totalCount} pedidos)</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Todos los pedidos que coinciden con el filtro</p>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
