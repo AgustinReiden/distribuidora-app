@@ -216,14 +216,14 @@ export default function TopNavigation({
                       <button
                         key={item.id}
                         onClick={() => handleVistaChange(item.id)}
-                        className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                        className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors ${
                           vista === item.id
-                            ? 'bg-blue-600 text-white shadow-md'
-                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 font-semibold'
+                            : 'text-gray-600 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-gray-700/60'
                         }`}
                       >
-                        <ItemIcon className="w-4 h-4" />
-                        <span className="font-medium text-sm">{item.label}</span>
+                        <ItemIcon className={`w-4 h-4 ${vista === item.id ? 'text-blue-600 dark:text-blue-300' : ''}`} />
+                        <span className="text-sm">{item.label}</span>
                       </button>
                     );
                   });
@@ -244,15 +244,15 @@ export default function TopNavigation({
                       onClick={() => toggleDropdown(group.id)}
                       aria-expanded={isOpen}
                       aria-haspopup="true"
-                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                      className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors ${
                         isActive
-                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 font-semibold'
+                          : 'text-gray-600 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-gray-700/60'
                       }`}
                     >
-                      <GroupIcon className="w-4 h-4" />
-                      <span className="font-medium text-sm">{group.label}</span>
-                      <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      <GroupIcon className={`w-4 h-4 ${isActive ? 'text-blue-600 dark:text-blue-300' : ''}`} />
+                      <span className="text-sm">{group.label}</span>
+                      <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''} ${isActive ? 'text-blue-600 dark:text-blue-300' : ''}`} />
                     </button>
 
                     {/* Dropdown */}
@@ -265,13 +265,13 @@ export default function TopNavigation({
                               key={item.id}
                               role="menuitem"
                               onClick={() => handleVistaChange(item.id)}
-                              className={`w-full flex items-center space-x-3 px-4 py-3 transition-colors ${
+                              className={`w-full flex items-center space-x-3 px-4 py-2.5 transition-colors border-l-2 ${
                                 vista === item.id
-                                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                  ? 'bg-blue-50/70 dark:bg-blue-900/20 text-blue-700 dark:text-blue-200 border-blue-500'
+                                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-transparent'
                               }`}
                             >
-                              <ItemIcon className="w-4 h-4" />
+                              <ItemIcon className={`w-4 h-4 ${vista === item.id ? 'text-blue-600 dark:text-blue-300' : ''}`} />
                               <span className="font-medium text-sm">{item.label}</span>
                             </button>
                           );
