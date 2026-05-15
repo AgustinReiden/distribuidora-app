@@ -1,15 +1,25 @@
 /**
- * Componente de filtros para la vista de pedidos
+ * Componente de filtros para la vista de pedidos.
  *
- * Diseño: dropdowns con un único estilo de pill (border sutil, fondo blanco).
- * Cuando un filtro tiene valor distinto al "todos" por default, su pill
- * adquiere acento azul para señalar que está activo, en lugar de usar un
- * color distinto por tipo de filtro (eso causaba el "carnaval" en mobile).
+ * Dos layouts (responsive con Tailwind, sin JS):
+ *
+ *  MOBILE (<sm):
+ *    [ 🔍 Buscar...                            ]
+ *    [ 📅 Fechas ]    [ ⚙ Filtros (N) ]
+ *    [ Chip "Filtrado: 2026-04-15 – ..." si activo ]
+ *
+ *  DESKTOP (sm+):
+ *    Dos filas inline igual que antes (sin cambios desde PR #318).
+ *
+ * Los filtros secundarios (estado, pago, transportista, usuario, salvedades,
+ * entrega) en mobile viven dentro del bottom sheet `ModalFiltrosPedidos`
+ * para no convertir esta zona en un muro de UI.
  */
-import React, { memo, ChangeEvent } from 'react';
-import { Search, Calendar, X, Truck, User } from 'lucide-react';
+import React, { memo, useState, type ChangeEvent } from 'react';
+import { Search, Calendar, X, Truck, User, SlidersHorizontal } from 'lucide-react';
 import { fechaLocalISO } from '../../utils/formatters';
 import { cn } from '../../lib/utils';
+import ModalFiltrosPedidos from './ModalFiltrosPedidos';
 import type { Usuario } from '../../types';
 
 interface FiltrosPedido {
@@ -65,6 +75,22 @@ function selectClass(activo: boolean): string {
   return cn(SELECT_BASE, activo && SELECT_ACTIVE);
 }
 
+/**
+ * Cuenta filtros activos (excluyendo búsqueda y fechaDesde/fechaHasta que
+ * viven afuera del modal). Se usa para el badge "(N)" del botón mobile.
+ */
+function contarFiltrosActivos(filtros: FiltrosPedido): number {
+  let n = 0;
+  if (filtros.estado && filtros.estado !== 'todos') n++;
+  if (filtros.estadoPago && filtros.estadoPago !== 'todos') n++;
+  if (filtros.transportistaId && filtros.transportistaId !== 'todos') n++;
+  if (filtros.usuarioId && filtros.usuarioId !== 'todos') n++;
+  if (filtros.conSalvedad && filtros.conSalvedad !== 'todos') n++;
+  if (filtros.fechaEntregaProgramada) n++;
+  if (filtros.verCancelados) n++;
+  return n;
+}
+
 // =============================================================================
 // MAIN
 // =============================================================================
@@ -77,13 +103,15 @@ function PedidoFilters({
   isAdmin,
   onBusquedaChange,
   onFiltrosChange,
-  onModalFiltroFecha
+  onModalFiltroFecha,
 }: PedidoFiltersProps): React.ReactElement {
   const fechaActiva = Boolean(filtros.fechaDesde || filtros.fechaHasta);
+  const activosCount = contarFiltrosActivos(filtros);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* ─── Primera fila: Busqueda + filtros principales ─── */}
+    <div className="flex flex-col gap-2.5 sm:gap-3">
+      {/* ╔══ Búsqueda (compartida mobile + desktop) ══╗ */}
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1 min-w-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" aria-hidden="true" />
@@ -92,7 +120,7 @@ function PedidoFilters({
             value={busqueda}
             onChange={(e: ChangeEvent<HTMLInputElement>) => onBusquedaChange(e.target.value)}
             className={cn(
-              'w-full h-9 pl-9 pr-3 rounded-lg border text-sm',
+              'w-full h-10 sm:h-9 pl-9 pr-3 rounded-lg border text-sm',
               'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200',
               'border-stone-200 dark:border-gray-700 placeholder:text-gray-400',
               'focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400',
@@ -101,48 +129,89 @@ function PedidoFilters({
             aria-label="Buscar pedidos por cliente, dirección o número de pedido"
           />
         </div>
-        <label htmlFor="filtro-estado" className="sr-only">Filtrar por estado del pedido</label>
-        <select
-          id="filtro-estado"
-          value={filtros.estado}
-          onChange={(e: ChangeEvent<HTMLSelectElement>) => onFiltrosChange({ estado: e.target.value })}
-          className={selectClass(filtros.estado !== 'todos')}
-        >
-          <option value="todos">Todos los estados</option>
-          <option value="pendiente">Pendientes</option>
-          <option value="en_preparacion">En preparación</option>
-          <option value="asignado">En camino</option>
-          <option value="entregado">Entregados</option>
-          <option value="cancelado">Cancelados</option>
-        </select>
-        <label className="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-stone-200 dark:border-gray-700 bg-white dark:bg-gray-800 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/50">
-          <input
-            type="checkbox"
-            checked={filtros.verCancelados || false}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => onFiltrosChange({ verCancelados: e.target.checked })}
-            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">Ver cancelados</span>
-        </label>
+
+        {/* ─── DESKTOP: Estado + Ver cancelados + Fechas ─── */}
+        <div className="hidden sm:flex items-center gap-2">
+          <label htmlFor="filtro-estado" className="sr-only">Filtrar por estado del pedido</label>
+          <select
+            id="filtro-estado"
+            value={filtros.estado}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => onFiltrosChange({ estado: e.target.value })}
+            className={selectClass(filtros.estado !== 'todos')}
+          >
+            <option value="todos">Todos los estados</option>
+            <option value="pendiente">Pendientes</option>
+            <option value="en_preparacion">En preparación</option>
+            <option value="asignado">En camino</option>
+            <option value="entregado">Entregados</option>
+            <option value="cancelado">Cancelados</option>
+          </select>
+          <label className="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-stone-200 dark:border-gray-700 bg-white dark:bg-gray-800 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/50">
+            <input
+              type="checkbox"
+              checked={filtros.verCancelados || false}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onFiltrosChange({ verCancelados: e.target.checked })}
+              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">Ver cancelados</span>
+          </label>
+          <button
+            type="button"
+            onClick={onModalFiltroFecha}
+            aria-label="Filtrar pedidos por rango de fechas"
+            className={cn(
+              'inline-flex items-center gap-2 h-9 px-3 rounded-lg border text-sm transition-colors',
+              fechaActiva
+                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-200'
+                : 'bg-white dark:bg-gray-800 border-stone-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50',
+            )}
+          >
+            <Calendar className="w-4 h-4" aria-hidden="true" />
+            <span>Fechas</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ╔══ MOBILE: [Fechas] [Filtros (N)] en una fila ══╗ */}
+      <div className="grid grid-cols-2 gap-2 sm:hidden">
         <button
           type="button"
           onClick={onModalFiltroFecha}
           aria-label="Filtrar pedidos por rango de fechas"
           className={cn(
-            'inline-flex items-center gap-2 h-9 px-3 rounded-lg border text-sm transition-colors',
+            'inline-flex items-center justify-center gap-2 h-10 px-3 rounded-lg border text-sm font-medium transition-colors',
             fechaActiva
               ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-200'
-              : 'bg-white dark:bg-gray-800 border-stone-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50',
+              : 'bg-white dark:bg-gray-800 border-stone-200 dark:border-gray-700 text-gray-700 dark:text-gray-200',
           )}
         >
           <Calendar className="w-4 h-4" aria-hidden="true" />
           <span>Fechas</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setSheetOpen(true)}
+          aria-label="Abrir filtros avanzados"
+          className={cn(
+            'inline-flex items-center justify-center gap-2 h-10 px-3 rounded-lg border text-sm font-medium transition-colors',
+            activosCount > 0
+              ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-200'
+              : 'bg-white dark:bg-gray-800 border-stone-200 dark:border-gray-700 text-gray-700 dark:text-gray-200',
+          )}
+        >
+          <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
+          <span>Filtros</span>
+          {activosCount > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-blue-600 text-white text-[11px] font-bold tabular-nums">
+              {activosCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* ─── Segunda fila: Filtros adicionales para admin ─── */}
+      {/* ─── DESKTOP: Segunda fila de filtros admin ─── */}
       {isAdmin && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="hidden sm:flex flex-wrap items-center gap-2">
           <label htmlFor="filtro-pago" className="sr-only">Filtrar por estado de pago</label>
           <select
             id="filtro-pago"
@@ -206,7 +275,7 @@ function PedidoFilters({
         </div>
       )}
 
-      {/* ─── Chip de filtro de fechas activo ─── */}
+      {/* ╔══ Chip de filtro de fechas activo (común) ══╗ */}
       {fechaActiva && (
         <div
           className="inline-flex items-center gap-2 self-start px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-200"
@@ -227,12 +296,25 @@ function PedidoFilters({
           </button>
         </div>
       )}
+
+      {/* Bottom sheet de filtros (solo mobile lo dispara). El componente
+          sigue montado pero su visibilidad la controla `sheetOpen`. */}
+      <ModalFiltrosPedidos
+        open={sheetOpen}
+        filtros={filtros}
+        transportistas={transportistas}
+        usuarios={usuarios}
+        isAdmin={isAdmin}
+        activosCount={activosCount}
+        onFiltrosChange={onFiltrosChange}
+        onClose={() => setSheetOpen(false)}
+      />
     </div>
   );
 }
 
 // =============================================================================
-// SEGMENTED CONTROL DE ENTREGA (Hoy / Mañana + date input)
+// SEGMENTED CONTROL DE ENTREGA (Hoy / Mañana + date input) — solo desktop
 // =============================================================================
 
 interface EntregaSegmentedControlProps {

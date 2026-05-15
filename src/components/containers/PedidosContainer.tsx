@@ -5,7 +5,7 @@
  * Maneja estado de paginación, filtros, búsqueda y modales.
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
-import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
+import React, { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
@@ -33,6 +33,7 @@ import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
 import { usePromocionPedido } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
+import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { supabase } from '../../hooks/supabase/base'
 import { usePagos } from '../../hooks/supabase/usePagos'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
@@ -58,6 +59,7 @@ const ModalPagosMasivos = lazy(() => import('../modals/ModalPagosMasivos'))
 const ModalAsignarTransportistaMasivo = lazy(() => import('../modals/ModalAsignarTransportistaMasivo'))
 const ModalMarcarVisita = lazy(() => import('../modals/ModalMarcarVisita'))
 const ModalVisitasHoy = lazy(() => import('../modals/ModalVisitasHoy'))
+const ModalMotivoSinGps = lazy(() => import('../modals/ModalMotivoSinGps'))
 
 const ITEMS_PER_PAGE = 15
 
@@ -725,16 +727,22 @@ export default function PedidosContainer(): React.ReactElement {
   }, [pedidoPago, isAdmin, eliminarPago, refreshPagosPedido, queryClient, notify])
 
   // ModalPedido handlers
-  const handleGuardarPedido = useCallback(async () => {
-    if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
-      notify.warning('Seleccioná cliente y productos')
-      return
-    }
-    setGuardando(true)
-    // Disparamos la captura de GPS en paralelo a la creación del pedido para
-    // no agregar latencia al flujo. Sólo si el usuario es preventista (target
-    // del feature). El RPC vuelve a validar la autorización en el backend.
-    const gpsPromise = isPreventista ? capturarGps() : null
+  // Estado para el modal de motivo cuando GPS != ok (timeout/unavailable/error).
+  // Bloquea la creación del pedido hasta que el preventista escriba justificación
+  // o cancele.
+  const [motivoGpsPending, setMotivoGpsPending] = useState<{
+    status: Exclude<GpsStatus, 'ok' | 'denied'>
+  } | null>(null)
+  // Guardamos el GpsResult capturado mientras esperamos que el preventista
+  // escriba el motivo. Usamos ref para no re-renderizar cuando cambia.
+  const gpsPendingRef = useRef<GpsResult | null>(null)
+
+  // Helper: ejecuta la creación efectiva del pedido + check-in GPS.
+  // Recibe el GPS ya capturado (admin: gps=null, preventista: GpsResult).
+  const ejecutarCreacionPedido = useCallback(async (
+    gps: GpsResult | null,
+    motivoOmision?: string,
+  ) => {
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
@@ -795,12 +803,11 @@ export default function PedidosContainer(): React.ReactElement {
         totalIva,
         fechaEntregaProgramada: nuevoPedido.fechaEntregaProgramada,
       })
-      // Check-in GPS: fire-and-forget. La promesa de captura ya está corriendo
-      // en paralelo desde el inicio del handler; cuando resuelva, mandamos el
-      // resultado al RPC. No bloquea el toast de éxito.
-      if (gpsPromise && pedidoCreado?.id) {
+      // Check-in GPS: ya tenemos el resultado capturado (sincrono para
+      // preventistas, null para admin). Persistimos directo, sin esperar.
+      if (gps && pedidoCreado?.id) {
         const pedidoId = pedidoCreado.id
-        gpsPromise.then(gps => { void registrarGpsPedido(pedidoId, gps) })
+        void registrarGpsPedido(pedidoId, gps, motivoOmision)
       }
       resetNuevoPedido()
       setModalPedidoOpen(false)
@@ -809,7 +816,57 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos, clientes, isPreventista, capturarGps, registrarGpsPedido])
+  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
+
+  // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
+  // pedir motivo, o crear directo.
+  const handleGuardarPedido = useCallback(async () => {
+    if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
+      notify.warning('Seleccioná cliente y productos')
+      return
+    }
+    setGuardando(true)
+
+    // Admin / encargado: sin GPS, flujo histórico.
+    if (!isPreventista) {
+      await ejecutarCreacionPedido(null)
+      return
+    }
+
+    // Preventista: capturar GPS sincrónicamente antes de crear el pedido.
+    const gps = await capturarGps()
+    if (gps.status === 'denied') {
+      notify.error('Permiso de GPS bloqueado. Activalo desde el navegador y reintentá.')
+      setGuardando(false)
+      return
+    }
+    if (gps.status !== 'ok') {
+      // Guardamos el GpsResult y dejamos que el ModalMotivoSinGps maneje el
+      // resto. El botón Confirmar del ModalPedido queda deshabilitado porque
+      // guardando sigue en true hasta que se confirme o cancele el motivo.
+      gpsPendingRef.current = gps
+      setMotivoGpsPending({ status: gps.status })
+      return
+    }
+    await ejecutarCreacionPedido(gps)
+  }, [nuevoPedido, isPreventista, capturarGps, ejecutarCreacionPedido, notify])
+
+  const handleConfirmarMotivoGps = useCallback(async (motivo: string) => {
+    const gps = gpsPendingRef.current
+    setMotivoGpsPending(null)
+    gpsPendingRef.current = null
+    if (!gps) {
+      setGuardando(false)
+      return
+    }
+    await ejecutarCreacionPedido(gps, motivo)
+  }, [ejecutarCreacionPedido])
+
+  const handleCancelarMotivoGps = useCallback(() => {
+    setMotivoGpsPending(null)
+    gpsPendingRef.current = null
+    setGuardando(false)
+  }, [])
 
   // ModalFiltroFecha: onApply({ fechaDesde, fechaHasta })
   const handleFiltroFechaApply = useCallback((f: { fechaDesde: string | null; fechaHasta: string | null }) => {
@@ -1310,6 +1367,7 @@ export default function PedidosContainer(): React.ReactElement {
             clientes={clientes}
             userId={user?.id ?? null}
             isAdmin={isAdmin}
+            isPreventista={isPreventista}
             onClose={() => setModalMarcarVisitaOpen(false)}
           />
         </Suspense>
@@ -1321,6 +1379,18 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalVisitasHoy
             userId={user?.id ?? null}
             onClose={() => setModalVisitasHoyOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal de motivo cuando el GPS no es 'ok' al confirmar pedido (preventista) */}
+      {motivoGpsPending && (
+        <Suspense fallback={null}>
+          <ModalMotivoSinGps
+            status={motivoGpsPending.status}
+            guardando={guardando}
+            onConfirm={handleConfirmarMotivoGps}
+            onCancel={handleCancelarMotivoGps}
           />
         </Suspense>
       )}
