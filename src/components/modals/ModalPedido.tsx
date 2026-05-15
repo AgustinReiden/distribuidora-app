@@ -6,6 +6,7 @@ import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import ModalBase from './ModalBase';
+import GeolocationGate from '../GeolocationGate';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -264,6 +265,7 @@ const ModalPedido = memo(function ModalPedido({
 
   return (
     <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
+      <GeolocationGate enabled={!!isPreventista} onCancel={onClose}>
       <div className="relative overflow-hidden">
         <div className="max-h-[65vh] overflow-y-auto overscroll-contain p-4 space-y-4">
           {/* Seccion Cliente */}
@@ -881,6 +883,7 @@ const ModalPedido = memo(function ModalPedido({
             Confirmar
           </button>
         </div>
+      </GeolocationGate>
     </ModalBase>
   );
 });

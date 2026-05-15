@@ -58,6 +58,7 @@ export interface RegistrarVisitaInput {
   lng?: number | null
   accuracy?: number | null
   capturadoAt?: string | null
+  motivoOmision?: string | null
 }
 
 interface RegistrarVisitaResponse {
@@ -76,6 +77,8 @@ async function registrarVisita(input: RegistrarVisitaInput): Promise<RegistrarVi
     params.p_lng = input.lng
     params.p_accuracy = input.accuracy
     params.p_capturado_at = input.capturadoAt
+  } else if (input.motivoOmision && input.motivoOmision.trim().length > 0) {
+    params.p_motivo_omision = input.motivoOmision.trim()
   }
   const { data, error } = await supabase.rpc('registrar_visita_cliente', params)
   if (error) throw error
