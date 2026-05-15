@@ -47,7 +47,7 @@ export function useUsuarios(): UseUsuariosReturn {
       nombre: datos.nombre,
       rol: datos.rol,
       activo: datos.activo,
-      zona: datos.rol === 'preventista' ? (datos.zona || null) : null
+      zona: (datos.rol === 'preventista' || datos.rol === 'preventista_taco') ? (datos.zona || null) : null
     }
     const { data, error } = await supabase.from('perfiles').update(updateData).eq('id', id).select().single()
     if (error) throw error
