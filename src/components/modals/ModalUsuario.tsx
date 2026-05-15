@@ -7,7 +7,7 @@ import { useZonasEstandarizadasQuery, usePreventistaZonasQuery, useAsignarZonasP
 import type { PerfilDB } from '../../types';
 
 /** Roles disponibles para usuarios */
-export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
+export type RolUsuario = 'admin' | 'preventista' | 'preventista_taco' | 'transportista' | 'deposito' | 'encargado';
 
 /** Datos del formulario de usuario */
 export interface UsuarioFormData {
@@ -63,8 +63,8 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     }
   }, [prevZonaIds]);
 
-  // Mostrar campo de zona solo para preventistas
-  const mostrarZona = form.rol === 'preventista';
+  // Mostrar campo de zona para preventistas (regular y taco)
+  const mostrarZona = form.rol === 'preventista' || form.rol === 'preventista_taco';
 
   const handleFieldChange = (field: keyof UsuarioFormData, value: string | boolean): void => {
     setForm({ ...form, [field]: value });
@@ -102,7 +102,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     await onSave({ ...form, id: usuario?.id });
 
     // Guardar zonas del preventista en tabla pivot
-    if (usuario?.id && form.rol === 'preventista') {
+    if (usuario?.id && (form.rol === 'preventista' || form.rol === 'preventista_taco')) {
       try {
         await asignarZonasMut.mutateAsync({ perfilId: usuario.id, zonaIds });
       } catch {
@@ -145,13 +145,15 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
             value={form.rol}
             onChange={e => {
               const newRol = e.target.value as RolUsuario;
-              setForm({ ...form, rol: newRol, zona: newRol !== 'preventista' ? '' : form.zona });
+              const esPreventista = newRol === 'preventista' || newRol === 'preventista_taco';
+              setForm({ ...form, rol: newRol, zona: esPreventista ? form.zona : '' });
               if (hasAttemptedSubmit && errors.rol) clearFieldError('rol');
             }}
             className={inputClass('rol')}
             {...getAriaProps('rol', true)}
           >
             <option value="preventista">Preventista</option>
+            <option value="preventista_taco">Preventista Taco</option>
             <option value="transportista">Transportista</option>
             <option value="deposito">Deposito</option>
             <option value="encargado">Encargado</option>
