@@ -373,7 +373,7 @@ export const usuarioSchema = z.object({
     .email({ message: 'Email inválido' })
     .min(1, { message: 'El email es obligatorio' }),
 
-  rol: z.enum(['admin', 'preventista', 'transportista', 'deposito', 'encargado'], {
+  rol: z.enum(['admin', 'preventista', 'preventista_taco', 'transportista', 'deposito', 'encargado'], {
     error: 'Rol invalido'
   }),
 
@@ -386,7 +386,7 @@ export const usuarioSchema = z.object({
 export type UsuarioFormData = z.infer<typeof usuarioSchema>
 
 /** Valid user roles */
-export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado'
+export type RolUsuario = 'admin' | 'preventista' | 'preventista_taco' | 'transportista' | 'deposito' | 'encargado'
 
 // ============================================
 // SCHEMAS DE PROVEEDOR
@@ -567,7 +567,8 @@ export const modalClienteSchema = z.object({
   rubro: z.string().optional(),
   notas: z.string().optional(),
   limiteCredito: z.coerce.number().nonnegative().default(0),
-  diasCredito: z.coerce.number().int().nonnegative().default(30)
+  diasCredito: z.coerce.number().int().nonnegative().default(30),
+  descuentoPorcentaje: z.coerce.number().min(0).max(100).default(0)
 })
 
 /** Inferred type for ModalCliente schema */

@@ -16,6 +16,9 @@ import {
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useFichaCliente } from '../../hooks/supabase/useFichaCliente'
+import { usePagos } from '../../hooks/supabase'
+import { useQueryClient } from '@tanstack/react-query'
+import { puedeRegistrarPagoCliente } from '../../lib/permisos'
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
 
@@ -25,6 +28,7 @@ const ModalCliente = lazy(() => import('../modals/ModalCliente'))
 const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalZonas = lazy(() => import('../modals/ModalZonas'))
+const ModalRegistrarPago = lazy(() => import('../modals/ModalRegistrarPago'))
 
 function LoadingState() {
   return (
@@ -43,8 +47,12 @@ interface ConfirmConfig {
 }
 
 export default function ClientesContainer(): React.ReactElement {
-  const { user, isAdmin, isPreventista, isEncargado } = useAuthData()
+  const { user, perfil, isAdmin, isPreventista, isEncargado } = useAuthData()
   const notify = useNotification()
+  const queryClient = useQueryClient()
+  const { registrarPago, registrarPagoFIFO, obtenerResumenCuenta } = usePagos()
+  const rol = perfil?.rol
+  const puedePago = puedeRegistrarPagoCliente(rol)
 
   // Queries
   const { data: clientes = [], isLoading } = useClientesQuery()
@@ -63,6 +71,8 @@ export default function ClientesContainer(): React.ReactElement {
   const [modalFichaOpen, setModalFichaOpen] = useState(false)
   const [modalZonasOpen, setModalZonasOpen] = useState(false)
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
+  const [clientePago, setClientePago] = useState<ClienteDB | null>(null)
+  const [saldoPendientePago, setSaldoPendientePago] = useState<number>(0)
 
   // Ficha cliente hook - ModalFichaCliente lo usa internamente
   useFichaCliente(clienteFichaId)
@@ -106,6 +116,59 @@ export default function ClientesContainer(): React.ReactElement {
     setClienteFichaId(cliente.id)
     setModalFichaOpen(true)
   }, [])
+
+  const handleAbrirRegistrarPago = useCallback(async (cliente: ClienteDB) => {
+    if (!puedePago) return
+    setClientePago(cliente)
+    const resumen = await obtenerResumenCuenta(cliente.id)
+    setSaldoPendientePago(resumen?.saldo_actual ?? 0)
+    setModalFichaOpen(false)
+  }, [puedePago, obtenerResumenCuenta])
+
+  const handleConfirmarPagoSimple = useCallback(async (datosPago: {
+    clienteId: string
+    pedidoId: string | null
+    monto: number
+    formaPago: string
+    referencia: string
+    notas: string
+    fecha: string
+  }) => {
+    const pago = await registrarPago({
+      clienteId: datosPago.clienteId,
+      pedidoId: datosPago.pedidoId,
+      monto: datosPago.monto,
+      formaPago: datosPago.formaPago,
+      referencia: datosPago.referencia,
+      notas: datosPago.notas,
+      fecha: datosPago.fecha,
+      usuarioId: user?.id ?? ''
+    })
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
+    notify.success('Pago registrado correctamente')
+    return pago
+  }, [registrarPago, user?.id, queryClient, notify])
+
+  const handleConfirmarPagoFIFO = useCallback(async (input: {
+    clienteId: string
+    monto: number
+    formaPago: string
+    fecha?: string
+    referencia?: string
+    notas?: string
+  }) => {
+    const result = await registrarPagoFIFO(input)
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
+    queryClient.invalidateQueries({ queryKey: ['clientes'] })
+    if (result.sobrante > 0) {
+      notify.success(`Pago registrado. $${result.sobrante.toLocaleString('es-AR')} quedó como saldo a favor.`)
+    } else {
+      notify.success('Pago registrado y aplicado a pedidos pendientes')
+    }
+    return result
+  }, [registrarPagoFIFO, queryClient, notify])
 
   const handleGestionarZonas = useCallback(() => {
     setModalZonasOpen(true)
@@ -156,6 +219,7 @@ export default function ClientesContainer(): React.ReactElement {
       longitud: data.longitud,
       limite_credito: data.limiteCredito,
       dias_credito: data.diasCredito,
+      descuento_porcentaje: data.descuentoPorcentaje,
       contacto: data.contacto || undefined,
       horarios_atencion: data.horarios_atencion || undefined,
       rubro: data.rubro || undefined,
@@ -221,6 +285,21 @@ export default function ClientesContainer(): React.ReactElement {
               setModalFichaOpen(false)
               setClienteFichaId(null)
             }}
+            onRegistrarPago={puedePago ? handleAbrirRegistrarPago : undefined}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Registrar Pago — flujo desde ficha de cliente con imputacion FIFO */}
+      {clientePago && (
+        <Suspense fallback={null}>
+          <ModalRegistrarPago
+            cliente={clientePago}
+            saldoPendiente={saldoPendientePago}
+            pedidos={[]}
+            onClose={() => setClientePago(null)}
+            onConfirmar={handleConfirmarPagoSimple as any}
+            onConfirmarFIFO={handleConfirmarPagoFIFO}
           />
         </Suspense>
       )}

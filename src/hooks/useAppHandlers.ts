@@ -185,6 +185,7 @@ export interface UseAppHandlersParams {
 
   // Funciones Pagos
   registrarPago: (...args: any[]) => Promise<any>;
+  registrarPagoFIFO: (...args: any[]) => Promise<any>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 
   // Funciones Mermas
@@ -262,6 +263,7 @@ export interface UseAppHandlersReturn {
   handleVerFichaCliente: (cliente: ClienteDB) => Promise<void>;
   handleAbrirRegistrarPago: (cliente: ClienteDB, saldo?: number) => Promise<void>;
   handleRegistrarPago: (pago: { clienteId: string; monto: number; formaPago: string; notas?: string }) => Promise<void>;
+  handleRegistrarPagoFIFO: (input: { clienteId: string; monto: number; formaPago: string; fecha?: string; referencia?: string; notas?: string }) => Promise<unknown>;
   handleGenerarReciboPago: (pago: { clienteId: string; monto: number; fecha: string }) => void;
 
   // Productos (from useProductoHandlers)
@@ -346,6 +348,7 @@ export function useAppHandlers({
   fetchHistorialPedido,
   actualizarUsuario,
   registrarPago,
+  registrarPagoFIFO,
   obtenerResumenCuenta,
   registrarMerma,
   registrarCompra,
@@ -435,6 +438,7 @@ export function useAppHandlers({
     actualizarCliente,
     eliminarCliente,
     registrarPago,
+    registrarPagoFIFO: registrarPagoFIFO as UseClienteHandlersProps['registrarPagoFIFO'],
     obtenerResumenCuenta: obtenerResumenCuenta as UseClienteHandlersProps['obtenerResumenCuenta'],
     modales: clienteModales,
     setGuardando,

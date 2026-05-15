@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2 } from 'lucide-react'
+import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
+import { useAuthData } from '../../contexts/AuthDataContext'
+import { puedeVerSaldoCliente, puedeVerHistorialVentasCliente, puedeRegistrarPagoCliente } from '../../lib/permisos'
 import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
@@ -43,6 +45,11 @@ interface TabItem {
 export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido }: ModalFichaClienteProps) {
   const { pedidosCliente, estadisticas, loading } = useFichaCliente(cliente?.id)
   const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta } = usePagos()
+  const { perfil } = useAuthData()
+  const rol = perfil?.rol
+  const verSaldo = puedeVerSaldoCliente(rol)
+  const verHistorialVentas = puedeVerHistorialVentasCliente(rol)
+  const puedeRegistrarPago = puedeRegistrarPagoCliente(rol)
   const [resumenCuenta, setResumenCuenta] = useState<ResumenCuenta | null>(null)
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen')
   const [expandedPedido, setExpandedPedido] = useState<string | null>(null)
@@ -92,6 +99,12 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                     {cliente.rubro}
                   </span>
                 )}
+                {(cliente.descuento_porcentaje ?? 0) > 0 && (
+                  <span className="px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-medium flex items-center gap-1" title="Descuento precargado por el administrador">
+                    <Percent className="w-3 h-3" />
+                    Dto. {cliente.descuento_porcentaje}%
+                  </span>
+                )}
               </div>
               <p className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
                 <Building2 className="w-4 h-4" />
@@ -129,6 +142,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
           </div>
 
           {/* Account Balance Card */}
+          {verSaldo && (
           <div className={`mt-4 p-4 rounded-xl ${excedido ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' : 'bg-blue-50 dark:bg-blue-900/20'}`}>
             <div className="flex items-center justify-between">
               <div>
@@ -148,10 +162,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   </p>
                 )}
               </div>
-              {saldoActual > 0 && (
+              {puedeRegistrarPago && (
                 <button
                   onClick={() => onRegistrarPago?.(cliente)}
                   className="ml-4 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
+                  title={saldoActual > 0 ? 'Registrar pago del cliente' : 'Registrar pago anticipado / saldo a favor'}
                 >
                   <Plus className="w-4 h-4" />
                   Registrar Pago
@@ -176,15 +191,16 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               </div>
             )}
           </div>
+          )}
         </div>
 
-        {/* Tabs */}
+        {/* Tabs (taco no ve la pestaña Pagos) */}
         <div className="flex border-b border-gray-200 dark:border-gray-700">
-          {([
+          {(([
             { id: 'resumen', label: 'Resumen', icon: TrendingUp },
             { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag },
-            { id: 'pagos', label: 'Pagos', icon: DollarSign }
-          ] as TabItem[]).map(tab => (
+            ...(verSaldo ? [{ id: 'pagos' as ActiveTab, label: 'Pagos', icon: DollarSign }] : [])
+          ]) as TabItem[]).map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -216,18 +232,22 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   value={estadisticas?.totalPedidos || 0}
                   color="blue"
                 />
-                <StatCard
-                  icon={DollarSign}
-                  label="Total Compras"
-                  value={formatCurrency(estadisticas?.totalCompras || 0)}
-                  color="green"
-                />
-                <StatCard
-                  icon={TrendingUp}
-                  label="Ticket Promedio"
-                  value={formatCurrency(estadisticas?.ticketPromedio || 0)}
-                  color="purple"
-                />
+                {verHistorialVentas && (
+                  <>
+                    <StatCard
+                      icon={DollarSign}
+                      label="Total Compras"
+                      value={formatCurrency(estadisticas?.totalCompras || 0)}
+                      color="green"
+                    />
+                    <StatCard
+                      icon={TrendingUp}
+                      label="Ticket Promedio"
+                      value={formatCurrency(estadisticas?.ticketPromedio || 0)}
+                      color="purple"
+                    />
+                  </>
+                )}
                 <StatCard
                   icon={Clock}
                   label="Días sin Comprar"
@@ -236,7 +256,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 />
               </div>
 
-              {/* Payment Status */}
+              {/* Payment Status (oculto para preventista_taco) */}
+              {verSaldo && (
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl">
                   <div className="flex items-center gap-2 text-green-600 dark:text-green-400 mb-2">
@@ -259,6 +280,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   <p className="text-sm text-yellow-600">{estadisticas?.pedidosPendientes || 0} pedidos</p>
                 </div>
               </div>
+              )}
 
               {/* Favorite Products */}
               {(estadisticas?.productosFavoritos?.length ?? 0) > 0 && estadisticas && (
@@ -281,7 +303,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 </div>
               )}
 
-              {/* Credit Info */}
+              {/* Credit Info (oculto para preventista_taco) */}
+              {verSaldo && (
               <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                 <h3 className="font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
                   <CreditCard className="w-5 h-5" />
@@ -296,12 +319,19 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                     <span className="text-gray-500">Días de Crédito:</span>
                     <span className="ml-2 font-medium">{cliente.dias_credito || 30} días</span>
                   </div>
+                  {(cliente.descuento_porcentaje ?? 0) > 0 && (
+                    <div>
+                      <span className="text-gray-500">Descuento:</span>
+                      <span className="ml-2 font-medium text-emerald-600">{cliente.descuento_porcentaje}%</span>
+                    </div>
+                  )}
                   <div>
                     <span className="text-gray-500">Frecuencia de Compra:</span>
                     <span className="ml-2 font-medium">{(estadisticas?.frecuenciaCompra || 0).toFixed(1)} pedidos/mes</span>
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Notas del cliente */}
               {cliente.notas && (
@@ -346,9 +376,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <p className="text-xl font-bold text-gray-900 dark:text-white">
-                          {formatCurrency(pedido.total)}
-                        </p>
+                        {verHistorialVentas && (
+                          <p className="text-xl font-bold text-gray-900 dark:text-white">
+                            {formatCurrency(pedido.total)}
+                          </p>
+                        )}
                         {expandedPedido === pedido.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                       </div>
                     </div>
@@ -359,8 +391,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                             <tr className="text-gray-500 text-left">
                               <th className="pb-2">Producto</th>
                               <th className="pb-2 text-right">Cant.</th>
-                              <th className="pb-2 text-right">Precio</th>
-                              <th className="pb-2 text-right">Subtotal</th>
+                              {verHistorialVentas && <th className="pb-2 text-right">Precio</th>}
+                              {verHistorialVentas && <th className="pb-2 text-right">Subtotal</th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -368,8 +400,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                               <tr key={item.id} className="border-t border-gray-100 dark:border-gray-700">
                                 <td className="py-2">{item.producto?.nombre || 'Producto'}</td>
                                 <td className="py-2 text-right">{item.cantidad}</td>
-                                <td className="py-2 text-right">{formatCurrency(item.precio_unitario)}</td>
-                                <td className="py-2 text-right font-medium">{formatCurrency(item.subtotal)}</td>
+                                {verHistorialVentas && <td className="py-2 text-right">{formatCurrency(item.precio_unitario)}</td>}
+                                {verHistorialVentas && <td className="py-2 text-right font-medium">{formatCurrency(item.subtotal)}</td>}
                               </tr>
                             ))}
                           </tbody>
@@ -393,7 +425,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
             <div className="space-y-3">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-semibold text-gray-900 dark:text-white">Historial de Pagos</h3>
-                {saldoActual > 0 && (
+                {puedeRegistrarPago && (
                   <button
                     onClick={() => onRegistrarPago?.(cliente)}
                     className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm flex items-center gap-1"

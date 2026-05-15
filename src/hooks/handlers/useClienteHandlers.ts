@@ -12,7 +12,9 @@ import type {
   ClienteFormInput,
   PagoFormInput,
   PagoDBWithUsuario,
-  ResumenCuenta
+  ResumenCuenta,
+  RegistrarPagoFifoInput,
+  RegistrarPagoFifoResult
 } from '../../types'
 import type { ModalControl, ConfirmModal, NotifyService } from './types'
 
@@ -55,6 +57,7 @@ export interface UseClienteHandlersProps {
   actualizarCliente: (id: string, cliente: Partial<ClienteFormInput>) => Promise<ClienteDB>;
   eliminarCliente: (id: string) => Promise<void>;
   registrarPago: (pago: PagoFormInput) => Promise<PagoDBWithUsuario>;
+  registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
   modales: ClienteModales;
   setGuardando: (guardando: boolean) => void;
@@ -76,6 +79,7 @@ export interface UseClienteHandlersReturn {
   handleVerFichaCliente: (cliente: ClienteDB) => Promise<void>;
   handleAbrirRegistrarPago: (cliente: ClienteDB) => Promise<void>;
   handleRegistrarPago: (datosPago: DatosPagoInput) => Promise<PagoDBWithUsuario>;
+  handleRegistrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   handleGenerarReciboPago: (pago: PagoDBWithUsuario, cliente: ClienteDB) => void;
 }
 
@@ -84,6 +88,7 @@ export function useClienteHandlers({
   actualizarCliente,
   eliminarCliente,
   registrarPago,
+  registrarPagoFIFO,
   obtenerResumenCuenta,
   modales,
   setGuardando,
@@ -165,6 +170,24 @@ export function useClienteHandlers({
     }
   }, [registrarPago, user, notify])
 
+  const handleRegistrarPagoFIFO = useCallback(async (input: RegistrarPagoFifoInput): Promise<RegistrarPagoFifoResult> => {
+    try {
+      const result = await registrarPagoFIFO(input)
+      if (result.sobrante > 0) {
+        notify.success(
+          `Pago registrado. $${result.sobrante.toLocaleString('es-AR')} quedó como saldo a favor.`
+        )
+      } else {
+        notify.success('Pago registrado y aplicado a pedidos pendientes')
+      }
+      return result
+    } catch (e) {
+      const error = e as Error
+      notify.error('Error al registrar pago: ' + error.message)
+      throw e
+    }
+  }, [registrarPagoFIFO, notify])
+
   const handleGenerarReciboPago = useCallback((pago: PagoDBWithUsuario, cliente: ClienteDB): void => {
     try {
       generarReciboPago(pago, cliente)
@@ -181,6 +204,7 @@ export function useClienteHandlers({
     handleVerFichaCliente,
     handleAbrirRegistrarPago,
     handleRegistrarPago,
+    handleRegistrarPagoFIFO,
     handleGenerarReciboPago
   }
 }
