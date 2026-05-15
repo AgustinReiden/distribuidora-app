@@ -344,6 +344,11 @@ function PedidoCard({
         <div className="flex flex-wrap justify-between items-center gap-2">
           <div className="flex flex-col">
             <p className="text-lg font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
+            {pedido.estado_pago === 'parcial' && (
+              <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
+              </p>
+            )}
             {(pedido.forma_pago || (pedido.pagos && pedido.pagos.length > 0)) && (
               <p className="text-xs text-gray-500 flex items-center">
                 <CreditCard className="w-3 h-3 mr-1" />

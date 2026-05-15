@@ -138,6 +138,7 @@ export interface HistorialCambio {
 
 export interface UsePedidoHandlersProps {
   productos: ProductoDB[];
+  clientes?: ClienteDB[];
   crearPedido: (
     clienteId: number,
     items: NuevoPedidoItem[],
@@ -233,6 +234,7 @@ export interface UsePedidoHandlersReturn {
 
 export function usePedidoHandlers({
   productos,
+  clientes,
   crearPedido,
   cambiarEstado,
   asignarTransportista,
@@ -277,6 +279,7 @@ export function usePedidoHandlers({
   // Esto evita recrear los callbacks cuando estos valores cambian
   // ==========================================================================
   const productosRef = useLatestRef(productos)
+  const clientesRef = useLatestRef(clientes ?? [])
   const nuevoPedidoRef = useLatestRef(nuevoPedido)
   const pedidoAsignandoRef = useLatestRef(pedidoAsignando)
   const pedidoEditandoRef = useLatestRef(pedidoEditando)
@@ -414,6 +417,22 @@ export function usePedidoHandlers({
       }
     }
 
+    // Aplicar descuento porcentual del cliente. Se aplica DESPUES de precio
+    // mayorista/promo para que el descuento se calcule sobre el precio final
+    // por linea. No tocamos lineas con precioOverride (admin lo fijo manual)
+    // ni items con precio 0 (bonificaciones se agregan despues).
+    const clienteSeleccionado = clientesRef.current.find(c => String(c.id) === String(nuevoPedido.clienteId))
+    const dtoPct = clienteSeleccionado?.descuento_porcentaje ?? 0
+    if (dtoPct > 0) {
+      const factor = 1 - dtoPct / 100
+      itemsFinales = itemsFinales.map(item => {
+        if (item.precioOverride) return item
+        if (!item.precioUnitario || item.precioUnitario <= 0) return item
+        const precioConDto = Math.round(item.precioUnitario * factor * 100) / 100
+        return { ...item, precioUnitario: precioConDto }
+      })
+    }
+
     // Agregar items de bonificación
     const itemsBonificacion = promoResolucion.bonificaciones.map(b => ({
       productoId: b.productoId,
@@ -516,7 +535,7 @@ export function usePedidoHandlers({
       notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, promoMapRef, productosRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
+  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, promoMapRef, productosRef, clientesRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
   const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {

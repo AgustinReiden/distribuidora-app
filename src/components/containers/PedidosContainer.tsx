@@ -738,8 +738,15 @@ export default function PedidosContainer(): React.ReactElement {
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
+      // Descuento porcentual del cliente (admin lo precarga en la ficha).
+      // Se aplica DESPUES de promociones/precio mayorista para que el factor
+      // multiplique el precio final por linea. Items bonificacion no se tocan.
+      const clienteSel = clientes.find(c => String(c.id) === String(nuevoPedido.clienteId))
+      const dtoPct = clienteSel?.descuento_porcentaje ?? 0
+      const factorDto = dtoPct > 0 ? 1 - dtoPct / 100 : 1
       let totalNeto = 0
       let totalIva = 0
+      let totalConDescuento = 0
       const itemsParaCrear = itemsFinales.map(item => {
         const esBonif = !!item.esBonificacion
         if (esBonif) {
@@ -755,13 +762,17 @@ export default function PedidosContainer(): React.ReactElement {
         const producto = productos.find(p => String(p.id) === String(item.productoId))
         const pctIva = producto?.porcentaje_iva ?? 21
         const pctImpInt = producto?.impuestos_internos ?? 0
-        const desglose = calcularNetoVenta(item.precioUnitario, pctIva, pctImpInt, tipoFactura)
+        const precioConDto = factorDto < 1
+          ? Math.round(item.precioUnitario * factorDto * 100) / 100
+          : item.precioUnitario
+        const desglose = calcularNetoVenta(precioConDto, pctIva, pctImpInt, tipoFactura)
         totalNeto += desglose.neto * item.cantidad
         totalIva += desglose.iva * item.cantidad
+        totalConDescuento += precioConDto * item.cantidad
         return {
           productoId: String(item.productoId),
           cantidad: item.cantidad,
-          precioUnitario: item.precioUnitario,
+          precioUnitario: precioConDto,
           ...(item.promoId ? { promocionId: item.promoId } : {}),
           neto_unitario: desglose.neto,
           iva_unitario: desglose.iva,
@@ -772,7 +783,7 @@ export default function PedidosContainer(): React.ReactElement {
       const pedidoCreado = await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
-        total: totalFinal,
+        total: factorDto < 1 ? totalConDescuento : totalFinal,
         usuarioId: user?.id ?? null,
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
@@ -798,7 +809,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos, isPreventista, capturarGps, registrarGpsPedido])
+  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos, clientes, isPreventista, capturarGps, registrarGpsPedido])
 
   // ModalFiltroFecha: onApply({ fechaDesde, fechaHasta })
   const handleFiltroFechaApply = useCallback((f: { fechaDesde: string | null; fechaHasta: string | null }) => {

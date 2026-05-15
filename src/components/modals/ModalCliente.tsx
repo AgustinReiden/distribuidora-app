@@ -38,6 +38,7 @@ export interface ClienteFormData {
   notas: string;
   limiteCredito: number;
   diasCredito: number;
+  descuentoPorcentaje: number;
   preventista_id: string;
   preventista_ids: string[];
 }
@@ -116,6 +117,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     notas: cliente.notas || '',
     limiteCredito: cliente.limite_credito || 0,
     diasCredito: cliente.dias_credito || 30,
+    descuentoPorcentaje: cliente.descuento_porcentaje || 0,
     preventista_id: cliente.preventista_id || '',
     preventista_ids: cliente.preventista_ids || []
   } : {
@@ -135,6 +137,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     notas: '',
     limiteCredito: 0,
     diasCredito: 30,
+    descuentoPorcentaje: 0,
     preventista_id: '',
     preventista_ids: []
   });
@@ -570,12 +573,12 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           />
         </div>
 
-        {/* Campos de crédito - Solo visibles y editables para admin */}
-        {isAdmin && (
+        {/* Campos de crédito y descuento - Solo admin puede editar */}
+        {isAdmin ? (
           <div className="border-t pt-4 mt-4">
             <div className="flex items-center gap-2 mb-3">
               <CreditCard className="w-5 h-5 text-blue-600" />
-              <span className="font-medium text-gray-700 dark:text-gray-200">Configuración de Crédito</span>
+              <span className="font-medium text-gray-700 dark:text-gray-200">Configuración de Crédito y Descuento</span>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -607,8 +610,47 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
                 />
                 <p className="text-xs text-gray-500 mt-1">Plazo de pago en días</p>
               </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 dark:text-gray-200">Descuento (%)</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.5"
+                  min="0"
+                  max="100"
+                  value={form.descuentoPorcentaje}
+                  onChange={e => handleFieldChange('descuentoPorcentaje', e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="0"
+                />
+                <p className="text-xs text-gray-500 mt-1">Se aplica al precio_unitario al armar pedidos</p>
+              </div>
             </div>
           </div>
+        ) : (
+          (form.descuentoPorcentaje > 0 || (form.limiteCredito ?? 0) > 0) && (
+            <div className="border-t pt-4 mt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <CreditCard className="w-5 h-5 text-blue-600" />
+                <span className="font-medium text-gray-700 dark:text-gray-200">Crédito y Descuento</span>
+              </div>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-500">Límite de Crédito</p>
+                  <p className="font-medium">${form.limiteCredito.toLocaleString('es-AR')}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Días de Crédito</p>
+                  <p className="font-medium">{form.diasCredito} días</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Descuento</p>
+                  <p className="font-medium">{form.descuentoPorcentaje}%</p>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">Solo el administrador puede editar estos valores.</p>
+            </div>
+          )
         )}
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">

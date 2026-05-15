@@ -199,6 +199,8 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const effectiveRol = currentSucursalRol ?? perfil?.rol
   const isAdmin = effectiveRol === 'admin'
   const isPreventista = effectiveRol === 'preventista'
+  const isPreventistaTaco = effectiveRol === 'preventista_taco'
+  const isAnyPreventista = isPreventista || isPreventistaTaco
   const isTransportista = effectiveRol === 'transportista'
   const isEncargado = effectiveRol === 'encargado'
   const isAdminOrEncargado = isAdmin || isEncargado
@@ -211,6 +213,8 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     authReady,
     isAdmin,
     isPreventista,
+    isPreventistaTaco,
+    isAnyPreventista,
     isTransportista,
     isEncargado,
     isAdminOrEncargado,
@@ -218,7 +222,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     logout: handleLogout,
     currentSucursalId,
     currentSucursalNombre,
-  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
+  }), [user, perfil, authReady, isAdmin, isPreventista, isPreventistaTaco, isAnyPreventista, isTransportista, isEncargado, isAdminOrEncargado, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()
@@ -246,7 +250,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/dashboard"
-                  element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                  element={(isAdmin || isAnyPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="/pedidos" element={<PedidosContainer />} />

@@ -21,7 +21,9 @@ import type {
   RutaOptimizada,
   RegistrarSalvedadInput,
   RegistrarSalvedadResult,
-  PagoDBWithUsuario
+  PagoDBWithUsuario,
+  RegistrarPagoFifoInput,
+  RegistrarPagoFifoResult
 } from '../types/hooks';
 
 // Importar tipos específicos de handlers
@@ -161,6 +163,7 @@ export interface AppModalsHandlers {
   handleGuardarCliente: (clienteData: ClienteFormInput & { id?: string }) => Promise<void>;
   handleAbrirRegistrarPago: (cliente: ClienteDB) => Promise<void>;
   handleRegistrarPago: (datosPago: DatosPagoInput) => Promise<PagoDBWithUsuario>;
+  handleRegistrarPagoFIFO?: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   handleGenerarReciboPago: (pago: PagoDBWithUsuario, cliente: ClienteDB) => void;
 
   // Producto handlers
@@ -533,6 +536,7 @@ export default function AppModals({
               pedidos={pedidos as any}
               onClose={() => { modales.registrarPago.setOpen(false); setClientePago(null); }}
               onConfirmar={handlers.handleRegistrarPago as any}
+              onConfirmarFIFO={handlers.handleRegistrarPagoFIFO as any}
               onGenerarRecibo={handlers.handleGenerarReciboPago as any}
             />
           </CompactErrorBoundary>

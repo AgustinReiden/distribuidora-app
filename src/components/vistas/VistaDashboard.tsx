@@ -62,6 +62,8 @@ export interface VistaDashboardProps {
   totalClientes?: number;
   isAdmin?: boolean;
   isPreventista?: boolean;
+  isPreventistaTaco?: boolean;
+  isEncargado?: boolean;
 }
 
 interface MetricasCalculadas {
@@ -198,8 +200,19 @@ export default function VistaDashboard({
   productosStockBajo = [],
   totalClientes = 0,
   isAdmin = false,
-  isPreventista = false
+  isPreventista = false,
+  isPreventistaTaco = false,
+  isEncargado = false
 }: VistaDashboardProps) {
+  // Visibilidad por rol:
+  //  - admin: ve todo
+  //  - encargado: solo "Ventas ultimos 7 dias" + estados de pedido (sin facturacion total ni agregados)
+  //  - preventista_taco: solo items (Top 5 productos) + estados; sin ningun monto
+  //  - preventista regular: ve montos pero filtrados a sus propias ventas
+  const verMontosAgregados = isAdmin || (isPreventista && !isPreventistaTaco)
+  const verVentasSemanales = !isPreventistaTaco // taco no ve ningun monto
+  const verTopProductos = !isEncargado || isAdmin // encargado no ve agregados de productos
+  const verEstadoPedidos = true
   const [fechaDesdeLocal, setFechaDesdeLocal] = useState<string>('');
   const [fechaHastaLocal, setFechaHastaLocal] = useState<string>('');
   const [mostrarFechasPersonalizadas, setMostrarFechasPersonalizadas] = useState<boolean>(false);
@@ -246,10 +259,12 @@ export default function VistaDashboard({
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            {isPreventista && !isAdmin ? 'Mis Métricas' : 'Dashboard'}
+            {(isPreventista || isPreventistaTaco) && !isAdmin ? 'Mis Métricas' : 'Dashboard'}
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {isPreventista && !isAdmin
+            {isPreventistaTaco && !isAdmin
+              ? `Resumen de actividad - ${periodoLabels[filtroPeriodo]}`
+              : isPreventista && !isAdmin
               ? `Resumen de mis ventas - ${periodoLabels[filtroPeriodo]}`
               : `Resumen de actividad - ${periodoLabels[filtroPeriodo]}`
             }
@@ -348,14 +363,16 @@ export default function VistaDashboard({
 
       {/* Métricas principales */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricaCard
-          icono={DollarSign}
-          titulo="Ventas"
-          valor={formatPrecio(metricas.ventasPeriodo)}
-          subtitulo={periodoLabels[filtroPeriodo]}
-          colorClase={{ bg: 'bg-green-100 dark:bg-green-900/30', icon: 'text-green-600', text: 'text-green-600' }}
-          tendencia={<TendenciaIndicator valor={metricas.ventasPeriodo} comparacion={metricas.ventasPeriodoAnterior} />}
-        />
+        {verMontosAgregados && (
+          <MetricaCard
+            icono={DollarSign}
+            titulo="Ventas"
+            valor={formatPrecio(metricas.ventasPeriodo)}
+            subtitulo={periodoLabels[filtroPeriodo]}
+            colorClase={{ bg: 'bg-green-100 dark:bg-green-900/30', icon: 'text-green-600', text: 'text-green-600' }}
+            tendencia={<TendenciaIndicator valor={metricas.ventasPeriodo} comparacion={metricas.ventasPeriodoAnterior} />}
+          />
+        )}
         <MetricaCard
           icono={ShoppingCart}
           titulo="Pedidos"
@@ -364,13 +381,15 @@ export default function VistaDashboard({
           colorClase={{ bg: 'bg-blue-100 dark:bg-blue-900/30', icon: 'text-blue-600', text: 'text-blue-600' }}
           tendencia={<TendenciaIndicator valor={metricas.pedidosPeriodo} comparacion={metricas.pedidosPeriodoAnterior} />}
         />
-        <MetricaCard
-          icono={Target}
-          titulo="Ticket Promedio"
-          valor={formatPrecio(metricasCalculadas?.ticketPromedio || 0)}
-          subtitulo="Por pedido"
-          colorClase={{ bg: 'bg-purple-100 dark:bg-purple-900/30', icon: 'text-purple-600', text: 'text-purple-600' }}
-        />
+        {verMontosAgregados && (
+          <MetricaCard
+            icono={Target}
+            titulo="Ticket Promedio"
+            valor={formatPrecio(metricasCalculadas?.ticketPromedio || 0)}
+            subtitulo="Por pedido"
+            colorClase={{ bg: 'bg-purple-100 dark:bg-purple-900/30', icon: 'text-purple-600', text: 'text-purple-600' }}
+          />
+        )}
         <MetricaCard
           icono={Users}
           titulo="Clientes"
@@ -434,12 +453,15 @@ export default function VistaDashboard({
       {/* Gráficos */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Ventas últimos 7 días */}
+        {verVentasSemanales && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-800 dark:text-white">Ventas últimos 7 días</h3>
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              Total: {formatPrecio(metricas.ventasPorDia.reduce((sum, d) => sum + d.ventas, 0))}
-            </span>
+            {verMontosAgregados && (
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                Total: {formatPrecio(metricas.ventasPorDia.reduce((sum, d) => sum + d.ventas, 0))}
+              </span>
+            )}
           </div>
           <div className="space-y-3">
             {metricas.ventasPorDia.map((d, i) => {
@@ -456,8 +478,10 @@ export default function VistaDashboard({
             })}
           </div>
         </div>
+        )}
 
         {/* Top 5 productos */}
+        {verTopProductos && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
           <h3 className="font-semibold text-gray-800 dark:text-white mb-4">
             Top 5 Productos
@@ -506,10 +530,11 @@ export default function VistaDashboard({
             })}
           </div>
         </div>
+        )}
       </div>
 
       {/* Tasa de entrega */}
-      {metricasCalculadas && (
+      {metricasCalculadas && verEstadoPedidos && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
           <h3 className="font-semibold text-gray-800 dark:text-white mb-4">Tasa de Entrega</h3>
           <div className="flex items-center space-x-4">

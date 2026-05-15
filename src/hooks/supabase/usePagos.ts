@@ -5,6 +5,9 @@ import type {
   PagoDBWithUsuario,
   PagoFormInput,
   RegistrarPagoBatchInput,
+  RegistrarPagoFifoInput,
+  RegistrarPagoFifoResult,
+  PagoFifoAplicacion,
   ResumenCuenta,
   UsePagosReturnExtended,
   ClienteDB,
@@ -127,6 +130,49 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  /**
+   * Registra un pago de cliente y lo distribuye automaticamente sobre los
+   * pedidos mas antiguos con saldo pendiente (FIFO). Sobrante queda como
+   * saldo a favor (fila en pagos con pedido_id NULL).
+   *
+   * Solo admin o encargado (validado server-side en la RPC).
+   */
+  const registrarPagoFIFO = async (
+    input: RegistrarPagoFifoInput
+  ): Promise<RegistrarPagoFifoResult> => {
+    try {
+      if (currentSucursalId == null) {
+        throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+      }
+      const { data, error } = await supabase.rpc('registrar_pago_cliente_fifo', {
+        p_cliente_id: input.clienteId,
+        p_monto: input.monto,
+        p_forma_pago: input.formaPago,
+        p_fecha: input.fecha ?? null,
+        p_referencia: input.referencia ?? null,
+        p_notas: input.notas ?? null,
+      })
+      if (error) throw error
+
+      const raw = (data ?? {}) as {
+        pago_ids?: number[]
+        sobrante?: number
+        monto_total?: number
+        aplicaciones?: PagoFifoAplicacion[]
+      }
+
+      return {
+        pagoIds: raw.pago_ids ?? [],
+        sobrante: Number(raw.sobrante ?? 0),
+        montoTotal: Number(raw.monto_total ?? input.monto),
+        aplicaciones: raw.aplicaciones ?? [],
+      }
+    } catch (error) {
+      notifyError('Error al registrar pago: ' + (error as Error).message)
+      throw error
+    }
+  }
+
   const eliminarPago = async (pagoId: string): Promise<void> => {
     try {
       const { error } = await supabase.from('pagos').delete().eq('id', pagoId)
@@ -194,6 +240,7 @@ export function usePagos(): UsePagosReturnExtended {
     fetchPagosPedido,
     registrarPago,
     registrarPagosBatch,
+    registrarPagoFIFO,
     eliminarPago,
     obtenerResumenCuenta,
   }
