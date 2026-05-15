@@ -282,21 +282,23 @@ function PedidoCard({
       </div>
 
       {/* ╔══ ZONA 2: HEADER PRINCIPAL — cliente prominente + estado a la derecha ══╗ */}
-      <div className="px-5 pt-2 flex items-start justify-between gap-4">
+      <div className="px-5 pt-2 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-lg font-semibold text-stone-900 dark:text-white leading-tight">
+          <h3 className="text-lg font-semibold text-stone-900 dark:text-white leading-tight break-words">
             {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
           </h3>
           {pedido.cliente?.direccion && (
             <p className="mt-1 text-sm text-stone-500 dark:text-gray-400 flex items-start gap-1.5">
               <MapPin className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-stone-400 dark:text-stone-500" aria-hidden="true" />
-              <span className="truncate">{pedido.cliente.direccion}</span>
+              {/* Mobile: deja que la dirección wrappee a 2 líneas (line-clamp-2)
+                  para que el operador la vea entera. Desktop: trunca a 1 línea. */}
+              <span className="line-clamp-2 sm:line-clamp-none sm:truncate">{pedido.cliente.direccion}</span>
             </p>
           )}
         </div>
 
-        {/* Columna derecha: stepper + acciones */}
-        <div className="flex items-start gap-2 flex-shrink-0">
+        {/* DESKTOP: stepper + badges + dropdown a la derecha */}
+        <div className="hidden sm:flex items-start gap-2 flex-shrink-0">
           <div className="flex flex-col items-end gap-2">
             <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -331,6 +333,48 @@ function PedidoCard({
             onCancelarPedido={onCancelarPedido}
             onRegistrarPago={handleRegistrarPago}
           />
+        </div>
+
+        {/* MOBILE: solo el dropdown a la derecha del header. El stepper y los
+            badges van a una fila propia abajo, para que cliente y dirección
+            tengan todo el ancho disponible. */}
+        <div className="sm:hidden flex-shrink-0 -mt-1">
+          <AccionesDropdown
+            pedido={pedido}
+            isAdmin={isAdmin}
+            isPreventista={isPreventista}
+            isTransportista={isTransportista}
+            isEncargado={isEncargado}
+            currentUserId={user?.id}
+            onHistorial={handleVerHistorial}
+            onEditar={handleEditarPedido}
+            onEditarNotas={onEditarNotas}
+            onPreparar={handleMarcarEnPreparacion}
+            onVolverAPendiente={handleVolverAPendiente}
+            onAsignar={onAsignarTransportista}
+            onEntregado={handleMarcarEntregado}
+            onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
+            onRevertir={handleDesmarcarEntregado}
+            onCancelarPedido={onCancelarPedido}
+            onRegistrarPago={handleRegistrarPago}
+          />
+        </div>
+      </div>
+
+      {/* ╔══ ZONA 2b (mobile only): Stepper + badges de pago/FC ══╗ */}
+      <div className="sm:hidden px-5 mt-3 flex items-center justify-between gap-2 flex-wrap">
+        <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {pedido.estado_pago && (
+            <span className={`px-2.5 py-1 rounded-full text-[12.5px] font-semibold ${getEstadoPagoColor(pedido.estado_pago)}`}>
+              {getEstadoPagoLabel(pedido.estado_pago)}
+            </span>
+          )}
+          {pedido.tipo_factura === 'FC' && (
+            <span className="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+              FC
+            </span>
+          )}
         </div>
       </div>
 
