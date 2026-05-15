@@ -717,6 +717,7 @@ export interface UsePagosReturnExtended {
   registrarPagosBatch: (input: RegistrarPagoBatchInput) => Promise<PagoDBWithUsuario[]>;
   registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   eliminarPago: (pagoId: string) => Promise<void>;
+  actualizarFormaPagoDePago: (pagoId: string, nuevaFormaPago: string) => Promise<void>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
 }
 

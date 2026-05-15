@@ -38,6 +38,12 @@ export interface ModalPagoPedidoProps {
   onConfirmar: (payload: PagoPedidoPayload) => Promise<void>
   /** Si esta presente, se permite anular pagos previos (admin/encargado). */
   onAnularPago?: (pagoId: string) => Promise<void>
+  /**
+   * Si esta presente, se permite editar la forma de pago de pagos previos
+   * (admin/encargado). El backend bloquea la edicion si la rendicion del
+   * dia del pago esta cerrada.
+   */
+  onEditarFormaPago?: (pagoId: string, nuevaForma: string) => Promise<void>
   /** Activa el flujo "Entregar sin pago / Entregar y registrar pago". */
   modoEntregaTransportista?: boolean
   /** Solo aplica con modoEntregaTransportista. */
@@ -66,6 +72,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   loadingPagosPrevios,
   onConfirmar,
   onAnularPago,
+  onEditarFormaPago,
   modoEntregaTransportista,
   onEntregarSinPago,
   onClose,
@@ -84,6 +91,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     { formaPago: 'efectivo', monto: saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '' },
   ])
   const [error, setError] = useState<string>('')
+  // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
+  const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
   // Si los pagos previos cambian (anulacion), reajustar la linea por default al saldo restante.
   useEffect(() => {
@@ -153,6 +162,19 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     }
   }
 
+  const handleEditarFormaPago = async (pagoId: string, nuevaForma: string): Promise<void> => {
+    if (!onEditarFormaPago) return
+    setError('')
+    setEditandoPagoId(pagoId)
+    try {
+      await onEditarFormaPago(pagoId, nuevaForma)
+    } catch (e) {
+      setError((e as Error).message || 'Error al actualizar forma de pago')
+    } finally {
+      setEditandoPagoId(null)
+    }
+  }
+
   const handleEntregarSinPago = async (): Promise<void> => {
     if (!onEntregarSinPago) return
     setError('')
@@ -203,33 +225,55 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
               Pagos previos ({pagosPrevios.length})
             </div>
             <div className="divide-y dark:divide-gray-600">
-              {pagosPrevios.map(p => (
-                <div key={p.id} className="px-3 py-2 flex items-center justify-between text-sm">
-                  <div>
-                    <p className="dark:text-white">
-                      {formatPrecio(p.monto)}{' '}
-                      <span className="text-gray-500">· {getFormaPagoLabel(p.forma_pago)}</span>
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {p.created_at && formatDateTime(p.created_at)}
-                      {p.usuario?.nombre ? ` · ${p.usuario.nombre}` : ''}
-                    </p>
-                    {p.notas && <p className="text-xs text-gray-400 italic">{p.notas}</p>}
+              {pagosPrevios.map(p => {
+                const editandoEste = editandoPagoId === p.id
+                return (
+                  <div key={p.id} className="px-3 py-2 flex items-center justify-between gap-2 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium dark:text-white">{formatPrecio(p.monto)}</span>
+                        {onEditarFormaPago ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-gray-400">·</span>
+                            <select
+                              value={p.forma_pago || 'efectivo'}
+                              onChange={e => { void handleEditarFormaPago(p.id, e.target.value) }}
+                              disabled={guardando || editandoEste}
+                              className="text-xs px-1.5 py-0.5 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
+                              aria-label="Editar forma de pago"
+                              title="Editar forma de pago"
+                            >
+                              {FORMAS_PAGO_OPCIONES.map(o => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                            {editandoEste && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+                          </div>
+                        ) : (
+                          <span className="text-gray-500">· {getFormaPagoLabel(p.forma_pago)}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {p.created_at && formatDateTime(p.created_at)}
+                        {p.usuario?.nombre ? ` · ${p.usuario.nombre}` : ''}
+                      </p>
+                      {p.notas && <p className="text-xs text-gray-400 italic">{p.notas}</p>}
+                    </div>
+                    {onAnularPago && (
+                      <button
+                        type="button"
+                        onClick={() => { void onAnularPago(p.id) }}
+                        disabled={guardando}
+                        className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
+                        aria-label="Anular pago"
+                        title="Anular pago"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
-                  {onAnularPago && (
-                    <button
-                      type="button"
-                      onClick={() => { void onAnularPago(p.id) }}
-                      disabled={guardando}
-                      className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
-                      aria-label="Anular pago"
-                      title="Anular pago"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}

@@ -118,15 +118,16 @@ function AccionesDropdown({
       });
     }
 
-    // Registrar pago (admin o encargado, mientras no este pagado/cancelado)
+    // Registrar pago / ver-editar pagos (admin o encargado, mientras no este cancelado).
+    // Cuando estado_pago === 'pagado', el modal abre en modo solo-lectura + edicion de
+    // forma de pago de pagos previos (con bloqueo SQL si la rendicion esta cerrada).
     if (
       (isAdmin || isEncargado) &&
       pedido.estado !== 'cancelado' &&
-      pedido.estado_pago !== 'pagado' &&
       onRegistrarPago
     ) {
       items.push({
-        label: 'Registrar Pago',
+        label: pedido.estado_pago === 'pagado' ? 'Ver/Editar Pagos' : 'Registrar Pago',
         icon: DollarSign,
         onClick: () => onRegistrarPago(pedido),
         className: 'text-green-700 dark:text-green-400'
