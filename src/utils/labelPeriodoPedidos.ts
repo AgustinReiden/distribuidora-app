@@ -19,6 +19,10 @@
  */
 import { fechaLocalISO, parseDateSafe } from './formatters';
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 const MESES_AR = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
@@ -46,14 +50,23 @@ function mismoMesYAnio(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 }
 
-/** Devuelve el primer día del mes (YYYY-MM-DD) en TZ Argentina. */
+/** Primer día del mes (YYYY-MM-DD). Construye el ISO directo desde year+month
+ *  para evitar que la TZ del runtime mueva el día al construir un Date local
+ *  (bug que aparecía en CI corriendo en UTC: new Date(2026, 4, 1) en UTC se
+ *  reinterpretaba como '2026-04-30' al pasarlo por fechaLocalISO en TZ AR). */
 function primerDiaDelMesISO(d: Date): string {
-  return fechaLocalISO(new Date(d.getFullYear(), d.getMonth(), 1));
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
 }
 
-/** Devuelve el último día del mes (YYYY-MM-DD) en TZ Argentina. */
+/** Último día del mes (YYYY-MM-DD). Calcula el último día usando
+ *  new Date(year, month+1, 0).getDate() — esto es TZ-safe porque getDate()
+ *  extrae el día en la misma TZ con la que se construyó el Date, y el
+ *  resultado (28-31) es independiente de TZ. */
 function ultimoDiaDelMesISO(d: Date): string {
-  return fechaLocalISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return `${year}-${pad2(month + 1)}-${pad2(lastDay)}`;
 }
 
 function isoOffsetDias(now: Date, offset: number): string {
