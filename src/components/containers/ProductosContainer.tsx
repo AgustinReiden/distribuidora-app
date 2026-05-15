@@ -31,6 +31,7 @@ const ModalActualizacionMasivaPrecios = lazy(() => import('../modals/ModalActual
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
 const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
+const ModalStockBajo = lazy(() => import('../modals/ModalStockBajo'))
 
 function LoadingState() {
   return (
@@ -74,6 +75,7 @@ export default function ProductosContainer(): React.ReactElement {
   const [modalActualizacionMasivaOpen, setModalActualizacionMasivaOpen] = useState(false)
   const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
   const [modalCambioOpen, setModalCambioOpen] = useState(false)
+  const [modalStockBajoOpen, setModalStockBajoOpen] = useState(false)
 
   // Estado de edición
   const [productoEditando, setProductoEditando] = useState<ProductoDB | null>(null)
@@ -147,6 +149,37 @@ export default function ProductosContainer(): React.ReactElement {
     setModalCambioOpen(true)
   }, [])
 
+  const handleAbrirStockBajo = useCallback(() => {
+    setModalStockBajoOpen(true)
+  }, [])
+
+  // Control de stock: descarga Excel con el inventario actual.
+  // Antes vivía inline en VistaProductos; movido al container para que la
+  // toolbar pueda recibirlo como handler simple.
+  const handleControlStock = useCallback(async () => {
+    try {
+      const { exportControlStock } = await import('../../utils/excel')
+      await exportControlStock(productos)
+    } catch {
+      notify.error('Error al exportar el control de stock')
+    }
+  }, [productos, notify])
+
+  // Productos con stock bajo: una sola fuente de verdad. El toolbar usa
+  // el count y el modal usa la lista. La fórmula respeta exactamente la
+  // que estaba en VistaProductos: stock < (stock_minimo || 10).
+  const productosStockBajo = useMemo(() => {
+    return productos.filter(p => p.stock < (p.stock_minimo || 10))
+  }, [productos])
+
+  // Handler de "Editar" desde el modal de stock bajo: cierra el modal
+  // y abre el modal de edición del producto.
+  const handleEditarDesdeStockBajo = useCallback((producto: ProductoDB) => {
+    setModalStockBajoOpen(false)
+    setProductoEditando(producto)
+    setModalProductoOpen(true)
+  }, [])
+
   const handleGuardarCambioProducto = useCallback(async (data: RegistrarCambioInput) => {
     try {
       await registrarCambioProducto.mutateAsync(data)
@@ -203,6 +236,7 @@ export default function ProductosContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaProductos
           productos={productos}
+          productosStockBajo={productosStockBajo}
           proveedores={proveedores}
           loading={isLoading}
           isAdmin={isAdmin}
@@ -214,6 +248,8 @@ export default function ProductosContainer(): React.ReactElement {
           onActualizacionMasivaPrecios={handleAbrirActualizacionMasiva}
           onGestionarCategorias={handleGestionarCategorias}
           onCambioProducto={puedeCambiarProductos ? handleAbrirCambioProducto : undefined}
+          onControlStock={handleControlStock}
+          onAbrirStockBajo={handleAbrirStockBajo}
         />
       </Suspense>
 
@@ -289,6 +325,17 @@ export default function ProductosContainer(): React.ReactElement {
             productos={productos}
             onSave={handleGuardarCambioProducto}
             onClose={() => setModalCambioOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Stock bajo */}
+      {modalStockBajoOpen && (
+        <Suspense fallback={null}>
+          <ModalStockBajo
+            productos={productosStockBajo}
+            onEditarProducto={handleEditarDesdeStockBajo}
+            onClose={() => setModalStockBajoOpen(false)}
           />
         </Suspense>
       )}

@@ -91,8 +91,8 @@ function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactEle
     : 'bg-amber-100 text-amber-700 border-amber-300';
 
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${colorClass}`}>
-      <Timer className="w-3 h-3" />
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border ${colorClass}`}>
+      <Timer className="w-3.5 h-3.5" />
       {dias}d
     </span>
   );
@@ -119,9 +119,9 @@ function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.Reac
     return (
       <span
         title={motivo}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
       >
-        <MapPin className="w-3 h-3" />
+        <MapPin className="w-3.5 h-3.5" />
         Sin GPS
       </span>
     );
@@ -137,9 +137,9 @@ function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.Reac
     return (
       <span
         title="Cliente sin coordenadas cargadas"
-        className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border border-gray-200 ${SEMAFORO_COLORS.sin_dato.bg}`}
       >
-        <MapPin className="w-3 h-3" />
+        <MapPin className="w-3.5 h-3.5" />
         s/ref
       </span>
     );
@@ -155,9 +155,9 @@ function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.Reac
   return (
     <span
       title={`${cfg.label} · ${formatDistancia(metros)}`}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border border-transparent ${cfg.bg}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12.5px] font-medium rounded-full border border-transparent ${cfg.bg}`}
     >
-      <MapPin className="w-3 h-3" />
+      <MapPin className="w-3.5 h-3.5" />
       {formatDistancia(metros)}
     </span>
   );
@@ -239,72 +239,78 @@ function PedidoCard({
   const handleMarcarEntregado = onMarcarEntregado ?? pedidoActions?.handleMarcarEntregado;
   const handleDesmarcarEntregado = onDesmarcarEntregado ?? pedidoActions?.handleDesmarcarEntregado;
   const handleRegistrarPago = onRegistrarPago ?? pedidoActions?.handleRegistrarPago;
+  const diasAntiguedad = calcularDiasAntiguedad(pedido.fecha || pedido.created_at);
+  const fechaCreacionLabel = formatFecha(pedido.fecha || pedido.created_at);
+  const horaCreacion = pedido.created_at ? formatHora(pedido.created_at) : null;
+  const mostrarEntrega = pedido.fecha_entrega_programada
+    && pedido.estado !== 'entregado'
+    && pedido.estado !== 'cancelado';
+
   return (
-    <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow">
-      {/* Header del pedido */}
-      <div className="flex justify-between items-start">
-        <div className="flex-1">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="font-semibold text-lg text-gray-800 dark:text-white">
-                {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
-              </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{pedido.cliente?.direccion}</p>
-              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
-                <span>#{pedido.id} - {formatFecha(pedido.fecha || pedido.created_at)}</span>
-                {pedido.created_at && (
-                  <span className="inline-flex items-center gap-0.5 text-xs text-gray-400 dark:text-gray-500" title="Hora de creación del pedido">
-                    <Clock className="w-3 h-3" />
-                    {formatHora(pedido.created_at)}
-                  </span>
-                )}
-                {pedido.fecha_entrega_programada && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && (
-                  <span className="inline-flex items-center gap-0.5 text-xs text-orange-600 dark:text-orange-400">
-                    <Truck className="w-3 h-3" />
-                    {formatFecha(pedido.fecha_entrega_programada)}
-                  </span>
-                )}
-                <BadgeAntiguedad dias={calcularDiasAntiguedad(pedido.fecha || pedido.created_at)} estado={pedido.estado} />
-                {(isAdmin || (isPreventista && user?.id === pedido.usuario_id)) && (
-                  <BadgeGeolocalizacion pedido={pedido} />
-                )}
-              </p>
-            </div>
-          </div>
-          {pedido.usuario?.nombre && (
-            <div className="mt-2 inline-flex items-center px-2 py-1 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded-full text-sm" title="Pedido cargado por">
-              <User className="w-4 h-4 mr-1" />
-              Cargado por {pedido.usuario.nombre}
-            </div>
-          )}
-          {pedido.transportista && (
-            <div className="mt-2 inline-flex items-center px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">
-              <Truck className="w-4 h-4 mr-1" />
-              {pedido.transportista.nombre}
-            </div>
-          )}
-          {pedido.estado === 'cancelado' && pedido.motivo_cancelacion && (
-            <div className="mt-2 inline-flex items-center px-2 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-full text-sm">
-              <AlertTriangle className="w-3 h-3 mr-1" />
-              <span className="truncate max-w-xs">{pedido.motivo_cancelacion}</span>
-            </div>
+    <div className="group bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl shadow-warm hover:shadow-warm-md hover:-translate-y-px hover:border-stone-300 dark:hover:border-gray-600 transition-[transform,box-shadow,border-color] duration-200 overflow-hidden">
+
+      {/* ╔══ ZONA 1: META-LINE editorial (todos los datos secundarios en una línea) ══╗
+           Nota: el ID conserva tracking editorial; el resto del texto va en case
+           natural (más legible) con peso medium. Tamaño 13px — antes era 11px,
+           se leía con esfuerzo. */}
+      <div className="px-5 pt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-stone-500 dark:text-stone-400">
+        <span className="tabular-nums font-semibold uppercase tracking-wide text-stone-600 dark:text-stone-300">#{pedido.id}</span>
+        <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
+        <span className="font-medium">{fechaCreacionLabel}</span>
+        {horaCreacion && (
+          <>
+            <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-1 font-medium" title="Hora de creación">
+              <Clock className="w-3.5 h-3.5" />
+              {horaCreacion}
+            </span>
+          </>
+        )}
+        {mostrarEntrega && (
+          <>
+            <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-1 font-medium text-orange-600 dark:text-orange-400" title="Entrega programada">
+              <Truck className="w-3.5 h-3.5" />
+              entrega {formatFecha(pedido.fecha_entrega_programada)}
+            </span>
+          </>
+        )}
+        <BadgeAntiguedad dias={diasAntiguedad} estado={pedido.estado} />
+        {(isAdmin || (isPreventista && user?.id === pedido.usuario_id)) && (
+          <BadgeGeolocalizacion pedido={pedido} />
+        )}
+      </div>
+
+      {/* ╔══ ZONA 2: HEADER PRINCIPAL — cliente prominente + estado a la derecha ══╗ */}
+      <div className="px-5 pt-2 flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-semibold text-stone-900 dark:text-white leading-tight">
+            {pedido.cliente?.nombre_fantasia || 'Sin cliente'}
+          </h3>
+          {pedido.cliente?.direccion && (
+            <p className="mt-1 text-sm text-stone-500 dark:text-gray-400 flex items-start gap-1.5">
+              <MapPin className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-stone-400 dark:text-stone-500" aria-hidden="true" />
+              <span className="truncate">{pedido.cliente.direccion}</span>
+            </p>
           )}
         </div>
 
-        {/* Acciones */}
-        <div className="flex items-start space-x-2">
+        {/* Columna derecha: stepper + acciones */}
+        <div className="flex items-start gap-2 flex-shrink-0">
           <div className="flex flex-col items-end gap-2">
             <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
-            {pedido.estado_pago && (
-              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getEstadoPagoColor(pedido.estado_pago)}`}>
-                {getEstadoPagoLabel(pedido.estado_pago)}
-              </span>
-            )}
-            {pedido.tipo_factura === 'FC' && (
-              <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
-                FC
-              </span>
-            )}
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {pedido.estado_pago && (
+                <span className={`px-2.5 py-1 rounded-full text-[12.5px] font-semibold ${getEstadoPagoColor(pedido.estado_pago)}`}>
+                  {getEstadoPagoLabel(pedido.estado_pago)}
+                </span>
+              )}
+              {pedido.tipo_factura === 'FC' && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                  FC
+                </span>
+              )}
+            </div>
           </div>
           <AccionesDropdown
             pedido={pedido}
@@ -328,56 +334,103 @@ function PedidoCard({
         </div>
       </div>
 
-      {/* Resumen del pedido */}
-      <div className="mt-3 pt-3 border-t dark:border-gray-700">
-        <div className="flex flex-wrap items-center gap-2 mb-2">
+      {/* ╔══ ZONA 3: PERSONAS (compactas, en una sola fila) ══╗ */}
+      {(pedido.usuario?.nombre || pedido.transportista || (pedido.estado === 'cancelado' && pedido.motivo_cancelacion)) && (
+        <div className="px-5 mt-3 flex flex-wrap items-center gap-1.5">
+          {pedido.usuario?.nombre && (
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] bg-purple-50 text-purple-700 border border-purple-200/60 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800/40"
+              title="Pedido cargado por"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span className="font-medium">{pedido.usuario.nombre}</span>
+            </span>
+          )}
+          {pedido.transportista && (
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] bg-orange-50 text-orange-700 border border-orange-200/60 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800/40"
+              title="Transportista asignado"
+            >
+              <Truck className="w-3.5 h-3.5" />
+              <span className="font-medium">{pedido.transportista.nombre}</span>
+            </span>
+          )}
+          {pedido.estado === 'cancelado' && pedido.motivo_cancelacion && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] bg-red-50 text-red-700 border border-red-200/60 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800/40">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span className="font-medium truncate max-w-xs">{pedido.motivo_cancelacion}</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ╔══ ZONA 4: PRODUCTOS ══╗ */}
+      <div className="px-5 mt-4">
+        {/* Divider editorial: gradiente sutil */}
+        <div className="h-px bg-gradient-to-r from-transparent via-stone-200 dark:via-gray-700 to-transparent" aria-hidden="true" />
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {pedido.items?.slice(0, 3).map(i => (
-            <span key={i.id} className="inline-block px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs dark:text-gray-300">
-              {i.producto?.nombre} x{i.cantidad}
+            <span
+              key={i.id}
+              className="inline-flex items-baseline gap-1 px-2.5 py-1 bg-stone-50 dark:bg-gray-700/70 border border-stone-200/80 dark:border-gray-700 rounded-md text-[13px] text-stone-700 dark:text-gray-300"
+            >
+              <span className="truncate max-w-[22ch]">{i.producto?.nombre}</span>
+              <span className="tabular-nums text-stone-500 dark:text-gray-400 font-semibold">×{i.cantidad}</span>
             </span>
           ))}
           {pedido.items && pedido.items.length > 3 && (
-            <span className="text-xs text-gray-500">+{pedido.items.length - 3} mas</span>
+            <span className="text-[13px] text-stone-500 dark:text-gray-400 font-medium">
+              +{pedido.items.length - 3} más
+            </span>
           )}
         </div>
+      </div>
 
-        <div className="flex flex-wrap justify-between items-center gap-2">
-          <div className="flex flex-col">
-            <p className="text-lg font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
-            {pedido.estado_pago === 'parcial' && (
-              <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-                Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
-              </p>
-            )}
-            {(pedido.forma_pago || (pedido.pagos && pedido.pagos.length > 0)) && (
-              <p className="text-xs text-gray-500 flex items-center">
-                <CreditCard className="w-3 h-3 mr-1" />
-                {getFormaPagoDisplay(pedido)}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {pedido.estado_pago === 'pagado' && (
-              <ReciboDropdown pedido={pedido} />
-            )}
-            <button
-              onClick={() => setExpandido(!expandido)}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-              aria-expanded={expandido}
-              aria-controls={`pedido-detalle-${pedido.id}`}
-              aria-label={expandido ? 'Ocultar detalle del pedido' : 'Ver detalle del pedido'}
-            >
-              <Eye className="w-4 h-4" aria-hidden="true" />
-              {expandido ? 'Ocultar' : 'Ver detalle'}
-              {expandido ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
-            </button>
-          </div>
+      {/* ╔══ ZONA 5: FOOTER (total destacado en su propio compartimento) ══╗ */}
+      <div className="mt-4 px-5 py-3.5 bg-gradient-to-br from-stone-50/70 via-stone-50/40 to-blue-50/30 dark:from-gray-900/50 dark:via-gray-900/30 dark:to-blue-900/10 border-t border-stone-200/70 dark:border-gray-700/60 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500 dark:text-stone-400 leading-none">
+            Total
+          </p>
+          <p
+            className="mt-1 text-2xl text-blue-700 dark:text-blue-300 tabular-nums leading-none"
+            style={{ fontWeight: 800, letterSpacing: '-0.03em' }}
+          >
+            {formatPrecio(pedido.total)}
+          </p>
+          {pedido.estado_pago === 'parcial' && (
+            <p className="mt-1.5 text-[13px] font-medium text-amber-700 dark:text-amber-400 tabular-nums">
+              Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
+            </p>
+          )}
+          {(pedido.forma_pago || (pedido.pagos && pedido.pagos.length > 0)) && (
+            <p className="mt-1.5 text-[13px] text-stone-500 dark:text-gray-400 flex items-center gap-1.5">
+              <CreditCard className="w-3.5 h-3.5" aria-hidden="true" />
+              {getFormaPagoDisplay(pedido)}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {pedido.estado_pago === 'pagado' && (
+            <ReciboDropdown pedido={pedido} />
+          )}
+          <button
+            onClick={() => setExpandido(!expandido)}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 hover:gap-2 transition-[gap,color] duration-200"
+            aria-expanded={expandido}
+            aria-controls={`pedido-detalle-${pedido.id}`}
+            aria-label={expandido ? 'Ocultar detalle del pedido' : 'Ver detalle del pedido'}
+          >
+            <Eye className="w-4 h-4" aria-hidden="true" />
+            {expandido ? 'Ocultar detalle' : 'Ver detalle'}
+            {expandido ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
+          </button>
         </div>
       </div>
 
       {/* Contenido expandido del pedido */}
       {expandido && (
-        <div id={`pedido-detalle-${pedido.id}`} className="mt-4 pt-4 border-t dark:border-gray-700 space-y-4 animate-fadeIn">
+        <div id={`pedido-detalle-${pedido.id}`} className="px-5 pt-4 pb-5 border-t border-stone-200 dark:border-gray-700 space-y-4 animate-fadeIn">
           {/* Informacion del cliente */}
           <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">

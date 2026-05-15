@@ -1,9 +1,15 @@
 import { useState, useMemo, useRef } from 'react';
 import type { ChangeEvent } from 'react';
-import { Package, Plus, Edit2, Trash2, Search, AlertTriangle, Minus, TrendingDown, Percent, ClipboardCheck, Tag, ChevronLeft, ChevronRight, ArrowLeftRight } from 'lucide-react';
+import {
+  Package, Edit2, Trash2, Search, Minus,
+  ChevronLeft, ChevronRight,
+} from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
+import ProductosViewHeader from '../productos/ProductosViewHeader';
+import ProductoToolbar from '../productos/ProductoToolbar';
+import { cn } from '../../lib/utils';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
 
 const ITEMS_PER_PAGE = 20;
@@ -14,6 +20,7 @@ const ITEMS_PER_PAGE = 20;
 
 export interface VistaProductosProps {
   productos: ProductoDB[];
+  productosStockBajo: ProductoDB[];
   proveedores?: ProveedorDBExtended[];
   loading: boolean;
   isAdmin: boolean;
@@ -25,10 +32,13 @@ export interface VistaProductosProps {
   onActualizacionMasivaPrecios?: () => void;
   onGestionarCategorias?: () => void;
   onCambioProducto?: () => void;
+  onControlStock?: () => void;
+  onAbrirStockBajo?: () => void;
 }
 
 export default function VistaProductos({
   productos,
+  productosStockBajo,
   proveedores = [],
   loading,
   isAdmin,
@@ -39,7 +49,9 @@ export default function VistaProductos({
   onVerHistorialMermas,
   onActualizacionMasivaPrecios,
   onGestionarCategorias,
-  onCambioProducto
+  onCambioProducto,
+  onControlStock,
+  onAbrirStockBajo,
 }: VistaProductosProps) {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
@@ -53,17 +65,12 @@ export default function VistaProductos({
     return ['todas', ...Array.from(catsSet).sort()];
   }, [productos]);
 
-  // Productos con stock bajo
-  const productosStockBajo = useMemo((): ProductoDB[] => {
-    return productos.filter((p: ProductoDB) => p.stock < (p.stock_minimo || 10));
-  }, [productos]);
-
   // Filtrar productos
   const productosFiltrados = useMemo((): ProductoDB[] => {
     return productos.filter((p: ProductoDB) => {
-      const matchBusqueda = !busqueda ||
-        p.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        p.codigo?.toLowerCase().includes(busqueda.toLowerCase());
+      const matchBusqueda = !busqueda
+        || p.nombre?.toLowerCase().includes(busqueda.toLowerCase())
+        || p.codigo?.toLowerCase().includes(busqueda.toLowerCase());
 
       const matchCategoria = filtroCategoria === 'todas' || p.categoria === filtroCategoria;
 
@@ -80,164 +87,85 @@ export default function VistaProductos({
     return productosFiltrados.slice(inicio, inicio + ITEMS_PER_PAGE);
   }, [productosFiltrados, paginaActual]);
 
-  // Reset page when filters change
   const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
   const handleCategoria = (cat: string) => { setFiltroCategoria(cat); setPaginaActual(1); };
-  const handleStockBajo = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
+  const handleStockBajoToggle = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
 
-  // Mapa de proveedores para lookup rápido
   const proveedoresMap = useMemo(() => {
-    return new Map(proveedores.map(p => [p.id, p.nombre]))
-  }, [proveedores])
+    return new Map(proveedores.map(p => [p.id, p.nombre]));
+  }, [proveedores]);
 
+  // Color de la pill de stock — alineado con la paleta de Pedidos (rose/amber/orange/emerald).
   const getStockColor = (producto: ProductoDB): string => {
     const stockMinimo = producto.stock_minimo || 10;
-    if (producto.stock === 0) return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
-    if (producto.stock < stockMinimo) return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
-    if (producto.stock < stockMinimo * 2) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400';
-    return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
+    if (producto.stock === 0) return 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300';
+    if (producto.stock < stockMinimo) return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+    if (producto.stock < stockMinimo * 2) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300';
+    return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
   };
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Productos</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{productos.length} productos en catálogo</p>
-        </div>
-        {(isAdmin || onCambioProducto) && (
-          <div className="flex flex-wrap gap-2">
-            {isAdmin && onGestionarCategorias && (
-              <button
-                onClick={onGestionarCategorias}
-                className="flex items-center space-x-2 px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
-              >
-                <Tag className="w-5 h-5" />
-                <span>Categorías</span>
-              </button>
-            )}
-            {isAdmin && (
-              <button
-                onClick={async () => {
-                  const { exportControlStock } = await import('../../utils/excel');
-                  await exportControlStock(productos);
-                }}
-                className="flex items-center space-x-2 px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
-              >
-                <ClipboardCheck className="w-5 h-5" />
-                <span>Control de Stock</span>
-              </button>
-            )}
-            {isAdmin && onVerHistorialMermas && (
-              <button
-                onClick={onVerHistorialMermas}
-                className="flex items-center space-x-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-              >
-                <TrendingDown className="w-5 h-5" />
-                <span>Historial Mermas</span>
-              </button>
-            )}
-            {isAdmin && onActualizacionMasivaPrecios && (
-              <button
-                onClick={onActualizacionMasivaPrecios}
-                className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
-              >
-                <Percent className="w-5 h-5" />
-                <span>Actualización masiva</span>
-              </button>
-            )}
-            {onCambioProducto && (
-              <button
-                onClick={onCambioProducto}
-                className="flex items-center space-x-2 px-4 py-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
-              >
-                <ArrowLeftRight className="w-5 h-5" />
-                <span>Cambio de productos</span>
-              </button>
-            )}
-            {isAdmin && (
-              <button
-                onClick={onNuevoProducto}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Nuevo Producto</span>
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Alerta de stock bajo */}
-      {productosStockBajo.length > 0 && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4" role="alert">
-          <div className="flex items-start space-x-3">
-            <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
-            <div className="flex-1">
-              <p className="text-red-700 dark:text-red-300 font-medium">
-                {productosStockBajo.length} producto(s) con stock bajo
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {productosStockBajo.slice(0, 5).map(p => (
-                  <span key={p.id} className="text-xs px-2 py-1 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-full">
-                    {p.nombre} ({p.stock})
-                  </span>
-                ))}
-                {productosStockBajo.length > 5 && (
-                  <span className="text-xs px-2 py-1 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-full">
-                    +{productosStockBajo.length - 5} más
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={handleStockBajo}
-                className="mt-2 text-sm text-red-600 dark:text-red-400 hover:underline"
-              >
-                {mostrarSoloStockBajo ? 'Mostrar todos' : 'Ver solo productos con stock bajo'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Header con título dinámico + toolbar */}
+      <ProductosViewHeader
+        busqueda={busqueda}
+        categoriaSeleccionada={filtroCategoria}
+        mostrarSoloStockBajo={mostrarSoloStockBajo}
+        totalCount={productosFiltrados.length}
+        loading={loading}
+        actions={
+          <ProductoToolbar
+            isAdmin={isAdmin}
+            productosStockBajoCount={productosStockBajo.length}
+            onGestionarCategorias={onGestionarCategorias}
+            onCambioProducto={onCambioProducto}
+            onActualizacionMasivaPrecios={onActualizacionMasivaPrecios}
+            onControlStock={onControlStock}
+            onVerHistorialMermas={onVerHistorialMermas}
+            onAbrirStockBajo={onAbrirStockBajo}
+            onNuevoProducto={onNuevoProducto}
+          />
+        }
+      />
 
       {/* Búsqueda — full width */}
       <div className="relative w-full">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5" aria-hidden="true" />
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-stone-400 dark:text-gray-500 w-4 h-4" aria-hidden="true" />
         <input
           type="text"
           value={busqueda}
           onChange={handleBusqueda}
-          className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-          placeholder="Buscar por nombre o código..."
+          className="w-full h-10 pl-10 pr-3 rounded-lg border border-stone-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-stone-700 dark:text-white placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400"
+          placeholder="Buscar por nombre o código…"
           aria-label="Buscar productos"
         />
       </div>
 
       {/* Filtros de categoría — carrusel horizontal con flechas */}
       {categorias.length > 1 && (
-        <div className="relative" role="group" aria-label="Filtrar por categoría">
+        <div className="relative flex items-center gap-2" role="group" aria-label="Filtrar por categoría">
           <button
             type="button"
             onClick={() => categoriasScrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
-            className="hidden sm:flex absolute left-0 top-1/2 -translate-y-1/2 z-10 items-center justify-center w-8 h-8 bg-white/95 dark:bg-gray-800 rounded-full shadow-md border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="hidden sm:flex absolute left-0 top-1/2 -translate-y-1/2 z-10 items-center justify-center w-8 h-8 bg-white/95 dark:bg-gray-800 rounded-full shadow-warm border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700"
             aria-label="Scroll categorías a la izquierda"
           >
-            <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+            <ChevronLeft className="w-4 h-4 text-stone-600 dark:text-gray-300" />
           </button>
           <div
             ref={categoriasScrollRef}
-            className="flex gap-2 overflow-x-auto scroll-smooth sm:px-10 py-1 scrollbar-hide"
+            className="flex gap-1.5 overflow-x-auto scroll-smooth sm:px-10 py-1 scrollbar-hide flex-1"
           >
             {categorias.map(cat => (
               <button
                 key={cat}
                 onClick={() => handleCategoria(cat)}
-                className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={cn(
+                  'shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                   filtroCategoria === cat
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                }`}
+                    ? 'bg-blue-600 text-white shadow-warm'
+                    : 'bg-stone-100 dark:bg-gray-700 text-stone-700 dark:text-gray-300 hover:bg-stone-200 dark:hover:bg-gray-600',
+                )}
                 aria-pressed={filtroCategoria === cat}
               >
                 {cat === 'todas' ? 'Todas' : cat}
@@ -247,107 +175,131 @@ export default function VistaProductos({
           <button
             type="button"
             onClick={() => categoriasScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
-            className="hidden sm:flex absolute right-0 top-1/2 -translate-y-1/2 z-10 items-center justify-center w-8 h-8 bg-white/95 dark:bg-gray-800 rounded-full shadow-md border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="hidden sm:flex absolute right-0 top-1/2 -translate-y-1/2 z-10 items-center justify-center w-8 h-8 bg-white/95 dark:bg-gray-800 rounded-full shadow-warm border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700"
             aria-label="Scroll categorías a la derecha"
           >
-            <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+            <ChevronRight className="w-4 h-4 text-stone-600 dark:text-gray-300" />
           </button>
         </div>
       )}
 
-      {/* Contador de resultados */}
-      {(busqueda || filtroCategoria !== 'todas' || mostrarSoloStockBajo) && (
-        <div className="text-sm text-gray-600 dark:text-gray-400" aria-live="polite">
-          Mostrando {productosFiltrados.length} de {productos.length} productos
+      {/* Toggle "Ver solo stock bajo" — chip discreto */}
+      {productosStockBajo.length > 0 && (
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={handleStockBajoToggle}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+              mostrarSoloStockBajo
+                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50'
+                : 'bg-white dark:bg-gray-800 text-stone-600 dark:text-gray-300 border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700/50',
+            )}
+            aria-pressed={mostrarSoloStockBajo}
+          >
+            <span
+              className={cn(
+                'inline-block w-1.5 h-1.5 rounded-full',
+                mostrarSoloStockBajo ? 'bg-amber-500' : 'bg-stone-300 dark:bg-gray-600',
+              )}
+              aria-hidden="true"
+            />
+            {mostrarSoloStockBajo ? 'Mostrando solo stock bajo' : 'Ver solo stock bajo'}
+          </button>
         </div>
       )}
 
       {/* Tabla de productos */}
       {loading ? <LoadingSpinner /> : productosFiltrados.length === 0 ? (
-        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+        <div className="text-center py-12 text-stone-500 dark:text-gray-400">
           <Package className="w-12 h-12 mx-auto mb-3 opacity-50" aria-hidden="true" />
           <p>{busqueda || filtroCategoria !== 'todas' ? 'No se encontraron productos' : 'No hay productos'}</p>
         </div>
       ) : (
         <>
-          {/* Tabla - desktop */}
-          <div className="hidden md:block bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm overflow-x-auto">
-            <table className="w-full" role="table">
-              <thead className="bg-gray-50 dark:bg-gray-700/50">
-                <tr>
-                  <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Código</th>
-                  <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Producto</th>
-                  <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Categoría</th>
-                  <th scope="col" className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Proveedor</th>
-                  <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Precio</th>
-                  <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Stock</th>
-                  {isAdmin && <th scope="col" className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Acciones</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-gray-700">
-                {productosPaginados.map(producto => (
-                  <tr key={producto.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-sm font-mono">
-                      {producto.codigo || '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-medium text-gray-800 dark:text-white">{producto.nombre}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={producto.categoria ? 'px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}>
-                        {producto.categoria || 'Sin categoría'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                      {producto.proveedor_id ? (proveedoresMap.get(producto.proveedor_id) || '-') : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-blue-600 dark:text-blue-400">
-                      {formatPrecio(producto.precio)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`px-2 py-1 rounded-full text-sm font-medium ${getStockColor(producto)}`}>
-                        {producto.stock}
-                      </span>
-                    </td>
-                    {isAdmin && (
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end space-x-1">
-                          {onBajaStock && producto.stock > 0 && (
-                            <button
-                              onClick={() => onBajaStock(producto)}
-                              className="p-2 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors"
-                              title="Baja de stock"
-                              aria-label={`Baja de stock ${producto.nombre}`}
-                            >
-                              <Minus className="w-4 h-4" aria-hidden="true" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => onEditarProducto(producto)}
-                            className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                            title="Editar"
-                            aria-label={`Editar ${producto.nombre}`}
-                          >
-                            <Edit2 className="w-4 h-4" aria-hidden="true" />
-                          </button>
-                          <button
-                            onClick={() => onEliminarProducto(producto.id)}
-                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                            title="Eliminar"
-                            aria-label={`Eliminar ${producto.nombre}`}
-                          >
-                            <Trash2 className="w-4 h-4" aria-hidden="true" />
-                          </button>
-                        </div>
-                      </td>
-                    )}
+          {/* Tabla — desktop */}
+          <div className="hidden md:block bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full" role="table">
+                <thead className="bg-stone-50/70 dark:bg-gray-700/50 border-b border-stone-200 dark:border-gray-700">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Código</th>
+                    <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Producto</th>
+                    <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Categoría</th>
+                    <th scope="col" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Proveedor</th>
+                    <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Precio</th>
+                    <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Stock</th>
+                    {isAdmin && <th scope="col" className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-gray-400">Acciones</th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-stone-200 dark:divide-gray-700">
+                  {productosPaginados.map(producto => (
+                    <tr key={producto.id} className="hover:bg-stone-50/70 dark:hover:bg-gray-700/40 transition-colors">
+                      <td className="px-4 py-3 text-stone-500 dark:text-gray-400 text-sm font-mono tabular-nums">
+                        {producto.codigo || '-'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-medium text-stone-800 dark:text-white">{producto.nombre}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={producto.categoria ? 'px-2 py-0.5 bg-stone-100 dark:bg-gray-700 rounded-full text-xs text-stone-700 dark:text-gray-300' : 'text-stone-400 dark:text-gray-500 text-xs'}>
+                          {producto.categoria || 'Sin categoría'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-stone-600 dark:text-gray-400">
+                        {producto.proveedor_id ? (proveedoresMap.get(producto.proveedor_id) || '-') : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
+                        {formatPrecio(producto.precio)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-sm font-semibold tabular-nums ${getStockColor(producto)}`}>
+                          {producto.stock}
+                        </span>
+                      </td>
+                      {isAdmin && (
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            {onBajaStock && producto.stock > 0 && (
+                              <button
+                                onClick={() => onBajaStock(producto)}
+                                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-orange-50 dark:bg-orange-900/15 text-orange-700 dark:text-orange-300 border border-orange-200/70 dark:border-orange-800/40 hover:bg-orange-100 dark:hover:bg-orange-900/25 hover:border-orange-300 hover:-translate-y-px active:translate-y-0 transition-[transform,background-color,border-color]"
+                                title="Registrar baja de stock"
+                                aria-label={`Baja de stock ${producto.nombre}`}
+                              >
+                                <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+                                <span>Baja</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onEditarProducto(producto)}
+                              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/15 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-800/40 hover:bg-blue-100 dark:hover:bg-blue-900/25 hover:border-blue-300 hover:-translate-y-px active:translate-y-0 transition-[transform,background-color,border-color]"
+                              title="Editar"
+                              aria-label={`Editar ${producto.nombre}`}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>Editar</span>
+                            </button>
+                            <button
+                              onClick={() => onEliminarProducto(producto.id)}
+                              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-rose-50 dark:bg-rose-900/15 text-rose-700 dark:text-rose-300 border border-rose-200/70 dark:border-rose-800/40 hover:bg-rose-100 dark:hover:bg-rose-900/25 hover:border-rose-300 hover:-translate-y-px active:translate-y-0 transition-[transform,background-color,border-color]"
+                              title="Eliminar"
+                              aria-label={`Eliminar ${producto.nombre}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>Borrar</span>
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          {/* Cards - mobile */}
+          {/* Cards — mobile */}
           <div className="grid gap-3 md:hidden">
             {productosPaginados.map(producto => {
               const stockMinimo = producto.stock_minimo || 10;
@@ -356,79 +308,83 @@ export default function VistaProductos({
               return (
                 <div
                   key={producto.id}
-                  className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg p-4 shadow-sm"
+                  className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl p-4 shadow-warm hover:shadow-warm-md transition-shadow"
                 >
                   <div className="flex justify-between items-start gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         {producto.codigo && (
-                          <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs font-mono font-semibold">
+                          <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs font-mono font-semibold tabular-nums">
                             #{producto.codigo}
                           </span>
                         )}
-                        <h3 className="font-semibold text-gray-800 dark:text-white truncate">
+                        <h3 className="font-semibold text-stone-800 dark:text-white truncate">
                           {producto.nombre}
                         </h3>
                       </div>
                       {producto.categoria && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        <p className="text-sm text-stone-600 dark:text-gray-400 mt-1">
                           {producto.categoria}
                         </p>
                       )}
                       {proveedorNombre && (
-                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
+                        <p className="text-xs text-stone-500 dark:text-gray-500 mt-0.5">
                           {proveedorNombre}
                         </p>
                       )}
                       <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
-                        <span className="text-gray-800 dark:text-gray-200">
-                          <span className="text-gray-500 dark:text-gray-400">Precio:</span>{' '}
-                          <span className="font-semibold text-blue-600 dark:text-blue-400">
+                        <span className="text-stone-800 dark:text-gray-200">
+                          <span className="text-stone-500 dark:text-gray-400">Precio:</span>{' '}
+                          <span className="font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
                             {formatPrecio(producto.precio)}
                           </span>
                         </span>
                         <span
-                          className={
+                          className={cn(
+                            'tabular-nums',
                             stockBajo
-                              ? 'text-red-600 dark:text-red-400 font-medium'
-                              : 'text-gray-800 dark:text-gray-200'
-                          }
+                              ? 'text-rose-600 dark:text-rose-400 font-semibold'
+                              : 'text-stone-800 dark:text-gray-200',
+                          )}
                         >
-                          <span className="text-gray-500 dark:text-gray-400">Stock:</span> {producto.stock}
+                          <span className="text-stone-500 dark:text-gray-400">Stock:</span> {producto.stock}
                         </span>
                       </div>
                     </div>
-                    {isAdmin && (
-                      <div className="flex flex-col gap-1 shrink-0">
-                        {onBajaStock && producto.stock > 0 && (
-                          <button
-                            onClick={() => onBajaStock(producto)}
-                            className="p-2 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
-                            title="Baja de stock"
-                            aria-label={`Baja de stock ${producto.nombre}`}
-                          >
-                            <Minus className="w-4 h-4" aria-hidden="true" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => onEditarProducto(producto)}
-                          className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
-                          title="Editar"
-                          aria-label={`Editar ${producto.nombre}`}
-                        >
-                          <Edit2 className="w-4 h-4" aria-hidden="true" />
-                        </button>
-                        <button
-                          onClick={() => onEliminarProducto(producto.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
-                          title="Eliminar"
-                          aria-label={`Eliminar ${producto.nombre}`}
-                        >
-                          <Trash2 className="w-4 h-4" aria-hidden="true" />
-                        </button>
-                      </div>
-                    )}
                   </div>
+                  {isAdmin && (
+                    <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-stone-200 dark:border-gray-700">
+                      {onBajaStock && producto.stock > 0 && (
+                        <button
+                          onClick={() => onBajaStock(producto)}
+                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200/70 hover:bg-orange-100 transition-colors"
+                          title="Baja de stock"
+                          aria-label={`Baja de stock ${producto.nombre}`}
+                        >
+                          <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Baja</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onEditarProducto(producto)}
+                        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200/70 hover:bg-blue-100 transition-colors"
+                        title="Editar"
+                        aria-label={`Editar ${producto.nombre}`}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        onClick={() => onEliminarProducto(producto.id)}
+                        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200/70 hover:bg-rose-100 transition-colors"
+                        title="Eliminar"
+                        aria-label={`Eliminar ${producto.nombre}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Borrar</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -1,12 +1,18 @@
 import React, { useState, useMemo, memo } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { RefreshCw, Download, DollarSign, ShoppingCart, Clock, Package, Truck, Check, TrendingUp, TrendingDown, Minus, Target, Users, AlertTriangle } from 'lucide-react';
+import {
+  DollarSign, ShoppingCart, Clock, Package, Truck, Check,
+  TrendingUp, TrendingDown, Minus, Target, Users, AlertTriangle,
+} from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import DashboardViewHeader from '../dashboard/DashboardViewHeader';
+import DashboardToolbar from '../dashboard/DashboardToolbar';
+import { cn } from '../../lib/utils';
 import type {
   ProductoDB,
   DashboardMetricasExtended,
-  FiltroPeriodo
+  FiltroPeriodo,
 } from '../../types';
 
 // =============================================================================
@@ -19,11 +25,17 @@ interface TendenciaIndicatorProps {
   invertido?: boolean;
 }
 
-interface ColorClase {
-  bg: string;
-  icon: string;
-  text: string;
-  border?: string;
+interface MetricaSemantica {
+  /** Border-left coloreado (border-l-...) */
+  accentBorder: string;
+  /** Color del número y el icono dentro del badge */
+  accentText: string;
+  /** Fondo del badge circular del icono */
+  badgeBg: string;
+  /** Color del icono en el badge */
+  badgeIcon: string;
+  /** Gradient overlay sutil (before:from-...) */
+  gradientFrom: string;
 }
 
 interface MetricaCardProps {
@@ -31,15 +43,22 @@ interface MetricaCardProps {
   titulo: string;
   valor: string | number;
   subtitulo?: string;
-  colorClase: ColorClase;
+  semantica: MetricaSemantica;
   tendencia?: React.ReactNode;
+}
+
+interface EstadoSemantica {
+  accentBorder: string;
+  accentText: string;
+  badgeBg: string;
+  badgeIcon: string;
 }
 
 interface EstadoCardProps {
   icono: LucideIcon;
   titulo: string;
   valor: number;
-  colorClase: ColorClase;
+  semantica: EstadoSemantica;
   onClick?: () => void;
 }
 
@@ -77,15 +96,18 @@ const periodoLabels: Record<string, string> = {
   mes: 'Este mes',
   anio: 'Este año',
   historico: 'Histórico',
-  personalizado: 'Personalizado'
+  personalizado: 'Personalizado',
 };
 
-// Componente de indicador de tendencia
+// =============================================================================
+// SUB-COMPONENTES
+// =============================================================================
+
 const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion, invertido = false }: TendenciaIndicatorProps) {
   if (!comparacion || comparacion === 0) {
     return (
-      <span className="flex items-center text-xs text-gray-500">
-        <Minus className="w-3 h-3 mr-1" />
+      <span className="inline-flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">
+        <Minus className="w-3 h-3" />
         Sin datos previos
       </span>
     );
@@ -97,97 +119,190 @@ const TendenciaIndicator = memo(function TendenciaIndicator({ valor, comparacion
 
   if (esNeutro) {
     return (
-      <span className="flex items-center text-xs text-gray-500">
-        <Minus className="w-3 h-3 mr-1" />
+      <span className="inline-flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">
+        <Minus className="w-3 h-3" />
         Sin cambios
       </span>
     );
   }
 
   return (
-    <span className={`flex items-center text-xs ${esPositivo ? 'text-green-600' : 'text-red-600'}`}>
-      {esPositivo ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
-      {Math.abs(porcentaje).toFixed(1)}% vs período anterior
+    <span className={cn(
+      'inline-flex items-center gap-1 text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-md',
+      esPositivo
+        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
+        : 'bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300',
+    )}>
+      {esPositivo ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+      {Math.abs(porcentaje).toFixed(1)}%
     </span>
   );
 });
 
-// Componente de tarjeta de métrica grande
-const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo, colorClase, tendencia }: MetricaCardProps) {
+const MetricaCard = memo(function MetricaCard({ icono, titulo, valor, subtitulo, semantica, tendencia }: MetricaCardProps) {
   const Icono = icono;
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow">
-      <div className="flex items-start justify-between">
-        <div className={`p-3 ${colorClase.bg} rounded-xl`}>
-          <Icono className={`w-7 h-7 ${colorClase.icon}`} />
-        </div>
-        {tendencia && (
-          <div className="text-right">
-            {tendencia}
-          </div>
-        )}
+    <div
+      className={cn(
+        'group relative overflow-hidden bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 border-l-4 rounded-xl px-5 py-4 shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow] duration-200',
+        semantica.accentBorder,
+        'before:absolute before:inset-0 before:bg-gradient-to-br before:to-transparent before:pointer-events-none',
+        semantica.gradientFrom,
+      )}
+    >
+      <div className="relative flex items-start justify-between gap-3">
+        <span className={cn('inline-flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0', semantica.badgeBg)}>
+          <Icono className={cn('w-[18px] h-[18px]', semantica.badgeIcon)} aria-hidden="true" />
+        </span>
+        {tendencia && <div className="flex-shrink-0 mt-1">{tendencia}</div>}
       </div>
-      <div className="mt-4">
-        <p className="text-sm text-gray-500 dark:text-gray-400">{titulo}</p>
-        <p className={`text-3xl font-bold mt-1 ${colorClase.text}`}>{valor}</p>
-        {subtitulo && <p className="text-xs text-gray-400 mt-1">{subtitulo}</p>}
+      <div className="relative mt-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400">
+          {titulo}
+        </p>
+        <p
+          className={cn('text-[28px] tabular-nums leading-tight mt-1', semantica.accentText)}
+          style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
+        >
+          {valor}
+        </p>
+        {subtitulo && (
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">{subtitulo}</p>
+        )}
       </div>
     </div>
   );
 });
 
-// Componente de tarjeta de estado pequeña
-const EstadoCard = memo(function EstadoCard({ icono, titulo, valor, colorClase, onClick }: EstadoCardProps) {
+const EstadoCard = memo(function EstadoCard({ icono, titulo, valor, semantica, onClick }: EstadoCardProps) {
   const Icono = icono;
+  const Container: React.ElementType = onClick ? 'button' : 'div';
   return (
-    <button
+    <Container
       onClick={onClick}
-      className={`${colorClase.bg} border ${colorClase.border} rounded-xl p-4 text-left hover:scale-105 transition-transform w-full`}
+      className={cn(
+        'group relative overflow-hidden text-left bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 border-l-4 rounded-xl px-4 py-3 shadow-warm hover:shadow-warm-md hover:-translate-y-px transition-[transform,box-shadow] duration-200 w-full',
+        semantica.accentBorder,
+        onClick && 'cursor-pointer',
+      )}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <Icono className={`w-5 h-5 ${colorClase.icon}`} />
-          <span className={`${colorClase.text} font-medium text-sm`}>{titulo}</span>
-        </div>
+      <div className="flex items-center gap-2.5">
+        <span className={cn('inline-flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0', semantica.badgeBg)}>
+          <Icono className={cn('w-3.5 h-3.5', semantica.badgeIcon)} aria-hidden="true" />
+        </span>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 leading-tight">
+          {titulo}
+        </span>
       </div>
-      <p className={`text-3xl font-bold ${colorClase.icon} mt-2`}>{valor}</p>
-    </button>
+      <p
+        className={cn('text-[26px] tabular-nums leading-tight mt-1.5', semantica.accentText)}
+        style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
+      >
+        {valor.toLocaleString('es-AR')}
+      </p>
+    </Container>
   );
 });
 
-// Componente de barra de progreso animada
 const BarraProgreso = memo(function BarraProgreso({ dia, ventas, maxVenta, index }: BarraProgresoProps) {
   const porcentaje = maxVenta > 0 ? (ventas / maxVenta) * 100 : 0;
-  const esHoy = index === 6; // Último día es hoy
+  const esHoy = index === 6;
 
   return (
-    <div className="flex items-center space-x-3 group">
-      <span className={`w-12 text-sm ${esHoy ? 'font-bold text-blue-600' : 'text-gray-600'}`}>
+    <div className="flex items-center gap-3 group">
+      <span className={cn(
+        'w-12 text-sm tabular-nums',
+        esHoy ? 'font-bold text-blue-700 dark:text-blue-300' : 'text-stone-500 dark:text-stone-400',
+      )}>
         {dia}
       </span>
-      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-8 overflow-hidden">
+      <div className="flex-1 bg-stone-100 dark:bg-gray-700 rounded-full h-7 overflow-hidden">
         <div
-          className={`h-8 rounded-full flex items-center justify-end pr-3 transition-all duration-500 ${
+          className={cn(
+            'h-7 rounded-full flex items-center justify-end pr-3 transition-all duration-500',
             esHoy
               ? 'bg-gradient-to-r from-blue-500 to-blue-600'
-              : 'bg-gradient-to-r from-blue-400 to-blue-500'
-          }`}
+              : 'bg-gradient-to-r from-blue-400/80 to-blue-500/80',
+          )}
           style={{
-            width: `${Math.max(porcentaje, 15)}%`,
-            animationDelay: `${index * 100}ms`
+            width: `${Math.max(porcentaje, 14)}%`,
+            animationDelay: `${index * 100}ms`,
           }}
         >
-          <span className="text-xs text-white font-medium truncate">
+          <span className="text-xs text-white font-semibold tabular-nums truncate">
             {formatPrecio(ventas)}
           </span>
         </div>
       </div>
-      <div className="w-16 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="text-xs text-gray-500">{porcentaje.toFixed(0)}%</span>
+      <div className="w-12 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="text-xs text-stone-500 dark:text-stone-400 tabular-nums">{porcentaje.toFixed(0)}%</span>
       </div>
     </div>
   );
 });
+
+// Mapping de semánticas (consistente con KPI cards de Pedidos)
+const METRICAS_SEMANTICA: Record<'ventas' | 'pedidos' | 'ticket' | 'clientes', MetricaSemantica> = {
+  ventas: {
+    accentBorder: 'border-l-emerald-500',
+    accentText: 'text-emerald-700 dark:text-emerald-300',
+    badgeBg: 'bg-emerald-100 dark:bg-emerald-500/15',
+    badgeIcon: 'text-emerald-600 dark:text-emerald-400',
+    gradientFrom: 'before:from-emerald-500/[0.07]',
+  },
+  pedidos: {
+    accentBorder: 'border-l-blue-500',
+    accentText: 'text-blue-700 dark:text-blue-300',
+    badgeBg: 'bg-blue-100 dark:bg-blue-500/15',
+    badgeIcon: 'text-blue-600 dark:text-blue-400',
+    gradientFrom: 'before:from-blue-500/[0.07]',
+  },
+  ticket: {
+    accentBorder: 'border-l-purple-500',
+    accentText: 'text-purple-700 dark:text-purple-300',
+    badgeBg: 'bg-purple-100 dark:bg-purple-500/15',
+    badgeIcon: 'text-purple-600 dark:text-purple-400',
+    gradientFrom: 'before:from-purple-500/[0.07]',
+  },
+  clientes: {
+    accentBorder: 'border-l-indigo-500',
+    accentText: 'text-indigo-700 dark:text-indigo-300',
+    badgeBg: 'bg-indigo-100 dark:bg-indigo-500/15',
+    badgeIcon: 'text-indigo-600 dark:text-indigo-400',
+    gradientFrom: 'before:from-indigo-500/[0.07]',
+  },
+};
+
+const ESTADOS_SEMANTICA: Record<'pendiente' | 'preparacion' | 'camino' | 'entregado', EstadoSemantica> = {
+  pendiente: {
+    accentBorder: 'border-l-amber-500',
+    accentText: 'text-amber-700 dark:text-amber-300',
+    badgeBg: 'bg-amber-100 dark:bg-amber-500/15',
+    badgeIcon: 'text-amber-600 dark:text-amber-400',
+  },
+  preparacion: {
+    accentBorder: 'border-l-orange-500',
+    accentText: 'text-orange-700 dark:text-orange-300',
+    badgeBg: 'bg-orange-100 dark:bg-orange-500/15',
+    badgeIcon: 'text-orange-600 dark:text-orange-400',
+  },
+  camino: {
+    accentBorder: 'border-l-blue-500',
+    accentText: 'text-blue-700 dark:text-blue-300',
+    badgeBg: 'bg-blue-100 dark:bg-blue-500/15',
+    badgeIcon: 'text-blue-600 dark:text-blue-400',
+  },
+  entregado: {
+    accentBorder: 'border-l-emerald-500',
+    accentText: 'text-emerald-700 dark:text-emerald-300',
+    badgeBg: 'bg-emerald-100 dark:bg-emerald-500/15',
+    badgeIcon: 'text-emerald-600 dark:text-emerald-400',
+  },
+};
+
+// =============================================================================
+// VISTA PRINCIPAL
+// =============================================================================
 
 export default function VistaDashboard({
   metricas,
@@ -202,7 +317,7 @@ export default function VistaDashboard({
   isAdmin = false,
   isPreventista = false,
   isPreventistaTaco = false,
-  isEncargado = false
+  isEncargado = false,
 }: VistaDashboardProps) {
   // Visibilidad por rol:
   //  - admin: ve todo
@@ -217,7 +332,6 @@ export default function VistaDashboard({
   const [fechaHastaLocal, setFechaHastaLocal] = useState<string>('');
   const [mostrarFechasPersonalizadas, setMostrarFechasPersonalizadas] = useState<boolean>(false);
 
-  // Calcular métricas adicionales
   const metricasCalculadas = useMemo((): MetricasCalculadas | null => {
     if (!metricas) return null;
 
@@ -253,76 +367,61 @@ export default function VistaDashboard({
 
   if (loading) return <LoadingSpinner />;
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            {(isPreventista || isPreventistaTaco) && !isAdmin ? 'Mis Métricas' : 'Dashboard'}
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {isPreventistaTaco && !isAdmin
-              ? `Resumen de actividad - ${periodoLabels[filtroPeriodo]}`
-              : isPreventista && !isAdmin
-              ? `Resumen de mis ventas - ${periodoLabels[filtroPeriodo]}`
-              : `Resumen de actividad - ${periodoLabels[filtroPeriodo]}`
-            }
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={onRefetch}
-            disabled={loading}
-            className="flex items-center space-x-2 px-4 py-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            aria-label="Actualizar datos"
-          >
-            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Actualizar</span>
-          </button>
-          {isAdmin && (
-            <button
-              onClick={() => onDescargarBackup('completo')}
-              disabled={exportando}
-              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              aria-label="Descargar backup"
-            >
-              <Download className="w-5 h-5" />
-              <span>Backup</span>
-            </button>
-          )}
-        </div>
-      </div>
+  const verbo = (isPreventista && !isAdmin && !isPreventistaTaco) ? 'Mis métricas' : 'Resumen';
 
-      {/* Alerta de stock bajo */}
+  return (
+    <div className="space-y-5">
+      {/* Header editorial con toolbar */}
+      <DashboardViewHeader
+        filtroPeriodo={filtroPeriodo}
+        fechaDesde={mostrarFechasPersonalizadas ? fechaDesdeLocal || null : null}
+        fechaHasta={mostrarFechasPersonalizadas ? fechaHastaLocal || null : null}
+        verbo={verbo}
+        periodoLabel={periodoLabels[filtroPeriodo] || filtroPeriodo}
+        loading={loading}
+        actions={
+          <DashboardToolbar
+            loading={loading}
+            exportando={exportando}
+            isAdmin={isAdmin}
+            onRefetch={onRefetch}
+            onDescargarBackup={onDescargarBackup}
+          />
+        }
+      />
+
+      {/* Alerta de stock bajo: chip compacto (no banner) */}
       {productosStockBajo.length > 0 && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start space-x-3">
-          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-          <div>
+        <div className="inline-flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800/40 rounded-lg px-3.5 py-2.5 text-sm">
+          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="min-w-0">
             <p className="font-medium text-amber-800 dark:text-amber-200">
-              Atención: {productosStockBajo.length} producto(s) con stock bajo
+              {productosStockBajo.length} producto{productosStockBajo.length === 1 ? '' : 's'} con stock bajo
             </p>
-            <p className="text-sm text-amber-600 dark:text-amber-300 mt-1">
-              {productosStockBajo.slice(0, 3).map(p => p.nombre).join(', ')}
-              {productosStockBajo.length > 3 && ` y ${productosStockBajo.length - 3} más`}
+            <p className="text-xs text-amber-700/80 dark:text-amber-300/80 mt-0.5 truncate">
+              {productosStockBajo.slice(0, 3).map(p => p.nombre).join(' · ')}
+              {productosStockBajo.length > 3 && ` · +${productosStockBajo.length - 3} más`}
             </p>
           </div>
         </div>
       )}
 
-      {/* Filtro de período */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-gray-600 dark:text-gray-300 mr-2">Período:</span>
+      {/* Filtro de período: chips horizontales */}
+      <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm p-4">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 mr-2">
+            Período
+          </span>
           {Object.entries(periodoLabels).map(([key, label]) => (
             <button
               key={key}
               onClick={() => handlePeriodoChange(key)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              className={cn(
+                'h-8 px-3 rounded-lg text-sm font-medium transition-colors',
                 filtroPeriodo === key
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+                  ? 'bg-blue-600 text-white shadow-warm'
+                  : 'bg-stone-100 dark:bg-gray-700 text-stone-700 dark:text-stone-200 hover:bg-stone-200 dark:hover:bg-gray-600',
+              )}
               aria-pressed={filtroPeriodo === key}
             >
               {label}
@@ -330,30 +429,30 @@ export default function VistaDashboard({
           ))}
         </div>
         {mostrarFechasPersonalizadas && (
-          <div className="mt-4 flex flex-wrap items-end gap-3">
+          <div className="mt-4 pt-4 border-t border-stone-200 dark:border-gray-700 flex flex-wrap items-end gap-3">
             <div>
-              <label htmlFor="fecha-desde" className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Desde</label>
+              <label htmlFor="fecha-desde" className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 mb-1">Desde</label>
               <input
                 id="fecha-desde"
                 type="date"
                 value={fechaDesdeLocal}
                 onChange={e => setFechaDesdeLocal(e.target.value)}
-                className="px-3 py-2 border dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                className="h-9 px-3 rounded-lg border border-stone-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400"
               />
             </div>
             <div>
-              <label htmlFor="fecha-hasta" className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Hasta</label>
+              <label htmlFor="fecha-hasta" className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400 mb-1">Hasta</label>
               <input
                 id="fecha-hasta"
                 type="date"
                 value={fechaHastaLocal}
                 onChange={e => setFechaHastaLocal(e.target.value)}
-                className="px-3 py-2 border dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                className="h-9 px-3 rounded-lg border border-stone-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400"
               />
             </div>
             <button
               onClick={aplicarFechasPersonalizadas}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
+              className="h-9 px-4 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
             >
               Aplicar
             </button>
@@ -362,108 +461,70 @@ export default function VistaDashboard({
       </div>
 
       {/* Métricas principales */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {verMontosAgregados && (
           <MetricaCard
             icono={DollarSign}
             titulo="Ventas"
             valor={formatPrecio(metricas.ventasPeriodo)}
             subtitulo={periodoLabels[filtroPeriodo]}
-            colorClase={{ bg: 'bg-green-100 dark:bg-green-900/30', icon: 'text-green-600', text: 'text-green-600' }}
+            semantica={METRICAS_SEMANTICA.ventas}
             tendencia={<TendenciaIndicator valor={metricas.ventasPeriodo} comparacion={metricas.ventasPeriodoAnterior} />}
           />
         )}
         <MetricaCard
           icono={ShoppingCart}
           titulo="Pedidos"
-          valor={metricas.pedidosPeriodo}
+          valor={metricas.pedidosPeriodo.toLocaleString('es-AR')}
           subtitulo={periodoLabels[filtroPeriodo]}
-          colorClase={{ bg: 'bg-blue-100 dark:bg-blue-900/30', icon: 'text-blue-600', text: 'text-blue-600' }}
+          semantica={METRICAS_SEMANTICA.pedidos}
           tendencia={<TendenciaIndicator valor={metricas.pedidosPeriodo} comparacion={metricas.pedidosPeriodoAnterior} />}
         />
         {verMontosAgregados && (
           <MetricaCard
             icono={Target}
-            titulo="Ticket Promedio"
+            titulo="Ticket promedio"
             valor={formatPrecio(metricasCalculadas?.ticketPromedio || 0)}
             subtitulo="Por pedido"
-            colorClase={{ bg: 'bg-purple-100 dark:bg-purple-900/30', icon: 'text-purple-600', text: 'text-purple-600' }}
+            semantica={METRICAS_SEMANTICA.ticket}
           />
         )}
         <MetricaCard
           icono={Users}
           titulo="Clientes"
-          valor={totalClientes}
+          valor={totalClientes.toLocaleString('es-AR')}
           subtitulo="Registrados"
-          colorClase={{ bg: 'bg-indigo-100 dark:bg-indigo-900/30', icon: 'text-indigo-600', text: 'text-indigo-600' }}
+          semantica={METRICAS_SEMANTICA.clientes}
         />
       </div>
 
       {/* Estados de pedidos */}
       <div>
-        <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-3">Estado de Pedidos</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <EstadoCard
-            icono={Clock}
-            titulo="Pendientes"
-            valor={metricas.pedidosPorEstado.pendiente}
-            colorClase={{
-              bg: 'bg-yellow-50 dark:bg-yellow-900/20',
-              border: 'border-yellow-200 dark:border-yellow-800',
-              icon: 'text-yellow-600',
-              text: 'text-yellow-800 dark:text-yellow-200'
-            }}
-          />
-          <EstadoCard
-            icono={Package}
-            titulo="En preparación"
-            valor={metricas.pedidosPorEstado.en_preparacion || 0}
-            colorClase={{
-              bg: 'bg-orange-50 dark:bg-orange-900/20',
-              border: 'border-orange-200 dark:border-orange-800',
-              icon: 'text-orange-600',
-              text: 'text-orange-800 dark:text-orange-200'
-            }}
-          />
-          <EstadoCard
-            icono={Truck}
-            titulo="En camino"
-            valor={metricas.pedidosPorEstado.asignado}
-            colorClase={{
-              bg: 'bg-blue-50 dark:bg-blue-900/20',
-              border: 'border-blue-200 dark:border-blue-800',
-              icon: 'text-blue-600',
-              text: 'text-blue-800 dark:text-blue-200'
-            }}
-          />
-          <EstadoCard
-            icono={Check}
-            titulo="Entregados"
-            valor={metricas.pedidosPorEstado.entregado}
-            colorClase={{
-              bg: 'bg-green-50 dark:bg-green-900/20',
-              border: 'border-green-200 dark:border-green-800',
-              icon: 'text-green-600',
-              text: 'text-green-800 dark:text-green-200'
-            }}
-          />
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500 dark:text-stone-400 mb-2.5">
+          Estado de pedidos
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <EstadoCard icono={Clock} titulo="Pendientes" valor={metricas.pedidosPorEstado.pendiente} semantica={ESTADOS_SEMANTICA.pendiente} />
+          <EstadoCard icono={Package} titulo="En preparación" valor={metricas.pedidosPorEstado.en_preparacion || 0} semantica={ESTADOS_SEMANTICA.preparacion} />
+          <EstadoCard icono={Truck} titulo="En camino" valor={metricas.pedidosPorEstado.asignado} semantica={ESTADOS_SEMANTICA.camino} />
+          <EstadoCard icono={Check} titulo="Entregados" valor={metricas.pedidosPorEstado.entregado} semantica={ESTADOS_SEMANTICA.entregado} />
         </div>
       </div>
 
       {/* Gráficos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Ventas últimos 7 días */}
         {verVentasSemanales && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+        <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-gray-800 dark:text-white">Ventas últimos 7 días</h3>
+            <h3 className="text-base font-semibold text-stone-900 dark:text-white">Ventas últimos 7 días</h3>
             {verMontosAgregados && (
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                Total: {formatPrecio(metricas.ventasPorDia.reduce((sum, d) => sum + d.ventas, 0))}
+              <span className="text-xs text-stone-500 dark:text-stone-400 tabular-nums">
+                Total: <span className="font-semibold text-stone-700 dark:text-stone-200">{formatPrecio(metricas.ventasPorDia.reduce((sum, d) => sum + d.ventas, 0))}</span>
               </span>
             )}
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {metricas.ventasPorDia.map((d, i) => {
               const maxVenta = Math.max(...metricas.ventasPorDia.map(x => x.ventas)) || 1;
               return (
@@ -482,45 +543,51 @@ export default function VistaDashboard({
 
         {/* Top 5 productos */}
         {verTopProductos && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-          <h3 className="font-semibold text-gray-800 dark:text-white mb-4">
-            Top 5 Productos
-            <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
-              ({periodoLabels[filtroPeriodo]})
+        <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-stone-900 dark:text-white">
+              Top 5 productos
+            </h3>
+            <span className="text-xs text-stone-500 dark:text-stone-400">
+              {periodoLabels[filtroPeriodo]}
             </span>
-          </h3>
-          <div className="space-y-4">
+          </div>
+          <div className="space-y-3.5">
             {metricas.productosMasVendidos.length === 0 ? (
-              <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+              <p className="text-stone-500 dark:text-stone-400 text-center py-8 text-sm">
                 Sin datos en este período
               </p>
             ) : metricas.productosMasVendidos.map((p, i) => {
               const maxCantidad = metricas.productosMasVendidos[0]?.cantidad || 1;
               const porcentaje = (p.cantidad / maxCantidad) * 100;
-
+              const rankClass =
+                i === 0 ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-amber-900' :
+                i === 1 ? 'bg-gradient-to-br from-stone-300 to-stone-400 text-stone-800' :
+                i === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-500 text-orange-900' :
+                'bg-stone-100 dark:bg-gray-700 text-stone-600 dark:text-stone-300';
+              const barColor =
+                i === 0 ? 'bg-amber-500' :
+                i === 1 ? 'bg-stone-400' :
+                i === 2 ? 'bg-orange-500' :
+                'bg-blue-500';
               return (
-                <div key={p.id} className="flex items-center space-x-3">
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shadow-sm ${
-                    i === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-yellow-900' :
-                    i === 1 ? 'bg-gradient-to-br from-gray-300 to-gray-400 text-gray-700' :
-                    i === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-500 text-orange-900' :
-                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                  }`}>
+                <div key={p.id} className="flex items-center gap-3">
+                  <span className={cn(
+                    'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shadow-warm flex-shrink-0',
+                    rankClass,
+                  )}>
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-gray-800 dark:text-white truncate">{p.nombre}</span>
-                      <span className="text-sm text-gray-600 dark:text-gray-400 ml-2">{p.cantidad} unid.</span>
+                    <div className="flex items-center justify-between mb-1.5 gap-2">
+                      <span className="font-medium text-sm text-stone-800 dark:text-white truncate">{p.nombre}</span>
+                      <span className="text-xs text-stone-600 dark:text-stone-300 tabular-nums flex-shrink-0">
+                        {p.cantidad.toLocaleString('es-AR')} <span className="text-stone-400">unid.</span>
+                      </span>
                     </div>
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div className="w-full bg-stone-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
                       <div
-                        className={`h-2 rounded-full transition-all duration-500 ${
-                          i === 0 ? 'bg-yellow-500' :
-                          i === 1 ? 'bg-gray-400' :
-                          i === 2 ? 'bg-orange-500' :
-                          'bg-blue-500'
-                        }`}
+                        className={cn('h-1.5 rounded-full transition-all duration-500', barColor)}
                         style={{ width: `${porcentaje}%` }}
                       />
                     </div>
@@ -535,24 +602,25 @@ export default function VistaDashboard({
 
       {/* Tasa de entrega */}
       {metricasCalculadas && verEstadoPedidos && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-          <h3 className="font-semibold text-gray-800 dark:text-white mb-4">Tasa de Entrega</h3>
-          <div className="flex items-center space-x-4">
-            <div className="flex-1">
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
-                <div
-                  className="bg-gradient-to-r from-green-500 to-green-600 h-4 rounded-full transition-all duration-500"
-                  style={{ width: `${metricasCalculadas.tasaEntrega}%` }}
-                />
-              </div>
+        <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-base font-semibold text-stone-900 dark:text-white">Tasa de entrega</h3>
+              <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">Porcentaje de pedidos entregados del total</p>
             </div>
-            <span className="text-2xl font-bold text-green-600">
+            <span
+              className="text-3xl text-emerald-700 dark:text-emerald-300 tabular-nums"
+              style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
+            >
               {metricasCalculadas.tasaEntrega.toFixed(1)}%
             </span>
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-            Porcentaje de pedidos entregados del total
-          </p>
+          <div className="w-full bg-stone-100 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-emerald-500 to-emerald-600 h-3 rounded-full transition-all duration-500"
+              style={{ width: `${metricasCalculadas.tasaEntrega}%` }}
+            />
+          </div>
         </div>
       )}
     </div>
