@@ -112,7 +112,7 @@ function ToolbarDropdown({
   label,
   mobileLabel,
   children,
-  menuClassName = 'w-64',
+  menuClassName = 'w-[min(16rem,calc(100vw-2rem))]',
 }: ToolbarDropdownProps) {
   return (
     // modal={false} evita que Radix bloquee el scroll del body al abrir,
@@ -140,7 +140,7 @@ function ToolbarDropdown({
  * Botón primario verde para "Nuevo pedido". Único color de fondo saturado
  * en toda la toolbar.
  */
-function PrimaryNewButton({ onClick }: { onClick: () => void }) {
+function PrimaryNewButton({ onClick, fullWidth = false }: { onClick: () => void; fullWidth?: boolean }) {
   return (
     <button
       type="button"
@@ -154,6 +154,7 @@ function PrimaryNewButton({ onClick }: { onClick: () => void }) {
         'active:translate-y-0 active:shadow-[0_2px_4px_-2px_rgb(34_197_94/0.4)]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-gray-900',
         'transition-[transform,box-shadow,background] duration-200',
+        fullWidth && 'w-full justify-center',
       )}
     >
       <span
@@ -161,10 +162,7 @@ function PrimaryNewButton({ onClick }: { onClick: () => void }) {
         aria-hidden="true"
       />
       <Plus className={cn('relative', TOOLBAR_ICON_SIZE)} aria-hidden="true" />
-      <span className="relative">
-        <span className="hidden sm:inline">Nuevo pedido</span>
-        <span className="sm:hidden">Nuevo</span>
-      </span>
+      <span className="relative">Nuevo pedido</span>
     </button>
   );
 }
@@ -198,116 +196,171 @@ export default function PedidoToolbar({
     onAsignarTransportistaMasivo || onPagosMasivos || onEntregasMasivas,
   );
 
+  // Dropdowns "Acciones masivas" y "Exportaciones" — reusados en ambos layouts.
+  const masivasDropdown = hasMasivas && (
+    <ToolbarDropdown
+      triggerIcon={Boxes}
+      label="Acciones masivas"
+      mobileLabel="Masivas"
+    >
+      <DropdownMenuLabel>Acciones masivas</DropdownMenuLabel>
+      {onAsignarTransportistaMasivo && (
+        <DropdownMenuItem onSelect={onAsignarTransportistaMasivo}>
+          <Truck className="w-4 h-4 text-blue-600" />
+          <span>Asignar Transportista</span>
+        </DropdownMenuItem>
+      )}
+      {onPagosMasivos && (
+        <DropdownMenuItem onSelect={onPagosMasivos}>
+          <Banknote className="w-4 h-4 text-green-600" />
+          <span>Pagos Masivos</span>
+        </DropdownMenuItem>
+      )}
+      {onEntregasMasivas && (
+        <DropdownMenuItem onSelect={onEntregasMasivas}>
+          <PackageCheck className="w-4 h-4 text-teal-600" />
+          <span>Entregas Masivas</span>
+        </DropdownMenuItem>
+      )}
+    </ToolbarDropdown>
+  );
+
+  const exportarDropdown = (
+    <ToolbarDropdown
+      triggerIcon={Download}
+      label="Exportaciones"
+      mobileLabel="Exportar"
+      menuClassName="w-[min(18rem,calc(100vw-2rem))]"
+    >
+      <DropdownMenuLabel>Exportaciones</DropdownMenuLabel>
+      <DropdownMenuItem
+        onSelect={() => onExportarExcel('pagina')}
+        disabled={exportando}
+      >
+        <FileDown className="w-4 h-4 text-emerald-600" />
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="font-medium">Excel — Página actual</span>
+          <span className="text-xs text-stone-500 dark:text-gray-400">
+            Solo los pedidos visibles
+          </span>
+        </div>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onSelect={() => onExportarExcel('filtro')}
+        disabled={exportando}
+      >
+        <FileDown className="w-4 h-4 text-emerald-600" />
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="font-medium">
+            Excel — Filtro actual ({totalCount.toLocaleString('es-AR')})
+          </span>
+          <span className="text-xs text-stone-500 dark:text-gray-400">
+            Todos los pedidos que coinciden
+          </span>
+        </div>
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={onExportarPDF}>
+        <FileDown className="w-4 h-4 text-rose-600" />
+        <span>PDF</span>
+      </DropdownMenuItem>
+    </ToolbarDropdown>
+  );
+
   return (
-    <div className="flex items-center gap-2 justify-end flex-wrap">
-      {showOpsGroups && (
-        <>
-          {hasMasivas && (
-            <ToolbarDropdown
-              triggerIcon={Boxes}
-              label="Acciones masivas"
-              mobileLabel="Masivas"
-            >
-              <DropdownMenuLabel>Acciones masivas</DropdownMenuLabel>
-              {onAsignarTransportistaMasivo && (
-                <DropdownMenuItem onSelect={onAsignarTransportistaMasivo}>
-                  <Truck className="w-4 h-4 text-blue-600" />
-                  <span>Asignar Transportista</span>
-                </DropdownMenuItem>
-              )}
-              {onPagosMasivos && (
-                <DropdownMenuItem onSelect={onPagosMasivos}>
-                  <Banknote className="w-4 h-4 text-green-600" />
-                  <span>Pagos Masivos</span>
-                </DropdownMenuItem>
-              )}
-              {onEntregasMasivas && (
-                <DropdownMenuItem onSelect={onEntregasMasivas}>
-                  <PackageCheck className="w-4 h-4 text-teal-600" />
-                  <span>Entregas Masivas</span>
-                </DropdownMenuItem>
-              )}
-            </ToolbarDropdown>
-          )}
-
-          <ToolbarDropdown
-            triggerIcon={Download}
-            label="Exportaciones"
-            mobileLabel="Exportar"
-            menuClassName="w-72"
-          >
-            <DropdownMenuLabel>Exportaciones</DropdownMenuLabel>
-            <DropdownMenuItem
-              onSelect={() => onExportarExcel('pagina')}
-              disabled={exportando}
-            >
-              <FileDown className="w-4 h-4 text-emerald-600" />
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-medium">Excel — Página actual</span>
-                <span className="text-xs text-stone-500 dark:text-gray-400">
-                  Solo los pedidos visibles
-                </span>
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => onExportarExcel('filtro')}
-              disabled={exportando}
-            >
-              <FileDown className="w-4 h-4 text-emerald-600" />
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-medium">
-                  Excel — Filtro actual ({totalCount.toLocaleString('es-AR')})
-                </span>
-                <span className="text-xs text-stone-500 dark:text-gray-400">
-                  Todos los pedidos que coinciden
-                </span>
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onExportarPDF}>
-              <FileDown className="w-4 h-4 text-rose-600" />
-              <span>PDF</span>
-            </DropdownMenuItem>
-          </ToolbarDropdown>
-
-          <ToolbarButton
-            icon={Route}
-            iconClassName="text-blue-600"
-            mobileLabel="Ruta"
-            onClick={onOptimizarRuta}
-          >
-            Optimizar Ruta
-          </ToolbarButton>
-        </>
-      )}
-
-      {showPreventistaActions && (
-        <>
-          {onVerVisitasHoy && (
+    <>
+      {/* ╔══ MOBILE (<sm): grid 3-col arriba + primary full-width abajo ══╗ */}
+      <div className="flex flex-col gap-2 sm:hidden">
+        {showOpsGroups && (
+          <div className="grid grid-cols-3 gap-1.5 [&>*]:w-full [&>*]:justify-center [&>*]:px-2">
+            {masivasDropdown}
+            {exportarDropdown}
             <ToolbarButton
-              icon={History}
-              iconClassName="text-stone-500"
-              mobileLabel="Visitas"
-              onClick={onVerVisitasHoy}
-              title="Ver clientes que visitaste hoy"
+              icon={Route}
+              iconClassName="text-blue-600"
+              mobileLabel="Ruta"
+              onClick={onOptimizarRuta}
             >
-              Visitas del día
+              Optimizar Ruta
             </ToolbarButton>
-          )}
-          {onMarcarVisita && (
-            <ToolbarButton
-              icon={MapPin}
-              iconClassName="text-indigo-600"
-              mobileLabel="Marcar"
-              onClick={onMarcarVisita}
-              title="Marcar visita a un cliente sin necesidad de cargar pedido"
-            >
-              Marcar visita
-            </ToolbarButton>
-          )}
-        </>
-      )}
+          </div>
+        )}
 
-      {canCreate && <PrimaryNewButton onClick={onNuevoPedido} />}
-    </div>
+        {showPreventistaActions && (
+          <div className="grid grid-cols-2 gap-1.5 [&>*]:w-full [&>*]:justify-center [&>*]:px-2">
+            {onVerVisitasHoy && (
+              <ToolbarButton
+                icon={History}
+                iconClassName="text-stone-500"
+                mobileLabel="Visitas"
+                onClick={onVerVisitasHoy}
+                title="Ver clientes que visitaste hoy"
+              >
+                Visitas del día
+              </ToolbarButton>
+            )}
+            {onMarcarVisita && (
+              <ToolbarButton
+                icon={MapPin}
+                iconClassName="text-indigo-600"
+                mobileLabel="Marcar"
+                onClick={onMarcarVisita}
+                title="Marcar visita a un cliente sin necesidad de cargar pedido"
+              >
+                Marcar visita
+              </ToolbarButton>
+            )}
+          </div>
+        )}
+
+        {canCreate && <PrimaryNewButton onClick={onNuevoPedido} fullWidth />}
+      </div>
+
+      {/* ╔══ DESKTOP (sm+): layout original — fila a la derecha ══╗ */}
+      <div className="hidden sm:flex items-center gap-2 justify-end flex-wrap">
+        {showOpsGroups && (
+          <>
+            {masivasDropdown}
+            {exportarDropdown}
+            <ToolbarButton
+              icon={Route}
+              iconClassName="text-blue-600"
+              mobileLabel="Ruta"
+              onClick={onOptimizarRuta}
+            >
+              Optimizar Ruta
+            </ToolbarButton>
+          </>
+        )}
+
+        {showPreventistaActions && (
+          <>
+            {onVerVisitasHoy && (
+              <ToolbarButton
+                icon={History}
+                iconClassName="text-stone-500"
+                mobileLabel="Visitas"
+                onClick={onVerVisitasHoy}
+                title="Ver clientes que visitaste hoy"
+              >
+                Visitas del día
+              </ToolbarButton>
+            )}
+            {onMarcarVisita && (
+              <ToolbarButton
+                icon={MapPin}
+                iconClassName="text-indigo-600"
+                mobileLabel="Marcar"
+                onClick={onMarcarVisita}
+                title="Marcar visita a un cliente sin necesidad de cargar pedido"
+              >
+                Marcar visita
+              </ToolbarButton>
+            )}
+          </>
+        )}
+
+        {canCreate && <PrimaryNewButton onClick={onNuevoPedido} />}
+      </div>
+    </>
   );
 }

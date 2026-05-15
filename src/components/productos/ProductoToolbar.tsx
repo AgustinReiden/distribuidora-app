@@ -63,7 +63,7 @@ function ToolbarDropdown({
   label,
   mobileLabel,
   children,
-  menuClassName = 'w-72',
+  menuClassName = 'w-[min(18rem,calc(100vw-2rem))]',
 }: ToolbarDropdownProps) {
   return (
     <DropdownMenu modal={false}>
@@ -118,7 +118,7 @@ function StockBajoButton({ count, onClick }: { count: number; onClick?: () => vo
   );
 }
 
-function PrimaryNewButton({ onClick }: { onClick: () => void }) {
+function PrimaryNewButton({ onClick, fullWidth = false }: { onClick: () => void; fullWidth?: boolean }) {
   return (
     <button
       type="button"
@@ -132,6 +132,7 @@ function PrimaryNewButton({ onClick }: { onClick: () => void }) {
         'active:translate-y-0 active:shadow-[0_2px_4px_-2px_rgb(34_197_94/0.4)]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-gray-900',
         'transition-[transform,box-shadow,background] duration-200',
+        fullWidth && 'w-full justify-center',
       )}
     >
       <span
@@ -139,10 +140,7 @@ function PrimaryNewButton({ onClick }: { onClick: () => void }) {
         aria-hidden="true"
       />
       <Plus className={cn('relative', TOOLBAR_ICON_SIZE)} aria-hidden="true" />
-      <span className="relative">
-        <span className="hidden sm:inline">Nuevo producto</span>
-        <span className="sm:hidden">Nuevo</span>
-      </span>
+      <span className="relative">Nuevo producto</span>
     </button>
   );
 }
@@ -169,60 +167,77 @@ export default function ProductoToolbar({
     return null;
   }
 
+  // Dropdowns reusados en ambos layouts (mobile y desktop).
+  const catalogoDropdown = hayCatálogo && (
+    <ToolbarDropdown triggerIcon={Tag} label="Catálogo" mobileLabel="Catálogo">
+      <DropdownMenuLabel>Catálogo</DropdownMenuLabel>
+      {onGestionarCategorias && (
+        <DropdownMenuItem onSelect={onGestionarCategorias}>
+          <Tag className="w-4 h-4 text-purple-600" />
+          <span>Categorías</span>
+        </DropdownMenuItem>
+      )}
+      {onCambioProducto && (
+        <DropdownMenuItem onSelect={onCambioProducto}>
+          <ArrowLeftRight className="w-4 h-4 text-indigo-600" />
+          <span>Cambio de productos</span>
+        </DropdownMenuItem>
+      )}
+      {onActualizacionMasivaPrecios && (
+        <DropdownMenuItem onSelect={onActualizacionMasivaPrecios}>
+          <Percent className="w-4 h-4 text-indigo-600" />
+          <span>Actualización masiva de precios</span>
+        </DropdownMenuItem>
+      )}
+    </ToolbarDropdown>
+  );
+
+  const inventarioDropdown = hayInventario && (
+    <ToolbarDropdown triggerIcon={Package2} label="Inventario" mobileLabel="Inventario">
+      <DropdownMenuLabel>Inventario</DropdownMenuLabel>
+      {onControlStock && (
+        <DropdownMenuItem onSelect={onControlStock}>
+          <ClipboardCheck className="w-4 h-4 text-amber-600" />
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="font-medium">Control de stock</span>
+            <span className="text-xs text-stone-500 dark:text-gray-400">
+              Descarga Excel con el inventario actual
+            </span>
+          </div>
+        </DropdownMenuItem>
+      )}
+      {onVerHistorialMermas && (
+        <DropdownMenuItem onSelect={onVerHistorialMermas}>
+          <TrendingDown className="w-4 h-4 text-rose-600" />
+          <span>Historial de mermas</span>
+        </DropdownMenuItem>
+      )}
+    </ToolbarDropdown>
+  );
+
+  const stockBajoBtn = hayStockBajo && (
+    <StockBajoButton count={productosStockBajoCount} onClick={onAbrirStockBajo} />
+  );
+
   return (
-    <div className="flex items-center gap-2 justify-end flex-wrap">
-      {hayCatálogo && (
-        <ToolbarDropdown triggerIcon={Tag} label="Catálogo" mobileLabel="Catálogo">
-          <DropdownMenuLabel>Catálogo</DropdownMenuLabel>
-          {onGestionarCategorias && (
-            <DropdownMenuItem onSelect={onGestionarCategorias}>
-              <Tag className="w-4 h-4 text-purple-600" />
-              <span>Categorías</span>
-            </DropdownMenuItem>
-          )}
-          {onCambioProducto && (
-            <DropdownMenuItem onSelect={onCambioProducto}>
-              <ArrowLeftRight className="w-4 h-4 text-indigo-600" />
-              <span>Cambio de productos</span>
-            </DropdownMenuItem>
-          )}
-          {onActualizacionMasivaPrecios && (
-            <DropdownMenuItem onSelect={onActualizacionMasivaPrecios}>
-              <Percent className="w-4 h-4 text-indigo-600" />
-              <span>Actualización masiva de precios</span>
-            </DropdownMenuItem>
-          )}
-        </ToolbarDropdown>
-      )}
+    <>
+      {/* ╔══ MOBILE (<sm): grid 3-col + primary full-width abajo ══╗ */}
+      <div className="flex flex-col gap-2 sm:hidden">
+        <div className="grid grid-cols-3 gap-1.5 [&>*]:w-full [&>*]:justify-center [&>*]:px-2">
+          {catalogoDropdown}
+          {inventarioDropdown}
+          {stockBajoBtn}
+        </div>
+        {hayNuevo && onNuevoProducto && <PrimaryNewButton onClick={onNuevoProducto} fullWidth />}
+      </div>
 
-      {hayInventario && (
-        <ToolbarDropdown triggerIcon={Package2} label="Inventario" mobileLabel="Inventario">
-          <DropdownMenuLabel>Inventario</DropdownMenuLabel>
-          {onControlStock && (
-            <DropdownMenuItem onSelect={onControlStock}>
-              <ClipboardCheck className="w-4 h-4 text-amber-600" />
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-medium">Control de stock</span>
-                <span className="text-xs text-stone-500 dark:text-gray-400">
-                  Descarga Excel con el inventario actual
-                </span>
-              </div>
-            </DropdownMenuItem>
-          )}
-          {onVerHistorialMermas && (
-            <DropdownMenuItem onSelect={onVerHistorialMermas}>
-              <TrendingDown className="w-4 h-4 text-rose-600" />
-              <span>Historial de mermas</span>
-            </DropdownMenuItem>
-          )}
-        </ToolbarDropdown>
-      )}
-
-      {hayStockBajo && (
-        <StockBajoButton count={productosStockBajoCount} onClick={onAbrirStockBajo} />
-      )}
-
-      {hayNuevo && onNuevoProducto && <PrimaryNewButton onClick={onNuevoProducto} />}
-    </div>
+      {/* ╔══ DESKTOP (sm+): layout original ══╗ */}
+      <div className="hidden sm:flex items-center gap-2 justify-end flex-wrap">
+        {catalogoDropdown}
+        {inventarioDropdown}
+        {stockBajoBtn}
+        {hayNuevo && onNuevoProducto && <PrimaryNewButton onClick={onNuevoProducto} />}
+      </div>
+    </>
   );
 }
