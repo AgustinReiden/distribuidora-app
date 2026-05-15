@@ -110,7 +110,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [filtros, setFiltros] = useState<FiltrosPedidosState>(buildDefaultFiltros)
 
   // Queries - use debounced search to avoid firing on every keystroke
-  const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago } = usePagos()
+  const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago, actualizarFormaPagoDePago } = usePagos()
 
   const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
@@ -726,6 +726,22 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pedidoPago, isAdmin, eliminarPago, refreshPagosPedido, queryClient, notify])
 
+  // Editar la forma de pago de un pago previo. Admin o encargado. El RPC
+  // bloquea la edicion si la rendicion del dia del pago esta cerrada.
+  const handleEditarFormaPagoPedido = useCallback(async (pagoId: string, nuevaForma: string) => {
+    if (!pedidoPago) return
+    if (!isAdmin && !isEncargado) return
+    try {
+      await actualizarFormaPagoDePago(pagoId, nuevaForma)
+      await refreshPagosPedido(String(pedidoPago.id))
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      notify.success('Forma de pago actualizada')
+    } catch (e) {
+      notify.error((e as Error).message)
+      throw e
+    }
+  }, [pedidoPago, isAdmin, isEncargado, actualizarFormaPagoDePago, refreshPagosPedido, queryClient, notify])
+
   // ModalPedido handlers
   // Estado para el modal de motivo cuando GPS != ok (timeout/unavailable/error).
   // Bloquea la creación del pedido hasta que el preventista escriba justificación
@@ -1230,6 +1246,7 @@ export default function PedidosContainer(): React.ReactElement {
             loadingPagosPrevios={loadingPagosPrevios}
             onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
             onAnularPago={isAdmin && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
+            onEditarFormaPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleEditarFormaPagoPedido : undefined}
             modoEntregaTransportista={!!pedidoEntregaConPago}
             onEntregarSinPago={pedidoEntregaConPago ? handleEntregarSinPago : undefined}
             onClose={() => {

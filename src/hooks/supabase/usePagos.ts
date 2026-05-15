@@ -184,6 +184,25 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  const actualizarFormaPagoDePago = async (
+    pagoId: string,
+    nuevaFormaPago: string,
+  ): Promise<void> => {
+    try {
+      const { error } = await supabase.rpc('actualizar_forma_pago_pago', {
+        p_pago_id: pagoId,
+        p_forma_pago: nuevaFormaPago,
+      })
+      if (error) throw error
+      setPagos(prev =>
+        prev.map(p => (p.id === pagoId ? { ...p, forma_pago: nuevaFormaPago } : p)),
+      )
+    } catch (error) {
+      notifyError('Error al actualizar forma de pago: ' + (error as Error).message)
+      throw error
+    }
+  }
+
   const obtenerResumenCuenta = async (clienteId: string): Promise<ResumenCuenta | null> => {
     try {
       const { data, error } = await supabase.rpc('obtener_resumen_cuenta_cliente', { p_cliente_id: clienteId })
@@ -242,6 +261,7 @@ export function usePagos(): UsePagosReturnExtended {
     registrarPagosBatch,
     registrarPagoFIFO,
     eliminarPago,
+    actualizarFormaPagoDePago,
     obtenerResumenCuenta,
   }
 }
