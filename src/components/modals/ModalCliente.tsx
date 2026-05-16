@@ -25,6 +25,7 @@ export interface ClienteFormData {
   razonSocial: string;
   nombreFantasia: string;
   direccion: string;
+  aclaracionDireccion: string;
   latitud: number | null;
   longitud: number | null;
   telefono: string;
@@ -106,6 +107,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     razonSocial: cliente.razon_social || '',
     nombreFantasia: cliente.nombre_fantasia || '',
     direccion: cliente.direccion || '',
+    aclaracionDireccion: cliente.aclaracion_direccion || '',
     latitud: cliente.latitud || null,
     longitud: cliente.longitud || null,
     telefono: cliente.telefono || '',
@@ -126,6 +128,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     razonSocial: '',
     nombreFantasia: '',
     direccion: '',
+    aclaracionDireccion: '',
     latitud: null,
     longitud: null,
     telefono: '',
@@ -425,6 +428,24 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               )}
             </div>
           )}
+        </div>
+
+        {/* Aclaración de dirección (para repartidores) */}
+        <div>
+          <label htmlFor="aclaracionDireccion" className="block text-sm font-medium mb-1 dark:text-gray-200">
+            Aclaración de dirección (para repartidores)
+          </label>
+          <textarea
+            id="aclaracionDireccion"
+            value={form.aclaracionDireccion}
+            onChange={e => handleFieldChange('aclaracionDireccion', e.target.value)}
+            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none"
+            rows={2}
+            placeholder="Ej: tocar timbre azul, fondo del pasillo"
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Se imprime en la hoja de ruta y se ve en el celular del transportista.
+          </p>
         </div>
 
         {/* Teléfono y Contacto */}

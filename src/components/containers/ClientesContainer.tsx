@@ -206,6 +206,7 @@ export default function ClientesContainer(): React.ReactElement {
       razon_social: data.razonSocial || data.nombreFantasia,
       nombre_fantasia: data.nombreFantasia,
       direccion: data.direccion,
+      aclaracion_direccion: data.aclaracionDireccion?.trim() || null,
       telefono: data.telefono || undefined,
       cuit: data.cuit || undefined,
       // zona (texto) deprecada — se espeja desde zona_id resolviendo contra el

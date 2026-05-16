@@ -542,6 +542,8 @@ export const modalClienteSchema = z.object({
     .transform(val => val.trim())
     .refine(val => val.length >= 5, { message: 'La dirección debe tener al menos 5 caracteres' }),
 
+  aclaracionDireccion: z.string().optional(),
+
   telefono: z
     .string()
     .refine(val => !val || val.replace(/\D/g, '').length >= 8, {
