@@ -138,6 +138,28 @@ declare namespace google.maps {
     lng: number;
   }
 
+  // Geocoder: usado para reverse geocoding (coords -> direccion) en useReverseGeocoding.
+  class Geocoder {
+    constructor();
+    geocode(request: GeocoderRequest): Promise<GeocoderResponse>;
+  }
+
+  interface GeocoderRequest {
+    location?: LatLng | LatLngLiteral;
+    address?: string;
+  }
+
+  interface GeocoderResponse {
+    results: GeocoderResult[];
+  }
+
+  interface GeocoderResult {
+    formatted_address: string;
+    geometry?: {
+      location?: LatLng;
+    };
+  }
+
   namespace places {
     class AutocompleteService {
       getPlacePredictions(

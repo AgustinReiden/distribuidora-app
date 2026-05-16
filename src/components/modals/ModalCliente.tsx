@@ -6,6 +6,7 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
 import { usePreventistasQuery, useZonasEstandarizadasQuery } from '../../hooks/queries';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
+import { useReverseGeocoding } from '../../hooks/useReverseGeocoding';
 import {
   formatCuitInput,
   formatDniInput,
@@ -151,7 +152,13 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const [gpsCapturando, setGpsCapturando] = useState<boolean>(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  // Marca cuando la direccion fue autocompletada por reverse geocoding tras
+  // un GPS. Permite mostrar un texto auxiliar invitando al usuario a corregir
+  // si la sugerencia no es exacta. Se borra al editar manualmente o usar el
+  // autocompletado de Google Places.
+  const [direccionDesdeGps, setDireccionDesdeGps] = useState<boolean>(false);
   const capturarGps = useGeolocationCapture();
+  const { reverseGeocode } = useReverseGeocoding();
 
   const handleCapturarGps = async (): Promise<void> => {
     if (gpsCapturando) return;
@@ -163,6 +170,19 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
         setForm(prev => ({ ...prev, latitud: result.lat, longitud: result.lng }));
         setGpsAccuracy(result.accuracy);
         if (errores.direccion) clearFieldError('direccion');
+        // Reverse geocoding: traducir coords a direccion legible. No bloquea
+        // el flujo si falla; el GPS ya capturo coords utiles. Sobreescribe
+        // la direccion actual con la sugerencia para que el usuario solo
+        // necesite revisar/editar.
+        try {
+          const rev = await reverseGeocode(result.lat, result.lng);
+          if (rev?.direccion) {
+            setForm(prev => ({ ...prev, direccion: rev.direccion }));
+            setDireccionDesdeGps(true);
+          }
+        } catch {
+          // Silencioso: la captura de coords ya fue exitosa.
+        }
       } else {
         const mensajes: Record<typeof result.status, string> = {
           denied: 'Permiso de ubicación denegado. Aceptá el permiso en la configuración del navegador y volvé a intentar.',
@@ -204,6 +224,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     // previa para no mostrar un dato engañoso en el bloque "Coordenadas".
     setGpsAccuracy(null);
     setGpsError(null);
+    setDireccionDesdeGps(false);
     if (errores.direccion) clearFieldError('direccion');
   };
 
@@ -283,6 +304,11 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     if (intentoGuardar && errores[field]) {
       clearFieldError(field);
     }
+    // Si el user edito manualmente la direccion, la "sugerencia GPS" deja
+    // de aplicar (ya tomo control).
+    if (field === 'direccion' && direccionDesdeGps) {
+      setDireccionDesdeGps(false);
+    }
   };
 
   const inputClass = (field: keyof ClienteFormData): string => `w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${errores[field] ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''}`;
@@ -360,6 +386,11 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             className={errores.direccion ? 'border-red-500' : ''}
           />
           {errores.direccion && <p {...getErrorMessageProps('direccion')} className="text-red-500 text-xs mt-1">{errores.direccion}</p>}
+          {direccionDesdeGps && !errores.direccion && (
+            <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 italic">
+              Dirección sugerida por GPS — corregila si no coincide.
+            </p>
+          )}
 
           {/* Botón "Usar mi ubicación actual": complementa al autocomplete cuando
               la dirección no se encuentra o devuelve coords de otra localidad.

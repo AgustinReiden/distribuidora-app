@@ -2,8 +2,9 @@
  * Vista de ruta para transportista
  */
 import React, { useState, useMemo, useRef, memo } from 'react';
-import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift, WifiOff } from 'lucide-react';
+import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift, WifiOff, X } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
+import { googleMapsNavUrl, wazeNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
 import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
@@ -101,16 +102,11 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad 
               </span>
             </div>
 
-            {/* Direccion con link a maps */}
-            <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pedido.cliente?.direccion || '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-start gap-2 mt-2 text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            {/* Direccion del cliente */}
+            <div className="flex items-start gap-2 mt-2 text-gray-700 dark:text-gray-300">
+              <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
               <span className="text-sm">{pedido.cliente?.direccion || 'Sin direccion'}</span>
-            </a>
+            </div>
 
             {/* Aclaracion de direccion (info extra para el repartidor) */}
             {pedido.cliente?.aclaracion_direccion && (
@@ -118,6 +114,38 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad 
                 {pedido.cliente.aclaracion_direccion}
               </p>
             )}
+
+            {/* Botones de navegacion turn-by-turn: Google Maps + Waze.
+                Usa lat/lng cuando estan disponibles para iniciar nav directa,
+                sino cae a search por direccion. */}
+            <div className="flex gap-2 mt-2">
+              <a
+                href={
+                  pedido.cliente?.latitud != null && pedido.cliente?.longitud != null
+                    ? googleMapsNavUrl(Number(pedido.cliente.latitud), Number(pedido.cliente.longitud))
+                    : googleMapsSearchUrl(pedido.cliente?.direccion || '')
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg text-sm font-medium transition-colors"
+                aria-label="Iniciar navegacion en Google Maps"
+              >
+                <Navigation className="w-4 h-4" />
+                Google Maps
+              </a>
+              {pedido.cliente?.latitud != null && pedido.cliente?.longitud != null && (
+                <a
+                  href={wazeNavUrl(Number(pedido.cliente.latitud), Number(pedido.cliente.longitud))}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 rounded-lg text-sm font-medium transition-colors"
+                  aria-label="Iniciar navegacion en Waze"
+                >
+                  <Navigation className="w-4 h-4" />
+                  Waze
+                </a>
+              )}
+            </div>
 
             {/* Telefono */}
             {pedido.cliente?.telefono && (
@@ -247,6 +275,10 @@ function VistaRutaTransportista({
   // entregado si el transportista cancelo).
   const pagoExitosoRef = useRef(false);
 
+  // Sheet de seleccion de app de navegacion (Maps vs Waze) para el FAB
+  // "Navegar al siguiente". Cuando es null el sheet no se muestra.
+  const [navAppSheet, setNavAppSheet] = useState<PedidoEnriquecido | null>(null);
+
   // Estado de conexion — en ruta es importante saber si quedo sin red.
   const { isOnline } = useAuthData();
 
@@ -291,6 +323,13 @@ function VistaRutaTransportista({
         return (a.orden_entrega || 999) - (b.orden_entrega || 999);
       });
   }, [pedidosEnriquecidos, userId]);
+
+  // Proxima entrega pendiente: el primer pedido en estado "asignado" segun el
+  // orden de la ruta optimizada. El FAB "Navegar al siguiente" abre nav hacia
+  // este punto. Si no hay pendientes, el FAB no se muestra.
+  const proximaEntrega = useMemo<PedidoEnriquecido | null>(() => {
+    return pedidosOrdenados.find(p => p.estado === 'asignado') || null;
+  }, [pedidosOrdenados]);
 
   const entregasPendientes = pedidosOrdenados.filter(p => p.estado === 'asignado').length;
   const entregasCompletadas = pedidosOrdenados.filter(p => p.estado === 'entregado').length;
@@ -473,6 +512,84 @@ function VistaRutaTransportista({
           onClose={handleCerrarModalPago}
           onConfirmar={handleConfirmarPago}
         />
+      )}
+
+      {/* FAB: Navegar al siguiente. Solo visible si hay un pedido pendiente.
+          Abre un sheet con dos opciones: Google Maps y Waze. */}
+      {proximaEntrega && (
+        <button
+          onClick={() => setNavAppSheet(proximaEntrega)}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-5 py-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-full shadow-lg shadow-blue-600/50 transition-colors font-semibold min-h-[56px]"
+          aria-label="Iniciar navegacion al proximo pedido pendiente"
+        >
+          <Navigation className="w-5 h-5" />
+          <span>Navegar al siguiente</span>
+        </button>
+      )}
+
+      {/* Sheet de seleccion de app de navegacion. Sticky bottom para tablets. */}
+      {navAppSheet && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Elegir app de navegacion"
+          onClick={() => setNavAppSheet(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-1">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                Navegar al siguiente
+              </h3>
+              <button
+                onClick={() => setNavAppSheet(null)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 truncate">
+              {navAppSheet.cliente?.nombre_fantasia || 'Cliente'} — {navAppSheet.cliente?.direccion || 'Sin direccion'}
+            </p>
+            <div className="space-y-3">
+              <a
+                href={
+                  navAppSheet.cliente?.latitud != null && navAppSheet.cliente?.longitud != null
+                    ? googleMapsNavUrl(Number(navAppSheet.cliente.latitud), Number(navAppSheet.cliente.longitud))
+                    : googleMapsSearchUrl(navAppSheet.cliente?.direccion || '')
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setNavAppSheet(null)}
+                className="flex items-center justify-center gap-2 w-full py-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-semibold text-base min-h-[56px]"
+              >
+                <Navigation className="w-5 h-5" />
+                Google Maps
+              </a>
+              {navAppSheet.cliente?.latitud != null && navAppSheet.cliente?.longitud != null && (
+                <a
+                  href={wazeNavUrl(Number(navAppSheet.cliente.latitud), Number(navAppSheet.cliente.longitud))}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setNavAppSheet(null)}
+                  className="flex items-center justify-center gap-2 w-full py-4 bg-cyan-500 hover:bg-cyan-600 active:bg-cyan-700 text-white rounded-xl font-semibold text-base min-h-[56px]"
+                >
+                  <Navigation className="w-5 h-5" />
+                  Waze
+                </a>
+              )}
+              {(navAppSheet.cliente?.latitud == null || navAppSheet.cliente?.longitud == null) && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
+                  Este cliente no tiene coordenadas cargadas. Solo Google Maps por busqueda de direccion.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
