@@ -23,6 +23,7 @@ export interface BaseEntity {
 export interface Cliente extends BaseEntity {
   nombre: string;
   direccion?: string;
+  aclaracion_direccion?: string;
   telefono?: string;
   email?: string;
   /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
@@ -39,6 +40,7 @@ export interface Cliente extends BaseEntity {
 export interface ClienteInput {
   nombre: string;
   direccion?: string;
+  aclaracion_direccion?: string;
   telefono?: string;
   email?: string;
   /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */

@@ -103,6 +103,7 @@ interface ClienteCreateInput {
   razon_social: string
   nombre_fantasia: string
   direccion: string
+  aclaracion_direccion?: string | null
   telefono?: string
   cuit?: string
   /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release.
@@ -159,6 +160,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       razon_social: clienteFields.razon_social,
       nombre_fantasia: clienteFields.nombre_fantasia,
       direccion: clienteFields.direccion,
+      aclaracion_direccion: clienteFields.aclaracion_direccion ?? null,
       telefono: clienteFields.telefono || null,
       cuit: clienteFields.cuit || null,
       // zona (texto) deprecada: se sigue escribiendo un release por compat de lecturas legacy.

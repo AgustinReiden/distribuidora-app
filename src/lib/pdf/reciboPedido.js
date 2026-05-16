@@ -166,16 +166,28 @@ function generarReciboA4(pedido) {
     doc.setFontSize(9)
     doc.setFont('helvetica', 'normal')
 
-    // Nombre completo del producto (sin truncar, con wrap si necesario)
+    // Nombre completo del producto (sin truncar, con wrap si necesario).
+    // Para regalos usa descripcion_regalo en lugar del nombre del producto contenedor.
     const productoNombre = item.producto?.nombre || 'Producto'
-    const aclaracion = formatAclaracionBulto(
-      item.cantidad,
-      item.producto?.unidades_de_venta_por_fardo,
-      item.producto?.etiqueta_bulto,
-    )
-    const nombreCompleto = aclaracion
-      ? `${productoNombre} ${aclaracion}`
-      : productoNombre
+    let nombreCompleto
+    if (item.es_bonificacion) {
+      const desc = item.descripcion_regalo?.trim()
+      if (desc) {
+        const match = desc.match(/^(\d+)\s+(.+)$/)
+        nombreCompleto = match ? `${match[2]} (REGALO)` : `${desc} (REGALO)`
+      } else {
+        nombreCompleto = `${productoNombre} (REGALO)`
+      }
+    } else {
+      const aclaracion = formatAclaracionBulto(
+        item.cantidad,
+        item.producto?.unidades_de_venta_por_fardo,
+        item.producto?.etiqueta_bulto,
+      )
+      nombreCompleto = aclaracion
+        ? `${productoNombre} ${aclaracion}`
+        : productoNombre
+    }
     const nombreLines = doc.splitTextToSize(nombreCompleto, 90)
     doc.text(nombreLines[0], margin + 5, y)
 
@@ -311,6 +323,9 @@ function calcularAlturaComanda(pedido) {
   const items = pedido.items || []
   let height = 40 // header empresa + nro recibo + fecha
   height += 28 // cliente (nombre + direccion 2 lineas + telefono)
+  // Reserva extra cuando el nombre puede partirse a 2 lineas (>30 chars
+  // suele ser umbral para el ancho 75mm en font 12).
+  if ((pedido.cliente?.nombre_fantasia || '').length > 30) height += 5
   if (pedido.cliente?.horarios_atencion) height += 8 // horario (hasta 2 lineas)
   height += 10 // divider + header tabla productos
   height += items.length * 12 // productos (nombre puede envolver + detalle precio unit)
@@ -354,8 +369,11 @@ function dibujarComanda(doc, pedido) {
 
   // === CLIENTE ===
   setHeaderStyle(doc, 12)
-  doc.text(pedido.cliente?.nombre_fantasia || 'Cliente', margin, y)
-  y += 5
+  const nombreLines = doc.splitTextToSize(pedido.cliente?.nombre_fantasia || 'Cliente', contentWidth)
+  nombreLines.forEach(line => {
+    doc.text(line, margin, y)
+    y += 5
+  })
   setNormalStyle(doc, 9)
   if (pedido.cliente?.razon_social && pedido.cliente.razon_social !== pedido.cliente.nombre_fantasia) {
     const razonLines = doc.splitTextToSize(pedido.cliente.razon_social, contentWidth)
@@ -398,15 +416,33 @@ function dibujarComanda(doc, pedido) {
   items.forEach(item => {
     const productoNombre = item.producto?.nombre || 'Producto'
     const subtotal = item.subtotal || item.precio_unitario * item.cantidad
+    const esBonif = !!item.es_bonificacion
 
-    const aclaracion = formatAclaracionBulto(
-      item.cantidad,
-      item.producto?.unidades_de_venta_por_fardo,
-      item.producto?.etiqueta_bulto,
-    )
-    const lineaProducto = aclaracion
-      ? `${item.cantidad}x ${productoNombre} ${aclaracion}`
-      : `${item.cantidad}x ${productoNombre}`
+    let lineaProducto
+    if (esBonif) {
+      // Para regalos: usar descripcion_regalo (texto manual de la promo) en lugar
+      // del nombre del producto contenedor + aclaracion de bulto. Si la descripcion
+      // empieza con un numero (ej "2 Botellas Manaos Pomelo Blanco 3L"), reemplaza
+      // ese numero con la cantidad total para que el ticket muestre "6 Botellas...".
+      const desc = item.descripcion_regalo?.trim()
+      if (desc) {
+        const match = desc.match(/^(\d+)\s+(.+)$/)
+        lineaProducto = match
+          ? `${item.cantidad} ${match[2]} (REGALO)`
+          : `${item.cantidad}x ${desc} (REGALO)`
+      } else {
+        lineaProducto = `${item.cantidad}x ${productoNombre} (REGALO)`
+      }
+    } else {
+      const aclaracion = formatAclaracionBulto(
+        item.cantidad,
+        item.producto?.unidades_de_venta_por_fardo,
+        item.producto?.etiqueta_bulto,
+      )
+      lineaProducto = aclaracion
+        ? `${item.cantidad}x ${productoNombre} ${aclaracion}`
+        : `${item.cantidad}x ${productoNombre}`
+    }
 
     const nombreLines = doc.splitTextToSize(lineaProducto, contentWidth - 26)
     nombreLines.forEach((line, idx) => {
@@ -416,13 +452,18 @@ function dibujarComanda(doc, pedido) {
       }
       y += 4
     })
-    // Detalle: cantidad x precio unitario
-    doc.setFontSize(7)
-    doc.setTextColor(100, 100, 100)
-    doc.text(`${item.cantidad} x ${formatPrecio(item.precio_unitario)}`, margin + 3, y)
-    doc.setTextColor(0, 0, 0)
-    doc.setFontSize(9)
-    y += 3.5
+    // Detalle: para items comprados muestra "cantidad x precio_unit"; para regalos
+    // se omite (no aporta info — precio es 0 y la cantidad ya esta en el header).
+    if (!esBonif) {
+      doc.setFontSize(7)
+      doc.setTextColor(100, 100, 100)
+      doc.text(`${item.cantidad} x ${formatPrecio(item.precio_unitario)}`, margin + 3, y)
+      doc.setTextColor(0, 0, 0)
+      doc.setFontSize(9)
+      y += 3.5
+    } else {
+      y += 1
+    }
   })
 
   y += 1

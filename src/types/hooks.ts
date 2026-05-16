@@ -15,6 +15,7 @@ export interface ClienteDB {
   razon_social?: string | null;
   nombre_fantasia: string;
   direccion: string;
+  aclaracion_direccion?: string | null;
   latitud?: number | null;
   longitud?: number | null;
   telefono?: string | null;
@@ -216,6 +217,7 @@ export interface ClienteFormInput {
   razonSocial?: string;
   nombreFantasia: string;
   direccion: string;
+  aclaracionDireccion?: string;
   latitud?: number | null;
   longitud?: number | null;
   telefono?: string;

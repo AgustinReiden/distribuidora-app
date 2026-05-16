@@ -112,6 +112,13 @@ function EntregaRutaCard({ pedido, orden, onMarcarEntregado, onReportarSalvedad 
               <span className="text-sm">{pedido.cliente?.direccion || 'Sin direccion'}</span>
             </a>
 
+            {/* Aclaracion de direccion (info extra para el repartidor) */}
+            {pedido.cliente?.aclaracion_direccion && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 italic mt-1 ml-6">
+                {pedido.cliente.aclaracion_direccion}
+              </p>
+            )}
+
             {/* Telefono */}
             {pedido.cliente?.telefono && (
               <a

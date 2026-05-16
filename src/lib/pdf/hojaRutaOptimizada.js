@@ -119,6 +119,16 @@ function buildCardOps(doc, pedido, orderNumber) {
     })
   }
 
+  // Aclaracion de direccion (info extra para el repartidor: timbre, referencias)
+  if (pedido.cliente?.aclaracion_direccion) {
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(8)
+    const aclLines = doc.splitTextToSize(pedido.cliente.aclaracion_direccion, CARD_CONTENT_WIDTH)
+    aclLines.slice(0, 2).forEach((line) => {
+      ops.push({ kind: 'italic', text: line, fontSize: 8, advance: 3.5 })
+    })
+  }
+
   // Telefono
   if (pedido.cliente?.telefono) {
     ops.push({
