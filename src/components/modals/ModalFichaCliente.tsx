@@ -85,7 +85,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
     <ModalBase title="Ficha Cliente" description={cliente.nombre_fantasia} onClose={onClose} maxWidth="max-w-4xl">
       <div className="flex flex-col">
         {/* Header */}
-        <div className="pb-6 border-b border-gray-200 dark:border-gray-700">
+        <div className="px-5 pt-5 pb-5 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-start gap-4">
             <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shrink-0">
               <User className="w-8 h-8 text-white" />
@@ -195,7 +195,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
         </div>
 
         {/* Tabs (taco no ve la pestaña Pagos) */}
-        <div className="flex border-b border-gray-200 dark:border-gray-700">
+        <div className="flex border-b border-gray-200 dark:border-gray-700 px-5">
           {(([
             { id: 'resumen', label: 'Resumen', icon: TrendingUp },
             { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag },
@@ -217,7 +217,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto px-5 py-5">
           {loading || loadingPagos ? (
             <div className="flex items-center justify-center h-48">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
