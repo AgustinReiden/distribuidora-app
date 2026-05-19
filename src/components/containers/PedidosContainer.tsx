@@ -1263,6 +1263,7 @@ export default function PedidosContainer(): React.ReactElement {
               isAdmin || isEncargado ||
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
             }
+            canSustituirRegalo={isAdmin || isEncargado}
             onSave={handleGuardarEdicion}
             onSaveItems={handleGuardarItemsEdicion}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}

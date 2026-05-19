@@ -4,7 +4,7 @@
  * Container que carga transferencias, sucursales y productos bajo demanda usando TanStack Query.
  * Soporta salidas e ingresos entre sucursales.
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useTransferenciasQuery,
@@ -16,6 +16,8 @@ import {
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { fechaHaceDias, fechaLocalISO } from '../../utils/formatters'
 import type { TransferenciaFormInput, TransferenciaDB, TipoTransferencia } from '../../types'
 
 // Lazy load de componentes
@@ -35,8 +37,14 @@ export default function TransferenciasContainer(): React.ReactElement {
   const { user } = useAuthData()
   const notify = useNotification()
 
+  // Filtros de fecha + paginacion. Defaults: ultimos 60 dias, pagina 1.
+  const [desde, setDesde] = useState<string>(() => fechaHaceDias(60))
+  const [hasta, setHasta] = useState<string>(() => fechaLocalISO())
+  const [pagina, setPagina] = useState<number>(1)
+  const filtros = useMemo(() => ({ desde, hasta, pagina }), [desde, hasta, pagina])
+
   // Queries
-  const { data: transferencias = [], isLoading } = useTransferenciasQuery()
+  const { data: transferencias = [], isLoading } = useTransferenciasQuery(filtros)
   const { data: sucursales = [] } = useSucursalesQuery()
   const { data: productos = [] } = useProductosQuery()
 
@@ -48,6 +56,24 @@ export default function TransferenciasContainer(): React.ReactElement {
   // Estado de modales
   const [modalTipo, setModalTipo] = useState<TipoTransferencia | null>(null)
   const [detalleTransferencia, setDetalleTransferencia] = useState<TransferenciaDB | null>(null)
+
+  // Cerrar modales y volver a pagina 1 al cambiar sucursal.
+  useResetOnSucursalChange(() => {
+    setModalTipo(null)
+    setDetalleTransferencia(null)
+    setPagina(1)
+  })
+
+  // Handlers de filtros
+  const handleFechaDesde = useCallback((v: string) => {
+    setDesde(v)
+    setPagina(1)
+  }, [])
+  const handleFechaHasta = useCallback((v: string) => {
+    setHasta(v)
+    setPagina(1)
+  }, [])
+  const handlePaginaCambio = useCallback((p: number) => setPagina(p), [])
 
   // Handlers
   const handleNuevaSalida = useCallback(() => {
@@ -96,6 +122,12 @@ export default function TransferenciasContainer(): React.ReactElement {
         <VistaTransferencias
           transferencias={transferencias}
           loading={isLoading}
+          desde={desde}
+          hasta={hasta}
+          pagina={pagina}
+          onCambiarDesde={handleFechaDesde}
+          onCambiarHasta={handleFechaHasta}
+          onCambiarPagina={handlePaginaCambio}
           onNuevaSalida={handleNuevaSalida}
           onNuevoIngreso={handleNuevoIngreso}
           onVerDetalle={handleVerDetalle}

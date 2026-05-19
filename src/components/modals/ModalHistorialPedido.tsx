@@ -42,7 +42,9 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
       forma_pago: "Forma de pago",
       estado_pago: "Estado de pago",
       total: "Total",
-      creacion: "Creacion"
+      creacion: "Creacion",
+      sustitucion_regalo: "Sustitucion de regalo",
+      items: "Items"
     };
     return mapeo[campo] || campo;
   };
