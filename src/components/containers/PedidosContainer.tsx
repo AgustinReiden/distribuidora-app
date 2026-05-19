@@ -32,6 +32,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
 import { usePromocionPedido } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
+import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
 import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { supabase } from '../../hooks/supabase/base'
@@ -183,6 +184,40 @@ export default function PedidosContainer(): React.ReactElement {
   const [pedidoCancelando, setPedidoCancelando] = useState<PedidoDB | null>(null)
   const [pedidoNotasEditando, setPedidoNotasEditando] = useState<PedidoDB | null>(null)
   const [guardando, setGuardando] = useState(false)
+  // Estado de "entrega con pago pendiente" (declarado aca para poder
+  // resetearlo en useResetOnSucursalChange junto al resto de modales).
+  const [pedidoEntregaConPago, setPedidoEntregaConPago] = useState<PedidoDB | null>(null)
+
+  // Cerrar todos los modales al cambiar de sucursal: evita que queden con
+  // datos de la sucursal anterior (hooks legacy con estado local que no se
+  // invalidan con queryClient.invalidateQueries).
+  useResetOnSucursalChange(() => {
+    setModalPedidoOpen(false)
+    setModalAsignarOpen(false)
+    setModalHistorialOpen(false)
+    setModalEditarOpen(false)
+    setModalFiltroFechaOpen(false)
+    setModalExportarPDFOpen(false)
+    setModalOptimizarRutaOpen(false)
+    setModalEntregaSalvedadOpen(false)
+    setModalEntregasMasivasOpen(false)
+    setModalCancelarOpen(false)
+    setModalPagosMasivosOpen(false)
+    setModalAsignarMasivoOpen(false)
+    setModalNotasOpen(false)
+    setModalPagoPedidoOpen(false)
+    setModalMarcarVisitaOpen(false)
+    setModalVisitasHoyOpen(false)
+    setPedidoPago(null)
+    setPedidoAsignando(null)
+    setPedidoHistorial(null)
+    setPedidoEditando(null)
+    setPedidoParaSalvedad(null)
+    setPedidoCancelando(null)
+    setPedidoNotasEditando(null)
+    setPedidoEntregaConPago(null)
+    setConfirmConfig({ visible: false })
+  })
 
   // Nuevo pedido form state
   const [nuevoPedido, setNuevoPedido] = useState({
@@ -228,11 +263,12 @@ export default function PedidosContainer(): React.ReactElement {
     setPaginaActual(page)
   }, [])
 
-  // Estado: marcar entregado.
-  // Si el pedido ya esta pagado completamente → confirm simple.
-  // Si queda saldo pendiente → abrir ModalPagoPedido en modoEntregaTransportista
-  // para que el usuario pueda registrar el cobro o entregar sin pago en el mismo gesto.
-  const [pedidoEntregaConPago, setPedidoEntregaConPago] = useState<PedidoDB | null>(null)
+  // `pedidoEntregaConPago` se declara arriba (junto al resto de estado de
+  // modales) para entrar en el reset de useResetOnSucursalChange.
+  // Marca el flujo "marcar entregado":
+  //   - Pedido ya pagado totalmente → confirm simple.
+  //   - Saldo pendiente → abrir ModalPagoPedido en modoEntregaTransportista
+  //     para cobrar o entregar sin pago en el mismo gesto.
 
   // Cargar pagos previos del pedido seleccionado para mostrar en el modal de pago.
   // Definido antes de handleMarcarEntregado porque este lo invoca al abrir el modal.

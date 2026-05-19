@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useActualizarUsuarioMutation, useUsuariosQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import type { PerfilDB } from '../../types'
 import type { UsuarioFormData } from '../modals/ModalUsuario'
 
@@ -23,6 +24,12 @@ export default function UsuariosContainer(): React.ReactElement {
 
   const [usuarioEditando, setUsuarioEditando] = useState<PerfilDB | null>(null)
   const [modalUsuarioOpen, setModalUsuarioOpen] = useState(false)
+
+  // Cerrar modal al cambiar de sucursal.
+  useResetOnSucursalChange(() => {
+    setModalUsuarioOpen(false)
+    setUsuarioEditando(null)
+  })
 
   useEffect(() => {
     if (error) {

@@ -1205,6 +1205,11 @@ export interface ResumenRendicionDiaria {
   total_otros: number;
   /** Total cobrado ese día (suma de pagos) */
   total_general: number;
+  /** Cobros vinculados a un pedido entregado en la misma fecha del pago. */
+  total_entregas: number;
+  /** Cobros de cuenta corriente: pago sin pedido, FIFO sobre pedidos viejos
+   *  o pago a pedido no entregado en la fecha. */
+  total_ctascte: number;
   /** Cantidad de pedidos entregados ese día */
   cantidad_pedidos: number;
   /** Total facturado entregado ese día (para comparar contra cobrado) */

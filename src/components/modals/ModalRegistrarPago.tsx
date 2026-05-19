@@ -1,5 +1,5 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
-import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar, ListOrdered } from 'lucide-react'
+import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { useZodValidation } from '../../hooks/useZodValidation'
@@ -80,8 +80,6 @@ export default function ModalRegistrarPago({
   const [resultadoFIFO, setResultadoFIFO] = useState<RegistrarPagoFifoResult | null>(null)
   const [error, setError] = useState<string>('')
   const [fecha, setFecha] = useState<string>(fechaLocalISO())
-  // Toggle FIFO: por defecto on cuando hay onConfirmarFIFO disponible
-  const [aplicarFIFO, setAplicarFIFO] = useState<boolean>(Boolean(onConfirmarFIFO))
 
   // Pago dividido
   const [pagoDividido, setPagoDividido] = useState<boolean>(false)
@@ -114,9 +112,10 @@ export default function ModalRegistrarPago({
     e.preventDefault()
     setError('')
 
-    // FIFO solo aplica cuando: no es pago dividido, no hay pedido específico
-    // seleccionado, y el caller proveyó onConfirmarFIFO.
-    const usarFIFO = aplicarFIFO && !pagoDividido && !pedidoSeleccionado && !!onConfirmarFIFO
+    // FIFO siempre aplica cuando: no es pago dividido, no hay pedido específico
+    // seleccionado, y el caller proveyó onConfirmarFIFO. Si no hay pedidos
+    // pendientes el sobrante queda como saldo a favor automaticamente.
+    const usarFIFO = !pagoDividido && !pedidoSeleccionado && !!onConfirmarFIFO
 
     if (usarFIFO) {
       const montoNumero = parsePrecio(monto)
@@ -375,28 +374,6 @@ export default function ModalRegistrarPago({
             </span>
           </label>
 
-          {/* Toggle FIFO: solo visible si el caller proveyó onConfirmarFIFO y no
-              hay pago dividido ni pedido específico seleccionado */}
-          {onConfirmarFIFO && !pagoDividido && !pedidoSeleccionado && (
-            <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={aplicarFIFO}
-                  onChange={e => setAplicarFIFO(e.target.checked)}
-                  className="w-4 h-4 mt-0.5 rounded border-gray-300 text-emerald-600"
-                />
-                <span className="text-sm text-emerald-800 dark:text-emerald-200 flex items-center gap-1">
-                  <ListOrdered className="w-4 h-4" />
-                  Aplicar a pedidos más antiguos automáticamente (FIFO)
-                </span>
-              </label>
-              <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1 ml-6">
-                Imputa el monto en orden de fecha de pedido. Sobrante queda como saldo a favor.
-              </p>
-            </div>
-          )}
-
           {/* Warning de saldo a favor */}
           {!pagoDividido && parsePrecio(monto) > saldoPendiente && saldoPendiente > 0 && (
             <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-start gap-2 text-yellow-800 dark:text-yellow-200">
@@ -404,9 +381,7 @@ export default function ModalRegistrarPago({
               <p className="text-sm">
                 El monto excede el saldo pendiente en{' '}
                 <span className="font-semibold">{formatCurrency(parsePrecio(monto) - saldoPendiente)}</span>.{' '}
-                {aplicarFIFO && onConfirmarFIFO
-                  ? 'La diferencia quedará como saldo a favor.'
-                  : 'Activá FIFO o ajustá el monto si no querés generar saldo a favor.'}
+                La diferencia quedará como saldo a favor.
               </p>
             </div>
           )}
