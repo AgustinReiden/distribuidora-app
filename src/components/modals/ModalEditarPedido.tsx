@@ -1,5 +1,5 @@
-import { useState, memo, useEffect, useMemo } from 'react';
-import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift } from 'lucide-react';
+import { lazy, Suspense, useState, memo, useEffect, useMemo } from 'react';
+import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { formatPrecio } from '../../utils/formatters';
@@ -7,8 +7,11 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
+import { usePromocionesListQuery } from '../../hooks/queries/usePromocionesQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
-import type { PedidoDB, ProductoDB } from '../../types';
+import type { PedidoDB, ProductoDB, PedidoItemDB } from '../../types';
+
+const ModalSustituirRegalo = lazy(() => import('./ModalSustituirRegalo'));
 
 /** Item del pedido para edición. Incluye fiscales opcionales que se pueblan al guardar. */
 export interface PedidoEditItem {
@@ -47,6 +50,8 @@ export interface ModalEditarPedidoProps {
   canEditPrices?: boolean;
   /** Permite cambiar fecha de pedido / entrega / entrega programada. Default: isAdmin. */
   canEditFechaEntrega?: boolean;
+  /** Permite sustituir el producto de un regalo de promo. Default: false. Solo admin/encargado. */
+  canSustituirRegalo?: boolean;
   /** @deprecated usar canEditItems/canEditPrices/canEditFechaEntrega. Mantiene compat. */
   isAdmin?: boolean;
   /** Callback al guardar datos */
@@ -65,6 +70,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   canEditItems,
   canEditPrices,
   canEditFechaEntrega,
+  canSustituirRegalo = false,
   isAdmin = false,
   onSave,
   onSaveItems,
@@ -102,8 +108,31 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
 
+  // Sustitucion de regalos: el row persistido a editar (id real de pedido_items).
+  const [sustItemTarget, setSustItemTarget] = useState<PedidoItemDB | null>(null);
+
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
+
+  // Regalos persistidos en DB (items con es_bonificacion=true). A diferencia
+  // de las bonificacionesCalculadas que se recalculan localmente, estas son
+  // las filas REALES de pedido_items con su `id`, necesarias para invocar
+  // la RPC `sustituir_regalo_pedido`.
+  const regalosPersistidos = useMemo<PedidoItemDB[]>(
+    () => (pedido?.items ?? []).filter(i => i.es_bonificacion === true),
+    [pedido]
+  );
+
+  // Mapa promocion_id -> regalo_mueve_stock, para resolver el modo (A/B) de
+  // cada regalo persistido en el modal de sustitucion.
+  const { data: promociones = [] } = usePromocionesListQuery();
+  const promoMueveStockMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const p of promociones) {
+      m.set(String(p.id), Boolean(p.regalo_mueve_stock));
+    }
+    return m;
+  }, [promociones]);
 
   // Inicializar items del pedido — sólo no-bonificaciones.
   // Las bonificaciones se recalculan reactivamente a partir del estado no-bonif
@@ -670,6 +699,51 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
+        {/* Regalos persistidos del pedido — solo para admin/encargado, para
+            sustituir el producto del regalo (mig 058). No se muestra si no hay
+            regalos persistidos o si el usuario no tiene permiso. */}
+        {canSustituirRegalo && regalosPersistidos.length > 0 && !pedidoEntregado && (
+          <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
+            <div className="bg-gray-50 dark:bg-gray-700/50 px-3 py-2 border-b dark:border-gray-700">
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                <Gift className="w-4 h-4 text-emerald-600" />
+                Regalos del pedido (sustituibles)
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Cambiar el producto de un regalo deja audit trail y maneja el stock segun el modo de la promo.
+              </p>
+            </div>
+            <div className="divide-y dark:divide-gray-700">
+              {regalosPersistidos.map(regalo => (
+                <div
+                  key={`regalo-real-${regalo.id}`}
+                  className="p-3 flex items-center justify-between bg-emerald-50/40 dark:bg-emerald-900/10"
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Gift className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm dark:text-white truncate">
+                        {regalo.producto?.nombre || `Producto #${regalo.producto_id}`}
+                      </p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                        REGALO x{regalo.cantidad}
+                        {regalo.promocion_id ? ` · promo #${regalo.promocion_id}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSustItemTarget(regalo)}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 border border-emerald-300 dark:border-emerald-700 rounded-lg"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Cambiar regalo
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Total del pedido */}
         <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
           <div className="flex justify-between items-center">
@@ -783,6 +857,23 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </button>
       </div>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
+
+      {/* Modal de sustitucion de regalo (lazy) */}
+      {sustItemTarget && sustItemTarget.producto && (
+        <Suspense fallback={null}>
+          <ModalSustituirRegalo
+            pedidoItemId={sustItemTarget.id}
+            productoOriginal={sustItemTarget.producto}
+            cantidadOriginal={sustItemTarget.cantidad}
+            regaloMueveStock={
+              sustItemTarget.promocion_id
+                ? (promoMueveStockMap.get(String(sustItemTarget.promocion_id)) ?? true)
+                : true
+            }
+            onClose={() => setSustItemTarget(null)}
+          />
+        </Suspense>
+      )}
     </ModalBase>
   );
 });

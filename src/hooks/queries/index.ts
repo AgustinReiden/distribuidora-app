@@ -147,12 +147,18 @@ export type { ZonaDB } from './useZonasQuery'
 export {
   transferenciasKeys,
   sucursalesKeys,
+  TRANSFERENCIAS_PAGE_SIZE,
   useTransferenciasQuery,
+  useTransferenciaItemsQuery,
   useSucursalesQuery,
   useCrearSucursalMutation,
   useRegistrarTransferenciaMutation,
   useRegistrarIngresoMutation,
 } from './useTransferenciasQuery'
+export type { TransferenciasFiltros } from './useTransferenciasQuery'
+
+// Sustitucion de regalos en promociones (mig 058)
+export { useSustituirRegaloMutation } from './useSustituirRegaloMutation'
 
 // Métricas
 export {

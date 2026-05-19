@@ -2,10 +2,13 @@
  * ModalDetalleTransferencia
  *
  * Modal de solo lectura que muestra el detalle de un movimiento entre sucursales.
+ * Carga los items on-demand via useTransferenciaItemsQuery (el listado de
+ * transferencias no incluye items para mantener payload liviano).
  */
 import React from 'react'
-import { X, ArrowUpRight, ArrowDownLeft, Package } from 'lucide-react'
+import { X, ArrowUpRight, ArrowDownLeft, Package, Loader2 } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import { useTransferenciaItemsQuery } from '../../hooks/queries/useTransferenciasQuery'
 import type { TransferenciaDB } from '../../types'
 
 interface ModalDetalleTransferenciaProps {
@@ -30,7 +33,10 @@ export default function ModalDetalleTransferencia({
   onClose,
 }: ModalDetalleTransferenciaProps): React.ReactElement {
   const esIngreso = transferencia.tipo === 'ingreso'
-  const items = transferencia.items || []
+  const { data: itemsRemote, isLoading: itemsLoading } = useTransferenciaItemsQuery(transferencia.id)
+  // Fallback al snapshot del payload (raro pero compat) si el query aun
+  // no resolvio; preferimos los items de la query.
+  const items = itemsRemote ?? transferencia.items ?? []
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -80,7 +86,13 @@ export default function ModalDetalleTransferencia({
           )}
 
           {/* Items table */}
-          {items.length > 0 ? (
+          {itemsLoading && (
+            <div className="flex items-center justify-center py-8 text-gray-400 gap-2">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm">Cargando items...</span>
+            </div>
+          )}
+          {!itemsLoading && items.length > 0 ? (
             <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
               <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-700/50 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                 <div className="col-span-5">Producto</div>
@@ -114,10 +126,12 @@ export default function ModalDetalleTransferencia({
               ))}
             </div>
           ) : (
-            <div className="flex flex-col items-center py-8 text-gray-400">
-              <Package className="w-8 h-8 mb-2" />
-              <p className="text-sm">Sin items</p>
-            </div>
+            !itemsLoading && (
+              <div className="flex flex-col items-center py-8 text-gray-400">
+                <Package className="w-8 h-8 mb-2" />
+                <p className="text-sm">Sin items</p>
+              </div>
+            )
           )}
         </div>
 

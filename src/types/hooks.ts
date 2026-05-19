@@ -966,6 +966,42 @@ export interface UsuarioSucursalDB {
   sucursal?: SucursalDB | null;
 }
 
+/**
+ * Audit log de sustituciones de regalos (mig 058). Una fila por cambio
+ * de producto/cantidad sobre un item bonificacion.
+ */
+export interface PedidoItemSustitucionDB {
+  id: string;
+  pedido_id: string;
+  pedido_item_id: string;
+  promocion_id: string | null;
+  producto_original_id: string;
+  producto_sustituto_id: string;
+  /** NUMERIC en DB; soporta fraccion */
+  cantidad_original: number;
+  cantidad_sustituta: number;
+  regalo_mueve_stock_snapshot: boolean | null;
+  motivo: string;
+  autorizado_por: string;
+  sucursal_id: number;
+  created_at: string;
+}
+
+/** Input para la RPC sustituir_regalo_pedido */
+export interface SustituirRegaloInput {
+  pedidoItemId: string;
+  productoNuevoId: string;
+  cantidadNueva: number;  // puede ser fraccion
+  motivo: string;
+  clientRequestId?: string;
+}
+
+export interface SustituirRegaloResult {
+  sustitucionId: string;
+  modo: 'A' | 'B';
+  idempotentReplay?: boolean;
+}
+
 export interface TransferenciaItemDB {
   id: string;
   transferencia_id: string;

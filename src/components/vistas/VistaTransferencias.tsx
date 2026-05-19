@@ -2,16 +2,24 @@
  * VistaTransferencias
  *
  * Lista de movimientos entre sucursales (salidas e ingresos) con detalle.
+ * Paginada en server-side (50 filas por pagina) + filtro de fecha.
  */
 import React from 'react'
-import { ArrowRightLeft, Plus, Package, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
+import { ArrowRightLeft, Package, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
 import LoadingSpinner from '../layout/LoadingSpinner'
 import { formatPrecio } from '../../utils/formatters'
+import { TRANSFERENCIAS_PAGE_SIZE } from '../../hooks/queries/useTransferenciasQuery'
 import type { TransferenciaDB } from '../../types'
 
 interface VistaTransferenciasProps {
   transferencias: TransferenciaDB[]
   loading: boolean
+  desde: string
+  hasta: string
+  pagina: number
+  onCambiarDesde: (v: string) => void
+  onCambiarHasta: (v: string) => void
+  onCambiarPagina: (p: number) => void
   onNuevaSalida: () => void
   onNuevoIngreso: () => void
   onVerDetalle: (transferencia: TransferenciaDB) => void
@@ -32,10 +40,21 @@ function formatFecha(fecha: string): string {
 export default function VistaTransferencias({
   transferencias,
   loading,
+  desde,
+  hasta,
+  pagina,
+  onCambiarDesde,
+  onCambiarHasta,
+  onCambiarPagina,
   onNuevaSalida,
   onNuevoIngreso,
   onVerDetalle,
 }: VistaTransferenciasProps): React.ReactElement {
+  // La paginacion es server-side por offset. Como la API no devuelve el total,
+  // habilitamos "siguiente" mientras la pagina actual venga llena. Si vuelve
+  // con menos de PAGE_SIZE elementos, asumimos que es la ultima.
+  const puedeSiguiente = transferencias.length === TRANSFERENCIAS_PAGE_SIZE
+  const puedeAnterior = pagina > 1
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -62,6 +81,35 @@ export default function VistaTransferencias({
             Nueva Salida
           </button>
         </div>
+      </div>
+
+      {/* Filtros de fecha */}
+      <div className="flex flex-wrap items-end gap-3 bg-white dark:bg-gray-800 rounded-xl p-3 border dark:border-gray-700 shadow-sm">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1">
+            <Calendar className="w-3 h-3" /> Desde
+          </label>
+          <input
+            type="date"
+            value={desde}
+            onChange={e => onCambiarDesde(e.target.value)}
+            className="px-3 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1">
+            <Calendar className="w-3 h-3" /> Hasta
+          </label>
+          <input
+            type="date"
+            value={hasta}
+            onChange={e => onCambiarHasta(e.target.value)}
+            className="px-3 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+        <p className="text-xs text-gray-500 dark:text-gray-400 ml-auto">
+          Por defecto, ultimos 60 dias. Ampliar manualmente si necesitan historial.
+        </p>
       </div>
 
       {/* Loading */}
@@ -98,9 +146,6 @@ export default function VistaTransferencias({
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Sucursal
                   </th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Items
-                  </th>
                   <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Total Costo
                   </th>
@@ -136,9 +181,6 @@ export default function VistaTransferencias({
                       <td className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white">
                         {t.sucursal?.nombre || 'Sin sucursal'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 text-center">
-                        {t.items?.length || 0}
-                      </td>
                       <td className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white text-right whitespace-nowrap">
                         {formatPrecio(t.total_costo)}
                       </td>
@@ -150,6 +192,29 @@ export default function VistaTransferencias({
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Paginador */}
+          <div className="flex items-center justify-between px-4 py-3 border-t dark:border-gray-700 text-sm">
+            <p className="text-gray-500 dark:text-gray-400">
+              Pagina {pagina}{' · '}{transferencias.length} mov.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onCambiarPagina(pagina - 1)}
+                disabled={!puedeAnterior}
+                className="flex items-center gap-1 px-3 py-1.5 border rounded-lg dark:border-gray-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <ChevronLeft className="w-4 h-4" /> Anterior
+              </button>
+              <button
+                onClick={() => onCambiarPagina(pagina + 1)}
+                disabled={!puedeSiguiente}
+                className="flex items-center gap-1 px-3 py-1.5 border rounded-lg dark:border-gray-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Siguiente <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
