@@ -17,6 +17,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useFichaCliente } from '../../hooks/supabase/useFichaCliente'
 import { usePagos } from '../../hooks/supabase'
+import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useQueryClient } from '@tanstack/react-query'
 import { puedeRegistrarPagoCliente } from '../../lib/permisos'
 import type { ClienteDB } from '../../types'
@@ -82,6 +83,19 @@ export default function ClientesContainer(): React.ReactElement {
 
   // Confirm modal state
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+
+  // Cerrar todos los modales al cambiar de sucursal: useFichaCliente y
+  // usePagos usan useState local (no son TanStack Queries), por lo que la
+  // invalidacion global de SucursalContext no los limpia.
+  useResetOnSucursalChange(() => {
+    setModalClienteOpen(false)
+    setModalFichaOpen(false)
+    setModalZonasOpen(false)
+    setClienteFichaId(null)
+    setClientePago(null)
+    setClienteEditando(null)
+    setConfirmConfig({ visible: false })
+  })
 
   // Handlers
   const handleNuevoCliente = useCallback(() => {

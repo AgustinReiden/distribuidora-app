@@ -21,6 +21,7 @@ import {
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
 
 // Lazy load de componentes
@@ -75,6 +76,18 @@ export default function ComprasContainer(): React.ReactElement {
   const [compraParaNC, setCompraParaNC] = useState<CompraDBExtended | null>(null)
   const [compraParaEditar, setCompraParaEditar] = useState<CompraDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+
+  // Cerrar modales al cambiar de sucursal: las compras son por sucursal.
+  useResetOnSucursalChange(() => {
+    setModalCompraOpen(false)
+    setModalDetalleOpen(false)
+    setModalNotaCreditoOpen(false)
+    setModalEditarOpen(false)
+    setCompraDetalle(null)
+    setCompraParaNC(null)
+    setCompraParaEditar(null)
+    setConfirmConfig({ visible: false })
+  })
 
   // NC resumen for badges in list
   const { data: ncResumen = [] } = useNotasCreditoResumenQuery()

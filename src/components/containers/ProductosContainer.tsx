@@ -19,6 +19,7 @@ import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '.
 import { useCategoriasQuery } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended } from '../../types'
 
@@ -83,6 +84,21 @@ export default function ProductosContainer(): React.ReactElement {
 
   // Confirm modal state
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+
+  // Cerrar modales al cambiar de sucursal: los productos viven por sucursal,
+  // dejar un modal abierto con un producto de otra sucursal seria misleading.
+  useResetOnSucursalChange(() => {
+    setModalProductoOpen(false)
+    setModalMermaOpen(false)
+    setModalHistorialOpen(false)
+    setModalActualizacionMasivaOpen(false)
+    setModalCategoriasOpen(false)
+    setModalCambioOpen(false)
+    setModalStockBajoOpen(false)
+    setProductoEditando(null)
+    setProductoMerma(null)
+    setConfirmConfig({ visible: false })
+  })
 
   // Categorías para el selector del modal: une la tabla `categorias` (solo
   // activas) con las categorías derivadas de productos (strings heredados que

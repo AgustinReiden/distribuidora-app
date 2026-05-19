@@ -24,6 +24,11 @@ export interface ModalCerrarRendicionProps {
   totalCobrado: number
   /** Total entregado en esa fecha, para que el usuario compare */
   totalEntregado: number
+  /** Cobros vinculados a un pedido entregado el mismo dia. */
+  totalEntregas: number
+  /** Cobros de cuenta corriente (resto: pago sin pedido, FIFO o pedido no
+   *  entregado en la fecha). */
+  totalCtasCte: number
   /** Observaciones existentes (si la rendición ya tenía) para prellenar */
   observacionesPrevias?: string | null
   /** Callback al confirmar. Recibe estado + observaciones + gastos. */
@@ -51,6 +56,8 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   transportistaNombre,
   totalCobrado,
   totalEntregado,
+  totalEntregas,
+  totalCtasCte,
   observacionesPrevias,
   onConfirmar,
   onClose,
@@ -113,6 +120,16 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
               <p className={`font-bold ${diferencia === 0 ? 'text-gray-800 dark:text-white' : diferencia < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                 {formatPrecio(diferencia)}
               </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-3 text-sm border-t border-gray-200 dark:border-gray-600 pt-3">
+            <div>
+              <p className="text-xs text-gray-500">Entregas (cobro del día)</p>
+              <p className="font-bold text-emerald-700 dark:text-emerald-400">{formatPrecio(totalEntregas)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Ctas Ctes (cobro de saldos)</p>
+              <p className="font-bold text-blue-700 dark:text-blue-400">{formatPrecio(totalCtasCte)}</p>
             </div>
           </div>
         </div>

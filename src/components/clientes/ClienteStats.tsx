@@ -166,7 +166,7 @@ function ClienteStats({ clientes }: ClienteStatsProps): React.ReactElement {
                 {showMontoAsMain ? (
                   <>
                     <p
-                      className={`text-2xl tabular-nums leading-tight mt-0.5 ${item.accentText} truncate`}
+                      className={`text-xl tabular-nums leading-tight mt-0.5 ${item.accentText}`}
                       style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
                     >
                       {item.detail}

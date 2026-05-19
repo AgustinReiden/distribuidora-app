@@ -127,6 +127,18 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
           </div>
         </div>
 
+        {/* Division Entregas vs Ctas Ctes */}
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <div className="bg-emerald-50 dark:bg-emerald-900/15 border border-emerald-200 dark:border-emerald-800 rounded-lg p-2.5">
+            <p className="text-xs text-emerald-700 dark:text-emerald-300">Entregas (cobro del día)</p>
+            <p className="font-bold text-emerald-700 dark:text-emerald-400">{formatMoney(resumen.total_entregas)}</p>
+          </div>
+          <div className="bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 rounded-lg p-2.5">
+            <p className="text-xs text-blue-700 dark:text-blue-300">Ctas Ctes (cobro de saldos)</p>
+            <p className="font-bold text-blue-700 dark:text-blue-400">{formatMoney(resumen.total_ctascte)}</p>
+          </div>
+        </div>
+
         {/* Breakdown por forma de pago (solo las que tienen monto) */}
         {desgloses.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
@@ -505,6 +517,8 @@ export default function VistaRendiciones(): React.ReactElement {
             transportistaNombre={cerrarResumen.transportista_nombre}
             totalCobrado={cerrarResumen.total_general}
             totalEntregado={cerrarResumen.total_entregado}
+            totalEntregas={cerrarResumen.total_entregas}
+            totalCtasCte={cerrarResumen.total_ctascte}
             observacionesPrevias={cerrarResumen.observaciones}
             onConfirmar={handleCerrar}
             onClose={() => setCerrarResumen(null)}

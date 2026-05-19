@@ -15,6 +15,7 @@ import {
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import type { ProveedorDBExtended, ProveedorFormInputExtended } from '../../types'
 
 // Lazy load de componentes
@@ -58,6 +59,13 @@ export default function ProveedoresContainer(): React.ReactElement {
   // Estado de edición
   const [proveedorEditando, setProveedorEditando] = useState<ProveedorDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+
+  // Cerrar modal al cambiar de sucursal.
+  useResetOnSucursalChange(() => {
+    setModalProveedorOpen(false)
+    setProveedorEditando(null)
+    setConfirmConfig({ visible: false })
+  })
 
   // Handlers
   const handleNuevoProveedor = useCallback(() => {
