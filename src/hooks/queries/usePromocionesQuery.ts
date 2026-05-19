@@ -10,6 +10,7 @@ import type {
   PromocionDB,
   PromocionProductoDB,
   PromocionReglaDB,
+  PromoAcumuladorDB,
 } from '../../types'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 
@@ -465,6 +466,41 @@ export function usePromoUnidadesEntregadasQuery() {
     },
     enabled: !!currentSucursalId,
     staleTime: 60 * 1000,
+  })
+}
+
+/**
+ * Hook que trae todos los acumuladores de promos (mig 059) de la sucursal
+ * activa. Una promo modo B puede tener varios acumuladores cuando admin
+ * sustituye regalos. Devuelve un mapa `promocion_id -> PromoAcumuladorDB[]`
+ * para que las vistas rendericen multiples barras por promo.
+ *
+ * `staleTime` corto (30s) porque el acumulador cambia con cada pedido
+ * que dispare la promo o cada sustitucion.
+ */
+export function usePromoAcumuladoresMapQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...promocionesKeys.all(currentSucursalId), 'acumuladores'] as const,
+    queryFn: async (): Promise<Map<string, PromoAcumuladorDB[]>> => {
+      const { data, error } = await supabase
+        .from('promo_acumuladores')
+        .select('*')
+      if (error) {
+        if (error.message.includes('does not exist')) return new Map()
+        throw error
+      }
+      const map = new Map<string, PromoAcumuladorDB[]>()
+      for (const row of (data ?? []) as PromoAcumuladorDB[]) {
+        const key = String(row.promocion_id)
+        const list = map.get(key) ?? []
+        list.push(row)
+        map.set(key, list)
+      }
+      return map
+    },
+    enabled: !!currentSucursalId,
+    staleTime: 30 * 1000,
   })
 }
 

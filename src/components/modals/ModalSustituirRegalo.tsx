@@ -25,6 +25,9 @@ export interface ModalSustituirRegaloProps {
   cantidadOriginal: number
   /** Modo de la promo. true = Modo A (stock unitario), false = Modo B (bloques). */
   regaloMueveStock: boolean
+  /** Contenedor (fardo) configurado en la promo original. Default sugerido
+   *  para el selector de "contenedor del sustituto" en Modo B. */
+  ajusteProductoIdOriginal?: string | null
   onClose: () => void
   /** Callback al confirmar exitosamente (para que el caller refresque). */
   onSustituido?: () => void
@@ -35,6 +38,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   productoOriginal,
   cantidadOriginal,
   regaloMueveStock,
+  ajusteProductoIdOriginal = null,
   onClose,
   onSustituido,
 }: ModalSustituirRegaloProps) {
@@ -49,6 +53,12 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const [productoNuevoId, setProductoNuevoId] = useState<string>('')
   const [cantidadNueva, setCantidadNueva] = useState<string>(String(cantidadOriginal))
   const [motivo, setMotivo] = useState<string>('')
+  // Contenedor del sustituto. Default = el de la promo original. El admin
+  // puede cambiarlo (otro fardo) o ponerlo en "" (= sin acumulacion de bloque).
+  // Solo aplica para Modo B.
+  const [ajusteProductoIdNuevo, setAjusteProductoIdNuevo] = useState<string>(
+    ajusteProductoIdOriginal ? String(ajusteProductoIdOriginal) : ''
+  )
   const [error, setError] = useState<string>('')
 
   const productoNuevo = useMemo(
@@ -67,7 +77,11 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   )
 
   const cantidadNum = parseFloat(cantidadNueva) || 0
-  const stockSuficiente = productoNuevo == null || (productoNuevo.stock ?? 0) >= cantidadNum
+  // Modo A descuenta stock unitario del nuevo producto -> hay que validar.
+  // Modo B no mueve stock unitario, solo acumula bloques -> no se valida acá.
+  const stockSuficiente = !regaloMueveStock
+    || productoNuevo == null
+    || (productoNuevo.stock ?? 0) >= cantidadNum
   const puedeConfirmar = !!productoNuevoId
     && cantidadNum > 0
     && motivo.trim().length > 0
@@ -83,6 +97,9 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         productoNuevoId,
         cantidadNueva: cantidadNum,
         motivo: motivo.trim(),
+        ajusteProductoIdNuevo: regaloMueveStock
+          ? null
+          : (ajusteProductoIdNuevo || null),
         clientRequestId,
       })
       notify.success(
@@ -119,19 +136,20 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           <div className="flex items-start gap-2 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-sm text-emerald-800 dark:text-emerald-200">
             <Check className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <p>
-              Esta promo descuenta stock por unidad. La sustitucion va a
+              <b>Modo A — stock por unidad.</b> La sustitucion va a
               <b> devolver {cantidadOriginal} de {productoOriginal.nombre}</b> al
               deposito y descontar la cantidad del producto sustituto.
             </p>
           </div>
         ) : (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-200">
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-sm text-blue-800 dark:text-blue-200">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <p>
-              Esta promo se ajusta por bloque del producto contenedor. La
-              sustitucion va a descontar el stock del nuevo producto pero
-              <b> NO va a reponer el contenedor original</b>. El bloque ya
-              consumido por la promo se mantiene.
+              <b>Modo B — ajuste por bloque.</b> Esta sustitucion <b>no mueve stock unitario</b>.
+              El acumulador del producto original baja en {cantidadOriginal} y se crea/incrementa
+              una <b>barra paralela</b> para el sustituto. Si la baja cruza un bloque cerrado,
+              <b> se devuelve el fardo original al stock</b>. Cuando la barra del sustituto complete
+              un bloque, se descuenta 1 fardo del contenedor que elijas abajo.
             </p>
           </div>
         )}
@@ -155,6 +173,34 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           </select>
         </div>
 
+        {/* Contenedor sustituto (solo modo B) */}
+        {!regaloMueveStock && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Contenedor del regalo sustituto
+              <span className="ml-1 text-xs text-gray-500 font-normal">
+                (fardo a descontar cuando complete bloque)
+              </span>
+            </label>
+            <select
+              value={ajusteProductoIdNuevo}
+              onChange={e => setAjusteProductoIdNuevo(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Sin contenedor — el sustituto no acumula bloque</option>
+              {productosOpciones.map(p => (
+                <option key={`cont-${p.id}`} value={p.id}>
+                  {p.nombre}{ajusteProductoIdOriginal && String(p.id) === String(ajusteProductoIdOriginal) ? ' · default de la promo' : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Por defecto se sugiere el mismo contenedor de la promo original. Cambialo
+              si el sustituto pertenece a otro fardo.
+            </p>
+          </div>
+        )}
+
         {/* Cantidad */}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -173,7 +219,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
             Se acepta fraccion (ej. 0.5). Por defecto se asume la misma
             cantidad que el regalo original.
           </p>
-          {productoNuevo && !stockSuficiente && (
+          {productoNuevo && regaloMueveStock && !stockSuficiente && (
             <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
               <AlertTriangle className="w-3 h-3" />
               Stock insuficiente del producto sustituto ({productoNuevo.stock ?? 0} disponible)

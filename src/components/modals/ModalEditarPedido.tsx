@@ -123,13 +123,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     [pedido]
   );
 
-  // Mapa promocion_id -> regalo_mueve_stock, para resolver el modo (A/B) de
-  // cada regalo persistido en el modal de sustitucion.
+  // Mapa promocion_id -> { regalo_mueve_stock, ajuste_producto_id } para
+  // resolver modo (A/B) y default del contenedor sustituto en el modal.
   const { data: promociones = [] } = usePromocionesListQuery();
-  const promoMueveStockMap = useMemo(() => {
-    const m = new Map<string, boolean>();
+  const promoInfoMap = useMemo(() => {
+    const m = new Map<string, { mueveStock: boolean; ajusteProductoId: string | null }>();
     for (const p of promociones) {
-      m.set(String(p.id), Boolean(p.regalo_mueve_stock));
+      m.set(String(p.id), {
+        mueveStock: Boolean(p.regalo_mueve_stock),
+        ajusteProductoId: p.ajuste_producto_id ? String(p.ajuste_producto_id) : null,
+      });
     }
     return m;
   }, [promociones]);
@@ -861,17 +864,21 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       {/* Modal de sustitucion de regalo (lazy) */}
       {sustItemTarget && sustItemTarget.producto && (
         <Suspense fallback={null}>
-          <ModalSustituirRegalo
-            pedidoItemId={sustItemTarget.id}
-            productoOriginal={sustItemTarget.producto}
-            cantidadOriginal={sustItemTarget.cantidad}
-            regaloMueveStock={
-              sustItemTarget.promocion_id
-                ? (promoMueveStockMap.get(String(sustItemTarget.promocion_id)) ?? true)
-                : true
-            }
-            onClose={() => setSustItemTarget(null)}
-          />
+          {(() => {
+            const info = sustItemTarget.promocion_id
+              ? promoInfoMap.get(String(sustItemTarget.promocion_id))
+              : null;
+            return (
+              <ModalSustituirRegalo
+                pedidoItemId={sustItemTarget.id}
+                productoOriginal={sustItemTarget.producto}
+                cantidadOriginal={sustItemTarget.cantidad}
+                regaloMueveStock={info?.mueveStock ?? true}
+                ajusteProductoIdOriginal={info?.ajusteProductoId ?? null}
+                onClose={() => setSustItemTarget(null)}
+              />
+            );
+          })()}
         </Suspense>
       )}
     </ModalBase>
