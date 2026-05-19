@@ -9,6 +9,7 @@ import React, { useMemo, useState } from 'react'
 import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, Layers, Ban, Zap, History, Filter } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
+import type { PromoAcumuladorDB } from '../../types'
 
 type FiltroEstado = 'vigentes' | 'todas' | 'inactivas'
 
@@ -23,6 +24,10 @@ export interface VistaPromocionesProps {
   productoNombres: Map<string, string>
   /** Map promo_id -> total unidades regaladas historicas (suma de pedido_items.cantidad con es_bonificacion=true) */
   unidadesEntregadas?: Map<string, number>
+  /** Map promo_id -> acumuladores paralelos (mig 059). Si una promo tiene
+   *  entries, renderizamos una barra por entry; si no, fallback a la barra
+   *  unica basada en promo.usos_pendientes. */
+  acumuladoresPorPromo?: Map<string, PromoAcumuladorDB[]>
 }
 
 export default function VistaPromociones({
@@ -34,6 +39,7 @@ export default function VistaPromociones({
   onToggleActivo,
   productoNombres,
   unidadesEntregadas,
+  acumuladoresPorPromo,
 }: VistaPromocionesProps): React.ReactElement {
   const [filtro, setFiltro] = useState<FiltroEstado>('vigentes')
   const [mostrarHistorico, setMostrarHistorico] = useState(false)
@@ -250,36 +256,88 @@ export default function VistaPromociones({
                   </div>
                 )}
 
-                {/* Subunidades pendientes para el proximo bloque (solo fracción) */}
+                {/* Subunidades pendientes para descontar stock — multi-barra (mig 059).
+                    Si hay acumuladores en promo_acumuladores los mostramos uno por uno;
+                    para el regalo default siempre se muestra incluso si esta en 0/N
+                    (con leyenda "Bloque recien cerrado"); los acumuladores
+                    alternativos (sustituciones) solo se muestran si usos_pendientes > 0. */}
                 {promo.ajuste_automatico && promo.unidades_por_bloque && promo.unidades_por_bloque > 0 && (
                   (() => {
-                    const pendientes = promo.usos_pendientes ?? 0
-                    const porBloque = promo.unidades_por_bloque ?? 0
-                    const falta = Math.max(porBloque - pendientes, 0)
-                    const progreso = porBloque > 0 ? Math.min((pendientes / porBloque) * 100, 100) : 0
+                    const acumuladores = (acumuladoresPorPromo?.get(String(promo.id)) ?? []).slice()
+                    const defaultProductoId = promo.producto_regalo_id ? String(promo.producto_regalo_id) : null
+
+                    // Si NO hay acumuladores en la tabla, sintetizamos uno default desde promo.usos_pendientes.
+                    if (acumuladores.length === 0 && defaultProductoId) {
+                      acumuladores.push({
+                        id: `legacy-${promo.id}`,
+                        promocion_id: String(promo.id),
+                        producto_regalo_id: defaultProductoId,
+                        ajuste_producto_id: promo.ajuste_producto_id ? String(promo.ajuste_producto_id) : null,
+                        unidades_por_bloque: promo.unidades_por_bloque,
+                        stock_por_bloque: promo.stock_por_bloque,
+                        usos_pendientes: promo.usos_pendientes ?? 0,
+                        sucursal_id: 0,
+                        created_at: '',
+                        updated_at: '',
+                      } as PromoAcumuladorDB)
+                    }
+
+                    // Filtrar: mostrar default siempre, alternativos solo si > 0.
+                    const visibles = acumuladores.filter(acc => {
+                      const esDefault = defaultProductoId !== null
+                        && String(acc.producto_regalo_id) === defaultProductoId
+                      return esDefault || acc.usos_pendientes > 0
+                    })
+
+                    if (visibles.length === 0) return null
+
                     return (
-                      <div className="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                        <div className="flex items-center justify-between gap-2 text-sm text-blue-700 dark:text-blue-300 mb-1.5">
-                          <span className="font-medium">
-                            Subunidades pendientes para descontar stock:
-                          </span>
-                          <span className="font-bold tabular-nums">
-                            {pendientes} / {porBloque}
-                          </span>
-                        </div>
-                        <div className="w-full bg-blue-100 dark:bg-blue-900/40 rounded-full h-2 overflow-hidden">
-                          <div
-                            className="bg-blue-500 dark:bg-blue-400 h-full transition-all"
-                            style={{ width: `${progreso}%` }}
-                            aria-label={`${pendientes} de ${porBloque}`}
-                          />
-                        </div>
-                        <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1">
-                          {pendientes === 0
-                            ? 'Bloque recién cerrado — se descontó 1 unidad del contenedor.'
-                            : `Faltan ${falta} subunidad${falta === 1 ? '' : 'es'} para cerrar el próximo bloque y descontar 1 unidad del contenedor.`
-                          }
-                        </p>
+                      <div className="mb-3 space-y-2">
+                        {visibles.map(acc => {
+                          const porBloque = acc.unidades_por_bloque ?? promo.unidades_por_bloque ?? 1
+                          const pendientes = acc.usos_pendientes
+                          const falta = Math.max(porBloque - pendientes, 0)
+                          const progreso = porBloque > 0 ? Math.min((pendientes / porBloque) * 100, 100) : 0
+                          const esDefault = defaultProductoId !== null
+                            && String(acc.producto_regalo_id) === defaultProductoId
+                          const colorClasses = esDefault
+                            ? { bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800',
+                                text: 'text-blue-700 dark:text-blue-300', textLight: 'text-blue-600 dark:text-blue-400',
+                                track: 'bg-blue-100 dark:bg-blue-900/40', fill: 'bg-blue-500 dark:bg-blue-400' }
+                            : { bg: 'bg-emerald-50 dark:bg-emerald-900/20', border: 'border-emerald-200 dark:border-emerald-800',
+                                text: 'text-emerald-700 dark:text-emerald-300', textLight: 'text-emerald-600 dark:text-emerald-400',
+                                track: 'bg-emerald-100 dark:bg-emerald-900/40', fill: 'bg-emerald-500 dark:bg-emerald-400' }
+                          const nombreRegalo = getProductoNombre(String(acc.producto_regalo_id))
+                          const nombreContenedor = acc.ajuste_producto_id
+                            ? getProductoNombre(String(acc.ajuste_producto_id))
+                            : null
+                          return (
+                            <div key={String(acc.id)} className={`px-3 py-2 ${colorClasses.bg} border ${colorClasses.border} rounded-lg`}>
+                              <div className={`flex items-center justify-between gap-2 text-sm ${colorClasses.text} mb-1.5`}>
+                                <span className="font-medium flex items-center gap-1.5">
+                                  {!esDefault && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-700/40 text-emerald-800 dark:text-emerald-200 font-bold">Sustituto</span>}
+                                  {nombreRegalo}
+                                </span>
+                                <span className="font-bold tabular-nums">
+                                  {pendientes} / {porBloque}
+                                </span>
+                              </div>
+                              <div className={`w-full ${colorClasses.track} rounded-full h-2 overflow-hidden`}>
+                                <div
+                                  className={`${colorClasses.fill} h-full transition-all`}
+                                  style={{ width: `${progreso}%` }}
+                                  aria-label={`${pendientes} de ${porBloque}`}
+                                />
+                              </div>
+                              <p className={`text-[11px] ${colorClasses.textLight} mt-1`}>
+                                {pendientes === 0
+                                  ? `Bloque recién cerrado — se descontó 1 unidad del contenedor${nombreContenedor ? ` (${nombreContenedor})` : ''}.`
+                                  : `Faltan ${falta} subunidad${falta === 1 ? '' : 'es'} para cerrar el próximo bloque y descontar 1 unidad${nombreContenedor ? ` de ${nombreContenedor}` : ' del contenedor'}.`
+                                }
+                              </p>
+                            </div>
+                          )
+                        })}
                       </div>
                     )
                   })()

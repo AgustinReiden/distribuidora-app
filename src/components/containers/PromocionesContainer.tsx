@@ -13,6 +13,7 @@ import {
   useEliminarPromocionMutation,
   useTogglePromocionActivaMutation,
   usePromoUnidadesEntregadasQuery,
+  usePromoAcumuladoresMapQuery,
 } from '../../hooks/queries'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -44,6 +45,7 @@ export default function PromocionesContainer(): React.ReactElement {
   const { data: promociones = [], isLoading } = usePromocionesListQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: unidadesEntregadas } = usePromoUnidadesEntregadasQuery()
+  const { data: acumuladoresPorPromo } = usePromoAcumuladoresMapQuery()
 
   const productoNombres = useMemo(() => {
     const m = new Map<string, string>()
@@ -125,6 +127,7 @@ export default function PromocionesContainer(): React.ReactElement {
           promociones={promociones}
           productoNombres={productoNombres}
           unidadesEntregadas={unidadesEntregadas}
+          acumuladoresPorPromo={acumuladoresPorPromo}
           loading={isLoading}
           onNuevaPromocion={handleNuevaPromocion}
           onEditarPromocion={handleEditarPromocion}

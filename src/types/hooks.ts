@@ -981,6 +981,8 @@ export interface PedidoItemSustitucionDB {
   cantidad_original: number;
   cantidad_sustituta: number;
   regalo_mueve_stock_snapshot: boolean | null;
+  /** Contenedor que el admin eligio para el sustituto (modo B). Mig 059. */
+  ajuste_producto_id_nuevo: string | null;
   motivo: string;
   autorizado_por: string;
   sucursal_id: number;
@@ -993,7 +995,27 @@ export interface SustituirRegaloInput {
   productoNuevoId: string;
   cantidadNueva: number;  // puede ser fraccion
   motivo: string;
+  /** Contenedor del producto sustituto (modo B). Default: el ajuste_producto_id
+   *  de la promo original. Si NULL/undefined: el sustituto no acumula bloque. */
+  ajusteProductoIdNuevo?: string | null;
   clientRequestId?: string;
+}
+
+/**
+ * Acumulador por (promo, producto regalado, sucursal). Una promo modo B
+ * puede tener varios acumuladores cuando admin sustituye regalos. Mig 059.
+ */
+export interface PromoAcumuladorDB {
+  id: string;
+  promocion_id: string;
+  producto_regalo_id: string;
+  ajuste_producto_id: string | null;
+  unidades_por_bloque: number | null;
+  stock_por_bloque: number | null;
+  usos_pendientes: number;
+  sucursal_id: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SustituirRegaloResult {

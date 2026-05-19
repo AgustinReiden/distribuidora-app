@@ -20,6 +20,7 @@ async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRe
     p_producto_nuevo_id: input.productoNuevoId,
     p_cantidad_nueva: input.cantidadNueva,
     p_motivo: input.motivo,
+    p_ajuste_producto_id_nuevo: input.ajusteProductoIdNuevo ?? null,
     p_client_request_id: clientRequestId,
   })
   if (error) throw error
