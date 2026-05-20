@@ -22,6 +22,7 @@ vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
   usePromocionesListQuery: () => ({ data: [], isLoading: false }),
+  usePedidoSustitucionesQuery: () => ({ data: [], isLoading: false }),
 }))
 
 // Mock formatPrecio (preserve fechaLocalISO since usePromocionesQuery uses it indirectly)

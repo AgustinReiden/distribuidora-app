@@ -7,7 +7,7 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
-import { usePromocionesListQuery } from '../../hooks/queries/usePromocionesQuery';
+import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import type { PedidoDB, ProductoDB, PedidoItemDB } from '../../types';
 
@@ -137,6 +137,28 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return m;
   }, [promociones]);
 
+  // Sustituciones de regalo del pedido (mig 058/059/060). Cuando el resolver
+  // de promos regenera una bonificacion con el producto original, mapeamos
+  // al sustituto vigente para no pisar la decision del admin al guardar
+  // (defensa en profundidad junto al trigger SQL trg_aplicar_sustituciones_regalo).
+  const { data: sustituciones = [] } = usePedidoSustitucionesQuery(pedido?.id);
+  // (promocion_id, producto_original_id) -> { producto_sustituto_id, cantidad_sustituta }
+  const sustitucionMap = useMemo(() => {
+    const m = new Map<string, { productoSustitutoId: string; cantidadSustituta: number }>();
+    // Como las sustituciones vienen ordenadas DESC por created_at, la primera
+    // entrada para cada (promo, original) gana (la mas reciente).
+    for (const s of sustituciones) {
+      const key = `${s.promocion_id ?? 'null'}|${s.producto_original_id}`;
+      if (!m.has(key)) {
+        m.set(key, {
+          productoSustitutoId: String(s.producto_sustituto_id),
+          cantidadSustituta: Number(s.cantidad_sustituta),
+        });
+      }
+    }
+    return m;
+  }, [sustituciones]);
+
   // Inicializar items del pedido — sólo no-bonificaciones.
   // Las bonificaciones se recalculan reactivamente a partir del estado no-bonif
   // vía usePromocionPedido (ver abajo). Así, editar cantidades, agregar o
@@ -205,21 +227,33 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return map;
   }, [itemsFinales, items]);
 
-  // Bonificaciones calculadas para mostrar como filas read-only
+  // Bonificaciones calculadas para mostrar como filas read-only.
+  // IMPORTANTE: aplicamos el mapping de sustituciones para que las
+  // bonificaciones reflejen el producto sustituido (no el original) — sino
+  // al guardar el modal, actualizar_pedido_items recibiria el producto
+  // original y pisaria la sustitucion (el trigger SQL es safety net pero
+  // queremos consistencia visual y al guardar).
   const bonificacionesCalculadas = useMemo(() => {
     return itemsFinales
       .filter(i => i.esBonificacion)
       .map(bonif => {
-        const producto = productos.find(p => String(p.id) === String(bonif.productoId));
+        const promoIdStr = String(bonif.promoId ?? 'null');
+        const origIdStr = String(bonif.productoId);
+        const key = `${promoIdStr}|${origIdStr}`;
+        const sub = sustitucionMap.get(key);
+        const productoIdFinal = sub ? sub.productoSustitutoId : origIdStr;
+        const cantidadFinal = sub ? sub.cantidadSustituta : bonif.cantidad;
+        const producto = productos.find(p => String(p.id) === productoIdFinal);
         return {
-          productoId: String(bonif.productoId),
+          productoId: productoIdFinal,
           nombre: producto?.nombre || bonif.promoNombre || 'Regalo',
-          cantidad: bonif.cantidad,
+          cantidad: cantidadFinal,
           promoNombre: bonif.promoNombre,
           promocionId: bonif.promoId,
+          esSustituido: !!sub,
         };
       });
-  }, [itemsFinales, productos]);
+  }, [itemsFinales, productos, sustitucionMap]);
 
   // Detectar si las bonificaciones recalculadas difieren de las que estaban
   // guardadas en el pedido. Si difieren, hay que marcar "modificado" para que

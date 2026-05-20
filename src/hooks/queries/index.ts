@@ -202,6 +202,7 @@ export {
   useAjustarStockPromoMutation,
   usePromoUnidadesEntregadasQuery,
   usePromoAcumuladoresMapQuery,
+  usePedidoSustitucionesQuery,
 } from './usePromocionesQuery'
 export { useSimularSalvedadPromoImpactoQuery } from './useSimularSalvedadQuery'
 export type { PromoImpactoSalvedad } from './useSimularSalvedadQuery'

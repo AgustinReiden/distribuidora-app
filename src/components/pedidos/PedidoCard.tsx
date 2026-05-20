@@ -8,7 +8,7 @@
  * Esto permite una migración gradual hacia el uso de contextos.
  */
 import React, { useState, memo, useContext } from 'react';
-import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle, Gift } from 'lucide-react';
+import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle, Gift, RefreshCw } from 'lucide-react';
 const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda' } = {}) => {
   const mod = await import('../../lib/pdfExport') as any
   return mod.generarReciboPedido(pedido, _empresa, options)
@@ -518,15 +518,36 @@ function PedidoCard({
               {pedido.items?.map(item => {
                 const salvedadItem = pedido.salvedades?.find(s => String(s.producto_id) === String(item.producto_id));
                 const cantidadOriginal = salvedadItem ? item.cantidad + salvedadItem.cantidad_afectada : item.cantidad;
+                // Item con sustitucion de regalo: la marca queda como
+                // "[Sustituido por: X]" en descripcion_regalo (lo agrega
+                // sustituir_regalo_pedido y el trigger pre-insert). Para la
+                // tarjeta queremos mostrar el nombre actual del producto +
+                // un badge "Sustituido" pequeno + tooltip con la descripcion.
+                const esSustituido = Boolean(
+                  item.es_bonificacion
+                  && item.descripcion_regalo
+                  && item.descripcion_regalo.includes('[Sustituido por:')
+                );
                 return (
                 <div key={item.id} className={`flex justify-between items-center py-2 border-b dark:border-gray-600 last:border-0 ${salvedadItem ? 'border-l-2 border-l-amber-400 pl-2 -ml-1' : ''} ${item.es_bonificacion ? 'bg-green-50 dark:bg-green-900/20 rounded px-2 -mx-1' : ''}`}>
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                       {item.es_bonificacion && <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />}
-                      {item.es_bonificacion && item.descripcion_regalo
-                        ? item.descripcion_regalo
+                      {item.es_bonificacion
+                        ? (esSustituido
+                            ? (item.producto?.nombre || 'Regalo sustituido')
+                            : (item.descripcion_regalo || item.producto?.nombre || 'Regalo'))
                         : (item.producto?.nombre || 'Producto')}
                       {item.es_bonificacion && <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full font-medium">REGALO</span>}
+                      {esSustituido && (
+                        <span
+                          className="inline-flex items-center gap-1 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded-full font-medium"
+                          title={item.descripcion_regalo || ''}
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Sustituido
+                        </span>
+                      )}
                       {salvedadItem && (
                         <span className="text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-medium">
                           {MOTIVOS_SALVEDAD_LABELS[salvedadItem.motivo as MotivoSalvedad] || salvedadItem.motivo}
