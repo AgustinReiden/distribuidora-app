@@ -11,6 +11,7 @@ import type {
   PromocionProductoDB,
   PromocionReglaDB,
   PromoAcumuladorDB,
+  PedidoItemSustitucionDB,
 } from '../../types'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 
@@ -466,6 +467,35 @@ export function usePromoUnidadesEntregadasQuery() {
     },
     enabled: !!currentSucursalId,
     staleTime: 60 * 1000,
+  })
+}
+
+/**
+ * Hook que trae las sustituciones de regalos de UN pedido. Devuelve un
+ * array de PedidoItemSustitucionDB filtrado por pedido_id. Util en
+ * ModalEditarPedido para mostrar el regalo correcto y para que el resolver
+ * de bonificaciones aplique el reemplazo antes de mandar a
+ * actualizar_pedido_items (defensa en profundidad junto al trigger SQL).
+ */
+export function usePedidoSustitucionesQuery(pedidoId: string | number | null | undefined) {
+  const { currentSucursalId } = useSucursal()
+  const key = pedidoId == null ? '' : String(pedidoId)
+  return useQuery({
+    queryKey: ['pedido-sustituciones', currentSucursalId, key] as const,
+    queryFn: async (): Promise<PedidoItemSustitucionDB[]> => {
+      const { data, error } = await supabase
+        .from('pedido_item_sustituciones')
+        .select('*')
+        .eq('pedido_id', key)
+        .order('created_at', { ascending: false })
+      if (error) {
+        if (error.message.includes('does not exist')) return []
+        throw error
+      }
+      return (data || []) as PedidoItemSustitucionDB[]
+    },
+    enabled: !!pedidoId && !!currentSucursalId,
+    staleTime: 30 * 1000,
   })
 }
 
