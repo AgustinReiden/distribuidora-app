@@ -230,6 +230,7 @@ export default function PedidosContainer(): React.ReactElement {
     fecha: fechaLocalISO(),
     tipoFactura: 'ZZ' as 'ZZ' | 'FC',
     fechaEntregaProgramada: undefined as string | undefined,
+    preventistaId: undefined as string | undefined,
   })
 
   const resetNuevoPedido = useCallback(() => {
@@ -239,6 +240,7 @@ export default function PedidosContainer(): React.ReactElement {
       fecha: fechaLocalISO(),
       tipoFactura: 'ZZ' as 'ZZ' | 'FC',
       fechaEntregaProgramada: undefined,
+      preventistaId: undefined,
     })
   }, [])
 
@@ -657,6 +659,31 @@ export default function PedidosContainer(): React.ReactElement {
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
   }, [pedidoEditando, user, queryClient])
 
+  // Reasignar el preventista del pedido en edicion. Solo admin (la UI ya
+  // pasa el flag canEditPreventista={isAdmin}). El RPC tambien valida.
+  const handleCambiarPreventistaPedido = useCallback(async (nuevoPreventistaId: string) => {
+    if (!pedidoEditando) return
+    try {
+      const { data, error } = await supabase.rpc('actualizar_preventista_pedido', {
+        p_pedido_id: pedidoEditando.id,
+        p_nuevo_preventista_id: nuevoPreventistaId,
+      })
+      if (error) throw error
+      const response = data as { success: boolean; error?: string }
+      if (!response?.success) {
+        throw new Error(response?.error || 'Error al cambiar preventista')
+      }
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      // Actualizar localmente el pedido en edicion para reflejar el cambio
+      // sin esperar al refetch.
+      setPedidoEditando(prev => prev ? { ...prev, usuario_id: nuevoPreventistaId } as PedidoDB : prev)
+      notify.success('Preventista actualizado')
+    } catch (e) {
+      notify.error((e as Error).message || 'Error al cambiar preventista')
+      throw e
+    }
+  }, [pedidoEditando, queryClient, notify])
+
   // ===========================================================================
   // ModalPagoPedido handlers (registrar/anular pagos sobre un pedido)
   // ===========================================================================
@@ -854,6 +881,7 @@ export default function PedidosContainer(): React.ReactElement {
         totalNeto,
         totalIva,
         fechaEntregaProgramada: nuevoPedido.fechaEntregaProgramada,
+        preventistaId: nuevoPedido.preventistaId ?? null,
       })
       // Check-in GPS: ya tenemos el resultado capturado (sincrono para
       // preventistas, null para admin). Persistimos directo, sin esperar.
@@ -1218,6 +1246,8 @@ export default function PedidosContainer(): React.ReactElement {
             onFechaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fecha }))}
             onTipoFacturaChange={(tipo: 'ZZ' | 'FC') => setNuevoPedido(prev => ({ ...prev, tipoFactura: tipo }))}
             onFechaEntregaProgramadaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fechaEntregaProgramada: fecha }))}
+            onPreventistaChange={(preventistaId: string) => setNuevoPedido(prev => ({ ...prev, preventistaId }))}
+            currentUserId={user?.id}
             isOffline={!isOnline}
           />
         </Suspense>
@@ -1264,8 +1294,10 @@ export default function PedidosContainer(): React.ReactElement {
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
             }
             canSustituirRegalo={isAdmin || isEncargado}
+            canEditPreventista={isAdmin}
             onSave={handleGuardarEdicion}
             onSaveItems={handleGuardarItemsEdicion}
+            onCambiarPreventista={handleCambiarPreventistaPedido}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}
             guardando={guardando}
           />

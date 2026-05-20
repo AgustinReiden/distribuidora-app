@@ -216,7 +216,8 @@ describe('PedidoService', () => {
         p_items: JSON.stringify(items),
         p_notas: 'Entregar por la tarde',
         p_forma_pago: 'efectivo',
-        p_estado_pago: 'pendiente'
+        p_estado_pago: 'pendiente',
+        p_preventista_id: null
       })
       expect(result).toEqual(createdPedido)
     })

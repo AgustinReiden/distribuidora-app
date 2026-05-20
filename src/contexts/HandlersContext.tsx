@@ -37,6 +37,7 @@ export interface PedidoActionsContext {
   handleFormaPagoChange: (formaPago: string) => void;
   handleEstadoPagoChange: (estadoPago: string) => void;
   handleMontoPagadoChange: (montoPagado: number) => void;
+  handlePreventistaChange: (preventistaId: string) => void;
   handleCrearClienteEnPedido: (nuevoCliente: ClienteFormInput) => Promise<ClienteDB>;
   handleGuardarPedidoConOffline: () => Promise<void>;
 
@@ -184,6 +185,7 @@ interface HandlersProviderProps {
     handleFormaPagoChange: PedidoActionsContext['handleFormaPagoChange'];
     handleEstadoPagoChange: PedidoActionsContext['handleEstadoPagoChange'];
     handleMontoPagadoChange: PedidoActionsContext['handleMontoPagadoChange'];
+    handlePreventistaChange: PedidoActionsContext['handlePreventistaChange'];
     handleCrearClienteEnPedido: PedidoActionsContext['handleCrearClienteEnPedido'];
     handleGuardarPedidoConOffline: PedidoActionsContext['handleGuardarPedidoConOffline'];
     handleMarcarEntregado: PedidoActionsContext['handleMarcarEntregado'];
@@ -261,6 +263,7 @@ export function HandlersProvider({ children, handlers }: HandlersProviderProps):
       handleFormaPagoChange: handlers.handleFormaPagoChange,
       handleEstadoPagoChange: handlers.handleEstadoPagoChange,
       handleMontoPagadoChange: handlers.handleMontoPagadoChange,
+      handlePreventistaChange: handlers.handlePreventistaChange,
       handleCrearClienteEnPedido: handlers.handleCrearClienteEnPedido,
       handleGuardarPedidoConOffline: handlers.handleGuardarPedidoConOffline,
       handleMarcarEntregado: handlers.handleMarcarEntregado,
@@ -286,6 +289,7 @@ export function HandlersProvider({ children, handlers }: HandlersProviderProps):
       handlers.handleFormaPagoChange,
       handlers.handleEstadoPagoChange,
       handlers.handleMontoPagadoChange,
+      handlers.handlePreventistaChange,
       handlers.handleCrearClienteEnPedido,
       handlers.handleGuardarPedidoConOffline,
       handlers.handleMarcarEntregado,

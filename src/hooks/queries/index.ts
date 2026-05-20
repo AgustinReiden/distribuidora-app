@@ -74,6 +74,7 @@ export {
   useUsuariosByRolQuery,
   useTransportistasQuery,
   usePreventistasQuery,
+  usePreventistasAsignablesQuery,
   useActualizarUsuarioMutation,
   useToggleUsuarioActivoMutation,
 } from './useUsuariosQuery'
