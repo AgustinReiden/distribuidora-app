@@ -24,6 +24,7 @@ export const usuariosKeys = {
   byRol: (sucursalId: number | null, rol: string) => [...usuariosKeys.all(sucursalId), 'rol', rol] as const,
   transportistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'transportistas'] as const,
   preventistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistas'] as const,
+  preventistasAsignables: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistasAsignables'] as const,
 }
 
 // Types
@@ -98,6 +99,23 @@ async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]>
     .from('perfiles')
     .select('*, usuario_sucursales!inner(sucursal_id)')
     .eq('rol', 'preventista')
+    .eq('activo', true)
+    .eq('usuario_sucursales.sucursal_id', sucursalId)
+    .order('nombre')
+
+  if (error) throw error
+  return (data as PerfilDB[]) || []
+}
+
+// Lista de usuarios que pueden ser asignados como preventista de un pedido:
+// admin + preventista + preventista_taco. Usada por admin para asignar quien
+// "tomo" el pedido (etiquetas, estadisticas, comisiones).
+async function fetchPreventistasAsignables(sucursalId: number | null): Promise<PerfilDB[]> {
+  if (!sucursalId) return []
+  const { data, error } = await supabase
+    .from('perfiles')
+    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .in('rol', ['admin', 'preventista', 'preventista_taco'])
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
@@ -198,6 +216,20 @@ export function usePreventistasQuery() {
 }
 
 /**
+ * Hook para obtener todos los usuarios que pueden ser asignados como
+ * preventista de un pedido (admin + preventista + preventista_taco activos).
+ */
+export function usePreventistasAsignablesQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: usuariosKeys.preventistasAsignables(currentSucursalId),
+    queryFn: () => fetchPreventistasAsignables(currentSucursalId),
+    enabled: !!currentSucursalId,
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+/**
  * Hook para actualizar un usuario
  */
 export function useActualizarUsuarioMutation() {
@@ -220,6 +252,7 @@ export function useActualizarUsuarioMutation() {
       }
       queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistasAsignables(currentSucursalId) })
     },
   })
 }
@@ -241,6 +274,7 @@ export function useToggleUsuarioActivoMutation() {
       })
       queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistasAsignables(currentSucursalId) })
     },
   })
 }

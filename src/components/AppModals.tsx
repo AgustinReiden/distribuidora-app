@@ -181,6 +181,7 @@ export interface AppModalsHandlers {
   handleFormaPagoChange: (formaPago: string) => void;
   handleEstadoPagoChange: (estadoPago: string) => void;
   handleMontoPagadoChange: (monto: number) => void;
+  handlePreventistaChange: (preventistaId: string) => void;
 
   // Pedido handlers - editing and assignment
   handleAsignarTransportista: (transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
@@ -411,6 +412,8 @@ export default function AppModals({
               onFormaPagoChange={handlers.handleFormaPagoChange}
               onEstadoPagoChange={handlers.handleEstadoPagoChange}
               onMontoPagadoChange={handlers.handleMontoPagadoChange}
+              onPreventistaChange={handlers.handlePreventistaChange}
+              currentUserId={user?.id}
               guardando={guardando}
               isAdmin={isAdmin}
               isPreventista={isPreventista}

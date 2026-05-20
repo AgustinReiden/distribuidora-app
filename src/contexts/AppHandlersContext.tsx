@@ -136,6 +136,7 @@ export function usePedidoHandlersContext() {
     handleFormaPagoChange: handlers.handleFormaPagoChange,
     handleEstadoPagoChange: handlers.handleEstadoPagoChange,
     handleMontoPagadoChange: handlers.handleMontoPagadoChange,
+    handlePreventistaChange: handlers.handlePreventistaChange,
     handleCrearClienteEnPedido: handlers.handleCrearClienteEnPedido,
     handleGuardarPedidoConOffline: handlers.handleGuardarPedidoConOffline,
     handleMarcarEntregado: handlers.handleMarcarEntregado,

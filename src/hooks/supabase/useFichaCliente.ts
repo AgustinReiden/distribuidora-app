@@ -39,7 +39,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // Query ligera: todos los pedidos del cliente (sólo columnas necesarias para stats)
       const { data: todosLiviano, error: errorLiv } = await supabase
         .from('pedidos')
-        .select('id, total, estado_pago, created_at')
+        .select('id, total, estado, estado_pago, created_at')
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false })
       if (errorLiv) throw errorLiv
@@ -56,10 +56,14 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
-      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'total' | 'estado_pago' | 'created_at'>>
-      const totalCompras = pedidosLivianos.reduce((s, p) => s + (p.total || 0), 0)
-      const pedidosPagados = pedidosLivianos.filter(p => p.estado_pago === 'pagado')
-      const pedidosPendientes = pedidosLivianos.filter(p => p.estado_pago !== 'pagado')
+      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'total' | 'estado' | 'estado_pago' | 'created_at'>>
+      // Cancelados se excluyen de toda la base de cálculo (no son "compras" reales).
+      const pedidosActivos = pedidosLivianos.filter(p => p.estado !== 'cancelado')
+      const totalCompras = pedidosActivos.reduce((s, p) => s + (p.total || 0), 0)
+      const pedidosPagados = pedidosActivos.filter(p => p.estado_pago === 'pagado')
+      // "Pendiente" = pedidos no entregados (lógica de entrega). La deuda se ve en "Saldo".
+      const pedidosSinEntregar = pedidosActivos.filter(p => p.estado !== 'entregado')
+      const montoSinEntregar = pedidosSinEntregar.reduce((s, p) => s + (p.total || 0), 0)
 
       // Fetch pagos from the pagos table (source of truth for payments)
       const { data: pagosCliente } = await supabase
@@ -67,7 +71,6 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         .select('monto')
         .eq('cliente_id', clienteId)
       const totalPagosRegistrados = (pagosCliente || []).reduce((s: number, p: { monto: number }) => s + (p.monto || 0), 0)
-      const totalPendienteReal = totalCompras - totalPagosRegistrados
 
       // Productos favoritos se calculan sobre los últimos 50 pedidos (limitación aceptada)
       const productosFrecuencia: ProductosFrecuenciaMap = {}
@@ -83,28 +86,28 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         .sort((a, b) => b.cantidad - a.cantidad)
         .slice(0, 5)
 
-      const ultimoPedido = pedidosLivianos[0]?.created_at
+      const ultimoPedido = pedidosActivos[0]?.created_at
       const diasDesdeUltimoP = ultimoPedido
         ? Math.floor((new Date().getTime() - new Date(ultimoPedido).getTime()) / (1000 * 60 * 60 * 24))
         : null
 
-      const ticketPromedio = pedidosLivianos.length > 0 ? totalCompras / pedidosLivianos.length : 0
+      const ticketPromedio = pedidosActivos.length > 0 ? totalCompras / pedidosActivos.length : 0
 
       let frecuenciaCompra = 0
-      if (pedidosLivianos.length > 1) {
-        const primerPedido = new Date(pedidosLivianos[pedidosLivianos.length - 1].created_at || 0)
-        const ultimoPedidoDate = new Date(pedidosLivianos[0].created_at || 0)
+      if (pedidosActivos.length > 1) {
+        const primerPedido = new Date(pedidosActivos[pedidosActivos.length - 1].created_at || 0)
+        const ultimoPedidoDate = new Date(pedidosActivos[0].created_at || 0)
         const meses = Math.max(1, (ultimoPedidoDate.getTime() - primerPedido.getTime()) / (1000 * 60 * 60 * 24 * 30))
-        frecuenciaCompra = pedidosLivianos.length / meses
+        frecuenciaCompra = pedidosActivos.length / meses
       }
 
       setEstadisticas({
-        totalPedidos: pedidosLivianos.length,
+        totalPedidos: pedidosActivos.length,
         totalCompras,
         pedidosPagados: pedidosPagados.length,
         montoPagado: totalPagosRegistrados,
-        pedidosPendientes: pedidosPendientes.length,
-        montoPendiente: totalPendienteReal,
+        pedidosPendientes: pedidosSinEntregar.length,
+        montoPendiente: montoSinEntregar,
         ticketPromedio,
         frecuenciaCompra,
         diasDesdeUltimoPedido: diasDesdeUltimoP,

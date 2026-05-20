@@ -54,6 +54,10 @@ interface CrearPedidoInput {
   totalNeto?: number
   totalIva?: number
   fechaEntregaProgramada?: string
+  // Preventista al que se asigna el pedido. Si se omite/iguala a usuarioId,
+  // el RPC usa auth.uid() (comportamiento histórico). Si difiere, el RPC
+  // exige que el actor sea admin (mig 060).
+  preventistaId?: string | null
 }
 
 interface ActualizarEstadoInput {
@@ -317,7 +321,10 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     p_tipo_factura: input.tipoFactura || 'ZZ',
     p_total_neto: input.totalNeto ?? input.total,
     p_total_iva: input.totalIva ?? 0,
-    ...(input.fechaEntregaProgramada ? { p_fecha_entrega_programada: input.fechaEntregaProgramada } : {})
+    ...(input.fechaEntregaProgramada ? { p_fecha_entrega_programada: input.fechaEntregaProgramada } : {}),
+    p_preventista_id: input.preventistaId && input.preventistaId !== input.usuarioId
+      ? input.preventistaId
+      : null
   })
 
   if (error) throw error

@@ -46,6 +46,9 @@ export interface NuevoPedidoState {
   estadoPago?: string;
   montoPagado?: number;
   tipoFactura?: 'ZZ' | 'FC';
+  // Preventista al que se asigna el pedido (pedidos.usuario_id).
+  // Default: user.id del actor. Admin puede setear otro (mig 060).
+  preventistaId?: string;
 }
 
 // =============================================================================
@@ -150,7 +153,8 @@ export interface UsePedidoHandlersProps {
     estadoPago?: string,
     tipoFactura?: 'ZZ' | 'FC',
     totalNeto?: number,
-    totalIva?: number
+    totalIva?: number,
+    preventistaId?: string | null
   ) => Promise<PedidoDB>;
   cambiarEstado: (pedidoId: string, nuevoEstado: string, usuarioId?: string) => Promise<void>;
   asignarTransportista: (pedidoId: string, transportistaId: string | null, marcarListo?: boolean) => Promise<void>;
@@ -210,6 +214,7 @@ export interface UsePedidoHandlersReturn {
   handleTipoFacturaChange: (tipo: 'ZZ' | 'FC') => void;
   handleEstadoPagoChange: (estadoPago: string) => void;
   handleMontoPagadoChange: (montoPagado: number) => void;
+  handlePreventistaChange: (preventistaId: string) => void;
   handleCrearClienteEnPedido: (nuevoCliente: ClienteFormInput) => Promise<ClienteDB>;
   handleGuardarPedidoConOffline: () => Promise<void>;
   // State changes
@@ -362,6 +367,10 @@ export function usePedidoHandlers({
     setNuevoPedido(prev => ({ ...prev, montoPagado }))
   }, [setNuevoPedido])
 
+  const handlePreventistaChange = useCallback((preventistaId: string): void => {
+    setNuevoPedido(prev => ({ ...prev, preventistaId }))
+  }, [setNuevoPedido])
+
   const handleCrearClienteEnPedido = useCallback(async (nuevoCliente: ClienteFormInput): Promise<ClienteDB> => {
     try {
       const cliente = await agregarCliente(nuevoCliente)
@@ -511,7 +520,12 @@ export function usePedidoHandlers({
         nuevoPedido.estadoPago,
         tipoFactura,
         totalNeto,
-        totalIva
+        totalIva,
+        // Si admin cargo un preventista distinto al actor, pasarlo al RPC.
+        // Si es null/igual al actor, el RPC usa p_usuario_id (auth.uid()).
+        nuevoPedido.preventistaId && nuevoPedido.preventistaId !== user?.id
+          ? nuevoPedido.preventistaId
+          : null
       )
 
       if (nuevoPedido.estadoPago === 'parcial' && nuevoPedido.montoPagado && nuevoPedido.montoPagado > 0 && pedidoCreado?.id) {
@@ -782,6 +796,7 @@ export function usePedidoHandlers({
     handleTipoFacturaChange,
     handleEstadoPagoChange,
     handleMontoPagadoChange,
+    handlePreventistaChange,
     handleCrearClienteEnPedido,
     handleGuardarPedidoConOffline,
     // State changes
