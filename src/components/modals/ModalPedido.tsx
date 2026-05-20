@@ -1,10 +1,11 @@
 import { useState, useMemo, memo, useRef } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck } from 'lucide-react';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
+import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
 import GeolocationGate from '../GeolocationGate';
 import type { ProductoDB, ClienteDB } from '../../types';
@@ -28,6 +29,9 @@ export interface NuevoPedidoState {
   fecha?: string;
   tipoFactura?: 'ZZ' | 'FC';
   fechaEntregaProgramada?: string;
+  // Preventista al que se asigna el pedido. Solo admin lo modifica.
+  // Si queda undefined, el RPC asigna al actor (auth.uid()).
+  preventistaId?: string;
 }
 
 /** Datos del cliente a crear */
@@ -98,6 +102,10 @@ export interface ModalPedidoProps {
   onActualizarPrecio?: (productoId: string, precio: number) => void;
   /** Si está offline */
   isOffline?: boolean;
+  /** Callback al cambiar el preventista asignado (solo admin) */
+  onPreventistaChange?: (preventistaId: string) => void;
+  /** ID del usuario actual (default del selector de preventista) */
+  currentUserId?: string;
 }
  
 
@@ -122,8 +130,15 @@ const ModalPedido = memo(function ModalPedido({
   onFechaChange,
   onTipoFacturaChange,
   onFechaEntregaProgramadaChange,
-  onActualizarPrecio
+  onActualizarPrecio,
+  onPreventistaChange,
+  currentUserId
 }: ModalPedidoProps) {
+  // Solo admin puede reasignar preventista al pedido. La query se habilita
+  // condicionalmente para no traer perfiles para preventistas/encargados.
+  const { data: preventistasAsignables = [] } = usePreventistasAsignablesQuery();
+  const preventistaSeleccionado = nuevoPedido.preventistaId ?? currentUserId ?? '';
+
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
@@ -781,6 +796,30 @@ const ModalPedido = memo(function ModalPedido({
                       </select>
                     </div>
                   </div>
+
+                  {/* Preventista asignado (solo admin). Permite que admin
+                      cargue un pedido en nombre de un preventista que lo
+                      tomo en persona pero no lo subio a la app — asi cuenta
+                      en sus etiquetas, estadisticas y comisiones. */}
+                  {isAdmin && preventistasAsignables.length > 0 && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+                        <UserCheck className="w-4 h-4 text-blue-600" />
+                        Preventista asignado
+                      </label>
+                      <select
+                        value={preventistaSeleccionado}
+                        onChange={e => onPreventistaChange?.(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                      >
+                        {preventistasAsignables.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre}{p.id === currentUserId ? ' (vos)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Monto pagado si es pago parcial */}
                   {nuevoPedido.estadoPago === 'parcial' && (

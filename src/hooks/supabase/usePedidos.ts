@@ -118,7 +118,8 @@ export interface UsePedidosHookReturn {
     estadoPago?: string,
     tipoFactura?: 'ZZ' | 'FC',
     totalNeto?: number,
-    totalIva?: number
+    totalIva?: number,
+    preventistaId?: string | null
   ) => Promise<{ id: string }>;
   cambiarEstado: (id: string, nuevoEstado: string) => Promise<void>;
   asignarTransportista: (pedidoId: string, transportistaId: string | null, cambiarEstadoFlag?: boolean) => Promise<void>;
@@ -135,6 +136,7 @@ export interface UsePedidosHookReturn {
   actualizarOrdenEntrega: (ordenOptimizado: OrdenEntregaItem[]) => Promise<void>;
   limpiarOrdenEntrega: (transportistaId: string) => Promise<void>;
   actualizarItemsPedido: (pedidoId: string, items: PedidoItemInput[], usuarioId?: string | null) => Promise<ActualizarItemsRPCResponse>;
+  actualizarPreventistaPedido: (pedidoId: string, nuevoPreventistaId: string) => Promise<void>;
   fetchHistorialPedido: (pedidoId: string) => Promise<PedidoHistorialDB[]>;
   fetchPedidosEliminados: () => Promise<PedidoEliminadoDB[]>;
   filtros: FiltrosPedidosState;
@@ -301,7 +303,8 @@ export function usePedidos(): UsePedidosHookReturn {
     estadoPago: string = 'pendiente',
     tipoFactura: 'ZZ' | 'FC' = 'ZZ',
     totalNeto?: number,
-    totalIva?: number
+    totalIva?: number,
+    preventistaId?: string | null
   ): Promise<{ id: string }> => {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId || item.producto_id,
@@ -325,7 +328,8 @@ export function usePedidos(): UsePedidosHookReturn {
       p_estado_pago: estadoPago || 'pendiente',
       p_tipo_factura: tipoFactura || 'ZZ',
       p_total_neto: totalNeto ?? total,
-      p_total_iva: totalIva ?? 0
+      p_total_iva: totalIva ?? 0,
+      p_preventista_id: preventistaId ?? null
     })
 
     if (error) {
@@ -543,6 +547,26 @@ export function usePedidos(): UsePedidosHookReturn {
     return response
   }
 
+  // Reasigna el preventista (pedidos.usuario_id) de un pedido. Solo admin.
+  // Llama al RPC actualizar_preventista_pedido (mig 060) que valida rol y
+  // registra el cambio en pedido_historial.
+  const actualizarPreventistaPedido = async (
+    pedidoId: string,
+    nuevoPreventistaId: string
+  ): Promise<void> => {
+    const { data, error } = await supabase.rpc('actualizar_preventista_pedido', {
+      p_pedido_id: pedidoId,
+      p_nuevo_preventista_id: nuevoPreventistaId
+    })
+    if (error) throw error
+    const response = data as { success: boolean; error?: string }
+    if (!response?.success) {
+      throw new Error(response?.error || 'Error al actualizar preventista')
+    }
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, usuario_id: nuevoPreventistaId } as PedidoDB : p))
+    await fetchPedidos()
+  }
+
   return {
     pedidos,
     pedidosFiltrados,
@@ -558,6 +582,7 @@ export function usePedidos(): UsePedidosHookReturn {
     actualizarOrdenEntrega,
     limpiarOrdenEntrega,
     actualizarItemsPedido,
+    actualizarPreventistaPedido,
     fetchHistorialPedido,
     fetchPedidosEliminados,
     filtros,

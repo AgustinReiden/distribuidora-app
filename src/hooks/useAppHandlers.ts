@@ -284,6 +284,7 @@ export interface UseAppHandlersReturn {
   handleFormaPagoChange: (formaPago: string) => void;
   handleEstadoPagoChange: (estadoPago: string) => void;
   handleMontoPagadoChange: (montoPagado: number) => void;
+  handlePreventistaChange: (preventistaId: string) => void;
   handleCrearClienteEnPedido: (nuevoCliente: ClienteFormInput) => Promise<ClienteDB>;
   handleGuardarPedidoConOffline: () => Promise<void>;
   handleMarcarEntregado: (pedido: PedidoDB) => void;

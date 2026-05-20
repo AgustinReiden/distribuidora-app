@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, memo, useEffect, useMemo } from 'react';
-import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw } from 'lucide-react';
+import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { formatPrecio } from '../../utils/formatters';
@@ -8,6 +8,7 @@ import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
+import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import type { PedidoDB, ProductoDB, PedidoItemDB } from '../../types';
 
@@ -52,12 +53,16 @@ export interface ModalEditarPedidoProps {
   canEditFechaEntrega?: boolean;
   /** Permite sustituir el producto de un regalo de promo. Default: false. Solo admin/encargado. */
   canSustituirRegalo?: boolean;
+  /** Permite reasignar el preventista del pedido. Default: false. Solo admin. */
+  canEditPreventista?: boolean;
   /** @deprecated usar canEditItems/canEditPrices/canEditFechaEntrega. Mantiene compat. */
   isAdmin?: boolean;
   /** Callback al guardar datos */
   onSave: (data: PedidoSaveData) => void | Promise<void>;
   /** Callback al guardar items */
   onSaveItems?: (items: PedidoEditItem[]) => Promise<void>;
+  /** Callback al cambiar el preventista asignado al pedido (solo admin) */
+  onCambiarPreventista?: (nuevoPreventistaId: string) => Promise<void>;
   /** Callback al cerrar */
   onClose: () => void;
   /** Indica si está guardando */
@@ -71,9 +76,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   canEditPrices,
   canEditFechaEntrega,
   canSustituirRegalo = false,
+  canEditPreventista = false,
   isAdmin = false,
   onSave,
   onSaveItems,
+  onCambiarPreventista,
   onClose,
   guardando
 }: ModalEditarPedidoProps) {
@@ -82,6 +89,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const puedeEditarItems = canEditItems ?? isAdmin;
   const puedeEditarPrecios = canEditPrices ?? isAdmin;
   const puedeEditarFechas = canEditFechaEntrega ?? isAdmin;
+  const puedeEditarPreventista = canEditPreventista;
 
   const [notas, setNotas] = useState<string>(pedido?.notas || "");
   const [fecha, setFecha] = useState<string>(pedido?.fecha || "");
@@ -850,6 +858,26 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         )}
 
+        {/* Preventista asignado — solo admin puede reasignar. Util cuando un
+            preventista tomo el pedido en persona pero no lo cargo en la app:
+            admin lo carga y reasigna para que cuente en sus etiquetas/
+            estadisticas/comisiones. El cambio persiste al instante (RPC
+            atomico) y no espera al boton Guardar.
+
+            Lo extraemos a sub-componente para que la query de preventistas
+            solo se invoque cuando el campo es visible (necesita
+            SucursalProvider en arbol; tests sin provider deben pasar). */}
+        {puedeEditarPreventista && onCambiarPreventista && pedido && (
+          <SelectorPreventistaPedido
+            pedido={pedido}
+            disabled={guardando || pedidoEntregado}
+            onCambiar={onCambiarPreventista}
+          />
+        )}
+        {puedeEditarPreventista && pedidoEntregado && (
+          <p className="text-xs text-gray-500">El pedido ya fue entregado; el preventista no se puede cambiar.</p>
+        )}
+
         {/* Notas */}
         <div>
           <label className="block text-sm font-medium mb-1 dark:text-gray-200">Notas / Observaciones</label>
@@ -920,3 +948,54 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 });
 
 export default ModalEditarPedido;
+
+// =============================================================================
+// SUB-COMPONENTE: selector de preventista del pedido (solo admin)
+// =============================================================================
+
+interface SelectorPreventistaPedidoProps {
+  pedido: PedidoDB;
+  disabled: boolean;
+  onCambiar: (nuevoPreventistaId: string) => Promise<void>;
+}
+
+function SelectorPreventistaPedido({ pedido, disabled, onCambiar }: SelectorPreventistaPedidoProps) {
+  const { data: preventistasAsignables = [] } = usePreventistasAsignablesQuery();
+  const [saving, setSaving] = useState<boolean>(false);
+
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+        <UserCheck className="w-4 h-4 text-blue-600" />
+        Preventista asignado
+      </label>
+      <select
+        value={pedido.usuario_id ?? ''}
+        disabled={saving || disabled}
+        onChange={async (e) => {
+          const nuevo = e.target.value;
+          if (!nuevo || nuevo === pedido.usuario_id) return;
+          setSaving(true);
+          try {
+            await onCambiar(nuevo);
+          } catch {
+            // El caller notifica el error. Solo limpiamos el flag.
+          } finally {
+            setSaving(false);
+          }
+        }}
+        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm disabled:opacity-50"
+      >
+        {/* Si el usuario_id actual no esta en la lista (preventista de otra
+            sucursal, eliminado, etc), igual lo mostramos para no perder el
+            contexto del pedido. */}
+        {pedido.usuario_id && !preventistasAsignables.some(p => p.id === pedido.usuario_id) && (
+          <option value={pedido.usuario_id}>(Actual — fuera de la lista)</option>
+        )}
+        {preventistasAsignables.map(p => (
+          <option key={p.id} value={p.id}>{p.nombre}</option>
+        ))}
+      </select>
+    </div>
+  );
+}

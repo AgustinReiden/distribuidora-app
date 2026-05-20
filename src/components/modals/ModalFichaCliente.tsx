@@ -69,10 +69,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   }, [cliente?.id])
 
   const saldoActual = useMemo((): number => {
+    // Saldo = deuda real (resumenCuenta es la fuente de verdad). montoPendiente
+    // ahora representa pedidos sin entregar, no deuda — no sirve como fallback.
     if (resumenCuenta?.saldo_actual !== undefined) return resumenCuenta.saldo_actual
-    if (!estadisticas) return 0
-    return estadisticas.montoPendiente
-  }, [resumenCuenta, estadisticas])
+    return 0
+  }, [resumenCuenta])
 
   const limiteCredito: number = cliente?.limite_credito || 0
   const creditoDisponible: number = limiteCredito - saldoActual

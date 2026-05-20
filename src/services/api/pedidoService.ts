@@ -147,9 +147,15 @@ class PedidoService extends BaseService<Pedido> {
    * Si falla, es por una razón válida (stock insuficiente, constraint, etc.)
    * y NO se debe intentar crear manualmente.
    *
-   * Parámetros DB: p_cliente_id, p_total, p_usuario_id, p_items, p_notas, p_forma_pago, p_estado_pago
+   * Parámetros DB: p_cliente_id, p_total, p_usuario_id, p_items, p_notas,
+   * p_forma_pago, p_estado_pago, p_preventista_id (opcional, admin only).
    */
-  async crearPedidoCompleto(pedidoData: PedidoData, items: PedidoItemInput[], _descontarStock = true): Promise<Pedido> {
+  async crearPedidoCompleto(
+    pedidoData: PedidoData,
+    items: PedidoItemInput[],
+    _descontarStock = true,
+    preventistaId?: string | null
+  ): Promise<Pedido> {
     return this.rpc<Pedido>('crear_pedido_completo', {
       p_cliente_id: pedidoData.cliente_id,
       p_total: pedidoData.total,
@@ -157,7 +163,20 @@ class PedidoService extends BaseService<Pedido> {
       p_items: JSON.stringify(items),
       p_notas: pedidoData.notas || '',
       p_forma_pago: pedidoData.forma_pago || 'efectivo',
-      p_estado_pago: pedidoData.estado_pago || 'pendiente'
+      p_estado_pago: pedidoData.estado_pago || 'pendiente',
+      p_preventista_id: preventistaId ?? null
+    })
+  }
+
+  /**
+   * Reasigna el preventista (pedidos.usuario_id) de un pedido existente.
+   * Solo admin. Usa la RPC 'actualizar_preventista_pedido' (mig 060) que
+   * valida rol y registra el cambio en pedido_historial.
+   */
+  async actualizarPreventista(pedidoId: string, nuevoPreventistaId: string): Promise<unknown> {
+    return this.rpc('actualizar_preventista_pedido', {
+      p_pedido_id: pedidoId,
+      p_nuevo_preventista_id: nuevoPreventistaId
     })
   }
 
