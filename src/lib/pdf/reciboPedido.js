@@ -29,6 +29,48 @@ const BRAND = {
 }
 
 /**
+ * Agrupa items de bonificacion repetidos por (producto, promocion, descripcion).
+ *
+ * El RPC `crear_pedido_completo` inserta UNA fila por bloque de promo aplicado:
+ * si una promo regala 2 botellas y el cliente compra 3 promos, se generan 3
+ * filas en `pedido_items` con cantidad=2 cada una (mismo producto y promo).
+ *
+ * Para impresion (comanda y recibo A4) queremos verlas sumadas: "6 botellas
+ * (REGALO)" en una sola linea, no "3 x 2 botellas" en tres lineas.
+ *
+ * Los items NO bonificacion se mantienen sin cambios (el reducer del pedido
+ * ya garantiza una fila por producto en pedidos cargados desde la app).
+ *
+ * @param {Array} items - items del pedido (pedido_items)
+ * @returns {Array} items con bonificaciones agrupadas
+ */
+function agruparItemsParaImpresion(items) {
+  if (!items || items.length === 0) return []
+  const noBonif = []
+  const bonifMap = new Map()
+  items.forEach(item => {
+    if (!item.es_bonificacion) {
+      noBonif.push(item)
+      return
+    }
+    const key = [
+      item.producto_id ?? item.producto?.id ?? 'null',
+      item.promocion_id ?? 'null',
+      (item.descripcion_regalo || '').trim()
+    ].join('|')
+    const existing = bonifMap.get(key)
+    if (existing) {
+      existing.cantidad = (existing.cantidad || 0) + (item.cantidad || 0)
+      existing.subtotal = (existing.subtotal || 0) + (item.subtotal || 0)
+    } else {
+      // Copia superficial para no mutar el item original
+      bonifMap.set(key, { ...item, cantidad: item.cantidad || 0, subtotal: item.subtotal || 0 })
+    }
+  })
+  return [...noBonif, ...bonifMap.values()]
+}
+
+/**
  * Genera recibo en formato A4 profesional
  */
 function generarReciboA4(pedido) {
@@ -153,8 +195,8 @@ function generarReciboA4(pedido) {
   doc.text('SUBTOTAL', contentWidth + margin - 5, y, { align: 'right' })
   y += 6
 
-  // Filas de productos
-  const items = pedido.items || []
+  // Filas de productos (bonificaciones repetidas se agrupan en una sola linea)
+  const items = agruparItemsParaImpresion(pedido.items || [])
   items.forEach((item, index) => {
     // Alternar color de fila
     if (index % 2 === 0) {
@@ -320,7 +362,9 @@ function generarReciboA4(pedido) {
  * Calcula la altura dinamica de una comanda para un pedido
  */
 function calcularAlturaComanda(pedido) {
-  const items = pedido.items || []
+  // Usamos la misma agrupacion de bonificaciones que dibujarComanda para que
+  // el alto refleje las lineas reales (sino sobra papel en blanco).
+  const items = agruparItemsParaImpresion(pedido.items || [])
   let height = 40 // header empresa + nro recibo + fecha
   height += 28 // cliente (nombre + direccion 2 lineas + telefono)
   // Reserva extra cuando el nombre puede partirse a 2 lineas (>30 chars
@@ -406,7 +450,9 @@ function dibujarComanda(doc, pedido) {
   y += 4
 
   // === PRODUCTOS ===
-  const items = pedido.items || []
+  // Agrupamos bonificaciones repetidas: 3 filas de 2 unidades de la misma
+  // promo -> una sola linea de 6 unidades.
+  const items = agruparItemsParaImpresion(pedido.items || [])
   setHeaderStyle(doc, 9)
   doc.text('PRODUCTO', margin, y)
   doc.text('SUBT.', ticketWidth - margin, y, { align: 'right' })
