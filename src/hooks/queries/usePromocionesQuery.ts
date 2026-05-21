@@ -500,6 +500,39 @@ export function usePedidoSustitucionesQuery(pedidoId: string | number | null | u
 }
 
 /**
+ * Hook que trae UN acumulador especifico (promo, producto_regalo) para la
+ * sucursal activa. Util en el modal de sustitucion para mostrar el estado
+ * actual de la barra del regalo original ANTES de sustituir, y proyectar
+ * el DESPUES.
+ */
+export function usePromoAcumuladorQuery(
+  promocionId: string | number | null | undefined,
+  productoRegaloId: string | number | null | undefined
+) {
+  const { currentSucursalId } = useSucursal()
+  const pid = promocionId == null ? '' : String(promocionId)
+  const rid = productoRegaloId == null ? '' : String(productoRegaloId)
+  return useQuery({
+    queryKey: [...promocionesKeys.all(currentSucursalId), 'acumulador', pid, rid] as const,
+    queryFn: async (): Promise<PromoAcumuladorDB | null> => {
+      const { data, error } = await supabase
+        .from('promo_acumuladores')
+        .select('*')
+        .eq('promocion_id', pid)
+        .eq('producto_regalo_id', rid)
+        .maybeSingle()
+      if (error) {
+        if (error.message.includes('does not exist')) return null
+        throw error
+      }
+      return (data ?? null) as PromoAcumuladorDB | null
+    },
+    enabled: !!promocionId && !!productoRegaloId && !!currentSucursalId,
+    staleTime: 30 * 1000,
+  })
+}
+
+/**
  * Hook que trae todos los acumuladores de promos (mig 059) de la sucursal
  * activa. Una promo modo B puede tener varios acumuladores cuando admin
  * sustituye regalos. Devuelve un mapa `promocion_id -> PromoAcumuladorDB[]`
