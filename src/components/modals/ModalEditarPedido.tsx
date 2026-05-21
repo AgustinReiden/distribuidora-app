@@ -131,15 +131,20 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     [pedido]
   );
 
-  // Mapa promocion_id -> { regalo_mueve_stock, ajuste_producto_id } para
-  // resolver modo (A/B) y default del contenedor sustituto en el modal.
+  // Mapa promocion_id -> { regalo_mueve_stock, ajuste_producto_id,
+  // unidades_por_bloque } para el modal de sustitucion (modo y barras).
   const { data: promociones = [] } = usePromocionesListQuery();
   const promoInfoMap = useMemo(() => {
-    const m = new Map<string, { mueveStock: boolean; ajusteProductoId: string | null }>();
+    const m = new Map<string, {
+      mueveStock: boolean;
+      ajusteProductoId: string | null;
+      unidadesPorBloque: number | null;
+    }>();
     for (const p of promociones) {
       m.set(String(p.id), {
         mueveStock: Boolean(p.regalo_mueve_stock),
         ajusteProductoId: p.ajuste_producto_id ? String(p.ajuste_producto_id) : null,
+        unidadesPorBloque: p.unidades_por_bloque ?? null,
       });
     }
     return m;
@@ -936,6 +941,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 productoOriginal={sustItemTarget.producto}
                 cantidadOriginal={sustItemTarget.cantidad}
                 regaloMueveStock={info?.mueveStock ?? true}
+                promocionId={sustItemTarget.promocion_id ?? null}
+                unidadesPorBloque={info?.unidadesPorBloque ?? null}
                 ajusteProductoIdOriginal={info?.ajusteProductoId ?? null}
                 onClose={() => setSustItemTarget(null)}
               />

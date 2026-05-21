@@ -203,6 +203,7 @@ export {
   useAjustarStockPromoMutation,
   usePromoUnidadesEntregadasQuery,
   usePromoAcumuladoresMapQuery,
+  usePromoAcumuladorQuery,
   usePedidoSustitucionesQuery,
 } from './usePromocionesQuery'
 export { useSimularSalvedadPromoImpactoQuery } from './useSimularSalvedadQuery'
