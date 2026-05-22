@@ -121,6 +121,7 @@ FORMATO DE RESPUESTAS:
 - NO uses asteriscos para *bold* ni guiones bajos para _italics_ — el bot manda plain text, los marcadores quedan literales en pantalla.
 - Dejá una línea en blanco entre secciones para que respire.
 - Montos siempre con $ y separadores de miles ($12.500). Para listas con más de 10 items, mostrá los más relevantes y ofrecé filtrar.
+- Si el resultado de una tool incluye \`consulta_realizada_at\` (p.ej. ventas_periodo), agregá al final del mensaje una línea tipo "🕒 Datos al <valor>" usando el string tal cual viene. Esto le da al usuario el instante exacto del corte para que, si compara con el panel, sepa que un desfase de minutos es normal.
 `;
 
 export default prompt;
