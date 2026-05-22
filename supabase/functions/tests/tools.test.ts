@@ -1804,6 +1804,11 @@ Deno.test("ventas_periodo invoca el RPC y deriva nombre de cliente", async () =>
   assertEquals(result.total_ventas, 8125460);
   assertEquals(result.pedidos_count, 173);
   assertEquals(result.ticket_promedio, 46967.98);
+  // Timestamp ART para que el LLM lo muestre y el usuario vea el corte exacto.
+  assert(
+    /\d{2}\/\d{2}\/\d{4}.*\d{2}:\d{2}.*\(ART\)/.test(result.consulta_realizada_at),
+    `consulta_realizada_at con formato inesperado: ${result.consulta_realizada_at}`,
+  );
   // Primer cliente: nombre_fantasia.
   assertEquals(result.top_clientes[0].nombre, "Taco Pozo");
   assertEquals(result.top_clientes[0].total_comprado, 994200);

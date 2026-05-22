@@ -240,7 +240,9 @@ async function fetchPedidosPaginated(
     query = query.lte('fecha', filters.fechaHasta)
   }
   if (!filters?.verCancelados && filters?.estado !== 'cancelado') {
-    query = query.neq('estado', 'cancelado')
+    // Alineado con bot_ventas_periodo (mig029): excluye 'cancelado' y 'anulado',
+    // incluye estado IS NULL. `.neq` solo excluía 'cancelado' y descartaba NULL.
+    query = query.or('estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)')
   }
   if (filters?.fechaEntregaProgramada) {
     query = query.eq('fecha_entrega_programada', filters.fechaEntregaProgramada)

@@ -24,6 +24,10 @@ export interface VentasPeriodoResult {
   total_ventas: number;
   pedidos_count: number;
   ticket_promedio: number;
+  // Momento en que se ejecutó el RPC (zona ART). El LLM debe mostrarlo al
+  // final de la respuesta para que el usuario pueda contrastar contra el
+  // panel sabiendo que el panel puede haberse refrescado en otro instante.
+  consulta_realizada_at: string;
   top_clientes: Array<{
     id: number;
     codigo: number | null;
@@ -46,9 +50,12 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
   name: "ventas_periodo",
   description:
     "Resumen de ventas en un rango de fechas (admin/encargado). Devuelve " +
-    "total facturado, cantidad de pedidos, ticket promedio, top clientes y " +
-    "top productos. Las fechas son inclusive en formato YYYY-MM-DD. Filtra " +
-    "por sucursal del bot user. Excluye pedidos cancelados/anulados.",
+    "total facturado, cantidad de pedidos, ticket promedio, top clientes, " +
+    "top productos y el timestamp ART en que se ejecutó la consulta " +
+    "(consulta_realizada_at) para que el usuario pueda contrastar contra el " +
+    "panel sabiendo cuándo se tomó el dato. Las fechas son inclusive en " +
+    "formato YYYY-MM-DD. Filtra por sucursal del bot user. Excluye pedidos " +
+    "cancelados/anulados.",
   parameters: {
     type: "object",
     properties: {
@@ -123,12 +130,23 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
       top_productos: RpcProducto[];
     };
 
+    const consultaRealizadaAt = new Date().toLocaleString("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }) + " (ART)";
+
     return {
       desde: r.desde,
       hasta: r.hasta,
       total_ventas: Number(r.total_ventas ?? 0),
       pedidos_count: Number(r.pedidos_count ?? 0),
       ticket_promedio: Number(r.ticket_promedio ?? 0),
+      consulta_realizada_at: consultaRealizadaAt,
       top_clientes: (r.top_clientes ?? []).map((c) => ({
         id: Number(c.id),
         codigo: c.codigo ?? null,
