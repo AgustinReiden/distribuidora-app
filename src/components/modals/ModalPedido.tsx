@@ -84,6 +84,8 @@ export interface ModalPedidoProps {
   isAdmin?: boolean;
   /** Si es preventista */
   isPreventista?: boolean;
+  /** Si es encargado */
+  isEncargado?: boolean;
   /** Callback al cambiar notas */
   onNotasChange?: (notas: string) => void;
   /** Callback al cambiar forma de pago */
@@ -123,6 +125,7 @@ const ModalPedido = memo(function ModalPedido({
   guardando,
   isAdmin,
   isPreventista,
+  isEncargado,
   onNotasChange,
   onFormaPagoChange,
   onEstadoPagoChange,
@@ -287,7 +290,7 @@ const ModalPedido = memo(function ModalPedido({
           <div>
             <div className="flex justify-between items-center mb-1">
               <label className="block text-sm font-medium dark:text-gray-200">Cliente *</label>
-              {(isAdmin || isPreventista) && (
+              {(isAdmin || isPreventista || isEncargado) && (
                 <button onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); setGpsError(null); setGpsAccuracy(null); }} className="text-sm text-blue-600">
                   {mostrarNuevoCliente ? 'Cancelar' : '+ Nuevo'}
                 </button>

@@ -1239,6 +1239,7 @@ export default function PedidosContainer(): React.ReactElement {
             guardando={guardando}
             isAdmin={isAdmin}
             isPreventista={isPreventista}
+            isEncargado={isEncargado}
             onNotasChange={(notas: string) => setNuevoPedido(prev => ({ ...prev, notas }))}
             onFormaPagoChange={(fp: string) => setNuevoPedido(prev => ({ ...prev, formaPago: fp }))}
             onEstadoPagoChange={(ep: string) => setNuevoPedido(prev => ({ ...prev, estadoPago: ep }))}
