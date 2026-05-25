@@ -162,8 +162,9 @@ export default function ModalTransferencia({
       }
       await onSave(formData)
       onClose()
-    } catch {
-      setError('Error al registrar el envio')
+    } catch (err) {
+      const msg = err instanceof Error && err.message ? err.message : 'Error al registrar el envio'
+      setError(msg)
     } finally {
       setGuardando(false)
     }

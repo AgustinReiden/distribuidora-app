@@ -15,6 +15,7 @@ import {
   useProductosQuery,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { fechaHaceDias, fechaLocalISO } from '../../utils/formatters'
@@ -35,6 +36,7 @@ function LoadingState() {
 
 export default function TransferenciasContainer(): React.ReactElement {
   const { user } = useAuthData()
+  const { currentSucursalId } = useSucursal()
   const notify = useNotification()
 
   // Filtros de fecha + paginacion. Defaults: ultimos 60 dias, pagina 1.
@@ -116,8 +118,26 @@ export default function TransferenciasContainer(): React.ReactElement {
     return nueva
   }, [crearSucursal, notify])
 
+  // Banner defensivo: si la sucursal activa quedo null (ej. localStorage stale
+  // apuntando a una sucursal a la que el usuario perdio acceso),
+  // current_sucursal_id() en la DB devuelve NULL y la RLS oculta todos los
+  // movimientos, incluso los que el mismo usuario creo. Avisamos en vez de
+  // mostrar "No hay movimientos" silenciosamente.
+  const sucursalInvalida = !currentSucursalId
+
   return (
     <>
+      {sucursalInvalida && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <p className="font-medium">No se detecta una sucursal activa.</p>
+          <p className="mt-1 text-xs">
+            Es probable que tu sesion haya quedado apuntando a una sucursal vieja. Cerra
+            sesion y volve a entrar, o cambia de sucursal desde el menu superior.
+            Mientras tanto, el panel mostrara vacio porque la base oculta los movimientos
+            que no pueda asociar a una sucursal autorizada.
+          </p>
+        </div>
+      )}
       <Suspense fallback={<LoadingState />}>
         <VistaTransferencias
           transferencias={transferencias}

@@ -266,6 +266,7 @@ export default function VistaClientes({
               cliente={cliente}
               idx={idx}
               isAdmin={isAdmin}
+              canEditar={isAdmin || isEncargado}
               verSaldo={verSaldo}
               onEditar={() => onEditarCliente(cliente)}
               onEliminar={() => onEliminarCliente(cliente.id)}
@@ -294,13 +295,14 @@ interface ClienteCardProps {
   cliente: ClienteDB;
   idx: number;
   isAdmin: boolean;
+  canEditar: boolean;
   verSaldo: boolean;
   onEditar: () => void;
   onEliminar: () => void;
   onVerFicha?: () => void;
 }
 
-function ClienteCard({ cliente, idx, isAdmin, verSaldo, onEditar, onEliminar, onVerFicha }: ClienteCardProps) {
+function ClienteCard({ cliente, idx, isAdmin, canEditar, verSaldo, onEditar, onEliminar, onVerFicha }: ClienteCardProps) {
   const saldo = cliente.saldo_cuenta ?? 0;
   const saldoColor =
     saldo > 0 ? 'text-rose-700 dark:text-rose-300'
@@ -334,22 +336,26 @@ function ClienteCard({ cliente, idx, isAdmin, verSaldo, onEditar, onEliminar, on
             </span>
           )}
         </div>
-        {isAdmin && (
+        {(canEditar || isAdmin) && (
           <div className="flex gap-0.5 flex-shrink-0">
-            <button
-              onClick={onEditar}
-              className="p-1.5 text-stone-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-md transition-colors"
-              aria-label={`Editar cliente ${cliente.nombre_fantasia}`}
-            >
-              <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-            <button
-              onClick={onEliminar}
-              className="p-1.5 text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-md transition-colors"
-              aria-label={`Eliminar cliente ${cliente.nombre_fantasia}`}
-            >
-              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
+            {canEditar && (
+              <button
+                onClick={onEditar}
+                className="p-1.5 text-stone-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-md transition-colors"
+                aria-label={`Editar cliente ${cliente.nombre_fantasia}`}
+              >
+                <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={onEliminar}
+                className="p-1.5 text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-md transition-colors"
+                aria-label={`Eliminar cliente ${cliente.nombre_fantasia}`}
+              >
+                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            )}
           </div>
         )}
       </div>
