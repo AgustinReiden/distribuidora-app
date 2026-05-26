@@ -46,7 +46,7 @@ export default function TransferenciasContainer(): React.ReactElement {
   const filtros = useMemo(() => ({ desde, hasta, pagina }), [desde, hasta, pagina])
 
   // Queries
-  const { data: transferencias = [], isLoading } = useTransferenciasQuery(filtros)
+  const { data: transferencias = [], isLoading, error: queryError } = useTransferenciasQuery(filtros)
   const { data: sucursales = [] } = useSucursalesQuery()
   const { data: productos = [] } = useProductosQuery()
 
@@ -135,6 +135,14 @@ export default function TransferenciasContainer(): React.ReactElement {
             sesion y volve a entrar, o cambia de sucursal desde el menu superior.
             Mientras tanto, el panel mostrara vacio porque la base oculta los movimientos
             que no pueda asociar a una sucursal autorizada.
+          </p>
+        </div>
+      )}
+      {queryError && !sucursalInvalida && (
+        <div className="mb-4 rounded-lg border border-rose-300 bg-rose-50 dark:bg-rose-900/20 dark:border-rose-800 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
+          <p className="font-medium">No se pudieron cargar los movimientos.</p>
+          <p className="mt-1 text-xs font-mono break-all">
+            {queryError instanceof Error ? queryError.message : String(queryError)}
           </p>
         </div>
       )}
