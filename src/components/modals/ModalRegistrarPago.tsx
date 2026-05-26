@@ -14,13 +14,15 @@ interface FormaPagoOption {
   label: string;
 }
 
+// Este modal cobra saldo pendiente (cuenta corriente). Por eso `cuenta_corriente`
+// y `vale_blanco` no son opciones válidas: no se puede saldar una deuda con
+// otra deuda ni con un vale blanco. Esas formas sí aplican en ModalPagoPedido
+// (al entregar un pedido, donde significan "no me pagó, va a CC" o "me dejó un vale").
 const FORMAS_PAGO: FormaPagoOption[] = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
   { value: 'cheque', label: 'Cheque' },
-  { value: 'tarjeta', label: 'Tarjeta' },
-  { value: 'cuenta_corriente', label: 'Cuenta Corriente' },
-  { value: 'vale_blanco', label: 'Vale Blanco' }
+  { value: 'tarjeta', label: 'Tarjeta' }
 ]
 
 interface PagoData {
@@ -502,24 +504,8 @@ export default function ModalRegistrarPago({
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Forma de Pago
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {FORMAS_PAGO.slice(0, 3).map(fp => (
-                    <button
-                      key={fp.value}
-                      type="button"
-                      onClick={() => setFormaPago(fp.value)}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        formaPago === fp.value
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      {fp.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  {FORMAS_PAGO.slice(3).map(fp => (
+                <div className="grid grid-cols-2 gap-2">
+                  {FORMAS_PAGO.map(fp => (
                     <button
                       key={fp.value}
                       type="button"
