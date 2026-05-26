@@ -88,6 +88,15 @@ export default function GeolocationGate({
   const { state, refetch } = useGeolocationPermission()
   const [requesting, setRequesting] = useState(false)
   const [browser, setBrowser] = useState<Browser>('other')
+  // Override local: si `getCurrentPosition` resuelve con éxito o con cualquier
+  // error que no sea PERMISSION_DENIED, sabemos que el permiso fue otorgado y
+  // dejamos pasar — aunque `navigator.permissions.query` siga reportando
+  // 'prompt'. Es un bug conocido de Chrome Android y otros browsers móviles
+  // donde el estado de Permissions API no se actualiza inmediatamente ni
+  // dispara el evento `change` después de que el usuario aprueba el prompt.
+  // Sin este override, el preventista "activa la ubicación pero no lo deja
+  // pasar" — exactamente el síntoma reportado en campo.
+  const [grantedOverride, setGrantedOverride] = useState(false)
 
   useEffect(() => {
     setBrowser(detectBrowser())
@@ -99,10 +108,19 @@ export default function GeolocationGate({
     navigator.geolocation.getCurrentPosition(
       () => {
         setRequesting(false)
+        setGrantedOverride(true)
         void refetch()
       },
-      () => {
+      (err) => {
         setRequesting(false)
+        // Solo PERMISSION_DENIED indica que el usuario bloqueó el permiso.
+        // Timeout / position_unavailable / otros errores son problemas del
+        // sensor o de cobertura: el permiso SÍ fue otorgado, así que dejamos
+        // pasar para que el flujo de captura al confirmar el pedido capture
+        // motivo de omisión sin trabar al preventista en el gate.
+        if (err.code !== err.PERMISSION_DENIED) {
+          setGrantedOverride(true)
+        }
         void refetch()
       },
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
@@ -110,7 +128,7 @@ export default function GeolocationGate({
   }, [refetch])
 
   if (!enabled) return <>{children}</>
-  if (state === 'granted' || state === 'unsupported') return <>{children}</>
+  if (grantedOverride || state === 'granted' || state === 'unsupported') return <>{children}</>
 
   if (state === 'prompt') {
     return (
