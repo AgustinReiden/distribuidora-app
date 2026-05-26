@@ -333,9 +333,10 @@ type UseServicesResult<T extends ServiceFunctions> = {
 export function useServices<T extends ServiceFunctions>(services: T): UseServicesResult<T> {
   const results = {} as UseServicesResult<T>
 
+  // Callers MUST pasar `services` con keys/orden estables entre renders (ver JSDoc arriba).
   Object.entries(services).forEach(([key, serviceFn]) => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    results[key as keyof T] = useService(serviceFn) as UseServicesResult<T>[keyof T]
+    // react-doctor-disable-next-line react-doctor/rules-of-hooks
+    results[key as keyof T] = useService(serviceFn) as UseServicesResult<T>[keyof T] // eslint-disable-line react-hooks/rules-of-hooks
   })
 
   return results

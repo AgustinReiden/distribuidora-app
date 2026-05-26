@@ -19,7 +19,8 @@
     "check-secrets": "./scripts/check-secrets.sh",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
-    "generate:pwa-assets": "node scripts/generate-pwa-assets.js"
+    "generate:pwa-assets": "node scripts/generate-pwa-assets.js",
+    "doctor": "npx react-doctor@latest"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
@@ -73,7 +74,7 @@
     "@vitest/coverage-v8": "^4.0.17",
     "autoprefixer": "^10.4.23",
     "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-hooks": "7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "fake-indexeddb": "^6.2.5",
     "globals": "^16.5.0",
@@ -81,6 +82,7 @@
     "jsdom": "^27.4.0",
     "lint-staged": "^16.2.7",
     "postcss": "^8.5.6",
+    "react-doctor": "^0.2.8",
     "sharp": "^0.34.5",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",

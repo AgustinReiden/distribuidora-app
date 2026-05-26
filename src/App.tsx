@@ -183,7 +183,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     if (user && perfil) {
       trackFirstAuthenticatedRender(location.pathname || '/')
     }
-  }, [location.pathname, perfil, user])
+  }, [location, perfil, user])
 
   useRealtimeInvalidation({ enabled: isOnline })
 

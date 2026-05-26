@@ -80,20 +80,15 @@ export default function MapaPreventistas({
   }, [isLoaded])
 
   // Re-render de markers + polyline cada vez que cambia la selección o data.
+  // El cleanup limpia markers vía `setMap(null)` (Google Maps libera los listeners
+  // asociados al marker al desasociarlo) y la polyline. No usamos removeListener
+  // explícito porque el ciclo de vida del marker es la unidad atómica.
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
   useEffect(() => {
     if (!mapReady || !mapRef.current) return
     const g = (window.google as unknown as { maps: typeof google.maps } | undefined)?.maps
     if (!g) return
     const map = mapRef.current
-
-    // Limpiar markers y polyline anteriores
-    for (const m of markersRef.current) m.setMap(null)
-    markersRef.current = []
-    if (polylineRef.current) {
-      polylineRef.current.setMap(null)
-      polylineRef.current = null
-    }
-    infoWindowRef.current?.close()
 
     const bounds = new g.LatLngBounds()
     let pointCount = 0
@@ -309,17 +304,17 @@ export default function MapaPreventistas({
       infoWindowRef.current.setContent(html)
       infoWindowRef.current.open(mapRef.current, anchor)
     }
-  }, [mapReady, preventistas, pedidos, visitas, preventistaSelectedId, pedidoSelectedId, onSelectPedido, onSelectPreventista])
 
-  // Cleanup
-  useEffect(() => {
     return () => {
       for (const m of markersRef.current) m.setMap(null)
       markersRef.current = []
-      if (polylineRef.current) polylineRef.current.setMap(null)
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null)
+        polylineRef.current = null
+      }
       infoWindowRef.current?.close()
     }
-  }, [])
+  }, [mapReady, preventistas, pedidos, visitas, preventistaSelectedId, pedidoSelectedId, onSelectPedido, onSelectPreventista])
 
   if (error) {
     return (
