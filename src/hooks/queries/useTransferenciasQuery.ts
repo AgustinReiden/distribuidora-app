@@ -55,12 +55,17 @@ interface FetchTransferenciasOpts {
 
 // Fetch functions
 async function fetchTransferencias(opts: FetchTransferenciasOpts): Promise<TransferenciaDB[]> {
+  // IMPORTANTE: transferencias_stock tiene DOS FK a sucursales (sucursal_id y
+  // tenant_sucursal_id desde mig 057). Sin hint explicito de FK, PostgREST
+  // devuelve "Could not embed because more than one relationship..." y la
+  // tabla se ve vacia. Por eso especificamos !sucursal_id (la contraparte
+  // del movimiento, que es lo que ya espera la vista).
   const { data, error } = await supabase
     .from('transferencias_stock')
     .select(`
       *,
-      sucursal:sucursales(id, nombre),
-      usuario:perfiles(id, nombre)
+      sucursal:sucursales!sucursal_id(id, nombre),
+      usuario:perfiles!usuario_id(id, nombre)
     `)
     .gte('fecha', opts.desde)
     .lte('fecha', opts.hasta)
