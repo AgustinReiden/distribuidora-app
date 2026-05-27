@@ -106,6 +106,29 @@ export default function ModalPromocion({
     )
   }, [productos, busquedaAjusteProd])
 
+  // Salvaguarda: cuando se edita una promo en modo fracción y se cambia el
+  // producto contenedor, alertar si descripcion_regalo (que es lo que imprimen
+  // hoja de ruta y comandas) ya no menciona el producto seleccionado.
+  const productoAjusteSeleccionado = useMemo(
+    () => productos.find(p => String(p.id) === ajusteProductoId),
+    [productos, ajusteProductoId]
+  )
+  const descripcionMencionaProducto = useMemo(() => {
+    if (tipoRegalo !== 'fraccion') return true
+    if (!productoAjusteSeleccionado || !descripcionRegalo.trim()) return true
+    const stoplist = new Set([
+      'manaos', 'botella', 'botellas', 'fardo', 'fardos', 'unidad', 'unidades',
+      'pack', 'packs', 'cajon', 'cajones', 'litro', 'litros', 'lata', 'latas',
+    ])
+    const tokens = productoAjusteSeleccionado.nombre
+      .toLowerCase()
+      .split(/[^a-záéíóúñ]+/i)
+      .filter(t => t.length > 3 && !stoplist.has(t))
+    if (tokens.length === 0) return true
+    const desc = descripcionRegalo.toLowerCase()
+    return tokens.some(t => desc.includes(t))
+  }, [tipoRegalo, productoAjusteSeleccionado, descripcionRegalo])
+
   const handleToggleProducto = (id: string) => {
     setProductoIds(prev => {
       const next = new Set(prev)
@@ -391,6 +414,13 @@ export default function ModalPromocion({
                 placeholder='Ej: 1 botella Manaos Naranja 600cc'
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />
+              {!descripcionMencionaProducto && productoAjusteSeleccionado && (
+                <div className="mt-2 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg text-xs text-amber-800 dark:text-amber-200">
+                  <p>
+                    ⚠ La descripción no menciona <strong>{productoAjusteSeleccionado.nombre}</strong>. Este texto es el que se imprime en hoja de ruta y comandas — si cambiaste el producto, actualizá la descripción para que coincida.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
