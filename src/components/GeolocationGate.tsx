@@ -31,6 +31,13 @@ export interface GeolocationGateProps {
   enabled: boolean
   children: ReactNode
   onCancel?: () => void
+  /**
+   * Permite al preventista saltar el gate cuando el navegador devuelve
+   * PERMISSION_DENIED y no logra desbloquearlo. El pedido se crea igual
+   * (queda gps_status='denied' en la fila). Solo aparece en la pantalla
+   * 'blocked', no en idle.
+   */
+  allowBypass?: boolean
 }
 
 type Browser = 'chrome-android' | 'ios-safari' | 'chrome-desktop' | 'firefox' | 'other'
@@ -91,6 +98,7 @@ export default function GeolocationGate({
   enabled,
   children,
   onCancel,
+  allowBypass = true,
 }: GeolocationGateProps) {
   const [gateState, setGateState] = useState<GateState>('idle')
   const [browser, setBrowser] = useState<Browser>('other')
@@ -197,6 +205,15 @@ export default function GeolocationGate({
         >
           Ya lo activé, reintentar
         </button>
+        {allowBypass && (
+          <button
+            type="button"
+            onClick={() => setGateState('allowed')}
+            className="w-full py-2 text-sm font-medium text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300 underline underline-offset-2"
+          >
+            Continuar sin GPS
+          </button>
+        )}
         {onCancel && (
           <button
             type="button"

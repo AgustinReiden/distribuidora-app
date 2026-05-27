@@ -5,12 +5,13 @@
  * que cargar pedido. Captura GPS y dispara `registrar_visita_cliente` al
  * confirmar.
  *
- * Reglas de geolocalización (post-052):
+ * Reglas de geolocalización (post-052, con escape hatch):
  * - Para preventistas, el modal está envuelto en `<GeolocationGate>` —
- *   si el permiso está `denied`, ven una pantalla bloqueante con
- *   instrucciones y nunca llegan al listado.
- * - Si la captura devuelve `denied` (raza con un cambio de permiso entre
- *   gate y click), bloqueamos y avisamos.
+ *   si el permiso está `denied`, ven la pantalla bloqueante; el gate ofrece
+ *   "Continuar sin GPS" como escape hatch cuando no logran desbloquear.
+ * - Si la captura devuelve `denied` (preventista pasó el gate con bypass o
+ *   permiso revocado entre gate y click), registramos igual con
+ *   gps_status='denied' — no bloqueamos al preventista en el confirmar.
  * - Si devuelve `timeout`/`unavailable`/`error`, abrimos `ModalMotivoSinGps`
  *   pidiendo justificación escrita; sin motivo no se registra.
  * - Admin sigue pudiendo marcar visitas con o sin GPS (flujo histórico).
@@ -134,18 +135,18 @@ export default function ModalMarcarVisita({
         return
       }
 
-      // Preventista — reglas estrictas:
-      if (gps.status === 'denied') {
-        notify.error('Permiso de GPS bloqueado. Activalo desde el navegador y reintentá.')
+      // Preventista:
+      // - 'ok' o 'denied' → registrar visita directo (denied queda en
+      //   gps_status para auditoría; si llegó acá habiendo pasado el gate,
+      //   no lo bloqueamos al confirmar).
+      // - timeout/unavailable/error → ModalMotivoSinGps para justificar.
+      if (gps.status === 'ok' || gps.status === 'denied') {
+        const ok = await persistir(cliente, gps)
+        if (ok) onClose()
         return
       }
-      if (gps.status !== 'ok') {
-        // Pasamos a ModalMotivoSinGps (permanece pendienteId hasta que confirme/cancele).
-        setMotivoPending({ cliente, status: gps.status })
-        return
-      }
-      const ok = await persistir(cliente, gps)
-      if (ok) onClose()
+      // Pasamos a ModalMotivoSinGps (permanece pendienteId hasta que confirme/cancele).
+      setMotivoPending({ cliente, status: gps.status })
     } finally {
       // Si quedó esperando motivo, no liberamos aún para que el listado no quede clickeable.
       if (!motivoPending) setPendienteId(null)
