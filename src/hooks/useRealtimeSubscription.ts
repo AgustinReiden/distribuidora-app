@@ -51,10 +51,14 @@ export function useRealtimeSubscription({
     }
   }, [])
 
+  // El cleanup correcto para Supabase Realtime es `supabase.removeChannel(channel)`,
+  // que desuscribe el canal y limpia todos los listeners internos. react-doctor no
+  // reconoce este patrón como remove de `.on(...)`, por eso suprimimos.
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
   useEffect(() => {
     if (!enabled) {
       unsubscribe()
-      return
+      return () => {}
     }
 
     const channelName = `realtime-${schema}-${table}-${event}`
