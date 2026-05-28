@@ -914,21 +914,20 @@ export default function PedidosContainer(): React.ReactElement {
     }
 
     // Preventista: capturar GPS sincrónicamente antes de crear el pedido.
+    // - 'ok' o 'denied' → crear pedido directo (denied queda registrado en
+    //   gps_status para auditoría; el preventista llegó acá habiendo pasado
+    //   el gate, no lo bloqueamos al confirmar).
+    // - timeout/unavailable/error → ModalMotivoSinGps para justificar.
     const gps = await capturarGps()
-    if (gps.status === 'denied') {
-      notify.error('Permiso de GPS bloqueado. Activalo desde el navegador y reintentá.')
-      setGuardando(false)
+    if (gps.status === 'ok' || gps.status === 'denied') {
+      await ejecutarCreacionPedido(gps)
       return
     }
-    if (gps.status !== 'ok') {
-      // Guardamos el GpsResult y dejamos que el ModalMotivoSinGps maneje el
-      // resto. El botón Confirmar del ModalPedido queda deshabilitado porque
-      // guardando sigue en true hasta que se confirme o cancele el motivo.
-      gpsPendingRef.current = gps
-      setMotivoGpsPending({ status: gps.status })
-      return
-    }
-    await ejecutarCreacionPedido(gps)
+    // Guardamos el GpsResult y dejamos que el ModalMotivoSinGps maneje el
+    // resto. El botón Confirmar del ModalPedido queda deshabilitado porque
+    // guardando sigue en true hasta que se confirme o cancele el motivo.
+    gpsPendingRef.current = gps
+    setMotivoGpsPending({ status: gps.status })
   }, [nuevoPedido, isPreventista, capturarGps, ejecutarCreacionPedido, notify])
 
   const handleConfirmarMotivoGps = useCallback(async (motivo: string) => {
