@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback, ChangeEvent } from 'react';
 import { MapPin, Loader2, X, AlertCircle } from 'lucide-react';
 import { useGoogleMaps } from '../hooks/useGoogleMaps';
+import { preservarAlturaEnDireccion } from '../utils/direccion';
 
 // =============================================================================
 // TYPES
@@ -184,17 +185,12 @@ export const AddressAutocomplete = ({
           const components = (place.address_components as AddressComponent[]) || [];
           let direccion = place.formatted_address || prediction.description;
 
-          // Si Google no devolvió número de calle, intentar extraerlo del input original
+          // Si Google geocodificó a nivel calle (sin street_number), preservar la
+          // altura que tipeó el usuario. NO lo hacemos si Google ya trajo un
+          // número (podría diferir del tipeado y no queremos pisarlo).
           const tieneStreetNumber = components.some(c => c.types.includes('street_number'));
           if (!tieneStreetNumber) {
-            const route = components.find(c => c.types.includes('route'))?.long_name;
-            // Extraer número del input original del usuario (ej: "eudoro araos 2135" → "2135")
-            const numberMatch = originalInput.match(/\b(\d{1,5})\b/);
-            if (route && numberMatch) {
-              const streetNumber = numberMatch[1];
-              // Insertar el número después del nombre de la calle
-              direccion = direccion.replace(route, `${route} ${streetNumber}`);
-            }
+            direccion = preservarAlturaEnDireccion(direccion, originalInput);
           }
 
           const result: AddressSelectResult = {
@@ -211,9 +207,12 @@ export const AddressAutocomplete = ({
           // Crear nuevo session token para la próxima búsqueda
           sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
         } else {
-          // Si falla obtener detalles, al menos guardamos la dirección
+          // Si falla obtener detalles, al menos guardamos la dirección,
+          // preservando la altura tipeada por el usuario.
+          const direccionFallback = preservarAlturaEnDireccion(prediction.description, originalInput);
+          onChange(direccionFallback);
           onSelect({
-            direccion: prediction.description,
+            direccion: direccionFallback,
             latitud: null,
             longitud: null,
             componentes: []
