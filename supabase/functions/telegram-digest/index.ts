@@ -28,6 +28,7 @@
 
 import { serve } from "std/http/server.ts";
 import { getServiceRoleClient } from "../_shared/supabase.ts";
+import { timingSafeEqual } from "../_shared/telegram.ts";
 import { runDigestForAdmin } from "./digest.ts";
 
 interface AdminRow {
@@ -46,7 +47,9 @@ serve(async (req: Request) => {
   }
 
   const auth = req.headers.get("Authorization") ?? "";
-  if (auth !== `Bearer ${serviceKey}`) {
+  // Comparación en tiempo constante (consistencia con telegram-webhook; evita
+  // timing attacks al validar el bearer). P2-6 de la auditoría 2026-05.
+  if (!timingSafeEqual(auth, `Bearer ${serviceKey}`)) {
     return new Response("forbidden", { status: 403 });
   }
 

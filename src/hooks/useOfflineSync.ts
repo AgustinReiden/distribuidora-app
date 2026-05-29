@@ -99,7 +99,12 @@ export interface CrearPedidoFunction {
     descontarStockFn?: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
     notas?: string,
     formaPago?: string,
-    estadoPago?: string
+    estadoPago?: string,
+    tipoFactura?: string,
+    totalNeto?: number,
+    totalIva?: number,
+    preventistaId?: string | null,
+    offlineId?: string | null
   ): Promise<unknown>;
 }
 
@@ -580,7 +585,13 @@ export function useOfflineSync(): UseOfflineSyncReturn {
             descontarStockFn,
             payload.notas as string | undefined,
             payload.formaPago as string | undefined,
-            payload.estadoPago as string | undefined
+            payload.estadoPago as string | undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            // Clave de idempotencia estable por operación encolada (P1-2)
+            `op_${op.id}`
           )
           await markAsCompleted(op.id!)
           sincronizados++
