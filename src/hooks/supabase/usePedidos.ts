@@ -119,7 +119,8 @@ export interface UsePedidosHookReturn {
     tipoFactura?: 'ZZ' | 'FC',
     totalNeto?: number,
     totalIva?: number,
-    preventistaId?: string | null
+    preventistaId?: string | null,
+    offlineId?: string | null
   ) => Promise<{ id: string }>;
   cambiarEstado: (id: string, nuevoEstado: string) => Promise<void>;
   asignarTransportista: (pedidoId: string, transportistaId: string | null, cambiarEstadoFlag?: boolean) => Promise<void>;
@@ -304,7 +305,8 @@ export function usePedidos(): UsePedidosHookReturn {
     tipoFactura: 'ZZ' | 'FC' = 'ZZ',
     totalNeto?: number,
     totalIva?: number,
-    preventistaId?: string | null
+    preventistaId?: string | null,
+    offlineId?: string | null
   ): Promise<{ id: string }> => {
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId || item.producto_id,
@@ -318,7 +320,7 @@ export function usePedidos(): UsePedidosHookReturn {
       ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
     }))
 
-    const { data, error } = await supabase.rpc('crear_pedido_completo', {
+    const { data, error } = await supabase.rpc('crear_pedido_idempotente', {
       p_cliente_id: clienteId,
       p_total: total,
       p_usuario_id: usuarioId,
@@ -329,7 +331,10 @@ export function usePedidos(): UsePedidosHookReturn {
       p_tipo_factura: tipoFactura || 'ZZ',
       p_total_neto: totalNeto ?? total,
       p_total_iva: totalIva ?? 0,
-      p_preventista_id: preventistaId ?? null
+      p_preventista_id: preventistaId ?? null,
+      // Idempotencia: evita pedidos duplicados si el sync reintenta tras un commit
+      // cuya respuesta se perdió. Para creación online directa es null. (P1-2)
+      p_offline_id: offlineId ?? null
     })
 
     if (error) {

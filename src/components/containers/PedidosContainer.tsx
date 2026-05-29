@@ -101,7 +101,7 @@ interface ConfirmConfig {
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
-  const { user, isAdmin, isPreventista, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
+  const { user, isAdmin, isPreventista, isPreventistaTaco, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
   const notify = useNotification()
 
   // Pagination state
@@ -1132,6 +1132,7 @@ export default function PedidosContainer(): React.ReactElement {
           isPreventista={isPreventista}
           isTransportista={isTransportista}
           isEncargado={isEncargado}
+          isPreventistaTaco={isPreventistaTaco}
           userId={user?.id ?? ''}
           clientes={clientes}
           productos={productos}

@@ -25,6 +25,7 @@ import { mostrarMontosEnStats, type PedidoStatKey } from '../../lib/permisos';
 export interface PedidoStatsProps {
   summary: PedidoStatsSummary;
   isEncargado?: boolean;
+  isPreventistaTaco?: boolean;
 }
 
 interface StatItem {
@@ -49,8 +50,9 @@ interface StatItem {
 // COMPONENT
 // =============================================================================
 
-function PedidoStats({ summary, isEncargado }: PedidoStatsProps): React.ReactElement {
-  const rol = isEncargado ? 'encargado' : 'admin';
+function PedidoStats({ summary, isEncargado, isPreventistaTaco }: PedidoStatsProps): React.ReactElement {
+  // El rol determina qué montos se muestran. preventista_taco no ve ningún monto. (P1-5)
+  const rol = isPreventistaTaco ? 'preventista_taco' : isEncargado ? 'encargado' : 'admin';
   const items: StatItem[] = [
     {
       key: 'pendientes',

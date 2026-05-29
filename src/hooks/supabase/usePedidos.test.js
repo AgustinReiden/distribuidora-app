@@ -372,7 +372,7 @@ describe('usePedidos', () => {
       })
 
       expect(createdPedido.id).toBe('nuevo-pedido-1')
-      expect(supabase.rpc).toHaveBeenCalledWith('crear_pedido_completo', expect.objectContaining({
+      expect(supabase.rpc).toHaveBeenCalledWith('crear_pedido_idempotente', expect.objectContaining({
         p_cliente_id: 'cliente-1',
         p_total: 500,
         p_usuario_id: 'user-1'
