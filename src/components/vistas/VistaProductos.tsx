@@ -24,6 +24,8 @@ export interface VistaProductosProps {
   proveedores?: ProveedorDBExtended[];
   loading: boolean;
   isAdmin: boolean;
+  /** admin o encargado: habilita stock bajo + control de stock (Excel). */
+  puedeControlarStock?: boolean;
   onNuevoProducto: () => void;
   onEditarProducto: (producto: ProductoDB) => void;
   onEliminarProducto: (id: string) => void;
@@ -42,6 +44,7 @@ export default function VistaProductos({
   proveedores = [],
   loading,
   isAdmin,
+  puedeControlarStock = false,
   onNuevoProducto,
   onEditarProducto,
   onEliminarProducto,
@@ -116,6 +119,7 @@ export default function VistaProductos({
         actions={
           <ProductoToolbar
             isAdmin={isAdmin}
+            puedeControlarStock={puedeControlarStock}
             productosStockBajoCount={productosStockBajo.length}
             onGestionarCategorias={onGestionarCategorias}
             onCambioProducto={onCambioProducto}

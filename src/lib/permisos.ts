@@ -11,6 +11,15 @@ export function puedeEditarProductos(rol: RolUsuario | null | undefined): boolea
   return rol === 'admin'
 }
 
+/**
+ * Si el rol puede controlar el stock: ver el panel de productos con stock bajo
+ * y descargar la planilla de control de stock (Excel). Operacion de solo
+ * lectura, no implica editar productos. Admin y encargado.
+ */
+export function puedeControlarStock(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado'
+}
+
 export function puedeEditarPreciosPedido(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'
 }

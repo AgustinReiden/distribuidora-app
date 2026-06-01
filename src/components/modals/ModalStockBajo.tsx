@@ -22,8 +22,11 @@ import type { ProductoDB } from '../../types';
 export interface ModalStockBajoProps {
   /** Productos con stock bajo, ya filtrados por el container. */
   productos: ProductoDB[];
-  /** Click en "Editar" de una fila: cierra el modal y abre ModalProducto. */
-  onEditarProducto: (producto: ProductoDB) => void;
+  /**
+   * Click en "Editar" de una fila: cierra el modal y abre ModalProducto.
+   * Si no se provee (ej. rol encargado, solo lectura) no se muestra el botón.
+   */
+  onEditarProducto?: (producto: ProductoDB) => void;
   /** Cerrar el modal. */
   onClose: () => void;
 }
@@ -215,15 +218,17 @@ const ModalStockBajo = memo(function ModalStockBajo({
                     </span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => { onEditarProducto(p); onClose(); }}
-                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-800/40 hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:border-blue-300 hover:-translate-y-px active:translate-y-0 transition-[transform,background-color,border-color] flex-shrink-0"
-                  title={`Editar ${p.nombre}`}
-                >
-                  <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Editar</span>
-                </button>
+                {onEditarProducto && (
+                  <button
+                    type="button"
+                    onClick={() => { onEditarProducto(p); onClose(); }}
+                    className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-800/40 hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:border-blue-300 hover:-translate-y-px active:translate-y-0 transition-[transform,background-color,border-color] flex-shrink-0"
+                    title={`Editar ${p.nombre}`}
+                  >
+                    <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Editar</span>
+                  </button>
+                )}
               </div>
             );
           })
