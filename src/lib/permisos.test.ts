@@ -11,6 +11,7 @@ import {
   puedeAccederPromociones,
   puedeAccederCondicionesMayoristas,
   puedeAccederTransferencias,
+  puedeControlarStock,
   mostrarMontosEnStats,
 } from './permisos'
 import type { RolUsuario } from '@/types'
@@ -51,6 +52,21 @@ describe('permisos por rol', () => {
       expect(puedeAccederDashboard('transportista')).toBe(false)
       expect(puedeAccederDashboard('deposito')).toBe(false)
       expect(puedeAccederDashboard(null)).toBe(false)
+    })
+  })
+
+  describe('puedeControlarStock', () => {
+    it('permite admin y encargado', () => {
+      expect(puedeControlarStock('admin')).toBe(true)
+      expect(puedeControlarStock('encargado')).toBe(true)
+    })
+
+    it('bloquea preventista, transportista, deposito y sin rol', () => {
+      expect(puedeControlarStock('preventista')).toBe(false)
+      expect(puedeControlarStock('transportista')).toBe(false)
+      expect(puedeControlarStock('deposito')).toBe(false)
+      expect(puedeControlarStock(null)).toBe(false)
+      expect(puedeControlarStock(undefined)).toBe(false)
     })
   })
 

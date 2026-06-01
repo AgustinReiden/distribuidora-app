@@ -24,6 +24,12 @@ import { cn } from '../../lib/utils';
 
 export interface ProductoToolbarProps {
   isAdmin: boolean;
+  /**
+   * Si el usuario puede controlar el stock (admin o encargado): habilita el
+   * botón de stock bajo y la descarga del control de stock (Excel), sin
+   * exponer el resto de acciones de catálogo/edición reservadas a admin.
+   */
+  puedeControlarStock?: boolean;
   productosStockBajoCount: number;
   onGestionarCategorias?: () => void;
   onCambioProducto?: () => void;
@@ -147,6 +153,7 @@ function PrimaryNewButton({ onClick, fullWidth = false }: { onClick: () => void;
 
 export default function ProductoToolbar({
   isAdmin,
+  puedeControlarStock = false,
   productosStockBajoCount,
   onGestionarCategorias,
   onCambioProducto,
@@ -159,8 +166,12 @@ export default function ProductoToolbar({
   const hayCatálogo = isAdmin && (
     Boolean(onGestionarCategorias) || Boolean(onCambioProducto) || Boolean(onActualizacionMasivaPrecios)
   );
-  const hayInventario = isAdmin && (Boolean(onControlStock) || Boolean(onVerHistorialMermas));
-  const hayStockBajo = isAdmin;
+  // Control de stock (Excel) lo ve admin y encargado; el historial de mermas
+  // sigue siendo solo admin.
+  const mostrarControlStock = puedeControlarStock && Boolean(onControlStock);
+  const mostrarHistorialMermas = isAdmin && Boolean(onVerHistorialMermas);
+  const hayInventario = mostrarControlStock || mostrarHistorialMermas;
+  const hayStockBajo = puedeControlarStock;
   const hayNuevo = isAdmin && Boolean(onNuevoProducto);
 
   if (!hayCatálogo && !hayInventario && !hayStockBajo && !hayNuevo) {
@@ -195,7 +206,7 @@ export default function ProductoToolbar({
   const inventarioDropdown = hayInventario && (
     <ToolbarDropdown triggerIcon={Package2} label="Inventario" mobileLabel="Inventario">
       <DropdownMenuLabel>Inventario</DropdownMenuLabel>
-      {onControlStock && (
+      {mostrarControlStock && onControlStock && (
         <DropdownMenuItem onSelect={onControlStock}>
           <ClipboardCheck className="w-4 h-4 text-amber-600" />
           <div className="flex flex-col gap-0.5 min-w-0">
@@ -206,7 +217,7 @@ export default function ProductoToolbar({
           </div>
         </DropdownMenuItem>
       )}
-      {onVerHistorialMermas && (
+      {mostrarHistorialMermas && onVerHistorialMermas && (
         <DropdownMenuItem onSelect={onVerHistorialMermas}>
           <TrendingDown className="w-4 h-4 text-rose-600" />
           <span>Historial de mermas</span>

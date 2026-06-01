@@ -19,6 +19,7 @@ import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '.
 import { useCategoriasQuery } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { puedeControlarStock as puedeControlarStockRol } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended } from '../../types'
@@ -51,8 +52,10 @@ interface ConfirmConfig {
 }
 
 export default function ProductosContainer(): React.ReactElement {
-  const { isAdmin } = useAuthData()
+  const { isAdmin, perfil } = useAuthData()
   const puedeCambiarProductos = isAdmin
+  // Stock bajo + control de stock (Excel): admin y encargado.
+  const puedeControlarStock = puedeControlarStockRol(perfil?.rol)
   const notify = useNotification()
 
   // Queries
@@ -256,6 +259,7 @@ export default function ProductosContainer(): React.ReactElement {
           proveedores={proveedores}
           loading={isLoading}
           isAdmin={isAdmin}
+          puedeControlarStock={puedeControlarStock}
           onNuevoProducto={handleNuevoProducto}
           onEditarProducto={handleEditarProducto}
           onEliminarProducto={handleEliminarProducto}
@@ -264,8 +268,8 @@ export default function ProductosContainer(): React.ReactElement {
           onActualizacionMasivaPrecios={handleAbrirActualizacionMasiva}
           onGestionarCategorias={handleGestionarCategorias}
           onCambioProducto={puedeCambiarProductos ? handleAbrirCambioProducto : undefined}
-          onControlStock={handleControlStock}
-          onAbrirStockBajo={handleAbrirStockBajo}
+          onControlStock={puedeControlarStock ? handleControlStock : undefined}
+          onAbrirStockBajo={puedeControlarStock ? handleAbrirStockBajo : undefined}
         />
       </Suspense>
 
@@ -350,7 +354,7 @@ export default function ProductosContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalStockBajo
             productos={productosStockBajo}
-            onEditarProducto={handleEditarDesdeStockBajo}
+            onEditarProducto={isAdmin ? handleEditarDesdeStockBajo : undefined}
             onClose={() => setModalStockBajoOpen(false)}
           />
         </Suspense>
