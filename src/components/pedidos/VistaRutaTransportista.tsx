@@ -43,6 +43,12 @@ export interface VistaRutaTransportistaProps {
     notas: string;
     fecha: string;
   }) => Promise<unknown>;
+  /**
+   * Entregar a cuenta corriente (sin cobrar): marca el pedido como entregado
+   * sin registrar pago, dejando el saldo pendiente. Debe rechazar (throw) si
+   * falla para que el modal quede abierto y permita reintentar.
+   */
+  onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
 }
 
 interface PedidoEnriquecido extends PedidoDB {
@@ -261,7 +267,8 @@ function VistaRutaTransportista({
   clientes,
   productos,
   onRegistrarSalvedad,
-  onRegistrarPago
+  onRegistrarPago,
+  onEntregarSinCobrar
 }: VistaRutaTransportistaProps): React.ReactElement {
   // Estado para modal de salvedad
   const [salvedadModal, setSalvedadModal] = useState<{
@@ -369,6 +376,17 @@ function VistaRutaTransportista({
       onMarcarEntregado(pedido as PedidoDB);
     }
     pagoExitosoRef.current = false;
+  };
+
+  // Entregar a cuenta corriente (sin cobrar): entrega el pedido sin registrar
+  // pago. El saldo queda pendiente (deuda del cliente). Si falla, propaga el
+  // error para que el modal siga abierto y se pueda reintentar.
+  const handleEntregarSinCobrar = async (): Promise<void> => {
+    const pedido = pedidoParaCobrar;
+    if (!pedido || !onEntregarSinCobrar) return;
+    pagoExitosoRef.current = false;
+    await onEntregarSinCobrar(pedido as PedidoDB);
+    setPedidoParaCobrar(null);
   };
 
   const handleReportarSalvedad = (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }): void => {
@@ -511,6 +529,7 @@ function VistaRutaTransportista({
           pedidos={[pedidoParaCobrar as unknown as import('../../types').Pedido]}
           onClose={handleCerrarModalPago}
           onConfirmar={handleConfirmarPago}
+          onEntregarSinCobrar={onEntregarSinCobrar ? handleEntregarSinCobrar : undefined}
         />
       )}
 

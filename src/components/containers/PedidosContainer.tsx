@@ -733,6 +733,21 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pedidoEntregaConPago, cambiarEstado, queryClient, notify])
 
+  // Flujo transportista: "Entregar a cuenta corriente (sin cobrar)" desde el
+  // modal de cobranza. Marca entregado sin registrar pago (el saldo queda
+  // pendiente = deuda del cliente). Repropaga el error para que el modal del
+  // transportista quede abierto y permita reintentar (importante sin red).
+  const handleEntregarSinCobrar = useCallback(async (pedido: PedidoDB) => {
+    try {
+      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      notify.success('Entregado a cuenta corriente (sin cobrar)')
+    } catch (e) {
+      notify.error((e as Error).message)
+      throw e
+    }
+  }, [cambiarEstado, queryClient, notify])
+
   // Modo entrega transportista: "Entregar y registrar pago" → cambia estado y registra pagos.
   // Orden: primero entrega (mas critica), luego pagos. Si falla algun pago, queda
   // entregado y el usuario puede usar "Registrar Pago" desde el dropdown.
@@ -1166,6 +1181,7 @@ export default function PedidosContainer(): React.ReactElement {
           onRegistrarSalvedad={handleRegistrarSalvedadSingle}
           onRegistrarPago={handleRegistrarPagoTransportista}
           onAbrirPagoPedido={handleAbrirRegistrarPago}
+          onEntregarSinCobrar={handleEntregarSinCobrar}
         />
       </Suspense>
 

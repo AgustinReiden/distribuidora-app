@@ -231,11 +231,13 @@ interface CalculosImpuestos {
 }
 
 // Constantes
+// Nota: `cuenta_corriente` ya no se ofrece como forma de pago (no es una forma
+// de pago real). Las compras históricas con ese valor se siguen mostrando bien
+// en ModalDetalleCompra; el mapeo del escaneo de factura lo conserva.
 const FORMAS_PAGO = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
   { value: 'cheque', label: 'Cheque' },
-  { value: 'cuenta_corriente', label: 'Cuenta Corriente' },
   { value: 'tarjeta', label: 'Tarjeta' }
 ]
 

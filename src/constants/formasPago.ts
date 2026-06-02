@@ -18,16 +18,23 @@ export interface FormaPagoMeta {
   color: string
   /** Etiqueta corta para tarjetas con poco espacio */
   short: string
+  /**
+   * Si se puede ELEGIR como forma de pago en los selectores de cobranza/compra.
+   * `cuenta_corriente` no es una forma de pago real (es una venta no cobrada): se
+   * conserva en este set solo para etiquetas y reportes históricos, pero no debe
+   * ofrecerse como opción. `otros` tampoco es seleccionable (bucket de fallback).
+   */
+  seleccionable: boolean
 }
 
 export const FORMAS_PAGO: readonly FormaPagoMeta[] = [
-  { value: 'efectivo', label: 'Efectivo', short: 'Ef.', color: 'emerald' },
-  { value: 'transferencia', label: 'Transferencia', short: 'Transf.', color: 'sky' },
-  { value: 'cheque', label: 'Cheque', short: 'Ch.', color: 'purple' },
-  { value: 'cuenta_corriente', label: 'Cuenta corriente', short: 'Cta. Cte.', color: 'amber' },
-  { value: 'tarjeta', label: 'Tarjeta', short: 'Tj.', color: 'indigo' },
-  { value: 'vale_blanco', label: 'Vale Blanco', short: 'V.B.', color: 'rose' },
-  { value: 'otros', label: 'Otros', short: 'Otros', color: 'slate' }
+  { value: 'efectivo', label: 'Efectivo', short: 'Ef.', color: 'emerald', seleccionable: true },
+  { value: 'transferencia', label: 'Transferencia', short: 'Transf.', color: 'sky', seleccionable: true },
+  { value: 'cheque', label: 'Cheque', short: 'Ch.', color: 'purple', seleccionable: true },
+  { value: 'cuenta_corriente', label: 'Cuenta corriente', short: 'Cta. Cte.', color: 'amber', seleccionable: false },
+  { value: 'tarjeta', label: 'Tarjeta', short: 'Tj.', color: 'indigo', seleccionable: true },
+  { value: 'vale_blanco', label: 'Vale Blanco', short: 'V.B.', color: 'rose', seleccionable: true },
+  { value: 'otros', label: 'Otros', short: 'Otros', color: 'slate', seleccionable: false }
 ] as const
 
 const FORMAS_PAGO_MAP: Record<FormaPago, FormaPagoMeta> = FORMAS_PAGO.reduce(
@@ -50,3 +57,13 @@ export function formaPagoLabel(value: FormaPago | string | null | undefined): st
 }
 
 export const FORMA_PAGO_VALUES: readonly FormaPago[] = FORMAS_PAGO.map((m) => m.value)
+
+/**
+ * Formas de pago que SÍ se pueden elegir en los selectores (cobranza, pedido,
+ * compra). Excluye `cuenta_corriente` (no es una forma de pago: es una venta no
+ * cobrada) y `otros` (bucket de fallback). Usar esto para poblar `<select>`/
+ * botones; usar `FORMAS_PAGO`/`formaPagoLabel` para mostrar valores históricos.
+ */
+export const FORMAS_PAGO_SELECCIONABLES: readonly FormaPagoMeta[] = FORMAS_PAGO.filter(
+  (m) => m.seleccionable,
+)

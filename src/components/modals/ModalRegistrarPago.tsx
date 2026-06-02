@@ -58,6 +58,12 @@ export interface ModalRegistrarPagoProps {
    */
   onConfirmarFIFO?: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
   onGenerarRecibo?: (pago: PagoRegistrado, cliente: Cliente) => void;
+  /**
+   * Si se provee, muestra el botón "Entregar a cuenta corriente (sin cobrar)"
+   * (flujo del transportista al entregar): entrega sin registrar pago. Debe
+   * rechazar (throw) si falla para mantener el modal abierto.
+   */
+  onEntregarSinCobrar?: () => void | Promise<void>;
 }
 
 export default function ModalRegistrarPago({
@@ -67,7 +73,8 @@ export default function ModalRegistrarPago({
   onClose,
   onConfirmar,
   onConfirmarFIFO,
-  onGenerarRecibo
+  onGenerarRecibo,
+  onEntregarSinCobrar
 }: ModalRegistrarPagoProps): React.ReactElement | null {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
@@ -209,6 +216,20 @@ export default function ModalRegistrarPago({
   const handleMontoPreset = (porcentaje: number): void => {
     if (saldoPendiente) {
       setMonto((saldoPendiente * porcentaje / 100).toFixed(2))
+    }
+  }
+
+  const handleEntregarSinCobrar = async (): Promise<void> => {
+    if (!onEntregarSinCobrar) return
+    setError('')
+    setLoading(true)
+    try {
+      await onEntregarSinCobrar()
+    } catch (err) {
+      // El padre ya notifica el error; mantenemos el modal abierto para reintentar.
+      setError(err instanceof Error ? err.message : 'Error al entregar')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -585,28 +606,42 @@ export default function ModalRegistrarPago({
           </div>
 
           {/* Actions */}
-          <div className="flex-shrink-0 flex gap-3 p-4 sm:p-6 pt-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-b-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg font-medium"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={loading || (pagoDividido ? totalDividido <= 0 : !monto)}
-              className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-              ) : (
-                <>
-                  <Check className="w-5 h-5" />
-                  Registrar
-                </>
-              )}
-            </button>
+          <div className="flex-shrink-0 flex flex-col gap-3 p-4 sm:p-6 pt-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-b-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
+            {/* Flujo transportista: entregar dejando el saldo a cuenta corriente,
+                sin registrar pago. Solo aparece si el caller provee el handler. */}
+            {onEntregarSinCobrar && (
+              <button
+                type="button"
+                onClick={() => { void handleEntregarSinCobrar() }}
+                disabled={loading}
+                className="w-full px-4 py-3 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg font-medium disabled:opacity-50"
+              >
+                Entregar a cuenta corriente (sin cobrar)
+              </button>
+            )}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={loading || (pagoDividido ? totalDividido <= 0 : !monto)}
+                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                ) : (
+                  <>
+                    <Check className="w-5 h-5" />
+                    Registrar
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       </div>

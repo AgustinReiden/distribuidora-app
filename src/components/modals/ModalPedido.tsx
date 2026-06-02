@@ -782,7 +782,6 @@ const ModalPedido = memo(function ModalPedido({
                         <option value="efectivo">Efectivo</option>
                         <option value="transferencia">Transferencia</option>
                         <option value="cheque">Cheque</option>
-                        <option value="cuenta_corriente">Cuenta Corriente</option>
                         <option value="tarjeta">Tarjeta</option>
                       </select>
                     </div>
