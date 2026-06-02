@@ -95,6 +95,11 @@ export interface VistaPedidosProps {
   }) => Promise<unknown>;
   /** Handler para abrir ModalPagoPedido desde el dropdown del PedidoCard. */
   onAbrirPagoPedido?: (pedido: PedidoDB) => void;
+  /**
+   * Handler para que el transportista entregue a cuenta corriente (sin cobrar):
+   * marca el pedido como entregado sin registrar pago, dejando el saldo pendiente.
+   */
+  onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
 }
 
 export default function VistaPedidos({
@@ -143,6 +148,7 @@ export default function VistaPedidos({
   onRegistrarSalvedad,
   onRegistrarPago,
   onAbrirPagoPedido,
+  onEntregarSinCobrar,
 }: VistaPedidosProps) {
   // Si es transportista, mostrar vista especial de ruta
   if (isTransportista && !isAdmin && !isPreventista) {
@@ -155,6 +161,7 @@ export default function VistaPedidos({
         productos={productos}
         onRegistrarSalvedad={onRegistrarSalvedad}
         onRegistrarPago={onRegistrarPago}
+        onEntregarSinCobrar={onEntregarSinCobrar}
       />
     );
   }

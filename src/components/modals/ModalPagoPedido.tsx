@@ -21,6 +21,7 @@ import { Loader2, DollarSign, Plus, Trash2, AlertCircle, X } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 import type { PedidoDB, PagoDBWithUsuario } from '../../types'
 
 export interface PagoPedidoPayload {
@@ -57,14 +58,12 @@ interface LineaPago {
   monto: string
 }
 
-const FORMAS_PAGO_OPCIONES: Array<{ value: string; label: string }> = [
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'cuenta_corriente', label: 'Cuenta Corriente' },
-  { value: 'tarjeta', label: 'Tarjeta' },
-  { value: 'vale_blanco', label: 'Vale Blanco' },
-]
+// Opciones de forma de pago seleccionables. `cuenta_corriente` ya no se ofrece:
+// registrar un "pago" en cuenta corriente marcaba el pedido como pagado sin que
+// el cliente pagara. Si el cliente no paga, se usa "Entregar a cuenta corriente
+// (sin cobrar)" (no crea pago, deja saldo pendiente).
+const FORMAS_PAGO_OPCIONES: Array<{ value: string; label: string }> =
+  FORMAS_PAGO_SELECCIONABLES.map(m => ({ value: m.value, label: m.label }))
 
 const ModalPagoPedido = memo(function ModalPagoPedido({
   pedido,
@@ -243,6 +242,11 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                               aria-label="Editar forma de pago"
                               title="Editar forma de pago"
                             >
+                              {/* Pago histórico con forma ya no seleccionable (ej: cuenta_corriente):
+                                  se muestra deshabilitada para no cambiarla en silencio. */}
+                              {p.forma_pago && !FORMAS_PAGO_OPCIONES.some(o => o.value === p.forma_pago) && (
+                                <option value={p.forma_pago} disabled>{getFormaPagoLabel(p.forma_pago)}</option>
+                              )}
                               {FORMAS_PAGO_OPCIONES.map(o => (
                                 <option key={o.value} value={o.value}>{o.label}</option>
                               ))}
@@ -395,7 +399,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center disabled:opacity-50"
           >
             {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Entregar sin pago
+            Entregar a cuenta corriente (sin cobrar)
           </button>
         )}
         {saldoPendiente > 0 && (
