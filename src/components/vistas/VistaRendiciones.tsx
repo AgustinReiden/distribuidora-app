@@ -257,7 +257,12 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                 <div><span className="text-gray-500">Efectivo:</span> <span className="font-medium">{formatMoney(resumen.total_efectivo)}</span></div>
                 <div><span className="text-gray-500">Transferencia:</span> <span className="font-medium">{formatMoney(resumen.total_transferencia)}</span></div>
                 <div><span className="text-gray-500">Cheque:</span> <span className="font-medium">{formatMoney(resumen.total_cheque)}</span></div>
-                <div><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
+                {/* Cuenta corriente como forma de pago está deprecada (ya no se registran pagos así):
+                    solo se muestra para datos históricos con monto, evitando un $0 permanente que confunde.
+                    La cuenta corriente real (cobro de saldos) se ve arriba en la tarjeta "Ctas Ctes". */}
+                {resumen.total_cuenta_corriente > 0 && (
+                  <div><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
+                )}
                 <div><span className="text-gray-500">Tarjeta:</span> <span className="font-medium">{formatMoney(resumen.total_tarjeta)}</span></div>
                 <div><span className="text-gray-500">Vale Blanco:</span> <span className="font-medium">{formatMoney(resumen.total_vale_blanco)}</span></div>
                 <div><span className="text-gray-500">Otros:</span> <span className="font-medium">{formatMoney(resumen.total_otros)}</span></div>
