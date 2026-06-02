@@ -224,6 +224,9 @@ export const pedidoSchema = z.object({
     .array(itemPedidoSchema)
     .min(1, { message: 'Debe agregar al menos un producto' }),
 
+  // `cuenta_corriente` es legacy: ya no se ofrece en la UI (no es una forma de
+  // pago real). Se mantiene en el enum solo para no rechazar la validación al
+  // editar pedidos históricos que ya tienen ese valor.
   forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta', 'vale_blanco'], {
     error: 'Forma de pago inválida'
   }),
@@ -313,6 +316,9 @@ export const compraSchema = z.object({
 
   fecha_compra: z.string().min(1, { message: 'La fecha es obligatoria' }),
 
+  // `cuenta_corriente` es legacy: ya no se ofrece en la UI de compras. Se
+  // mantiene en el enum solo para no rechazar la validación al editar compras
+  // históricas (o valores provenientes del escaneo de factura) que ya lo tengan.
   forma_pago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
     error: 'Forma de pago inválida'
   }),

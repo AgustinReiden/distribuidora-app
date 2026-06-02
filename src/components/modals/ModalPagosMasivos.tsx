@@ -3,7 +3,7 @@ import { Loader2, Search, Calendar, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { usePedidosNoPagadosQuery, useRendicionCerradaQuery } from '../../hooks/queries'
 import { getEstadoPagoColor, getEstadoPagoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
-import { FORMAS_PAGO } from '../../constants/formasPago'
+import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 
 export interface ModalPagosMasivosProps {
   /**
@@ -102,7 +102,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             >
               <option value="">Seleccionar forma de pago...</option>
-              {FORMAS_PAGO.filter(fp => fp.value !== 'otros').map(fp => (
+              {FORMAS_PAGO_SELECCIONABLES.map(fp => (
                 <option key={fp.value} value={fp.value}>{fp.label}</option>
               ))}
             </select>
