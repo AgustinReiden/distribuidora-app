@@ -31,6 +31,12 @@ export interface ClienteDB {
   dias_credito?: number;
   saldo_cuenta?: number;
   descuento_porcentaje?: number;
+  /**
+   * Descuentos por categoría (override del descuento general). N-a-1 via
+   * cliente_descuentos_categoria. Para productos de una categoría con descuento
+   * configurado, este prevalece sobre `descuento_porcentaje`.
+   */
+  descuentos_categoria?: Array<{ categoria: string; descuento_porcentaje: number }>;
   preventista_id?: string | null;
   /**
    * IDs de preventistas asignados (N-a-N via tabla cliente_preventistas).

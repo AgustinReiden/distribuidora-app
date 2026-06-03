@@ -20,36 +20,43 @@ export const clientesKeys = {
 
 type ClienteRow = ClienteDB & {
   cliente_preventistas?: { preventista_id: string }[] | null
+  cliente_descuentos_categoria?: { categoria: string; descuento_porcentaje: number }[] | null
 }
 
-function flattenPreventistaIds(row: ClienteRow): ClienteDB {
-  const { cliente_preventistas, ...rest } = row
+function flattenClienteRow(row: ClienteRow): ClienteDB {
+  const { cliente_preventistas, cliente_descuentos_categoria, ...rest } = row
   return {
     ...rest,
-    preventista_ids: (cliente_preventistas || []).map(cp => cp.preventista_id)
+    preventista_ids: (cliente_preventistas || []).map(cp => cp.preventista_id),
+    descuentos_categoria: (cliente_descuentos_categoria || []).map(d => ({
+      categoria: d.categoria,
+      descuento_porcentaje: Number(d.descuento_porcentaje) || 0,
+    })),
   }
 }
+
+const CLIENTE_SELECT = '*, cliente_preventistas(preventista_id), cliente_descuentos_categoria(categoria, descuento_porcentaje)'
 
 // Fetch functions
 async function fetchClientes(): Promise<ClienteDB[]> {
   const { data, error } = await supabase
     .from('clientes')
-    .select('*, cliente_preventistas(preventista_id)')
+    .select(CLIENTE_SELECT)
     .order('nombre_fantasia')
 
   if (error) throw error
-  return ((data as ClienteRow[]) || []).map(flattenPreventistaIds)
+  return ((data as ClienteRow[]) || []).map(flattenClienteRow)
 }
 
 async function fetchClienteById(id: string): Promise<ClienteDB | null> {
   const { data, error } = await supabase
     .from('clientes')
-    .select('*, cliente_preventistas(preventista_id)')
+    .select(CLIENTE_SELECT)
     .eq('id', id)
     .single()
 
   if (error) throw error
-  return data ? flattenPreventistaIds(data as ClienteRow) : null
+  return data ? flattenClienteRow(data as ClienteRow) : null
 }
 
 /**
@@ -71,6 +78,40 @@ async function replacePreventistaAssignments(
   const rows = preventistaIds.map(pid => ({ cliente_id: clienteId, preventista_id: pid }))
   const { error: insError } = await supabase
     .from('cliente_preventistas')
+    .insert(rows)
+  if (insError) throw insError
+}
+
+/**
+ * Reemplaza los descuentos por categoría de un cliente (delete + insert).
+ * Idempotente. Dedup por categoría normalizada (la última gana) para no chocar
+ * con el UNIQUE (cliente_id, categoria). Filas sin categoría se descartan.
+ */
+async function replaceCategoriaDiscounts(
+  clienteId: string,
+  descuentos: { categoria: string; descuento_porcentaje: number }[]
+): Promise<void> {
+  const { error: delError } = await supabase
+    .from('cliente_descuentos_categoria')
+    .delete()
+    .eq('cliente_id', clienteId)
+  if (delError) throw delError
+
+  const dedup = new Map<string, { cliente_id: string; categoria: string; descuento_porcentaje: number }>()
+  for (const d of descuentos || []) {
+    const categoria = (d.categoria || '').trim()
+    if (!categoria) continue
+    dedup.set(categoria.toUpperCase(), {
+      cliente_id: clienteId,
+      categoria,
+      descuento_porcentaje: d.descuento_porcentaje,
+    })
+  }
+  const rows = [...dedup.values()]
+  if (rows.length === 0) return
+
+  const { error: insError } = await supabase
+    .from('cliente_descuentos_categoria')
     .insert(rows)
   if (insError) throw insError
 }
@@ -122,6 +163,7 @@ interface ClienteCreateInput {
   notas?: string
   preventista_id?: string | null
   preventista_ids?: string[]
+  descuentos_categoria?: { categoria: string; descuento_porcentaje: number }[]
 }
 
 // Mutation functions
@@ -153,7 +195,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     }
   }
 
-  const { preventista_ids, ...clienteFields } = cliente
+  const { preventista_ids, descuentos_categoria, ...clienteFields } = cliente
   const { data, error } = await supabase
     .from('clientes')
     .insert([{
@@ -190,11 +232,16 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     newCliente.preventista_ids = preventista_ids
   }
 
+  if (descuentos_categoria !== undefined) {
+    await replaceCategoriaDiscounts(newCliente.id, descuentos_categoria)
+    newCliente.descuentos_categoria = descuentos_categoria
+  }
+
   return newCliente
 }
 
 async function updateCliente({ id, data: cliente }: { id: string; data: Partial<ClienteCreateInput> }): Promise<ClienteDB> {
-  const { preventista_ids, ...clienteFields } = cliente
+  const { preventista_ids, descuentos_categoria, ...clienteFields } = cliente
 
   // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
   // Solo aplicamos si el campo viene en el patch (Partial), preservando undefined
@@ -217,6 +264,11 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   if (preventista_ids !== undefined) {
     await replacePreventistaAssignments(id, preventista_ids)
     updated.preventista_ids = preventista_ids
+  }
+
+  if (descuentos_categoria !== undefined) {
+    await replaceCategoriaDiscounts(id, descuentos_categoria)
+    updated.descuentos_categoria = descuentos_categoria
   }
 
   return updated

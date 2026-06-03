@@ -249,7 +249,15 @@ export default function ClientesContainer(): React.ReactElement {
       horarios_atencion: data.horarios_atencion || undefined,
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,
-      ...(ids !== undefined ? { preventista_id: ids[0] ?? null, preventista_ids: ids } : {})
+      ...(ids !== undefined ? { preventista_id: ids[0] ?? null, preventista_ids: ids } : {}),
+      // Descuentos por categoría: solo admin puede escribirlos (RLS de
+      // cliente_descuentos_categoria exige es_admin()). Para no-admin omitimos
+      // la clave para que replaceCategoriaDiscounts ni se ejecute.
+      ...(isAdmin ? {
+        descuentos_categoria: data.descuentosPorCategoria
+          .filter(d => d.categoria && d.categoria.trim() !== '')
+          .map(d => ({ categoria: d.categoria.trim(), descuento_porcentaje: d.porcentaje })),
+      } : {})
     }
 
     try {
