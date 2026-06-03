@@ -408,11 +408,93 @@ export async function exportControlStock(
   downloadBuffer(buffer as ArrayBuffer, `Control_Stock_${fecha}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 }
 
+/** Fila parseada de una planilla de control de stock completada. */
+export interface ControlStockRow {
+  codigo: string | null
+  nombre: string | null
+  stockReal: number
+}
+
+/**
+ * Lee una planilla de control de stock COMPLETADA (la que genera
+ * exportControlStock). A diferencia de readExcelFile, esta tolera el layout
+ * real: encabezados en una fila intermedia (busca la que tiene "Stock Real") y
+ * datos debajo.
+ *
+ * REGLA DE SEGURIDAD: solo devuelve filas con "Stock Real" numérico no vacío.
+ * Una celda vacía = ítem no contado = se OMITE (no se ajusta a 0). Así un ítem
+ * que no se controló nunca se pisa.
+ */
+export async function readControlStockPlanilla(file: File | ArrayBuffer): Promise<ControlStockRow[]> {
+  const workbook = new ExcelJS.Workbook()
+  const arrayBuffer = file instanceof File ? await file.arrayBuffer() : file
+  await workbook.xlsx.load(arrayBuffer)
+
+  const ws = workbook.worksheets[0]
+  if (!ws) throw new Error('El archivo no contiene hojas de cálculo')
+
+  const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase()
+  const cellNumber = (v: unknown): unknown => {
+    if (v && typeof v === 'object') {
+      const cv = v as { result?: unknown; text?: string }
+      return cv.result ?? cv.text ?? null
+    }
+    return v
+  }
+
+  // 1. Localizar la fila de encabezados (la que contiene "Stock Real").
+  let headerRowNum = -1
+  const colIndex: { codigo?: number; nombre?: number; stockReal?: number } = {}
+  const maxScan = Math.min(ws.rowCount || 0, 20)
+  for (let r = 1; r <= maxScan; r++) {
+    const row = ws.getRow(r)
+    let tieneStockReal = false
+    row.eachCell((cell) => { if (norm(cell.value).includes('stock real')) tieneStockReal = true })
+    if (!tieneStockReal) continue
+    headerRowNum = r
+    row.eachCell((cell, col) => {
+      const t = norm(cell.value)
+      if (t.includes('stock real') || t === 'real') colIndex.stockReal = col
+      else if (t.includes('cód') || t.includes('cod')) colIndex.codigo = col
+      else if (t.includes('producto') || t === 'nombre') colIndex.nombre = col
+    })
+    break
+  }
+  if (headerRowNum < 0 || colIndex.stockReal == null) {
+    throw new Error('No se encontró la columna "Stock Real". Usá la planilla descargada desde el sistema.')
+  }
+
+  // 2. Leer filas de datos.
+  const out: ControlStockRow[] = []
+  for (let r = headerRowNum + 1; r <= (ws.rowCount || 0); r++) {
+    const row = ws.getRow(r)
+    const realRaw = cellNumber(row.getCell(colIndex.stockReal).value)
+    if (realRaw === null || realRaw === undefined || String(realRaw).trim() === '') continue
+    const num = Number(String(realRaw).replace(',', '.'))
+    if (!Number.isFinite(num)) continue
+
+    const codigoRaw = colIndex.codigo ? cellNumber(row.getCell(colIndex.codigo).value) : null
+    const nombreRaw = colIndex.nombre ? cellNumber(row.getCell(colIndex.nombre).value) : null
+    const codigo = codigoRaw != null ? String(codigoRaw).trim() : null
+    const nombre = nombreRaw != null ? String(nombreRaw).trim() : null
+    // Saltar la fila de TOTALES (sin código ni producto).
+    if (!codigo && !nombre) continue
+
+    out.push({
+      codigo: codigo && codigo !== '-' ? codigo : null,
+      nombre: nombre || null,
+      stockReal: Math.max(0, Math.round(num)),
+    })
+  }
+  return out
+}
+
 export default {
   readExcelFile,
   createAndDownloadExcel,
   createTemplate,
   exportReport,
   createMultiSheetExcel,
-  exportControlStock
+  exportControlStock,
+  readControlStockPlanilla
 }

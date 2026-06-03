@@ -7,6 +7,7 @@
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { calcularNetoVenta } from '../../utils/calculations'
+import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
@@ -245,7 +246,7 @@ export default function PedidosContainer(): React.ReactElement {
   }, [])
 
   // Resolve wholesale prices for current pedido items
-  const { itemsFinales, totalFinal } = usePromocionPedido(nuevoPedido.items)
+  const { itemsFinales } = usePromocionPedido(nuevoPedido.items)
 
   // =========================================================================
   // VistaPedidos handlers
@@ -840,16 +841,15 @@ export default function PedidosContainer(): React.ReactElement {
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
-      // Descuento porcentual del cliente (admin lo precarga en la ficha).
-      // Se aplica DESPUES de promociones/precio mayorista para que el factor
-      // multiplique el precio final por linea. Items bonificacion no se tocan.
+      // Descuento del cliente: general + por categoría (la categoría prevalece).
+      // Se aplica DESPUES de promociones/precio mayorista. Mismo helper que usa
+      // ModalPedido, para que el total guardado == el total mostrado en vivo.
+      // Items bonificacion / precioOverride / precio<=0 no se tocan.
       const clienteSel = clientes.find(c => String(c.id) === String(nuevoPedido.clienteId))
-      const dtoPct = clienteSel?.descuento_porcentaje ?? 0
-      const factorDto = dtoPct > 0 ? 1 - dtoPct / 100 : 1
+      const { items: itemsConDescuento, total: totalConDescuento } = aplicarDescuentoClienteItems(itemsFinales, productos, clienteSel)
       let totalNeto = 0
       let totalIva = 0
-      let totalConDescuento = 0
-      const itemsParaCrear = itemsFinales.map(item => {
+      const itemsParaCrear = itemsConDescuento.map(item => {
         const esBonif = !!item.esBonificacion
         if (esBonif) {
           return {
@@ -864,17 +864,13 @@ export default function PedidosContainer(): React.ReactElement {
         const producto = productos.find(p => String(p.id) === String(item.productoId))
         const pctIva = producto?.porcentaje_iva ?? 21
         const pctImpInt = producto?.impuestos_internos ?? 0
-        const precioConDto = factorDto < 1
-          ? Math.round(item.precioUnitario * factorDto * 100) / 100
-          : item.precioUnitario
-        const desglose = calcularNetoVenta(precioConDto, pctIva, pctImpInt, tipoFactura)
+        const desglose = calcularNetoVenta(item.precioUnitario, pctIva, pctImpInt, tipoFactura)
         totalNeto += desglose.neto * item.cantidad
         totalIva += desglose.iva * item.cantidad
-        totalConDescuento += precioConDto * item.cantidad
         return {
           productoId: String(item.productoId),
           cantidad: item.cantidad,
-          precioUnitario: precioConDto,
+          precioUnitario: item.precioUnitario,
           ...(item.promoId ? { promocionId: item.promoId } : {}),
           neto_unitario: desglose.neto,
           iva_unitario: desglose.iva,
@@ -885,7 +881,7 @@ export default function PedidosContainer(): React.ReactElement {
       const pedidoCreado = await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
-        total: factorDto < 1 ? totalConDescuento : totalFinal,
+        total: totalConDescuento,
         usuarioId: user?.id ?? null,
         notas: nuevoPedido.notas,
         formaPago: nuevoPedido.formaPago,
@@ -911,7 +907,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, totalFinal, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
+  }, [nuevoPedido, itemsFinales, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -1290,6 +1286,7 @@ export default function PedidosContainer(): React.ReactElement {
             pedido={pedidoHistorial}
             historial={historialCambios as Parameters<typeof ModalHistorialPedido>[0]['historial']}
             loading={cargandoHistorial}
+            transportistas={transportistas}
             onClose={() => { setModalHistorialOpen(false); setPedidoHistorial(null) }}
           />
         </Suspense>

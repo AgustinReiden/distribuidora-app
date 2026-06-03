@@ -20,6 +20,16 @@ export function puedeControlarStock(rol: RolUsuario | null | undefined): boolean
   return rol === 'admin' || rol === 'encargado'
 }
 
+/**
+ * Si el rol puede CARGAR la planilla de control de stock (aplicar ajustes que
+ * modifican el stock). Solo admin: si el encargado pudiera cargarla, sería una
+ * vía para editar stock sin permisos. Descargar y ver histórico sí los puede
+ * (ver puedeControlarStock). El RPC aplicar_control_stock revalida es_admin().
+ */
+export function puedeCargarControlStock(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 export function puedeEditarPreciosPedido(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'
 }

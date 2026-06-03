@@ -13,7 +13,7 @@
 import React from 'react';
 import {
   Plus, ChevronDown, Tag, Package2, AlertTriangle,
-  ArrowLeftRight, Percent, ClipboardCheck, TrendingDown,
+  ArrowLeftRight, Percent, ClipboardCheck, TrendingDown, History,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -35,6 +35,7 @@ export interface ProductoToolbarProps {
   onCambioProducto?: () => void;
   onActualizacionMasivaPrecios?: () => void;
   onControlStock?: () => void;
+  onVerAjustesStock?: () => void;
   onVerHistorialMermas?: () => void;
   onAbrirStockBajo?: () => void;
   onNuevoProducto?: () => void;
@@ -159,6 +160,7 @@ export default function ProductoToolbar({
   onCambioProducto,
   onActualizacionMasivaPrecios,
   onControlStock,
+  onVerAjustesStock,
   onVerHistorialMermas,
   onAbrirStockBajo,
   onNuevoProducto,
@@ -169,8 +171,9 @@ export default function ProductoToolbar({
   // Control de stock (Excel) lo ve admin y encargado; el historial de mermas
   // sigue siendo solo admin.
   const mostrarControlStock = puedeControlarStock && Boolean(onControlStock);
+  const mostrarAjustesStock = puedeControlarStock && Boolean(onVerAjustesStock);
   const mostrarHistorialMermas = isAdmin && Boolean(onVerHistorialMermas);
-  const hayInventario = mostrarControlStock || mostrarHistorialMermas;
+  const hayInventario = mostrarControlStock || mostrarAjustesStock || mostrarHistorialMermas;
   const hayStockBajo = puedeControlarStock;
   const hayNuevo = isAdmin && Boolean(onNuevoProducto);
 
@@ -212,7 +215,18 @@ export default function ProductoToolbar({
           <div className="flex flex-col gap-0.5 min-w-0">
             <span className="font-medium">Control de stock</span>
             <span className="text-xs text-stone-500 dark:text-gray-400">
-              Descarga Excel con el inventario actual
+              Descargar o cargar planilla de inventario
+            </span>
+          </div>
+        </DropdownMenuItem>
+      )}
+      {mostrarAjustesStock && onVerAjustesStock && (
+        <DropdownMenuItem onSelect={onVerAjustesStock}>
+          <History className="w-4 h-4 text-indigo-600" />
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="font-medium">Ajustes de stock</span>
+            <span className="text-xs text-stone-500 dark:text-gray-400">
+              Histórico de ajustes por planilla
             </span>
           </div>
         </DropdownMenuItem>

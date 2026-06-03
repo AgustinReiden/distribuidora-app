@@ -35,6 +35,7 @@ export interface VistaProductosProps {
   onGestionarCategorias?: () => void;
   onCambioProducto?: () => void;
   onControlStock?: () => void;
+  onVerAjustesStock?: () => void;
   onAbrirStockBajo?: () => void;
 }
 
@@ -54,6 +55,7 @@ export default function VistaProductos({
   onGestionarCategorias,
   onCambioProducto,
   onControlStock,
+  onVerAjustesStock,
   onAbrirStockBajo,
 }: VistaProductosProps) {
   const [busqueda, setBusqueda] = useState<string>('');
@@ -125,6 +127,7 @@ export default function VistaProductos({
             onCambioProducto={onCambioProducto}
             onActualizacionMasivaPrecios={onActualizacionMasivaPrecios}
             onControlStock={onControlStock}
+            onVerAjustesStock={onVerAjustesStock}
             onVerHistorialMermas={onVerHistorialMermas}
             onAbrirStockBajo={onAbrirStockBajo}
             onNuevoProducto={onNuevoProducto}

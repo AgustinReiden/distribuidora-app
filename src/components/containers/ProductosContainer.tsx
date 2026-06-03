@@ -17,9 +17,10 @@ import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
 import { useCategoriasQuery } from '../../hooks/queries'
+import { useAplicarControlStockMutation } from '../../hooks/queries/useControlStockQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { puedeControlarStock as puedeControlarStockRol } from '../../lib/permisos'
+import { puedeControlarStock as puedeControlarStockRol, puedeCargarControlStock as puedeCargarControlStockRol } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended } from '../../types'
@@ -34,6 +35,8 @@ const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
 const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
 const ModalStockBajo = lazy(() => import('../modals/ModalStockBajo'))
+const ModalControlStock = lazy(() => import('../modals/ModalControlStock'))
+const ModalAjustesStockHistorial = lazy(() => import('../modals/ModalAjustesStockHistorial'))
 
 function LoadingState() {
   return (
@@ -54,8 +57,10 @@ interface ConfirmConfig {
 export default function ProductosContainer(): React.ReactElement {
   const { isAdmin, perfil } = useAuthData()
   const puedeCambiarProductos = isAdmin
-  // Stock bajo + control de stock (Excel): admin y encargado.
+  // Stock bajo + descargar planilla + ver histórico de ajustes: admin y encargado.
   const puedeControlarStock = puedeControlarStockRol(perfil?.rol)
+  // Cargar la planilla (aplicar ajustes que modifican stock): solo admin.
+  const puedeCargarControlStock = puedeCargarControlStockRol(perfil?.rol)
   const notify = useNotification()
 
   // Queries
@@ -71,6 +76,7 @@ export default function ProductosContainer(): React.ReactElement {
   const eliminarProducto = useEliminarProductoMutation()
   const registrarMerma = useRegistrarMermaMutation()
   const registrarCambioProducto = useRegistrarCambioProductoMutation()
+  const aplicarControlStock = useAplicarControlStockMutation()
 
   // Estado de modales
   const [modalProductoOpen, setModalProductoOpen] = useState(false)
@@ -80,6 +86,8 @@ export default function ProductosContainer(): React.ReactElement {
   const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
   const [modalCambioOpen, setModalCambioOpen] = useState(false)
   const [modalStockBajoOpen, setModalStockBajoOpen] = useState(false)
+  const [modalControlStockOpen, setModalControlStockOpen] = useState(false)
+  const [modalAjustesStockOpen, setModalAjustesStockOpen] = useState(false)
 
   // Estado de edición
   const [productoEditando, setProductoEditando] = useState<ProductoDB | null>(null)
@@ -98,6 +106,8 @@ export default function ProductosContainer(): React.ReactElement {
     setModalCategoriasOpen(false)
     setModalCambioOpen(false)
     setModalStockBajoOpen(false)
+    setModalControlStockOpen(false)
+    setModalAjustesStockOpen(false)
     setProductoEditando(null)
     setProductoMerma(null)
     setConfirmConfig({ visible: false })
@@ -172,17 +182,33 @@ export default function ProductosContainer(): React.ReactElement {
     setModalStockBajoOpen(true)
   }, [])
 
-  // Control de stock: descarga Excel con el inventario actual.
-  // Antes vivía inline en VistaProductos; movido al container para que la
-  // toolbar pueda recibirlo como handler simple.
-  const handleControlStock = useCallback(async () => {
-    try {
-      const { exportControlStock } = await import('../../utils/excel')
-      await exportControlStock(productos)
-    } catch {
-      notify.error('Error al exportar el control de stock')
-    }
-  }, [productos, notify])
+  // Control de stock: abre el modal de descarga/carga de planilla. La descarga
+  // (con filtro por categoría, ambos roles) y la carga (aplicar ajustes, solo
+  // admin) viven dentro del modal.
+  const handleControlStock = useCallback(() => {
+    setModalControlStockOpen(true)
+  }, [])
+
+  // Histórico de ajustes de control de stock (agrupado por carga). Ambos roles.
+  const handleVerAjustesStock = useCallback(() => {
+    setModalAjustesStockOpen(true)
+  }, [])
+
+  // Aplica los ajustes de la planilla via RPC (solo admin; la DB revalida).
+  // Devuelve el resumen de la sesión al modal para mostrar el resultado.
+  const handleAplicarControlStock = useCallback(
+    async (ajustes: Array<{ producto_id: string; stock_real: number }>) => {
+      try {
+        const res = await aplicarControlStock.mutateAsync(ajustes)
+        notify.success(`Stock ajustado: ${res.total_items} producto${res.total_items === 1 ? '' : 's'}`)
+        return res
+      } catch (e) {
+        notify.error((e as Error).message || 'Error al aplicar los ajustes de stock')
+        throw e
+      }
+    },
+    [aplicarControlStock, notify]
+  )
 
   // Productos con stock bajo: una sola fuente de verdad. El toolbar usa
   // el count y el modal usa la lista. La fórmula respeta exactamente la
@@ -269,6 +295,7 @@ export default function ProductosContainer(): React.ReactElement {
           onGestionarCategorias={handleGestionarCategorias}
           onCambioProducto={puedeCambiarProductos ? handleAbrirCambioProducto : undefined}
           onControlStock={puedeControlarStock ? handleControlStock : undefined}
+          onVerAjustesStock={puedeControlarStock ? handleVerAjustesStock : undefined}
           onAbrirStockBajo={puedeControlarStock ? handleAbrirStockBajo : undefined}
         />
       </Suspense>
@@ -356,6 +383,29 @@ export default function ProductosContainer(): React.ReactElement {
             productos={productosStockBajo}
             onEditarProducto={isAdmin ? handleEditarDesdeStockBajo : undefined}
             onClose={() => setModalStockBajoOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Control de stock (descargar / cargar planilla) */}
+      {modalControlStockOpen && (
+        <Suspense fallback={null}>
+          <ModalControlStock
+            productos={productos}
+            puedeCargar={puedeCargarControlStock}
+            onAplicar={handleAplicarControlStock}
+            aplicando={aplicarControlStock.isPending}
+            onClose={() => setModalControlStockOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Histórico de ajustes de stock */}
+      {modalAjustesStockOpen && (
+        <Suspense fallback={null}>
+          <ModalAjustesStockHistorial
+            productos={productos}
+            onClose={() => setModalAjustesStockOpen(false)}
           />
         </Suspense>
       )}

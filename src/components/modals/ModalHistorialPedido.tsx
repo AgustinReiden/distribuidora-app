@@ -28,12 +28,22 @@ export interface ModalHistorialPedidoProps {
   historial: HistorialCambio[];
   onClose: () => void;
   loading: boolean;
+  /** Transportistas activos para resolver el UUID guardado en el historial a un nombre legible. */
+  transportistas?: Array<{ id: string; nombre: string }>;
 }
 
 /** Mapa de campos a etiquetas */
 type CampoMapeo = Record<string, string>;
 
-const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading }: ModalHistorialPedidoProps) {
+const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, historial, onClose, loading, transportistas = [] }: ModalHistorialPedidoProps) {
+  // Resuelve el UUID del transportista (guardado como texto en el historial) a
+  // su nombre. 'sin asignar' es el literal que escribe el trigger cuando no hay
+  // transportista. Si no se encuentra (transportista dado de baja), cae al UUID.
+  const resolverTransportista = (valor: string): string => {
+    if (!valor || valor === 'sin asignar') return 'Sin asignar';
+    return transportistas.find(t => String(t.id) === String(valor))?.nombre || valor;
+  };
+
   const formatearCampo = (campo: string): string => {
     const mapeo: CampoMapeo = {
       estado: "Estado",
@@ -50,6 +60,7 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
   };
 
   const formatearValor = (campo: string, valor: string): string => {
+    if (campo === "transportista_id") return resolverTransportista(valor);
     if (campo === "total") return formatPrecio(parsePrecio(valor));
     if (campo === "estado") {
       const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparacion", asignado: "En camino", entregado: "Entregado" };
@@ -94,7 +105,7 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
                       {formatearCampo(cambio.campo_modificado)}
                     </p>
                     <p className="text-sm text-gray-600">
-                      {cambio.usuario?.nombre || "Usuario desconocido"}
+                      {cambio.usuario?.nombre || "Sistema"}
                     </p>
                   </div>
                   <p className="text-xs text-gray-500">{cambio.created_at ? formatFecha(cambio.created_at) : '-'}</p>

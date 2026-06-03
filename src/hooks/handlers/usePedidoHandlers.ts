@@ -10,6 +10,7 @@ import { usePromoMapQuery } from '../queries/usePromocionesQuery'
 import { resolverPreciosMayorista, aplicarPreciosMayorista, validarMOQPedido } from '../../utils/precioMayorista'
 import { resolverPromociones } from '../../utils/promociones'
 import { calcularNetoVenta } from '../../utils/calculations'
+import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente'
 import type { User } from '@supabase/supabase-js'
 import type {
   ProductoDB,
@@ -426,21 +427,12 @@ export function usePedidoHandlers({
       }
     }
 
-    // Aplicar descuento porcentual del cliente. Se aplica DESPUES de precio
-    // mayorista/promo para que el descuento se calcule sobre el precio final
-    // por linea. No tocamos lineas con precioOverride (admin lo fijo manual)
-    // ni items con precio 0 (bonificaciones se agregan despues).
+    // Aplicar descuento del cliente: general + por categoría (la categoría
+    // prevalece). Se aplica DESPUES de precio mayorista/promo. Mismo helper que
+    // el path online y ModalPedido. No toca precioOverride / bonificaciones /
+    // precio <= 0.
     const clienteSeleccionado = clientesRef.current.find(c => String(c.id) === String(nuevoPedido.clienteId))
-    const dtoPct = clienteSeleccionado?.descuento_porcentaje ?? 0
-    if (dtoPct > 0) {
-      const factor = 1 - dtoPct / 100
-      itemsFinales = itemsFinales.map(item => {
-        if (item.precioOverride) return item
-        if (!item.precioUnitario || item.precioUnitario <= 0) return item
-        const precioConDto = Math.round(item.precioUnitario * factor * 100) / 100
-        return { ...item, precioUnitario: precioConDto }
-      })
-    }
+    itemsFinales = aplicarDescuentoClienteItems(itemsFinales, productosRef.current, clienteSeleccionado).items
 
     // Agregar items de bonificación
     const itemsBonificacion = promoResolucion.bonificaciones.map(b => ({

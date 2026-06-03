@@ -1,10 +1,10 @@
-import { useState, memo, useRef } from 'react';
-import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle } from 'lucide-react';
+import { useState, memo, useRef, useMemo } from 'react';
+import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
-import { usePreventistasQuery, useZonasEstandarizadasQuery } from '../../hooks/queries';
+import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery } from '../../hooks/queries';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { useReverseGeocoding } from '../../hooks/useReverseGeocoding';
 import {
@@ -41,6 +41,8 @@ export interface ClienteFormData {
   limiteCredito: number;
   diasCredito: number;
   descuentoPorcentaje: number;
+  /** Descuentos por categoría (override del general). Porcentaje entero. */
+  descuentosPorCategoria: Array<{ categoria: string; porcentaje: number }>;
   preventista_id: string;
   preventista_ids: string[];
 }
@@ -94,6 +96,17 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const formRef = useRef<HTMLDivElement>(null);
   const { data: preventistas = [] } = usePreventistasQuery();
   const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true });
+  const { data: categoriasTabla = [] } = useCategoriasQuery();
+  const { data: productosParaCategorias = [] } = useProductosQuery();
+  // Opciones de categoría = unión de la tabla `categorias` (gestionada) y las
+  // categorías reales usadas por productos. Así el valor elegido siempre matchea
+  // algún producto al calcular el descuento (productos.categoria es texto libre).
+  const categoriasDisponibles = useMemo(() => {
+    const set = new Set<string>();
+    categoriasTabla.forEach(c => { const n = (c.nombre || '').trim(); if (n) set.add(n); });
+    productosParaCategorias.forEach(p => { const n = (p.categoria || '').trim(); if (n) set.add(n); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [categoriasTabla, productosParaCategorias]);
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -121,6 +134,10 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     limiteCredito: cliente.limite_credito || 0,
     diasCredito: cliente.dias_credito || 30,
     descuentoPorcentaje: cliente.descuento_porcentaje || 0,
+    descuentosPorCategoria: (cliente.descuentos_categoria || []).map(d => ({
+      categoria: d.categoria,
+      porcentaje: Number(d.descuento_porcentaje) || 0,
+    })),
     preventista_id: cliente.preventista_id || '',
     preventista_ids: cliente.preventista_ids || []
   } : {
@@ -142,6 +159,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     limiteCredito: 0,
     diasCredito: 30,
     descuentoPorcentaje: 0,
+    descuentosPorCategoria: [],
     preventista_id: '',
     preventista_ids: []
   });
@@ -212,6 +230,33 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const preventistasVisibles = preventistas.filter(p =>
     (p.nombre || '').toLowerCase().includes(preventistasFiltro.trim().toLowerCase())
   );
+
+  // --- Descuentos por categoría (filas dinámicas) ---
+  const agregarDescuentoCategoria = (): void => {
+    setForm(prev => ({
+      ...prev,
+      descuentosPorCategoria: [...prev.descuentosPorCategoria, { categoria: '', porcentaje: 0 }],
+    }));
+  };
+  const actualizarDescuentoCategoria = (index: number, field: 'categoria' | 'porcentaje', value: string): void => {
+    setForm(prev => ({
+      ...prev,
+      descuentosPorCategoria: prev.descuentosPorCategoria.map((row, i) => {
+        if (i !== index) return row;
+        if (field === 'porcentaje') {
+          const num = value === '' ? 0 : Math.max(0, Math.min(100, Math.trunc(Number(value)) || 0));
+          return { ...row, porcentaje: num };
+        }
+        return { ...row, categoria: value };
+      }),
+    }));
+  };
+  const eliminarDescuentoCategoria = (index: number): void => {
+    setForm(prev => ({
+      ...prev,
+      descuentosPorCategoria: prev.descuentosPorCategoria.filter((_, i) => i !== index),
+    }));
+  };
 
   const handleAddressSelect = (result: AddressSelectResult): void => {
     setForm(prev => ({
@@ -677,6 +722,68 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
                 />
                 <p className="text-xs text-gray-500 mt-1">Se aplica al precio_unitario al armar pedidos</p>
               </div>
+            </div>
+
+            {/* Descuentos por categoría (prevalecen sobre el descuento general) */}
+            <div className="mt-4 border-t border-dashed pt-3 dark:border-gray-700">
+              <div className="flex items-center gap-2 mb-1">
+                <Percent className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Descuentos por categoría</span>
+              </div>
+              <p className="text-xs text-gray-500 mb-2">
+                Para productos de la categoría elegida se aplica este % en lugar del descuento general.
+              </p>
+
+              <datalist id="cliente-categorias-disponibles">
+                {categoriasDisponibles.map(c => <option key={c} value={c} />)}
+              </datalist>
+
+              {form.descuentosPorCategoria.length > 0 && (
+                <div className="space-y-2 mb-2">
+                  {form.descuentosPorCategoria.map((row, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        list="cliente-categorias-disponibles"
+                        value={row.categoria}
+                        onChange={e => actualizarDescuentoCategoria(index, 'categoria', e.target.value)}
+                        placeholder="Buscar categoría..."
+                        className="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                      />
+                      <div className="relative w-24">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={row.porcentaje}
+                          onChange={e => actualizarDescuentoCategoria(index, 'porcentaje', e.target.value)}
+                          className="w-full px-3 py-2 pr-7 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => eliminarDescuentoCategoria(index)}
+                        className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg"
+                        aria-label="Eliminar descuento de categoría"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={agregarDescuentoCategoria}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
+              >
+                <Plus className="w-4 h-4" />
+                Agregar categoría
+              </button>
             </div>
           </div>
         ) : (

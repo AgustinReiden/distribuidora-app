@@ -1,9 +1,10 @@
 import { useState, useMemo, memo, useRef } from 'react';
-import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck } from 'lucide-react';
+import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent } from 'lucide-react';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
+import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
@@ -260,10 +261,19 @@ const ModalPedido = memo(function ModalPedido({
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
   // Precios mayoristas, promociones y cantidades mínimas
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, totalFinal, totalOriginal, ahorro, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items);
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items);
+
+  // Descuento del cliente (general + por categoría) aplicado en vivo sobre los
+  // items ya resueltos (mayorista/promo). La categoría prevalece sobre el general.
+  const descuentoCliente = useMemo(
+    () => aplicarDescuentoClienteItems(itemsFinales, productos, clienteSeleccionado),
+    [itemsFinales, productos, clienteSeleccionado]
+  );
+  const totalConDescuentoCliente = descuentoCliente.total;
+  const hayDescuentoTotal = hayDescuento || descuentoCliente.hayDescuento;
 
   const totalItemsCarrito = nuevoPedido.items.reduce((t, i) => t + i.cantidad, 0);
-  const totalParaMostrar = hayDescuento ? totalFinal : calcularTotal();
+  const totalParaMostrar = hayDescuentoTotal ? totalConDescuentoCliente : calcularTotal();
   const hayItems = nuevoPedido.items.length > 0;
 
   const tipoFacturaToggle = (
@@ -601,7 +611,12 @@ const ModalPedido = memo(function ModalPedido({
                         const precioInfo = preciosResueltos.get(String(item.productoId));
                         const esOverride = item.precioOverride || false;
                         const esMayorista = !esOverride && (precioInfo?.esMayorista || false);
-                        const precioMostrar = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
+                        const precioBase = esOverride ? item.precioUnitario : (esMayorista ? precioInfo!.precioResuelto : item.precioUnitario);
+                        // Descuento del cliente sobre el precio efectivo (no sobre override).
+                        const pctCliente = esOverride ? 0 : resolverDescuentoPctCliente(clienteSeleccionado, prod?.categoria);
+                        const precioMostrar = pctCliente > 0 && precioBase > 0
+                          ? Math.round(precioBase * (1 - pctCliente / 100) * 100) / 100
+                          : precioBase;
                         const subtotal = precioMostrar * item.cantidad;
                         const itemMoq = moqMap.get(String(item.productoId));
                         const minCantidad = itemMoq && itemMoq > 1 ? itemMoq : 1;
@@ -622,6 +637,12 @@ const ModalPedido = memo(function ModalPedido({
                                     <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium shrink-0">
                                       <Tag className="w-3 h-3" />
                                       {precioInfo?.etiqueta || 'Mayorista'}
+                                    </span>
+                                  )}
+                                  {pctCliente > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-medium shrink-0">
+                                      <Percent className="w-3 h-3" />
+                                      -{pctCliente}%
                                     </span>
                                   )}
                                 </div>
@@ -690,6 +711,11 @@ const ModalPedido = memo(function ModalPedido({
                                     }}
                                   >
                                     {formatPrecio(item.precioUnitario)} c/u {isAdmin && onActualizarPrecio && <Pencil className="w-3 h-3 inline ml-0.5 text-gray-400" />}
+                                  </p>
+                                )}
+                                {pctCliente > 0 && (
+                                  <p className="text-xs text-emerald-600 font-medium mt-0.5">
+                                    Descuento cliente -{pctCliente}%: {formatPrecio(precioMostrar)} c/u
                                   </p>
                                 )}
                                 {itemMoq && itemMoq > 1 && (
@@ -834,7 +860,7 @@ const ModalPedido = memo(function ModalPedido({
                           inputMode="decimal"
                           min="0"
                           step="0.01"
-                          max={hayDescuento ? totalFinal : calcularTotal()}
+                          max={totalParaMostrar}
                           value={nuevoPedido.montoPagado || ''}
                           onChange={e => onMontoPagadoChange && onMontoPagadoChange(parsePrecio(e.target.value))}
                           className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 bg-white dark:bg-gray-800 dark:border-yellow-600 dark:text-white"
@@ -843,7 +869,7 @@ const ModalPedido = memo(function ModalPedido({
                       </div>
                       {(nuevoPedido.montoPagado ?? 0) > 0 && (
                         <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">
-                          Resta por pagar: {formatPrecio((hayDescuento ? totalFinal : calcularTotal()) - (nuevoPedido.montoPagado ?? 0))}
+                          Resta por pagar: {formatPrecio(totalParaMostrar - (nuevoPedido.montoPagado ?? 0))}
                         </p>
                       )}
                     </div>
@@ -865,11 +891,11 @@ const ModalPedido = memo(function ModalPedido({
               <div className="border-t dark:border-gray-600 pt-3 flex justify-between items-center">
                 <span className="text-base font-medium dark:text-white">Total</span>
                 <div className="text-right">
-                  {hayDescuento ? (
+                  {hayDescuentoTotal ? (
                     <>
                       <span className="text-xs text-gray-400 line-through mr-2">{formatPrecio(totalOriginal)}</span>
-                      <span className="text-xl font-bold text-green-600">{formatPrecio(totalFinal)}</span>
-                      <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(ahorro)}</p>
+                      <span className="text-xl font-bold text-green-600">{formatPrecio(totalConDescuentoCliente)}</span>
+                      <p className="text-xs text-green-600 font-medium">Ahorro: {formatPrecio(totalOriginal - totalConDescuentoCliente)}</p>
                     </>
                   ) : (
                     <span className="text-xl font-bold text-blue-600">{formatPrecio(calcularTotal())}</span>
@@ -905,7 +931,7 @@ const ModalPedido = memo(function ModalPedido({
                   : 'Sin productos'}
               </span>
               {hayItems && (
-                <span className={`font-bold text-sm truncate ${hayDescuento ? 'text-green-600' : 'text-blue-600 dark:text-blue-400'}`}>
+                <span className={`font-bold text-sm truncate ${hayDescuentoTotal ? 'text-green-600' : 'text-blue-600 dark:text-blue-400'}`}>
                   {formatPrecio(totalParaMostrar)}
                 </span>
               )}
