@@ -354,6 +354,17 @@ EXCEPTION WHEN OTHERS THEN
 END; $$;
 ALTER FUNCTION public.denegar_movimiento_sucursal(bigint, text) OWNER TO postgres;
 
+-- Helpers internos: NO deben ser invocables directamente por el cliente (las
+-- RPCs definer los llaman internamente como owner). Revocar de PUBLIC/anon/auth
+-- evita, p.ej., que un anon llame a _notificar_sucursal_roles (sin gate) para
+-- spamear notificaciones.
+REVOKE EXECUTE ON FUNCTION public._rol_en_sucursal(uuid, bigint) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public._rol_en_sucursal(uuid, bigint) FROM anon;
+REVOKE EXECUTE ON FUNCTION public._rol_en_sucursal(uuid, bigint) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public._notificar_sucursal_roles(bigint, uuid, varchar, text, text, varchar, bigint, jsonb) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public._notificar_sucursal_roles(bigint, uuid, varchar, text, text, varchar, bigint, jsonb) FROM anon;
+REVOKE EXECUTE ON FUNCTION public._notificar_sucursal_roles(bigint, uuid, varchar, text, text, varchar, bigint, jsonb) FROM authenticated;
+
 -- Grants de ejecución (RPCs de cara al cliente).
 GRANT EXECUTE ON FUNCTION public.crear_movimiento_sucursal(bigint, text, jsonb) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.aceptar_movimiento_sucursal(bigint, jsonb) TO authenticated;

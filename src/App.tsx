@@ -43,7 +43,7 @@ const ReportesContainer = lazy(() => import('./components/containers/ReportesCon
 const ComisionesContainer = lazy(() => import('./components/containers/ComisionesContainer'))
 const RecorridosContainer = lazy(() => import('./components/containers/RecorridosContainer'))
 const RecorridoPreventistaContainer = lazy(() => import('./components/containers/RecorridoPreventistaContainer'))
-const TransferenciasContainer = lazy(() => import('./components/containers/TransferenciasContainer'))
+const MovimientosContainer = lazy(() => import('./components/containers/MovimientosContainer'))
 const PromocionesContainer = lazy(() => import('./components/containers/PromocionesContainer'))
 const VistaBotTelegramContainer = lazy(() => import('./components/containers/VistaBotTelegramContainer'))
 
@@ -299,7 +299,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/transferencias"
-                  element={isAdmin ? <TransferenciasContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <MovimientosContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
