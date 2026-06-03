@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
-import { NotificationCenter } from '../../contexts/NotificationContext';
+import DbNotificationBell from './DbNotificationBell';
 import SucursalSelector from './SucursalSelector';
 import VincularTelegramButton from '../perfil/VincularTelegramButton';
 import type { PerfilDB, RolUsuario } from '../../types';
@@ -75,7 +75,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
       { id: 'condiciones-mayoristas', icon: Tag, label: 'Condiciones Mayoristas', roles: ['admin'] },
       { id: 'promociones', icon: Gift, label: 'Promociones', roles: ['admin'] },
-      { id: 'transferencias', icon: ArrowRightLeft, label: 'Mov. Sucursales', roles: ['admin'] },
+      { id: 'transferencias', icon: ArrowRightLeft, label: 'Mov. Sucursales', roles: ['admin', 'encargado'] },
     ]
   },
   {
@@ -295,8 +295,8 @@ export default function TopNavigation({
               {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
 
-            {/* Notificaciones */}
-            <NotificationCenter />
+            {/* Notificaciones (persistentes, DB) */}
+            <DbNotificationBell />
 
             {/* Sucursal */}
             <SucursalSelector />

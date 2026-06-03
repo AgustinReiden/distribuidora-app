@@ -158,6 +158,32 @@ export {
 } from './useTransferenciasQuery'
 export type { TransferenciasFiltros } from './useTransferenciasQuery'
 
+// Movimientos entre sucursales (con aprobación, mig 076)
+export {
+  movimientosKeys,
+  MOVIMIENTOS_PAGE_SIZE,
+  useMovimientosQuery,
+  useMovimientoItemsQuery,
+  useCrearMovimientoMutation,
+  useAceptarMovimientoMutation,
+  useDenegarMovimientoMutation,
+} from './useMovimientosQuery'
+export type {
+  EstadoMovimiento,
+  MovimientoSucursalDB,
+  MovimientoItemDB,
+  MovimientosFiltros,
+  ResolucionItem,
+} from './useMovimientosQuery'
+
+// Notificaciones (campanita DB-backed, mig 076)
+export {
+  useNotificacionesQuery,
+  useMarcarNotificacionLeidaMutation,
+  useMarcarTodasNotificacionesLeidasMutation,
+} from './useNotificacionesQuery'
+export type { NotificacionDB } from './useNotificacionesQuery'
+
 // Sustitucion de regalos en promociones (mig 058)
 export { useSustituirRegaloMutation } from './useSustituirRegaloMutation'
 
