@@ -95,14 +95,25 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
 
         let corriente = 0, vencido30 = 0, vencido60 = 0, vencido90 = 0
         pedidosCliente.forEach(p => {
-          const fechaPedido = new Date(p.created_at || 0)
-          const diasCredito = cliente.dias_credito || 30
-          const fechaVencimiento = new Date(fechaPedido)
-          fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito)
-          const diasVencido = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24))
           // Use outstanding balance per order, not full total (BUG-9 fix)
           const saldoPedido = (p.total || 0) - (p.monto_pagado || 0)
           if (saldoPedido <= 0) return // Skip fully paid orders
+
+          // La mora se cuenta desde la ENTREGA, no desde la creación del pedido.
+          // Un pedido con saldo pero aún NO entregado todavía no genera mora: va
+          // a "corriente" (el cliente todavía no recibió la mercadería).
+          if (p.estado !== 'entregado') {
+            corriente += saldoPedido
+            return
+          }
+          // Base de antigüedad: fecha de entrega real. Para pedidos entregados sin
+          // fecha_entrega (datos viejos) se usa la fecha del pedido como fallback.
+          const baseStr = p.fecha_entrega || p.fecha || p.created_at || 0
+          const fechaBase = new Date(baseStr)
+          const diasCredito = cliente.dias_credito || 30
+          const fechaVencimiento = new Date(fechaBase)
+          fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito)
+          const diasVencido = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24))
 
           if (diasVencido <= 0) corriente += saldoPedido
           else if (diasVencido <= 30) vencido30 += saldoPedido

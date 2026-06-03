@@ -279,3 +279,7 @@ export type {
   BotToggleUsuarioInput,
   BotToggleUsuarioResult,
 } from './useBotAdmin'
+
+// Deudores en mora (cuenta corriente)
+export { useDeudoresMoraQuery } from './useDeudoresMoraQuery'
+export type { DeudorMora } from './useDeudoresMoraQuery'
