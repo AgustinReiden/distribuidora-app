@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { useSucursal } from '../../contexts/SucursalContext'
+import type { SucursalDB } from '../../types'
 
 export const MOVIMIENTOS_PAGE_SIZE = 50
 
@@ -155,6 +156,34 @@ async function denegarMovimiento(input: { movimientoId: number; motivo?: string 
   if (error) throw error
   const r = data as RPCResult
   if (!r.success) throw new Error(r.error || 'Error al denegar el movimiento')
+}
+
+/**
+ * Sucursales activas para el destino de un movimiento. A diferencia de
+ * `useSucursalesQuery` (que filtra tipo='distribuidora' para el flujo viejo de
+ * transferencias), un movimiento puede ir a CUALQUIER sucursal activa (las
+ * reales en uso son principal/secundaria, no solo distribuidoras). El caller
+ * excluye la sucursal activa.
+ */
+async function fetchSucursalesActivas(): Promise<SucursalDB[]> {
+  const { data, error } = await supabase
+    .from('sucursales')
+    .select('*')
+    .eq('activa', true)
+    .order('nombre', { ascending: true })
+  if (error) {
+    if (error.message.includes('does not exist')) return []
+    throw error
+  }
+  return (data || []) as SucursalDB[]
+}
+
+export function useSucursalesActivasQuery() {
+  return useQuery({
+    queryKey: ['sucursales-activas'],
+    queryFn: fetchSucursalesActivas,
+    staleTime: 10 * 60 * 1000,
+  })
 }
 
 export function useMovimientosQuery(filtros: MovimientosFiltros = {}) {

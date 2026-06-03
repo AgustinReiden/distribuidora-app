@@ -7,7 +7,7 @@ import { Loader2 } from 'lucide-react'
 import {
   useMovimientosQuery,
   useMovimientoItemsQuery,
-  useSucursalesQuery,
+  useSucursalesActivasQuery,
   useProductosQuery,
   useCrearMovimientoMutation,
   useAceptarMovimientoMutation,
@@ -39,7 +39,7 @@ export default function MovimientosContainer(): React.ReactElement {
   const [aceptarMov, setAceptarMov] = useState<MovimientoSucursalDB | null>(null)
 
   const { data: movimientos = [], isLoading } = useMovimientosQuery({ estado })
-  const { data: sucursales = [] } = useSucursalesQuery()
+  const { data: sucursales = [] } = useSucursalesActivasQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: itemsAceptar = [], isLoading: loadingItems } = useMovimientoItemsQuery(aceptarMov ? String(aceptarMov.id) : null)
 

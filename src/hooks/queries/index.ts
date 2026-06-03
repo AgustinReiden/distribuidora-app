@@ -164,6 +164,7 @@ export {
   MOVIMIENTOS_PAGE_SIZE,
   useMovimientosQuery,
   useMovimientoItemsQuery,
+  useSucursalesActivasQuery,
   useCrearMovimientoMutation,
   useAceptarMovimientoMutation,
   useDenegarMovimientoMutation,
