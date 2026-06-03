@@ -144,19 +144,11 @@ export {
 } from './useZonasQuery'
 export type { ZonaDB } from './useZonasQuery'
 
-// Transferencias y Sucursales
+// Sucursales (el flujo viejo de transferencias fue reemplazado por movimientos)
 export {
-  transferenciasKeys,
   sucursalesKeys,
-  TRANSFERENCIAS_PAGE_SIZE,
-  useTransferenciasQuery,
-  useTransferenciaItemsQuery,
   useSucursalesQuery,
-  useCrearSucursalMutation,
-  useRegistrarTransferenciaMutation,
-  useRegistrarIngresoMutation,
 } from './useTransferenciasQuery'
-export type { TransferenciasFiltros } from './useTransferenciasQuery'
 
 // Movimientos entre sucursales (con aprobación, mig 076)
 export {
