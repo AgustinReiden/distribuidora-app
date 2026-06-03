@@ -30,6 +30,7 @@ const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalZonas = lazy(() => import('../modals/ModalZonas'))
 const ModalRegistrarPago = lazy(() => import('../modals/ModalRegistrarPago'))
+const ModalDeudoresMora = lazy(() => import('../modals/ModalDeudoresMora'))
 
 function LoadingState() {
   return (
@@ -71,6 +72,7 @@ export default function ClientesContainer(): React.ReactElement {
   const [modalClienteOpen, setModalClienteOpen] = useState(false)
   const [modalFichaOpen, setModalFichaOpen] = useState(false)
   const [modalZonasOpen, setModalZonasOpen] = useState(false)
+  const [modalDeudoresOpen, setModalDeudoresOpen] = useState(false)
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
   const [clientePago, setClientePago] = useState<ClienteDB | null>(null)
   const [saldoPendientePago, setSaldoPendientePago] = useState<number>(0)
@@ -91,6 +93,7 @@ export default function ClientesContainer(): React.ReactElement {
     setModalClienteOpen(false)
     setModalFichaOpen(false)
     setModalZonasOpen(false)
+    setModalDeudoresOpen(false)
     setClienteFichaId(null)
     setClientePago(null)
     setClienteEditando(null)
@@ -128,6 +131,13 @@ export default function ClientesContainer(): React.ReactElement {
 
   const handleVerFichaCliente = useCallback((cliente: ClienteDB) => {
     setClienteFichaId(cliente.id)
+    setModalFichaOpen(true)
+  }, [])
+
+  // Abre la ficha desde el panel de deudores (la RPC devuelve cliente_id numérico).
+  const handleVerFichaDesdeDeudores = useCallback((clienteId: number) => {
+    setModalDeudoresOpen(false)
+    setClienteFichaId(String(clienteId))
     setModalFichaOpen(true)
   }, [])
 
@@ -272,6 +282,7 @@ export default function ClientesContainer(): React.ReactElement {
           onEliminarCliente={handleEliminarCliente}
           onVerFichaCliente={handleVerFichaCliente}
           onGestionarZonas={isAdmin ? handleGestionarZonas : undefined}
+          onVerDeudores={(isAdmin || isEncargado) ? () => setModalDeudoresOpen(true) : undefined}
         />
       </Suspense>
 
@@ -287,6 +298,16 @@ export default function ClientesContainer(): React.ReactElement {
             }}
             guardando={crearCliente.isPending || actualizarCliente.isPending}
             isAdmin={isAdmin}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Deudores en mora */}
+      {modalDeudoresOpen && (
+        <Suspense fallback={null}>
+          <ModalDeudoresMora
+            onClose={() => setModalDeudoresOpen(false)}
+            onVerFicha={handleVerFichaDesdeDeudores}
           />
         </Suspense>
       )}

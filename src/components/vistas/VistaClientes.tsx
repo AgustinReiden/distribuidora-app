@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
-import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2 } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import ClientesViewHeader from '../clientes/ClientesViewHeader';
@@ -34,6 +34,8 @@ export interface VistaClientesProps {
   onVerFichaCliente?: (cliente: ClienteDB) => void;
   /** Solo se pasa cuando el usuario es admin (gating en el container). */
   onGestionarZonas?: () => void;
+  /** Abre el panel de deudores en mora. Solo se pasa a admin/encargado. */
+  onVerDeudores?: () => void;
 }
 
 // =============================================================================
@@ -50,7 +52,8 @@ export default function VistaClientes({
   onEditarCliente,
   onEliminarCliente,
   onVerFichaCliente,
-  onGestionarZonas
+  onGestionarZonas,
+  onVerDeudores
 }: VistaClientesProps) {
   const { perfil } = useAuthData();
   const verSaldo = puedeVerSaldoCliente(perfil?.rol);
@@ -138,6 +141,23 @@ export default function VistaClientes({
         filtroDescriptivo={filtroDescriptivo}
         actions={
           <div className="flex flex-wrap items-center gap-2 justify-end">
+            {onVerDeudores && (
+              <button
+                onClick={onVerDeudores}
+                className={cn(
+                  'inline-flex items-center gap-2.5 h-11 px-5 rounded-lg text-[14px] font-medium',
+                  'bg-white dark:bg-gray-800 text-stone-700 dark:text-gray-200',
+                  'border border-stone-200/80 dark:border-gray-700',
+                  'shadow-warm',
+                  'hover:bg-stone-50 dark:hover:bg-gray-700/50 hover:border-stone-300 dark:hover:border-gray-600 hover:-translate-y-px hover:shadow-warm-md',
+                  'active:translate-y-0 active:shadow-warm',
+                  'transition-[transform,box-shadow,background-color,border-color] duration-150',
+                )}
+              >
+                <AlertTriangle className="w-[18px] h-[18px] text-amber-600" aria-hidden="true" />
+                <span>Deudores</span>
+              </button>
+            )}
             {isAdmin && onGestionarZonas && (
               <button
                 onClick={onGestionarZonas}
