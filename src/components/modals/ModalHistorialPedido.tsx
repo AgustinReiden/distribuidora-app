@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { Loader2, History } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatFecha } from './utils';
-import { formatPrecio } from '../../utils/formatters';
+import { formatPrecio, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import type { PedidoDB } from '../../types';
 
@@ -63,13 +63,10 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
     if (campo === "transportista_id") return resolverTransportista(valor);
     if (campo === "total") return formatPrecio(parsePrecio(valor));
     if (campo === "estado") {
-      const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparacion", asignado: "En camino", entregado: "Entregado" };
+      const estados: Record<string, string> = { pendiente: "Pendiente", en_preparacion: "En preparación", asignado: "En camino", entregado: "Entregado", cancelado: "Cancelado" };
       return estados[valor] || valor;
     }
-    if (campo === "estado_pago") {
-      const estados: Record<string, string> = { pendiente: "Pendiente", pagado: "Pagado", parcial: "Parcial" };
-      return estados[valor] || valor;
-    }
+    if (campo === "estado_pago") return getEstadoPagoLabel(valor);
     if (campo === "forma_pago") {
       const formas: Record<string, string> = {
         efectivo: "Efectivo",
@@ -81,6 +78,15 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
       return formas[valor] || valor;
     }
     return valor;
+  };
+
+  // Color del badge según el valor, usando el mismo código de colores que la
+  // tarjeta de pedido (getEstadoColor / getEstadoPagoColor). Para el resto de
+  // los campos (total, notas, forma de pago, transportista) un gris neutro.
+  const colorValor = (campo: string, valor: string): string => {
+    if (campo === "estado") return getEstadoColor(valor);
+    if (campo === "estado_pago") return getEstadoPagoColor(valor);
+    return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200";
   };
 
   return (
@@ -113,12 +119,12 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
                 {cambio.campo_modificado === "creacion" ? (
                   <p className="text-sm text-green-600 font-medium">{cambio.valor_nuevo}</p>
                 ) : (
-                  <div className="flex items-center space-x-2 text-sm">
-                    <span className="px-2 py-1 bg-red-100 text-red-700 rounded">
+                  <div className="flex items-center gap-2 text-sm flex-wrap">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${colorValor(cambio.campo_modificado, cambio.valor_anterior)}`}>
                       {formatearValor(cambio.campo_modificado, cambio.valor_anterior)}
                     </span>
                     <span className="text-gray-400">→</span>
-                    <span className="px-2 py-1 bg-green-100 text-green-700 rounded">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${colorValor(cambio.campo_modificado, cambio.valor_nuevo)}`}>
                       {formatearValor(cambio.campo_modificado, cambio.valor_nuevo)}
                     </span>
                   </div>
