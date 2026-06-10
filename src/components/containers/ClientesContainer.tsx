@@ -55,6 +55,10 @@ export default function ClientesContainer(): React.ReactElement {
   const { registrarPago, registrarPagoFIFO, obtenerResumenCuenta } = usePagos()
   const rol = perfil?.rol
   const puedePago = puedeRegistrarPagoCliente(rol)
+  // Preventista editando un cliente existente: solo puede tocar datos de
+  // contacto/atención (razón social, dirección, teléfono, contacto, rubro,
+  // horarios, notas). El resto lo gestiona admin/encargado.
+  const edicionRestringida = isPreventista && !isAdmin && !isEncargado
 
   // Queries
   const { data: clientes = [], isLoading } = useClientesQuery()
@@ -226,6 +230,34 @@ export default function ClientesContainer(): React.ReactElement {
       ? zonas.find(z => String(z.id) === String(data.zona_id))
       : null
 
+    // Preventista editando: patch acotado a los campos que puede tocar.
+    // CUIT, nombre fantasía, zona, crédito, descuentos y asignaciones quedan
+    // fuera para que no se sobrescriban desde esta UI.
+    if (!isCreating && edicionRestringida) {
+      const patchRestringido = {
+        razon_social: data.razonSocial || data.nombreFantasia,
+        direccion: data.direccion,
+        aclaracion_direccion: data.aclaracionDireccion?.trim() || null,
+        latitud: data.latitud,
+        longitud: data.longitud,
+        telefono: data.telefono || undefined,
+        contacto: data.contacto || undefined,
+        horarios_atencion: data.horarios_atencion || undefined,
+        rubro: data.rubro || undefined,
+        notas: data.notas || undefined,
+      }
+      try {
+        await actualizarCliente.mutateAsync({ id: clienteEditando!.id, data: patchRestringido })
+        notify.success('Cliente actualizado')
+        setModalClienteOpen(false)
+        setClienteEditando(null)
+      } catch (error) {
+        notify.error((error as Error).message || 'Error al guardar cliente')
+        throw error
+      }
+      return
+    }
+
     const dbData = {
       razon_social: data.razonSocial || data.nombreFantasia,
       nombre_fantasia: data.nombreFantasia,
@@ -274,7 +306,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, user, zonas])
+  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user, zonas])
 
   return (
     <>
@@ -306,6 +338,7 @@ export default function ClientesContainer(): React.ReactElement {
             }}
             guardando={crearCliente.isPending || actualizarCliente.isPending}
             isAdmin={isAdmin}
+            edicionRestringida={edicionRestringida && !!clienteEditando}
           />
         </Suspense>
       )}

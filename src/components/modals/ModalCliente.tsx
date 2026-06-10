@@ -72,6 +72,13 @@ export interface ModalClienteProps {
   guardando: boolean;
   /** Si el usuario es admin (puede editar crédito) */
   isAdmin?: boolean;
+  /**
+   * Edición restringida (preventista editando un cliente existente): solo
+   * permite tocar razón social, dirección, teléfono, contacto, rubro,
+   * horarios de atención y notas. El resto se muestra deshabilitado.
+   * El container debe enviar únicamente esos campos en el patch.
+   */
+  edicionRestringida?: boolean;
 }
 
 // Las zonas ahora vienen de la tabla `zonas` via useZonasEstandarizadasQuery
@@ -91,7 +98,7 @@ const RUBROS_OPCIONES = [
   'Otro'
 ];
 
-const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false }: ModalClienteProps) {
+const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, edicionRestringida = false }: ModalClienteProps) {
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
   const { data: preventistas = [] } = usePreventistasQuery();
@@ -361,6 +368,15 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
       <div ref={formRef} className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        {edicionRestringida && (
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs">
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>
+              Podés editar razón social, dirección, teléfono, contacto, rubro, horarios y notas.
+              El resto de los datos los gestiona un administrador.
+            </span>
+          </div>
+        )}
         {/* Tipo Documento, Numero y Razón Social */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
@@ -368,7 +384,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             <select
               value={form.tipo_documento}
               onChange={e => handleTipoDocumentoChange(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              disabled={edicionRestringida}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <option value="CUIT">CUIT</option>
               <option value="DNI">DNI</option>
@@ -383,7 +400,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               type="text"
               value={form.numero_documento}
               onChange={e => handleFieldChange('numero_documento', e.target.value)}
-              className={inputClass('numero_documento')}
+              disabled={edicionRestringida}
+              className={`${inputClass('numero_documento')} disabled:opacity-60 disabled:cursor-not-allowed`}
               placeholder={form.tipo_documento === 'CUIT' ? 'XX-XXXXXXXX-X' : '12345678'}
               maxLength={form.tipo_documento === 'CUIT' ? 13 : 8}
               {...getAriaProps('numero_documento', true)}
@@ -413,7 +431,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             type="text"
             value={form.nombreFantasia}
             onChange={e => handleFieldChange('nombreFantasia', e.target.value)}
-            className={inputClass('nombreFantasia')}
+            disabled={edicionRestringida}
+            className={`${inputClass('nombreFantasia')} disabled:opacity-60 disabled:cursor-not-allowed`}
             placeholder="Nombre comercial"
             {...getAriaProps('nombreFantasia', true)}
           />
@@ -578,7 +597,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             <select
               value={form.zona_id}
               onChange={e => handleFieldChange('zona_id', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              disabled={edicionRestringida}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <option value="">(Sin zona)</option>
               {zonas.map(z => (
