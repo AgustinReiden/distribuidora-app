@@ -57,6 +57,7 @@ export {
   useAsignarTransportistaMutation,
   useEliminarPedidoMutation,
   usePedidosNoEntregadosQuery,
+  usePedidosAsignadosQuery,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
   usePedidosNoPagadosQuery,
