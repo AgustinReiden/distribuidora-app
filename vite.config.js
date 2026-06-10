@@ -265,6 +265,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.js',
     include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
+    // El default (5s) produce timeouts aleatorios en tests jsdom pesados
+    // cuando la máquina está cargada (p. ej. la suite completa en el hook
+    // de pre-commit): fallaba un test distinto en cada corrida.
+    testTimeout: 15000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
