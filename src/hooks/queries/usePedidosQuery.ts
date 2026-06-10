@@ -23,6 +23,7 @@ export const pedidosKeys = {
     [...pedidosKeys.all(sucursalId), 'paginated', page, pageSize, filters] as const,
   noEntregados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'no-entregados'] as const,
   noPagados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'no-pagados'] as const,
+  asignados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'asignados'] as const,
 }
 
 // Types
@@ -190,6 +191,26 @@ async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)
+
+  if (error) throw error
+  return (data || []) as PedidoDB[]
+}
+
+// Pedidos asignados (sin paginar) para el modal de gestión de rutas: la
+// optimización necesita TODOS los pedidos en estado 'asignado' de la sucursal,
+// no la página visible de /pedidos (15 items), que dejaba afuera pedidos del
+// transportista al optimizar.
+async function fetchPedidosAsignados(sucursalId: number | null): Promise<PedidoDB[]> {
+  let query = supabase
+    .from('pedidos')
+    .select(PEDIDO_SELECT)
+    .eq('estado', 'asignado')
+
+  if (sucursalId != null) {
+    query = query.eq('sucursal_id', sucursalId)
+  }
+
+  const { data, error } = await query.order('orden_entrega', { ascending: true, nullsFirst: false })
 
   if (error) throw error
   return (data || []) as PedidoDB[]
@@ -470,6 +491,20 @@ export function usePedidosPaginatedQuery(
     staleTime: 2 * 60 * 1000,
     placeholderData: keepPreviousData,
     enabled,
+  })
+}
+
+/**
+ * Hook para obtener todos los pedidos asignados (sin paginación).
+ * Se habilita solo cuando enabled=true (modal de gestión de rutas abierto).
+ */
+export function usePedidosAsignadosQuery(enabled = false) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: pedidosKeys.asignados(currentSucursalId),
+    queryFn: () => fetchPedidosAsignados(currentSucursalId),
+    enabled: enabled && !!currentSucursalId,
+    staleTime: 30 * 1000, // 30 segundos
   })
 }
 

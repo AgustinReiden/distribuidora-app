@@ -22,6 +22,7 @@ import {
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
   usePagosMasivosMutation,
+  usePedidosAsignadosQuery,
   useClientesQuery,
   useProductosQuery,
   useTransportistasQuery,
@@ -172,6 +173,11 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalVisitasHoyOpen, setModalVisitasHoyOpen] = useState(false)
   const [pedidoPago, setPedidoPago] = useState<PedidoDB | null>(null)
   const [pagosPreviosPedido, setPagosPreviosPedido] = useState<PagoDBWithUsuario[]>([])
+
+  // Pedidos para el modal de gestión de rutas: TODOS los 'asignado' de la
+  // sucursal, sin paginar. La lista paginada de la vista (15 por página)
+  // dejaba afuera pedidos del transportista al optimizar la ruta.
+  const { data: pedidosParaRuta = [], isLoading: loadingPedidosRuta } = usePedidosAsignadosQuery(modalOptimizarRutaOpen)
   const [loadingPagosPrevios, setLoadingPagosPrevios] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
@@ -997,12 +1003,14 @@ export default function PedidosContainer(): React.ReactElement {
           p_pedidos: data.ordenOptimizado.map(p => ({ id: p.pedido_id, orden_entrega: p.orden }))
         })
       }
+      // Refresca lista paginada y query de asignados: ambos cachean orden_entrega
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalOptimizarRutaOpen(false)
       limpiarRuta()
       notify.success('Orden de entrega actualizado')
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
-  }, [limpiarRuta, notify])
+  }, [limpiarRuta, notify, queryClient])
 
   const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[]) => {
     try {
@@ -1386,12 +1394,12 @@ export default function PedidosContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalGestionRutas
             transportistas={transportistas}
-            pedidos={pedidos}
+            pedidos={pedidosParaRuta}
             onOptimizar={optimizarRuta as Parameters<typeof ModalGestionRutas>[0]['onOptimizar']}
             onAplicarOrden={handleAplicarOrden as Parameters<typeof ModalGestionRutas>[0]['onAplicarOrden']}
             onExportarPDF={handleExportarHojaRutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['onExportarPDF']}
             onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta() }}
-            loading={loadingOptimizacion}
+            loading={loadingOptimizacion || loadingPedidosRuta}
             guardando={guardando}
             rutaOptimizada={rutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['rutaOptimizada']}
             error={errorOptimizacion}

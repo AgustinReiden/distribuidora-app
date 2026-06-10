@@ -286,7 +286,7 @@ export default function VistaClientes({
               cliente={cliente}
               idx={idx}
               isAdmin={isAdmin}
-              canEditar={isAdmin || isEncargado}
+              canEditar={isAdmin || isEncargado || isPreventista}
               verSaldo={verSaldo}
               onEditar={() => onEditarCliente(cliente)}
               onEliminar={() => onEliminarCliente(cliente.id)}
