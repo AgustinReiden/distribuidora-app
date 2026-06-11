@@ -1,5 +1,8 @@
 // Tests de la lógica pura de tramos de optimizar-ruta (sin red).
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+// Import vía el alias std/ del deno.json (NO usar la URL literal de
+// deno.land: nixpacks la detecta y clasifica el repo entero como Deno,
+// rompiendo el build de Coolify).
+import { assertEquals } from "std/assert/mod.ts";
 import {
   type GoogleRoute,
   MAX_INTERMEDIOS,

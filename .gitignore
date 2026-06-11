@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# deno.lock en la raiz (generado al correr deno desde la raiz) hace que
+# nixpacks detecte el repo como Deno y rompa el build de Coolify
+/deno.lock
+
 # Environment variables (NUNCA commitear con valores reales)
 .env
 .env.local
