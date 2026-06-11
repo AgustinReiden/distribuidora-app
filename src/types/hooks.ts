@@ -137,6 +137,10 @@ export interface PedidoDB {
   fecha?: string;
   fecha_entrega?: string | null;
   fecha_entrega_programada?: string | null;
+  // Fecha local (YYYY-MM-DD) de la última asignación de transportista,
+  // derivada de pedido_historial (campo_modificado='transportista_id').
+  // Solo la adjunta fetchPedidosAsignados para el filtro del modal de rutas.
+  fecha_asignacion?: string | null;
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;

@@ -3,7 +3,7 @@ import type { ChangeEvent } from 'react';
 import {
   Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation,
   Settings, Save, FileText, ChevronDown, ChevronUp, Phone,
-  DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight
+  DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays
 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { getDepositoCoords, setDepositoCoords } from '../../hooks/useOptimizarRuta';
@@ -180,6 +180,12 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   error
 }: ModalGestionRutasProps) {
   const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
+  // Filtro de fecha: la admin marca entregados/rendición con rezago, así que
+  // al armar la ruta del día siguiente quedan pedidos viejos aún en estado
+  // 'asignado' que no deben entrar en la optimización.
+  const [filtroCriterio, setFiltroCriterio] = useState<'asignacion' | 'pedido'>('asignacion');
+  const [filtroDesde, setFiltroDesde] = useState<string>('');
+  const [filtroHasta, setFiltroHasta] = useState<string>('');
   const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState<boolean>(false);
   const [depositoLat, setDepositoLat] = useState<string>('');
   const [depositoLng, setDepositoLng] = useState<string>('');
@@ -200,13 +206,47 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     }
   }, [rutaOptimizada]);
 
+  // Fecha del pedido según el criterio de filtro. Para 'asignacion' usa la
+  // derivada del historial; si no existe (pedidos viejos sin registro), cae a
+  // la fecha del pedido para no excluirlos silenciosamente.
+  const fechaSegunCriterio = (p: PedidoDB): string | null => {
+    if (filtroCriterio === 'asignacion') return p.fecha_asignacion || p.fecha || null;
+    return p.fecha || null;
+  };
+
+  const filtroActivo = !!(filtroDesde || filtroHasta);
+
+  // Pedidos que pasan el filtro de fecha (estado 'asignado' ya viene filtrado
+  // del container, pero se mantiene la condición por robustez)
+  const pedidosFiltrados = useMemo((): PedidoDB[] => {
+    return pedidos.filter(p => {
+      if (p.estado !== 'asignado') return false;
+      if (!filtroActivo) return true;
+      const f = fechaSegunCriterio(p);
+      if (!f) return true; // sin fecha conocida: incluir antes que ocultar
+      if (filtroDesde && f < filtroDesde) return false;
+      if (filtroHasta && f > filtroHasta) return false;
+      return true;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidos, filtroActivo, filtroCriterio, filtroDesde, filtroHasta]);
+
   // Obtener pedidos del transportista seleccionado
   const pedidosTransportista = useMemo((): PedidoDB[] => {
     if (!transportistaSeleccionado) return [];
-    return pedidos
-      .filter(p => p.transportista_id === transportistaSeleccionado && p.estado === 'asignado')
+    return pedidosFiltrados
+      .filter(p => p.transportista_id === transportistaSeleccionado)
       .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
-  }, [pedidos, transportistaSeleccionado]);
+  }, [pedidosFiltrados, transportistaSeleccionado]);
+
+  // Cuántos pedidos del transportista quedaron afuera por el filtro de fecha
+  const pedidosExcluidosPorFecha = useMemo((): number => {
+    if (!transportistaSeleccionado || !filtroActivo) return 0;
+    const totalTransportista = pedidos.filter(
+      p => p.transportista_id === transportistaSeleccionado && p.estado === 'asignado'
+    ).length;
+    return totalTransportista - pedidosTransportista.length;
+  }, [pedidos, pedidosTransportista, transportistaSeleccionado, filtroActivo]);
 
   // Pedidos ordenados segun la optimizacion
   const pedidosOrdenados = useMemo((): PedidoOrdenado[] => {
@@ -239,7 +279,9 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   const handleOptimizar = (): void => {
     if (transportistaSeleccionado) {
-      onOptimizar(transportistaSeleccionado, pedidos);
+      // Solo los pedidos que pasaron el filtro de fecha: la optimización debe
+      // respetar lo que el admin ve en el panel.
+      onOptimizar(transportistaSeleccionado, pedidosTransportista);
     }
   };
 
@@ -373,6 +415,74 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 )}
               </div>
 
+              {/* Filtro de fecha: excluye pedidos viejos aún 'asignado' (la
+                  rendición se controla con rezago) al armar la ruta del día */}
+              <div className="bg-white border rounded-lg p-4">
+                <label className="block text-sm font-medium mb-2 flex items-center gap-1.5">
+                  <CalendarDays className="w-4 h-4 text-gray-500" />
+                  Filtrar pedidos por fecha
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Criterio</label>
+                    <select
+                      value={filtroCriterio}
+                      onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroCriterio(e.target.value as 'asignacion' | 'pedido')}
+                      className="w-full px-3 py-2 border rounded-lg text-sm"
+                    >
+                      <option value="asignacion">Fecha de asignación</option>
+                      <option value="pedido">Fecha del pedido (creación)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Desde</label>
+                    <input
+                      type="date"
+                      value={filtroDesde}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setFiltroDesde(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Hasta</label>
+                    <input
+                      type="date"
+                      value={filtroHasta}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setFiltroHasta(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const hoy = new Date();
+                      const f = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+                      setFiltroDesde(f);
+                      setFiltroHasta(f);
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  >
+                    Hoy
+                  </button>
+                  {filtroActivo && (
+                    <button
+                      type="button"
+                      onClick={() => { setFiltroDesde(''); setFiltroHasta(''); }}
+                      className="px-3 py-1.5 text-xs font-medium rounded-full border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100"
+                    >
+                      Quitar filtro
+                    </button>
+                  )}
+                  {filtroActivo && transportistaSeleccionado && pedidosExcluidosPorFecha > 0 && (
+                    <span className="text-xs text-amber-700">
+                      {pedidosExcluidosPorFecha} pedido{pedidosExcluidosPorFecha !== 1 ? 's' : ''} del transportista quedan afuera por el filtro
+                    </span>
+                  )}
+                </div>
+              </div>
+
               {/* Selector de transportista */}
               <div className="bg-white border rounded-lg p-4">
                 <label className="block text-sm font-medium mb-2">Seleccionar Transportista</label>
@@ -384,8 +494,8 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 >
                   <option value="">Seleccionar transportista...</option>
                   {transportistas.map(t => {
-                    const cantPedidos = pedidos.filter(p =>
-                      p.transportista_id === t.id && p.estado === 'asignado'
+                    const cantPedidos = pedidosFiltrados.filter(p =>
+                      p.transportista_id === t.id
                     ).length;
                     return (
                       <option key={t.id} value={t.id}>
@@ -461,6 +571,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                 #{pedido.id} - {pedido.cliente?.nombre_fantasia}
                               </p>
                               <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
+                              <p className="text-xs text-gray-400">
+                                Pedido: {pedido.fecha || '—'}
+                                {pedido.fecha_asignacion ? ` · Asignado: ${pedido.fecha_asignacion}` : ''}
+                              </p>
                             </div>
                             <div className="text-right ml-2">
                               <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>
