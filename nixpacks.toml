@@ -1,0 +1,7 @@
+# Fuerza el provider Node en Nixpacks (Coolify).
+#
+# El repo contiene edge functions de Deno (supabase/functions/deno.json,
+# deno.lock y archivos .ts con imports de deno.land). Sin esto, nixpacks
+# autodetecta el proyecto como Deno, no instala Node y el build de Coolify
+# falla con "npm: command not found".
+providers = ["node"]
