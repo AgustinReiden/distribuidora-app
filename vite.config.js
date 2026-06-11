@@ -2,9 +2,13 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
+import os from 'os'
+import process from 'node:process'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const cpuCount = os.availableParallelism?.() ?? os.cpus().length
 
 function cspConnectSrcPlugin() {
   let resolvedEnv = {}
@@ -269,12 +273,10 @@ export default defineConfig({
     // cuando la máquina está cargada (p. ej. la suite completa en el hook
     // de pre-commit): fallaba un test distinto en cada corrida.
     testTimeout: 15000,
-    // Sin tope, vitest levanta un worker por core (22 en la máquina de dev) y
-    // la suite completa (45 archivos jsdom) se autosatura e incluso puede
-    // agotar la RAM. Override puntual con VITEST_MAX_WORKERS=N (vitest 4 ya
-    // no honra VITEST_MAX_FORKS/VITEST_MAX_THREADS).
-    // eslint-disable-next-line no-undef
-    maxWorkers: Number(process.env.VITEST_MAX_WORKERS) || 4,
+    // Sin tope, vitest levanta un fork jsdom por core lógico; en máquinas
+    // con muchos cores (20+) se autosaturan y vuelven los timeouts.
+    maxWorkers: Number(process.env.VITEST_MAX_WORKERS)
+      || Math.min(6, Math.max(2, Math.floor(cpuCount / 2))),
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
