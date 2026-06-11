@@ -1,4 +1,13 @@
-# Optimización de ruta con más de 25 pedidos (n8n, 2026-06)
+# Optimización de ruta con más de 25 pedidos (2026-06)
+
+> **ACTUALIZACIÓN**: la solución definitiva es la Edge Function
+> `supabase/functions/optimizar-ruta` (misma lógica de tramos, API key como
+> secret del servidor, JWT obligatorio). El frontend la invoca primero y solo
+> cae al webhook de n8n como fallback. Los workflows de n8n (v1 y v2) quedan
+> como respaldo y se pueden retirar cuando la edge function esté consolidada
+> — en ese momento eliminar también `VITE_GOOGLE_API_KEY` del bundle.
+> Requisito: configurar el secret `GOOGLE_API_KEY` en Supabase
+> (Dashboard → Edge Functions → Secrets).
 
 ## Problema
 
