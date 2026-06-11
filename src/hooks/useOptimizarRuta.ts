@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { supabase } from './supabase/base';
 import type { PedidoDB, ClienteDB } from '../types';
 
 // ============================================================================
@@ -59,10 +60,13 @@ export interface UseOptimizarRutaReturn {
 // CONSTANTS
 // ============================================================================
 
-// URL del webhook de n8n para optimizar rutas (desde variables de entorno)
+// URL del webhook de n8n para optimizar rutas — LEGACY, solo fallback.
+// El camino principal es la Edge Function `optimizar-ruta` (la API key de
+// Google vive como secret del servidor y la función exige JWT).
 const N8N_WEBHOOK_URL: string = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
 
-// Google API Key para el workflow de n8n (Routes API)
+// Google API Key para el workflow legacy de n8n (Routes API).
+// TODO: eliminar VITE_GOOGLE_API_KEY del bundle cuando se retire el fallback n8n.
 const GOOGLE_API_KEY: string = import.meta.env.VITE_GOOGLE_API_KEY || '';
 
 // Coordenadas del depósito por defecto (se pueden configurar)
@@ -135,11 +139,6 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       return null;
     }
 
-    if (!N8N_WEBHOOK_URL) {
-      setError('La URL del servicio de optimización no está configurada. Configura VITE_N8N_WEBHOOK_URL en las variables de entorno.');
-      return null;
-    }
-
     // Filtrar pedidos del transportista que tengan coordenadas
     const pedidosConCoordenadas: PedidoParaOptimizar[] = pedidos
       .filter((p): p is PedidoDB & { cliente: ClienteDB & { latitud: number; longitud: number } } =>
@@ -177,38 +176,54 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       transportista_id: transportistaId,
       deposito_lat: deposito.lat,
       deposito_lng: deposito.lng,
-      pedidos: pedidosConCoordenadas,
-      google_api_key: GOOGLE_API_KEY
+      pedidos: pedidosConCoordenadas
     };
 
     try {
-      const response = await fetch(N8N_WEBHOOK_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody)
-      });
+      // Camino principal: Edge Function `optimizar-ruta`. La API key de
+      // Google es secret del servidor y la plataforma valida el JWT.
+      let data: RutaOptimizadaResponse | null = null;
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        'optimizar-ruta',
+        { body: requestBody }
+      );
+      const fnResult = !fnError && fnData ? (fnData as RutaOptimizadaResponse) : null;
 
-      if (!response.ok) {
-        // Intentar obtener más detalles del error
-        let errorDetail = '';
-        try {
-          const errorText = await response.text();
-          errorDetail = errorText ? ` - ${errorText}` : '';
-        } catch {
-          // No se pudo leer el cuerpo del error
+      if (fnResult && !fnResult.error) {
+        data = fnResult;
+      } else if (N8N_WEBHOOK_URL) {
+        // Fallback legacy: webhook n8n (requiere mandar la API key desde el
+        // cliente). Eliminar cuando la edge function esté consolidada.
+        const response = await fetch(N8N_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...requestBody, google_api_key: GOOGLE_API_KEY })
+        });
+
+        if (!response.ok) {
+          let errorDetail = '';
+          try {
+            const errorText = await response.text();
+            errorDetail = errorText ? ` - ${errorText}` : '';
+          } catch {
+            // No se pudo leer el cuerpo del error
+          }
+          throw new Error(`Error HTTP: ${response.status}${errorDetail}`);
         }
-        throw new Error(`Error HTTP: ${response.status}${errorDetail}`);
-      }
 
-      // Parsear JSON
-      let data: RutaOptimizadaResponse;
-      try {
-        const responseText = await response.text();
-        data = JSON.parse(responseText) as RutaOptimizadaResponse;
-      } catch {
-        throw new Error('La respuesta no es JSON válido');
+        try {
+          data = JSON.parse(await response.text()) as RutaOptimizadaResponse;
+        } catch {
+          throw new Error('La respuesta no es JSON válido');
+        }
+      } else if (fnResult) {
+        // Sin fallback configurado: dejar que el manejo de error de abajo
+        // (data.error) muestre el mensaje de la edge function.
+        data = fnResult;
+      } else {
+        throw new Error(
+          fnError?.message || 'No se pudo contactar el servicio de optimización de rutas'
+        );
       }
 
       // Verificar si la respuesta indica error (del workflow n8n)

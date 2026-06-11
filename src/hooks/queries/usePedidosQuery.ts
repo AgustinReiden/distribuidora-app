@@ -213,7 +213,34 @@ async function fetchPedidosAsignados(sucursalId: number | null): Promise<PedidoD
   const { data, error } = await query.order('orden_entrega', { ascending: true, nullsFirst: false })
 
   if (error) throw error
-  return (data || []) as PedidoDB[]
+
+  const pedidos = (data || []) as PedidoDB[]
+  if (pedidos.length === 0) return pedidos
+
+  // Adjuntar fecha de asignación (última escritura de transportista_id en
+  // pedido_historial). El modal de rutas la usa para filtrar pedidos viejos
+  // que siguen 'asignado' porque la rendición se controla con rezago.
+  // Best-effort: si el historial falla, los pedidos salen sin fecha_asignacion.
+  const { data: historial } = await supabase
+    .from('pedido_historial')
+    .select('pedido_id, created_at')
+    .eq('campo_modificado', 'transportista_id')
+    .in('pedido_id', pedidos.map(p => p.id))
+    .order('created_at', { ascending: true })
+
+  const asignacionMap: Record<string, string> = {}
+  for (const h of (historial || [])) {
+    // Orden ascendente: la última iteración deja el timestamp más reciente.
+    // Se convierte a fecha local (YYYY-MM-DD) para comparar contra inputs date.
+    const d = new Date(h.created_at as string)
+    const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    asignacionMap[String(h.pedido_id)] = local
+  }
+
+  return pedidos.map(p => ({
+    ...p,
+    fecha_asignacion: asignacionMap[String(p.id)] ?? null,
+  }))
 }
 
 // Paginated fetch
