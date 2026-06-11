@@ -269,10 +269,12 @@ export default defineConfig({
     // cuando la máquina está cargada (p. ej. la suite completa en el hook
     // de pre-commit): fallaba un test distinto en cada corrida.
     testTimeout: 15000,
-    // Sin tope, vitest levanta un worker por core y la suite completa (45
-    // archivos jsdom) puede agotar la RAM de la máquina. Override puntual
-    // con la env var VITEST_MAX_FORKS=N (la honra vitest nativamente).
-    maxWorkers: 4,
+    // Sin tope, vitest levanta un worker por core (22 en la máquina de dev) y
+    // la suite completa (45 archivos jsdom) se autosatura e incluso puede
+    // agotar la RAM. Override puntual con VITEST_MAX_WORKERS=N (vitest 4 ya
+    // no honra VITEST_MAX_FORKS/VITEST_MAX_THREADS).
+    // eslint-disable-next-line no-undef
+    maxWorkers: Number(process.env.VITEST_MAX_WORKERS) || 4,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
