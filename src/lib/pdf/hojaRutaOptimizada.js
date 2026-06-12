@@ -153,6 +153,19 @@ function buildCardOps(doc, pedido, orderNumber) {
     })
   }
 
+  // Horario de entrega pedido por el cliente (destacado para el chofer)
+  if (pedido.cliente?.horario_entrega) {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    const entLines = doc.splitTextToSize(
+      `ENTREGAR: ${pedido.cliente.horario_entrega}`,
+      CARD_CONTENT_WIDTH
+    )
+    entLines.slice(0, 2).forEach((line) => {
+      ops.push({ kind: 'text', text: line, fontSize: 9, bold: true, advance: 4 })
+    })
+  }
+
   // Total + estado
   ops.push({
     kind: 'text',
@@ -162,19 +175,18 @@ function buildCardOps(doc, pedido, orderNumber) {
     advance: 5
   })
 
-  // Productos
+  // Productos: las bonificaciones van en una lista aparte abajo de los items
+  // comprados, con la unidad bien aclarada (botellas/paquetes sueltos vs
+  // fardos) para que el chofer no mezcle unidades al cargar/descargar.
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
   const priceColWidth = 24
   const productWrapWidth = CARD_CONTENT_WIDTH - priceColWidth
-  ;(pedido.items || []).forEach((item) => {
-    // Para regalos de tipo Fracción, descripcion_regalo es el texto manual
-    // que el admin cargó (ej: "1 botella Manaos Naranja 600cc"). Cae al
-    // nombre del producto cuando no hay snapshot (regalos antiguos / unidad
-    // entera).
-    const nombre = (item.es_bonificacion && item.descripcion_regalo?.trim())
-      ? item.descripcion_regalo.trim()
-      : (item.producto?.nombre || 'Producto')
+  const itemsComprados = (pedido.items || []).filter((i) => !i.es_bonificacion)
+  const itemsBonificados = (pedido.items || []).filter((i) => i.es_bonificacion)
+
+  itemsComprados.forEach((item) => {
+    const nombre = item.producto?.nombre || 'Producto'
     const subtotal = (item.precio_unitario || 0) * item.cantidad
     const aclaracion = formatAclaracionBulto(
       item.cantidad,
@@ -195,6 +207,50 @@ function buildCardOps(doc, pedido, orderNumber) {
       })
     })
   })
+
+  if (itemsBonificados.length > 0) {
+    ops.push({ kind: 'spacer', advance: 0.5 })
+    ops.push({
+      kind: 'text',
+      text: 'PRODUCTOS BONIFICADOS:',
+      fontSize: 8.5,
+      bold: true,
+      advance: 4
+    })
+    itemsBonificados.forEach((item) => {
+      // Regalo de tipo Fracción: cantidad en subunidades (botellas/paquetes)
+      // y descripcion_regalo describe la subunidad (ej: "botella Manaos 600cc").
+      // Regalo de unidad entera: cantidad en unidades de venta del producto,
+      // con la aclaración de fardos si aplica.
+      const esFraccion = !!(item.promocion?.unidades_por_bloque
+        && item.promocion.unidades_por_bloque > 1
+        && item.descripcion_regalo?.trim())
+      let linea
+      if (esFraccion) {
+        linea = `${item.cantidad}x ${item.descripcion_regalo.trim()} (SUELTAS, NO FARDO)`
+      } else {
+        const nombre = item.descripcion_regalo?.trim() || item.producto?.nombre || 'Producto'
+        const aclaracion = formatAclaracionBulto(
+          item.cantidad,
+          item.producto?.unidades_de_venta_por_fardo,
+          item.producto?.etiqueta_bulto,
+        )
+        linea = aclaracion
+          ? `${item.cantidad}x ${nombre} ${aclaracion}`
+          : `${item.cantidad}x ${nombre}`
+      }
+      const itemLines = doc.splitTextToSize(linea, productWrapWidth)
+      itemLines.forEach((line, idx) => {
+        ops.push({
+          kind: 'product',
+          text: line,
+          subtotal: idx === 0 ? 'BONIF' : null,
+          fontSize: 9,
+          advance: 4
+        })
+      })
+    })
+  }
 
   // Total pedido
   ops.push({ kind: 'spacer', advance: 1 })
@@ -316,8 +372,15 @@ function buildCierreOps(pedidos) {
  * para que el chofer sepa que carga 1 fardo + N botellas individuales.
  */
 function buildManifiestoOps(pedidos) {
-  const totalesFardos = {} // por producto_id (fardos enteros)
-  const totalesBotellas = {} // por descripcion_regalo (botellas sueltas)
+  const totalesCompras = {} // por producto_id (items vendidos)
+  const totalesBonifFardos = {} // por producto_id (bonifs en unidades de venta / fardos)
+  const totalesBonifSueltas = {} // por descripcion_regalo (botellas/paquetes sueltos)
+
+  const acumular = (mapa, key, nombre, cantidad) => {
+    if (!mapa[key]) mapa[key] = { nombre, cantidad: 0 }
+    mapa[key].cantidad += cantidad
+    return mapa[key]
+  }
 
   pedidos.forEach((pedido) => {
     ;(pedido.items || []).forEach((item) => {
@@ -329,49 +392,65 @@ function buildManifiestoOps(pedidos) {
       const upb = item.promocion?.unidades_por_bloque
       const desc = item.descripcion_regalo?.trim()
 
-      // Caso A: regalo Fracción → split en fardos + botellas sueltas.
-      if (item.es_bonificacion && upb && upb > 1 && desc) {
-        const fardos = Math.floor(cantidad / upb)
-        const sueltas = cantidad % upb
-        if (fardos > 0) {
-          if (!totalesFardos[key]) totalesFardos[key] = { nombre: nombreProducto, cantidad: 0 }
-          totalesFardos[key].cantidad += fardos
-          // La cantidad acumulada para esta key ya no está en unidades de venta
-          // (mezcla fardos enteros pre-convertidos), así que no aplicar la
-          // aclaración (N FARDO) sobre el total consolidado para esta key.
-          totalesFardos[key].mixedFardo = true
+      // Compras → lista principal, con aclaración (N FARDOS) si aplica.
+      if (!item.es_bonificacion) {
+        const fila = acumular(totalesCompras, key, nombreProducto, cantidad)
+        if (fila.unidades_de_venta_por_fardo == null) {
+          fila.unidades_de_venta_por_fardo = item.producto?.unidades_de_venta_por_fardo ?? null
         }
-        if (sueltas > 0) {
-          const sueltasKey = `bonif:${desc}`
-          if (!totalesBotellas[sueltasKey]) totalesBotellas[sueltasKey] = { nombre: desc, cantidad: 0 }
-          totalesBotellas[sueltasKey].cantidad += sueltas
+        if (fila.etiqueta_bulto == null) {
+          fila.etiqueta_bulto = item.producto?.etiqueta_bulto ?? null
         }
         return
       }
 
-      // Caso B: items normales (compras o regalos de unidad entera) → suma directa.
-      if (!totalesFardos[key]) totalesFardos[key] = { nombre: nombreProducto, cantidad: 0 }
-      totalesFardos[key].cantidad += cantidad
-      // Capturar campos de fardo del producto para mostrar la aclaración
-      // (N FARDO) sobre la cantidad consolidada. Solo aplican a Caso B; si la
-      // entrada también recibió Caso A, mixedFardo bloquea la aclaración.
-      if (totalesFardos[key].unidades_de_venta_por_fardo == null) {
-        totalesFardos[key].unidades_de_venta_por_fardo =
-          item.producto?.unidades_de_venta_por_fardo ?? null
+      // Bonificación de tipo Fracción: cantidad en subunidades → split en
+      // fardos completos + botellas/paquetes sueltos.
+      if (upb && upb > 1 && desc) {
+        const fardos = Math.floor(cantidad / upb)
+        const sueltas = cantidad % upb
+        if (fardos > 0) {
+          // Pre-convertido a fardos: marcar para no re-aplicar la aclaración.
+          const fila = acumular(totalesBonifFardos, key, nombreProducto, fardos)
+          fila.preConvertidoAFardos = true
+        }
+        if (sueltas > 0) {
+          acumular(totalesBonifSueltas, `bonif:${desc}`, desc, sueltas)
+        }
+        return
       }
-      if (totalesFardos[key].etiqueta_bulto == null) {
-        totalesFardos[key].etiqueta_bulto = item.producto?.etiqueta_bulto ?? null
+
+      // Bonificación de unidad entera: en unidades de venta del producto.
+      const fila = acumular(totalesBonifFardos, key, nombreProducto, cantidad)
+      if (fila.unidades_de_venta_por_fardo == null) {
+        fila.unidades_de_venta_por_fardo = item.producto?.unidades_de_venta_por_fardo ?? null
+      }
+      if (fila.etiqueta_bulto == null) {
+        fila.etiqueta_bulto = item.producto?.etiqueta_bulto ?? null
       }
     })
   })
 
-  const filasFardos = Object.values(totalesFardos)
+  const ordenar = (mapa) => Object.values(mapa)
     .filter((t) => t.cantidad > 0)
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
 
-  const filasBotellas = Object.values(totalesBotellas)
-    .filter((t) => t.cantidad > 0)
-    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+  const filasCompras = ordenar(totalesCompras)
+  const filasBonifFardos = ordenar(totalesBonifFardos)
+  const filasBonifSueltas = ordenar(totalesBonifSueltas)
+
+  const lineaConAclaracion = (f) => {
+    // preConvertidoAFardos: la cantidad ya está en fardos, la etiqueta va directa.
+    if (f.preConvertidoAFardos) {
+      return `${f.nombre} (${f.cantidad === 1 ? 'FARDO COMPLETO' : 'FARDOS COMPLETOS'})`
+    }
+    const aclaracion = formatAclaracionBulto(
+      f.cantidad,
+      f.unidades_de_venta_por_fardo,
+      f.etiqueta_bulto,
+    )
+    return aclaracion ? `${f.nombre} ${aclaracion}` : f.nombre
+  }
 
   const ops = []
   ops.push({ kind: 'manifiesto-title', text: 'MANIFIESTO DE CARGA', advance: 5.5 })
@@ -380,33 +459,34 @@ function buildManifiestoOps(pedidos) {
     text: 'Total de productos a cargar en el vehiculo',
     advance: 5
   })
-  filasFardos.forEach((f) => {
-    const aclaracion = f.mixedFardo
-      ? null
-      : formatAclaracionBulto(
-          f.cantidad,
-          f.unidades_de_venta_por_fardo,
-          f.etiqueta_bulto,
-        )
+  filasCompras.forEach((f) => {
     ops.push({
       kind: 'manifiesto-line',
       cantidad: `${f.cantidad}x`,
-      nombre: aclaracion ? `${f.nombre} ${aclaracion}` : f.nombre,
+      nombre: lineaConAclaracion(f),
       advance: 4.5
     })
   })
-  if (filasBotellas.length > 0) {
+  if (filasBonifFardos.length > 0 || filasBonifSueltas.length > 0) {
     ops.push({ kind: 'spacer', advance: 1.5 })
     ops.push({
       kind: 'manifiesto-subtitle',
-      text: 'Bonificaciones sueltas (de fardo abierto)',
+      text: 'PRODUCTOS BONIFICADOS (cargar aparte)',
       advance: 4.5
     })
-    filasBotellas.forEach((f) => {
+    filasBonifFardos.forEach((f) => {
       ops.push({
         kind: 'manifiesto-line',
         cantidad: `${f.cantidad}x`,
-        nombre: f.nombre,
+        nombre: lineaConAclaracion(f),
+        advance: 4.5
+      })
+    })
+    filasBonifSueltas.forEach((f) => {
+      ops.push({
+        kind: 'manifiesto-line',
+        cantidad: `${f.cantidad}x`,
+        nombre: `${f.nombre} (SUELTAS, NO FARDO)`,
         advance: 4.5
       })
     })

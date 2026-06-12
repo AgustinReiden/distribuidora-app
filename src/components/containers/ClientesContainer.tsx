@@ -243,6 +243,7 @@ export default function ClientesContainer(): React.ReactElement {
         telefono: data.telefono || undefined,
         contacto: data.contacto || undefined,
         horarios_atencion: data.horarios_atencion || undefined,
+        horario_entrega: data.horario_entrega || undefined,
         rubro: data.rubro || undefined,
         notas: data.notas || undefined,
       }
@@ -279,6 +280,7 @@ export default function ClientesContainer(): React.ReactElement {
       descuento_porcentaje: data.descuentoPorcentaje,
       contacto: data.contacto || undefined,
       horarios_atencion: data.horarios_atencion || undefined,
+      horario_entrega: data.horario_entrega || undefined,
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,
       ...(ids !== undefined ? { preventista_id: ids[0] ?? null, preventista_ids: ids } : {}),

@@ -159,6 +159,7 @@ interface ClienteCreateInput {
   descuento_porcentaje?: number
   contacto?: string
   horarios_atencion?: string
+  horario_entrega?: string
   rubro?: string
   notas?: string
   preventista_id?: string | null
