@@ -25,6 +25,8 @@ export interface ClienteDB {
   zona?: string | null;
   zona_id?: string | null;
   horarios_atencion?: string | null;
+  // Franja en la que el cliente pide recibir el pedido (se imprime en hoja de ruta)
+  horario_entrega?: string | null;
   rubro?: string | null;
   notas?: string | null;
   limite_credito?: number;
@@ -237,6 +239,7 @@ export interface ClienteFormInput {
   zona?: string;
   zona_id?: string | null;
   horarios_atencion?: string;
+  horario_entrega?: string;
   rubro?: string;
   notas?: string;
   limiteCredito?: string | number;

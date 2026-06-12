@@ -266,6 +266,34 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     return pedidosTransportista.filter(p => !p.cliente?.latitud || !p.cliente?.longitud);
   }, [pedidosTransportista]);
 
+  // Links a Google Maps con la ruta armada. Maps acepta máximo 9 waypoints
+  // por link (+ origen + destino = 10 paradas nuevas por link), así que rutas
+  // largas se parten en varios links encadenados: el destino de un link es el
+  // origen del siguiente.
+  const linksGoogleMaps = useMemo((): Array<{ url: string; desde: number; hasta: number }> => {
+    const coords = pedidosOrdenados
+      .filter(p => p.cliente?.latitud != null && p.cliente?.longitud != null)
+      .map(p => `${p.cliente!.latitud},${p.cliente!.longitud}`);
+    if (coords.length === 0) return [];
+
+    const dep = getDepositoCoords();
+    const PARADAS_POR_LINK = 10; // 9 waypoints + destino
+    const links: Array<{ url: string; desde: number; hasta: number }> = [];
+    let origen = `${dep.lat},${dep.lng}`;
+
+    for (let i = 0; i < coords.length; i += PARADAS_POR_LINK) {
+      const grupo = coords.slice(i, i + PARADAS_POR_LINK);
+      const destino = grupo[grupo.length - 1];
+      const waypoints = grupo.slice(0, -1).join('|');
+      const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origen)}&destination=${encodeURIComponent(destino)}${
+        waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : ''
+      }&travelmode=driving`;
+      links.push({ url, desde: i + 1, hasta: i + grupo.length });
+      origen = destino;
+    }
+    return links;
+  }, [pedidosOrdenados]);
+
   // Calcular totales
   const totales = useMemo((): Totales => {
     const lista = vistaActiva === 'resultado' ? pedidosOrdenados : pedidosTransportista;
@@ -655,6 +683,39 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   </div>
                 </div>
               </div>
+
+              {/* Navegación en Google Maps con las paradas ya cargadas */}
+              {linksGoogleMaps.length > 0 && (
+                <div className="bg-white border rounded-lg p-4">
+                  <h3 className="font-medium text-gray-700 mb-1 flex items-center gap-2">
+                    <Navigation className="w-5 h-5 text-blue-600" />
+                    Abrir ruta en Google Maps
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Sale del depósito con las paradas en el orden optimizado. Google Maps
+                    admite hasta 10 paradas por link
+                    {linksGoogleMaps.length > 1
+                      ? ': al terminar un tramo, abrí el siguiente (continúa desde la última parada).'
+                      : '.'}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {linksGoogleMaps.map((link, i) => (
+                      <a
+                        key={link.url}
+                        href={link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                      >
+                        <MapPin className="w-4 h-4" />
+                        {linksGoogleMaps.length === 1
+                          ? 'Abrir ruta completa'
+                          : `Tramo ${i + 1} (paradas ${link.desde}-${link.hasta})`}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Lista de entregas ordenadas */}
               <div>
