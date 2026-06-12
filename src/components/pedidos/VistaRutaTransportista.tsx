@@ -338,6 +338,35 @@ function VistaRutaTransportista({
     return pedidosOrdenados.find(p => p.estado === 'asignado') || null;
   }, [pedidosOrdenados]);
 
+  // Links a Google Maps con las entregas pendientes ya cargadas en orden.
+  // El primer tramo sale desde la ubicación actual del chofer (sin origin,
+  // Maps usa "Tu ubicación"). Maps acepta máximo 9 waypoints por link, así
+  // que rutas largas se parten en tramos encadenados de 10 paradas.
+  const linksRutaMaps = useMemo((): Array<{ url: string; desde: number; hasta: number }> => {
+    const coords = pedidosOrdenados
+      .filter(p => p.estado === 'asignado' && p.cliente?.latitud != null && p.cliente?.longitud != null)
+      .map(p => `${p.cliente!.latitud},${p.cliente!.longitud}`);
+    if (coords.length === 0) return [];
+
+    const PARADAS_POR_LINK = 10; // 9 waypoints + destino
+    const links: Array<{ url: string; desde: number; hasta: number }> = [];
+    let origen: string | null = null; // primer tramo: ubicación actual
+
+    for (let i = 0; i < coords.length; i += PARADAS_POR_LINK) {
+      const grupo = coords.slice(i, i + PARADAS_POR_LINK);
+      const destino = grupo[grupo.length - 1];
+      const waypoints = grupo.slice(0, -1).join('|');
+      const url = `https://www.google.com/maps/dir/?api=1${
+        origen ? `&origin=${encodeURIComponent(origen)}` : ''
+      }&destination=${encodeURIComponent(destino)}${
+        waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : ''
+      }&travelmode=driving`;
+      links.push({ url, desde: i + 1, hasta: i + grupo.length });
+      origen = destino;
+    }
+    return links;
+  }, [pedidosOrdenados]);
+
   const entregasPendientes = pedidosOrdenados.filter(p => p.estado === 'asignado').length;
   const entregasCompletadas = pedidosOrdenados.filter(p => p.estado === 'entregado').length;
   const totalACobrar = pedidosOrdenados.filter(p => p.estado === 'asignado').reduce((sum, p) => sum + (p.total || 0), 0);
@@ -491,6 +520,36 @@ function VistaRutaTransportista({
           />
         </div>
       </div>
+
+      {/* Ruta completa en Google Maps (paradas pendientes en orden) */}
+      {linksRutaMaps.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border dark:border-gray-700">
+          <h3 className="font-semibold text-gray-800 dark:text-white mb-1 flex items-center gap-2">
+            <MapPin className="w-5 h-5 text-blue-600" />
+            Ruta completa en Google Maps
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            Abre Maps con tus entregas pendientes ya cargadas en orden, saliendo desde donde estás.
+            {linksRutaMaps.length > 1 && ' Al terminar un tramo, abrí el siguiente.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {linksRutaMaps.map((link, i) => (
+              <a
+                key={link.url}
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-3 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px]"
+              >
+                <Navigation className="w-4 h-4" />
+                {linksRutaMaps.length === 1
+                  ? 'Abrir ruta completa'
+                  : `Tramo ${i + 1} (paradas ${link.desde}-${link.hasta})`}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Lista de entregas */}
       <div>
