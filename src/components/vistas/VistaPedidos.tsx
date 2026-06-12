@@ -7,7 +7,8 @@
 import { ShoppingCart } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
-import { PedidoCard, PedidoFilters, PedidoStats, VistaRutaTransportista } from '../pedidos';
+import { PedidoCard, PedidoFilters, PedidoStats } from '../pedidos';
+import RutaActivaTransportista from '../rutaActiva/RutaActivaTransportista';
 import PedidosViewHeader from '../pedidos/PedidosViewHeader';
 import PedidoToolbar from '../pedidos/PedidoToolbar';
 import type {
@@ -150,10 +151,11 @@ export default function VistaPedidos({
   onAbrirPagoPedido,
   onEntregarSinCobrar,
 }: VistaPedidosProps) {
-  // Si es transportista, mostrar vista especial de ruta
+  // Si es transportista, mostrar la pantalla map-first "Ruta Activa"
+  // (reemplaza a VistaRutaTransportista; el flujo de entrega es el mismo).
   if (isTransportista && !isAdmin && !isPreventista) {
     return (
-      <VistaRutaTransportista
+      <RutaActivaTransportista
         pedidos={pedidos}
         onMarcarEntregado={onMarcarEntregado}
         userId={userId}
