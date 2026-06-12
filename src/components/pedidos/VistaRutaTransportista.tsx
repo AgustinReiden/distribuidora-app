@@ -1,7 +1,7 @@
 /**
  * Vista de ruta para transportista
  */
-import React, { useState, useMemo, useRef, memo } from 'react';
+import React, { useState, useMemo, useRef, memo, lazy, Suspense } from 'react';
 import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift, WifiOff, X } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
 import { googleMapsNavUrl, wazeNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
@@ -9,6 +9,10 @@ import type { PedidoDB, ClienteDB, ProductoDB, PedidoItemDB, MotivoSalvedad, Reg
 import { useAuthData } from '../../contexts/AuthDataContext';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 import ModalRegistrarPago from '../modals/ModalRegistrarPago';
+import { getDepositoCoords } from '../../hooks/useOptimizarRuta';
+
+// Lazy: leaflet solo se carga al entrar a esta vista
+const MapaRuta = lazy(() => import('../MapaRuta'));
 
 // =============================================================================
 // INTERFACES DE PROPS Y TIPOS
@@ -520,6 +524,23 @@ function VistaRutaTransportista({
           />
         </div>
       </div>
+
+      {/* Mapa de la ruta (paradas numeradas; verde = entregado) */}
+      <Suspense fallback={null}>
+        <MapaRuta
+          paradas={pedidosOrdenados
+            .filter(p => p.cliente?.latitud != null && p.cliente?.longitud != null)
+            .map((p, i) => ({
+              lat: p.cliente!.latitud as number,
+              lng: p.cliente!.longitud as number,
+              orden: p.orden_entrega || i + 1,
+              titulo: p.cliente?.nombre_fantasia || 'Cliente',
+              subtitulo: p.cliente?.direccion || undefined,
+              entregado: p.estado === 'entregado',
+            }))}
+          deposito={getDepositoCoords()}
+        />
+      </Suspense>
 
       {/* Ruta completa en Google Maps (paradas pendientes en orden) */}
       {linksRutaMaps.length > 0 && (

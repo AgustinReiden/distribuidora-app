@@ -1090,11 +1090,22 @@ export interface TransportistaBasic {
   nombre: string;
 }
 
+/** Parada de un recorrido (fila de recorrido_pedidos con el pedido embebido) */
+export interface RecorridoParada {
+  pedido_id?: string;
+  orden_entrega?: number;
+  estado_entrega?: string;
+  hora_entrega?: string | null;
+  pedido?: PedidoDB;
+}
+
 export interface RecorridoDBExtended {
   id: string;
   transportista_id: string;
   transportista?: TransportistaBasic | null;
   fecha: string;
+  /** Paradas del recorrido, mapeadas desde recorrido_pedidos por useRecorridos */
+  pedidos?: RecorridoParada[];
   pedidos_json?: Array<{ pedido_id: string; orden_entrega: number }>;
   estado?: string;
   total_pedidos?: number;
