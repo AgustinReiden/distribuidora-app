@@ -995,22 +995,59 @@ export default function PedidosContainer(): React.ReactElement {
   }, [notify])
 
   // ModalGestionRutas handlers
-  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null }) => {
+  // Aplica el orden optimizado y persiste el recorrido del día (RPC
+  // aplicar_orden_ruta, mig 081): actualiza pedidos.orden_entrega, cancela el
+  // recorrido en_curso anterior del transportista y crea el nuevo con
+  // distancia/duración. Un recorrido vigente por transportista por día.
+  const aplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null }) => {
     setGuardando(true)
     try {
-      if (data.ordenOptimizado) {
-        await supabase.rpc('actualizar_orden_entrega', {
-          p_pedidos: data.ordenOptimizado.map(p => ({ id: p.pedido_id, orden_entrega: p.orden }))
-        })
-      }
+      const { error } = await supabase.rpc('aplicar_orden_ruta', {
+        p_transportista_id: data.transportistaId,
+        p_pedidos: data.ordenOptimizado.map(p => ({ pedido_id: p.pedido_id, orden_entrega: p.orden })),
+        p_distancia: data.distancia,
+        p_duracion: data.duracion != null ? Math.round(data.duracion) : null
+      })
+      if (error) throw error
+
       // Refresca lista paginada y query de asignados: ambos cachean orden_entrega
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalOptimizarRutaOpen(false)
       limpiarRuta()
-      notify.success('Orden de entrega actualizado')
-    } catch (e) { notify.error((e as Error).message) }
+      notify.success('Ruta aplicada: orden de entrega y recorrido del día guardados')
+    } catch (e) { notify.error('Error al aplicar la ruta: ' + (e as Error).message) }
     setGuardando(false)
   }, [limpiarRuta, notify, queryClient])
+
+  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null }) => {
+    if (!data.ordenOptimizado?.length || !data.transportistaId) return
+    // Si ya hay un recorrido vigente hoy para este transportista, confirmar
+    // el reemplazo (el anterior queda como 'cancelado' a modo de historial).
+    const { data: vigente } = await supabase
+      .from('recorridos')
+      .select('id')
+      .eq('transportista_id', data.transportistaId)
+      .eq('fecha', fechaLocalISO())
+      .eq('estado', 'en_curso')
+      .limit(1)
+      .maybeSingle()
+
+    if (vigente) {
+      const transportista = transportistas.find(t => t.id === data.transportistaId)
+      setConfirmConfig({
+        visible: true,
+        tipo: 'warning',
+        titulo: 'Reemplazar recorrido del día',
+        mensaje: `Ya hay un recorrido armado hoy para ${transportista?.nombre || 'este transportista'}. Se reemplazará por la ruta nueva (el anterior queda en el historial como cancelado).`,
+        onConfirm: () => {
+          setConfirmConfig({ visible: false })
+          aplicarOrden(data)
+        },
+      })
+      return
+    }
+    await aplicarOrden(data)
+  }, [aplicarOrden, transportistas])
 
   const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[]) => {
     try {

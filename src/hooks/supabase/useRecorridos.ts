@@ -3,6 +3,7 @@ import { supabase } from './base'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   RecorridoDBExtended,
+  RecorridoParada,
   PedidoOrdenado,
   EstadisticasRecorridos,
   EstadisticaTransportista,
@@ -29,11 +30,45 @@ interface RecorridoRaw {
   completed_at?: string | null;
   created_at?: string;
   transportista?: TransportistaBasic | null;
+  recorrido_pedidos?: Array<{
+    id: string;
+    orden_entrega?: number;
+    estado_entrega?: string;
+    hora_entrega?: string | null;
+    pedido?: Record<string, unknown> | null;
+  }>;
 }
 
 interface PedidoJson {
   pedido_id: string;
   orden_entrega: number;
+}
+
+// SELECT con joins: trae transportista y las paradas (recorrido_pedidos) con
+// su pedido y cliente embebidos en UNA sola query. Antes se hacía select('*')
+// sin joins (la vista esperaba recorrido.pedidos y nunca llegaba) más un N+1
+// de perfiles por recorrido.
+const RECORRIDO_SELECT = `*,
+  transportista:perfiles!transportista_id(id, nombre),
+  recorrido_pedidos(id, orden_entrega, estado_entrega, hora_entrega,
+    pedido:pedidos(id, estado, estado_pago, total, monto_pagado, notas,
+      cliente:clientes(nombre_fantasia, direccion, telefono, latitud, longitud),
+      items:pedido_items(id)))`
+
+// Mapea la fila cruda al shape que espera VistaRecorridos (recorrido.pedidos)
+function mapRecorrido(r: RecorridoRaw): RecorridoDBExtended {
+  const pedidos = (r.recorrido_pedidos || [])
+    .slice()
+    .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999))
+    .map((rp): RecorridoParada => ({
+      pedido_id: rp.pedido ? String((rp.pedido as { id?: unknown }).id ?? '') : undefined,
+      orden_entrega: rp.orden_entrega,
+      estado_entrega: rp.estado_entrega,
+      hora_entrega: rp.hora_entrega,
+      pedido: rp.pedido as RecorridoParada['pedido'],
+    }))
+  const { recorrido_pedidos: _omit, ...rest } = r
+  return { ...rest, pedidos } as RecorridoDBExtended
 }
 
 export function useRecorridos(): UseRecorridosReturnExtended {
@@ -52,69 +87,13 @@ export function useRecorridos(): UseRecorridosReturnExtended {
     return Promise.race([queryPromise, timeoutPromise])
   }
 
-  // Obtener recorridos del dia
-  const fetchRecorridosHoy = useCallback(async (): Promise<RecorridoDBExtended[]> => {
+  // Fetch compartido: una sola query con joins (transportista + paradas)
+  const fetchRecorridosDeFecha = useCallback(async (fecha: string): Promise<RecorridoDBExtended[]> => {
     setLoading(true)
-    const hoy = fechaLocalISO()
-
     try {
       const query = supabase
         .from('recorridos')
-        .select('*')
-        .eq('fecha', hoy)
-        .order('created_at', { ascending: false })
-
-      const { data, error } = await fetchConTimeout(query, 8000)
-
-      if (error) {
-        setRecorridos([])
-        return []
-      }
-
-      const dataTyped = (data || []) as RecorridoRaw[]
-
-      // Si hay recorridos, enriquecer con datos del transportista
-      if (dataTyped.length > 0) {
-        const recorridosEnriquecidos = await Promise.all(
-          dataTyped.map(async (recorrido): Promise<RecorridoDBExtended> => {
-            let transportista: TransportistaBasic | null = null
-            if (recorrido.transportista_id) {
-              try {
-                const { data: perfil } = await supabase
-                  .from('perfiles')
-                  .select('id, nombre')
-                  .eq('id', recorrido.transportista_id)
-                  .single()
-                transportista = perfil as TransportistaBasic | null
-              } catch {
-                // Error silenciado
-              }
-            }
-            return { ...recorrido, transportista }
-          })
-        )
-        setRecorridos(recorridosEnriquecidos)
-        return recorridosEnriquecidos
-      }
-
-      setRecorridos(dataTyped)
-      return dataTyped
-    } catch {
-      setRecorridos([])
-      return []
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // Obtener recorridos por fecha
-  const fetchRecorridosPorFecha = useCallback(async (fecha: string): Promise<RecorridoDBExtended[]> => {
-    setLoading(true)
-
-    try {
-      const query = supabase
-        .from('recorridos')
-        .select('*')
+        .select(RECORRIDO_SELECT)
         .eq('fecha', fecha)
         .order('created_at', { ascending: false })
 
@@ -125,34 +104,9 @@ export function useRecorridos(): UseRecorridosReturnExtended {
         return []
       }
 
-      const dataTyped = (data || []) as RecorridoRaw[]
-
-      // Si hay recorridos, enriquecer con datos del transportista
-      if (dataTyped.length > 0) {
-        const recorridosEnriquecidos = await Promise.all(
-          dataTyped.map(async (recorrido): Promise<RecorridoDBExtended> => {
-            let transportista: TransportistaBasic | null = null
-            if (recorrido.transportista_id) {
-              try {
-                const { data: perfil } = await supabase
-                  .from('perfiles')
-                  .select('id, nombre')
-                  .eq('id', recorrido.transportista_id)
-                  .single()
-                transportista = perfil as TransportistaBasic | null
-              } catch {
-                // Error silenciado
-              }
-            }
-            return { ...recorrido, transportista }
-          })
-        )
-        setRecorridos(recorridosEnriquecidos)
-        return recorridosEnriquecidos
-      }
-
-      setRecorridos(dataTyped)
-      return dataTyped
+      const mapped = ((data || []) as unknown as RecorridoRaw[]).map(mapRecorrido)
+      setRecorridos(mapped)
+      return mapped
     } catch {
       setRecorridos([])
       return []
@@ -160,6 +114,16 @@ export function useRecorridos(): UseRecorridosReturnExtended {
       setLoading(false)
     }
   }, [])
+
+  // Obtener recorridos del dia
+  const fetchRecorridosHoy = useCallback(async (): Promise<RecorridoDBExtended[]> => {
+    return fetchRecorridosDeFecha(fechaLocalISO())
+  }, [fetchRecorridosDeFecha])
+
+  // Obtener recorridos por fecha
+  const fetchRecorridosPorFecha = useCallback(async (fecha: string): Promise<RecorridoDBExtended[]> => {
+    return fetchRecorridosDeFecha(fecha)
+  }, [fetchRecorridosDeFecha])
 
   // Crear un nuevo recorrido cuando se aplica una ruta optimizada
   const crearRecorrido = async (

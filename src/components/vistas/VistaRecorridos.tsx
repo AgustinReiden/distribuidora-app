@@ -1,7 +1,11 @@
-import React, { useState, useMemo, ChangeEvent } from 'react';
+import React, { useState, useMemo, lazy, Suspense, ChangeEvent } from 'react';
 import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
 import { formatPrecio, formatFecha, fechaLocalISO } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import { getDepositoCoords } from '../../hooks/useOptimizarRuta';
+
+// Lazy: leaflet solo se carga al expandir un recorrido
+const MapaRuta = lazy(() => import('../MapaRuta'));
 import type {
   RecorridoDBExtended,
   PedidoDB,
@@ -37,6 +41,8 @@ interface PedidoRecorrido {
     nombre_fantasia?: string;
     direccion?: string;
     telefono?: string;
+    latitud?: number | null;
+    longitud?: number | null;
   };
   items?: PedidoItemDB[];
   notas?: string;
@@ -295,6 +301,29 @@ function RecorridoCard({ recorrido, defaultExpanded = false }: RecorridoCardProp
       {/* Lista de pedidos */}
       {expandido && (
         <div className="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+          {/* Mapa de la ruta (paradas con coordenadas) */}
+          <Suspense fallback={null}>
+            <div className="mb-4">
+              <MapaRuta
+                paradas={pedidosOrdenados
+                  .map((p, i) => {
+                    const cliente = p.pedido?.cliente || p.cliente;
+                    if (cliente?.latitud == null || cliente?.longitud == null) return null;
+                    return {
+                      lat: cliente.latitud,
+                      lng: cliente.longitud,
+                      orden: p.orden_entrega || i + 1,
+                      titulo: cliente.nombre_fantasia || 'Cliente',
+                      subtitulo: cliente.direccion || undefined,
+                      entregado: (p.pedido?.estado || p.estado) === 'entregado',
+                    };
+                  })
+                  .filter((p): p is NonNullable<typeof p> => p !== null)}
+                deposito={getDepositoCoords()}
+                altura={240}
+              />
+            </div>
+          </Suspense>
           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
             <Route className="w-4 h-4" />
             Orden de Entregas
