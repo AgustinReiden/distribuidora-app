@@ -150,3 +150,26 @@ select {
 option {
   @apply dark:bg-gray-700 dark:text-white;
 }
+
+/* === MapaRuta (Leaflet) === */
+/* Anillo pulsante de la parada activa en la pantalla Ruta Activa */
+@keyframes mapa-pulso {
+  0% { box-shadow: 0 0 0 0 rgba(29, 78, 216, 0.45), 0 1px 6px rgba(0, 0, 0, 0.45); }
+  70% { box-shadow: 0 0 0 14px rgba(29, 78, 216, 0), 0 1px 6px rgba(0, 0, 0, 0.45); }
+  100% { box-shadow: 0 0 0 0 rgba(29, 78, 216, 0), 0 1px 6px rgba(0, 0, 0, 0.45); }
+}
+.mapa-marker-activo {
+  animation: mapa-pulso 1.8s ease-out infinite;
+}
+/* Dark mode: oscurecer los tiles de OSM (patron estandar Leaflet) */
+.dark .mapa-ruta .leaflet-tile-pane {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+/* El mapa no debe tapar modales/sheets: el contenedor crea un stacking
+   context propio asi los z-index internos de leaflet (200-700) no compiten
+   con el resto de la app */
+.mapa-ruta {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
