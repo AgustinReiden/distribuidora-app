@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense, ReactElement, useCallback, useMemo } from 'react'
+import { useEffect, Suspense, ReactElement, useCallback, useMemo } from 'react'
 import { BrowserRouter, useLocation, Navigate, Route, Routes } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import {
@@ -10,6 +10,7 @@ import {
   useProductos
 } from './hooks/supabase'
 import { useInvalidateMetricas } from './hooks/queries'
+import { lazyWithReload } from './utils/lazyWithReload'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { NotificationProvider, useNotification } from './contexts/NotificationContext'
 import { AuthDataProvider, type AuthDataContextValue } from './contexts/AuthDataContext'
@@ -35,17 +36,19 @@ import ProductosContainer from './components/containers/ProductosContainer'
 import ProveedoresContainer from './components/containers/ProveedoresContainer'
 import UsuariosContainer from './components/containers/UsuariosContainer'
 
-const VistaRendiciones = lazy(() => import('./components/vistas/VistaRendiciones'))
-const VistaSalvedades = lazy(() => import('./components/vistas/VistaSalvedades'))
-const VistaGeolocalizacion = lazy(() => import('./components/vistas/VistaGeolocalizacion'))
-const AnalyticsContainer = lazy(() => import('./components/containers/AnalyticsContainer'))
-const ReportesContainer = lazy(() => import('./components/containers/ReportesContainer'))
-const ComisionesContainer = lazy(() => import('./components/containers/ComisionesContainer'))
-const RecorridosContainer = lazy(() => import('./components/containers/RecorridosContainer'))
-const RecorridoPreventistaContainer = lazy(() => import('./components/containers/RecorridoPreventistaContainer'))
-const MovimientosContainer = lazy(() => import('./components/containers/MovimientosContainer'))
-const PromocionesContainer = lazy(() => import('./components/containers/PromocionesContainer'))
-const VistaBotTelegramContainer = lazy(() => import('./components/containers/VistaBotTelegramContainer'))
+// lazyWithReload: si un chunk quedó obsoleto tras un deploy (PWA con SW que
+// tomó control a mitad de sesión), recarga una vez en vez de colgar el Suspense.
+const VistaRendiciones = lazyWithReload(() => import('./components/vistas/VistaRendiciones'))
+const VistaSalvedades = lazyWithReload(() => import('./components/vistas/VistaSalvedades'))
+const VistaGeolocalizacion = lazyWithReload(() => import('./components/vistas/VistaGeolocalizacion'))
+const AnalyticsContainer = lazyWithReload(() => import('./components/containers/AnalyticsContainer'))
+const ReportesContainer = lazyWithReload(() => import('./components/containers/ReportesContainer'))
+const ComisionesContainer = lazyWithReload(() => import('./components/containers/ComisionesContainer'))
+const RecorridosContainer = lazyWithReload(() => import('./components/containers/RecorridosContainer'))
+const RecorridoPreventistaContainer = lazyWithReload(() => import('./components/containers/RecorridoPreventistaContainer'))
+const MovimientosContainer = lazyWithReload(() => import('./components/containers/MovimientosContainer'))
+const PromocionesContainer = lazyWithReload(() => import('./components/containers/PromocionesContainer'))
+const VistaBotTelegramContainer = lazyWithReload(() => import('./components/containers/VistaBotTelegramContainer'))
 
 function LoadingVista(): ReactElement {
   return (
