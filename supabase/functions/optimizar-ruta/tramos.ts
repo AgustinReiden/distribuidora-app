@@ -38,6 +38,8 @@ export interface GoogleRoute {
   duration?: string;
   optimizedIntermediateWaypointIndex?: number[];
   legs?: Array<{ distanceMeters?: number; duration?: string }>;
+  /** Geometría de la ruta sobre las calles (encoded polyline, precisión 5). */
+  polyline?: { encodedPolyline?: string };
 }
 
 export interface OrdenOptimizadoItem {
@@ -55,6 +57,8 @@ export interface RutaUnida {
   ordenOptimizado: OrdenOptimizadoItem[];
   distanciaTotalMetros: number;
   duracionTotalSegundos: number;
+  /** Encoded polylines, una por tramo en orden (la ruta real sobre calles). */
+  polylines: string[];
 }
 
 /** Máximo de intermedios por request (25 de Google, con margen). */
@@ -109,6 +113,7 @@ const parseDuracion = (s: string | undefined): number =>
  */
 export function unirTramos(tramos: Tramo[], rutas: GoogleRoute[]): RutaUnida {
   const ordenOptimizado: OrdenOptimizadoItem[] = [];
+  const polylines: string[] = [];
   let distanciaTotalMetros = 0;
   let duracionTotalSegundos = 0;
 
@@ -116,6 +121,9 @@ export function unirTramos(tramos: Tramo[], rutas: GoogleRoute[]): RutaUnida {
     const ruta = rutas[i] ?? {};
     const legs = ruta.legs ?? [];
     const optimizedOrder = ruta.optimizedIntermediateWaypointIndex ?? [];
+
+    const encoded = ruta.polyline?.encodedPolyline;
+    if (encoded) polylines.push(encoded);
 
     // Orden de visita del tramo: intermedios (reordenados por Google si hubo
     // optimización) y el puente al final si existe.
@@ -150,5 +158,5 @@ export function unirTramos(tramos: Tramo[], rutas: GoogleRoute[]): RutaUnida {
     }
   });
 
-  return { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos };
+  return { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos, polylines };
 }

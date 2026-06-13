@@ -17,7 +17,8 @@ import { formatPrecio } from '../../utils/formatters';
 import { haversineMeters } from '../../utils/geo';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { useWatchPosition } from '../../hooks/useWatchPosition';
-import { getDepositoCoords } from '../../hooks/useOptimizarRuta';
+import { useDepositoCoords, useRecorridoActivoQuery } from '../../hooks/queries';
+import { decodePolylines } from '../../utils/polyline';
 import { useEntregaParada, type PedidoConCliente, type DatosPago, type DatosSalvedad } from './useEntregaParada';
 import SheetParada, { type LinkRutaMaps } from './SheetParada';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
@@ -28,6 +29,10 @@ const MapaRuta = lazy(() => import('../MapaRuta'));
 
 /** Radio del geofence de llegada, en metros */
 const RADIO_LLEGADA_M = 100;
+/** Accuracy máxima para confiar en el GPS (peor = IP-geoloc de desktop) */
+const ACCURACY_MAX_M = 1000;
+/** Más lejos que esto de la parada activa = el chofer no está en zona */
+const DISTANCIA_ABSURDA_M = 50_000;
 
 export interface RutaActivaTransportistaProps {
   pedidos: PedidoDB[] | null;
@@ -51,7 +56,14 @@ export default function RutaActivaTransportista({
   onEntregarSinCobrar,
 }: RutaActivaTransportistaProps): React.ReactElement {
   const { isOnline } = useAuthData();
+  const deposito = useDepositoCoords();
   const { posicion } = useWatchPosition(true);
+  // Ruta real sobre las calles (polylines guardadas al aplicar el orden)
+  const { data: recorridoActivo } = useRecorridoActivoQuery(userId);
+  const rutaReal = useMemo(
+    () => decodePolylines(recorridoActivo?.polylines),
+    [recorridoActivo?.polylines],
+  );
   const [seguirPosicion, setSeguirPosicion] = useState(false);
   // Parada seleccionada manualmente (tap en mapa o en la lista). null = automática.
   const [paradaSeleccionadaId, setParadaSeleccionadaId] = useState<string | null>(null);
@@ -106,15 +118,21 @@ export default function RutaActivaTransportista({
     if (!sel || sel.estado !== 'asignado') setParadaSeleccionadaId(null);
   }, [paradaSeleccionadaId, pedidosOrdenados]);
 
-  // Geofence: distancia a la parada activa
+  // GPS confiable: descarta la geolocalización por IP del navegador en
+  // desktop (accuracy enorme) que producía el falso "808 km".
+  const gpsConfiable = posicion != null && posicion.accuracy != null && posicion.accuracy <= ACCURACY_MAX_M;
+
+  // Geofence: distancia a la parada activa. null si el GPS no es confiable o si
+  // la distancia es absurda (chofer fuera de zona) → no mostrar dato falso.
   const distanciaMetros = useMemo((): number | null => {
-    if (!posicion || !paradaActiva?.cliente?.latitud || !paradaActiva?.cliente?.longitud) return null;
-    return haversineMeters(
+    if (!gpsConfiable || !posicion || !paradaActiva?.cliente?.latitud || !paradaActiva?.cliente?.longitud) return null;
+    const d = haversineMeters(
       { lat: posicion.lat, lng: posicion.lng },
       { lat: Number(paradaActiva.cliente.latitud), lng: Number(paradaActiva.cliente.longitud) },
     );
-  }, [posicion, paradaActiva]);
-  const llegaste = distanciaMetros != null && distanciaMetros <= RADIO_LLEGADA_M;
+    return d > DISTANCIA_ABSURDA_M ? null : d;
+  }, [gpsConfiable, posicion, paradaActiva]);
+  const llegaste = gpsConfiable && distanciaMetros != null && distanciaMetros <= RADIO_LLEGADA_M;
 
   // Paradas para el mapa
   const paradasMapa = useMemo(
@@ -179,12 +197,15 @@ export default function RutaActivaTransportista({
       <Suspense fallback={<div className="flex h-full items-center justify-center text-gray-400">Cargando mapa…</div>}>
         <MapaRuta
           paradas={paradasMapa}
-          deposito={getDepositoCoords()}
+          deposito={deposito}
           altura="full"
-          posicion={posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy } : null}
+          rutaReal={rutaReal.length > 1 ? rutaReal : null}
+          // Solo mostramos el punto azul con GPS confiable (no plantarlo en
+          // medio del país con la geolocalización por IP del desktop).
+          posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy } : null}
           paradaActivaOrden={paradaActiva?.orden_entrega ?? null}
           onParadaTap={handleParadaTapMapa}
-          seguirPosicion={seguirPosicion}
+          seguirPosicion={seguirPosicion && gpsConfiable}
         />
       </Suspense>
 

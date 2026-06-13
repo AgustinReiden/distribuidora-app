@@ -11,7 +11,7 @@
  *
  * No-modal: el mapa de fondo sigue interactivo.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Drawer } from 'vaul';
 import {
   Navigation, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, Map as MapIcon,
@@ -65,6 +65,12 @@ export default function SheetParada({
   const expandido = snap === SNAP_EXPANDIDO;
 
   const pendientes = paradas.filter(p => p.estado === 'asignado');
+
+  // Al detectar llegada, subir el sheet a la posición media si está colapsado
+  // para que el botón Entregar quede a la vista (flujo guiado).
+  useEffect(() => {
+    if (llegaste) setSnap(s => (s === SNAP_COLAPSADO ? SNAP_MEDIO : s));
+  }, [llegaste]);
 
   return (
     <Drawer.Root

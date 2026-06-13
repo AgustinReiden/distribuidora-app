@@ -6,7 +6,7 @@ import {
   DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays
 } from 'lucide-react';
 import ModalBase from './ModalBase';
-import { getDepositoCoords, setDepositoCoords } from '../../hooks/useOptimizarRuta';
+import { useDepositoCoords, useSetDepositoMutation } from '../../hooks/queries';
 import type { PedidoDB, PerfilDB } from '../../types';
 
 // =============================================================================
@@ -192,12 +192,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const [depositoGuardado, setDepositoGuardado] = useState<boolean>(false);
   const [vistaActiva, setVistaActiva] = useState<'optimizar' | 'resultado'>('optimizar');
 
-  // Cargar coordenadas del deposito al montar
+  // Depósito de la sucursal (DB, mig 082) — compartido con el mapa del transportista
+  const deposito = useDepositoCoords();
+  const setDepositoMut = useSetDepositoMutation();
+
+  // Cargar coordenadas del deposito en los inputs
   useEffect(() => {
-    const coords = getDepositoCoords();
-    setDepositoLat(coords.lat.toString());
-    setDepositoLng(coords.lng.toString());
-  }, []);
+    setDepositoLat(deposito.lat.toString());
+    setDepositoLng(deposito.lng.toString());
+  }, [deposito.lat, deposito.lng]);
 
   // Cambiar a vista resultado cuando hay ruta optimizada
   useEffect(() => {
@@ -276,10 +279,9 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
       .map(p => `${p.cliente!.latitud},${p.cliente!.longitud}`);
     if (coords.length === 0) return [];
 
-    const dep = getDepositoCoords();
     const PARADAS_POR_LINK = 10; // 9 waypoints + destino
     const links: Array<{ url: string; desde: number; hasta: number }> = [];
-    let origen = `${dep.lat},${dep.lng}`;
+    let origen = `${deposito.lat},${deposito.lng}`;
 
     for (let i = 0; i < coords.length; i += PARADAS_POR_LINK) {
       const grupo = coords.slice(i, i + PARADAS_POR_LINK);
@@ -292,7 +294,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
       origen = destino;
     }
     return links;
-  }, [pedidosOrdenados]);
+  }, [pedidosOrdenados, deposito.lat, deposito.lng]);
 
   // Calcular totales
   const totales = useMemo((): Totales => {
@@ -317,9 +319,12 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     const lat = parseFloat(depositoLat);
     const lng = parseFloat(depositoLng);
     if (!isNaN(lat) && !isNaN(lng)) {
-      setDepositoCoords(lat, lng);
-      setDepositoGuardado(true);
-      setTimeout(() => setDepositoGuardado(false), 2000);
+      setDepositoMut.mutate({ lat, lng }, {
+        onSuccess: () => {
+          setDepositoGuardado(true);
+          setTimeout(() => setDepositoGuardado(false), 2000);
+        },
+      });
     }
   };
 

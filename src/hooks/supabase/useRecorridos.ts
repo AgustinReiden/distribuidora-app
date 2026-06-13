@@ -29,6 +29,7 @@ interface RecorridoRaw {
   duracion_total?: number;
   completed_at?: string | null;
   created_at?: string;
+  polylines?: string[] | null;
   transportista?: TransportistaBasic | null;
   recorrido_pedidos?: Array<{
     id: string;

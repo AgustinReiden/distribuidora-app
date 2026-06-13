@@ -48,22 +48,36 @@ export interface MapaRutaProps {
   onParadaTap?: (orden: number) => void;
   /** Si true, el mapa sigue la posición propia en vez de la parada activa. */
   seguirPosicion?: boolean;
+  /**
+   * Ruta real sobre las calles (polyline decodificada de Google). Si viene con
+   * >1 punto se dibuja la línea sólida real; si no, fallback a la línea recta
+   * punteada entre paradas (recorridos viejos / sin polyline).
+   */
+  rutaReal?: [number, number][] | null;
 }
 
-const markerParada = (orden: number, entregado: boolean, activa: boolean) =>
-  divIcon({
+// Jerarquía visual: la parada activa domina (40px, anillo pulsante); las
+// pendientes son medianas (28px); las completadas se "apagan" (20px, verde
+// atenuado) para ceder protagonismo y desamontonar el centro.
+const markerParada = (orden: number, entregado: boolean, activa: boolean) => {
+  const size = activa ? 40 : entregado ? 20 : 28;
+  const bg = entregado ? '#16a34a' : activa ? '#1d4ed8' : '#2563eb';
+  const fontSize = activa ? 15 : entregado ? 10 : 12;
+  const border = activa ? 3 : 2;
+  return divIcon({
     className: '', // sin clase default de leaflet (evita el sprite roto)
     html: `<div class="${activa ? 'mapa-marker-activo' : ''}" style="
-      width:${activa ? 36 : 28}px;height:${activa ? 36 : 28}px;border-radius:9999px;
-      background:${entregado ? '#22c55e' : activa ? '#1d4ed8' : '#2563eb'};
-      color:#fff;font-weight:700;font-size:${activa ? 14 : 12}px;
+      width:${size}px;height:${size}px;border-radius:9999px;
+      background:${bg};opacity:${entregado && !activa ? 0.65 : 1};
+      color:#fff;font-weight:700;font-size:${fontSize}px;
       display:flex;align-items:center;justify-content:center;
-      border:${activa ? 3 : 2}px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.45);
+      border:${border}px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.45);
     ">${entregado ? '✓' : orden}</div>`,
-    iconSize: activa ? [36, 36] : [28, 28],
-    iconAnchor: activa ? [18, 18] : [14, 14],
-    popupAnchor: [0, activa ? -18 : -14],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
+};
 
 const markerDeposito = divIcon({
   className: '',
@@ -108,6 +122,7 @@ export default function MapaRuta({
   paradaActivaOrden = null,
   onParadaTap,
   seguirPosicion = false,
+  rutaReal = null,
 }: MapaRutaProps) {
   const paradasOrdenadas = useMemo(
     () => [...paradas].sort((a, b) => a.orden - b.orden),
@@ -121,16 +136,17 @@ export default function MapaRuta({
     return latLngBounds(puntos as [number, number][]).pad(0.15);
   }, [paradasOrdenadas, deposito]);
 
-  // Trazado simple (líneas punteadas entre paradas en orden). El trazado real
-  // sobre calles requeriría guardar la polyline de Google en recorridos —
-  // fase 3 del plan de Ruta Activa.
-  const linea = useMemo((): LatLngExpression[] => {
+  // Fallback: líneas rectas punteadas entre paradas en orden. Solo se usa
+  // cuando no hay ruta real (recorridos viejos / sin polyline guardada).
+  const lineaFallback = useMemo((): LatLngExpression[] => {
     const pts: LatLngExpression[] = paradasOrdenadas.map(p => [p.lat, p.lng]);
     if (deposito && pts.length > 0) {
       return [[deposito.lat, deposito.lng], ...pts, [deposito.lat, deposito.lng]];
     }
     return pts;
   }, [paradasOrdenadas, deposito]);
+
+  const hayRutaReal = (rutaReal?.length ?? 0) > 1;
 
   const objetivo = useMemo((): LatLngExpression | null => {
     if (seguirPosicion && posicion) return [posicion.lat, posicion.lng];
@@ -157,13 +173,21 @@ export default function MapaRuta({
         zoomControl={!esFull}
         attributionControl={true}
       >
+        {/* CARTO Voyager: base limpia y profesional (gratis). {r} sirve tiles
+            @2x en pantallas retina (celulares). Atribución CARTO + OSM. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          subdomains="abcd"
+          maxZoom={20}
         />
         <VistaControlada objetivo={objetivo} />
-        {linea.length > 1 && (
-          <Polyline positions={linea} pathOptions={{ color: '#2563eb', weight: 3, dashArray: '6 8', opacity: 0.7 }} />
+        {hayRutaReal ? (
+          // Ruta real sobre las calles: línea sólida.
+          <Polyline positions={rutaReal as LatLngExpression[]} pathOptions={{ color: '#2563eb', weight: 5, opacity: 0.85 }} />
+        ) : lineaFallback.length > 1 && (
+          // Fallback recto punteado (sin polyline guardada).
+          <Polyline positions={lineaFallback} pathOptions={{ color: '#2563eb', weight: 3, dashArray: '6 8', opacity: 0.6 }} />
         )}
         {deposito && (
           <Marker position={[deposito.lat, deposito.lng]} icon={markerDeposito}>

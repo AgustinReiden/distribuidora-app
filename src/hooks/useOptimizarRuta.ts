@@ -35,7 +35,12 @@ export interface RutaOptimizadaResponse {
   orden_optimizado?: OrdenOptimizadoItem[];
   distancia_total?: number;
   duracion_total?: number;
-  polyline?: string;
+  /**
+   * Polylines codificadas (Google encoded polyline, una por tramo) de la ruta
+   * real sobre las calles. El front las decodifica y dibuja. Se persisten en
+   * recorridos.polylines al aplicar el orden.
+   */
+  polylines?: string[];
   mensaje?: string;
   error?: string;
 }
@@ -52,7 +57,7 @@ export interface UseOptimizarRutaReturn {
   loading: boolean;
   rutaOptimizada: RutaOptimizadaResponse | null;
   error: string | null;
-  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[]) => Promise<RutaOptimizadaResponse | null>;
+  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords) => Promise<RutaOptimizadaResponse | null>;
   limpiarRuta: () => void;
 }
 
@@ -83,7 +88,9 @@ const DEPOSITO_STORAGE_KEY = 'distribuidora_deposito_coords';
 // ============================================================================
 
 /**
- * Obtiene las coordenadas del depósito desde localStorage o usa las por defecto
+ * Obtiene las coordenadas del depósito desde localStorage o usa las por defecto.
+ * @deprecated El depósito vive en la DB por sucursal (mig 082). Usar
+ * `useDepositoCoords()` de hooks/queries. Esto queda solo como fallback puro.
  */
 export const getDepositoCoords = (): DepositoCoords => {
   try {
@@ -132,7 +139,8 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
    */
   const optimizarRuta = useCallback(async (
     transportistaId: string,
-    pedidos: PedidoDB[] = []
+    pedidos: PedidoDB[] = [],
+    deposito?: DepositoCoords
   ): Promise<RutaOptimizadaResponse | null> => {
     if (!transportistaId) {
       setError('Debes seleccionar un transportista');
@@ -169,13 +177,15 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
     setLoading(true);
     setError(null);
 
-    // Obtener coordenadas del depósito (configurables)
-    const deposito = getDepositoCoords();
+    // Depósito: lo provee el caller desde la DB (useDepositoCoords). Fallback
+    // al default si no se pasó (compat) — pero el caller debe pasarlo para que
+    // optimización y mapa usen la MISMA fuente.
+    const dep = deposito ?? getDepositoCoords();
 
     const requestBody: OptimizarRutaRequestBody = {
       transportista_id: transportistaId,
-      deposito_lat: deposito.lat,
-      deposito_lng: deposito.lng,
+      deposito_lat: dep.lat,
+      deposito_lng: dep.lng,
       pedidos: pedidosConCoordenadas
     };
 
