@@ -145,6 +145,22 @@ export {
 } from './useZonasQuery'
 export type { ZonaDB } from './useZonasQuery'
 
+// Depósito de la sucursal (origen/cierre de rutas)
+export {
+  depositoKeys,
+  DEPOSITO_DEFAULT,
+  useDepositoCoords,
+  useSetDepositoMutation,
+} from './useDepositoQuery'
+export type { DepositoCoords } from './useDepositoQuery'
+
+// Recorrido activo del transportista (para la ruta real)
+export {
+  recorridoActivoKeys,
+  useRecorridoActivoQuery,
+} from './useRecorridoActivoQuery'
+export type { RecorridoActivo } from './useRecorridoActivoQuery'
+
 // Sucursales (el flujo viejo de transferencias fue reemplazado por movimientos)
 export {
   sucursalesKeys,

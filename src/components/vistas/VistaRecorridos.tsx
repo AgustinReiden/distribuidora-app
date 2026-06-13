@@ -2,7 +2,8 @@ import React, { useState, useMemo, lazy, Suspense, ChangeEvent } from 'react';
 import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
 import { formatPrecio, formatFecha, fechaLocalISO } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
-import { getDepositoCoords } from '../../hooks/useOptimizarRuta';
+import { useDepositoCoords } from '../../hooks/queries';
+import { decodePolylines } from '../../utils/polyline';
 
 // Lazy: leaflet solo se carga al expandir un recorrido
 const MapaRuta = lazy(() => import('../MapaRuta'));
@@ -211,6 +212,7 @@ function PedidoRecorridoCard({ pedido, orden }: PedidoRecorridoCardProps): React
 
 function RecorridoCard({ recorrido, defaultExpanded = false }: RecorridoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(defaultExpanded);
+  const deposito = useDepositoCoords();
 
   const pedidosOrdenados = useMemo<PedidoRecorrido[]>(() => {
     if (!recorrido.pedidos) return [];
@@ -319,7 +321,8 @@ function RecorridoCard({ recorrido, defaultExpanded = false }: RecorridoCardProp
                     };
                   })
                   .filter((p): p is NonNullable<typeof p> => p !== null)}
-                deposito={getDepositoCoords()}
+                deposito={deposito}
+                rutaReal={(() => { const r = decodePolylines(recorrido.polylines); return r.length > 1 ? r : null; })()}
                 altura={240}
               />
             </div>

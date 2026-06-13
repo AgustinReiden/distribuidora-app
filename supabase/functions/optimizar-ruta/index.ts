@@ -60,8 +60,10 @@ async function llamarGoogle(
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
+      // routes.polyline: geometría real sobre las calles para dibujarla en la
+      // app (la pagamos igual al optimizar; es campo base, no sube el SKU).
       "X-Goog-FieldMask":
-        "routes.duration,routes.distanceMeters,routes.optimizedIntermediateWaypointIndex,routes.legs",
+        "routes.duration,routes.distanceMeters,routes.optimizedIntermediateWaypointIndex,routes.legs,routes.polyline.encodedPolyline",
     },
     body: JSON.stringify({
       origin: { location: { latLng: origen } },
@@ -72,6 +74,7 @@ async function llamarGoogle(
       travelMode: "DRIVE",
       optimizeWaypointOrder: intermedios.length > 1,
       routingPreference: "TRAFFIC_AWARE",
+      polylineEncoding: "ENCODED_POLYLINE",
       languageCode: "es-419",
       units: "METRIC",
     }),
@@ -164,7 +167,7 @@ serve(async (req: Request) => {
     });
   }
 
-  const { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos } = unirTramos(
+  const { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos, polylines } = unirTramos(
     tramos,
     rutas,
   );
@@ -200,5 +203,6 @@ serve(async (req: Request) => {
     duracion_formato: horas > 0 ? `${horas}h ${minutos}m` : `${minutos} minutos`,
     distancia_formato: `${distanciaTotalKm} km`,
     orden_optimizado: ordenOptimizado,
+    polylines,
   });
 });

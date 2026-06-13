@@ -28,6 +28,7 @@ import {
   useTransportistasQuery,
   useUsuariosQuery,
   useCrearClienteMutation,
+  useDepositoCoords,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -145,6 +146,13 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Route optimization
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta()
+  const deposito = useDepositoCoords()
+  // Inyecta el depósito de la sucursal (DB) en la optimización, así el lado
+  // que optimiza y el mapa del transportista usan la MISMA ubicación.
+  const optimizarRutaConDeposito = useCallback(
+    (transportistaId: string, pedidosData?: PedidoDB[]) => optimizarRuta(transportistaId, pedidosData, deposito),
+    [optimizarRuta, deposito],
+  )
 
   // Export
   const [exportando, setExportando] = useState(false)
@@ -1006,18 +1014,23 @@ export default function PedidosContainer(): React.ReactElement {
         p_transportista_id: data.transportistaId,
         p_pedidos: data.ordenOptimizado.map(p => ({ pedido_id: p.pedido_id, orden_entrega: p.orden })),
         p_distancia: data.distancia,
-        p_duracion: data.duracion != null ? Math.round(data.duracion) : null
+        p_duracion: data.duracion != null ? Math.round(data.duracion) : null,
+        // Ruta real sobre las calles (encoded polylines de Google) para
+        // dibujarla en el mapa del transportista y del admin.
+        p_polylines: rutaOptimizada?.polylines ?? null
       })
       if (error) throw error
 
-      // Refresca lista paginada y query de asignados: ambos cachean orden_entrega
+      // Refresca lista paginada, query de asignados y recorridos (cachean
+      // orden_entrega y la ruta real)
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       setModalOptimizarRutaOpen(false)
       limpiarRuta()
       notify.success('Ruta aplicada: orden de entrega y recorrido del día guardados')
     } catch (e) { notify.error('Error al aplicar la ruta: ' + (e as Error).message) }
     setGuardando(false)
-  }, [limpiarRuta, notify, queryClient])
+  }, [limpiarRuta, notify, queryClient, rutaOptimizada])
 
   const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null }) => {
     if (!data.ordenOptimizado?.length || !data.transportistaId) return
@@ -1432,7 +1445,7 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalGestionRutas
             transportistas={transportistas}
             pedidos={pedidosParaRuta}
-            onOptimizar={optimizarRuta as Parameters<typeof ModalGestionRutas>[0]['onOptimizar']}
+            onOptimizar={optimizarRutaConDeposito as Parameters<typeof ModalGestionRutas>[0]['onOptimizar']}
             onAplicarOrden={handleAplicarOrden as Parameters<typeof ModalGestionRutas>[0]['onAplicarOrden']}
             onExportarPDF={handleExportarHojaRutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['onExportarPDF']}
             onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta() }}

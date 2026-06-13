@@ -74,6 +74,7 @@ Deno.test("unirTramos respeta el orden optimizado de Google y suma totales", () 
   // (índices sobre tramos[0].intermedios). 4 legs: 3 llegadas + vuelta al depósito.
   const ruta: GoogleRoute = {
     optimizedIntermediateWaypointIndex: [2, 0, 1],
+    polyline: { encodedPolyline: "_p~iF~ps|U" },
     legs: [
       { distanceMeters: 1000, duration: "60s" },
       { distanceMeters: 2000, duration: "120s" },
@@ -84,6 +85,8 @@ Deno.test("unirTramos respeta el orden optimizado de Google y suma totales", () 
 
   const unida = unirTramos(tramos, [ruta]);
   assertEquals(unida.ordenOptimizado.length, 3);
+  // La polyline del tramo se recolecta en orden
+  assertEquals(unida.polylines, ["_p~iF~ps|U"]);
   assertEquals(unida.ordenOptimizado.map((o) => o.orden), [1, 2, 3]);
   assertEquals(
     unida.ordenOptimizado.map((o) => o.pedido_id),

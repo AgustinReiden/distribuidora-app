@@ -1106,6 +1106,8 @@ export interface RecorridoDBExtended {
   fecha: string;
   /** Paradas del recorrido, mapeadas desde recorrido_pedidos por useRecorridos */
   pedidos?: RecorridoParada[];
+  /** Encoded polylines (ruta real sobre calles) guardadas al aplicar el orden */
+  polylines?: string[] | null;
   pedidos_json?: Array<{ pedido_id: string; orden_entrega: number }>;
   estado?: string;
   total_pedidos?: number;

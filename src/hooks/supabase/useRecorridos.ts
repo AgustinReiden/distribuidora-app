@@ -29,6 +29,7 @@ interface RecorridoRaw {
   duracion_total?: number;
   completed_at?: string | null;
   created_at?: string;
+  polylines?: string[] | null;
   transportista?: TransportistaBasic | null;
   recorrido_pedidos?: Array<{
     id: string;
@@ -126,7 +127,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
   }, [fetchRecorridosDeFecha])
 
   // Crear un nuevo recorrido cuando se aplica una ruta optimizada
-  const crearRecorrido = async (
+  const crearRecorrido = useCallback(async (
     transportistaId: string,
     pedidosOrdenados: PedidoOrdenado[],
     distancia: number | null = null,
@@ -150,10 +151,10 @@ export function useRecorridos(): UseRecorridosReturnExtended {
     setRecorridoActual({ id: recorridoId })
     await fetchRecorridosHoy()
     return recorridoId
-  }
+  }, [fetchRecorridosHoy])
 
   // Completar un recorrido
-  const completarRecorrido = async (recorridoId: string): Promise<void> => {
+  const completarRecorrido = useCallback(async (recorridoId: string): Promise<void> => {
     const { error } = await supabase
       .from('recorridos')
       .update({ estado: 'completado', completed_at: new Date().toISOString() })
@@ -161,10 +162,13 @@ export function useRecorridos(): UseRecorridosReturnExtended {
 
     if (error) throw error
     await fetchRecorridosHoy()
-  }
+  }, [fetchRecorridosHoy])
 
-  // Obtener resumen de recorridos para estadisticas
-  const getEstadisticasRecorridos = async (
+  // Obtener resumen de recorridos para estadisticas.
+  // useCallback: si no, su referencia cambia en cada render y dispara un loop
+  // infinito de fetches en RecorridosContainer (la tenía en las deps de un
+  // useEffect vía cargarRecorridos) → ERR_INSUFFICIENT_RESOURCES.
+  const getEstadisticasRecorridos = useCallback(async (
     fechaDesde: string,
     fechaHasta: string
   ): Promise<EstadisticasRecorridos> => {
@@ -213,7 +217,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
     } catch {
       return { total: 0, porTransportista: [] }
     }
-  }
+  }, [])
 
   return {
     recorridos,
