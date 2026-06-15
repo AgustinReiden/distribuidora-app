@@ -25,7 +25,8 @@ import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 import ModalRegistrarPago from '../modals/ModalRegistrarPago';
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 
-const MapaRuta = lazy(() => import('../MapaRuta'));
+// Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
+const MapaRuta = lazy(() => import('./MapaRutaGoogle'));
 
 /** Radio del geofence de llegada, en metros */
 const RADIO_LLEGADA_M = 100;

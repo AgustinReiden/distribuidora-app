@@ -51,6 +51,7 @@ declare namespace google.maps {
     fullscreenControl?: boolean;
     zoomControl?: boolean;
     clickableIcons?: boolean;
+    gestureHandling?: 'cooperative' | 'greedy' | 'none' | 'auto';
     styles?: unknown[];
   }
 
@@ -97,6 +98,25 @@ declare namespace google.maps {
     strokeColor?: string;
     strokeOpacity?: number;
     strokeWeight?: number;
+    icons?: Array<{ icon: Symbol; offset?: string; repeat?: string }>;
+  }
+
+  class Circle {
+    constructor(opts?: CircleOptions);
+    setMap(map: Map | null): void;
+    setCenter(center: LatLng | LatLngLiteral): void;
+    setRadius(radius: number): void;
+  }
+
+  interface CircleOptions {
+    map?: Map;
+    center?: LatLng | LatLngLiteral;
+    radius?: number;
+    strokeColor?: string;
+    strokeOpacity?: number;
+    strokeWeight?: number;
+    fillColor?: string;
+    fillOpacity?: number;
   }
 
   class InfoWindow {
@@ -118,6 +138,7 @@ declare namespace google.maps {
     fillColor?: string;
     fillOpacity?: number;
     strokeColor?: string;
+    strokeOpacity?: number;
     strokeWeight?: number;
     scale?: number;
     labelOrigin?: { x: number; y: number };
