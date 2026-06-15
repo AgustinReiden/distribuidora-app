@@ -76,12 +76,13 @@ export async function optimizeTours(
         deliveries: [{ arrivalLocation: { latitude: p.latitud, longitude: p.longitud } }],
       })),
       vehicles: [{
-        startWaypoint: { location: { latitude: deposito.latitude, longitude: deposito.longitude } },
+        startLocation: { latitude: deposito.latitude, longitude: deposito.longitude },
         endLocation: { latitude: deposito.latitude, longitude: deposito.longitude },
       }],
     },
+    // Sin considerRoadTraffic: exige global_start_time y la ruta se arma el día
+    // anterior, así que el tráfico "de ahora" no representa el de la entrega.
     populatePolylines: true,
-    considerRoadTraffic: true,
   };
 
   const res = await fetch(
