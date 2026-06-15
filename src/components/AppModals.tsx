@@ -503,8 +503,7 @@ export default function AppModals({
             <ModalGestionRutas
               transportistas={transportistas}
               pedidos={pedidos}
-              onOptimizar={(transportistaId, pedidosData) => optimizarRuta(transportistaId, pedidosData)}
-              onAplicarOrden={handlers.handleAplicarOrdenOptimizado as any}
+              onArmarRuta={((transportistaId: string, pedidosData: PedidoDB[]) => optimizarRuta(transportistaId, pedidosData)) as any}
               onExportarPDF={handlers.handleExportarHojaRutaOptimizada as any}
               onClose={handlers.handleCerrarModalOptimizar}
               loading={loadingOptimizacion}

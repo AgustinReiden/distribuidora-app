@@ -586,6 +586,10 @@ export function useCambiarEstadoMutation() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // La ruta del día del transportista lee pedido.estado vía el recorrido;
+      // al marcar entregado hay que refrescarla para que avance la parada.
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
     },
   })
 }
