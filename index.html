@@ -43,8 +43,9 @@
     <link rel="preconnect" href="https://maps.googleapis.com" />
     <link rel="preconnect" href="https://maps.gstatic.com" crossorigin />
 
-    <!-- Viewport -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <!-- Viewport. viewport-fit=cover: imprescindible para que env(safe-area-inset-*)
+         resuelva con valores reales en iOS (notch / home indicator). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
 
     <!-- Color Scheme Support -->
     <meta name="color-scheme" content="light dark" />
