@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useDepositoCoords, useSetDepositoMutation } from '../../hooks/queries';
+import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB } from '../../types';
 
 // =============================================================================
@@ -60,7 +61,7 @@ export interface ModalGestionRutasProps {
    * Arma la ruta del día: optimiza los pedidos seleccionados y la guarda en
    * un solo paso (el container encadena optimizar + aplicar_orden_ruta).
    */
-  onArmarRuta: (transportistaId: string, pedidos: PedidoDB[]) => void;
+  onArmarRuta: (transportistaId: string, pedidos: PedidoDB[], fecha: string) => void;
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
   /** true mientras se optimiza/guarda la ruta del día */
@@ -183,6 +184,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   error
 }: ModalGestionRutasProps) {
   const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
+  // Fecha de entrega de la ruta. Generalmente se arma el día anterior, así que
+  // el default es mañana; se puede elegir de hoy en adelante.
+  const hoyISO = fechaLocalISO();
+  const [fechaEntrega, setFechaEntrega] = useState<string>(fechaHaceDias(-1));
   // Filtro de fecha: la admin marca entregados/rendición con rezago, así que
   // al armar la ruta del día siguiente quedan pedidos viejos aún en estado
   // 'asignado' que no deben entrar en la optimización.
@@ -337,7 +342,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleArmar = (): void => {
     if (transportistaSeleccionado && pedidosSeleccionados.length > 0) {
       // Optimiza + guarda en un paso, solo con los pedidos seleccionados.
-      onArmarRuta(transportistaSeleccionado, pedidosSeleccionados);
+      onArmarRuta(transportistaSeleccionado, pedidosSeleccionados, fechaEntrega);
     }
   };
 
@@ -404,6 +409,42 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
         <div className="flex-1 overflow-y-auto p-4">
           {vistaActiva === 'optimizar' ? (
             <div className="space-y-4">
+              {/* Fecha de entrega de la ruta (default: mañana; de hoy en adelante) */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <label className="block text-sm font-medium mb-2 flex items-center gap-1.5 text-blue-900">
+                  <CalendarDays className="w-4 h-4" />
+                  Fecha de entrega de esta ruta
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="date"
+                    value={fechaEntrega}
+                    min={hoyISO}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setFechaEntrega(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFechaEntrega(hoyISO)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-full border ${fechaEntrega === hoyISO ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-700 border-blue-200'}`}
+                    >
+                      Hoy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFechaEntrega(fechaHaceDias(-1))}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-full border ${fechaEntrega === fechaHaceDias(-1) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-700 border-blue-200'}`}
+                    >
+                      Mañana
+                    </button>
+                  </div>
+                  <span className="text-xs text-blue-700">
+                    El transportista la verá el {formatFecha(fechaEntrega)}.
+                  </span>
+                </div>
+              </div>
+
               {/* Configuracion del deposito (colapsable) */}
               <div className="border rounded-lg bg-white">
                 <button
