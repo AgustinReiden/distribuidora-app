@@ -10,6 +10,7 @@ import {
   type PedidoRuta,
   unirTramos,
 } from "../optimizar-ruta/tramos.ts";
+import { parseOptimizeTours } from "../optimizar-ruta/route-optimization.ts";
 
 const DEPOSITO = { latitude: -26.8241, longitude: -65.2226 };
 
@@ -124,4 +125,51 @@ Deno.test("unirTramos con dos tramos: el puente se visita al final de su tramo y
   // Totales: todos los legs (30 llegadas + 1 puente... 31 legs de 100m? No:
   // t1 tiene |int|+1 legs y t2 |int|+1 legs = 30 llegadas + vuelta = 31 legs)
   assertEquals(unida.distanciaTotalMetros, 3100);
+});
+
+// --- Route Optimization API (optimizeTours) ---
+
+Deno.test("parseOptimizeTours mapea visits al orden por shipmentLabel y la polyline única", () => {
+  const pedidos: PedidoRuta[] = [
+    { pedido_id: "10", cliente_nombre: "A", latitud: -26.80, longitud: -65.20 },
+    { pedido_id: "20", cliente_nombre: "B", latitud: -26.81, longitud: -65.21 },
+    { pedido_id: "30", cliente_nombre: "C", latitud: -26.82, longitud: -65.22 },
+  ];
+  // Google devuelve el orden óptimo: 30, 10, 20
+  const data = {
+    routes: [{
+      visits: [
+        { shipmentLabel: "30" },
+        { shipmentLabel: "10" },
+        { shipmentLabel: "20" },
+      ],
+      routePolyline: { points: "_p~iF~ps|U" },
+      metrics: { travelDistanceMeters: 12345, totalDuration: "1800s" },
+    }],
+  };
+
+  const ruta = parseOptimizeTours(data, pedidos);
+  assertEquals(ruta.ordenOptimizado.map((o) => o.pedido_id), ["30", "10", "20"]);
+  assertEquals(ruta.ordenOptimizado.map((o) => o.orden), [1, 2, 3]);
+  assertEquals(ruta.ordenOptimizado[0].cliente, "C");
+  assertEquals(ruta.distanciaTotalMetros, 12345);
+  assertEquals(ruta.duracionTotalSegundos, 1800);
+  assertEquals(ruta.polylines, ["_p~iF~ps|U"]);
+});
+
+Deno.test("parseOptimizeTours ignora visits sin label y rutas sin polyline", () => {
+  const pedidos: PedidoRuta[] = [
+    { pedido_id: "1", latitud: -26.8, longitud: -65.2 },
+  ];
+  const data = {
+    routes: [{
+      visits: [{ shipmentIndex: 0 }, { shipmentLabel: "1" }],
+      metrics: { travelDistanceMeters: 500 },
+    }],
+  };
+  const ruta = parseOptimizeTours(data, pedidos);
+  assertEquals(ruta.ordenOptimizado.length, 1);
+  assertEquals(ruta.ordenOptimizado[0].pedido_id, "1");
+  assertEquals(ruta.polylines, []);
+  assertEquals(ruta.duracionTotalSegundos, 0);
 });

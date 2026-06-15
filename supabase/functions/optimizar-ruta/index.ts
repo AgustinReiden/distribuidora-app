@@ -1,24 +1,19 @@
 // Edge Function: optimizar-ruta
 //
-// Optimiza el orden de entrega de los pedidos de un transportista usando
-// Google Routes API (computeRoutes + optimizeWaypointOrder). Reemplaza al
-// webhook de n8n "Optimizar Ruta Transportista":
-//   * la API key de Google vive como secret del servidor (GOOGLE_API_KEY),
-//     no en el bundle del frontend;
-//   * la plataforma exige JWT válido (verify_jwt=true) → solo usuarios
-//     logueados de la app pueden invocarla;
-//   * soporta más de 25 pedidos partiendo en tramos encadenados (ver tramos.ts).
+// Optimiza el orden de entrega de los pedidos de un transportista. Dos motores:
+//   1) Google Route Optimization API (optimizeTours) si está el secret
+//      GOOGLE_SA_KEY → óptimo global de 100+ paradas en una llamada (ideal 40+).
+//   2) Fallback: Google Routes API computeRoutes (GOOGLE_API_KEY), partiendo en
+//      tramos de ≤23 (ver tramos.ts) — para no romper si el SA no está cargado.
 //
-// Request (POST, mismo shape que el webhook legacy, sin google_api_key):
-//   { deposito_lat, deposito_lng, pedidos: [{ pedido_id, cliente_nombre,
-//     direccion, latitud, longitud }] }
-//
-// Response: mismo shape que el workflow n8n (success, orden_optimizado,
-// distancia_total, duracion_total, *_formato, mensaje/error) para que el
-// frontend no necesite cambios de parsing.
+// Request (POST): { deposito_lat, deposito_lng, pedidos: [{ pedido_id,
+//   cliente_nombre, direccion, latitud, longitud }] }
+// Response: { success, orden_optimizado[], polylines[], distancia_total,
+//   duracion_total, *_formato, mensaje/error }
 //
 // Variables de entorno:
-//   - GOOGLE_API_KEY (secret) — key de Google Maps Platform con Routes API
+//   - GOOGLE_SA_KEY  (secret) — JSON del service account (Route Optimization)
+//   - GOOGLE_API_KEY (secret) — key de Maps Platform (fallback computeRoutes)
 
 import { serve } from "std/http/server.ts";
 import {
@@ -26,8 +21,10 @@ import {
   type LatLng,
   partirEnTramos,
   type PedidoRuta,
+  type RutaUnida,
   unirTramos,
 } from "./tramos.ts";
+import { optimizeTours } from "./route-optimization.ts";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -49,6 +46,7 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   });
 }
 
+// --- Fallback: computeRoutes (Routes API) con tramos de ≤23 ---
 async function llamarGoogle(
   apiKey: string,
   origen: LatLng,
@@ -60,8 +58,6 @@ async function llamarGoogle(
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      // routes.polyline: geometría real sobre las calles para dibujarla en la
-      // app (la pagamos igual al optimizar; es campo base, no sube el SKU).
       "X-Goog-FieldMask":
         "routes.duration,routes.distanceMeters,routes.optimizedIntermediateWaypointIndex,routes.legs,routes.polyline.encodedPolyline",
     },
@@ -91,6 +87,20 @@ async function llamarGoogle(
   return route as GoogleRoute;
 }
 
+async function viaComputeRoutes(
+  apiKey: string,
+  deposito: LatLng,
+  conCoords: PedidoRuta[],
+): Promise<{ ruta: RutaUnida; tramos: number }> {
+  const tramos = partirEnTramos(deposito, conCoords);
+  const rutas: GoogleRoute[] = [];
+  // Secuencial a propósito: son 1-3 requests y simplifica el rate limiting.
+  for (const tramo of tramos) {
+    rutas.push(await llamarGoogle(apiKey, tramo.origen, tramo.destino, tramo.intermedios));
+  }
+  return { ruta: unirTramos(tramos, rutas), tramos: tramos.length };
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -99,13 +109,14 @@ serve(async (req: Request) => {
     return jsonResponse({ success: false, error: "Método no permitido" }, 405);
   }
 
+  const saKey = Deno.env.get("GOOGLE_SA_KEY") ?? "";
   const apiKey = Deno.env.get("GOOGLE_API_KEY") ?? "";
-  if (!apiKey) {
-    console.error("[optimizar-ruta] GOOGLE_API_KEY secret no configurado");
+  if (!saKey && !apiKey) {
+    console.error("[optimizar-ruta] Sin GOOGLE_SA_KEY ni GOOGLE_API_KEY");
     return jsonResponse({
       success: false,
-      error: "GOOGLE_API_KEY no configurada",
-      mensaje: "Falta configurar el secret GOOGLE_API_KEY en Supabase Edge Functions",
+      error: "Optimización no configurada",
+      mensaje: "Falta configurar GOOGLE_SA_KEY (Route Optimization) o GOOGLE_API_KEY (Routes)",
     });
   }
 
@@ -149,28 +160,36 @@ serve(async (req: Request) => {
     });
   }
 
-  const tramos = partirEnTramos(deposito, conCoords);
-
-  let rutas: GoogleRoute[];
+  // Motor de optimización: Route Optimization (SA) con fallback a computeRoutes.
+  let ruta: RutaUnida;
+  let optimizadoPor: string;
   try {
-    // Secuencial a propósito: son 1-3 requests y simplifica el rate limiting.
-    rutas = [];
-    for (const tramo of tramos) {
-      rutas.push(await llamarGoogle(apiKey, tramo.origen, tramo.destino, tramo.intermedios));
+    if (saKey) {
+      try {
+        ruta = await optimizeTours(saKey, deposito, conCoords);
+        optimizadoPor = "Google Route Optimization";
+      } catch (err) {
+        if (!apiKey) throw err;
+        console.error("[optimizar-ruta] Route Optimization falló, usando computeRoutes:", err);
+        const r = await viaComputeRoutes(apiKey, deposito, conCoords);
+        ruta = r.ruta;
+        optimizadoPor = `Google Routes API (${r.tramos} tramos, fallback)`;
+      }
+    } else {
+      const r = await viaComputeRoutes(apiKey, deposito, conCoords);
+      ruta = r.ruta;
+      optimizadoPor = r.tramos > 1 ? `Google Routes API (${r.tramos} tramos)` : "Google Routes API";
     }
   } catch (err) {
-    console.error("[optimizar-ruta] Google error:", err);
+    console.error("[optimizar-ruta] Error de optimización:", err);
     return jsonResponse({
       success: false,
-      error: "Error de Google Routes API",
+      error: "Error al optimizar la ruta",
       mensaje: err instanceof Error ? err.message : "No se pudo calcular la ruta",
     });
   }
 
-  const { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos, polylines } = unirTramos(
-    tramos,
-    rutas,
-  );
+  const { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos, polylines } = ruta;
 
   // Pedidos sin coordenadas: al final de la lista, marcados.
   for (const p of sinCoords) {
@@ -190,9 +209,7 @@ serve(async (req: Request) => {
 
   return jsonResponse({
     success: true,
-    optimizado_por: tramos.length > 1
-      ? `Google Routes API (${tramos.length} tramos)`
-      : "Google Routes API",
+    optimizado_por: optimizadoPor,
     total_pedidos: ordenOptimizado.length,
     pedidos_con_coordenadas: conCoords.length,
     pedidos_sin_coordenadas: sinCoords.length,
