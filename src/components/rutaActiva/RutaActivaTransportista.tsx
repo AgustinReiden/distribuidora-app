@@ -11,14 +11,17 @@
  * transportista en /pedidos. La lógica de entrega/cobro/salvedad es la misma
  * (useEntregaParada). Diseño: docs/plans/2026-06-12-ruta-activa-design.md
  */
-import React, { useState, useMemo, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Crosshair, WifiOff, Truck } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { haversineMeters } from '../../utils/geo';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { useWatchPosition } from '../../hooks/useWatchPosition';
 import { useDepositoCoords, useRecorridoActivoQuery } from '../../hooks/queries';
+import { useNavegacionVoz } from '../../hooks/useNavegacionVoz';
+import { useWakeLock } from '../../hooks/useWakeLock';
 import { decodePolylines } from '../../utils/polyline';
+import { googleMapsNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
 import { useEntregaParada, type PedidoConCliente, type DatosPago, type DatosSalvedad } from './useEntregaParada';
 import SheetParada, { type LinkRutaMaps } from './SheetParada';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
@@ -27,6 +30,8 @@ import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
 const MapaRuta = lazy(() => import('./MapaRutaGoogle'));
+// Navegación asistida in-app (pantalla completa) — pesada, carga bajo demanda.
+const NavAsistida = lazy(() => import('./NavAsistida'));
 
 /** Radio del geofence de llegada, en metros */
 const RADIO_LLEGADA_M = 100;
@@ -52,7 +57,13 @@ export default function RutaActivaTransportista({
 }: RutaActivaTransportistaProps): React.ReactElement {
   const { isOnline } = useAuthData();
   const deposito = useDepositoCoords();
-  const { posicion } = useWatchPosition(true);
+  // Modo navegación asistida in-app (pantalla completa giro-a-giro).
+  const [modoNavegacion, setModoNavegacion] = useState(false);
+  const [vozOn, setVozOn] = useState(true);
+  const voz = useNavegacionVoz();
+  const wakeLock = useWakeLock();
+  // En navegación, GPS más frecuente para seguir suave; si no, ahorro de batería.
+  const { posicion } = useWatchPosition(true, modoNavegacion ? 1000 : 4000);
   // Ruta del día: el transportista lee del recorrido en_curso (las paradas que
   // armó el admin), NO de "todos sus pedidos asignados". Trae también la ruta
   // real (polylines) para dibujarla.
@@ -165,6 +176,37 @@ export default function RutaActivaTransportista({
     }
   };
 
+  // --- Navegación asistida in-app ---
+  // Deep-link a Maps como fallback (botón "Abrir en Maps" dentro de la nav).
+  const navUrlActiva = useMemo((): string => {
+    if (paradaActiva?.cliente?.latitud != null && paradaActiva?.cliente?.longitud != null) {
+      return googleMapsNavUrl(Number(paradaActiva.cliente.latitud), Number(paradaActiva.cliente.longitud));
+    }
+    return googleMapsSearchUrl(paradaActiva?.cliente?.direccion || '');
+  }, [paradaActiva]);
+
+  // Desbloquear voz/haptics/wake-lock DENTRO del gesto (requisito del navegador).
+  const iniciarNavegacion = useCallback((): void => {
+    voz.prime();
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try { navigator.vibrate(1); } catch { /* sin haptics */ }
+    }
+    wakeLock.solicitar();
+    setSeguirPosicion(false);
+    setModoNavegacion(true);
+  }, [voz, wakeLock]);
+
+  const salirNavegacion = useCallback((): void => {
+    wakeLock.liberar();
+    voz.callar();
+    setModoNavegacion(false);
+  }, [wakeLock, voz]);
+
+  // Si se completó la ruta (o no hay parada activa), salir de la navegación.
+  useEffect(() => {
+    if (modoNavegacion && !paradaActiva) salirNavegacion();
+  }, [modoNavegacion, paradaActiva, salirNavegacion]);
+
   if (pedidosOrdenados.length === 0) {
     // Distinguir "todavía no hay ruta armada" de "ruta cargando".
     const sinRuta = !cargandoRuta && recorridoActivo == null;
@@ -189,20 +231,23 @@ export default function RutaActivaTransportista({
     // Full-bleed: compensa el padding del <main> (px-4 pb-6) para que el mapa
     // ocupe todo el ancho y llegue hasta abajo de la pantalla.
     <div className="relative -mx-4 -mb-6 h-[calc(100dvh-5rem)] overflow-hidden">
-      <Suspense fallback={<div className="flex h-full items-center justify-center text-gray-400">Cargando mapa…</div>}>
-        <MapaRuta
-          paradas={paradasMapa}
-          deposito={deposito}
-          altura="full"
-          rutaReal={rutaReal.length > 1 ? rutaReal : null}
-          // Solo mostramos el punto azul con GPS confiable (no plantarlo en
-          // medio del país con la geolocalización por IP del desktop).
-          posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy } : null}
-          paradaActivaOrden={paradaActiva?.orden_entrega ?? null}
-          onParadaTap={handleParadaTapMapa}
-          seguirPosicion={seguirPosicion && gpsConfiable}
-        />
-      </Suspense>
+      {/* Mapa overview: se desmonta en navegación para no tener dos mapas. */}
+      {!modoNavegacion && (
+        <Suspense fallback={<div className="flex h-full items-center justify-center text-gray-400">Cargando mapa…</div>}>
+          <MapaRuta
+            paradas={paradasMapa}
+            deposito={deposito}
+            altura="full"
+            rutaReal={rutaReal.length > 1 ? rutaReal : null}
+            // Solo mostramos el punto azul con GPS confiable (no plantarlo en
+            // medio del país con la geolocalización por IP del desktop).
+            posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy } : null}
+            paradaActivaOrden={paradaActiva?.orden_entrega ?? null}
+            onParadaTap={handleParadaTapMapa}
+            seguirPosicion={seguirPosicion && gpsConfiable}
+          />
+        </Suspense>
+      )}
 
       {/* Header flotante: progreso del día */}
       <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-2">
@@ -245,6 +290,7 @@ export default function RutaActivaTransportista({
         onEntregar={entrega.marcarEntregado}
         onSalvedad={onRegistrarSalvedad ? entrega.abrirSalvedad : undefined}
         linksRutaMaps={linksRutaMaps}
+        onNavegarInApp={iniciarNavegacion}
       />
 
       {/* Modales del flujo de entrega (mismos que la vista anterior) */}
@@ -265,6 +311,27 @@ export default function RutaActivaTransportista({
           onConfirmar={entrega.confirmarPago}
           onEntregarSinCobrar={onEntregarSinCobrar ? entrega.entregarSinCobrar : undefined}
         />
+      )}
+
+      {/* Navegación asistida in-app (pantalla completa, encima de todo) */}
+      {modoNavegacion && paradaActiva
+        && paradaActiva.cliente?.latitud != null
+        && paradaActiva.cliente?.longitud != null && (
+        <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 text-gray-300">Iniciando navegación…</div>}>
+          <NavAsistida
+            destino={{ lat: Number(paradaActiva.cliente.latitud), lng: Number(paradaActiva.cliente.longitud) }}
+            destinoNombre={paradaActiva.cliente?.nombre_fantasia || 'Cliente'}
+            destinoDireccion={paradaActiva.cliente?.direccion || undefined}
+            posicion={posicion}
+            gpsConfiable={gpsConfiable}
+            llegaste={llegaste}
+            voz={voz}
+            vozOn={vozOn}
+            onToggleVoz={() => setVozOn(v => !v)}
+            navUrlFallback={navUrlActiva}
+            onSalir={salirNavegacion}
+          />
+        </Suspense>
       )}
     </div>
   );
