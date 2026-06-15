@@ -1007,7 +1007,9 @@ export default function PedidosContainer(): React.ReactElement {
   // aplicar_orden_ruta, mig 081): actualiza pedidos.orden_entrega, cancela el
   // recorrido en_curso anterior del transportista y crea el nuevo con
   // distancia/duración. Un recorrido vigente por transportista por día.
-  const aplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null }) => {
+  // Las polylines se pasan por argumento (no se leen de rutaOptimizada del
+  // closure) para evitar usar un valor viejo cuando se encadena optimizar→aplicar.
+  const aplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null }) => {
     setGuardando(true)
     try {
       const { error } = await supabase.rpc('aplicar_orden_ruta', {
@@ -1017,22 +1019,22 @@ export default function PedidosContainer(): React.ReactElement {
         p_duracion: data.duracion != null ? Math.round(data.duracion) : null,
         // Ruta real sobre las calles (encoded polylines de Google) para
         // dibujarla en el mapa del transportista y del admin.
-        p_polylines: rutaOptimizada?.polylines ?? null
+        p_polylines: data.polylines ?? null
       })
       if (error) throw error
 
-      // Refresca lista paginada, query de asignados y recorridos (cachean
-      // orden_entrega y la ruta real)
+      // Refresca lista paginada, asignados, recorridos y la ruta del transportista
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
-      setModalOptimizarRutaOpen(false)
-      limpiarRuta()
-      notify.success('Ruta aplicada: orden de entrega y recorrido del día guardados')
-    } catch (e) { notify.error('Error al aplicar la ruta: ' + (e as Error).message) }
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      // No cerramos el modal: queda en la vista de resultado (confirmación +
+      // export PDF). El admin cierra con "Cerrar" (que limpia la ruta).
+      notify.success('Ruta del día armada y guardada')
+    } catch (e) { notify.error('Error al guardar la ruta: ' + (e as Error).message) }
     setGuardando(false)
-  }, [limpiarRuta, notify, queryClient, rutaOptimizada])
+  }, [notify, queryClient])
 
-  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null }) => {
+  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null }) => {
     if (!data.ordenOptimizado?.length || !data.transportistaId) return
     // Si ya hay un recorrido vigente hoy para este transportista, confirmar
     // el reemplazo (el anterior queda como 'cancelado' a modo de historial).
@@ -1061,6 +1063,26 @@ export default function PedidosContainer(): React.ReactElement {
     }
     await aplicarOrden(data)
   }, [aplicarOrden, transportistas])
+
+  // Armar ruta del día: optimiza los pedidos seleccionados y los guarda en un
+  // solo paso (sin botón "optimizar" separado). Las polylines del resultado se
+  // pasan explícitamente a aplicar (no se leen del estado, que aún no se
+  // actualizó en este tick).
+  const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[]) => {
+    if (!transportistaId || pedidosSeleccionados.length === 0) return
+    const ruta = await optimizarRutaConDeposito(transportistaId, pedidosSeleccionados)
+    if (!ruta?.orden_optimizado?.length) {
+      // optimizarRuta ya seteó errorOptimizacion / mostró el mensaje
+      return
+    }
+    await handleAplicarOrden({
+      ordenOptimizado: ruta.orden_optimizado as Array<{ pedido_id: string; orden: number }>,
+      transportistaId,
+      distancia: ruta.distancia_total ?? null,
+      duracion: ruta.duracion_total ?? null,
+      polylines: ruta.polylines ?? null,
+    })
+  }, [optimizarRutaConDeposito, handleAplicarOrden])
 
   const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[]) => {
     try {
@@ -1445,8 +1467,7 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalGestionRutas
             transportistas={transportistas}
             pedidos={pedidosParaRuta}
-            onOptimizar={optimizarRutaConDeposito as Parameters<typeof ModalGestionRutas>[0]['onOptimizar']}
-            onAplicarOrden={handleAplicarOrden as Parameters<typeof ModalGestionRutas>[0]['onAplicarOrden']}
+            onArmarRuta={handleArmarRutaDelDia as Parameters<typeof ModalGestionRutas>[0]['onArmarRuta']}
             onExportarPDF={handleExportarHojaRutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['onExportarPDF']}
             onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta() }}
             loading={loadingOptimizacion || loadingPedidosRuta}

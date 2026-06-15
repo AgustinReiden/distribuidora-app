@@ -56,10 +56,14 @@ interface PedidoRutaCardProps {
 export interface ModalGestionRutasProps {
   transportistas: PerfilDB[];
   pedidos: PedidoDB[];
-  onOptimizar: (transportistaId: string, pedidos: PedidoDB[]) => void;
-  onAplicarOrden: (data: AplicarOrdenData) => void;
+  /**
+   * Arma la ruta del día: optimiza los pedidos seleccionados y la guarda en
+   * un solo paso (el container encadena optimizar + aplicar_orden_ruta).
+   */
+  onArmarRuta: (transportistaId: string, pedidos: PedidoDB[]) => void;
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
+  /** true mientras se optimiza/guarda la ruta del día */
   loading: boolean;
   guardando: boolean;
   rutaOptimizada: RutaOptimizadaResult | null;
@@ -170,8 +174,7 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
 const ModalGestionRutas = memo(function ModalGestionRutas({
   transportistas,
   pedidos,
-  onOptimizar,
-  onAplicarOrden,
+  onArmarRuta,
   onExportarPDF,
   onClose,
   loading,
@@ -242,6 +245,30 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
       .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
   }, [pedidosFiltrados, transportistaSeleccionado]);
 
+  // Selección de pedidos para la ruta del día (default: todos). El admin puede
+  // destildar los que no van hoy (ej: entregados-no-marcados de días previos).
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setSeleccionados(new Set(pedidosTransportista.map(p => p.id)));
+  }, [pedidosTransportista]);
+
+  const pedidosSeleccionados = useMemo(
+    () => pedidosTransportista.filter(p => seleccionados.has(p.id)),
+    [pedidosTransportista, seleccionados],
+  );
+
+  const toggleSeleccion = (id: string): void => {
+    setSeleccionados(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const todosSeleccionados = pedidosTransportista.length > 0 && seleccionados.size === pedidosTransportista.length;
+  const toggleTodos = (): void => {
+    setSeleccionados(todosSeleccionados ? new Set() : new Set(pedidosTransportista.map(p => p.id)));
+  };
+
   // Cuántos pedidos del transportista quedaron afuera por el filtro de fecha
   const pedidosExcluidosPorFecha = useMemo((): number => {
     if (!transportistaSeleccionado || !filtroActivo) return 0;
@@ -307,11 +334,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     };
   }, [vistaActiva, pedidosOrdenados, pedidosTransportista]);
 
-  const handleOptimizar = (): void => {
-    if (transportistaSeleccionado) {
-      // Solo los pedidos que pasaron el filtro de fecha: la optimización debe
-      // respetar lo que el admin ve en el panel.
-      onOptimizar(transportistaSeleccionado, pedidosTransportista);
+  const handleArmar = (): void => {
+    if (transportistaSeleccionado && pedidosSeleccionados.length > 0) {
+      // Optimiza + guarda en un paso, solo con los pedidos seleccionados.
+      onArmarRuta(transportistaSeleccionado, pedidosSeleccionados);
     }
   };
 
@@ -328,17 +354,6 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     }
   };
 
-  const handleAplicar = (): void => {
-    if (rutaOptimizada?.orden_optimizado) {
-      onAplicarOrden({
-        ordenOptimizado: rutaOptimizada.orden_optimizado,
-        transportistaId: transportistaSeleccionado,
-        distancia: rutaOptimizada.distancia_total ?? null,
-        duracion: rutaOptimizada.duracion_total ?? null
-      });
-    }
-  };
-
   const handleExportarPDF = (): void => {
     const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
     onExportarPDF(transportista, pedidosOrdenados);
@@ -351,7 +366,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const transportistaInfo = transportistas.find(t => t.id === transportistaSeleccionado);
 
   return (
-    <ModalBase title="Gestion de Rutas de Entrega" onClose={onClose} maxWidth="max-w-4xl">
+    <ModalBase title="Armar ruta del día" onClose={onClose} maxWidth="max-w-4xl">
       <div className="flex flex-col h-[75vh]">
         {/* Tabs de navegacion */}
         <div className="flex border-b bg-gray-50 px-4">
@@ -364,7 +379,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
             }`}
           >
             <Route className="w-4 h-4 inline mr-2" />
-            Optimizar Ruta
+            Armar ruta
           </button>
           <button
             onClick={() => rutaOptimizada?.orden_optimizado && setVistaActiva('resultado')}
@@ -376,7 +391,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
             }`}
           >
             <CheckCircle className="w-4 h-4 inline mr-2" />
-            Ruta Optimizada
+            Ruta guardada
             {rutaOptimizada?.orden_optimizado && (
               <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
                 {rutaOptimizada.orden_optimizado.length}
@@ -583,42 +598,53 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                     </div>
                   )}
 
-                  {/* Lista de pedidos actuales */}
+                  {/* Lista de pedidos: el admin elige cuáles entran en la ruta del día */}
                   {pedidosTransportista.length > 0 && (
                     <div className="bg-white border rounded-lg">
-                      <div className="p-3 border-b bg-gray-50">
-                        <h3 className="font-medium text-gray-700">Pedidos asignados (orden actual)</h3>
+                      <div className="p-3 border-b bg-gray-50 flex items-center justify-between">
+                        <h3 className="font-medium text-gray-700">
+                          Pedidos del día ({pedidosSeleccionados.length}/{pedidosTransportista.length})
+                        </h3>
+                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                          <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} className="rounded" />
+                          Seleccionar todos
+                        </label>
                       </div>
                       <div className="max-h-60 overflow-y-auto divide-y">
-                        {pedidosTransportista.map((pedido) => (
-                          <div key={pedido.id} className="flex items-center p-3 hover:bg-gray-50">
-                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 mr-3">
-                              {pedido.orden_entrega ? (
-                                <span className="text-sm font-bold text-blue-600">{pedido.orden_entrega}</span>
-                              ) : (
-                                <span className="text-xs text-gray-400">-</span>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-gray-900 truncate">
-                                #{pedido.id} - {pedido.cliente?.nombre_fantasia}
-                              </p>
-                              <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
-                              <p className="text-xs text-gray-400">
-                                Pedido: {pedido.fecha || '—'}
-                                {pedido.fecha_asignacion ? ` · Asignado: ${pedido.fecha_asignacion}` : ''}
-                              </p>
-                            </div>
-                            <div className="text-right ml-2">
-                              <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>
-                              {pedido.cliente?.latitud && pedido.cliente?.longitud ? (
-                                <MapPin className="w-4 h-4 text-green-500 inline" />
-                              ) : (
-                                <MapPin className="w-4 h-4 text-gray-300 inline" />
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                        {pedidosTransportista.map((pedido) => {
+                          const checked = seleccionados.has(pedido.id);
+                          return (
+                            <label
+                              key={pedido.id}
+                              className={`flex items-center p-3 cursor-pointer ${checked ? 'hover:bg-gray-50' : 'bg-gray-50/60 opacity-60 hover:opacity-100'}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleSeleccion(pedido.id)}
+                                className="rounded mr-3"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-gray-900 truncate">
+                                  #{pedido.id} - {pedido.cliente?.nombre_fantasia}
+                                </p>
+                                <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
+                                <p className="text-xs text-gray-400">
+                                  Pedido: {pedido.fecha || '—'}
+                                  {pedido.fecha_asignacion ? ` · Asignado: ${pedido.fecha_asignacion}` : ''}
+                                </p>
+                              </div>
+                              <div className="text-right ml-2">
+                                <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>
+                                {pedido.cliente?.latitud && pedido.cliente?.longitud ? (
+                                  <MapPin className="w-4 h-4 text-green-500 inline" />
+                                ) : (
+                                  <MapPin className="w-4 h-4 text-gray-300 inline" />
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -646,7 +672,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                       <Route className="w-6 h-6" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-lg">Ruta Optimizada</h3>
+                      <h3 className="font-semibold text-lg">Ruta del día guardada</h3>
                       <p className="text-green-100 text-sm">{transportistaInfo?.nombre}</p>
                     </div>
                   </div>
@@ -756,40 +782,27 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
           <div className="flex space-x-3">
             {vistaActiva === 'optimizar' ? (
               <button
-                onClick={handleOptimizar}
-                disabled={!transportistaSeleccionado || loading || pedidosTransportista.length === 0}
+                onClick={handleArmar}
+                disabled={!transportistaSeleccionado || loading || guardando || pedidosSeleccionados.length === 0}
                 className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {loading ? (
+                {(loading || guardando) ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   <Route className="w-5 h-5" />
                 )}
-                <span>{loading ? 'Calculando ruta...' : 'Optimizar Ruta'}</span>
+                <span>
+                  {loading ? 'Optimizando…' : guardando ? 'Guardando…' : `Armar ruta del día (${pedidosSeleccionados.length})`}
+                </span>
               </button>
             ) : (
-              <>
-                <button
-                  onClick={handleExportarPDF}
-                  disabled={guardando}
-                  className="flex items-center space-x-2 px-4 py-2.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 transition-colors"
-                >
-                  <Printer className="w-5 h-5" />
-                  <span>Exportar PDF</span>
-                </button>
-                <button
-                  onClick={handleAplicar}
-                  disabled={guardando}
-                  className="flex items-center space-x-2 px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                >
-                  {guardando ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Check className="w-5 h-5" />
-                  )}
-                  <span>{guardando ? 'Guardando...' : 'Aplicar Orden'}</span>
-                </button>
-              </>
+              <button
+                onClick={handleExportarPDF}
+                className="flex items-center space-x-2 px-4 py-2.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                <Printer className="w-5 h-5" />
+                <span>Exportar PDF</span>
+              </button>
             )}
           </div>
         </div>

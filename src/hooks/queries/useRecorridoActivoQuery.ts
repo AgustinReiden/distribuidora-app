@@ -1,20 +1,25 @@
 /**
- * Recorrido vigente (en_curso) de hoy del transportista logueado.
+ * Recorrido vigente (en_curso) de hoy del transportista logueado, CON sus
+ * paradas. Es la "ruta del día" que arma el admin: el transportista lee de
+ * acá, NO de "todos sus pedidos asignados" (que colaba entregados-no-marcados
+ * de días previos).
  *
- * Lo usa la pantalla Ruta Activa SOLO para obtener las `polylines` (la ruta
- * real sobre las calles que guardó el admin al aplicar el orden) y dibujarla.
- * Las paradas y el flujo de entrega NO dependen de esto: se arman desde
- * `pedidos.orden_entrega`. Si no hay recorrido (o es viejo sin polyline), el
- * mapa cae al trazado recto — degradado seguro.
+ * El embedding PostgREST funciona con las RLS existentes: el transportista ve
+ * su recorrido (transportista_id = auth.uid()), sus recorrido_pedidos (vía el
+ * recorrido propio), sus pedidos (transportista_id = auth.uid()), los items de
+ * esos pedidos y los clientes/productos de su sucursal. Sin RPC.
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
+import type { PedidoConCliente } from '../../components/rutaActiva/useEntregaParada'
 
 export interface RecorridoActivo {
   id: string
   polylines: string[] | null
+  /** Paradas de la ruta del día, ordenadas por orden_entrega, enriquecidas. */
+  paradas: PedidoConCliente[]
 }
 
 export const recorridoActivoKeys = {
@@ -22,10 +27,27 @@ export const recorridoActivoKeys = {
     ['recorrido-activo', sucursalId, transportistaId] as const,
 }
 
+// Embedding: recorrido → paradas (recorrido_pedidos) → pedido → cliente/items.
+const RECORRIDO_ACTIVO_SELECT = `id, polylines,
+  recorrido_pedidos(
+    orden_entrega, estado_entrega, hora_entrega,
+    pedido:pedidos(
+      *,
+      cliente:clientes(id, nombre_fantasia, razon_social, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion),
+      items:pedido_items(*, producto:productos(id, nombre, codigo, etiqueta_bulto, unidades_de_venta_por_fardo))
+    )
+  )`
+
+interface RecorridoPedidoRaw {
+  orden_entrega: number | null
+  estado_entrega: string | null
+  pedido: (Record<string, unknown> & { orden_entrega?: number | null }) | null
+}
+
 async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoActivo | null> {
   const { data, error } = await supabase
     .from('recorridos')
-    .select('id, polylines')
+    .select(RECORRIDO_ACTIVO_SELECT)
     .eq('transportista_id', transportistaId)
     .eq('fecha', fechaLocalISO())
     .eq('estado', 'en_curso')
@@ -35,7 +57,22 @@ async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoA
 
   if (error) throw error
   if (!data) return null
-  return { id: String(data.id), polylines: (data.polylines as string[] | null) ?? null }
+
+  const rps = ((data.recorrido_pedidos as unknown as RecorridoPedidoRaw[]) || [])
+    .filter(rp => rp.pedido != null)
+    // El orden de entrega del recorrido es la fuente de verdad
+    .sort((a, b) => (a.orden_entrega ?? 999) - (b.orden_entrega ?? 999))
+
+  const paradas = rps.map(rp => ({
+    ...(rp.pedido as object),
+    orden_entrega: rp.orden_entrega ?? rp.pedido?.orden_entrega ?? null,
+  })) as unknown as PedidoConCliente[]
+
+  return {
+    id: String(data.id),
+    polylines: (data.polylines as string[] | null) ?? null,
+    paradas,
+  }
 }
 
 export function useRecorridoActivoQuery(transportistaId: string | null | undefined) {
@@ -44,6 +81,6 @@ export function useRecorridoActivoQuery(transportistaId: string | null | undefin
     queryKey: recorridoActivoKeys.all(currentSucursalId, transportistaId ?? null),
     queryFn: () => fetchRecorridoActivo(transportistaId as string),
     enabled: !!transportistaId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 60 * 1000,
   })
 }

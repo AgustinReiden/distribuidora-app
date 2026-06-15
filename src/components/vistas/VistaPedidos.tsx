@@ -117,8 +117,6 @@ export default function VistaPedidos({
   isEncargado,
   isPreventistaTaco,
   userId,
-  clientes,
-  productos,
   transportistas = [],
   usuarios = [],
   loading,
@@ -156,11 +154,8 @@ export default function VistaPedidos({
   if (isTransportista && !isAdmin && !isPreventista) {
     return (
       <RutaActivaTransportista
-        pedidos={pedidos}
         onMarcarEntregado={onMarcarEntregado}
         userId={userId}
-        clientes={clientes}
-        productos={productos}
         onRegistrarSalvedad={onRegistrarSalvedad}
         onRegistrarPago={onRegistrarPago}
         onEntregarSinCobrar={onEntregarSinCobrar}

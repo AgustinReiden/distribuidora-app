@@ -280,7 +280,7 @@ export default function PedidoToolbar({
               mobileLabel="Ruta"
               onClick={onOptimizarRuta}
             >
-              Optimizar Ruta
+              Armar ruta del día
             </ToolbarButton>
           </div>
         )}
@@ -327,7 +327,7 @@ export default function PedidoToolbar({
               mobileLabel="Ruta"
               onClick={onOptimizarRuta}
             >
-              Optimizar Ruta
+              Armar ruta del día
             </ToolbarButton>
           </>
         )}

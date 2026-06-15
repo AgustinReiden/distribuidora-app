@@ -23,7 +23,7 @@ import { useEntregaParada, type PedidoConCliente, type DatosPago, type DatosSalv
 import SheetParada, { type LinkRutaMaps } from './SheetParada';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 import ModalRegistrarPago from '../modals/ModalRegistrarPago';
-import type { PedidoDB, ClienteDB, ProductoDB, RegistrarSalvedadResult } from '../../types';
+import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 
 const MapaRuta = lazy(() => import('../MapaRuta'));
 
@@ -35,22 +35,16 @@ const ACCURACY_MAX_M = 1000;
 const DISTANCIA_ABSURDA_M = 50_000;
 
 export interface RutaActivaTransportistaProps {
-  pedidos: PedidoDB[] | null;
   onMarcarEntregado: (pedido: PedidoDB) => void;
   userId: string;
-  clientes: ClienteDB[];
-  productos: ProductoDB[];
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
   onRegistrarPago?: (data: DatosPago) => Promise<unknown>;
   onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
 }
 
 export default function RutaActivaTransportista({
-  pedidos,
   onMarcarEntregado,
   userId,
-  clientes,
-  productos,
   onRegistrarSalvedad,
   onRegistrarPago,
   onEntregarSinCobrar,
@@ -58,8 +52,10 @@ export default function RutaActivaTransportista({
   const { isOnline } = useAuthData();
   const deposito = useDepositoCoords();
   const { posicion } = useWatchPosition(true);
-  // Ruta real sobre las calles (polylines guardadas al aplicar el orden)
-  const { data: recorridoActivo } = useRecorridoActivoQuery(userId);
+  // Ruta del día: el transportista lee del recorrido en_curso (las paradas que
+  // armó el admin), NO de "todos sus pedidos asignados". Trae también la ruta
+  // real (polylines) para dibujarla.
+  const { data: recorridoActivo, isLoading: cargandoRuta } = useRecorridoActivoQuery(userId);
   const rutaReal = useMemo(
     () => decodePolylines(recorridoActivo?.polylines),
     [recorridoActivo?.polylines],
@@ -75,23 +71,11 @@ export default function RutaActivaTransportista({
     onRegistrarSalvedad,
   });
 
-  // Enriquecer pedidos con cliente y productos (mismo criterio que la vista anterior)
-  const pedidosOrdenados = useMemo<PedidoConCliente[]>(() => {
-    if (!pedidos) return [];
-    return pedidos
-      .filter(p => (p.estado === 'asignado' || p.estado === 'entregado') && p.transportista_id === userId)
-      .map(pedido => {
-        const cliente = (pedido.cliente_id && clientes.find(c => c.id === pedido.cliente_id))
-          || (pedido.cliente?.nombre_fantasia ? pedido.cliente : undefined);
-        const items = (pedido.items || []).map(item => ({
-          ...item,
-          producto: (item.producto_id && productos.find(pr => pr.id === item.producto_id))
-            || item.producto || undefined,
-        }));
-        return { ...pedido, cliente, items } as PedidoConCliente;
-      })
-      .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
-  }, [pedidos, clientes, productos, userId]);
+  // Paradas de la ruta del día (ya vienen ordenadas y enriquecidas del recorrido)
+  const pedidosOrdenados = useMemo<PedidoConCliente[]>(
+    () => recorridoActivo?.paradas ?? [],
+    [recorridoActivo?.paradas],
+  );
 
   const pendientes = useMemo(
     () => pedidosOrdenados.filter(p => p.estado === 'asignado'),
@@ -181,11 +165,21 @@ export default function RutaActivaTransportista({
   };
 
   if (pedidosOrdenados.length === 0) {
+    // Distinguir "todavía no hay ruta armada" de "ruta cargando".
+    const sinRuta = !cargandoRuta && recorridoActivo == null;
     return (
       <div className="text-center py-12">
         <Truck className="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
-        <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">Sin entregas asignadas</h3>
-        <p className="text-gray-500 dark:text-gray-500">No tienes entregas pendientes por el momento</p>
+        <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+          {cargandoRuta ? 'Cargando tu ruta…' : sinRuta ? 'Todavía no tenés ruta para hoy' : 'Ruta sin paradas'}
+        </h3>
+        <p className="text-gray-500 dark:text-gray-500">
+          {cargandoRuta
+            ? 'Un momento'
+            : sinRuta
+              ? 'El administrador todavía no armó tu ruta del día. Cuando la arme, va a aparecer acá.'
+              : 'Tu ruta de hoy no tiene paradas cargadas.'}
+        </p>
       </div>
     );
   }
