@@ -386,6 +386,16 @@ export default function ModalRegistrarPago({
               </div>
             </div>
           )}
+          {saldoPendiente < 0 && (
+            <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <div className="flex justify-between items-center">
+                <span className="text-green-700 dark:text-green-400">Saldo a favor:</span>
+                <span className="text-xl font-bold text-green-700 dark:text-green-400">
+                  {formatCurrency(Math.abs(saldoPendiente))}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Form */}
