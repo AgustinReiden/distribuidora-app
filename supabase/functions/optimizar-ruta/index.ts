@@ -25,6 +25,7 @@ import {
   unirTramos,
 } from "./tramos.ts";
 import { optimizeTours } from "./route-optimization.ts";
+import { navegarTramo } from "./navegar-tramo.ts";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -34,6 +35,11 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 interface RequestBody {
+  /** "navegar_tramo" → guía giro-a-giro de un tramo; ausente → optimizar ruta. */
+  mode?: string;
+  /** Modo navegar_tramo: origen (posición actual) y destino (próxima parada). */
+  origen?: { lat?: number | null; lng?: number | null };
+  destino?: { lat?: number | null; lng?: number | null };
   deposito_lat?: number;
   deposito_lng?: number;
   pedidos?: Array<Partial<PedidoRuta> & { latitud?: number | null; longitud?: number | null }>;
@@ -125,6 +131,41 @@ serve(async (req: Request) => {
     body = await req.json();
   } catch {
     return jsonResponse({ success: false, error: "Body inválido", mensaje: "Se esperaba JSON" });
+  }
+
+  // --- Modo navegación asistida: guía giro-a-giro de un solo tramo ---
+  if (body.mode === "navegar_tramo") {
+    if (!apiKey) {
+      return jsonResponse({
+        success: false,
+        error: "Navegación no configurada",
+        mensaje: "Falta GOOGLE_API_KEY (Routes API) para la navegación in-app",
+      });
+    }
+    const o = body.origen;
+    const d = body.destino;
+    if (o?.lat == null || o?.lng == null || d?.lat == null || d?.lng == null) {
+      return jsonResponse({
+        success: false,
+        error: "Faltan coordenadas",
+        mensaje: "Se requieren origen y destino con lat/lng para navegar el tramo",
+      });
+    }
+    try {
+      const tramo = await navegarTramo(
+        apiKey,
+        { latitude: o.lat, longitude: o.lng },
+        { latitude: d.lat, longitude: d.lng },
+      );
+      return jsonResponse({ success: true, ...tramo });
+    } catch (err) {
+      console.error("[optimizar-ruta] navegar_tramo error:", err);
+      return jsonResponse({
+        success: false,
+        error: "No se pudo calcular el tramo de navegación",
+        mensaje: err instanceof Error ? err.message : "Error al calcular la ruta",
+      });
+    }
   }
 
   const pedidos = body.pedidos ?? [];

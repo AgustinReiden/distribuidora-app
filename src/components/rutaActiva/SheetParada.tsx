@@ -43,12 +43,50 @@ export interface SheetParadaProps {
   onEntregar: (pedido: PedidoConCliente) => void;
   onSalvedad?: (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }) => void;
   linksRutaMaps: LinkRutaMaps[];
+  /** Inicia la navegación asistida in-app. Si no se pasa, solo queda el handoff. */
+  onNavegarInApp?: (pedido: PedidoConCliente) => void;
 }
 
 function navUrl(p: PedidoConCliente): string {
   return p.cliente?.latitud != null && p.cliente?.longitud != null
     ? googleMapsNavUrl(Number(p.cliente.latitud), Number(p.cliente.longitud))
     : googleMapsSearchUrl(p.cliente?.direccion || '');
+}
+
+/** Fila compacta de una parada. Reusada en "Próximas paradas" y "Todas las paradas". */
+function FilaParada({ parada, numero, activa, onSelect }: {
+  parada: PedidoConCliente;
+  numero: number;
+  activa: boolean;
+  onSelect: () => void;
+}) {
+  const entregado = parada.estado === 'entregado';
+  return (
+    <button
+      onClick={onSelect}
+      className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors ${
+        activa
+          ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30'
+          : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
+      }`}
+    >
+      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-500' : 'bg-blue-500'}`}>
+        {entregado ? <Check className="h-4 w-4" /> : numero}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">
+          {parada.cliente?.nombre_fantasia || 'Cliente'}
+        </span>
+        <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+          {parada.cliente?.direccion || 'Sin dirección'}
+        </span>
+      </span>
+      <span className="flex-shrink-0 text-sm font-semibold text-gray-700 dark:text-gray-300">
+        {formatPrecio(parada.total)}
+      </span>
+      <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400" />
+    </button>
+  );
 }
 
 export default function SheetParada({
@@ -60,11 +98,15 @@ export default function SheetParada({
   onEntregar,
   onSalvedad,
   linksRutaMaps,
+  onNavegarInApp,
 }: SheetParadaProps) {
   const [snap, setSnap] = useState<number | string | null>(SNAP_MEDIO);
   const expandido = snap === SNAP_EXPANDIDO;
 
   const pendientes = paradas.filter(p => p.estado === 'asignado');
+  // Próximas (hasta 3) pendientes después de la activa: visibles sin expandir.
+  const idxActiva = paradaActiva ? pendientes.findIndex(p => p.id === paradaActiva.id) : -1;
+  const proximas = (idxActiva >= 0 ? pendientes.slice(idxActiva + 1) : pendientes).slice(0, 3);
 
   // Al detectar llegada, subir el sheet a la posición media si está colapsado
   // para que el botón Entregar quede a la vista (flujo guiado).
@@ -88,10 +130,14 @@ export default function SheetParada({
         >
           <Drawer.Title className="sr-only">Parada actual de la ruta</Drawer.Title>
 
-          {/* Handle de arrastre */}
-          <div className="mx-auto mt-2 h-1.5 w-12 flex-shrink-0 rounded-full bg-gray-300 dark:bg-gray-600" />
+          {/* Handle de arrastre. Drawer.Handle trae el hit-area táctil de 44px
+              nativo de vaul (fácil de agarrar) y al tocarlo cicla los snaps. */}
+          <Drawer.Handle className="mx-auto mt-2 mb-1 h-1.5 w-12 flex-shrink-0 rounded-full bg-gray-300 dark:bg-gray-600" />
 
-          <div className={`flex-1 px-4 pb-[max(env(safe-area-inset-bottom),12px)] ${expandido ? 'overflow-y-auto' : 'overflow-hidden'}`}>
+          {/* Bloque fijo superior: encabezado + tarjeta + acciones. Las acciones
+              van ACÁ (arriba), NO en un footer: vaul revela el contenido
+              top-down, así que el peek/medio muestra el tope del panel. */}
+          <div className="flex-shrink-0 px-4 pb-1">
             {paradaActiva ? (
               <>
                 {/* Encabezado (visible incluso colapsado) */}
@@ -162,6 +208,20 @@ export default function SheetParada({
                     </p>
                   )}
 
+                  {/* Navegación asistida in-app (la principal). El handoff a
+                      Maps/Waze queda abajo como fallback. */}
+                  {onNavegarInApp && !llegaste
+                    && paradaActiva.cliente?.latitud != null
+                    && paradaActiva.cliente?.longitud != null && (
+                    <button
+                      onClick={() => onNavegarInApp(paradaActiva)}
+                      className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-semibold text-white transition-colors active:bg-blue-800"
+                    >
+                      <Navigation className="h-5 w-5" />
+                      Navegar en la app
+                    </button>
+                  )}
+
                   {/* Acciones principales */}
                   <div className="grid grid-cols-3 gap-2">
                     <a
@@ -175,7 +235,7 @@ export default function SheetParada({
                       }`}
                     >
                       <Navigation className="h-4 w-4" />
-                      Navegar
+                      Maps
                     </a>
                     {paradaActiva.cliente?.latitud != null && paradaActiva.cliente?.longitud != null ? (
                       <a
@@ -208,10 +268,37 @@ export default function SheetParada({
                 <p className="text-sm text-gray-500 dark:text-gray-400">No quedan entregas pendientes</p>
               </div>
             )}
+          </div>
+
+          {/* Bloque scrollable: próximas paradas (siempre) + detalle al expandir.
+              overscroll-contain corta el encadenamiento del scroll al documento
+              (defensa extra contra el pull-to-refresh); el pb respeta el home
+              indicator en snap expandido. min-h-0 para que flex-1 pueda scrollear. */}
+          <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(env(safe-area-inset-bottom),12px)]">
+            {/* Próximas paradas: visibles/scrolleables desde el snap medio, sin
+                tener que expandir del todo. Al expandir se ve la lista completa. */}
+            {!expandido && proximas.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Próximas paradas
+                </p>
+                <div className="space-y-1.5">
+                  {proximas.map((p, i) => (
+                    <FilaParada
+                      key={p.id}
+                      parada={p}
+                      numero={p.orden_entrega || i + 1}
+                      activa={false}
+                      onSelect={() => { onSeleccionarParada(p.id); setSnap(SNAP_MEDIO); }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Contenido expandido: productos de la parada + lista de paradas */}
             {expandido && (
-              <div className="mt-5 space-y-5">
+              <div className="space-y-5">
                 {paradaActiva && (paradaActiva.items?.length || 0) > 0 && (
                   <div>
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -256,37 +343,15 @@ export default function SheetParada({
                     Todas las paradas
                   </p>
                   <div className="space-y-1.5">
-                    {paradas.map((p, i) => {
-                      const entregado = p.estado === 'entregado';
-                      const activa = paradaActiva?.id === p.id;
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() => { onSeleccionarParada(p.id); setSnap(SNAP_MEDIO); }}
-                          className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors ${
-                            activa
-                              ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30'
-                              : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
-                          }`}
-                        >
-                          <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-500' : 'bg-blue-500'}`}>
-                            {entregado ? <Check className="h-4 w-4" /> : (p.orden_entrega || i + 1)}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">
-                              {p.cliente?.nombre_fantasia || 'Cliente'}
-                            </span>
-                            <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
-                              {p.cliente?.direccion || 'Sin dirección'}
-                            </span>
-                          </span>
-                          <span className="flex-shrink-0 text-sm font-semibold text-gray-700 dark:text-gray-300">
-                            {formatPrecio(p.total)}
-                          </span>
-                          <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400" />
-                        </button>
-                      );
-                    })}
+                    {paradas.map((p, i) => (
+                      <FilaParada
+                        key={p.id}
+                        parada={p}
+                        numero={p.orden_entrega || i + 1}
+                        activa={paradaActiva?.id === p.id}
+                        onSelect={() => { onSeleccionarParada(p.id); setSnap(SNAP_MEDIO); }}
+                      />
+                    ))}
                   </div>
                 </div>
 
