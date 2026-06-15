@@ -6,6 +6,7 @@ import type {
   PagoFormInput,
   RegistrarPagoBatchInput,
   RegistrarPagoFifoInput,
+  RegistrarPagoCombinadoFifoInput,
   RegistrarPagoFifoResult,
   PagoFifoAplicacion,
   ResumenCuenta,
@@ -173,6 +174,49 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  /**
+   * Registra un pago combinado (varias formas de pago) e imputa el total por
+   * FIFO sobre los pedidos más antiguos con saldo pendiente, en una sola
+   * transacción server-side (RPC `registrar_pago_combinado_cliente_fifo`).
+   * Sobrante por forma queda como saldo a favor (fila con pedido_id NULL).
+   *
+   * Solo admin o encargado (validado server-side en la RPC).
+   */
+  const registrarPagoCombinadoFIFO = async (
+    input: RegistrarPagoCombinadoFifoInput
+  ): Promise<RegistrarPagoFifoResult> => {
+    try {
+      if (currentSucursalId == null) {
+        throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+      }
+      const { data, error } = await supabase.rpc('registrar_pago_combinado_cliente_fifo', {
+        p_cliente_id: input.clienteId,
+        p_metodos: input.metodos.map(m => ({ monto: m.monto, forma_pago: m.formaPago })),
+        p_fecha: input.fecha ?? null,
+        p_referencia: input.referencia ?? null,
+        p_notas: input.notas ?? null,
+      })
+      if (error) throw error
+
+      const raw = (data ?? {}) as {
+        pago_ids?: number[]
+        sobrante?: number
+        monto_total?: number
+        aplicaciones?: PagoFifoAplicacion[]
+      }
+
+      return {
+        pagoIds: raw.pago_ids ?? [],
+        sobrante: Number(raw.sobrante ?? 0),
+        montoTotal: Number(raw.monto_total ?? 0),
+        aplicaciones: raw.aplicaciones ?? [],
+      }
+    } catch (error) {
+      notifyError('Error al registrar pago: ' + (error as Error).message)
+      throw error
+    }
+  }
+
   const eliminarPago = async (pagoId: string): Promise<void> => {
     try {
       const { error } = await supabase.from('pagos').delete().eq('id', pagoId)
@@ -260,6 +304,7 @@ export function usePagos(): UsePagosReturnExtended {
     registrarPago,
     registrarPagosBatch,
     registrarPagoFIFO,
+    registrarPagoCombinadoFIFO,
     eliminarPago,
     actualizarFormaPagoDePago,
     obtenerResumenCuenta,
