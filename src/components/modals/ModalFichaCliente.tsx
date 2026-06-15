@@ -149,10 +149,11 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Saldo Cuenta Corriente</p>
                 <p className={`text-3xl font-bold ${saldoActual > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                  {formatCurrency(saldoActual)}
+                  {formatCurrency(Math.abs(saldoActual))}
                 </p>
                 {saldoActual > 0 && <p className="text-sm text-gray-500">Debe</p>}
-                {saldoActual < 0 && <p className="text-sm text-gray-500">A favor</p>}
+                {saldoActual < 0 && <p className="text-sm text-green-600 dark:text-green-400 font-medium">A favor</p>}
+                {saldoActual === 0 && <p className="text-sm text-gray-500">Sin deuda</p>}
               </div>
               <div className="text-right">
                 <p className="text-sm text-gray-600 dark:text-gray-400">Límite de Crédito</p>
@@ -182,7 +183,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                     style={{ width: `${Math.min(100, porcentajeUsado)}%` }}
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">{porcentajeUsado.toFixed(0)}% del crédito utilizado</p>
+                <p className="text-xs text-gray-500 mt-1">{Math.max(0, porcentajeUsado).toFixed(0)}% del crédito utilizado</p>
               </div>
             )}
             {excedido && (

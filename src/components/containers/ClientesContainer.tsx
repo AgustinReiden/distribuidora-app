@@ -52,7 +52,7 @@ export default function ClientesContainer(): React.ReactElement {
   const { user, perfil, isAdmin, isPreventista, isEncargado } = useAuthData()
   const notify = useNotification()
   const queryClient = useQueryClient()
-  const { registrarPago, registrarPagoFIFO, obtenerResumenCuenta } = usePagos()
+  const { registrarPago, registrarPagoFIFO, registrarPagoCombinadoFIFO, obtenerResumenCuenta } = usePagos()
   const rol = perfil?.rol
   const puedePago = puedeRegistrarPagoCliente(rol)
   // Preventista editando un cliente existente: solo puede tocar datos de
@@ -197,6 +197,25 @@ export default function ClientesContainer(): React.ReactElement {
     }
     return result
   }, [registrarPagoFIFO, queryClient, notify])
+
+  const handleConfirmarPagoCombinadoFIFO = useCallback(async (input: {
+    clienteId: string
+    metodos: { monto: number; formaPago: string }[]
+    fecha?: string
+    referencia?: string
+    notas?: string
+  }) => {
+    const result = await registrarPagoCombinadoFIFO(input)
+    queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
+    queryClient.invalidateQueries({ queryKey: ['clientes'] })
+    if (result.sobrante > 0) {
+      notify.success(`Pago registrado. $${result.sobrante.toLocaleString('es-AR')} quedó como saldo a favor.`)
+    } else {
+      notify.success('Pago registrado y aplicado a pedidos pendientes')
+    }
+    return result
+  }, [registrarPagoCombinadoFIFO, queryClient, notify])
 
   const handleGestionarZonas = useCallback(() => {
     setModalZonasOpen(true)
@@ -379,6 +398,7 @@ export default function ClientesContainer(): React.ReactElement {
             onClose={() => setClientePago(null)}
             onConfirmar={handleConfirmarPagoSimple as any}
             onConfirmarFIFO={handleConfirmarPagoFIFO}
+            onConfirmarCombinadoFIFO={handleConfirmarPagoCombinadoFIFO}
           />
         </Suspense>
       )}
