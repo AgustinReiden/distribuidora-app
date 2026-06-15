@@ -1009,7 +1009,7 @@ export default function PedidosContainer(): React.ReactElement {
   // distancia/duración. Un recorrido vigente por transportista por día.
   // Las polylines se pasan por argumento (no se leen de rutaOptimizada del
   // closure) para evitar usar un valor viejo cuando se encadena optimizar→aplicar.
-  const aplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null }) => {
+  const aplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null; fecha: string }) => {
     setGuardando(true)
     try {
       const { error } = await supabase.rpc('aplicar_orden_ruta', {
@@ -1019,7 +1019,9 @@ export default function PedidosContainer(): React.ReactElement {
         p_duracion: data.duracion != null ? Math.round(data.duracion) : null,
         // Ruta real sobre las calles (encoded polylines de Google) para
         // dibujarla en el mapa del transportista y del admin.
-        p_polylines: data.polylines ?? null
+        p_polylines: data.polylines ?? null,
+        // Fecha de entrega elegida por el admin (default mañana en la UI).
+        p_fecha: data.fecha
       })
       if (error) throw error
 
@@ -1034,15 +1036,15 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [notify, queryClient])
 
-  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null }) => {
+  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null; fecha: string }) => {
     if (!data.ordenOptimizado?.length || !data.transportistaId) return
-    // Si ya hay un recorrido vigente hoy para este transportista, confirmar
+    // Si ya hay un recorrido vigente para ESA fecha y transportista, confirmar
     // el reemplazo (el anterior queda como 'cancelado' a modo de historial).
     const { data: vigente } = await supabase
       .from('recorridos')
       .select('id')
       .eq('transportista_id', data.transportistaId)
-      .eq('fecha', fechaLocalISO())
+      .eq('fecha', data.fecha)
       .eq('estado', 'en_curso')
       .limit(1)
       .maybeSingle()
@@ -1052,8 +1054,8 @@ export default function PedidosContainer(): React.ReactElement {
       setConfirmConfig({
         visible: true,
         tipo: 'warning',
-        titulo: 'Reemplazar recorrido del día',
-        mensaje: `Ya hay un recorrido armado hoy para ${transportista?.nombre || 'este transportista'}. Se reemplazará por la ruta nueva (el anterior queda en el historial como cancelado).`,
+        titulo: 'Reemplazar ruta del día',
+        mensaje: `Ya hay una ruta armada para ${transportista?.nombre || 'este transportista'} ese día. Se reemplazará por la nueva (la anterior queda en el historial como cancelada).`,
         onConfirm: () => {
           setConfirmConfig({ visible: false })
           aplicarOrden(data)
@@ -1068,7 +1070,7 @@ export default function PedidosContainer(): React.ReactElement {
   // solo paso (sin botón "optimizar" separado). Las polylines del resultado se
   // pasan explícitamente a aplicar (no se leen del estado, que aún no se
   // actualizó en este tick).
-  const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[]) => {
+  const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[], fecha: string) => {
     if (!transportistaId || pedidosSeleccionados.length === 0) return
     const ruta = await optimizarRutaConDeposito(transportistaId, pedidosSeleccionados)
     if (!ruta?.orden_optimizado?.length) {
@@ -1081,6 +1083,7 @@ export default function PedidosContainer(): React.ReactElement {
       distancia: ruta.distancia_total ?? null,
       duracion: ruta.duracion_total ?? null,
       polylines: ruta.polylines ?? null,
+      fecha,
     })
   }, [optimizarRutaConDeposito, handleAplicarOrden])
 
