@@ -10,7 +10,7 @@
  * (recálculo al desviarse).
  */
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { supabase } from './supabase/base';
 import { decodePolyline, type LatLngTuple } from '../utils/polyline';
 
@@ -67,17 +67,21 @@ export function useNavTramo(
   origen: Coord | null,
   destino: Coord | null,
   enabled: boolean,
+  recomputeNonce = 0,
 ): UseNavTramoReturn {
-  // La query se keyea SOLO por destino: una sola llamada por tramo. El origen se
-  // captura en el closure del queryFn (la última posición al habilitarse); los
-  // cambios de origen al moverse no re-fetchean porque la key no cambia.
+  // La query se keyea por destino + `recomputeNonce`: una llamada por tramo, y
+  // los cambios de origen al moverse NO re-fetchean (la key no cambia). Para
+  // recalcular al desviarse, el caller bumpea `recomputeNonce` tras actualizar
+  // el origen → la key cambia y se vuelve a pedir con el origen nuevo (capturado
+  // en el closure del queryFn). keepPreviousData evita el flicker del banner.
   const query = useQuery({
-    queryKey: ['nav-tramo', destino?.lat ?? null, destino?.lng ?? null],
+    queryKey: ['nav-tramo', destino?.lat ?? null, destino?.lng ?? null, recomputeNonce],
     queryFn: () => fetchTramo(origen as Coord, destino as Coord),
     enabled: enabled && !!origen && !!destino,
     staleTime: Infinity,
     retry: 1,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
   });
 
   const polyline = query.data?.polyline;

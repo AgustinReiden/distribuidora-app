@@ -98,6 +98,7 @@ declare namespace google.maps {
     strokeColor?: string;
     strokeOpacity?: number;
     strokeWeight?: number;
+    zIndex?: number;
     icons?: Array<{ icon: Symbol; offset?: string; repeat?: string }>;
   }
 

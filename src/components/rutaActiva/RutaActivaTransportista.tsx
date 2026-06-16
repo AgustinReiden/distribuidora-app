@@ -259,6 +259,8 @@ export default function RutaActivaTransportista({
           // Al guiar, el mapa sigue la posición y se acerca.
           seguirPosicion={(seguirPosicion || guiando) && gpsConfiable}
           zoomSeguir={guiando ? 17 : undefined}
+          // Tramo activo resaltado sobre la ruta del día (modo guía).
+          rutaTramo={guiando && guia.rutaTramo.length > 1 ? guia.rutaTramo : null}
         />
       </Suspense>
 
@@ -272,6 +274,8 @@ export default function RutaActivaTransportista({
               maniobra={llegaste ? 'LLEGADA' : (guia.pasoActual?.maniobra ?? null)}
               instruccion={llegaste ? 'Llegaste a destino' : (guia.pasoActual?.instruccion ?? null)}
               distanciaMetros={llegaste ? null : guia.distManiobra}
+              maniobraSiguiente={llegaste ? null : (guia.pasoSiguiente?.maniobra ?? null)}
+              instruccionSiguiente={llegaste ? null : (guia.pasoSiguiente?.instruccion ?? null)}
               cargando={guia.cargando}
               error={guia.error}
             />

@@ -38,6 +38,7 @@ export default function MapaRutaGoogle({
   seguirPosicion = false,
   zoomSeguir,
   rutaReal = null,
+  rutaTramo = null,
 }: MapaRutaProps): React.ReactElement {
   const { isLoaded, isLoading, error } = useGoogleMaps();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -45,6 +46,7 @@ export default function MapaRutaGoogle({
   const markersRef = useRef<google.maps.Marker[]>([]);
   const depositoMarkerRef = useRef<google.maps.Marker | null>(null);
   const polylineRef = useRef<google.maps.Polyline | null>(null);
+  const tramoPolylineRef = useRef<google.maps.Polyline | null>(null);
   const posMarkerRef = useRef<google.maps.Marker | null>(null);
   const posCircleRef = useRef<google.maps.Circle | null>(null);
   const fitSignatureRef = useRef<string>('');
@@ -210,6 +212,29 @@ export default function MapaRutaGoogle({
     }
   }, [mapReady, seguirPosicion, zoomSeguir, posicion, paradaActivaOrden, paradas]);
 
+  // 5) Tramo de navegación activo: polyline resaltada (cyan, gruesa) por encima
+  //    de la ruta del día. Solo en modo guía (cuando viene rutaTramo).
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const g = (window.google as unknown as { maps: typeof google.maps } | undefined)?.maps;
+    if (!g) return;
+    const map = mapRef.current;
+    const hayTramo = (rutaTramo?.length ?? 0) > 1;
+    if (!hayTramo) {
+      if (tramoPolylineRef.current) { tramoPolylineRef.current.setMap(null); tramoPolylineRef.current = null; }
+      return;
+    }
+    const path = (rutaTramo as [number, number][]).map(([lat, lng]) => ({ lat, lng }));
+    if (!tramoPolylineRef.current) {
+      tramoPolylineRef.current = new g.Polyline({
+        path, map, geodesic: false,
+        strokeColor: '#06b6d4', strokeOpacity: 0.95, strokeWeight: 7, zIndex: 5,
+      });
+    } else {
+      tramoPolylineRef.current.setPath(path);
+    }
+  }, [mapReady, rutaTramo]);
+
   // Limpieza al desmontar (salir de la pantalla): libera markers/polyline/círculo.
   useEffect(() => {
     return () => {
@@ -217,6 +242,7 @@ export default function MapaRutaGoogle({
       markersRef.current = [];
       depositoMarkerRef.current?.setMap(null);
       polylineRef.current?.setMap(null);
+      tramoPolylineRef.current?.setMap(null);
       posMarkerRef.current?.setMap(null);
       posCircleRef.current?.setMap(null);
     };

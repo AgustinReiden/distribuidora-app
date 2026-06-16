@@ -56,6 +56,11 @@ export interface MapaRutaProps {
    * punteada entre paradas (recorridos viejos / sin polyline).
    */
   rutaReal?: [number, number][] | null;
+  /**
+   * Tramo de navegación activo (de la posición a la próxima parada). Si viene,
+   * se dibuja RESALTADO por encima de la ruta del día (modo guía).
+   */
+  rutaTramo?: [number, number][] | null;
 }
 
 // Jerarquía visual: la parada activa domina (40px, anillo pulsante); las

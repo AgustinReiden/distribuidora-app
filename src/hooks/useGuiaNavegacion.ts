@@ -1,16 +1,18 @@
 /**
  * useGuiaNavegacion — lógica de la guía giro-a-giro de la pantalla Ruta Activa.
  *
- * Extrae lo que antes vivía en NavAsistida (el overlay full-screen): pide el
- * tramo a la próxima parada, avanza de maniobra, canta los avisos por voz y
- * expone la maniobra actual/siguiente para el banner. Ahora la guía CONVIVE con
- * el mapa principal y el sheet del pedido (no es una pantalla aparte): este hook
- * solo produce el estado de guía; el contenedor decide cuándo está `guiando` y
- * renderiza el banner sobre el mapa.
+ * Produce el estado de guía (maniobra actual/siguiente, distancia, geometría)
+ * que el contenedor renderiza como banner sobre el mapa principal (la guía
+ * convive con el sheet del pedido; no es una pantalla aparte).
  *
- * Fase 1 (asistida): una llamada por tramo, sin snap ni recálculo. El snap-to-
- * route + recálculo al desviarse + look-ahead se montan sobre `pasoSiguiente` y
- * `rutaTramo` que este hook ya expone (Fase C).
+ * Fase C — precisión:
+ *  - SNAP-TO-ROUTE: proyecta el GPS sobre la polyline del tramo (`navSnap`) para
+ *    medir la distancia a la maniobra A LO LARGO de la ruta (no en línea recta) y
+ *    avanzar de paso por posición sobre la ruta.
+ *  - RECÁLCULO al desviarse: si la distancia perpendicular a la ruta supera el
+ *    umbral por varios fixes seguidos, recaptura la posición como nuevo origen y
+ *    pide el tramo de nuevo (bump de `recomputeNonce` en useNavTramo).
+ *  - LOOK-AHEAD: expone `pasoSiguiente` para anticipar el giro encadenado.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavTramo, type Coord, type PasoNav } from './useNavTramo';
@@ -18,11 +20,16 @@ import type { PosicionGps } from './useWatchPosition';
 import type { UseNavegacionVozReturn } from './useNavegacionVoz';
 import type { LatLngTuple } from '../utils/polyline';
 import { haversineMeters } from '../utils/geo';
+import { construirSnapper, snapEnRuta, distanciaEnRutaDe, type Snapper } from '../utils/navSnap';
 
 /** Distancia (m) a la maniobra para considerarla pasada y avanzar de paso. */
 const UMBRAL_AVANCE_M = 30;
 /** Distancia (m) para el aviso anticipado de la maniobra. */
 const UMBRAL_AVISO_M = 160;
+/** Desvío perpendicular (m) a la ruta para considerarse fuera de ruta. */
+const UMBRAL_OFFROUTE_M = 45;
+/** Fixes consecutivos fuera de ruta antes de recalcular (filtra bandazos del GPS). */
+const OFFROUTE_FIXES = 3;
 
 export interface UseGuiaNavegacionParams {
   destino: Coord | null;
@@ -40,7 +47,7 @@ export interface UseGuiaNavegacionReturn {
   pasoActual: PasoNav | null;
   /** Maniobra siguiente (look-ahead) para anticipar giros encadenados. */
   pasoSiguiente: PasoNav | null;
-  /** Distancia (m) a la maniobra actual. */
+  /** Distancia (m) a la maniobra actual, a lo largo de la ruta. */
   distManiobra: number | null;
   /** Geometría del tramo decodificada (para dibujarlo resaltado en el mapa). */
   rutaTramo: LatLngTuple[];
@@ -59,11 +66,12 @@ export function useGuiaNavegacion({
 }: UseGuiaNavegacionParams): UseGuiaNavegacionReturn {
   const { decir, callar } = voz;
 
-  // Origen del tramo: la posición al iniciar la guía, capturada una vez por
-  // destino. Se resetea al cambiar de parada o al apagar la guía.
+  // Origen del tramo (posición al iniciar) + nonce para forzar recálculo.
   const [origen, setOrigen] = useState<Coord | null>(null);
+  const [recomputeNonce, setRecomputeNonce] = useState(0);
   useEffect(() => {
     setOrigen(null);
+    setRecomputeNonce(0);
   }, [destino?.lat, destino?.lng, guiando]);
   useEffect(() => {
     if (guiando && !origen && gpsConfiable && posicion) {
@@ -71,52 +79,91 @@ export function useGuiaNavegacion({
     }
   }, [guiando, origen, gpsConfiable, posicion]);
 
-  const tramo = useNavTramo(origen, destino, guiando && !!destino);
-  const { pasos } = tramo;
+  const tramo = useNavTramo(origen, destino, guiando && !!destino, recomputeNonce);
+  const { pasos, rutaTramo } = tramo;
 
-  // Paso (maniobra) actual y avisos ya dichos por paso.
-  const [idx, setIdx] = useState(0);
-  const anunciadosRef = useRef<Set<number>>(new Set());
+  // Snapper + distancia en ruta de cada maniobra: una vez por tramo.
+  const snapper = useMemo<Snapper | null>(
+    () => (rutaTramo.length >= 2 ? construirSnapper(rutaTramo) : null),
+    [rutaTramo],
+  );
+  const pasosDist = useMemo<number[]>(
+    () => (snapper ? pasos.map(p => distanciaEnRutaDe(snapper, p.inicio)) : []),
+    [snapper, pasos],
+  );
+  // Primera maniobra "real" (saltea el DEPART inicial).
+  const idxBase = pasos.length > 1 && pasos[0]?.maniobra === 'DEPART' ? 1 : 0;
+
+  // Estado derivado del snap (maniobra activa + distancia), por tick de GPS.
+  const [guia, setGuia] = useState<{ idx: number; dist: number | null }>({ idx: 0, dist: null });
+  const hintRef = useRef(0);
+  const offrouteRef = useRef(0);
+  const recalcRef = useRef(false);
+  const anunciadosRef = useRef<Set<string>>(new Set());
+
+  // Reset al cambiar de tramo (nuevo snapper).
   useEffect(() => {
-    // Saltear el "DEPART" inicial: arrancar en la primera maniobra real.
-    const start = pasos.length > 1 && pasos[0]?.maniobra === 'DEPART' ? 1 : 0;
-    setIdx(start);
+    hintRef.current = 0;
+    offrouteRef.current = 0;
+    recalcRef.current = false;
     anunciadosRef.current = new Set();
-  }, [pasos]);
+    setGuia({ idx: idxBase, dist: null });
+  }, [snapper, idxBase]);
 
-  const pasoActual = pasos[idx] ?? null;
-  const pasoSiguiente = pasos[idx + 1] ?? null;
-
-  const distManiobra = useMemo<number | null>(() => {
-    if (!gpsConfiable || !posicion || !pasoActual) return null;
-    return haversineMeters({ lat: posicion.lat, lng: posicion.lng }, pasoActual.inicio);
-  }, [gpsConfiable, posicion, pasoActual]);
-
-  // Avance de paso + avisos por voz (contra el punto absoluto de cada paso).
+  // Tick: snap → maniobra actual + distancia, avisos de voz, detección de desvío.
   useEffect(() => {
     if (!guiando || !gpsConfiable || !posicion || pasos.length === 0) return;
-    const paso = pasos[idx];
-    if (!paso) return;
-    const dist = haversineMeters({ lat: posicion.lat, lng: posicion.lng }, paso.inicio);
-    const key150 = idx * 1000 + 150;
-    const key30 = idx * 1000 + 30;
+    const pos = { lat: posicion.lat, lng: posicion.lng };
 
-    if (vozOn) {
-      if (dist <= UMBRAL_AVANCE_M && !anunciadosRef.current.has(key30)) {
-        anunciadosRef.current.add(key30);
-        anunciadosRef.current.add(key150);
+    let idx: number;
+    let dist: number | null;
+
+    if (snapper && pasosDist.length === pasos.length) {
+      const snap = snapEnRuta(snapper, pos, hintRef.current);
+      hintRef.current = snap.segmentIndex;
+
+      // Maniobra actual = la primera (≥ idxBase) que todavía no pasamos.
+      idx = pasos.length - 1;
+      for (let i = idxBase; i < pasos.length; i++) {
+        if (pasosDist[i] >= snap.distanciaEnRuta - UMBRAL_AVANCE_M) { idx = i; break; }
+      }
+      dist = Math.max(0, pasosDist[idx] - snap.distanciaEnRuta);
+
+      // Desvío sostenido → recálculo del tramo desde la posición actual.
+      if (snap.perpendicularM > UMBRAL_OFFROUTE_M) {
+        offrouteRef.current += 1;
+        if (offrouteRef.current >= OFFROUTE_FIXES && !recalcRef.current) {
+          recalcRef.current = true;
+          setOrigen(pos);
+          setRecomputeNonce(n => n + 1);
+        }
+      } else {
+        offrouteRef.current = 0;
+      }
+    } else {
+      // Sin snapper (tramo cargando): fallback a distancia recta al paso base.
+      idx = idxBase;
+      dist = haversineMeters(pos, pasos[idxBase].inicio);
+    }
+
+    setGuia(prev => (prev.idx === idx && prev.dist === dist ? prev : { idx, dist }));
+
+    // Avisos de voz por umbral, una vez por maniobra.
+    if (vozOn && dist != null) {
+      const paso = pasos[idx];
+      const k150 = `${idx}:150`;
+      const k30 = `${idx}:30`;
+      if (dist <= UMBRAL_AVANCE_M && !anunciadosRef.current.has(k30)) {
+        anunciadosRef.current.add(k30);
+        anunciadosRef.current.add(k150);
         decir(paso.instruccion, { forzar: true });
-      } else if (dist <= UMBRAL_AVISO_M && !anunciadosRef.current.has(key150)) {
-        anunciadosRef.current.add(key150);
+      } else if (dist <= UMBRAL_AVISO_M && !anunciadosRef.current.has(k150)) {
+        anunciadosRef.current.add(k150);
         const redonda = Math.max(10, Math.round(dist / 10) * 10);
         decir(`En ${redonda} metros, ${paso.instruccion}`);
       }
     }
-
-    if (dist <= UMBRAL_AVANCE_M && idx < pasos.length - 1) {
-      setIdx(i => (i < pasos.length - 1 ? i + 1 : i));
-    }
-  }, [guiando, posicion, gpsConfiable, pasos, idx, vozOn, decir]);
+  }, [guiando, posicion, gpsConfiable, snapper, pasos, pasosDist, idxBase, vozOn, decir]);
 
   // Anuncio de llegada (una vez mientras se guía).
   const llegadaRef = useRef(false);
@@ -137,10 +184,10 @@ export function useGuiaNavegacion({
   }, [guiando, callar]);
 
   return {
-    pasoActual,
-    pasoSiguiente,
-    distManiobra,
-    rutaTramo: tramo.rutaTramo,
+    pasoActual: pasos[guia.idx] ?? null,
+    pasoSiguiente: pasos[guia.idx + 1] ?? null,
+    distManiobra: guia.dist,
+    rutaTramo,
     cargando: tramo.cargando,
     error: tramo.error,
   };
