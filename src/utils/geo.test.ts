@@ -1,10 +1,28 @@
 import { describe, it, expect } from 'vitest'
 import {
   haversineMeters,
+  computeBearing,
   formatDistancia,
   clasificarDistancia,
   colorPreventista,
 } from './geo'
+
+describe('computeBearing', () => {
+  const o = { lat: -26.8, lng: -65.2 }
+  it('apunta al norte (~0/360)', () => {
+    const b = computeBearing(o, { lat: -26.7, lng: -65.2 })
+    expect(Math.min(b, 360 - b)).toBeLessThan(2)
+  })
+  it('apunta al este (~90)', () => {
+    expect(computeBearing(o, { lat: -26.8, lng: -65.1 })).toBeCloseTo(90, 0)
+  })
+  it('apunta al sur (~180)', () => {
+    expect(computeBearing(o, { lat: -26.9, lng: -65.2 })).toBeCloseTo(180, 0)
+  })
+  it('apunta al oeste (~270)', () => {
+    expect(computeBearing(o, { lat: -26.8, lng: -65.3 })).toBeCloseTo(270, 0)
+  })
+})
 
 describe('haversineMeters', () => {
   it('returns 0 for identical coordinates', () => {

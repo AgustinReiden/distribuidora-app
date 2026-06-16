@@ -43,6 +43,22 @@ export function haversineMeters(a: Coord, b: Coord): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h))
 }
 
+/**
+ * Rumbo inicial (bearing) de `a` → `b`, en grados horarios desde el norte (0-360).
+ * Se usa para orientar la cámara de navegación cuando el `heading` del GPS es
+ * null/ruidoso (parado o a baja velocidad): se deriva del movimiento o del rumbo
+ * de la ruta.
+ */
+export function computeBearing(a: Coord, b: Coord): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const y = Math.sin(dLng) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+}
+
 export function formatDistancia(metros: number | null | undefined): string {
   if (metros == null || !Number.isFinite(metros)) return '—'
   if (metros < 1000) return `${Math.round(metros)} m`

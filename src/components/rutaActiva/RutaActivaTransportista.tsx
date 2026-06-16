@@ -253,12 +253,14 @@ export default function RutaActivaTransportista({
           rutaReal={rutaReal.length > 1 ? rutaReal : null}
           // Solo mostramos el punto azul con GPS confiable (no plantarlo en
           // medio del país con la geolocalización por IP del desktop).
-          posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy } : null}
+          posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy, heading: posicion.heading, speed: posicion.speed } : null}
           paradaActivaOrden={paradaActiva?.orden_entrega ?? null}
           onParadaTap={handleParadaTapMapa}
           // Al guiar, el mapa sigue la posición y se acerca.
           seguirPosicion={(seguirPosicion || guiando) && gpsConfiable}
           zoomSeguir={guiando ? 17 : undefined}
+          // Modo guía: con Vector Map ID activa la cámara heading-up (tilt+rumbo).
+          modoGuia={guiando}
           // Tramo activo resaltado sobre la ruta del día (modo guía).
           rutaTramo={guiando && guia.rutaTramo.length > 1 ? guia.rutaTramo : null}
         />
