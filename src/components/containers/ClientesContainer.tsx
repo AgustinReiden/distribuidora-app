@@ -222,6 +222,25 @@ export default function ClientesContainer(): React.ReactElement {
   }, [])
 
   const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
+    // Bloqueo de nombre duplicado dentro de la sucursal (ignora mayúsculas y
+    // espacios extremos). Solo aplica a altas o cuando el nombre cambió, para no
+    // romper la edición de clientes homónimos ya existentes (se los respeta).
+    // `clientes` ya viene scopeado a la sucursal activa por useClientesQuery.
+    const nombreNuevo = (data.razonSocial || data.nombreFantasia || '').trim()
+    const nombreNuevoNorm = nombreNuevo.toLowerCase()
+    const nombreOriginalNorm = (clienteEditando?.razon_social || '').trim().toLowerCase()
+    if (nombreNuevoNorm && nombreNuevoNorm !== nombreOriginalNorm) {
+      const yaExiste = clientes.some(
+        c => c.id !== clienteEditando?.id &&
+          c.activo !== false &&
+          (c.razon_social || '').trim().toLowerCase() === nombreNuevoNorm
+      )
+      if (yaExiste) {
+        notify.error(`Ya existe un cliente con el nombre "${nombreNuevo}" en esta sucursal.`)
+        return
+      }
+    }
+
     // Transform from camelCase (form) to snake_case (database)
     // preventista_ids (N-a-N) es la fuente de verdad; preventista_id (legado)
     // se espeja con el primer asignado para no romper lecturas en otros modulos
@@ -327,7 +346,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user, zonas])
+  }, [clienteEditando, clientes, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user, zonas])
 
   return (
     <>
