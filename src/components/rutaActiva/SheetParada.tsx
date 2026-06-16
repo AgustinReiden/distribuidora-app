@@ -14,11 +14,11 @@
 import { useState, useEffect } from 'react';
 import { Drawer } from 'vaul';
 import {
-  Navigation, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, Map as MapIcon,
+  Navigation, Square, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, Map as MapIcon,
 } from 'lucide-react';
 import { formatPrecio, getFormaPagoLabel } from '../../utils/formatters';
 import { formatDistancia } from '../../utils/geo';
-import { googleMapsNavUrl, googleMapsSearchUrl, wazeNavUrl } from '../../utils/navegacion';
+import { googleMapsNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
 import type { PedidoItemDB, ProductoDB } from '../../types';
 import type { PedidoConCliente } from './useEntregaParada';
 
@@ -43,8 +43,10 @@ export interface SheetParadaProps {
   onEntregar: (pedido: PedidoConCliente) => void;
   onSalvedad?: (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }) => void;
   linksRutaMaps: LinkRutaMaps[];
-  /** Inicia la navegación asistida in-app. Si no se pasa, solo queda el handoff. */
-  onNavegarInApp?: (pedido: PedidoConCliente) => void;
+  /** Prende/apaga la guía in-app para la parada activa (toggle). */
+  onToggleGuia?: (pedido: PedidoConCliente) => void;
+  /** ¿La guía está activa ahora? Define el texto del toggle (Navegar/Parar). */
+  guiando?: boolean;
 }
 
 function navUrl(p: PedidoConCliente): string {
@@ -98,7 +100,8 @@ export default function SheetParada({
   onEntregar,
   onSalvedad,
   linksRutaMaps,
-  onNavegarInApp,
+  onToggleGuia,
+  guiando = false,
 }: SheetParadaProps) {
   const [snap, setSnap] = useState<number | string | null>(SNAP_MEDIO);
   const expandido = snap === SNAP_EXPANDIDO;
@@ -208,46 +211,38 @@ export default function SheetParada({
                     </p>
                   )}
 
-                  {/* Navegación asistida in-app (la principal). El handoff a
-                      Maps/Waze queda abajo como fallback. */}
-                  {onNavegarInApp && !llegaste
+                  {/* Guía in-app (toggle Navegar/Parar). El handoff a Maps queda
+                      como fallback abajo. Se muestra si se está guiando (para
+                      poder parar) o si todavía no llegaste. */}
+                  {onToggleGuia
+                    && (guiando || !llegaste)
                     && paradaActiva.cliente?.latitud != null
                     && paradaActiva.cliente?.longitud != null && (
                     <button
-                      onClick={() => onNavegarInApp(paradaActiva)}
-                      className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-semibold text-white transition-colors active:bg-blue-800"
+                      onClick={() => onToggleGuia(paradaActiva)}
+                      className={`flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-colors ${
+                        guiando
+                          ? 'bg-gray-200 text-gray-700 active:bg-gray-300 dark:bg-gray-700 dark:text-gray-200'
+                          : 'bg-blue-600 text-white active:bg-blue-800'
+                      }`}
                     >
-                      <Navigation className="h-5 w-5" />
-                      Navegar en la app
+                      {guiando
+                        ? <><Square className="h-5 w-5" /> Parar guía</>
+                        : <><Navigation className="h-5 w-5" /> Navegar</>}
                     </button>
                   )}
 
-                  {/* Acciones principales */}
-                  <div className="grid grid-cols-3 gap-2">
+                  {/* Acciones principales: Maps (handoff, fallback) + Entregar */}
+                  <div className="grid grid-cols-2 gap-2">
                     <a
                       href={navUrl(paradaActiva)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`flex min-h-[52px] items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition-colors ${
-                        llegaste
-                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                          : 'bg-blue-600 text-white active:bg-blue-800'
-                      }`}
+                      className="flex min-h-[52px] items-center justify-center gap-1.5 rounded-xl bg-blue-50 text-sm font-semibold text-blue-700 transition-colors active:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300"
                     >
-                      <Navigation className="h-4 w-4" />
+                      <MapIcon className="h-4 w-4" />
                       Maps
                     </a>
-                    {paradaActiva.cliente?.latitud != null && paradaActiva.cliente?.longitud != null ? (
-                      <a
-                        href={wazeNavUrl(Number(paradaActiva.cliente.latitud), Number(paradaActiva.cliente.longitud))}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex min-h-[52px] items-center justify-center gap-1.5 rounded-xl bg-cyan-50 text-sm font-semibold text-cyan-700 transition-colors active:bg-cyan-100 dark:bg-cyan-900/30 dark:text-cyan-300"
-                      >
-                        <Navigation className="h-4 w-4" />
-                        Waze
-                      </a>
-                    ) : <span />}
                     <button
                       onClick={() => onEntregar(paradaActiva)}
                       className={`flex min-h-[52px] items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition-colors ${

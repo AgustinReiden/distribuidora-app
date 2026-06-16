@@ -40,6 +40,9 @@ export interface BannerManiobraProps {
   instruccion: string | null;
   /** Distancia a la maniobra, en metros. */
   distanciaMetros: number | null;
+  /** Look-ahead: maniobra siguiente (se muestra como "Luego …"). */
+  maniobraSiguiente?: string | null;
+  instruccionSiguiente?: string | null;
   cargando?: boolean;
   error?: string | null;
 }
@@ -48,6 +51,8 @@ export default function BannerManiobra({
   maniobra,
   instruccion,
   distanciaMetros,
+  maniobraSiguiente = null,
+  instruccionSiguiente = null,
   cargando = false,
   error = null,
 }: BannerManiobraProps) {
@@ -70,20 +75,30 @@ export default function BannerManiobra({
   }
 
   const Icono = ICONOS[maniobra ?? ''] ?? Navigation;
+  const IconoSiguiente = instruccionSiguiente ? (ICONOS[maniobraSiguiente ?? ''] ?? Navigation) : null;
 
   return (
-    <div className="flex items-center gap-3 rounded-2xl bg-gray-900/95 px-4 py-3 text-white shadow-xl">
-      <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600">
-        <Icono className="h-8 w-8" strokeWidth={2.5} />
+    <div className="rounded-2xl bg-gray-900/95 px-4 py-3 text-white shadow-xl">
+      <div className="flex items-center gap-3">
+        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600">
+          <Icono className="h-8 w-8" strokeWidth={2.5} />
+        </div>
+        <div className="min-w-0 flex-1">
+          {distanciaMetros != null && (
+            <p className="text-2xl font-extrabold leading-tight">
+              {formatDistancia(distanciaMetros)}
+            </p>
+          )}
+          <p className="truncate text-base font-medium text-gray-100">{instruccion}</p>
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
-        {distanciaMetros != null && (
-          <p className="text-2xl font-extrabold leading-tight">
-            {formatDistancia(distanciaMetros)}
-          </p>
-        )}
-        <p className="truncate text-base font-medium text-gray-100">{instruccion}</p>
-      </div>
+      {IconoSiguiente && instruccionSiguiente && (
+        <div className="mt-2 flex items-center gap-2 border-t border-white/10 pt-2 text-sm text-gray-300">
+          <span className="flex-shrink-0 text-xs font-semibold uppercase text-gray-400">Luego</span>
+          <IconoSiguiente className="h-4 w-4 flex-shrink-0" />
+          <span className="truncate">{instruccionSiguiente}</span>
+        </div>
+      )}
     </div>
   );
 }

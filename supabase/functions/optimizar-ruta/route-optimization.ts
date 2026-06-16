@@ -59,12 +59,14 @@ export function parseOptimizeTours(data: OptimizeToursResponse, pedidos: PedidoR
 
 /**
  * Llama a optimizeTours: 1 shipment por pedido (delivery en la ubicación del
- * cliente, label = pedido_id), 1 vehículo con start/end en el depósito.
+ * cliente, label = pedido_id), 1 vehículo que arranca en el depósito y termina
+ * en `destino` (el punto de llegada configurable; por defecto = depósito).
  */
 export async function optimizeTours(
   saKeyJson: string,
   deposito: LatLng,
   pedidos: PedidoRuta[],
+  destino: LatLng = deposito,
 ): Promise<RutaUnida> {
   const sa = JSON.parse(saKeyJson) as ServiceAccountKey;
   const token = await getAccessToken(sa);
@@ -76,12 +78,14 @@ export async function optimizeTours(
         deliveries: [{ arrivalLocation: { latitude: p.latitud, longitude: p.longitud } }],
       })),
       vehicles: [{
-        startWaypoint: { location: { latitude: deposito.latitude, longitude: deposito.longitude } },
-        endLocation: { latitude: deposito.latitude, longitude: deposito.longitude },
+        // startLocation plano (NO startWaypoint anidado) y endLocation en el
+        // punto de llegada. Sin considerRoadTraffic: exige global_start_time y
+        // la ruta se arma el día anterior, así que el tráfico de ahora no aplica.
+        startLocation: { latitude: deposito.latitude, longitude: deposito.longitude },
+        endLocation: { latitude: destino.latitude, longitude: destino.longitude },
       }],
     },
     populatePolylines: true,
-    considerRoadTraffic: true,
   };
 
   const res = await fetch(

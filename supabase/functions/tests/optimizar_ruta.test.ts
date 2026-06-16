@@ -66,6 +66,31 @@ Deno.test("con 50 pedidos parte en tramos de <= MAX_INTERMEDIOS y los encadena",
   assertEquals(ids.length, 50);
 });
 
+Deno.test("partirEnTramos con punto de llegada: el último tramo termina en el destino", () => {
+  const destino = { latitude: -26.90, longitude: -65.30 };
+
+  // Un solo tramo: origen = depósito, destino = punto de llegada.
+  const uno = partirEnTramos(DEPOSITO, pedidosEnCirculo(10), destino);
+  assertEquals(uno.length, 1);
+  assertEquals(uno[0].origen, DEPOSITO);
+  assertEquals(uno[0].destino, destino);
+
+  // Tres tramos: SOLO el último termina en el destino; los previos en su puente.
+  const tres = partirEnTramos(DEPOSITO, pedidosEnCirculo(50), destino);
+  assertEquals(tres.length, 3);
+  assertEquals(tres[0].origen, DEPOSITO);
+  assertEquals(tres[tres.length - 1].destino, destino);
+  assertEquals(tres[0].destino, {
+    latitude: tres[0].puente!.latitud,
+    longitude: tres[0].puente!.longitud,
+  });
+});
+
+Deno.test("partirEnTramos sin punto de llegada: termina en el depósito (compat)", () => {
+  const tramos = partirEnTramos(DEPOSITO, pedidosEnCirculo(10));
+  assertEquals(tramos[0].destino, DEPOSITO);
+});
+
 Deno.test("unirTramos respeta el orden optimizado de Google y suma totales", () => {
   const pedidos = [pedido(1, -26.80, -65.20), pedido(2, -26.81, -65.21), pedido(3, -26.82, -65.22)];
   const tramos = partirEnTramos(DEPOSITO, pedidos);

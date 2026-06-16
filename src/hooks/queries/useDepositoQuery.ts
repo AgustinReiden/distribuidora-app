@@ -63,3 +63,51 @@ export function useSetDepositoMutation() {
     },
   })
 }
+
+// --- Punto de llegada (opcional, mig 087) ---
+// Si la sucursal lo configura, la optimización TERMINA acá (p. ej. donde se
+// guarda el camión) en vez de volver al depósito. null = sin punto de llegada.
+
+export const destinoKeys = {
+  all: (sucursalId: number | null) => ['destino-ruta', sucursalId] as const,
+}
+
+async function fetchDestino(): Promise<DepositoCoords | null> {
+  const { data, error } = await supabase.rpc('get_destino_sucursal')
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (row?.lat != null && row?.lng != null) {
+    return { lat: Number(row.lat), lng: Number(row.lng) }
+  }
+  return null
+}
+
+/** Punto de llegada de la sucursal actual, o null si no está configurado. */
+export function useDestinoCoords(): DepositoCoords | null {
+  const { currentSucursalId } = useSucursal()
+  const { data } = useQuery({
+    queryKey: destinoKeys.all(currentSucursalId),
+    queryFn: fetchDestino,
+    enabled: currentSucursalId != null,
+    staleTime: 30 * 60 * 1000,
+  })
+  return data ?? null
+}
+
+export function useSetDestinoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  return useMutation({
+    // null limpia el punto de llegada (la ruta vuelve a terminar en el depósito).
+    mutationFn: async (coords: DepositoCoords | null) => {
+      const { error } = await supabase.rpc('set_destino_sucursal', {
+        p_lat: coords?.lat ?? null,
+        p_lng: coords?.lng ?? null,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: destinoKeys.all(currentSucursalId) })
+    },
+  })
+}

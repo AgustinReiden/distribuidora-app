@@ -32,6 +32,10 @@ export interface PosicionMapa {
   lat: number;
   lng: number;
   accuracy?: number;
+  /** Rumbo del GPS (grados, 0 = norte) o null. Para la cámara heading-up. */
+  heading?: number | null;
+  /** Velocidad del GPS (m/s) o null. */
+  speed?: number | null;
 }
 
 export interface MapaRutaProps {
@@ -48,12 +52,25 @@ export interface MapaRutaProps {
   onParadaTap?: (orden: number) => void;
   /** Si true, el mapa sigue la posición propia en vez de la parada activa. */
   seguirPosicion?: boolean;
+  /** Zoom a aplicar UNA vez al activar el seguimiento (modo guía/navegación). */
+  zoomSeguir?: number;
+  /**
+   * Modo guía activo: si hay Vector Map ID (VITE_GOOGLE_MAP_ID), activa la
+   * cámara heading-up (acerca + inclina + rota al rumbo). Sin Map ID degrada a
+   * seguimiento 2D (panTo). Solo lo implementa MapaRutaGoogle.
+   */
+  modoGuia?: boolean;
   /**
    * Ruta real sobre las calles (polyline decodificada de Google). Si viene con
    * >1 punto se dibuja la línea sólida real; si no, fallback a la línea recta
    * punteada entre paradas (recorridos viejos / sin polyline).
    */
   rutaReal?: [number, number][] | null;
+  /**
+   * Tramo de navegación activo (de la posición a la próxima parada). Si viene,
+   * se dibuja RESALTADO por encima de la ruta del día (modo guía).
+   */
+  rutaTramo?: [number, number][] | null;
 }
 
 // Jerarquía visual: la parada activa domina (40px, anillo pulsante); las

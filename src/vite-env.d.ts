@@ -4,6 +4,8 @@ interface ImportMetaEnv {
   readonly VITE_SENTRY_DSN: string | undefined
   readonly VITE_APP_VERSION: string | undefined
   readonly VITE_GOOGLE_API_KEY: string | undefined
+  /** Vector Map ID (Google Cloud) para la cámara heading-up de navegación. */
+  readonly VITE_GOOGLE_MAP_ID: string | undefined
   readonly VITE_N8N_WEBHOOK_URL: string | undefined
   readonly VITE_N8N_FACTURA_WEBHOOK_URL: string | undefined
   readonly PROD: boolean
@@ -33,7 +35,22 @@ declare namespace google.maps {
     setCenter(latLng: LatLng | LatLngLiteral): void;
     setZoom(zoom: number): void;
     getZoom(): number;
+    /** Mueve la cámara (center/zoom/heading/tilt) en un paso; solo vector maps tiltan/rotan. */
+    moveCamera(cameraOptions: CameraOptions): void;
   }
+
+  interface CameraOptions {
+    center?: LatLng | LatLngLiteral;
+    zoom?: number;
+    heading?: number;
+    tilt?: number;
+  }
+
+  const RenderingType: {
+    readonly VECTOR: 'VECTOR';
+    readonly RASTER: 'RASTER';
+    readonly UNINITIALIZED: 'UNINITIALIZED';
+  };
 
   interface Padding {
     top?: number;
@@ -45,6 +62,10 @@ declare namespace google.maps {
   interface MapOptions {
     center?: LatLng | LatLngLiteral;
     zoom?: number;
+    heading?: number;
+    tilt?: number;
+    mapId?: string;
+    renderingType?: string;
     disableDefaultUI?: boolean;
     mapTypeControl?: boolean;
     streetViewControl?: boolean;
@@ -98,6 +119,7 @@ declare namespace google.maps {
     strokeColor?: string;
     strokeOpacity?: number;
     strokeWeight?: number;
+    zIndex?: number;
     icons?: Array<{ icon: Symbol; offset?: string; repeat?: string }>;
   }
 
@@ -141,6 +163,8 @@ declare namespace google.maps {
     strokeOpacity?: number;
     strokeWeight?: number;
     scale?: number;
+    /** Rotación del símbolo en grados horarios (para la flecha de rumbo). */
+    rotation?: number;
     labelOrigin?: { x: number; y: number };
   }
 

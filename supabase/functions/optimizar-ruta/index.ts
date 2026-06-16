@@ -42,6 +42,9 @@ interface RequestBody {
   destino?: { lat?: number | null; lng?: number | null };
   deposito_lat?: number;
   deposito_lng?: number;
+  /** Punto de llegada para optimizar (opcional; si falta, fin = depósito). */
+  destino_lat?: number | null;
+  destino_lng?: number | null;
   pedidos?: Array<Partial<PedidoRuta> & { latitud?: number | null; longitud?: number | null }>;
 }
 
@@ -97,8 +100,9 @@ async function viaComputeRoutes(
   apiKey: string,
   deposito: LatLng,
   conCoords: PedidoRuta[],
+  destino: LatLng = deposito,
 ): Promise<{ ruta: RutaUnida; tramos: number }> {
-  const tramos = partirEnTramos(deposito, conCoords);
+  const tramos = partirEnTramos(deposito, conCoords, destino);
   const rutas: GoogleRoute[] = [];
   // Secuencial a propósito: son 1-3 requests y simplifica el rate limiting.
   for (const tramo of tramos) {
@@ -181,6 +185,10 @@ serve(async (req: Request) => {
     latitude: body.deposito_lat ?? -26.8241,
     longitude: body.deposito_lng ?? -65.2226,
   };
+  // Punto de llegada opcional: si no viene, la ruta termina en el depósito.
+  const destino: LatLng = (body.destino_lat != null && body.destino_lng != null)
+    ? { latitude: body.destino_lat, longitude: body.destino_lng }
+    : deposito;
 
   const conCoords: PedidoRuta[] = [];
   const sinCoords: typeof pedidos = [];
@@ -207,17 +215,17 @@ serve(async (req: Request) => {
   try {
     if (saKey) {
       try {
-        ruta = await optimizeTours(saKey, deposito, conCoords);
+        ruta = await optimizeTours(saKey, deposito, conCoords, destino);
         optimizadoPor = "Google Route Optimization";
       } catch (err) {
         if (!apiKey) throw err;
         console.error("[optimizar-ruta] Route Optimization falló, usando computeRoutes:", err);
-        const r = await viaComputeRoutes(apiKey, deposito, conCoords);
+        const r = await viaComputeRoutes(apiKey, deposito, conCoords, destino);
         ruta = r.ruta;
         optimizadoPor = `Google Routes API (${r.tramos} tramos, fallback)`;
       }
     } else {
-      const r = await viaComputeRoutes(apiKey, deposito, conCoords);
+      const r = await viaComputeRoutes(apiKey, deposito, conCoords, destino);
       ruta = r.ruta;
       optimizadoPor = r.tramos > 1 ? `Google Routes API (${r.tramos} tramos)` : "Google Routes API";
     }

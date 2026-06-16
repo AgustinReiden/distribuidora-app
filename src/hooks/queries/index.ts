@@ -151,6 +151,9 @@ export {
   DEPOSITO_DEFAULT,
   useDepositoCoords,
   useSetDepositoMutation,
+  destinoKeys,
+  useDestinoCoords,
+  useSetDestinoMutation,
 } from './useDepositoQuery'
 export type { DepositoCoords } from './useDepositoQuery'
 
