@@ -263,7 +263,9 @@ export default function RutaActivaTransportista({
           paradas={paradasMapa}
           deposito={deposito}
           altura="full"
-          rutaReal={rutaReal.length > 1 ? rutaReal : null}
+          // Al guiar se oculta la ruta del día completa para no confundir con el
+          // tramo de navegación (rutaTramo); al parar vuelve la ruta completa.
+          rutaReal={!guiando && rutaReal.length > 1 ? rutaReal : null}
           // Solo mostramos el punto azul con GPS confiable (no plantarlo en
           // medio del país con la geolocalización por IP del desktop).
           posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy, heading: posicion.heading, speed: posicion.speed } : null}

@@ -159,9 +159,10 @@ export default function MapaRutaGoogle({
       bounds.extend({ lat: p.lat, lng: p.lng });
     }
 
-    // Ruta real sobre las calles, o fallback recto depósito→paradas→depósito
+    // Ruta del día (real, o fallback recto). En modo guía NO se dibuja: solo se
+    // ve el tramo de navegación (rutaTramo), para no confundir dos líneas.
     const hayRutaReal = (rutaReal?.length ?? 0) > 1;
-    if (hayRutaReal) {
+    if (!modoGuia && hayRutaReal) {
       polylineRef.current = new g.Polyline({
         path: (rutaReal as [number, number][]).map(([lat, lng]) => ({ lat, lng })),
         map,
@@ -170,7 +171,7 @@ export default function MapaRutaGoogle({
         strokeOpacity: 0.85,
         strokeWeight: 5,
       });
-    } else if (ordenadas.length > 0) {
+    } else if (!modoGuia && ordenadas.length > 0) {
       const path: google.maps.LatLngLiteral[] = [];
       if (deposito) path.push({ lat: deposito.lat, lng: deposito.lng });
       for (const p of ordenadas) path.push({ lat: p.lat, lng: p.lng });
@@ -194,7 +195,7 @@ export default function MapaRutaGoogle({
         map.fitBounds(bounds, 64);
       }
     }
-  }, [mapReady, paradas, deposito, rutaReal, paradaActivaOrden, onParadaTap]);
+  }, [mapReady, paradas, deposito, rutaReal, paradaActivaOrden, onParadaTap, modoGuia]);
 
   // 3) Posición propia: efecto AISLADO. Solo mueve el punto azul + el círculo de
   //    precisión, sin tocar los markers de paradas. Esto mata el re-render por GPS.

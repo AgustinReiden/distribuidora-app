@@ -184,7 +184,7 @@ export default function SheetParada({
                     onClick={() => onToggleGuia(paradaActiva)}
                     className={`flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-colors ${
                       guiando
-                        ? 'bg-gray-200 text-gray-700 active:bg-gray-300 dark:bg-gray-700 dark:text-gray-200'
+                        ? 'bg-red-600 text-white active:bg-red-800'
                         : 'bg-blue-600 text-white active:bg-blue-800'
                     }`}
                   >
@@ -336,7 +336,7 @@ export default function SheetParada({
               ) : guiando && onToggleGuia ? (
                 <button
                   onClick={() => onToggleGuia(paradaActiva)}
-                  className="flex h-12 flex-shrink-0 items-center gap-1.5 rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-700 active:bg-gray-300 dark:bg-gray-700 dark:text-gray-200"
+                  className="flex h-12 flex-shrink-0 items-center gap-1.5 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white active:bg-red-800"
                 >
                   <Square className="h-5 w-5" /> Parar
                 </button>
