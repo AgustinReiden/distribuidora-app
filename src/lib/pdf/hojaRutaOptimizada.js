@@ -83,12 +83,6 @@ function drawPageHeader(doc, transportista, pedidos, infoRuta, showSummary) {
  */
 function buildCardOps(doc, pedido, orderNumber) {
   const ops = []
-  const estadoPagoLabel =
-    pedido.estado_pago === 'pagado'
-      ? 'PAGADO'
-      : pedido.estado_pago === 'parcial'
-        ? 'PARCIAL'
-        : 'PEND'
 
   // Nombre cliente + numero
   const headerText = `${orderNumber}. ${pedido.cliente?.nombre_fantasia || 'Sin cliente'}`
@@ -166,14 +160,9 @@ function buildCardOps(doc, pedido, orderNumber) {
     })
   }
 
-  // Total + estado
-  ops.push({
-    kind: 'text',
-    text: `${formatPrecio(pedido.total)} - ${estadoPagoLabel}`,
-    fontSize: 11,
-    bold: true,
-    advance: 5
-  })
+  // (Se quitó la línea "Total + estado de pago" por cliente a pedido del negocio:
+  // la hoja de ruta no debe mostrar saldo/pendiente por ahora. El total del
+  // pedido sigue al pie como "Total pedido".)
 
   // Productos: las bonificaciones van en una lista aparte abajo de los items
   // comprados, con la unidad bien aclarada (botellas/paquetes sueltos vs
@@ -375,6 +364,10 @@ function buildManifiestoOps(pedidos) {
   const totalesCompras = {} // por producto_id (items vendidos)
   const totalesBonifFardos = {} // por producto_id (bonifs en unidades de venta / fardos)
   const totalesBonifSueltas = {} // por descripcion_regalo (botellas/paquetes sueltos)
+  // Bonifs de tipo Fracción: se acumulan en subunidades CRUDAS por producto y se
+  // parten a fardos+sueltas UNA sola vez sobre el total de la ruta (ver abajo),
+  // así no quedan más sueltas que un fardo por sumar restos pedido por pedido.
+  const totalesBonifFraccion = {} // `${id}|${desc}|${upb}` → { key, nombre, desc, upb, subunidades }
 
   const acumular = (mapa, key, nombre, cantidad) => {
     if (!mapa[key]) mapa[key] = { nombre, cantidad: 0 }
@@ -404,19 +397,14 @@ function buildManifiestoOps(pedidos) {
         return
       }
 
-      // Bonificación de tipo Fracción: cantidad en subunidades → split en
-      // fardos completos + botellas/paquetes sueltos.
+      // Bonificación de tipo Fracción: acumular en subunidades crudas. El split
+      // a fardos+sueltas se hace al final sobre el total consolidado de la ruta.
       if (upb && upb > 1 && desc) {
-        const fardos = Math.floor(cantidad / upb)
-        const sueltas = cantidad % upb
-        if (fardos > 0) {
-          // Pre-convertido a fardos: marcar para no re-aplicar la aclaración.
-          const fila = acumular(totalesBonifFardos, key, nombreProducto, fardos)
-          fila.preConvertidoAFardos = true
+        const fkey = `${key}|${desc}|${upb}`
+        if (!totalesBonifFraccion[fkey]) {
+          totalesBonifFraccion[fkey] = { key, nombre: nombreProducto, desc, upb, subunidades: 0 }
         }
-        if (sueltas > 0) {
-          acumular(totalesBonifSueltas, `bonif:${desc}`, desc, sueltas)
-        }
+        totalesBonifFraccion[fkey].subunidades += cantidad
         return
       }
 
@@ -429,6 +417,20 @@ function buildManifiestoOps(pedidos) {
         fila.etiqueta_bulto = item.producto?.etiqueta_bulto ?? null
       }
     })
+  })
+
+  // Partir las fracciones consolidadas UNA vez por producto: fardos completos +
+  // el resto como sueltas (a lo sumo upb-1 sueltas por producto en toda la ruta).
+  Object.values(totalesBonifFraccion).forEach((f) => {
+    const fardos = Math.floor(f.subunidades / f.upb)
+    const sueltas = f.subunidades % f.upb
+    if (fardos > 0) {
+      const fila = acumular(totalesBonifFardos, f.key, f.nombre, fardos)
+      fila.preConvertidoAFardos = true
+    }
+    if (sueltas > 0) {
+      acumular(totalesBonifSueltas, `bonif:${f.desc}`, f.desc, sueltas)
+    }
   })
 
   const ordenar = (mapa) => Object.values(mapa)
