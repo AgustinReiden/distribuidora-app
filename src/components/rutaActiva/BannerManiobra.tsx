@@ -78,24 +78,26 @@ export default function BannerManiobra({
   const IconoSiguiente = instruccionSiguiente ? (ICONOS[maniobraSiguiente ?? ''] ?? Navigation) : null;
 
   return (
-    <div className="rounded-2xl bg-gray-900/95 px-4 py-3 text-white shadow-xl">
-      <div className="flex items-center gap-3">
-        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600">
-          <Icono className="h-8 w-8" strokeWidth={2.5} />
+    <div className="rounded-2xl bg-gray-900/95 px-4 py-3.5 text-white shadow-xl ring-1 ring-white/10 backdrop-blur">
+      <div className="flex items-center gap-3.5">
+        <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-2xl bg-blue-600">
+          <Icono className="h-9 w-9" strokeWidth={2.5} />
         </div>
         <div className="min-w-0 flex-1">
           {distanciaMetros != null && (
-            <p className="text-2xl font-extrabold leading-tight">
+            <p className="text-3xl font-extrabold leading-none tabular-nums">
               {formatDistancia(distanciaMetros)}
             </p>
           )}
-          <p className="truncate text-base font-medium text-gray-100">{instruccion}</p>
+          <p className="mt-1 line-clamp-2 text-base font-medium leading-snug text-gray-100">
+            {instruccion}
+          </p>
         </div>
       </div>
       {IconoSiguiente && instruccionSiguiente && (
-        <div className="mt-2 flex items-center gap-2 border-t border-white/10 pt-2 text-sm text-gray-300">
-          <span className="flex-shrink-0 text-xs font-semibold uppercase text-gray-400">Luego</span>
-          <IconoSiguiente className="h-4 w-4 flex-shrink-0" />
+        <div className="mt-2.5 flex items-center gap-2 border-t border-white/10 pt-2 text-sm text-gray-300">
+          <span className="flex-shrink-0 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Luego</span>
+          <IconoSiguiente className="h-4 w-4 flex-shrink-0 text-gray-300" />
           <span className="truncate">{instruccionSiguiente}</span>
         </div>
       )}

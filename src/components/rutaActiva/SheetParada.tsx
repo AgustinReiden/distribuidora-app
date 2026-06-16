@@ -117,6 +117,13 @@ export default function SheetParada({
     if (llegaste) setSnap(s => (s === SNAP_COLAPSADO ? SNAP_MEDIO : s));
   }, [llegaste]);
 
+  // Al arrancar la guía, colapsar a la píldora → más mapa para manejar. El chofer
+  // puede subirlo con un toque (no se re-colapsa solo: depende de que cambie
+  // guiando/llegaste, no de cada render).
+  useEffect(() => {
+    if (guiando && !llegaste) setSnap(SNAP_COLAPSADO);
+  }, [guiando, llegaste]);
+
   return (
     <Drawer.Root
       open
@@ -156,15 +163,25 @@ export default function SheetParada({
                       <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                         {llegaste
                           ? '📍 Llegaste — confirmá la entrega'
-                          : distanciaMetros != null
-                            ? `A ${formatDistancia(distanciaMetros)} · ${pendientes.length} pendientes`
-                            : `${pendientes.length} entregas pendientes`}
+                          : guiando
+                            ? `Próxima parada · ${pendientes.length} pendientes`
+                            : distanciaMetros != null
+                              ? `A ${formatDistancia(distanciaMetros)} · ${pendientes.length} pendientes`
+                              : `${pendientes.length} entregas pendientes`}
                       </p>
                     </div>
                   </div>
-                  <span className="flex-shrink-0 text-lg font-bold text-gray-900 dark:text-white">
-                    {formatPrecio(paradaActiva.total)}
-                  </span>
+                  {/* Guiando: la distancia es lo glanceable (grande, tabular para que
+                      no titile al bajar). Si no, el monto a cobrar. */}
+                  {guiando && !llegaste && distanciaMetros != null ? (
+                    <span className="flex-shrink-0 text-xl font-extrabold tabular-nums text-blue-600 dark:text-blue-400">
+                      {formatDistancia(distanciaMetros)}
+                    </span>
+                  ) : (
+                    <span className="flex-shrink-0 text-lg font-bold text-gray-900 dark:text-white">
+                      {formatPrecio(paradaActiva.total)}
+                    </span>
+                  )}
                 </div>
 
                 {/* Tarjeta de la parada activa (visible desde snap medio) */}

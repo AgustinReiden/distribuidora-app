@@ -95,7 +95,9 @@ export default function MapaRutaGoogle({
       center: deposito ?? FALLBACK_CENTER,
       zoom: 13,
       // Vector map (si hay Map ID) para poder tiltar/rotar la cámara en guía.
-      ...(USAR_VECTOR ? { mapId: MAP_ID, renderingType: g.RenderingType?.VECTOR } : {}),
+      // El Map ID ya está configurado como vector en la consola; con pasar mapId
+      // alcanza (no forzamos renderingType para evitar conflictos).
+      ...(USAR_VECTOR ? { mapId: MAP_ID } : {}),
       mapTypeControl: false,
       streetViewControl: false,
       fullscreenControl: false,
