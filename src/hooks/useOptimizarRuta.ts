@@ -49,6 +49,9 @@ export interface OptimizarRutaRequestBody {
   transportista_id: string;
   deposito_lat: number;
   deposito_lng: number;
+  /** Punto de llegada opcional: si no viene, la ruta termina en el depósito. */
+  destino_lat?: number | null;
+  destino_lng?: number | null;
   pedidos: PedidoParaOptimizar[];
   google_api_key?: string;
 }
@@ -57,7 +60,7 @@ export interface UseOptimizarRutaReturn {
   loading: boolean;
   rutaOptimizada: RutaOptimizadaResponse | null;
   error: string | null;
-  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords) => Promise<RutaOptimizadaResponse | null>;
+  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null) => Promise<RutaOptimizadaResponse | null>;
   limpiarRuta: () => void;
 }
 
@@ -140,7 +143,8 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
   const optimizarRuta = useCallback(async (
     transportistaId: string,
     pedidos: PedidoDB[] = [],
-    deposito?: DepositoCoords
+    deposito?: DepositoCoords,
+    destino?: DepositoCoords | null
   ): Promise<RutaOptimizadaResponse | null> => {
     if (!transportistaId) {
       setError('Debes seleccionar un transportista');
@@ -186,6 +190,8 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       transportista_id: transportistaId,
       deposito_lat: dep.lat,
       deposito_lng: dep.lng,
+      destino_lat: destino?.lat ?? null,
+      destino_lng: destino?.lng ?? null,
       pedidos: pedidosConCoordenadas
     };
 

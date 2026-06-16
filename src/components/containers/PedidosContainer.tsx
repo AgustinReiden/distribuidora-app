@@ -29,6 +29,7 @@ import {
   useUsuariosQuery,
   useCrearClienteMutation,
   useDepositoCoords,
+  useDestinoCoords,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -147,11 +148,13 @@ export default function PedidosContainer(): React.ReactElement {
   // Route optimization
   const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta()
   const deposito = useDepositoCoords()
-  // Inyecta el depósito de la sucursal (DB) en la optimización, así el lado
-  // que optimiza y el mapa del transportista usan la MISMA ubicación.
+  const destinoRuta = useDestinoCoords()
+  // Inyecta el depósito (origen) y el punto de llegada opcional (destino) de la
+  // sucursal en la optimización, así el lado que optimiza y el mapa usan la
+  // MISMA ubicación. destino null = la ruta termina en el depósito.
   const optimizarRutaConDeposito = useCallback(
-    (transportistaId: string, pedidosData?: PedidoDB[]) => optimizarRuta(transportistaId, pedidosData, deposito),
-    [optimizarRuta, deposito],
+    (transportistaId: string, pedidosData?: PedidoDB[]) => optimizarRuta(transportistaId, pedidosData, deposito, destinoRuta),
+    [optimizarRuta, deposito, destinoRuta],
   )
 
   // Export

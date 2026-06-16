@@ -68,10 +68,15 @@ const toLatLng = (p: PedidoRuta): LatLng => ({ latitude: p.latitud, longitude: p
 
 /**
  * Parte los pedidos en tramos encadenados de ≤ MAX_INTERMEDIOS intermedios.
- * Con pocos pedidos devuelve un único tramo depósito → depósito (idéntico al
- * comportamiento de una sola llamada a Google).
+ * Arranca en el depósito y termina en `destino` (punto de llegada configurable;
+ * por defecto = depósito, idéntico al comportamiento histórico). El barrido
+ * angular sigue siendo alrededor del depósito (origen).
  */
-export function partirEnTramos(deposito: LatLng, pedidos: PedidoRuta[]): Tramo[] {
+export function partirEnTramos(
+  deposito: LatLng,
+  pedidos: PedidoRuta[],
+  destino: LatLng = deposito,
+): Tramo[] {
   if (pedidos.length === 0) return [];
 
   // Barrido angular: ordenar por ángulo respecto del depósito y partir en
@@ -96,7 +101,8 @@ export function partirEnTramos(deposito: LatLng, pedidos: PedidoRuta[]): Tramo[]
     const puenteAnterior = i > 0 ? bloques[i - 1][bloques[i - 1].length - 1] : null;
     return {
       origen: puenteAnterior ? toLatLng(puenteAnterior) : deposito,
-      destino: puente ? toLatLng(puente) : deposito,
+      // El último tramo termina en el punto de llegada (destino), no en el depósito.
+      destino: puente ? toLatLng(puente) : destino,
       intermedios,
       puente,
     };
@@ -149,8 +155,8 @@ export function unirTramos(tramos: Tramo[], rutas: GoogleRoute[]): RutaUnida {
       });
     });
 
-    // Último tramo: el leg final es la vuelta al depósito (no corresponde a
-    // ninguna parada). Se suma solo a los totales.
+    // Último tramo: el leg final va al punto de llegada (destino o depósito) y
+    // no corresponde a ninguna parada. Se suma solo a los totales.
     if (!tramo.puente && legs.length > visitados.length) {
       const lastLeg = legs[legs.length - 1];
       distanciaTotalMetros += lastLeg.distanceMeters ?? 0;

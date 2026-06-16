@@ -6,7 +6,7 @@ import {
   DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays
 } from 'lucide-react';
 import ModalBase from './ModalBase';
-import { useDepositoCoords, useSetDepositoMutation } from '../../hooks/queries';
+import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation } from '../../hooks/queries';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB } from '../../types';
 
@@ -197,18 +197,29 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState<boolean>(false);
   const [depositoLat, setDepositoLat] = useState<string>('');
   const [depositoLng, setDepositoLng] = useState<string>('');
+  const [destinoLat, setDestinoLat] = useState<string>('');
+  const [destinoLng, setDestinoLng] = useState<string>('');
   const [depositoGuardado, setDepositoGuardado] = useState<boolean>(false);
   const [vistaActiva, setVistaActiva] = useState<'optimizar' | 'resultado'>('optimizar');
 
-  // Depósito de la sucursal (DB, mig 082) — compartido con el mapa del transportista
+  // Depósito (origen) y punto de llegada opcional (destino) de la sucursal
+  // (DB, mig 082/087) — compartidos con la optimización y el mapa.
   const deposito = useDepositoCoords();
   const setDepositoMut = useSetDepositoMutation();
+  const destinoRuta = useDestinoCoords();
+  const setDestinoMut = useSetDestinoMutation();
 
   // Cargar coordenadas del deposito en los inputs
   useEffect(() => {
     setDepositoLat(deposito.lat.toString());
     setDepositoLng(deposito.lng.toString());
   }, [deposito.lat, deposito.lng]);
+
+  // Cargar el punto de llegada en los inputs (vacío si no está configurado)
+  useEffect(() => {
+    setDestinoLat(destinoRuta?.lat != null ? destinoRuta.lat.toString() : '');
+    setDestinoLng(destinoRuta?.lng != null ? destinoRuta.lng.toString() : '');
+  }, [destinoRuta?.lat, destinoRuta?.lng]);
 
   // Cambiar a vista resultado cuando hay ruta optimizada
   useEffect(() => {
@@ -349,14 +360,29 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleGuardarDeposito = (): void => {
     const lat = parseFloat(depositoLat);
     const lng = parseFloat(depositoLng);
-    if (!isNaN(lat) && !isNaN(lng)) {
-      setDepositoMut.mutate({ lat, lng }, {
-        onSuccess: () => {
-          setDepositoGuardado(true);
-          setTimeout(() => setDepositoGuardado(false), 2000);
-        },
-      });
-    }
+    if (isNaN(lat) || isNaN(lng)) return;
+
+    // Punto de llegada: ambos vacíos → limpiar (null, vuelve a terminar en el
+    // depósito); ambos válidos → guardar; a medias → no tocar.
+    const dLatRaw = destinoLat.trim();
+    const dLngRaw = destinoLng.trim();
+    const dLat = parseFloat(dLatRaw);
+    const dLng = parseFloat(dLngRaw);
+    const guardarDestino = (): void => {
+      if (dLatRaw === '' && dLngRaw === '') {
+        setDestinoMut.mutate(null);
+      } else if (!isNaN(dLat) && !isNaN(dLng)) {
+        setDestinoMut.mutate({ lat: dLat, lng: dLng });
+      }
+    };
+
+    setDepositoMut.mutate({ lat, lng }, {
+      onSuccess: () => {
+        guardarDestino();
+        setDepositoGuardado(true);
+        setTimeout(() => setDepositoGuardado(false), 2000);
+      },
+    });
   };
 
   const handleExportarPDF = (): void => {
@@ -460,8 +486,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 {mostrarConfigDeposito && (
                   <div className="p-4 border-t bg-gray-50 space-y-3">
                     <p className="text-sm text-gray-600">
-                      Ingresa las coordenadas de tu deposito. Este sera el punto de origen y destino de la ruta.
+                      Punto de origen (depósito) desde donde arranca la ruta. Opcionalmente, un
+                      punto de llegada distinto donde termina (p. ej. donde guardás el camión).
                     </p>
+                    <p className="text-xs font-semibold text-gray-700">Punto de origen (depósito)</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium mb-1">Latitud</label>
@@ -485,6 +513,36 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLng(e.target.value)}
                           className="w-full px-3 py-2 border rounded-lg text-sm"
                           placeholder="-65.2226"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Punto de llegada opcional (mig 087): si se completa, la
+                        ruta TERMINA acá en vez de volver al depósito. Vacío = depósito. */}
+                    <p className="text-xs font-semibold text-gray-700 pt-1">Punto de llegada (opcional)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Latitud</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.000001"
+                          value={destinoLat}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDestinoLat(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg text-sm"
+                          placeholder="vacío = vuelve al depósito"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Longitud</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.000001"
+                          value={destinoLng}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDestinoLng(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg text-sm"
+                          placeholder="vacío = vuelve al depósito"
                         />
                       </div>
                     </div>
