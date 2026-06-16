@@ -217,6 +217,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       descuento_porcentaje: clienteFields.descuento_porcentaje ?? 0,
       contacto: clienteFields.contacto || null,
       horarios_atencion: clienteFields.horarios_atencion || null,
+      horario_entrega: clienteFields.horario_entrega || null,
       rubro: clienteFields.rubro || null,
       notas: clienteFields.notas || null,
       sucursal_id: sucursalId,
