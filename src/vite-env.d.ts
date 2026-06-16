@@ -37,6 +37,7 @@ declare namespace google.maps {
     getZoom(): number;
     /** Mueve la cámara (center/zoom/heading/tilt) en un paso; solo vector maps tiltan/rotan. */
     moveCamera(cameraOptions: CameraOptions): void;
+    addListener(event: string, handler: (...args: unknown[]) => void): MapsEventListener;
   }
 
   interface CameraOptions {

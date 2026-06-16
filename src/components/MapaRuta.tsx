@@ -61,6 +61,16 @@ export interface MapaRutaProps {
    */
   modoGuia?: boolean;
   /**
+   * En modo guía, ¿la cámara sigue automáticamente? Se pone false cuando el
+   * chofer mueve el mapa a mano (deja de pelearle el giro, estilo Maps). El
+   * botón "centrar" lo vuelve a true (+ bump de recenterNonce). Default true.
+   */
+  camaraActiva?: boolean;
+  /** Bump para forzar re-centrar la cámara en la posición/rumbo actuales. */
+  recenterNonce?: number;
+  /** El chofer movió el mapa a mano (pan/rotación/zoom) → pausar el seguimiento. */
+  onArrastreUsuario?: () => void;
+  /**
    * Ruta real sobre las calles (polyline decodificada de Google). Si viene con
    * >1 punto se dibuja la línea sólida real; si no, fallback a la línea recta
    * punteada entre paradas (recorridos viejos / sin polyline).
