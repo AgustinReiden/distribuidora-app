@@ -62,14 +62,12 @@ export interface VistaPedidosProps {
   onEditarNotas?: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion: (pedido: PedidoDB) => void;
   onVolverAPendiente: (pedido: PedidoDB) => void;
-  onAsignarTransportista: (pedido: PedidoDB) => void;
   onMarcarEntregado: (pedido: PedidoDB) => void;
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
-  onAsignarTransportistaMasivo?: () => void;
   /** Abre el modal para que el preventista marque una visita a un cliente. */
   onMarcarVisita?: () => void;
   /** Abre el modal con el timeline de visitas del día del preventista logueado. */
@@ -134,14 +132,12 @@ export default function VistaPedidos({
   onEditarNotas,
   onMarcarEnPreparacion,
   onVolverAPendiente,
-  onAsignarTransportista,
   onMarcarEntregado,
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onCancelarPedido,
   onEntregasMasivas,
   onPagosMasivos,
-  onAsignarTransportistaMasivo,
   onMarcarVisita,
   onVerVisitasHoy,
   onRegistrarSalvedad,
@@ -183,7 +179,6 @@ export default function VistaPedidos({
             onExportarExcel={onExportarExcel}
             onEntregasMasivas={onEntregasMasivas}
             onPagosMasivos={onPagosMasivos}
-            onAsignarTransportistaMasivo={onAsignarTransportistaMasivo}
             onMarcarVisita={onMarcarVisita}
             onVerVisitasHoy={onVerVisitasHoy}
           />
@@ -237,7 +232,6 @@ export default function VistaPedidos({
                   onEditarNotas={onEditarNotas}
                   onMarcarEnPreparacion={onMarcarEnPreparacion}
                   onVolverAPendiente={onVolverAPendiente}
-                  onAsignarTransportista={onAsignarTransportista}
                   onMarcarEntregado={onMarcarEntregado}
                   onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
                   onDesmarcarEntregado={onDesmarcarEntregado}

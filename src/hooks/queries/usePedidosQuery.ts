@@ -82,7 +82,10 @@ const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, 
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
 // valor original al crear el pedido y queda desactualizado tras un combinado.
-const PEDIDO_SELECT = `*, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
+// Exportado para reutilizar la MISMA forma de pedido en queries que embeben
+// pedidos (p. ej. las paradas de un recorrido en useRecorridoExistenteQuery),
+// garantizando paridad con el pool de la ruta para optimizar y generar el PDF.
+export const PEDIDO_SELECT = `*, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
 const PEDIDO_SELECT_CLIENTE_INNER = `*, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
 
 // Helper: cargar salvedades para un conjunto de pedidos
@@ -196,51 +199,28 @@ async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   return (data || []) as PedidoDB[]
 }
 
-// Pedidos asignados (sin paginar) para el modal de gestión de rutas: la
-// optimización necesita TODOS los pedidos en estado 'asignado' de la sucursal,
-// no la página visible de /pedidos (15 items), que dejaba afuera pedidos del
-// transportista al optimizar.
+// Pedidos "rutables" (sin paginar) para el modal de gestión de rutas: el pool
+// disponible para armar/editar la ruta del día son los pedidos en 'pendiente' o
+// 'en_preparacion' de la sucursal (aún sin transportista ni ruta). La
+// asignación del transportista + marca "en camino" ahora la hace "Armar ruta
+// del día" (RPC aplicar_orden_ruta, mig 088), no una acción aparte. Se trae sin
+// paginar porque la optimización necesita TODOS, no la página visible (15).
+// Las paradas de una ruta ya armada se cargan aparte (useRecorridoExistenteQuery).
 async function fetchPedidosAsignados(sucursalId: number | null): Promise<PedidoDB[]> {
   let query = supabase
     .from('pedidos')
     .select(PEDIDO_SELECT)
-    .eq('estado', 'asignado')
+    .in('estado', ['pendiente', 'en_preparacion'])
 
   if (sucursalId != null) {
     query = query.eq('sucursal_id', sucursalId)
   }
 
-  const { data, error } = await query.order('orden_entrega', { ascending: true, nullsFirst: false })
+  const { data, error } = await query.order('fecha', { ascending: true, nullsFirst: false })
 
   if (error) throw error
 
-  const pedidos = (data || []) as PedidoDB[]
-  if (pedidos.length === 0) return pedidos
-
-  // Adjuntar fecha de asignación (última escritura de transportista_id en
-  // pedido_historial). El modal de rutas la usa para filtrar pedidos viejos
-  // que siguen 'asignado' porque la rendición se controla con rezago.
-  // Best-effort: si el historial falla, los pedidos salen sin fecha_asignacion.
-  const { data: historial } = await supabase
-    .from('pedido_historial')
-    .select('pedido_id, created_at')
-    .eq('campo_modificado', 'transportista_id')
-    .in('pedido_id', pedidos.map(p => p.id))
-    .order('created_at', { ascending: true })
-
-  const asignacionMap: Record<string, string> = {}
-  for (const h of (historial || [])) {
-    // Orden ascendente: la última iteración deja el timestamp más reciente.
-    // Se convierte a fecha local (YYYY-MM-DD) para comparar contra inputs date.
-    const d = new Date(h.created_at as string)
-    const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    asignacionMap[String(h.pedido_id)] = local
-  }
-
-  return pedidos.map(p => ({
-    ...p,
-    fecha_asignacion: asignacionMap[String(p.id)] ?? null,
-  }))
+  return (data || []) as PedidoDB[]
 }
 
 // Paginated fetch
