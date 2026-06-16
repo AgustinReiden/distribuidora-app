@@ -55,13 +55,12 @@ function drawPageHeader(doc, transportista, pedidos, infoRuta, showSummary) {
   doc.text(metricas.join('  |  '), PAGE_MARGIN, y)
 
   if (showSummary) {
+    // Solo el TOTAL de la ruta. Se quitó "PENDIENTE" (saldo deudor de clientes):
+    // no corresponde a la hoja de ruta.
     const totalGeneral = pedidos.reduce((sum, p) => sum + (p.total || 0), 0)
-    const totalPendiente = pedidos
-      .filter((p) => p.estado_pago !== 'pagado')
-      .reduce((sum, p) => sum + (p.total || 0), 0)
     doc.setFont('helvetica', 'bold')
     doc.text(
-      `TOTAL: ${formatPrecio(totalGeneral)}   PENDIENTE: ${formatPrecio(totalPendiente)}`,
+      `TOTAL: ${formatPrecio(totalGeneral)}`,
       PAGE_WIDTH - PAGE_MARGIN,
       y,
       { align: 'right' }
