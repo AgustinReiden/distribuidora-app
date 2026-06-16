@@ -323,7 +323,7 @@ function RecorridoCard({ recorrido, defaultExpanded = false }: RecorridoCardProp
                   .filter((p): p is NonNullable<typeof p> => p !== null)}
                 deposito={deposito}
                 rutaReal={(() => { const r = decodePolylines(recorrido.polylines); return r.length > 1 ? r : null; })()}
-                altura={240}
+                altura={440}
               />
             </div>
           </Suspense>
