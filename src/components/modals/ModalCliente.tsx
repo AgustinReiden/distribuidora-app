@@ -14,6 +14,14 @@ import {
   extractDniFromStorage,
   detectDocumentType
 } from '../../utils/formatters';
+import {
+  generarOpcionesHora,
+  horaAMinutos,
+  serializarFranjas,
+  validarFranjas,
+  convertirHorarioInicial,
+} from '../../utils/horariosCliente';
+import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ClienteDB } from '../../types';
 
 /** Tipo de documento del cliente */
@@ -85,25 +93,6 @@ export interface ModalClienteProps {
 
 // Las zonas ahora vienen de la tabla `zonas` via useZonasEstandarizadasQuery
 
-// Franjas horarias seleccionables para "Horarios de Atención" (multi-select:
-// hay clientes que abren fraccionado mañana y tarde). Se persisten unidas
-// con " y " en el campo de texto existente (clientes.horarios_atencion).
-const FRANJAS_ATENCION = [
-  'Mañana (08 a 13)',
-  'Mediodía (12 a 16)',
-  'Tarde (16 a 20)',
-  'Noche (20 a 00)',
-];
-const SEPARADOR_FRANJAS = ' y ';
-
-// Opciones para "Horario de entrega" (franja en la que el cliente pide
-// recibir el pedido; se imprime en la hoja de ruta del transportista).
-const FRANJAS_ENTREGA = [
-  'Mañana (08 a 13)',
-  'Mediodía (12 a 16)',
-  'Tarde (16 a 20)',
-];
-
 // Opciones predefinidas de rubros
 const RUBROS_OPCIONES = [
   'Gimnasio',
@@ -143,6 +132,12 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const tipoDocInicial = cliente ? (cliente.tipo_documento || detectDocumentType(cliente.cuit)) : 'CUIT';
   const numeroDocInicial = cliente ? (tipoDocInicial === 'DNI' ? extractDniFromStorage(cliente.cuit) : cliente.cuit) : '';
 
+  // Conversión inicial de los horarios guardados (string) a franjas para el
+  // editor. Auto-convierte las etiquetas viejas a rangos (decisión del usuario).
+  // Se computa una vez (el modal se remonta en cada apertura).
+  const convAtencionInicial = convertirHorarioInicial(cliente?.horarios_atencion);
+  const convEntregaInicial = convertirHorarioInicial(cliente?.horario_entrega);
+
   const [form, setForm] = useState<ClienteFormData>(cliente ? {
     tipo_documento: tipoDocInicial,
     numero_documento: numeroDocInicial || '',
@@ -156,8 +151,15 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     contacto: cliente.contacto || '',
     zona: cliente.zona || '',
     zona_id: cliente.zona_id ? String(cliente.zona_id) : '',
-    horarios_atencion: cliente.horarios_atencion || '',
-    horario_entrega: cliente.horario_entrega || '',
+    // Si reconocimos franjas (formato nuevo o etiquetas viejas) guardamos el
+    // string ya convertido, para que "Guardar" persista los rangos. Si no
+    // reconocimos nada, preservamos el valor original para no perderlo.
+    horarios_atencion: convAtencionInicial.franjas.length > 0
+      ? serializarFranjas(convAtencionInicial.franjas)
+      : (cliente.horarios_atencion || ''),
+    horario_entrega: convEntregaInicial.franjas.length > 0
+      ? serializarFranjas(convEntregaInicial.franjas)
+      : (cliente.horario_entrega || ''),
     rubro: cliente.rubro || '',
     notas: cliente.notas || '',
     limiteCredito: cliente.limite_credito || 0,
@@ -288,6 +290,55 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     }));
   };
 
+  // --- Horarios de atención y entrega (filas con rangos HH:MM) ---
+  // `franjasAtencion` es la fuente de verdad del editor; se inicializa de la
+  // conversión calculada arriba y se espeja al string del form al editar.
+  const [franjasAtencion, setFranjasAtencion] = useState<FranjaHoraria[]>(convAtencionInicial.franjas);
+  const [franjaEntrega, setFranjaEntrega] = useState<FranjaHoraria>(
+    convEntregaInicial.franjas[0] ?? { apertura: '', cierre: '' },
+  );
+  const opcionesApertura = useMemo(() => generarOpcionesHora(false), []);
+  const opcionesCierre = useMemo(() => generarOpcionesHora(true), []);
+  const validacionAtencion = useMemo(() => validarFranjas(franjasAtencion), [franjasAtencion]);
+
+  // Sincroniza las filas de atención con el string persistido (clientes.horarios_atencion).
+  const sincronizarAtencion = (filas: FranjaHoraria[]): void => {
+    setFranjasAtencion(filas);
+    setForm(prev => ({ ...prev, horarios_atencion: serializarFranjas(filas) }));
+  };
+  const agregarFranjaAtencion = (): void =>
+    sincronizarAtencion([...franjasAtencion, { apertura: '', cierre: '' }]);
+  const quitarFranjaAtencion = (index: number): void =>
+    sincronizarAtencion(franjasAtencion.filter((_, i) => i !== index));
+  const actualizarFranjaAtencion = (index: number, campo: keyof FranjaHoraria, valor: string): void =>
+    sincronizarAtencion(
+      franjasAtencion.map((f, i) => {
+        if (i !== index) return f;
+        const next = { ...f, [campo]: valor };
+        // Al cambiar la apertura, si el cierre quedó vacío o <= apertura, lo limpiamos.
+        if (campo === 'apertura' && next.cierre &&
+            (!valor || horaAMinutos(next.cierre) <= horaAMinutos(valor))) {
+          next.cierre = '';
+        }
+        return next;
+      }),
+    );
+
+  // Franja única de entrega; el campo queda vacío ("Sin preferencia") si está incompleta.
+  const sincronizarEntrega = (franja: FranjaHoraria): void => {
+    const next = { ...franja };
+    if (!next.apertura) {
+      next.cierre = '';
+    } else if (next.cierre && horaAMinutos(next.cierre) <= horaAMinutos(next.apertura)) {
+      next.cierre = '';
+    }
+    setFranjaEntrega(next);
+    setForm(prev => ({
+      ...prev,
+      horario_entrega: next.apertura && next.cierre ? serializarFranjas([next]) : '',
+    }));
+  };
+
   const handleAddressSelect = (result: AddressSelectResult): void => {
     setForm(prev => ({
       ...prev,
@@ -337,6 +388,17 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
         if (primerError) {
           primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+      }, 100);
+      return;
+    }
+
+    // Las franjas de atención no pueden solaparse ni tener apertura >= cierre.
+    // Es validación cross-field (no la cubre Zod): bloquea el guardado y hace
+    // scroll al primer select marcado en rojo.
+    if (!validacionAtencion.valido) {
+      setTimeout(() => {
+        const primerError = formRef.current?.querySelector('.border-red-500');
+        if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);
       return;
     }
@@ -683,50 +745,82 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           </div>
         )}
 
-        {/* Horarios de Atención: franjas seleccionables (multi) */}
+        {/* Horarios de Atención: una o más franjas con apertura/cierre (horario cortado) */}
         <div>
           <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
             <Clock className="w-4 h-4" />
             Horarios de Atención
           </label>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-            Podés marcar más de una franja (ej: abre a la mañana y a la tarde).
+            Cargá apertura y cierre. Si el horario es cortado (ej: mañana y tarde), agregá otra franja.
           </p>
-          <div className="flex flex-wrap gap-2">
-            {FRANJAS_ATENCION.map(franja => {
-              const seleccionadas = form.horarios_atencion
-                ? form.horarios_atencion.split(SEPARADOR_FRANJAS)
-                : [];
-              const activa = seleccionadas.includes(franja);
-              return (
-                <button
-                  key={franja}
-                  type="button"
-                  onClick={() => {
-                    const nuevas = activa
-                      ? seleccionadas.filter(f => f !== franja)
-                      : [...seleccionadas.filter(f => FRANJAS_ATENCION.includes(f)), franja];
-                    // Mantener el orden canónico de las franjas
-                    const ordenadas = FRANJAS_ATENCION.filter(f => nuevas.includes(f));
-                    handleFieldChange('horarios_atencion', ordenadas.join(SEPARADOR_FRANJAS));
-                  }}
-                  className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
-                    activa
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  {franja}
-                </button>
-              );
-            })}
-          </div>
-          {/* Valor legacy de texto libre: si lo guardado no coincide con las
-              franjas, se muestra para que no se pierda al editar. */}
-          {form.horarios_atencion &&
-            form.horarios_atencion.split(SEPARADOR_FRANJAS).some(f => !FRANJAS_ATENCION.includes(f)) && (
+          {franjasAtencion.length > 0 && (
+            <div className="space-y-2 mb-2">
+              {franjasAtencion.map((f, index) => {
+                const tieneError = Boolean(validacionAtencion.erroresPorFila[index]);
+                const selectClass = `flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:text-white text-sm ${
+                  tieneError ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : 'dark:border-gray-600'
+                }`;
+                return (
+                  <div key={index}>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={f.apertura}
+                        onChange={e => actualizarFranjaAtencion(index, 'apertura', e.target.value)}
+                        aria-label="Hora de apertura"
+                        className={selectClass}
+                      >
+                        <option value="">Apertura</option>
+                        {opcionesApertura.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                      <span className="text-gray-400 text-sm">a</span>
+                      <select
+                        value={f.cierre}
+                        onChange={e => actualizarFranjaAtencion(index, 'cierre', e.target.value)}
+                        aria-label="Hora de cierre"
+                        className={selectClass}
+                      >
+                        <option value="">Cierre</option>
+                        {opcionesCierre
+                          .filter(h => !f.apertura || horaAMinutos(h) > horaAMinutos(f.apertura))
+                          .map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => quitarFranjaAtencion(index)}
+                        className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg"
+                        aria-label="Quitar franja horaria"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {tieneError && (
+                      <p className="text-red-500 text-xs mt-1">{validacionAtencion.erroresPorFila[index]}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {validacionAtencion.errorSolapamiento && (
+            <p className="text-red-500 text-xs mb-2">{validacionAtencion.errorSolapamiento}</p>
+          )}
+          <button
+            type="button"
+            onClick={agregarFranjaAtencion}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
+          >
+            <Plus className="w-4 h-4" />
+            Agregar franja
+          </button>
+          {convAtencionInicial.huboLegacy && (
             <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
-              Valor actual: "{form.horarios_atencion}" — al elegir franjas se reemplaza.
+              Convertimos tus horarios anteriores a rangos. Revisá y guardá para confirmar.
+            </p>
+          )}
+          {convAtencionInicial.sinReconocer.length > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+              Valor anterior no reconocido: "{cliente?.horarios_atencion}". Cargá las franjas manualmente.
             </p>
           )}
         </div>
@@ -743,19 +837,43 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               ?
             </span>
           </label>
-          <select
-            value={form.horario_entrega}
-            onChange={e => handleFieldChange('horario_entrega', e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          >
-            <option value="">Sin preferencia</option>
-            {FRANJAS_ENTREGA.map(franja => (
-              <option key={franja} value={franja}>{franja}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={franjaEntrega.apertura}
+              onChange={e => sincronizarEntrega({ ...franjaEntrega, apertura: e.target.value })}
+              aria-label="Entregar desde"
+              className="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            >
+              <option value="">Sin preferencia</option>
+              {opcionesApertura.map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+            <span className="text-gray-400 text-sm">a</span>
+            <select
+              value={franjaEntrega.cierre}
+              onChange={e => sincronizarEntrega({ ...franjaEntrega, cierre: e.target.value })}
+              disabled={!franjaEntrega.apertura}
+              aria-label="Entregar hasta"
+              className="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <option value="">--</option>
+              {opcionesCierre
+                .filter(h => !franjaEntrega.apertura || horaAMinutos(h) > horaAMinutos(franjaEntrega.apertura))
+                .map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+          </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Franja en la que el cliente pide que se le entregue. Se imprime en la hoja de ruta.
           </p>
+          {convEntregaInicial.huboLegacy && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+              Convertimos la franja anterior a un rango. Revisá y guardá para confirmar.
+            </p>
+          )}
+          {convEntregaInicial.sinReconocer.length > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+              Valor anterior no reconocido: "{cliente?.horario_entrega}". Elegí el rango manualmente.
+            </p>
+          )}
         </div>
 
         {/* Notas */}
