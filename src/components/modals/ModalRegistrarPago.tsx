@@ -4,7 +4,7 @@ import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/forma
 import { parsePrecio } from '../../utils/calculations'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalPagoSchema } from '../../lib/schemas'
-import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
+import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
 
 // Alias for the Cliente type used in this component
 type Cliente = ClienteDB;
@@ -57,6 +57,12 @@ export interface ModalRegistrarPagoProps {
    * mas antiguos (FIFO). Sobrante queda como saldo a favor.
    */
   onConfirmarFIFO?: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
+  /**
+   * Si se provee, un pago dividido sin pedido específico se imputa por FIFO de
+   * forma atómica (una transacción server-side) en lugar de insertar filas a
+   * cuenta general. Sin esto, el dividido a cuenta general quedaría sin imputar.
+   */
+  onConfirmarCombinadoFIFO?: (input: RegistrarPagoCombinadoFifoInput) => Promise<RegistrarPagoFifoResult>;
   onGenerarRecibo?: (pago: PagoRegistrado, cliente: Cliente) => void;
   /**
    * Si se provee, muestra el botón "Entregar a cuenta corriente (sin cobrar)"
@@ -73,6 +79,7 @@ export default function ModalRegistrarPago({
   onClose,
   onConfirmar,
   onConfirmarFIFO,
+  onConfirmarCombinadoFIFO,
   onGenerarRecibo,
   onEntregarSinCobrar
 }: ModalRegistrarPagoProps): React.ReactElement | null {
@@ -160,9 +167,33 @@ export default function ModalRegistrarPago({
         return
       }
 
-      // El exceso ya no bloquea: queda como saldo a favor (ver flujo FIFO).
-      // Pero si NO se eligio pedido y NO se va a usar FIFO, advertimos.
+      // Pago dividido a cuenta general (sin pedido específico): imputación FIFO
+      // atómica server-side. Cada forma se aplica a los pedidos más antiguos con
+      // saldo pendiente y el sobrante queda como saldo a favor. Espeja la
+      // condición de `usarFIFO` del pago simple: sin esto, las filas se
+      // insertarían con pedido_id NULL y no actualizarían el saldo del cliente.
+      if (!pedidoSeleccionado && onConfirmarCombinadoFIFO) {
+        setLoading(true)
+        try {
+          const result = await onConfirmarCombinadoFIFO({
+            clienteId: cliente!.id,
+            metodos: pagosValidos.map(p => ({ monto: parsePrecio(p.monto), formaPago: p.formaPago })),
+            fecha,
+            notas: notas || undefined,
+          })
+          setResultadoFIFO(result)
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Error al registrar el pago'
+          setError(errorMessage)
+        } finally {
+          setLoading(false)
+        }
+        return
+      }
 
+      // Fallback: dividido aplicado a un pedido específico (o sin RPC combinado
+      // disponible, ej. flujo del transportista). Cada forma genera una fila con
+      // el pedido_id seleccionado, que sí dispara la cascada de triggers.
       setLoading(true)
       try {
         let ultimoPago: PagoRegistrado | null = null
@@ -351,6 +382,16 @@ export default function ModalRegistrarPago({
                 <span className="text-yellow-700 dark:text-yellow-400">Saldo pendiente:</span>
                 <span className="text-xl font-bold text-yellow-700 dark:text-yellow-400">
                   {formatCurrency(saldoPendiente)}
+                </span>
+              </div>
+            </div>
+          )}
+          {saldoPendiente < 0 && (
+            <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <div className="flex justify-between items-center">
+                <span className="text-green-700 dark:text-green-400">Saldo a favor:</span>
+                <span className="text-xl font-bold text-green-700 dark:text-green-400">
+                  {formatCurrency(Math.abs(saldoPendiente))}
                 </span>
               </div>
             </div>

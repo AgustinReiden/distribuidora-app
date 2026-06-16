@@ -703,6 +703,8 @@ export interface PagoFifoAplicacion {
   pago_id: number;
   pedido_id: number | null;
   pedido_fecha?: string;
+  /** Forma de pago de esta aplicación (presente en pagos combinados). */
+  forma_pago?: string;
   monto: number;
   saldo_a_favor?: boolean;
 }
@@ -723,6 +725,19 @@ export interface RegistrarPagoFifoResult {
   aplicaciones: PagoFifoAplicacion[];
 }
 
+/**
+ * Pago combinado (varias formas de pago) imputado por FIFO en una sola
+ * transacción server-side. Cada forma se aplica a los pedidos más antiguos
+ * con saldo pendiente; el sobrante por forma queda como saldo a favor.
+ */
+export interface RegistrarPagoCombinadoFifoInput {
+  clienteId: string;
+  metodos: Array<{ formaPago: string; monto: number }>;
+  fecha?: string;
+  referencia?: string;
+  notas?: string;
+}
+
 export interface UsePagosReturnExtended {
   pagos: PagoDBWithUsuario[];
   loading: boolean;
@@ -731,6 +746,7 @@ export interface UsePagosReturnExtended {
   registrarPago: (pago: PagoFormInput) => Promise<PagoDBWithUsuario>;
   registrarPagosBatch: (input: RegistrarPagoBatchInput) => Promise<PagoDBWithUsuario[]>;
   registrarPagoFIFO: (input: RegistrarPagoFifoInput) => Promise<RegistrarPagoFifoResult>;
+  registrarPagoCombinadoFIFO: (input: RegistrarPagoCombinadoFifoInput) => Promise<RegistrarPagoFifoResult>;
   eliminarPago: (pagoId: string) => Promise<void>;
   actualizarFormaPagoDePago: (pagoId: string, nuevaFormaPago: string) => Promise<void>;
   obtenerResumenCuenta: (clienteId: string) => Promise<ResumenCuenta | null>;
