@@ -36,6 +36,7 @@ export default function MapaRutaGoogle({
   paradaActivaOrden = null,
   onParadaTap,
   seguirPosicion = false,
+  zoomSeguir,
   rutaReal = null,
 }: MapaRutaProps): React.ReactElement {
   const { isLoaded, isLoading, error } = useGoogleMaps();
@@ -47,6 +48,9 @@ export default function MapaRutaGoogle({
   const posMarkerRef = useRef<google.maps.Marker | null>(null);
   const posCircleRef = useRef<google.maps.Circle | null>(null);
   const fitSignatureRef = useRef<string>('');
+  // El zoom de seguimiento se aplica una sola vez al entrar en follow (no en
+  // cada tick) para no pelear con el pinch-zoom del chofer.
+  const zoomSeguirAplicadoRef = useRef<boolean>(false);
   const [mapReady, setMapReady] = useState(false);
 
   // 1) Inicializar el mapa una sola vez.
@@ -192,13 +196,19 @@ export default function MapaRutaGoogle({
     const map = mapRef.current;
     if (seguirPosicion && posicion) {
       map.panTo({ lat: posicion.lat, lng: posicion.lng });
+      // Acercar la cámara una sola vez al entrar en seguimiento (modo guía).
+      if (zoomSeguir != null && !zoomSeguirAplicadoRef.current) {
+        map.setZoom(zoomSeguir);
+        zoomSeguirAplicadoRef.current = true;
+      }
       return;
     }
+    zoomSeguirAplicadoRef.current = false;
     if (paradaActivaOrden != null) {
       const activa = paradas.find(p => p.orden === paradaActivaOrden);
       if (activa) map.panTo({ lat: activa.lat, lng: activa.lng });
     }
-  }, [mapReady, seguirPosicion, posicion, paradaActivaOrden, paradas]);
+  }, [mapReady, seguirPosicion, zoomSeguir, posicion, paradaActivaOrden, paradas]);
 
   // Limpieza al desmontar (salir de la pantalla): libera markers/polyline/círculo.
   useEffect(() => {

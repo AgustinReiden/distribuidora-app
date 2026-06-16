@@ -12,7 +12,7 @@
  * (useEntregaParada). Diseño: docs/plans/2026-06-12-ruta-activa-design.md
  */
 import React, { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
-import { Crosshair, WifiOff, Truck } from 'lucide-react';
+import { Crosshair, WifiOff, Truck, Volume2, VolumeX } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { haversineMeters } from '../../utils/geo';
 import { useAuthData } from '../../contexts/AuthDataContext';
@@ -20,18 +20,18 @@ import { useWatchPosition } from '../../hooks/useWatchPosition';
 import { useDepositoCoords, useRecorridoActivoQuery } from '../../hooks/queries';
 import { useNavegacionVoz } from '../../hooks/useNavegacionVoz';
 import { useWakeLock } from '../../hooks/useWakeLock';
+import { useGuiaNavegacion } from '../../hooks/useGuiaNavegacion';
+import type { Coord } from '../../hooks/useNavTramo';
 import { decodePolylines } from '../../utils/polyline';
-import { googleMapsNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
 import { useEntregaParada, type PedidoConCliente, type DatosPago, type DatosSalvedad } from './useEntregaParada';
 import SheetParada, { type LinkRutaMaps } from './SheetParada';
+import BannerManiobra from './BannerManiobra';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 import ModalRegistrarPago from '../modals/ModalRegistrarPago';
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
 const MapaRuta = lazy(() => import('./MapaRutaGoogle'));
-// Navegación asistida in-app (pantalla completa) — pesada, carga bajo demanda.
-const NavAsistida = lazy(() => import('./NavAsistida'));
 
 /** Radio del geofence de llegada, en metros */
 const RADIO_LLEGADA_M = 100;
@@ -57,13 +57,13 @@ export default function RutaActivaTransportista({
 }: RutaActivaTransportistaProps): React.ReactElement {
   const { isOnline } = useAuthData();
   const deposito = useDepositoCoords();
-  // Modo navegación asistida in-app (pantalla completa giro-a-giro).
-  const [modoNavegacion, setModoNavegacion] = useState(false);
+  // Guía giro-a-giro in-app: convive con el mapa y el sheet (no es overlay).
+  const [guiando, setGuiando] = useState(false);
   const [vozOn, setVozOn] = useState(true);
   const voz = useNavegacionVoz();
   const wakeLock = useWakeLock();
-  // En navegación, GPS más frecuente para seguir suave; si no, ahorro de batería.
-  const { posicion } = useWatchPosition(true, modoNavegacion ? 1000 : 4000);
+  // Guiando: GPS más frecuente para seguir suave; si no, ahorro de batería.
+  const { posicion } = useWatchPosition(true, guiando ? 1000 : 4000);
   // Ruta del día: el transportista lee del recorrido en_curso (las paradas que
   // armó el admin), NO de "todos sus pedidos asignados". Trae también la ruta
   // real (polylines) para dibujarla.
@@ -176,36 +176,49 @@ export default function RutaActivaTransportista({
     }
   };
 
-  // --- Navegación asistida in-app ---
-  // Deep-link a Maps como fallback (botón "Abrir en Maps" dentro de la nav).
-  const navUrlActiva = useMemo((): string => {
+  // --- Guía giro-a-giro in-app ---
+  const destinoGuia = useMemo<Coord | null>(() => {
     if (paradaActiva?.cliente?.latitud != null && paradaActiva?.cliente?.longitud != null) {
-      return googleMapsNavUrl(Number(paradaActiva.cliente.latitud), Number(paradaActiva.cliente.longitud));
+      return { lat: Number(paradaActiva.cliente.latitud), lng: Number(paradaActiva.cliente.longitud) };
     }
-    return googleMapsSearchUrl(paradaActiva?.cliente?.direccion || '');
+    return null;
   }, [paradaActiva]);
 
+  const guia = useGuiaNavegacion({
+    destino: destinoGuia,
+    posicion,
+    gpsConfiable,
+    llegaste,
+    guiando,
+    vozOn,
+    voz,
+  });
+
   // Desbloquear voz/haptics/wake-lock DENTRO del gesto (requisito del navegador).
-  const iniciarNavegacion = useCallback((): void => {
+  const iniciarGuia = useCallback((): void => {
     voz.prime();
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try { navigator.vibrate(1); } catch { /* sin haptics */ }
     }
     wakeLock.solicitar();
-    setSeguirPosicion(false);
-    setModoNavegacion(true);
+    setSeguirPosicion(true);
+    setGuiando(true);
   }, [voz, wakeLock]);
 
-  const salirNavegacion = useCallback((): void => {
+  const pararGuia = useCallback((): void => {
     wakeLock.liberar();
     voz.callar();
-    setModoNavegacion(false);
+    setGuiando(false);
   }, [wakeLock, voz]);
 
-  // Si se completó la ruta (o no hay parada activa), salir de la navegación.
+  const toggleGuia = useCallback((): void => {
+    if (guiando) pararGuia(); else iniciarGuia();
+  }, [guiando, iniciarGuia, pararGuia]);
+
+  // Si se completó la ruta (o no hay parada activa), parar la guía.
   useEffect(() => {
-    if (modoNavegacion && !paradaActiva) salirNavegacion();
-  }, [modoNavegacion, paradaActiva, salirNavegacion]);
+    if (guiando && !paradaActiva) pararGuia();
+  }, [guiando, paradaActiva, pararGuia]);
 
   if (pedidosOrdenados.length === 0) {
     // Distinguir "todavía no hay ruta armada" de "ruta cargando".
@@ -231,45 +244,69 @@ export default function RutaActivaTransportista({
     // Full-bleed: compensa el padding del <main> (px-4 pb-6) para que el mapa
     // ocupe todo el ancho y llegue hasta abajo de la pantalla.
     <div className="relative -mx-4 -mb-6 h-[calc(100dvh-5rem)] overflow-hidden">
-      {/* Mapa overview: se desmonta en navegación para no tener dos mapas. */}
-      {!modoNavegacion && (
-        <Suspense fallback={<div className="flex h-full items-center justify-center text-gray-400">Cargando mapa…</div>}>
-          <MapaRuta
-            paradas={paradasMapa}
-            deposito={deposito}
-            altura="full"
-            rutaReal={rutaReal.length > 1 ? rutaReal : null}
-            // Solo mostramos el punto azul con GPS confiable (no plantarlo en
-            // medio del país con la geolocalización por IP del desktop).
-            posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy } : null}
-            paradaActivaOrden={paradaActiva?.orden_entrega ?? null}
-            onParadaTap={handleParadaTapMapa}
-            seguirPosicion={seguirPosicion && gpsConfiable}
-          />
-        </Suspense>
-      )}
+      {/* El mapa ES la pantalla; la guía se monta encima (banner), no lo desmonta. */}
+      <Suspense fallback={<div className="flex h-full items-center justify-center text-gray-400">Cargando mapa…</div>}>
+        <MapaRuta
+          paradas={paradasMapa}
+          deposito={deposito}
+          altura="full"
+          rutaReal={rutaReal.length > 1 ? rutaReal : null}
+          // Solo mostramos el punto azul con GPS confiable (no plantarlo en
+          // medio del país con la geolocalización por IP del desktop).
+          posicion={gpsConfiable && posicion ? { lat: posicion.lat, lng: posicion.lng, accuracy: posicion.accuracy } : null}
+          paradaActivaOrden={paradaActiva?.orden_entrega ?? null}
+          onParadaTap={handleParadaTapMapa}
+          // Al guiar, el mapa sigue la posición y se acerca.
+          seguirPosicion={(seguirPosicion || guiando) && gpsConfiable}
+          zoomSeguir={guiando ? 17 : undefined}
+        />
+      </Suspense>
 
-      {/* Header flotante: progreso del día */}
-      <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-2">
-        <div className="pointer-events-auto rounded-2xl bg-white/95 px-4 py-2.5 shadow-lg backdrop-blur dark:bg-gray-800/95">
-          <p className="text-sm font-bold text-gray-900 dark:text-white">
-            {completadas}/{pedidosOrdenados.length} entregas
-          </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {formatPrecio(porCobrar)} por cobrar
-          </p>
-        </div>
-        <button
-          onClick={() => setSeguirPosicion(s => !s)}
-          className={`pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full shadow-lg backdrop-blur transition-colors ${
-            seguirPosicion
-              ? 'bg-blue-600 text-white'
-              : 'bg-white/95 text-gray-600 dark:bg-gray-800/95 dark:text-gray-300'
-          }`}
-          aria-label={seguirPosicion ? 'Dejar de seguir mi posición' : 'Seguir mi posición'}
-        >
-          <Crosshair className="h-5 w-5" />
-        </button>
+      {/* Overlay superior: al guiar muestra el banner de maniobra + toggle de
+          voz; si no, el progreso del día + seguir-posición. El sheet (z-40)
+          queda visible debajo en ambos casos (no hay overlay full-screen). */}
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-30 flex items-start justify-between gap-2">
+        {guiando ? (
+          <div className="pointer-events-auto min-w-0 flex-1">
+            <BannerManiobra
+              maniobra={llegaste ? 'LLEGADA' : (guia.pasoActual?.maniobra ?? null)}
+              instruccion={llegaste ? 'Llegaste a destino' : (guia.pasoActual?.instruccion ?? null)}
+              distanciaMetros={llegaste ? null : guia.distManiobra}
+              cargando={guia.cargando}
+              error={guia.error}
+            />
+          </div>
+        ) : (
+          <div className="pointer-events-auto rounded-2xl bg-white/95 px-4 py-2.5 shadow-lg backdrop-blur dark:bg-gray-800/95">
+            <p className="text-sm font-bold text-gray-900 dark:text-white">
+              {completadas}/{pedidosOrdenados.length} entregas
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {formatPrecio(porCobrar)} por cobrar
+            </p>
+          </div>
+        )}
+        {guiando ? (
+          <button
+            onClick={() => setVozOn(v => !v)}
+            className={`pointer-events-auto flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full shadow-lg backdrop-blur transition-colors ${
+              vozOn ? 'bg-blue-600 text-white' : 'bg-white/95 text-gray-600 dark:bg-gray-800/95 dark:text-gray-300'
+            }`}
+            aria-label={vozOn ? 'Silenciar voz' : 'Activar voz'}
+          >
+            {vozOn ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+          </button>
+        ) : (
+          <button
+            onClick={() => setSeguirPosicion(s => !s)}
+            className={`pointer-events-auto flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full shadow-lg backdrop-blur transition-colors ${
+              seguirPosicion ? 'bg-blue-600 text-white' : 'bg-white/95 text-gray-600 dark:bg-gray-800/95 dark:text-gray-300'
+            }`}
+            aria-label={seguirPosicion ? 'Dejar de seguir mi posición' : 'Seguir mi posición'}
+          >
+            <Crosshair className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       {/* Banner offline */}
@@ -287,10 +324,11 @@ export default function RutaActivaTransportista({
         distanciaMetros={distanciaMetros}
         llegaste={llegaste}
         onSeleccionarParada={(id) => { setParadaSeleccionadaId(id); setSeguirPosicion(false); }}
-        onEntregar={entrega.marcarEntregado}
+        onEntregar={(p) => { if (guiando) pararGuia(); entrega.marcarEntregado(p); }}
         onSalvedad={onRegistrarSalvedad ? entrega.abrirSalvedad : undefined}
         linksRutaMaps={linksRutaMaps}
-        onNavegarInApp={iniciarNavegacion}
+        onToggleGuia={toggleGuia}
+        guiando={guiando}
       />
 
       {/* Modales del flujo de entrega (mismos que la vista anterior) */}
@@ -311,27 +349,6 @@ export default function RutaActivaTransportista({
           onConfirmar={entrega.confirmarPago}
           onEntregarSinCobrar={onEntregarSinCobrar ? entrega.entregarSinCobrar : undefined}
         />
-      )}
-
-      {/* Navegación asistida in-app (pantalla completa, encima de todo) */}
-      {modoNavegacion && paradaActiva
-        && paradaActiva.cliente?.latitud != null
-        && paradaActiva.cliente?.longitud != null && (
-        <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 text-gray-300">Iniciando navegación…</div>}>
-          <NavAsistida
-            destino={{ lat: Number(paradaActiva.cliente.latitud), lng: Number(paradaActiva.cliente.longitud) }}
-            destinoNombre={paradaActiva.cliente?.nombre_fantasia || 'Cliente'}
-            destinoDireccion={paradaActiva.cliente?.direccion || undefined}
-            posicion={posicion}
-            gpsConfiable={gpsConfiable}
-            llegaste={llegaste}
-            voz={voz}
-            vozOn={vozOn}
-            onToggleVoz={() => setVozOn(v => !v)}
-            navUrlFallback={navUrlActiva}
-            onSalir={salirNavegacion}
-          />
-        </Suspense>
       )}
     </div>
   );

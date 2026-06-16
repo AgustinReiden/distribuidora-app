@@ -48,6 +48,8 @@ export interface MapaRutaProps {
   onParadaTap?: (orden: number) => void;
   /** Si true, el mapa sigue la posición propia en vez de la parada activa. */
   seguirPosicion?: boolean;
+  /** Zoom a aplicar UNA vez al activar el seguimiento (modo guía/navegación). */
+  zoomSeguir?: number;
   /**
    * Ruta real sobre las calles (polyline decodificada de Google). Si viene con
    * >1 punto se dibuja la línea sólida real; si no, fallback a la línea recta
