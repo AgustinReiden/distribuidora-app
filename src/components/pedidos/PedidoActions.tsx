@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, User, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, DollarSign, LucideIcon } from 'lucide-react';
+import { MoreVertical, History, Edit2, Package, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, DollarSign, LucideIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -36,7 +36,6 @@ export interface AccionesDropdownProps {
   onEditarNotas?: (pedido: PedidoDB) => void;
   onPreparar?: (pedido: PedidoDB) => void;
   onVolverAPendiente?: (pedido: PedidoDB) => void;
-  onAsignar?: (pedido: PedidoDB) => void;
   onEntregado?: (pedido: PedidoDB) => void;
   onEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
@@ -68,7 +67,6 @@ function AccionesDropdown({
   onEditarNotas,
   onPreparar,
   onVolverAPendiente,
-  onAsignar,
   onEntregado,
   onEntregadoConSalvedad,
   onRevertir,
@@ -154,16 +152,6 @@ function AccionesDropdown({
       });
     }
 
-    // Admin o encargado puede asignar si no esta entregado
-    if ((isAdmin || isEncargado) && pedido.estado !== 'entregado' && onAsignar) {
-      items.push({
-        label: pedido.transportista ? 'Reasignar Transportista' : 'Asignar Transportista',
-        icon: User,
-        onClick: () => onAsignar(pedido),
-        className: 'text-orange-700 dark:text-orange-400'
-      });
-    }
-
     // Transportista, admin o encargado pueden marcar entregado
     if ((isTransportista || isAdmin || isEncargado) && pedido.estado === 'asignado' && onEntregado) {
       items.push({
@@ -207,7 +195,7 @@ function AccionesDropdown({
     }
 
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onAsignar, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago]);
 
   return (
     <DropdownMenu>

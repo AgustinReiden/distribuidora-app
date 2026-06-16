@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback, memo } from 'react';
 import type { ChangeEvent } from 'react';
-import { FileDown, Package, Truck, Printer, Loader2 } from 'lucide-react';
+import { FileDown, Package, Truck, Printer, Loader2, CalendarDays } from 'lucide-react';
 import ModalBase from './ModalBase';
-import { formatPrecio } from '../../utils/formatters';
+import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
+import { useRecorridosHojaRutaQuery } from '../../hooks/queries';
 import type { PedidoDB, PerfilDB } from '../../types';
 
 // =============================================================================
@@ -43,6 +44,16 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   const [seleccionarTodos, setSeleccionarTodos] = useState<boolean>(false);
   const [todosLosPedidos, setTodosLosPedidos] = useState<PedidoDB[] | null>(null);
   const [cargandoTodos, setCargandoTodos] = useState(false);
+  // Hoja de ruta: se descarga la ruta YA armada de un día + transportista
+  // (persistida en recorridos), no se regenera al vuelo desde pedidos filtrados.
+  const [fechaRuta, setFechaRuta] = useState<string>(fechaLocalISO());
+  const { data: recorridosDia = [], isLoading: cargandoRecorridos } = useRecorridosHojaRutaQuery(
+    tipoExport === 'ruta' ? fechaRuta : null,
+  );
+  const recorridoSeleccionado = useMemo(
+    () => recorridosDia.find(r => r.transportistaId === transportistaSeleccionado) ?? null,
+    [recorridosDia, transportistaSeleccionado],
+  );
 
   // Pedidos base: pagina actual o todos cargados
   const pedidosBase = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
@@ -120,9 +131,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     setTipoExport(tipo);
     setPedidosSeleccionados([]);
     setSeleccionarTodos(false);
-    if (tipo !== 'ruta' && tipo !== 'comanda') {
-      setTransportistaSeleccionado('');
-    }
+    // El transportista se elige distinto según el tipo (ruta: con ruta armada;
+    // comanda: filtro opcional), así que se resetea al cambiar de tipo.
+    setTransportistaSeleccionado('');
     // Comandas siempre cargan todos
     if (tipo === 'comanda' && !todosLosPedidos && fetchAllFilteredPedidos) {
       setAlcance('todos');
@@ -145,6 +156,16 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
   // Exportar
   const handleExportar = (): void => {
+    // Hoja de ruta: usa las paradas de la ruta ya armada (persistida), en su
+    // orden de entrega; no depende de la selección de pedidos.
+    if (tipoExport === 'ruta') {
+      if (!recorridoSeleccionado || recorridoSeleccionado.paradas.length === 0) return;
+      const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
+      onExportarHojaRuta(transportista, recorridoSeleccionado.paradas);
+      onClose();
+      return;
+    }
+
     const fuente = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
     const pedidosAExportar = fuente.filter(p => pedidosSeleccionados.includes(p.id));
     if (pedidosAExportar.length === 0) return;
@@ -153,9 +174,6 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
       onExportarOrdenPreparacion(pedidosAExportar);
     } else if (tipoExport === 'comanda') {
       onImprimirComandas?.(pedidosAExportar);
-    } else {
-      const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
-      onExportarHojaRuta(transportista, pedidosAExportar);
     }
     onClose();
   };
@@ -163,7 +181,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   const getEstadoLabel = (e: string): string => e === 'pendiente' ? 'Pendiente' : e === 'en_preparacion' ? 'En preparacion' : e === 'asignado' ? 'En camino' : 'Entregado';
   const getEstadoColor = (e: string): string => e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' : e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' : e === 'asignado' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
 
-  const mostrarAlcance = tipoExport !== 'comanda' && fetchAllFilteredPedidos;
+  // El alcance (página/todos) solo aplica a Orden de Preparación. Hoja de Ruta
+  // se descarga desde la ruta armada (día + transportista) y Comandas carga todo.
+  const mostrarAlcance = tipoExport === 'preparacion' && !!fetchAllFilteredPedidos;
 
   return (
     <ModalBase title="Exportar Pedidos a PDF" onClose={onClose} maxWidth="max-w-2xl">
@@ -250,18 +270,71 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           </div>
         )}
 
-        {/* Selector de transportista (para hoja de ruta y comandas) */}
-        {(tipoExport === 'ruta' || tipoExport === 'comanda') && (
+        {/* Hoja de Ruta: se elige un día + un transportista con ruta armada y se
+            descarga la hoja de ruta YA generada (persistida en recorridos). */}
+        {tipoExport === 'ruta' && (
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-1 flex items-center gap-1.5">
+                <CalendarDays className="w-4 h-4 text-gray-500" />
+                Día de la ruta
+              </label>
+              <input
+                type="date"
+                value={fechaRuta}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => { setFechaRuta(e.target.value); setTransportistaSeleccionado(''); }}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Transportista</label>
+              <select
+                value={transportistaSeleccionado}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => handleTransportistaChange(e.target.value)}
+                disabled={cargandoRecorridos}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              >
+                <option value="">{cargandoRecorridos ? 'Cargando rutas...' : 'Seleccionar transportista...'}</option>
+                {recorridosDia.map(r => (
+                  <option key={r.recorridoId} value={r.transportistaId}>
+                    {r.transportistaNombre} ({r.paradas.length} paradas)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="border rounded-lg p-4 bg-gray-50 dark:bg-gray-900 text-center">
+              {cargandoRecorridos ? (
+                <div className="flex items-center justify-center text-gray-500">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />Cargando rutas...
+                </div>
+              ) : recorridosDia.length === 0 ? (
+                <div className="text-gray-500 text-sm py-2">
+                  <Truck className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  No hay rutas armadas para el {formatFecha(fechaRuta)}.
+                </div>
+              ) : recorridoSeleccionado ? (
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  Se descargará la hoja de ruta de <strong>{recorridoSeleccionado.transportistaNombre}</strong> con <strong>{recorridoSeleccionado.paradas.length}</strong> paradas.
+                </p>
+              ) : (
+                <p className="text-sm text-gray-500">Elegí un transportista para descargar su hoja de ruta.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Selector de transportista (filtro opcional para comandas) */}
+        {tipoExport === 'comanda' && (
           <div>
             <label className="block text-sm font-medium mb-1">
-              {tipoExport === 'comanda' ? 'Filtrar por transportista (opcional)' : 'Transportista'}
+              Filtrar por transportista (opcional)
             </label>
             <select
               value={transportistaSeleccionado}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => handleTransportistaChange(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             >
-              <option value="">{tipoExport === 'comanda' ? 'Todos los transportistas' : 'Seleccionar transportista...'}</option>
+              <option value="">Todos los transportistas</option>
               {transportistas.map(t => {
                 const fuente = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
                 const pedidosTransportista = fuente.filter(p =>
@@ -278,96 +351,93 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           </div>
         )}
 
-        {/* Lista de pedidos */}
-        <div>
-          <div className="flex justify-between items-center mb-2">
-            <label className="block text-sm font-medium">
-              Pedidos a exportar ({pedidosSeleccionados.length} de {pedidosFiltrados.length})
-            </label>
-            {pedidosFiltrados.length > 0 && (
-              <label className="flex items-center space-x-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={seleccionarTodos}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleSeleccionarTodos(e.target.checked)}
-                  className="w-4 h-4 rounded"
-                />
-                <span>Seleccionar todos</span>
+        {/* Lista de pedidos (preparación y comandas) */}
+        {tipoExport !== 'ruta' && (
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-medium">
+                Pedidos a exportar ({pedidosSeleccionados.length} de {pedidosFiltrados.length})
               </label>
-            )}
-          </div>
-
-          {cargandoTodos ? (
-            <div className="flex items-center justify-center py-8 bg-gray-50 dark:bg-gray-900 rounded-lg">
-              <Loader2 className="w-6 h-6 animate-spin text-blue-600 mr-2" />
-              <span className="text-gray-500">Cargando pedidos...</span>
-            </div>
-          ) : pedidosFiltrados.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
-              {tipoExport === 'ruta' && !transportistaSeleccionado ? (
-                <>
-                  <Truck className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                  <p>Selecciona un transportista para ver sus pedidos</p>
-                </>
-              ) : (
-                <>
-                  <Package className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                  <p>No hay pedidos disponibles para exportar</p>
-                  <p className="text-xs mt-1">
-                    {tipoExport === 'preparacion'
-                      ? 'Solo se muestran pedidos pendientes o en preparacion'
-                      : 'Solo se muestran pedidos asignados al transportista'
-                    }
-                  </p>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="border rounded-lg max-h-64 overflow-y-auto">
-              {pedidosFiltrados.map(pedido => (
-                <div
-                  key={pedido.id}
-                  onClick={() => handleTogglePedido(pedido.id)}
-                  className={`flex items-center p-3 border-b last:border-b-0 cursor-pointer transition-colors ${
-                    pedidosSeleccionados.includes(pedido.id)
-                      ? 'bg-blue-50'
-                      : 'hover:bg-gray-50'
-                  }`}
-                >
+              {pedidosFiltrados.length > 0 && (
+                <label className="flex items-center space-x-2 text-sm cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={pedidosSeleccionados.includes(pedido.id)}
-                    onChange={() => {}}
-                    className="w-4 h-4 mr-3"
+                    checked={seleccionarTodos}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => handleSeleccionarTodos(e.target.checked)}
+                    className="w-4 h-4 rounded"
                   />
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium">#{pedido.id} - {pedido.cliente?.nombre_fantasia}</p>
-                      <span className={`px-2 py-0.5 rounded-full text-xs ${getEstadoColor(pedido.estado)}`}>
-                        {getEstadoLabel(pedido.estado)}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-500">{pedido.cliente?.direccion}</p>
-                    <p className="text-sm font-medium text-blue-600">{formatPrecio(pedido.total)}</p>
-                  </div>
-                </div>
-              ))}
+                  <span>Seleccionar todos</span>
+                </label>
+              )}
             </div>
-          )}
-        </div>
+
+            {cargandoTodos ? (
+              <div className="flex items-center justify-center py-8 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                <Loader2 className="w-6 h-6 animate-spin text-blue-600 mr-2" />
+                <span className="text-gray-500">Cargando pedidos...</span>
+              </div>
+            ) : pedidosFiltrados.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
+                <Package className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                <p>No hay pedidos disponibles para exportar</p>
+                <p className="text-xs mt-1">
+                  {tipoExport === 'preparacion'
+                    ? 'Solo se muestran pedidos pendientes o en preparacion'
+                    : 'No hay pedidos para imprimir comandas'
+                  }
+                </p>
+              </div>
+            ) : (
+              <div className="border rounded-lg max-h-64 overflow-y-auto">
+                {pedidosFiltrados.map(pedido => (
+                  <div
+                    key={pedido.id}
+                    onClick={() => handleTogglePedido(pedido.id)}
+                    className={`flex items-center p-3 border-b last:border-b-0 cursor-pointer transition-colors ${
+                      pedidosSeleccionados.includes(pedido.id)
+                        ? 'bg-blue-50'
+                        : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={pedidosSeleccionados.includes(pedido.id)}
+                      onChange={() => {}}
+                      className="w-4 h-4 mr-3"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <p className="font-medium">#{pedido.id} - {pedido.cliente?.nombre_fantasia}</p>
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${getEstadoColor(pedido.estado)}`}>
+                          {getEstadoLabel(pedido.estado)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-500">{pedido.cliente?.direccion}</p>
+                      <p className="text-sm font-medium text-blue-600">{formatPrecio(pedido.total)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex justify-between items-center p-4 border-t bg-gray-50 dark:bg-gray-800 sticky bottom-0">
         <p className="text-sm text-gray-600">
-          {pedidosSeleccionados.length > 0 && (
-            <>
-              Total: {formatPrecio(
-                pedidosFiltrados
-                  .filter(p => pedidosSeleccionados.includes(p.id))
-                  .reduce((sum, p) => sum + (p.total || 0), 0)
-              )}
-            </>
-          )}
+          {tipoExport === 'ruta'
+            ? (recorridoSeleccionado && (
+                <>Total: {formatPrecio(recorridoSeleccionado.paradas.reduce((sum, p) => sum + (p.total || 0), 0))}</>
+              ))
+            : (pedidosSeleccionados.length > 0 && (
+                <>
+                  Total: {formatPrecio(
+                    pedidosFiltrados
+                      .filter(p => pedidosSeleccionados.includes(p.id))
+                      .reduce((sum, p) => sum + (p.total || 0), 0)
+                  )}
+                </>
+              ))}
         </p>
         <div className="flex space-x-3">
           <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">
@@ -375,7 +445,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           </button>
           <button
             onClick={handleExportar}
-            disabled={pedidosSeleccionados.length === 0}
+            disabled={tipoExport === 'ruta'
+              ? !recorridoSeleccionado || recorridoSeleccionado.paradas.length === 0
+              : pedidosSeleccionados.length === 0}
             className={`flex items-center space-x-2 px-4 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
               tipoExport === 'comanda'
                 ? 'bg-purple-600 hover:bg-purple-700'

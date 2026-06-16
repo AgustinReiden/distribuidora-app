@@ -1,12 +1,12 @@
-import { useState, useMemo, memo, useEffect } from 'react';
+import { useState, useMemo, memo, useEffect, useRef } from 'react';
 import type { ChangeEvent } from 'react';
 import {
   Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation,
   Settings, Save, FileText, ChevronDown, ChevronUp, Phone,
-  DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays
+  DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays, Pencil
 } from 'lucide-react';
 import ModalBase from './ModalBase';
-import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation } from '../../hooks/queries';
+import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery } from '../../hooks/queries';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB } from '../../types';
 
@@ -188,10 +188,8 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // el default es mañana; se puede elegir de hoy en adelante.
   const hoyISO = fechaLocalISO();
   const [fechaEntrega, setFechaEntrega] = useState<string>(fechaHaceDias(-1));
-  // Filtro de fecha: la admin marca entregados/rendición con rezago, así que
-  // al armar la ruta del día siguiente quedan pedidos viejos aún en estado
-  // 'asignado' que no deben entrar en la optimización.
-  const [filtroCriterio, setFiltroCriterio] = useState<'asignacion' | 'pedido'>('asignacion');
+  // Filtro de fecha (por fecha de pedido) para acotar el pool de disponibles:
+  // suelen acumularse pendientes/en preparación de varios días.
   const [filtroDesde, setFiltroDesde] = useState<string>('');
   const [filtroHasta, setFiltroHasta] = useState<string>('');
   const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState<boolean>(false);
@@ -228,49 +226,64 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     }
   }, [rutaOptimizada]);
 
-  // Fecha del pedido según el criterio de filtro. Para 'asignacion' usa la
-  // derivada del historial; si no existe (pedidos viejos sin registro), cae a
-  // la fecha del pedido para no excluirlos silenciosamente.
-  const fechaSegunCriterio = (p: PedidoDB): string | null => {
-    if (filtroCriterio === 'asignacion') return p.fecha_asignacion || p.fecha || null;
-    return p.fecha || null;
-  };
-
   const filtroActivo = !!(filtroDesde || filtroHasta);
 
-  // Pedidos que pasan el filtro de fecha (estado 'asignado' ya viene filtrado
-  // del container, pero se mantiene la condición por robustez)
-  const pedidosFiltrados = useMemo((): PedidoDB[] => {
+  // Ruta ya armada (en_curso) de este transportista+fecha: sus paradas se
+  // precargan pre-tildadas para EDITARLA (agregar/quitar y reoptimizar). Si no
+  // hay, estamos armando una ruta nueva.
+  const { data: rutaExistente } = useRecorridoExistenteQuery(
+    transportistaSeleccionado || null,
+    transportistaSeleccionado ? fechaEntrega : null,
+  );
+  const paradasExistentes = useMemo((): PedidoDB[] => rutaExistente?.paradas ?? [], [rutaExistente]);
+  const editando = paradasExistentes.length > 0;
+  const idsExistentes = useMemo(() => new Set(paradasExistentes.map(p => p.id)), [paradasExistentes]);
+
+  // Disponibles para sumar a la ruta: pendiente/en_preparacion (vienen del
+  // container) filtrados por fecha de pedido.
+  const disponiblesFiltrados = useMemo((): PedidoDB[] => {
     return pedidos.filter(p => {
-      if (p.estado !== 'asignado') return false;
       if (!filtroActivo) return true;
-      const f = fechaSegunCriterio(p);
+      const f = p.fecha || null;
       if (!f) return true; // sin fecha conocida: incluir antes que ocultar
       if (filtroDesde && f < filtroDesde) return false;
       if (filtroHasta && f > filtroHasta) return false;
       return true;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pedidos, filtroActivo, filtroCriterio, filtroDesde, filtroHasta]);
+  }, [pedidos, filtroActivo, filtroDesde, filtroHasta]);
 
-  // Obtener pedidos del transportista seleccionado
-  const pedidosTransportista = useMemo((): PedidoDB[] => {
+  // Lista visible al elegir transportista: paradas de su ruta (si existe) +
+  // disponibles, sin duplicar (las paradas existentes ganan y van primero).
+  const pedidosVisibles = useMemo((): PedidoDB[] => {
     if (!transportistaSeleccionado) return [];
-    return pedidosFiltrados
-      .filter(p => p.transportista_id === transportistaSeleccionado)
+    const map = new Map<string, PedidoDB>();
+    for (const p of paradasExistentes) map.set(p.id, p);
+    for (const p of disponiblesFiltrados) if (!map.has(p.id)) map.set(p.id, p);
+    return Array.from(map.values())
       .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
-  }, [pedidosFiltrados, transportistaSeleccionado]);
+  }, [transportistaSeleccionado, paradasExistentes, disponiblesFiltrados]);
 
-  // Selección de pedidos para la ruta del día (default: todos). El admin puede
-  // destildar los que no van hoy (ej: entregados-no-marcados de días previos).
+  // Selección de paradas. Se siembra una vez por (transportista, fecha): en
+  // edición, con las paradas de la ruta existente; en ruta nueva, vacía (el
+  // admin tilda las que entran). No se re-siembra en refetch para no pisar la
+  // selección en curso.
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+  const rutaKey = `${transportistaSeleccionado}|${fechaEntrega}`;
+  const seededKeyRef = useRef<string>('');
   useEffect(() => {
-    setSeleccionados(new Set(pedidosTransportista.map(p => p.id)));
-  }, [pedidosTransportista]);
+    if (!transportistaSeleccionado) {
+      if (seededKeyRef.current !== '') { setSeleccionados(new Set()); seededKeyRef.current = ''; }
+      return;
+    }
+    if (rutaExistente === undefined) return; // aún cargando la ruta existente
+    if (seededKeyRef.current === rutaKey) return;
+    seededKeyRef.current = rutaKey;
+    setSeleccionados(new Set(paradasExistentes.map(p => p.id)));
+  }, [transportistaSeleccionado, rutaKey, rutaExistente, paradasExistentes]);
 
   const pedidosSeleccionados = useMemo(
-    () => pedidosTransportista.filter(p => seleccionados.has(p.id)),
-    [pedidosTransportista, seleccionados],
+    () => pedidosVisibles.filter(p => seleccionados.has(p.id)),
+    [pedidosVisibles, seleccionados],
   );
 
   const toggleSeleccion = (id: string): void => {
@@ -280,37 +293,30 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
       return next;
     });
   };
-  const todosSeleccionados = pedidosTransportista.length > 0 && seleccionados.size === pedidosTransportista.length;
+  const todosSeleccionados = pedidosVisibles.length > 0 && seleccionados.size === pedidosVisibles.length;
   const toggleTodos = (): void => {
-    setSeleccionados(todosSeleccionados ? new Set() : new Set(pedidosTransportista.map(p => p.id)));
+    setSeleccionados(todosSeleccionados ? new Set() : new Set(pedidosVisibles.map(p => p.id)));
   };
 
-  // Cuántos pedidos del transportista quedaron afuera por el filtro de fecha
-  const pedidosExcluidosPorFecha = useMemo((): number => {
-    if (!transportistaSeleccionado || !filtroActivo) return 0;
-    const totalTransportista = pedidos.filter(
-      p => p.transportista_id === transportistaSeleccionado && p.estado === 'asignado'
-    ).length;
-    return totalTransportista - pedidosTransportista.length;
-  }, [pedidos, pedidosTransportista, transportistaSeleccionado, filtroActivo]);
-
-  // Pedidos ordenados segun la optimizacion
+  // Pedidos ordenados segun la optimizacion (resuelve desde paradas existentes +
+  // pool, que cubre la transición post-armado antes del refetch).
   const pedidosOrdenados = useMemo((): PedidoOrdenado[] => {
     if (!rutaOptimizada?.orden_optimizado) return [];
+    const map = new Map<string, PedidoDB>();
+    for (const p of paradasExistentes) map.set(p.id, p);
+    for (const p of pedidos) map.set(p.id, p);
     const result: PedidoOrdenado[] = [];
     for (const item of rutaOptimizada.orden_optimizado) {
-      const pedido = pedidos.find(p => p.id === item.pedido_id);
-      if (pedido) {
-        result.push({ ...pedido, orden_optimizado: item.orden });
-      }
+      const pedido = map.get(item.pedido_id);
+      if (pedido) result.push({ ...pedido, orden_optimizado: item.orden });
     }
     return result;
-  }, [rutaOptimizada, pedidos]);
+  }, [rutaOptimizada, paradasExistentes, pedidos]);
 
-  // Verificar si hay pedidos sin coordenadas
+  // Verificar si hay pedidos seleccionados sin coordenadas
   const pedidosSinCoordenadas = useMemo((): PedidoDB[] => {
-    return pedidosTransportista.filter(p => !p.cliente?.latitud || !p.cliente?.longitud);
-  }, [pedidosTransportista]);
+    return pedidosSeleccionados.filter(p => !p.cliente?.latitud || !p.cliente?.longitud);
+  }, [pedidosSeleccionados]);
 
   // Links a Google Maps con la ruta armada. Maps acepta máximo 9 waypoints
   // por link (+ origen + destino = 10 paradas nuevas por link), así que rutas
@@ -341,14 +347,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   // Calcular totales
   const totales = useMemo((): Totales => {
-    const lista = vistaActiva === 'resultado' ? pedidosOrdenados : pedidosTransportista;
+    const lista = vistaActiva === 'resultado' ? pedidosOrdenados : pedidosSeleccionados;
     return {
       pedidos: lista.length,
       total: lista.reduce((sum, p) => sum + (p.total || 0), 0),
       pendienteCobro: lista.filter(p => p.estado_pago !== 'pagado').reduce((sum, p) => sum + (p.total || 0), 0),
       items: lista.reduce((sum, p) => sum + (p.items?.length || 0), 0)
     };
-  }, [vistaActiva, pedidosOrdenados, pedidosTransportista]);
+  }, [vistaActiva, pedidosOrdenados, pedidosSeleccionados]);
 
   const handleArmar = (): void => {
     if (transportistaSeleccionado && pedidosSeleccionados.length > 0) {
@@ -562,25 +568,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 )}
               </div>
 
-              {/* Filtro de fecha: excluye pedidos viejos aún 'asignado' (la
-                  rendición se controla con rezago) al armar la ruta del día */}
+              {/* Filtro por fecha de pedido: acota el pool de pendientes/en
+                  preparación cuando se acumulan de varios días */}
               <div className="bg-white border rounded-lg p-4">
                 <label className="block text-sm font-medium mb-2 flex items-center gap-1.5">
                   <CalendarDays className="w-4 h-4 text-gray-500" />
-                  Filtrar pedidos por fecha
+                  Filtrar disponibles por fecha de pedido
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Criterio</label>
-                    <select
-                      value={filtroCriterio}
-                      onChange={(e: ChangeEvent<HTMLSelectElement>) => setFiltroCriterio(e.target.value as 'asignacion' | 'pedido')}
-                      className="w-full px-3 py-2 border rounded-lg text-sm"
-                    >
-                      <option value="asignacion">Fecha de asignación</option>
-                      <option value="pedido">Fecha del pedido (creación)</option>
-                    </select>
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Desde</label>
                     <input
@@ -622,11 +617,6 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                       Quitar filtro
                     </button>
                   )}
-                  {filtroActivo && transportistaSeleccionado && pedidosExcluidosPorFecha > 0 && (
-                    <span className="text-xs text-amber-700">
-                      {pedidosExcluidosPorFecha} pedido{pedidosExcluidosPorFecha !== 1 ? 's' : ''} del transportista quedan afuera por el filtro
-                    </span>
-                  )}
                 </div>
               </div>
 
@@ -640,22 +630,28 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   disabled={loading}
                 >
                   <option value="">Seleccionar transportista...</option>
-                  {transportistas.map(t => {
-                    const cantPedidos = pedidosFiltrados.filter(p =>
-                      p.transportista_id === t.id
-                    ).length;
-                    return (
-                      <option key={t.id} value={t.id}>
-                        {t.nombre} ({cantPedidos} pedidos asignados)
-                      </option>
-                    );
-                  })}
+                  {transportistas.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               {/* Info del transportista */}
               {transportistaSeleccionado && (
                 <>
+                  {/* Edición de ruta existente: aviso de que se modificará la armada */}
+                  {editando && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+                      <Pencil className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <p className="text-sm text-amber-800">
+                        Ya hay una ruta armada para <strong>{transportistaInfo?.nombre}</strong> el {formatFecha(fechaEntrega)}.
+                        Se editará esa misma ruta (agregá o quitá paradas y se reoptimiza al armar).
+                      </p>
+                    </div>
+                  )}
+
                   <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-4 text-white">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
@@ -664,7 +660,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         </div>
                         <div>
                           <h3 className="font-semibold text-lg">{transportistaInfo?.nombre}</h3>
-                          <p className="text-blue-100 text-sm">{pedidosTransportista.length} entregas asignadas</p>
+                          <p className="text-blue-100 text-sm">{pedidosSeleccionados.length} paradas seleccionadas</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -697,12 +693,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                     </div>
                   )}
 
-                  {/* Lista de pedidos: el admin elige cuáles entran en la ruta del día */}
-                  {pedidosTransportista.length > 0 && (
+                  {/* Lista de pedidos: el admin elige cuáles entran en la ruta del
+                      día. Incluye las paradas ya en ruta (pre-tildadas) y los
+                      pedidos disponibles (pendiente/en preparación) para sumar. */}
+                  {pedidosVisibles.length > 0 ? (
                     <div className="bg-white border rounded-lg">
                       <div className="p-3 border-b bg-gray-50 flex items-center justify-between">
                         <h3 className="font-medium text-gray-700">
-                          Pedidos del día ({pedidosSeleccionados.length}/{pedidosTransportista.length})
+                          Pedidos del día ({pedidosSeleccionados.length}/{pedidosVisibles.length})
                         </h3>
                         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                           <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} className="rounded" />
@@ -710,8 +708,9 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         </label>
                       </div>
                       <div className="max-h-60 overflow-y-auto divide-y">
-                        {pedidosTransportista.map((pedido) => {
+                        {pedidosVisibles.map((pedido) => {
                           const checked = seleccionados.has(pedido.id);
+                          const enRuta = idsExistentes.has(pedido.id);
                           return (
                             <label
                               key={pedido.id}
@@ -724,14 +723,16 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                 className="rounded mr-3"
                               />
                               <div className="flex-1 min-w-0">
-                                <p className="font-medium text-gray-900 truncate">
+                                <p className="font-medium text-gray-900 truncate flex items-center gap-2">
                                   #{pedido.id} - {pedido.cliente?.nombre_fantasia}
+                                  {enRuta && (
+                                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-100 text-green-700 border border-green-200">
+                                      en la ruta
+                                    </span>
+                                  )}
                                 </p>
                                 <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
-                                <p className="text-xs text-gray-400">
-                                  Pedido: {pedido.fecha || '—'}
-                                  {pedido.fecha_asignacion ? ` · Asignado: ${pedido.fecha_asignacion}` : ''}
-                                </p>
+                                <p className="text-xs text-gray-400">Pedido: {pedido.fecha || '—'}</p>
                               </div>
                               <div className="text-right ml-2">
                                 <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>
@@ -745,6 +746,12 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           );
                         })}
                       </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
+                      <Package className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                      <p>No hay pedidos disponibles para armar la ruta</p>
+                      <p className="text-xs mt-1">Se listan pedidos pendientes o en preparación (y las paradas ya en ruta).</p>
                     </div>
                   )}
                 </>

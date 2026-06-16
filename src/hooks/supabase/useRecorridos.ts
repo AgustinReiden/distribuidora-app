@@ -96,6 +96,10 @@ export function useRecorridos(): UseRecorridosReturnExtended {
         .from('recorridos')
         .select(RECORRIDO_SELECT)
         .eq('fecha', fecha)
+        // Ocultar canceladas: con la edición in-place (mig 088) ya no se generan,
+        // pero pueden existir históricas del flujo viejo (cancelar + recrear) y
+        // confundían al mostrar dos rutas del mismo transportista el mismo día.
+        .neq('estado', 'cancelado')
         .order('created_at', { ascending: false })
 
       const { data, error } = await fetchConTimeout(query, 8000)

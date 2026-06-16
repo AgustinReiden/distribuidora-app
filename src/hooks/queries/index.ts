@@ -164,6 +164,20 @@ export {
 } from './useRecorridoActivoQuery'
 export type { RecorridoActivo } from './useRecorridoActivoQuery'
 
+// Recorrido vigente de un transportista+fecha (para editar la ruta del día)
+export {
+  recorridoExistenteKeys,
+  useRecorridoExistenteQuery,
+} from './useRecorridoExistenteQuery'
+export type { RecorridoExistente } from './useRecorridoExistenteQuery'
+
+// Recorridos de una fecha con paradas completas (para re-descargar la hoja de ruta)
+export {
+  recorridosHojaRutaKeys,
+  useRecorridosHojaRutaQuery,
+} from './useRecorridosHojaRutaQuery'
+export type { RecorridoHojaRuta } from './useRecorridosHojaRutaQuery'
+
 // Sucursales (el flujo viejo de transferencias fue reemplazado por movimientos)
 export {
   sucursalesKeys,

@@ -22,7 +22,6 @@ export interface VirtualizedListHandlers {
   onEditarPedido?: (pedido: PedidoDB) => void
   onMarcarEnPreparacion?: (pedido: PedidoDB) => void
   onVolverAPendiente?: (pedido: PedidoDB) => void
-  onAsignarTransportista?: (pedido: PedidoDB) => void
   onMarcarEntregado?: (pedido: PedidoDB) => void
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void
   onDesmarcarEntregado?: (pedido: PedidoDB) => void

@@ -22,7 +22,7 @@
  */
 import React from 'react';
 import {
-  Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown, Truck,
+  Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown,
   MapPin, History, Boxes, Download, type LucideIcon,
 } from 'lucide-react';
 import {
@@ -47,7 +47,6 @@ export interface PedidoToolbarProps {
   onExportarExcel: (modo: 'pagina' | 'filtro') => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
-  onAsignarTransportistaMasivo?: () => void;
   onMarcarVisita?: () => void;
   onVerVisitasHoy?: () => void;
 }
@@ -183,7 +182,6 @@ export default function PedidoToolbar({
   onExportarExcel,
   onEntregasMasivas,
   onPagosMasivos,
-  onAsignarTransportistaMasivo,
   onMarcarVisita,
   onVerVisitasHoy,
 }: PedidoToolbarProps): React.ReactElement {
@@ -193,7 +191,7 @@ export default function PedidoToolbar({
 
   // ¿Hay al menos una acción masiva habilitada? (para mostrar el dropdown)
   const hasMasivas = Boolean(
-    onAsignarTransportistaMasivo || onPagosMasivos || onEntregasMasivas,
+    onPagosMasivos || onEntregasMasivas,
   );
 
   // Dropdowns "Acciones masivas" y "Exportaciones" — reusados en ambos layouts.
@@ -204,12 +202,6 @@ export default function PedidoToolbar({
       mobileLabel="Masivas"
     >
       <DropdownMenuLabel>Acciones masivas</DropdownMenuLabel>
-      {onAsignarTransportistaMasivo && (
-        <DropdownMenuItem onSelect={onAsignarTransportistaMasivo}>
-          <Truck className="w-4 h-4 text-blue-600" />
-          <span>Asignar Transportista</span>
-        </DropdownMenuItem>
-      )}
       {onPagosMasivos && (
         <DropdownMenuItem onSelect={onPagosMasivos}>
           <Banknote className="w-4 h-4 text-green-600" />

@@ -49,7 +49,6 @@ import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 const VistaPedidos = lazy(() => import('../vistas/VistaPedidos'))
 const ModalPedido = lazy(() => import('../modals/ModalPedido'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
-const ModalAsignarTransportista = lazy(() => import('../modals/ModalAsignarTransportista'))
 const ModalHistorialPedido = lazy(() => import('../modals/ModalHistorialPedido'))
 const ModalEditarPedido = lazy(() => import('../modals/ModalEditarPedido'))
 const ModalPagoPedido = lazy(() => import('../modals/ModalPagoPedido'))
@@ -61,7 +60,6 @@ const ModalEntregaConSalvedad = lazy(() => import('../modals/ModalEntregaConSalv
 const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas'))
 const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
 const ModalPagosMasivos = lazy(() => import('../modals/ModalPagosMasivos'))
-const ModalAsignarTransportistaMasivo = lazy(() => import('../modals/ModalAsignarTransportistaMasivo'))
 const ModalMarcarVisita = lazy(() => import('../modals/ModalMarcarVisita'))
 const ModalVisitasHoy = lazy(() => import('../modals/ModalVisitasHoy'))
 const ModalMotivoSinGps = lazy(() => import('../modals/ModalMotivoSinGps'))
@@ -167,7 +165,6 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Modal state
   const [modalPedidoOpen, setModalPedidoOpen] = useState(false)
-  const [modalAsignarOpen, setModalAsignarOpen] = useState(false)
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
   const [modalEditarOpen, setModalEditarOpen] = useState(false)
   const [modalFiltroFechaOpen, setModalFiltroFechaOpen] = useState(false)
@@ -177,7 +174,6 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalEntregasMasivasOpen, setModalEntregasMasivasOpen] = useState(false)
   const [modalCancelarOpen, setModalCancelarOpen] = useState(false)
   const [modalPagosMasivosOpen, setModalPagosMasivosOpen] = useState(false)
-  const [modalAsignarMasivoOpen, setModalAsignarMasivoOpen] = useState(false)
   const [modalNotasOpen, setModalNotasOpen] = useState(false)
   const [modalPagoPedidoOpen, setModalPagoPedidoOpen] = useState(false)
   const [modalMarcarVisitaOpen, setModalMarcarVisitaOpen] = useState(false)
@@ -185,15 +181,14 @@ export default function PedidosContainer(): React.ReactElement {
   const [pedidoPago, setPedidoPago] = useState<PedidoDB | null>(null)
   const [pagosPreviosPedido, setPagosPreviosPedido] = useState<PagoDBWithUsuario[]>([])
 
-  // Pedidos para el modal de gestión de rutas: TODOS los 'asignado' de la
-  // sucursal, sin paginar. La lista paginada de la vista (15 por página)
-  // dejaba afuera pedidos del transportista al optimizar la ruta.
+  // Pool de pedidos para el modal de gestión de rutas: TODOS los pendiente /
+  // en_preparacion de la sucursal, sin paginar (la lista paginada de 15 dejaba
+  // pedidos afuera). El armado de ruta los asigna + marca "en camino".
   const { data: pedidosParaRuta = [], isLoading: loadingPedidosRuta } = usePedidosAsignadosQuery(modalOptimizarRutaOpen)
   const [loadingPagosPrevios, setLoadingPagosPrevios] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // Pedido-specific state for modals
-  const [pedidoAsignando, setPedidoAsignando] = useState<PedidoDB | null>(null)
   const [pedidoHistorial, setPedidoHistorial] = useState<PedidoDB | null>(null)
   const [historialCambios, setHistorialCambios] = useState<unknown[]>([])
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
@@ -211,7 +206,6 @@ export default function PedidosContainer(): React.ReactElement {
   // invalidan con queryClient.invalidateQueries).
   useResetOnSucursalChange(() => {
     setModalPedidoOpen(false)
-    setModalAsignarOpen(false)
     setModalHistorialOpen(false)
     setModalEditarOpen(false)
     setModalFiltroFechaOpen(false)
@@ -221,13 +215,11 @@ export default function PedidosContainer(): React.ReactElement {
     setModalEntregasMasivasOpen(false)
     setModalCancelarOpen(false)
     setModalPagosMasivosOpen(false)
-    setModalAsignarMasivoOpen(false)
     setModalNotasOpen(false)
     setModalPagoPedidoOpen(false)
     setModalMarcarVisitaOpen(false)
     setModalVisitasHoyOpen(false)
     setPedidoPago(null)
-    setPedidoAsignando(null)
     setPedidoHistorial(null)
     setPedidoEditando(null)
     setPedidoParaSalvedad(null)
@@ -373,11 +365,6 @@ export default function PedidosContainer(): React.ReactElement {
     })
   }, [cambiarEstado, asignarTransportistaMut, notify])
 
-  const handleAsignarTransportista = useCallback((pedido: PedidoDB) => {
-    setPedidoAsignando(pedido)
-    setModalAsignarOpen(true)
-  }, [])
-
   const handleVerHistorial = useCallback(async (pedido: PedidoDB) => {
     setPedidoHistorial(pedido)
     setModalHistorialOpen(true)
@@ -459,21 +446,6 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [pagosMasivos, notify])
-
-  const handleAsignarTransportistaMasivo = useCallback(async (transportistaId: string, pedidoIds: string[], marcarListo: boolean) => {
-    setGuardando(true)
-    try {
-      for (const pedidoId of pedidoIds) {
-        await asignarTransportistaMut.mutateAsync({ pedidoId, transportistaId })
-        if (marcarListo) {
-          await cambiarEstado.mutateAsync({ pedidoId, nuevoEstado: 'asignado' })
-        }
-      }
-      setModalAsignarMasivoOpen(false)
-      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} asignado${pedidoIds.length !== 1 ? 's' : ''} al transportista`)
-    } catch (e) { notify.error('Error al asignar transportista: ' + (e as Error).message) }
-    setGuardando(false)
-  }, [asignarTransportistaMut, cambiarEstado, notify])
 
   // Fetch todos los pedidos con filtros actuales (sin paginación) para export
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
@@ -606,22 +578,6 @@ export default function PedidosContainer(): React.ReactElement {
   // =========================================================================
   // Modal-specific handlers
   // =========================================================================
-
-  // ModalAsignarTransportista: onSave(transportistaId, marcarListo)
-  const handleConfirmarAsignar = useCallback(async (transportistaId: string, marcarListo: boolean) => {
-    if (!pedidoAsignando) return
-    setGuardando(true)
-    try {
-      await asignarTransportistaMut.mutateAsync({ pedidoId: pedidoAsignando.id, transportistaId: transportistaId || null })
-      if (marcarListo && transportistaId) {
-        await cambiarEstado.mutateAsync({ pedidoId: pedidoAsignando.id, nuevoEstado: 'asignado' })
-      }
-      setModalAsignarOpen(false)
-      setPedidoAsignando(null)
-      notify.success(transportistaId ? 'Transportista asignado' : 'Transportista desasignado')
-    } catch (e) { notify.error((e as Error).message) }
-    setGuardando(false)
-  }, [pedidoAsignando, asignarTransportistaMut, cambiarEstado, notify])
 
   // ModalEditarPedido: onSave({ notas, fecha?, fechaEntrega?, fechaEntregaProgramada? })
   // Pago se gestiona desde ModalRegistrarPago (separate flow).
@@ -1028,10 +984,14 @@ export default function PedidosContainer(): React.ReactElement {
       })
       if (error) throw error
 
-      // Refresca lista paginada, asignados, recorridos y la ruta del transportista
+      // Refresca lista paginada + pool rutable (prefijo 'pedidos'), recorridos,
+      // la ruta del transportista, la ruta existente (para re-editar) y el
+      // resumen para re-descargar la hoja de ruta.
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       // No cerramos el modal: queda en la vista de resultado (confirmación +
       // export PDF). El admin cierra con "Cerrar" (que limpia la ruta).
       notify.success('Ruta del día armada y guardada')
@@ -1041,33 +1001,11 @@ export default function PedidosContainer(): React.ReactElement {
 
   const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null; fecha: string }) => {
     if (!data.ordenOptimizado?.length || !data.transportistaId) return
-    // Si ya hay un recorrido vigente para ESA fecha y transportista, confirmar
-    // el reemplazo (el anterior queda como 'cancelado' a modo de historial).
-    const { data: vigente } = await supabase
-      .from('recorridos')
-      .select('id')
-      .eq('transportista_id', data.transportistaId)
-      .eq('fecha', data.fecha)
-      .eq('estado', 'en_curso')
-      .limit(1)
-      .maybeSingle()
-
-    if (vigente) {
-      const transportista = transportistas.find(t => t.id === data.transportistaId)
-      setConfirmConfig({
-        visible: true,
-        tipo: 'warning',
-        titulo: 'Reemplazar ruta del día',
-        mensaje: `Ya hay una ruta armada para ${transportista?.nombre || 'este transportista'} ese día. Se reemplazará por la nueva (la anterior queda en el historial como cancelada).`,
-        onConfirm: () => {
-          setConfirmConfig({ visible: false })
-          aplicarOrden(data)
-        },
-      })
-      return
-    }
+    // Sin confirm de reemplazo: si ya hay una ruta para ese transportista+fecha,
+    // el modal la cargó pre-tildada y el RPC (mig 088) la edita in-place (no
+    // duplica). Armar = guardar las modificaciones sobre esa misma ruta.
     await aplicarOrden(data)
-  }, [aplicarOrden, transportistas])
+  }, [aplicarOrden])
 
   // Armar ruta del día: optimiza los pedidos seleccionados y los guarda en un
   // solo paso (sin botón "optimizar" separado). Las polylines del resultado se
@@ -1250,14 +1188,12 @@ export default function PedidosContainer(): React.ReactElement {
           onEditarNotas={handleEditarNotas}
           onMarcarEnPreparacion={handleMarcarEnPreparacion}
           onVolverAPendiente={handleVolverAPendiente}
-          onAsignarTransportista={handleAsignarTransportista}
           onMarcarEntregado={handleMarcarEntregado}
           onMarcarEntregadoConSalvedad={handleMarcarEntregadoConSalvedad}
           onDesmarcarEntregado={handleDesmarcarEntregado}
           onCancelarPedido={handleCancelarPedido}
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
-          onAsignarTransportistaMasivo={() => setModalAsignarMasivoOpen(true)}
           onMarcarVisita={() => setModalMarcarVisitaOpen(true)}
           onVerVisitasHoy={() => setModalVisitasHoyOpen(true)}
           onRegistrarSalvedad={handleRegistrarSalvedadSingle}
@@ -1352,18 +1288,6 @@ export default function PedidosContainer(): React.ReactElement {
         </Suspense>
       )}
 
-      {/* Modal Asignar Transportista */}
-      {modalAsignarOpen && pedidoAsignando && (
-        <Suspense fallback={null}>
-          <ModalAsignarTransportista
-            pedido={pedidoAsignando}
-            transportistas={transportistas}
-            onSave={handleConfirmarAsignar}
-            onClose={() => { setModalAsignarOpen(false); setPedidoAsignando(null) }}
-            guardando={guardando}
-          />
-        </Suspense>
-      )}
 
       {/* Modal Historial Pedido */}
       {modalHistorialOpen && pedidoHistorial && (
@@ -1508,17 +1432,6 @@ export default function PedidosContainer(): React.ReactElement {
         </Suspense>
       )}
 
-      {/* Modal Asignar Transportista Masivo */}
-      {modalAsignarMasivoOpen && (
-        <Suspense fallback={null}>
-          <ModalAsignarTransportistaMasivo
-            transportistas={transportistas}
-            onConfirm={handleAsignarTransportistaMasivo}
-            onClose={() => setModalAsignarMasivoOpen(false)}
-            guardando={guardando}
-          />
-        </Suspense>
-      )}
 
       {/* Modal Cancelar Pedido */}
       {modalCancelarOpen && pedidoCancelando && (

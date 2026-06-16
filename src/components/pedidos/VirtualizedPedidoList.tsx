@@ -45,7 +45,6 @@ export interface VirtualizedPedidoListProps {
   onEditarPedido?: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
   onVolverAPendiente?: (pedido: PedidoDB) => void;
-  onAsignarTransportista?: (pedido: PedidoDB) => void;
   onMarcarEntregado?: (pedido: PedidoDB) => void;
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
@@ -98,7 +97,6 @@ const PedidoRow = memo(function PedidoRow({ index, style, ariaAttributes }: Pedi
           onEditarPedido={handlers?.onEditarPedido}
           onMarcarEnPreparacion={handlers?.onMarcarEnPreparacion}
           onVolverAPendiente={handlers?.onVolverAPendiente}
-          onAsignarTransportista={handlers?.onAsignarTransportista}
           onMarcarEntregado={handlers?.onMarcarEntregado}
           onMarcarEntregadoConSalvedad={handlers?.onMarcarEntregadoConSalvedad}
           onDesmarcarEntregado={handlers?.onDesmarcarEntregado}
@@ -184,7 +182,6 @@ function VirtualizedPedidoList({
   onEditarPedido,
   onMarcarEnPreparacion,
   onVolverAPendiente,
-  onAsignarTransportista,
   onMarcarEntregado,
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
@@ -223,13 +220,12 @@ function VirtualizedPedidoList({
     onEditarPedido,
     onMarcarEnPreparacion,
     onVolverAPendiente,
-    onAsignarTransportista,
     onMarcarEntregado,
     onMarcarEntregadoConSalvedad,
     onDesmarcarEntregado,
     onCancelarPedido,
     onRegistrarPago
-  }), [onVerHistorial, onEditarPedido, onMarcarEnPreparacion, onVolverAPendiente, onAsignarTransportista, onMarcarEntregado, onMarcarEntregadoConSalvedad, onDesmarcarEntregado, onCancelarPedido, onRegistrarPago])
+  }), [onVerHistorial, onEditarPedido, onMarcarEnPreparacion, onVolverAPendiente, onMarcarEntregado, onMarcarEntregadoConSalvedad, onDesmarcarEntregado, onCancelarPedido, onRegistrarPago])
 
   // Preparar permisos para el Context (memoizados)
   const permissions = useMemo<VirtualizedListPermissions>(() => ({

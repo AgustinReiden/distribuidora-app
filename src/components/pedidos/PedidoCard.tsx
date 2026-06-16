@@ -46,7 +46,6 @@ export interface PedidoCardProps {
   onEditarNotas?: (pedido: PedidoDB) => void;
   onMarcarEnPreparacion?: (pedido: PedidoDB) => void;
   onVolverAPendiente?: (pedido: PedidoDB) => void;
-  onAsignarTransportista?: (pedido: PedidoDB) => void;
   onMarcarEntregado?: (pedido: PedidoDB) => void;
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
@@ -217,7 +216,6 @@ function PedidoCard({
   onEditarNotas,
   onMarcarEnPreparacion,
   onVolverAPendiente,
-  onAsignarTransportista,
   onMarcarEntregado,
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
@@ -328,7 +326,6 @@ function PedidoCard({
             onEditarNotas={onEditarNotas}
             onPreparar={handleMarcarEnPreparacion}
             onVolverAPendiente={handleVolverAPendiente}
-            onAsignar={onAsignarTransportista}
             onEntregado={handleMarcarEntregado}
             onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
             onRevertir={handleDesmarcarEntregado}
@@ -353,7 +350,6 @@ function PedidoCard({
             onEditarNotas={onEditarNotas}
             onPreparar={handleMarcarEnPreparacion}
             onVolverAPendiente={handleVolverAPendiente}
-            onAsignar={onAsignarTransportista}
             onEntregado={handleMarcarEntregado}
             onEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
             onRevertir={handleDesmarcarEntregado}
