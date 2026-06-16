@@ -12,7 +12,7 @@
  * (useEntregaParada). Diseño: docs/plans/2026-06-12-ruta-activa-design.md
  */
 import React, { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
-import { Crosshair, WifiOff, Truck, Volume2, VolumeX } from 'lucide-react';
+import { Crosshair, WifiOff, Truck, Volume2, VolumeX, LocateFixed } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { haversineMeters } from '../../utils/geo';
 import { useAuthData } from '../../contexts/AuthDataContext';
@@ -60,6 +60,10 @@ export default function RutaActivaTransportista({
   // Guía giro-a-giro in-app: convive con el mapa y el sheet (no es overlay).
   const [guiando, setGuiando] = useState(false);
   const [vozOn, setVozOn] = useState(true);
+  // Cámara de guía: se pausa cuando el chofer mueve el mapa a mano (estilo Maps);
+  // el botón "centrar" la reactiva (+ bump del nonce para re-centrar).
+  const [camaraSeguir, setCamaraSeguir] = useState(true);
+  const [recenterNonce, setRecenterNonce] = useState(0);
   const voz = useNavegacionVoz();
   const wakeLock = useWakeLock();
   // Guiando: GPS más frecuente para seguir suave; si no, ahorro de batería.
@@ -202,6 +206,7 @@ export default function RutaActivaTransportista({
     }
     wakeLock.solicitar();
     setSeguirPosicion(true);
+    setCamaraSeguir(true);
     setGuiando(true);
   }, [voz, wakeLock]);
 
@@ -210,6 +215,14 @@ export default function RutaActivaTransportista({
     voz.callar();
     setGuiando(false);
   }, [wakeLock, voz]);
+
+  // El chofer movió el mapa a mano → pausar el seguimiento de la cámara.
+  const handleArrastreMapa = useCallback((): void => setCamaraSeguir(false), []);
+  // Botón "centrar": volver a seguir y re-centrar en la posición/rumbo actuales.
+  const recentrarMapa = useCallback((): void => {
+    setCamaraSeguir(true);
+    setRecenterNonce(n => n + 1);
+  }, []);
 
   const toggleGuia = useCallback((): void => {
     if (guiando) pararGuia(); else iniciarGuia();
@@ -263,6 +276,10 @@ export default function RutaActivaTransportista({
           modoGuia={guiando}
           // Tramo activo resaltado sobre la ruta del día (modo guía).
           rutaTramo={guiando && guia.rutaTramo.length > 1 ? guia.rutaTramo : null}
+          // Pausa/recentrado de la cámara estilo Maps.
+          camaraActiva={camaraSeguir}
+          recenterNonce={recenterNonce}
+          onArrastreUsuario={handleArrastreMapa}
         />
       </Suspense>
 
@@ -321,6 +338,18 @@ export default function RutaActivaTransportista({
           <WifiOff className="h-4 w-4 flex-shrink-0" aria-hidden />
           <p className="text-sm font-medium">Sin conexión — las entregas no se están guardando</p>
         </div>
+      )}
+
+      {/* Botón "centrar" estilo Maps: aparece al guiar cuando el chofer movió el
+          mapa a mano; lo vuelve a centrar y reactiva el seguimiento. */}
+      {guiando && !camaraSeguir && (
+        <button
+          onClick={recentrarMapa}
+          className="fixed right-4 bottom-[calc(7rem+env(safe-area-inset-bottom))] z-30 flex h-12 w-12 items-center justify-center rounded-full bg-white text-blue-600 shadow-lg ring-1 ring-black/10 active:bg-gray-100 dark:bg-gray-800 dark:text-blue-400"
+          aria-label="Centrar el mapa en mi posición"
+        >
+          <LocateFixed className="h-6 w-6" />
+        </button>
       )}
 
       {/* Bottom sheet con la parada activa */}

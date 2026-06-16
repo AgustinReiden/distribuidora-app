@@ -63,6 +63,9 @@ export default function MapaRutaGoogle({
   rutaReal = null,
   rutaTramo = null,
   modoGuia = false,
+  camaraActiva = true,
+  recenterNonce = 0,
+  onArrastreUsuario,
 }: MapaRutaProps): React.ReactElement {
   const { isLoaded, isLoading, error } = useGoogleMaps();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -84,6 +87,7 @@ export default function MapaRutaGoogle({
   const headingRef = useRef<number>(0);
   const prevPosRef = useRef<{ lat: number; lng: number } | null>(null);
   const animarRef = useRef<() => void>(() => {});
+  const recenterAplicadoRef = useRef<number>(-1);
   const [mapReady, setMapReady] = useState(false);
 
   // 1) Inicializar el mapa una sola vez.
@@ -236,6 +240,8 @@ export default function MapaRutaGoogle({
     if (!mapReady || !mapRef.current) return;
     // En modo guía vector, la cámara la maneja el rAF heading-up (efecto 4b).
     if (USAR_VECTOR && modoGuia) return;
+    // En guía (raster), si el chofer movió el mapa a mano, no re-centramos.
+    if (modoGuia && !camaraActiva) return;
     const map = mapRef.current;
     if (seguirPosicion && posicion) {
       map.panTo({ lat: posicion.lat, lng: posicion.lng });
@@ -251,7 +257,7 @@ export default function MapaRutaGoogle({
       const activa = paradas.find(p => p.orden === paradaActivaOrden);
       if (activa) map.panTo({ lat: activa.lat, lng: activa.lng });
     }
-  }, [mapReady, seguirPosicion, zoomSeguir, posicion, paradaActivaOrden, paradas, modoGuia]);
+  }, [mapReady, seguirPosicion, zoomSeguir, posicion, paradaActivaOrden, paradas, modoGuia, camaraActiva]);
 
   // 4a) Loop de animación de la cámara: interpola la cámara actual hacia el
   //     target en cada frame (rumbo por el camino más corto, sin spin en 0/360).
@@ -262,14 +268,16 @@ export default function MapaRutaGoogle({
       const tgt = camTargetRef.current;
       const map = mapRef.current;
       if (!cam || !tgt || !map) { rafRef.current = null; return; }
-      const k = 0.2;
+      // Easing por propiedad: el rumbo MÁS lento (rotación suave, no brusca);
+      // el centro un poco más ágil. Interpola por el camino más corto del ángulo.
+      const kH = 0.1, kC = 0.18, kT = 0.12;
       const dh = ((tgt.heading - cam.heading + 540) % 360) - 180;
-      cam.heading = (cam.heading + dh * k + 360) % 360;
-      cam.lat += (tgt.lat - cam.lat) * k;
-      cam.lng += (tgt.lng - cam.lng) * k;
-      cam.tilt += (tgt.tilt - cam.tilt) * k;
+      cam.heading = (cam.heading + dh * kH + 360) % 360;
+      cam.lat += (tgt.lat - cam.lat) * kC;
+      cam.lng += (tgt.lng - cam.lng) * kC;
+      cam.tilt += (tgt.tilt - cam.tilt) * kT;
       map.moveCamera({ center: { lat: cam.lat, lng: cam.lng }, heading: cam.heading, tilt: cam.tilt });
-      const convergio = Math.abs(dh) < 0.5
+      const convergio = Math.abs(dh) < 1
         && Math.abs(tgt.lat - cam.lat) < 1e-6
         && Math.abs(tgt.lng - cam.lng) < 1e-6
         && Math.abs(tgt.tilt - cam.tilt) < 0.5;
@@ -284,8 +292,8 @@ export default function MapaRutaGoogle({
     if (!mapReady || !mapRef.current) return;
     const map = mapRef.current;
 
-    if (!(USAR_VECTOR && modoGuia && posicion)) {
-      // Salir del modo cámara: frenar el loop y volver a norte-up plano.
+    // Guía terminada → frenar el loop y volver a norte-up plano.
+    if (!(USAR_VECTOR && modoGuia)) {
       if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
       if (camRef.current) {
         camRef.current = null;
@@ -293,6 +301,14 @@ export default function MapaRutaGoogle({
         prevPosRef.current = null;
         map.moveCamera({ heading: 0, tilt: 0 });
       }
+      return;
+    }
+
+    // En guía pero el chofer movió el mapa a mano (camaraActiva=false) → no
+    // forzamos nada: lo dejamos donde lo puso (sin pelearle el giro). El botón
+    // "centrar" reactiva con un bump de recenterNonce.
+    if (!camaraActiva || !posicion) {
+      if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
       return;
     }
 
@@ -307,15 +323,33 @@ export default function MapaRutaGoogle({
     headingRef.current = heading;
     prevPosRef.current = pos;
 
-    if (!camRef.current) {
-      // Recién entramos en guía: ubicar la cámara de una y fijar el zoom cercano.
+    // (Re)centrar de una al entrar en guía o al tocar "centrar" (recenterNonce).
+    const necesitaSnap = !camRef.current || recenterAplicadoRef.current !== recenterNonce;
+    if (necesitaSnap) {
+      recenterAplicadoRef.current = recenterNonce;
       camRef.current = { lat: pos.lat, lng: pos.lng, heading, tilt: TILT_GUIA };
       map.setZoom(zoomSeguir ?? 17);
       map.moveCamera({ center: pos, heading, tilt: TILT_GUIA });
     }
     camTargetRef.current = { lat: pos.lat, lng: pos.lng, heading, tilt: TILT_GUIA };
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(animarRef.current);
-  }, [mapReady, modoGuia, posicion, zoomSeguir]);
+  }, [mapReady, modoGuia, camaraActiva, posicion, zoomSeguir, recenterNonce]);
+
+  // 4c) Detectar cuando el chofer mueve el mapa a mano (pan o gesto de 2 dedos
+  //     para rotar/zoomear) → avisar al contenedor para pausar el seguimiento.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !onArrastreUsuario) return;
+    const map = mapRef.current;
+    const cont = containerRef.current;
+    const avisar = (): void => onArrastreUsuario();
+    const lisDrag = map.addListener('dragstart', avisar);
+    const onTouch = (e: TouchEvent): void => { if (e.touches.length >= 2) onArrastreUsuario(); };
+    cont?.addEventListener('touchstart', onTouch, { passive: true });
+    return () => {
+      lisDrag.remove();
+      cont?.removeEventListener('touchstart', onTouch);
+    };
+  }, [mapReady, onArrastreUsuario]);
 
   // 5) Tramo de navegación activo: polyline resaltada (cyan, gruesa) por encima
   //    de la ruta del día. Solo en modo guía (cuando viene rutaTramo).
