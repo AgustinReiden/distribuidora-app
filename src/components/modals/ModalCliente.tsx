@@ -293,12 +293,9 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   // --- Horarios de atención y entrega (filas con rangos HH:MM) ---
   // `franjasAtencion` es la fuente de verdad del editor; se inicializa de la
   // conversión calculada arriba y se espeja al string del form al editar.
-  const [franjasAtencion, setFranjasAtencion] = useState<FranjaHoraria[]>(convAtencionInicial.franjas);
-  // Texto libre de atención: para horarios que no entran en franjas (24 hs, por
-  // día de semana, cierres pasada la medianoche). Se prellena con el valor viejo
-  // que no se pudo convertir, para no perderlo y dejarlo editable.
-  const [notaLibreAtencion, setNotaLibreAtencion] = useState<string>(
-    convAtencionInicial.franjas.length === 0 ? (cliente?.horarios_atencion ?? '') : '',
+  // Por defecto el editor arranca con una fila vacía lista para cargar.
+  const [franjasAtencion, setFranjasAtencion] = useState<FranjaHoraria[]>(
+    convAtencionInicial.franjas.length > 0 ? convAtencionInicial.franjas : [{ apertura: '', cierre: '' }],
   );
   const [franjaEntrega, setFranjaEntrega] = useState<FranjaHoraria>(
     convEntregaInicial.franjas[0] ?? { apertura: '', cierre: '' },
@@ -307,20 +304,15 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const opcionesCierre = useMemo(() => generarOpcionesHora(true), []);
   const validacionAtencion = useMemo(() => validarFranjas(franjasAtencion), [franjasAtencion]);
 
-  // El horario de atención se guarda como franjas estructuradas si hay alguna
-  // completa; si no, como el texto libre. Las franjas tienen prioridad.
-  const combinarHorariosAtencion = (filas: FranjaHoraria[], nota: string): string =>
-    serializarFranjas(filas) || nota.trim();
-  // Si hay al menos una franja completa, el texto libre se ignora (las franjas
-  // tienen prioridad) y se deshabilita su input.
-  const usandoFranjasAtencion = serializarFranjas(franjasAtencion) !== '';
+  // Valor original (texto libre legacy) que no se pudo convertir a franjas: si el
+  // usuario no carga franjas estructuradas se conserva tal cual para no perder el
+  // dato (en prod la mayoría de los horarios viejos son texto libre no convertible).
+  const horarioOriginalAtencion = convAtencionInicial.franjas.length === 0
+    ? (cliente?.horarios_atencion ?? '')
+    : '';
   const sincronizarAtencion = (filas: FranjaHoraria[]): void => {
     setFranjasAtencion(filas);
-    setForm(prev => ({ ...prev, horarios_atencion: combinarHorariosAtencion(filas, notaLibreAtencion) }));
-  };
-  const cambiarNotaLibreAtencion = (nota: string): void => {
-    setNotaLibreAtencion(nota);
-    setForm(prev => ({ ...prev, horarios_atencion: combinarHorariosAtencion(franjasAtencion, nota) }));
+    setForm(prev => ({ ...prev, horarios_atencion: serializarFranjas(filas) || horarioOriginalAtencion }));
   };
   const agregarFranjaAtencion = (): void =>
     sincronizarAtencion([...franjasAtencion, { apertura: '', cierre: '' }]);
@@ -834,30 +826,6 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               Convertimos tus horarios anteriores a rangos. Revisá y guardá para confirmar.
             </p>
           )}
-
-          {/* Texto libre: para horarios que no entran en franjas (24 hs, por día
-              de semana, cierres pasada la medianoche). Se prellena con el valor
-              viejo no convertible para no perderlo y dejarlo editable. Si hay
-              franjas completas, esas tienen prioridad y este campo se deshabilita. */}
-          <div className="mt-3">
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-              ¿No entra en franjas? Describilo en texto libre (ej: "24 hs", "Lun a Sáb de 9 a 14 y 17 a 21")
-            </label>
-            <input
-              type="text"
-              value={notaLibreAtencion}
-              onChange={e => cambiarNotaLibreAtencion(e.target.value)}
-              disabled={usandoFranjasAtencion}
-              placeholder="Horario en texto libre (opcional)"
-              aria-label="Horario de atención en texto libre"
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            />
-            {usandoFranjasAtencion && (
-              <p className="text-xs text-gray-400 mt-1">
-                Se usan las franjas de arriba. Quitalas si querés volver al texto libre.
-              </p>
-            )}
-          </div>
         </div>
 
         {/* Horario de entrega (franja en la que el cliente pide recibir el pedido) */}
