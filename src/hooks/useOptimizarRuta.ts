@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { supabase } from './supabase/base';
+import { parsearFranjas } from '../utils/horariosCliente';
 import type { PedidoDB, ClienteDB } from '../types';
 
 // ============================================================================
@@ -45,6 +46,13 @@ export interface RutaOptimizadaResponse {
   error?: string;
 }
 
+/** Ventana horaria de entrega de un pedido, derivada de cliente.horario_entrega. */
+export interface VentanaPedido {
+  pedido_id: string;
+  inicio: string; // "HH:MM"
+  fin: string;    // "HH:MM" (puede ser "24:00")
+}
+
 export interface OptimizarRutaRequestBody {
   transportista_id: string;
   deposito_lat: number;
@@ -53,6 +61,12 @@ export interface OptimizarRutaRequestBody {
   destino_lat?: number | null;
   destino_lng?: number | null;
   pedidos: PedidoParaOptimizar[];
+  /** Fecha de entrega "YYYY-MM-DD" + hora de inicio "HH:MM": ancla temporal para
+   *  respetar ventanas horarias (solo optimizeTours; el fallback las ignora). */
+  fecha?: string;
+  hora_inicio?: string;
+  /** Ventanas por pedido (de horario_entrega). Solo se respetan con optimizeTours. */
+  ventanas?: VentanaPedido[];
   google_api_key?: string;
 }
 
@@ -60,7 +74,7 @@ export interface UseOptimizarRutaReturn {
   loading: boolean;
   rutaOptimizada: RutaOptimizadaResponse | null;
   error: string | null;
-  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null) => Promise<RutaOptimizadaResponse | null>;
+  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: { fecha?: string; horaInicio?: string }) => Promise<RutaOptimizadaResponse | null>;
   limpiarRuta: () => void;
 }
 
@@ -144,18 +158,22 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
     transportistaId: string,
     pedidos: PedidoDB[] = [],
     deposito?: DepositoCoords,
-    destino?: DepositoCoords | null
+    destino?: DepositoCoords | null,
+    opts?: { fecha?: string; horaInicio?: string }
   ): Promise<RutaOptimizadaResponse | null> => {
     if (!transportistaId) {
       setError('Debes seleccionar un transportista');
       return null;
     }
 
-    // Filtrar pedidos del transportista que tengan coordenadas
+    // El caller (modal de rutas) ya pasa los pedidos curados a rutear (pool
+    // pendiente/en_preparacion + paradas de la ruta a editar). Acá solo se exige
+    // que tengan coordenadas. NOTA: NO filtrar por estado/transportista — con la
+    // unificación (un solo "Armar ruta del día") los pedidos nuevos vienen sin
+    // transportista y en pendiente/en_preparacion; filtrar por 'asignado' los
+    // dejaba a todos afuera.
     const pedidosConCoordenadas: PedidoParaOptimizar[] = pedidos
       .filter((p): p is PedidoDB & { cliente: ClienteDB & { latitud: number; longitud: number } } =>
-        p.transportista_id === transportistaId &&
-        p.estado === 'asignado' &&
         p.cliente?.latitud != null &&
         p.cliente?.longitud != null
       )
@@ -167,6 +185,17 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
         latitud: p.cliente.latitud,
         longitud: p.cliente.longitud
       }));
+
+    // Ventanas horarias por pedido desde horario_entrega del cliente (1ª franja
+    // estructurada "HH:MM-HH:MM"). Solo las respeta optimizeTours; sin dato =
+    // pedido flexible (sin restricción).
+    const ventanas: VentanaPedido[] = [];
+    for (const p of pedidos) {
+      const fr = parsearFranjas(p.cliente?.horario_entrega)[0];
+      if (fr?.apertura && fr?.cierre) {
+        ventanas.push({ pedido_id: p.id, inicio: fr.apertura, fin: fr.cierre });
+      }
+    }
 
     if (pedidosConCoordenadas.length === 0) {
       const emptyResult: RutaOptimizadaResponse = {
@@ -192,7 +221,10 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       deposito_lng: dep.lng,
       destino_lat: destino?.lat ?? null,
       destino_lng: destino?.lng ?? null,
-      pedidos: pedidosConCoordenadas
+      pedidos: pedidosConCoordenadas,
+      fecha: opts?.fecha,
+      hora_inicio: opts?.horaInicio,
+      ventanas: ventanas.length > 0 ? ventanas : undefined
     };
 
     try {

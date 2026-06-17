@@ -46,6 +46,11 @@ interface RequestBody {
   destino_lat?: number | null;
   destino_lng?: number | null;
   pedidos?: Array<Partial<PedidoRuta> & { latitud?: number | null; longitud?: number | null }>;
+  /** Ancla temporal para respetar ventanas horarias (solo optimizeTours). */
+  fecha?: string; // "YYYY-MM-DD"
+  hora_inicio?: string; // "HH:MM"
+  /** Ventanas de entrega por pedido (derivadas de cliente.horario_entrega). */
+  ventanas?: Array<{ pedido_id: string | number; inicio: string; fin: string }>;
 }
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
@@ -209,14 +214,24 @@ serve(async (req: Request) => {
     });
   }
 
+  // Ventanas horarias: solo las respeta optimizeTours (el fallback computeRoutes
+  // no soporta time windows). ventanas_aplicadas avisa al front si se respetaron.
+  const tieneVentanas = !!(body.fecha && body.hora_inicio && body.ventanas && body.ventanas.length > 0);
+  let ventanasAplicadas = false;
+
   // Motor de optimización: Route Optimization (SA) con fallback a computeRoutes.
   let ruta: RutaUnida;
   let optimizadoPor: string;
   try {
     if (saKey) {
       try {
-        ruta = await optimizeTours(saKey, deposito, conCoords, destino);
+        ruta = await optimizeTours(saKey, deposito, conCoords, destino, {
+          fecha: body.fecha,
+          horaInicio: body.hora_inicio,
+          ventanas: body.ventanas,
+        });
         optimizadoPor = "Google Route Optimization";
+        ventanasAplicadas = tieneVentanas;
       } catch (err) {
         if (!apiKey) throw err;
         console.error("[optimizar-ruta] Route Optimization falló, usando computeRoutes:", err);
@@ -270,5 +285,6 @@ serve(async (req: Request) => {
     distancia_formato: `${distanciaTotalKm} km`,
     orden_optimizado: ordenOptimizado,
     polylines,
+    ventanas_aplicadas: ventanasAplicadas,
   });
 });

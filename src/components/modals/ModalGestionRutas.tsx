@@ -61,7 +61,7 @@ export interface ModalGestionRutasProps {
    * Arma la ruta del día: optimiza los pedidos seleccionados y la guarda en
    * un solo paso (el container encadena optimizar + aplicar_orden_ruta).
    */
-  onArmarRuta: (transportistaId: string, pedidos: PedidoDB[], fecha: string) => void;
+  onArmarRuta: (transportistaId: string, pedidos: PedidoDB[], fecha: string, horaInicio: string) => void;
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
   /** true mientras se optimiza/guarda la ruta del día */
@@ -188,6 +188,9 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // el default es mañana; se puede elegir de hoy en adelante.
   const hoyISO = fechaLocalISO();
   const [fechaEntrega, setFechaEntrega] = useState<string>(fechaHaceDias(-1));
+  // Hora a la que arranca el recorrido (sale del depósito). Ancla las ventanas
+  // horarias en la optimización para priorizar los horarios de entrega.
+  const [horaInicio, setHoraInicio] = useState<string>('08:00');
   // Filtro de fecha (por fecha de pedido) para acotar el pool de disponibles:
   // suelen acumularse pendientes/en preparación de varios días.
   const [filtroDesde, setFiltroDesde] = useState<string>('');
@@ -359,7 +362,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleArmar = (): void => {
     if (transportistaSeleccionado && pedidosSeleccionados.length > 0) {
       // Optimiza + guarda en un paso, solo con los pedidos seleccionados.
-      onArmarRuta(transportistaSeleccionado, pedidosSeleccionados, fechaEntrega);
+      onArmarRuta(transportistaSeleccionado, pedidosSeleccionados, fechaEntrega, horaInicio);
     }
   };
 
@@ -473,6 +476,21 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   </div>
                   <span className="text-xs text-blue-700">
                     El transportista la verá el {formatFecha(fechaEntrega)}.
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <label className="text-sm font-medium flex items-center gap-1.5 text-blue-900">
+                    <Clock className="w-4 h-4" />
+                    Hora de inicio del recorrido
+                  </label>
+                  <input
+                    type="time"
+                    value={horaInicio}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setHoraInicio(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <span className="text-xs text-blue-700">
+                    Hora a la que sale del depósito. Prioriza los horarios de entrega de los clientes.
                   </span>
                 </div>
               </div>
