@@ -359,7 +359,7 @@ function buildCierreOps(pedidos) {
  * Las botellas sueltas se listan en una fila aparte usando descripcion_regalo,
  * para que el chofer sepa que carga 1 fardo + N botellas individuales.
  */
-function buildManifiestoOps(pedidos) {
+function buildManifiestoOps(doc, pedidos) {
   const totalesCompras = {} // por producto_id (items vendidos)
   const totalesBonifFardos = {} // por producto_id (bonifs en unidades de venta / fardos)
   const totalesBonifSueltas = {} // por descripcion_regalo (botellas/paquetes sueltos)
@@ -454,20 +454,40 @@ function buildManifiestoOps(pedidos) {
   }
 
   const ops = []
+  // Ancho reservado para la cantidad (alineado con drawManifiestoOps). Los
+  // nombres se pre-cortan acá a líneas físicas (con doc) para que el manifiesto
+  // NO trunque nombres largos como "… (SUELTAS, NO FARDO)".
+  const cantidadWidth = 12
+  const pushLinea = (cantidad, nombre) => {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    const lineas = doc.splitTextToSize(nombre, CARD_CONTENT_WIDTH - cantidadWidth)
+    lineas.forEach((ln, i) => {
+      ops.push({
+        kind: 'manifiesto-line',
+        cantidad: i === 0 ? cantidad : '',
+        nombre: ln,
+        advance: i === 0 ? 4.5 : 4,
+      })
+    })
+  }
+  // Sueltos: "Nx botellas <producto>" — saca el conteo unitario del regalo
+  // ("1 Botella"/"2 Botellas") y deja la unidad en plural + el resto del nombre.
+  const nombreSuelta = (desc) => {
+    const m = /^\s*\d+\s+(\S+)\s+(.+)$/.exec(desc || '')
+    if (!m) return `${desc} (SUELTAS, NO FARDO)`
+    const unidad = m[1].toLowerCase()
+    const plural = unidad.endsWith('s') ? unidad : `${unidad}s`
+    return `${plural} ${m[2]} (SUELTAS, NO FARDO)`
+  }
+
   ops.push({ kind: 'manifiesto-title', text: 'MANIFIESTO DE CARGA', advance: 5.5 })
   ops.push({
     kind: 'manifiesto-subtitle',
     text: 'Total de productos a cargar en el vehiculo',
     advance: 5
   })
-  filasCompras.forEach((f) => {
-    ops.push({
-      kind: 'manifiesto-line',
-      cantidad: `${f.cantidad}x`,
-      nombre: lineaConAclaracion(f),
-      advance: 4.5
-    })
-  })
+  filasCompras.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
   if (filasBonifFardos.length > 0 || filasBonifSueltas.length > 0) {
     ops.push({ kind: 'spacer', advance: 1.5 })
     ops.push({
@@ -475,22 +495,8 @@ function buildManifiestoOps(pedidos) {
       text: 'PRODUCTOS BONIFICADOS (cargar aparte)',
       advance: 4.5
     })
-    filasBonifFardos.forEach((f) => {
-      ops.push({
-        kind: 'manifiesto-line',
-        cantidad: `${f.cantidad}x`,
-        nombre: lineaConAclaracion(f),
-        advance: 4.5
-      })
-    })
-    filasBonifSueltas.forEach((f) => {
-      ops.push({
-        kind: 'manifiesto-line',
-        cantidad: `${f.cantidad}x`,
-        nombre: `${f.nombre} (SUELTAS, NO FARDO)`,
-        advance: 4.5
-      })
-    })
+    filasBonifFardos.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
+    filasBonifSueltas.forEach((f) => pushLinea(`${f.cantidad}x`, nombreSuelta(f.nombre)))
   }
   ops.push({ kind: 'spacer', advance: 2 })
   ops.push({ kind: 'manifiesto-firma', advance: 5.5 })
@@ -563,18 +569,15 @@ function drawManifiestoOps(doc, ops, ctx) {
         break
       }
       case 'manifiesto-line': {
-        doc.setFont('helvetica', 'normal')
         doc.setFontSize(9)
         doc.setTextColor(0, 0, 0)
         const cantidadWidth = 12
         doc.setFont('helvetica', 'bold')
         doc.text(op.cantidad, innerX, y + 3)
         doc.setFont('helvetica', 'normal')
-        const nombreLineas = doc.splitTextToSize(
-          op.nombre,
-          CARD_CONTENT_WIDTH - cantidadWidth
-        )
-        doc.text(nombreLineas[0] || '', innerX + cantidadWidth, y + 3)
+        // op.nombre ya viene pre-cortado a una línea física en buildManifiestoOps,
+        // así que se dibuja completo (no se re-trunca a la primera línea).
+        doc.text(op.nombre || '', innerX + cantidadWidth, y + 3)
         break
       }
       case 'manifiesto-firma': {
@@ -682,7 +685,7 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
   // Manifiesto de carga: resumen consolidado de productos para el chofer.
   // La paginacion la maneja drawManifiestoOps fila-por-fila para que la lista
   // completa quede visible aunque exceda una columna o una hoja.
-  const manifiestoOps = buildManifiestoOps(pedidos)
+  const manifiestoOps = buildManifiestoOps(doc, pedidos)
   y += 3
 
   drawManifiestoOps(doc, manifiestoOps, {
