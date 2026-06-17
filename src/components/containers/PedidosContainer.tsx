@@ -375,7 +375,27 @@ export default function PedidosContainer(): React.ReactElement {
         .from('pedido_historial').select('*')
         .eq('pedido_id', pedido.id)
         .order('created_at', { ascending: false })
-      setHistorialCambios(data || [])
+      const filas = (data || []) as Array<Record<string, unknown>>
+      // Resolver usuario_id → nombre: la tabla guarda solo el id y el modal
+      // muestra `cambio.usuario?.nombre` (si no, "Sistema"). Mismo patrón que
+      // fetchAllFilteredPedidos. Sin esto, todo el historial salía como "Sistema".
+      const usuarioIds = Array.from(
+        new Set(filas.map(f => f.usuario_id).filter(Boolean)),
+      ) as string[]
+      let perfilesMap: Record<string, { nombre: string }> = {}
+      if (usuarioIds.length > 0) {
+        const { data: perfiles } = await supabase
+          .from('perfiles').select('id, nombre').in('id', usuarioIds)
+        if (perfiles) {
+          perfilesMap = Object.fromEntries(
+            (perfiles as Array<{ id: string; nombre: string }>).map(p => [p.id, { nombre: p.nombre }]),
+          )
+        }
+      }
+      setHistorialCambios(filas.map(f => ({
+        ...f,
+        usuario: f.usuario_id ? (perfilesMap[f.usuario_id as string] ?? null) : null,
+      })))
     } catch (e) {
       notify.error('Error al cargar historial: ' + (e as Error).message)
       setHistorialCambios([])
@@ -1400,6 +1420,7 @@ export default function PedidosContainer(): React.ReactElement {
             pedidos={pedidosParaRuta}
             onArmarRuta={handleArmarRutaDelDia as Parameters<typeof ModalGestionRutas>[0]['onArmarRuta']}
             onExportarPDF={handleExportarHojaRutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['onExportarPDF']}
+            onImprimirComandas={handleImprimirComandas as Parameters<typeof ModalGestionRutas>[0]['onImprimirComandas']}
             onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta() }}
             loading={loadingOptimizacion || loadingPedidosRuta}
             guardando={guardando}

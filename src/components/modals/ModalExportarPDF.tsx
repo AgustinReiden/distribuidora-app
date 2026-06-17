@@ -44,11 +44,12 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   const [seleccionarTodos, setSeleccionarTodos] = useState<boolean>(false);
   const [todosLosPedidos, setTodosLosPedidos] = useState<PedidoDB[] | null>(null);
   const [cargandoTodos, setCargandoTodos] = useState(false);
-  // Hoja de ruta: se descarga la ruta YA armada de un día + transportista
-  // (persistida en recorridos), no se regenera al vuelo desde pedidos filtrados.
+  // Hoja de ruta Y comandas: se descargan desde la ruta YA armada de un día +
+  // transportista (persistida en recorridos), no desde pedidos filtrados a mano.
   const [fechaRuta, setFechaRuta] = useState<string>(fechaLocalISO());
+  const usaRecorrido = tipoExport === 'ruta' || tipoExport === 'comanda';
   const { data: recorridosDia = [], isLoading: cargandoRecorridos } = useRecorridosHojaRutaQuery(
-    tipoExport === 'ruta' ? fechaRuta : null,
+    usaRecorrido ? fechaRuta : null,
   );
   const recorridoSeleccionado = useMemo(
     () => recorridosDia.find(r => r.transportistaId === transportistaSeleccionado) ?? null,
@@ -126,26 +127,13 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     });
   };
 
-  // Resetear seleccion cuando cambia el tipo o transportista
+  // Resetear seleccion cuando cambia el tipo. Hoja de ruta y comandas eligen
+  // día + transportista de la ruta armada (sin selección manual).
   const handleTipoChange = (tipo: TipoExport): void => {
     setTipoExport(tipo);
     setPedidosSeleccionados([]);
     setSeleccionarTodos(false);
-    // El transportista se elige distinto según el tipo (ruta: con ruta armada;
-    // comanda: filtro opcional), así que se resetea al cambiar de tipo.
     setTransportistaSeleccionado('');
-    // Comandas siempre cargan todos
-    if (tipo === 'comanda' && !todosLosPedidos && fetchAllFilteredPedidos) {
-      setAlcance('todos');
-      setCargandoTodos(true);
-      fetchAllFilteredPedidos().then(todos => {
-        setTodosLosPedidos(todos);
-      }).catch(() => {
-        setTodosLosPedidos(null);
-      }).finally(() => {
-        setCargandoTodos(false);
-      });
-    }
   };
 
   const handleTransportistaChange = (id: string): void => {
@@ -156,25 +144,25 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
   // Exportar
   const handleExportar = (): void => {
-    // Hoja de ruta: usa las paradas de la ruta ya armada (persistida), en su
-    // orden de entrega; no depende de la selección de pedidos.
-    if (tipoExport === 'ruta') {
+    // Hoja de ruta y Comandas: usan las paradas de la ruta ya armada
+    // (persistida), en su orden de entrega; sin selección manual de pedidos.
+    if (usaRecorrido) {
       if (!recorridoSeleccionado || recorridoSeleccionado.paradas.length === 0) return;
       const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
-      onExportarHojaRuta(transportista, recorridoSeleccionado.paradas);
+      if (tipoExport === 'ruta') {
+        onExportarHojaRuta(transportista, recorridoSeleccionado.paradas);
+      } else {
+        onImprimirComandas?.(recorridoSeleccionado.paradas);
+      }
       onClose();
       return;
     }
 
+    // Orden de preparación: selección manual de pedidos.
     const fuente = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
     const pedidosAExportar = fuente.filter(p => pedidosSeleccionados.includes(p.id));
     if (pedidosAExportar.length === 0) return;
-
-    if (tipoExport === 'preparacion') {
-      onExportarOrdenPreparacion(pedidosAExportar);
-    } else if (tipoExport === 'comanda') {
-      onImprimirComandas?.(pedidosAExportar);
-    }
+    onExportarOrdenPreparacion(pedidosAExportar);
     onClose();
   };
 
@@ -270,9 +258,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           </div>
         )}
 
-        {/* Hoja de Ruta: se elige un día + un transportista con ruta armada y se
-            descarga la hoja de ruta YA generada (persistida en recorridos). */}
-        {tipoExport === 'ruta' && (
+        {/* Hoja de Ruta y Comandas: se elige día + transportista con ruta armada
+            y se genera desde el recorrido persistido (sin selección manual). */}
+        {usaRecorrido && (
           <>
             <div>
               <label className="block text-sm font-medium mb-1 flex items-center gap-1.5">
@@ -314,45 +302,20 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 </div>
               ) : recorridoSeleccionado ? (
                 <p className="text-sm text-gray-700 dark:text-gray-300">
-                  Se descargará la hoja de ruta de <strong>{recorridoSeleccionado.transportistaNombre}</strong> con <strong>{recorridoSeleccionado.paradas.length}</strong> paradas.
+                  {tipoExport === 'ruta'
+                    ? <>Se descargará la hoja de ruta de <strong>{recorridoSeleccionado.transportistaNombre}</strong> con <strong>{recorridoSeleccionado.paradas.length}</strong> paradas.</>
+                    : <>Se imprimirán las comandas (duplicado por pedido) de <strong>{recorridoSeleccionado.transportistaNombre}</strong>: <strong>{recorridoSeleccionado.paradas.length}</strong> pedidos.</>}
                 </p>
               ) : (
-                <p className="text-sm text-gray-500">Elegí un transportista para descargar su hoja de ruta.</p>
+                <p className="text-sm text-gray-500">Elegí un transportista para continuar.</p>
               )}
             </div>
           </>
         )}
 
-        {/* Selector de transportista (filtro opcional para comandas) */}
-        {tipoExport === 'comanda' && (
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Filtrar por transportista (opcional)
-            </label>
-            <select
-              value={transportistaSeleccionado}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => handleTransportistaChange(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            >
-              <option value="">Todos los transportistas</option>
-              {transportistas.map(t => {
-                const fuente = alcance === 'todos' && todosLosPedidos ? todosLosPedidos : pedidos;
-                const pedidosTransportista = fuente.filter(p =>
-                  p.transportista_id === t.id &&
-                  p.estado !== 'entregado' && p.estado !== 'cancelado'
-                ).length;
-                return (
-                  <option key={t.id} value={t.id}>
-                    {t.nombre} ({pedidosTransportista} pedidos)
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-        )}
-
-        {/* Lista de pedidos (preparación y comandas) */}
-        {tipoExport !== 'ruta' && (
+        {/* Lista de pedidos: solo Orden de Preparación usa selección manual.
+            Hoja de Ruta y Comandas salen del recorrido armado (arriba). */}
+        {tipoExport === 'preparacion' && (
           <div>
             <div className="flex justify-between items-center mb-2">
               <label className="block text-sm font-medium">
@@ -380,12 +343,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
               <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
                 <Package className="w-10 h-10 mx-auto mb-2 opacity-50" />
                 <p>No hay pedidos disponibles para exportar</p>
-                <p className="text-xs mt-1">
-                  {tipoExport === 'preparacion'
-                    ? 'Solo se muestran pedidos pendientes o en preparacion'
-                    : 'No hay pedidos para imprimir comandas'
-                  }
-                </p>
+                <p className="text-xs mt-1">Solo se muestran pedidos pendientes o en preparacion</p>
               </div>
             ) : (
               <div className="border rounded-lg max-h-64 overflow-y-auto">
@@ -425,7 +383,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
       <div className="flex justify-between items-center p-4 border-t bg-gray-50 dark:bg-gray-800 sticky bottom-0">
         <p className="text-sm text-gray-600">
-          {tipoExport === 'ruta'
+          {usaRecorrido
             ? (recorridoSeleccionado && (
                 <>Total: {formatPrecio(recorridoSeleccionado.paradas.reduce((sum, p) => sum + (p.total || 0), 0))}</>
               ))
@@ -445,7 +403,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           </button>
           <button
             onClick={handleExportar}
-            disabled={tipoExport === 'ruta'
+            disabled={usaRecorrido
               ? !recorridoSeleccionado || recorridoSeleccionado.paradas.length === 0
               : pedidosSeleccionados.length === 0}
             className={`flex items-center space-x-2 px-4 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${

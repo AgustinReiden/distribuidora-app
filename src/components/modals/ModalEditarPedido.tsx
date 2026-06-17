@@ -180,17 +180,27 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     if (pedido?.items) {
       const itemsFormateados = pedido.items
         .filter(item => !item.es_bonificacion)
-        .map(item => ({
-          productoId: item.producto_id,
-          nombre: item.producto?.nombre || 'Producto desconocido',
-          cantidad: item.cantidad,
-          precioUnitario: item.precio_unitario,
-          cantidadOriginal: item.cantidad,
-        }));
+        .map(item => {
+          // Marcar precioOverride cuando el precio guardado difiere del de lista
+          // (precio negociado o regalo manual). Sin esto, al reabrir el modal el
+          // precio se recalculaba a lista/mayorista y se "perdía" el manual.
+          const producto = productos.find(p => p.id === item.producto_id);
+          const base = producto?.precio;
+          const override = base != null
+            && Math.abs(Number(item.precio_unitario) - Number(base)) > 0.001;
+          return {
+            productoId: item.producto_id,
+            nombre: item.producto?.nombre || 'Producto desconocido',
+            cantidad: item.cantidad,
+            precioUnitario: item.precio_unitario,
+            cantidadOriginal: item.cantidad,
+            ...(override ? { precioOverride: true } : {}),
+          };
+        });
       setItems(itemsFormateados);
       setItemsOriginales(JSON.parse(JSON.stringify(itemsFormateados)));
     }
-  }, [pedido]);
+  }, [pedido, productos]);
 
   // Armar input con precios base para la resolución. Para items con override
   // manual usamos ese precio; para los demás, el precio base del producto
@@ -294,7 +304,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         const original = itemsOriginales.find(o => o.productoId === item.productoId);
         if (!original) return true; // item nuevo
         if (original.cantidad !== item.cantidad) return true;
-        if (item.precioOverride) return true;
+        // El override puede venir precargado (precio negociado/regalo) sin ser un
+        // cambio del usuario: solo cuenta si difiere del estado original.
+        if (Boolean(item.precioOverride) !== Boolean(original.precioOverride)) return true;
         if (Math.abs((original.precioUnitario ?? 0) - (item.precioUnitario ?? 0)) > 0.001) return true;
         return false;
       }) ||
