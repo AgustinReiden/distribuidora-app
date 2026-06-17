@@ -151,7 +151,8 @@ export default function PedidosContainer(): React.ReactElement {
   // sucursal en la optimización, así el lado que optimiza y el mapa usan la
   // MISMA ubicación. destino null = la ruta termina en el depósito.
   const optimizarRutaConDeposito = useCallback(
-    (transportistaId: string, pedidosData?: PedidoDB[]) => optimizarRuta(transportistaId, pedidosData, deposito, destinoRuta),
+    (transportistaId: string, pedidosData?: PedidoDB[], fecha?: string, horaInicio?: string) =>
+      optimizarRuta(transportistaId, pedidosData, deposito, destinoRuta, { fecha, horaInicio }),
     [optimizarRuta, deposito, destinoRuta],
   )
 
@@ -1011,9 +1012,9 @@ export default function PedidosContainer(): React.ReactElement {
   // solo paso (sin botón "optimizar" separado). Las polylines del resultado se
   // pasan explícitamente a aplicar (no se leen del estado, que aún no se
   // actualizó en este tick).
-  const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[], fecha: string) => {
+  const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[], fecha: string, horaInicio: string) => {
     if (!transportistaId || pedidosSeleccionados.length === 0) return
-    const ruta = await optimizarRutaConDeposito(transportistaId, pedidosSeleccionados)
+    const ruta = await optimizarRutaConDeposito(transportistaId, pedidosSeleccionados, fecha, horaInicio)
     if (!ruta?.orden_optimizado?.length) {
       // optimizarRuta ya seteó errorOptimizacion / mostró el mensaje
       return
