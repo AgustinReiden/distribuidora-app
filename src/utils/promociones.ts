@@ -72,8 +72,11 @@ export function resolverPromociones(
   const bonificaciones: BonificacionResult[] = []
   const productosConPromo = new Set<string>()
 
-  // 1. Recolectar promos vistas en el pedido
-  const promosVistas = acumularPromos(items, promoMap, { skipOverride: true })
+  // 1. Recolectar promos vistas en el pedido.
+  //    skipOverride:false → un ítem con precio editado a mano SIGUE contando para
+  //    su promo (el precio manual cambia el precio, no la elegibilidad). Ej: regalar
+  //    un producto bajándole el precio no debe anular la botella de regalo de la promo.
+  const promosVistas = acumularPromos(items, promoMap, { skipOverride: false })
 
   for (const entry of promosVistas.values()) {
     for (const pid of entry.productoIdsEnPedido) productosConPromo.add(pid)

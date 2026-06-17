@@ -63,6 +63,8 @@ export interface ModalGestionRutasProps {
    */
   onArmarRuta: (transportistaId: string, pedidos: PedidoDB[], fecha: string, horaInicio: string) => void;
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
+  /** Imprime las comandas (duplicado por pedido) de la ruta recién armada. */
+  onImprimirComandas?: (pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
   /** true mientras se optimiza/guarda la ruta del día */
   loading: boolean;
@@ -177,6 +179,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   pedidos,
   onArmarRuta,
   onExportarPDF,
+  onImprimirComandas,
   onClose,
   loading,
   guardando,
@@ -397,6 +400,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleExportarPDF = (): void => {
     const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
     onExportarPDF(transportista, pedidosOrdenados);
+  };
+
+  const handleImprimirComandas = (): void => {
+    onImprimirComandas?.(pedidosOrdenados);
   };
 
   const handleVolverOptimizar = (): void => {
@@ -920,13 +927,24 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 </span>
               </button>
             ) : (
-              <button
-                onClick={handleExportarPDF}
-                className="flex items-center space-x-2 px-4 py-2.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-              >
-                <Printer className="w-5 h-5" />
-                <span>Exportar PDF</span>
-              </button>
+              <>
+                <button
+                  onClick={handleExportarPDF}
+                  className="flex items-center space-x-2 px-4 py-2.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  <Printer className="w-5 h-5" />
+                  <span>Hoja de ruta</span>
+                </button>
+                {onImprimirComandas && (
+                  <button
+                    onClick={handleImprimirComandas}
+                    className="flex items-center space-x-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  >
+                    <FileText className="w-5 h-5" />
+                    <span>Comandas</span>
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
