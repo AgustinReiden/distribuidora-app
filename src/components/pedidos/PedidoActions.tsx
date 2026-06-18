@@ -9,7 +9,7 @@
  * - Focus visible en items
  */
 import React, { memo, useMemo } from 'react';
-import { MoreVertical, History, Edit2, Package, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, DollarSign, LucideIcon } from 'lucide-react';
+import { MoreVertical, History, Edit2, Package, Check, AlertTriangle, RotateCcw, AlertCircle, XCircle, DollarSign, Printer, LucideIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -41,6 +41,7 @@ export interface AccionesDropdownProps {
   onRevertir?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
+  onImprimirComanda?: (pedido: PedidoDB) => void;
 }
 
 interface AccionItem {
@@ -72,6 +73,7 @@ function AccionesDropdown({
   onRevertir,
   onCancelarPedido,
   onRegistrarPago,
+  onImprimirComanda,
 }: AccionesDropdownProps): React.ReactElement {
   // Memoizar acciones para evitar recalculos innecesarios
   const acciones = useMemo((): AccionItem[] => {
@@ -84,6 +86,17 @@ function AccionesDropdown({
         icon: History,
         onClick: () => onHistorial(pedido),
         className: 'text-gray-700 dark:text-gray-300'
+      });
+    }
+
+    // Imprimir comanda (ticket 75mm) de un pedido individual. Admin o encargado,
+    // en cualquier estado y estado de pago.
+    if ((isAdmin || isEncargado) && onImprimirComanda) {
+      items.push({
+        label: 'Imprimir Comanda',
+        icon: Printer,
+        onClick: () => onImprimirComanda(pedido),
+        className: 'text-purple-700 dark:text-purple-400'
       });
     }
 
@@ -152,8 +165,14 @@ function AccionesDropdown({
       });
     }
 
-    // Transportista, admin o encargado pueden marcar entregado
-    if ((isTransportista || isAdmin || isEncargado) && pedido.estado === 'asignado' && onEntregado) {
+    // Marcar entregado:
+    // - Transportista: solo pedidos ruteados (estado 'asignado').
+    // - Admin/encargado: cualquier estado activo (no entregado/cancelado), para
+    //   poder cerrar entregas sueltas sin tener que armar una ruta.
+    const puedeEntregarStaff = (isAdmin || isEncargado)
+      && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado';
+    const puedeEntregarTransportista = isTransportista && pedido.estado === 'asignado';
+    if ((puedeEntregarStaff || puedeEntregarTransportista) && onEntregado) {
       items.push({
         label: 'Marcar Entregado',
         icon: Check,
@@ -195,7 +214,7 @@ function AccionesDropdown({
     }
 
     return items;
-  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago]);
+  }, [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago, onImprimirComanda]);
 
   return (
     <DropdownMenu>

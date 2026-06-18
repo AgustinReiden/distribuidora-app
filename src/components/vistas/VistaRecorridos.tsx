@@ -1,6 +1,6 @@
 import React, { useState, useMemo, lazy, Suspense, ChangeEvent } from 'react';
-import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
-import { formatPrecio, formatFecha, fechaLocalISO } from '../../utils/formatters';
+import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
+import { formatPrecio, formatFecha, fechaLocalISO, fechaHaceDias, parseDateSafe } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import { useDepositoCoords } from '../../hooks/queries';
 import { decodePolylines } from '../../utils/polyline';
@@ -393,6 +393,7 @@ export default function VistaRecorridos({
 
   const hoy = fechaLocalISO();
   const esHoy = fechaSeleccionada === hoy;
+  const esFuturo = fechaSeleccionada > hoy;
 
   const handleFechaChange = (e: ChangeEvent<HTMLInputElement>): void => {
     onFechaChange(e.target.value);
@@ -416,7 +417,7 @@ export default function VistaRecorridos({
             Recorridos
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
-            {esHoy ? 'Recorridos de hoy' : `Recorridos del ${formatFecha(fechaSeleccionada)}`}
+            {esHoy ? 'Recorridos de hoy' : `Recorridos del ${formatFecha(fechaSeleccionada)}${esFuturo ? ' (futuro)' : ''}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -449,13 +450,28 @@ export default function VistaRecorridos({
             <Calendar className="w-5 h-5 text-gray-500" />
             <span className="text-gray-700 dark:text-gray-300">Fecha:</span>
           </div>
+          <button
+            onClick={() => onFechaChange(fechaHaceDias(1, parseDateSafe(fechaSeleccionada)))}
+            className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            aria-label="Día anterior"
+            title="Día anterior"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
           <input
             type="date"
             value={fechaSeleccionada}
             onChange={handleFechaChange}
-            max={hoy}
             className="px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
           />
+          <button
+            onClick={() => onFechaChange(fechaHaceDias(-1, parseDateSafe(fechaSeleccionada)))}
+            className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            aria-label="Día siguiente"
+            title="Día siguiente"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
           {!esHoy && (
             <button
               onClick={() => onFechaChange(hoy)}
