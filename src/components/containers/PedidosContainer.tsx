@@ -1035,12 +1035,26 @@ export default function PedidosContainer(): React.ReactElement {
   const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[], fecha: string, horaInicio: string) => {
     if (!transportistaId || pedidosSeleccionados.length === 0) return
     const ruta = await optimizarRutaConDeposito(transportistaId, pedidosSeleccionados, fecha, horaInicio)
-    if (!ruta?.orden_optimizado?.length) {
-      // optimizarRuta ya seteó errorOptimizacion / mostró el mensaje
-      return
-    }
+    // ruta es null solo si la optimización falló de verdad (error de red/servicio):
+    // optimizarRuta ya mostró el mensaje y no armamos nada.
+    if (!ruta) return
+
+    const optimizados = (ruta.orden_optimizado ?? []) as Array<{ pedido_id: string; orden: number }>
+    // Los pedidos sin coordenadas NO los devuelve el optimizador, pero igual deben
+    // formar parte de la ruta (son entregables). Se anexan al final, después de las
+    // paradas optimizadas, con orden_entrega secuencial. Antes se perdían y la ruta
+    // quedaba solo con los pedidos geolocalizados.
+    const idsOptimizados = new Set(optimizados.map(o => String(o.pedido_id)))
+    const maxOrden = optimizados.reduce((m, o) => Math.max(m, o.orden), 0)
+    const sinCoordenadas = pedidosSeleccionados
+      .filter(p => !idsOptimizados.has(String(p.id)))
+      .map((p, i) => ({ pedido_id: p.id, orden: maxOrden + 1 + i }))
+
+    const ordenFinal = [...optimizados, ...sinCoordenadas]
+    if (ordenFinal.length === 0) return
+
     await handleAplicarOrden({
-      ordenOptimizado: ruta.orden_optimizado as Array<{ pedido_id: string; orden: number }>,
+      ordenOptimizado: ordenFinal,
       transportistaId,
       distancia: ruta.distancia_total ?? null,
       duracion: ruta.duracion_total ?? null,

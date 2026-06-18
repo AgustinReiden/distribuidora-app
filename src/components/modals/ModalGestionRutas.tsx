@@ -312,12 +312,20 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     for (const p of paradasExistentes) map.set(p.id, p);
     for (const p of pedidos) map.set(p.id, p);
     const result: PedidoOrdenado[] = [];
+    const incluidos = new Set<string>();
     for (const item of rutaOptimizada.orden_optimizado) {
       const pedido = map.get(item.pedido_id);
-      if (pedido) result.push({ ...pedido, orden_optimizado: item.orden });
+      if (pedido) { result.push({ ...pedido, orden_optimizado: item.orden }); incluidos.add(pedido.id); }
+    }
+    // Pedidos seleccionados sin coordenadas: el optimizador no los ordena, pero
+    // forman parte de la ruta armada. Se muestran al final, sin orden geográfico,
+    // para que el conteo, la hoja de ruta y las comandas coincidan con lo seleccionado.
+    let orden = result.length;
+    for (const p of pedidosSeleccionados) {
+      if (!incluidos.has(p.id)) { result.push({ ...p, orden_optimizado: ++orden }); incluidos.add(p.id); }
     }
     return result;
-  }, [rutaOptimizada, paradasExistentes, pedidos]);
+  }, [rutaOptimizada, paradasExistentes, pedidos, pedidosSeleccionados]);
 
   // Verificar si hay pedidos seleccionados sin coordenadas
   const pedidosSinCoordenadas = useMemo((): PedidoDB[] => {
