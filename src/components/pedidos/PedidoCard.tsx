@@ -239,6 +239,11 @@ function PedidoCard({
   const handleMarcarEntregado = onMarcarEntregado ?? pedidoActions?.handleMarcarEntregado;
   const handleDesmarcarEntregado = onDesmarcarEntregado ?? pedidoActions?.handleDesmarcarEntregado;
   const handleRegistrarPago = onRegistrarPago ?? pedidoActions?.handleRegistrarPago;
+  // Impresión de comanda individual (ticket 75mm). Autocontenido: reusa la misma
+  // utilidad que el ReciboDropdown del footer; solo necesita el pedido y su cliente.
+  const handleImprimirComanda = React.useCallback(async (p: PedidoDB): Promise<void> => {
+    if (p.cliente) await generarReciboPedido(p, p.cliente, { formato: 'comanda' });
+  }, []);
   const diasAntiguedad = calcularDiasAntiguedad(pedido.fecha || pedido.created_at);
   const fechaCreacionLabel = formatFecha(pedido.fecha || pedido.created_at);
   const horaCreacion = pedido.created_at ? formatHora(pedido.created_at) : null;
@@ -331,6 +336,7 @@ function PedidoCard({
             onRevertir={handleDesmarcarEntregado}
             onCancelarPedido={onCancelarPedido}
             onRegistrarPago={handleRegistrarPago}
+            onImprimirComanda={handleImprimirComanda}
           />
         </div>
 
@@ -355,6 +361,7 @@ function PedidoCard({
             onRevertir={handleDesmarcarEntregado}
             onCancelarPedido={onCancelarPedido}
             onRegistrarPago={handleRegistrarPago}
+            onImprimirComanda={handleImprimirComanda}
           />
         </div>
       </div>
