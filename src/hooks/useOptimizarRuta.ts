@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { supabase } from './supabase/base';
 import { parsearFranjas } from '../utils/horariosCliente';
 import type { PedidoDB, ClienteDB } from '../types';
@@ -75,6 +76,10 @@ export interface UseOptimizarRutaReturn {
   rutaOptimizada: RutaOptimizadaResponse | null;
   error: string | null;
   optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: { fecha?: string; horaInicio?: string }) => Promise<RutaOptimizadaResponse | null>;
+  /** Permite al caller reflejar la ruta realmente armada (p.ej. agregando las
+   *  paradas sin coordenadas que el optimizador no devuelve) para que el modal
+   *  muestre el resultado y los botones de hoja de ruta / comandas. */
+  setRutaOptimizada: Dispatch<SetStateAction<RutaOptimizadaResponse | null>>;
   limpiarRuta: () => void;
 }
 
@@ -326,6 +331,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
     rutaOptimizada,
     error,
     optimizarRuta,
+    setRutaOptimizada,
     limpiarRuta
   };
 }

@@ -144,7 +144,7 @@ export default function PedidosContainer(): React.ReactElement {
   const crearClienteMut = useCrearClienteMutation()
 
   // Route optimization
-  const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, limpiarRuta } = useOptimizarRuta()
+  const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, setRutaOptimizada, limpiarRuta } = useOptimizarRuta()
   const deposito = useDepositoCoords()
   const destinoRuta = useDestinoCoords()
   // Inyecta el depósito (origen) y el punto de llegada opcional (destino) de la
@@ -989,8 +989,9 @@ export default function PedidosContainer(): React.ReactElement {
   // distancia/duración. Un recorrido vigente por transportista por día.
   // Las polylines se pasan por argumento (no se leen de rutaOptimizada del
   // closure) para evitar usar un valor viejo cuando se encadena optimizar→aplicar.
-  const aplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null; fecha: string }) => {
+  const aplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null; fecha: string }): Promise<boolean> => {
     setGuardando(true)
+    let ok = false
     try {
       const { error } = await supabase.rpc('aplicar_orden_ruta', {
         p_transportista_id: data.transportistaId,
@@ -1016,16 +1017,18 @@ export default function PedidosContainer(): React.ReactElement {
       // No cerramos el modal: queda en la vista de resultado (confirmación +
       // export PDF). El admin cierra con "Cerrar" (que limpia la ruta).
       notify.success('Ruta del día armada y guardada')
+      ok = true
     } catch (e) { notify.error('Error al guardar la ruta: ' + (e as Error).message) }
     setGuardando(false)
+    return ok
   }, [notify, queryClient])
 
-  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null; fecha: string }) => {
-    if (!data.ordenOptimizado?.length || !data.transportistaId) return
+  const handleAplicarOrden = useCallback(async (data: { ordenOptimizado: Array<{ pedido_id: string; orden: number }>; transportistaId: string; distancia: number | null; duracion: number | null; polylines: string[] | null; fecha: string }): Promise<boolean> => {
+    if (!data.ordenOptimizado?.length || !data.transportistaId) return false
     // Sin confirm de reemplazo: si ya hay una ruta para ese transportista+fecha,
     // el modal la cargó pre-tildada y el RPC (mig 088) la edita in-place (no
     // duplica). Armar = guardar las modificaciones sobre esa misma ruta.
-    await aplicarOrden(data)
+    return await aplicarOrden(data)
   }, [aplicarOrden])
 
   // Armar ruta del día: optimiza los pedidos seleccionados y los guarda en un
@@ -1053,7 +1056,7 @@ export default function PedidosContainer(): React.ReactElement {
     const ordenFinal = [...optimizados, ...sinCoordenadas]
     if (ordenFinal.length === 0) return
 
-    await handleAplicarOrden({
+    const armado = await handleAplicarOrden({
       ordenOptimizado: ordenFinal,
       transportistaId,
       distancia: ruta.distancia_total ?? null,
@@ -1061,7 +1064,21 @@ export default function PedidosContainer(): React.ReactElement {
       polylines: ruta.polylines ?? null,
       fecha,
     })
-  }, [optimizarRutaConDeposito, handleAplicarOrden])
+
+    // Reflejar en el resultado la ruta REALMENTE armada (optimizadas + sin
+    // coordenadas). El optimizador no devuelve las paradas sin coordenadas, así
+    // que sin esto el modal no cambiaba a la vista de resultado (ni mostraba los
+    // botones de hoja de ruta / comandas) cuando la ruta tenía pocas o ninguna
+    // parada geolocalizada.
+    if (armado) {
+      setRutaOptimizada(prev => ({
+        ...(prev ?? {}),
+        success: true,
+        total_pedidos: ordenFinal.length,
+        orden_optimizado: ordenFinal.map(o => ({ pedido_id: o.pedido_id, orden: o.orden })),
+      }))
+    }
+  }, [optimizarRutaConDeposito, handleAplicarOrden, setRutaOptimizada])
 
   const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[]) => {
     try {
