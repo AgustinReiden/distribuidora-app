@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, memo, useEffect, useMemo } from 'react';
-import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck } from 'lucide-react';
+import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck, Check } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { formatPrecio } from '../../utils/formatters';
@@ -365,6 +365,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     ));
   };
 
+  // Confirma el precio en edicion. Se invoca desde Enter, blur y el boton ✓.
+  // El boton es clave en mobile: el `onBlur` en touch no siempre dispara de
+  // forma confiable, asi que damos una via explicita para commitear el valor.
+  const commitEditingPrice = (): void => {
+    if (editingPriceId == null) return;
+    const newPrice = parsePrecio(editingPriceValue);
+    if (newPrice > 0) handlePrecioChange(editingPriceId, newPrice);
+    setEditingPriceId(null);
+  };
+
   const handleAgregarProducto = (producto: ProductoDB): void => {
     const moq = moqMap.get(String(producto.id));
     const cantidadInicial = moq && moq > 1 ? moq : 1;
@@ -645,30 +655,31 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                             <div className="flex items-center gap-1">
                               <span className="text-orange-600">$</span>
                               <input
-                                type="number"
+                                type="text"
                                 inputMode="decimal"
-                                step="0.01"
-                                min="0.01"
                                 aria-label="Editar precio unitario"
                                 value={editingPriceValue}
                                 onChange={e => setEditingPriceValue(e.target.value)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') {
-                                    const newPrice = parsePrecio(editingPriceValue);
-                                    if (newPrice > 0) handlePrecioChange(item.productoId, newPrice);
-                                    setEditingPriceId(null);
+                                    commitEditingPrice();
                                   } else if (e.key === 'Escape') {
                                     setEditingPriceId(null);
                                   }
                                 }}
-                                onBlur={() => {
-                                  const newPrice = parsePrecio(editingPriceValue);
-                                  if (newPrice > 0) handlePrecioChange(item.productoId, newPrice);
-                                  setEditingPriceId(null);
-                                }}
-                                className="w-28 px-2 py-1 text-sm border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                                onBlur={commitEditingPrice}
+                                className="w-24 px-2 py-1 text-sm border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                                 autoFocus
                               />
+                              <button
+                                type="button"
+                                aria-label="Confirmar precio"
+                                onPointerDown={e => e.preventDefault()}
+                                onClick={commitEditingPrice}
+                                className="p-1 text-white bg-orange-500 hover:bg-orange-600 rounded shrink-0"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                              </button>
                               <span className="text-orange-600">c/u</span>
                             </div>
                           ) : (

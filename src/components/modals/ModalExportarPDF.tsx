@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, memo } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import type { ChangeEvent } from 'react';
 import { FileDown, Package, Truck, Printer, Loader2, CalendarDays } from 'lucide-react';
 import ModalBase from './ModalBase';
@@ -48,7 +48,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   // transportista (persistida en recorridos), no desde pedidos filtrados a mano.
   const [fechaRuta, setFechaRuta] = useState<string>(fechaLocalISO());
   const usaRecorrido = tipoExport === 'ruta' || tipoExport === 'comanda';
-  const { data: recorridosDia = [], isLoading: cargandoRecorridos } = useRecorridosHojaRutaQuery(
+  const { data: recorridosDia = [], isLoading: cargandoRecorridos, isFetching: recargandoRecorridos } = useRecorridosHojaRutaQuery(
     usaRecorrido ? fechaRuta : null,
   );
   const recorridoSeleccionado = useMemo(
@@ -100,11 +100,36 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     }
   }, [todosLosPedidos, fetchAllFilteredPedidos]);
 
+  // Lista sobre la que opera la seleccion: para Hoja de Ruta y Comandas son las
+  // paradas de la ruta armada; para Orden de Preparacion, los pedidos filtrados.
+  const listaSeleccionable = usaRecorrido
+    ? (recorridoSeleccionado?.paradas ?? [])
+    : pedidosFiltrados;
+
+  // Hoja de Ruta y Comandas arrancan con TODAS las paradas tildadas (imprime
+  // todo por defecto, como antes); el usuario destilda las que quiera excluir.
+  // Solo reseteamos cuando CAMBIA el recorrido elegido (día/transportista), no
+  // en cada refetch en segundo plano: sino pisaríamos los destildados del user.
+  const recorridoAplicadoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!usaRecorrido) { recorridoAplicadoRef.current = null; return; }
+    const id = recorridoSeleccionado?.recorridoId ?? null;
+    if (id === recorridoAplicadoRef.current) return;
+    recorridoAplicadoRef.current = id;
+    if (recorridoSeleccionado) {
+      setPedidosSeleccionados(recorridoSeleccionado.paradas.map(p => p.id));
+      setSeleccionarTodos(true);
+    } else {
+      setPedidosSeleccionados([]);
+      setSeleccionarTodos(false);
+    }
+  }, [recorridoSeleccionado, usaRecorrido]);
+
   // Manejar seleccion de todos
   const handleSeleccionarTodos = (checked: boolean): void => {
     setSeleccionarTodos(checked);
     if (checked) {
-      setPedidosSeleccionados(pedidosFiltrados.map(p => p.id));
+      setPedidosSeleccionados(listaSeleccionable.map(p => p.id));
     } else {
       setPedidosSeleccionados([]);
     }
@@ -119,7 +144,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
         return nuevo;
       } else {
         const nuevo = [...prev, pedidoId];
-        if (nuevo.length === pedidosFiltrados.length) {
+        if (nuevo.length === listaSeleccionable.length) {
           setSeleccionarTodos(true);
         }
         return nuevo;
@@ -144,15 +169,18 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
   // Exportar
   const handleExportar = (): void => {
-    // Hoja de ruta y Comandas: usan las paradas de la ruta ya armada
-    // (persistida), en su orden de entrega; sin selección manual de pedidos.
+    // Hoja de ruta y Comandas: parten de las paradas de la ruta ya armada
+    // (persistida), en su orden de entrega, excluyendo las que el usuario haya
+    // destildado.
     if (usaRecorrido) {
-      if (!recorridoSeleccionado || recorridoSeleccionado.paradas.length === 0) return;
+      if (!recorridoSeleccionado) return;
+      const paradas = recorridoSeleccionado.paradas.filter(p => pedidosSeleccionados.includes(p.id));
+      if (paradas.length === 0) return;
       const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
       if (tipoExport === 'ruta') {
-        onExportarHojaRuta(transportista, recorridoSeleccionado.paradas);
+        onExportarHojaRuta(transportista, paradas);
       } else {
-        onImprimirComandas?.(recorridoSeleccionado.paradas);
+        onImprimirComandas?.(paradas);
       }
       onClose();
       return;
@@ -310,6 +338,58 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 <p className="text-sm text-gray-500">Elegí un transportista para continuar.</p>
               )}
             </div>
+
+            {/* Lista de paradas para destildar las que NO se quieran imprimir.
+                Arranca todo tildado (imprime todo, como antes). Aplica igual a
+                Hoja de Ruta y a Comandas. */}
+            {recorridoSeleccionado && recorridoSeleccionado.paradas.length > 0 && (
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-medium">
+                    Pedidos a imprimir ({pedidosSeleccionados.length} de {recorridoSeleccionado.paradas.length})
+                  </label>
+                  <label className="flex items-center space-x-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={seleccionarTodos}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => handleSeleccionarTodos(e.target.checked)}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span>Seleccionar todos</span>
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  Destildá los pedidos que no quieras incluir en la impresión.
+                </p>
+                <div className="border rounded-lg max-h-56 overflow-y-auto dark:border-gray-600">
+                  {recorridoSeleccionado.paradas.map((pedido, idx) => (
+                    <div
+                      key={pedido.id}
+                      onClick={() => handleTogglePedido(pedido.id)}
+                      className={`flex items-center p-3 border-b last:border-b-0 cursor-pointer transition-colors dark:border-gray-700 ${
+                        pedidosSeleccionados.includes(pedido.id)
+                          ? 'bg-blue-50 dark:bg-blue-900/20'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700/40'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={pedidosSeleccionados.includes(pedido.id)}
+                        onChange={() => {}}
+                        className="w-4 h-4 mr-3"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate dark:text-white">
+                          {idx + 1}. #{pedido.id} - {pedido.cliente?.nombre_fantasia}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{pedido.cliente?.direccion}</p>
+                        <p className="text-sm font-medium text-blue-600">{formatPrecio(pedido.total)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -384,8 +464,8 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
       <div className="flex justify-between items-center p-4 border-t bg-gray-50 dark:bg-gray-800 sticky bottom-0">
         <p className="text-sm text-gray-600">
           {usaRecorrido
-            ? (recorridoSeleccionado && (
-                <>Total: {formatPrecio(recorridoSeleccionado.paradas.reduce((sum, p) => sum + (p.total || 0), 0))}</>
+            ? (recorridoSeleccionado && pedidosSeleccionados.length > 0 && (
+                <>Total: {formatPrecio(recorridoSeleccionado.paradas.filter(p => pedidosSeleccionados.includes(p.id)).reduce((sum, p) => sum + (p.total || 0), 0))}</>
               ))
             : (pedidosSeleccionados.length > 0 && (
                 <>
@@ -404,7 +484,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
           <button
             onClick={handleExportar}
             disabled={usaRecorrido
-              ? !recorridoSeleccionado || recorridoSeleccionado.paradas.length === 0
+              ? !recorridoSeleccionado || pedidosSeleccionados.length === 0 || recargandoRecorridos
               : pedidosSeleccionados.length === 0}
             className={`flex items-center space-x-2 px-4 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
               tipoExport === 'comanda'

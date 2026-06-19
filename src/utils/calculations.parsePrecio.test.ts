@@ -26,6 +26,10 @@ describe('parsePrecio', () => {
   it('acepta comas como separador decimal (es-AR)', () => {
     expect(parsePrecio('10,5')).toBe(10.5)
     expect(parsePrecio('1.234,56')).toBe(1234.56)
+    // Caso del bug de edición de precio en mobile: el teclado es-AR tipea coma
+    // ("0,1" para un regalo). Con type="text"+inputMode="decimal" el valor llega
+    // a parsePrecio y se convierte (antes el type="number" lo descartaba).
+    expect(parsePrecio('0,1')).toBe(0.1)
   })
 
   it('trimea whitespace en strings', () => {

@@ -91,6 +91,10 @@ export function useRecorridosHojaRutaQuery(fecha: string | null | undefined) {
     queryKey: recorridosHojaRutaKeys.all(currentSucursalId, fecha ?? null),
     queryFn: () => fetchRecorridosHojaRuta(currentSucursalId, fecha as string),
     enabled: !!fecha,
-    staleTime: 30 * 1000,
+    // La exportacion debe reflejar SIEMPRE el ultimo precio/estado del pedido:
+    // sin ventana de frescura y con refetch al abrir el modal, ademas de la
+    // invalidacion de ['recorridos-hoja-ruta'] al editar items del pedido.
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 }
