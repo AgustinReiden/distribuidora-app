@@ -614,8 +614,14 @@ export default function PedidosContainer(): React.ReactElement {
       if (data.fechaEntregaProgramada) updateData.fecha_entrega_programada = data.fechaEntregaProgramada
       const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoEditando.id)
       if (error) throw error
-      // Invalidar cache para que los cambios se reflejen en la UI
+      // Invalidar cache para que los cambios se reflejen en la UI. Incluye la
+      // familia recorridos* para que la hoja de ruta/comanda re-descargada desde
+      // Exportaciones refleje cambios de fecha/notas (sino sirve datos cacheados).
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       setModalEditarOpen(false)
       setPedidoEditando(null)
       notify.success('Pedido actualizado')
@@ -650,8 +656,15 @@ export default function PedidosContainer(): React.ReactElement {
     if (!response.success) {
       throw new Error(response.errores?.join(', ') || 'Error al actualizar items')
     }
-    // Invalidar cache de pedidos para refrescar datos
+    // Invalidar cache de pedidos para refrescar datos. Tambien la familia
+    // recorridos* para que la hoja de ruta y las comandas (que se descargan
+    // desde la ruta armada via useRecorridosHojaRutaQuery) reflejen el precio
+    // editado y no sirvan paradas cacheadas con el valor viejo.
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+    queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
+    queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+    queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
   }, [pedidoEditando, user, queryClient])
 
   // Reasignar el preventista del pedido en edicion. Solo admin (la UI ya
