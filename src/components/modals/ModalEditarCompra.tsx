@@ -19,6 +19,7 @@
 import { useState, memo, useMemo } from 'react'
 import { Loader2, Trash2, AlertCircle } from 'lucide-react'
 import ModalBase from './ModalBase'
+import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import type { CompraDBExtended } from '../../types'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
@@ -41,11 +42,6 @@ export interface ModalEditarCompraProps {
   onGuardar: (input: ActualizarCompraItemsInput) => Promise<void>
   onClose: () => void
   guardando: boolean
-}
-
-function toNumber(raw: string, fallback = 0): number {
-  const n = parseFloat(raw.replace(',', '.'))
-  return Number.isFinite(n) ? n : fallback
 }
 
 const ModalEditarCompra = memo(function ModalEditarCompra({
@@ -223,48 +219,49 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                   <tr key={it.productoId} className={`border-b dark:border-gray-700 ${rowClass}`}>
                     <td className="py-2 pr-2 dark:text-gray-200">{it.nombre}</td>
                     <td className="py-2 px-2">
-                      <input
-                        type="number"
+                      <NumberInput
+                        integer
                         min={1}
-                        step={1}
+                        emptyValue={1}
                         value={it.cantidad}
-                        onChange={(e) => updateItem(it.productoId, 'cantidad', toNumber(e.target.value))}
+                        onChange={(n) => updateItem(it.productoId, 'cantidad', n)}
+                        commitOnChange
                         disabled={it.marcadoParaEliminar}
                         className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
                       />
                     </td>
                     <td className="py-2 px-2">
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
-                        step={0.01}
+                        emptyValue={0}
                         value={it.costoUnitario}
-                        onChange={(e) => updateItem(it.productoId, 'costoUnitario', toNumber(e.target.value))}
+                        onChange={(n) => updateItem(it.productoId, 'costoUnitario', n)}
+                        commitOnChange
                         disabled={it.marcadoParaEliminar}
                         className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
                       />
                     </td>
                     <td className="py-2 px-2">
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
                         max={99.99}
-                        step={0.01}
+                        emptyValue={0}
                         value={it.bonificacion}
-                        onChange={(e) => updateItem(it.productoId, 'bonificacion', toNumber(e.target.value))}
+                        onChange={(n) => updateItem(it.productoId, 'bonificacion', n)}
+                        commitOnChange
                         disabled={it.marcadoParaEliminar}
                         className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
                       />
                     </td>
                     {!esZZ && (
                       <td className="py-2 px-2">
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           max={100}
-                          step={0.01}
+                          emptyValue={0}
                           value={it.porcentajeIva}
-                          onChange={(e) => updateItem(it.productoId, 'porcentajeIva', toNumber(e.target.value))}
+                          onChange={(n) => updateItem(it.productoId, 'porcentajeIva', n)}
+                          commitOnChange
                           disabled={it.marcadoParaEliminar}
                           className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
                         />

@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, memo, useEffect, useMemo } from 'react';
 import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck, Check } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
+import NumberInput from '../ui/NumberInput';
 import { formatPrecio } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
@@ -349,6 +350,27 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         return { ...item, cantidad: nuevaCantidad };
       }
       return item;
+    }));
+  };
+
+  // Setea la cantidad a un valor absoluto (para el input editable), con la
+  // misma validación de MOQ/stock que handleCantidadChange pero clampeando al
+  // máximo disponible en vez de rechazar.
+  const handleCantidadSet = (productoId: string, value: number): void => {
+    setErrorStock(null);
+    setItems(prev => prev.map(item => {
+      if (item.productoId !== productoId) return item;
+      const moq = moqMap.get(String(productoId));
+      const minCantidad = moq && moq > 1 ? moq : 1;
+      const producto = productos.find(p => p.id === productoId);
+      const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
+      const stockDisponible = (producto?.stock || 0) + cantidadOriginal;
+      let nueva = Math.max(minCantidad, Math.round(value));
+      if (nueva > stockDisponible) {
+        setErrorStock(`Stock insuficiente para "${item.nombre}". Disponible: ${stockDisponible}`);
+        nueva = stockDisponible;
+      }
+      return { ...item, cantidad: nueva };
     }));
   };
 
@@ -719,9 +741,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                           >
                             <Minus className="w-4 h-4" />
                           </button>
-                          <span className="px-3 py-1 min-w-[40px] text-center font-medium dark:text-white">
-                            {item.cantidad}
-                          </span>
+                          <NumberInput
+                            integer
+                            min={moqMap.get(String(item.productoId)) || 1}
+                            max={stockDisponible}
+                            emptyValue={moqMap.get(String(item.productoId)) || 1}
+                            value={item.cantidad}
+                            onChange={(n) => handleCantidadSet(item.productoId, n)}
+                            aria-label="Cantidad"
+                            className="w-12 px-1 py-1 text-center font-medium dark:text-white bg-transparent focus:outline-none"
+                          />
                           <button
                             onClick={() => handleCantidadChange(item.productoId, 1)}
                             disabled={item.cantidad >= stockDisponible}

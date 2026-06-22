@@ -1,6 +1,7 @@
 import { useState, memo, useRef, useMemo } from 'react';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2 } from 'lucide-react';
 import ModalBase from './ModalBase';
+import NumberInput from '../ui/NumberInput';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
@@ -904,13 +905,12 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Límite de Crédito ($)</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="100"
-                  value={form.limiteCredito}
-                  onChange={e => handleFieldChange('limiteCredito', e.target.value)}
+                <NumberInput
+                  min={0}
+                  emptyValue={0}
+                  commitOnChange
+                  value={Number(form.limiteCredito) || 0}
+                  onChange={(n) => handleFieldChange('limiteCredito', n)}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   placeholder="0"
                 />
@@ -918,14 +918,14 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Días de Crédito</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  step="1"
-                  min="0"
-                  max="365"
-                  value={form.diasCredito}
-                  onChange={e => handleFieldChange('diasCredito', e.target.value)}
+                <NumberInput
+                  integer
+                  min={0}
+                  max={365}
+                  emptyValue={0}
+                  commitOnChange
+                  value={Number(form.diasCredito) || 0}
+                  onChange={(n) => handleFieldChange('diasCredito', n)}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   placeholder="30"
                 />
@@ -933,14 +933,13 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Descuento (%)</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.5"
-                  min="0"
-                  max="100"
-                  value={form.descuentoPorcentaje}
-                  onChange={e => handleFieldChange('descuentoPorcentaje', e.target.value)}
+                <NumberInput
+                  min={0}
+                  max={100}
+                  emptyValue={0}
+                  commitOnChange
+                  value={Number(form.descuentoPorcentaje) || 0}
+                  onChange={(n) => handleFieldChange('descuentoPorcentaje', n)}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   placeholder="0"
                 />
@@ -975,14 +974,14 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
                         className="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
                       />
                       <div className="relative w-24">
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min="0"
-                          max="100"
-                          step="1"
-                          value={row.porcentaje}
-                          onChange={e => actualizarDescuentoCategoria(index, 'porcentaje', e.target.value)}
+                        <NumberInput
+                          integer
+                          min={0}
+                          max={100}
+                          emptyValue={0}
+                          commitOnChange
+                          value={Number(row.porcentaje) || 0}
+                          onChange={(n) => actualizarDescuentoCategoria(index, 'porcentaje', String(n))}
                           className="w-full px-3 py-2 pr-7 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
                         />
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>

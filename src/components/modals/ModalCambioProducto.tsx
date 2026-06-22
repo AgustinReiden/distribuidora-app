@@ -3,6 +3,7 @@ import { X, ArrowLeftRight, ArrowDown, ArrowUp, FileText, Search, Package, Alert
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalCambioProductoSchema } from '../../lib/schemas'
 import { formatPrecio } from '../../utils/formatters'
+import NumberInput from '../ui/NumberInput'
 import type { ClienteDB, ProductoDB } from '../../types'
 
 export interface CambioProductoSaveData {
@@ -283,13 +284,13 @@ export default function ModalCambioProducto({
                     Precio: {formatPrecio(productoDevuelto.precio)} · Stock actual: {productoDevuelto.stock}
                   </p>
                 </div>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min="1"
-                  step="1"
-                  value={cantidadDevuelta}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setCantidadDevuelta(e.target.value)}
+                <NumberInput
+                  integer
+                  min={1}
+                  emptyValue={1}
+                  commitOnChange
+                  value={Number(cantidadDevuelta) || 0}
+                  onChange={(n) => setCantidadDevuelta(n)}
                   className="w-20 px-2 py-1 border dark:border-gray-600 rounded text-right dark:bg-gray-700 dark:text-white"
                   aria-label="Cantidad devuelta"
                 />
@@ -343,14 +344,14 @@ export default function ModalCambioProducto({
                     Precio: {formatPrecio(productoEntregado.precio)} · Stock actual: {productoEntregado.stock}
                   </p>
                 </div>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min="1"
-                  step="1"
+                <NumberInput
+                  integer
+                  min={1}
                   max={productoEntregado.stock}
-                  value={cantidadEntregada}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setCantidadEntregada(e.target.value)}
+                  emptyValue={1}
+                  commitOnChange
+                  value={Number(cantidadEntregada) || 0}
+                  onChange={(n) => setCantidadEntregada(n)}
                   className="w-20 px-2 py-1 border dark:border-gray-600 rounded text-right dark:bg-gray-700 dark:text-white"
                   aria-label="Cantidad entregada"
                 />

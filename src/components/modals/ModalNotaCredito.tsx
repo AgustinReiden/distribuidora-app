@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { X, FileText, AlertTriangle } from 'lucide-react'
+import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 
@@ -203,14 +204,14 @@ export default function ModalNotaCredito({
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          step="1"
+                        <NumberInput
+                          integer
                           min={0}
                           max={max}
+                          emptyValue={0}
+                          commitOnChange
                           value={cant}
-                          onChange={(e) => handleCantidadChange(item.producto_id, e.target.value)}
+                          onChange={(n) => handleCantidadChange(item.producto_id, String(n))}
                           disabled={max <= 0}
                           className="w-20 px-2 py-1 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />

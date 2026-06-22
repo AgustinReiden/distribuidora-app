@@ -8,7 +8,7 @@ import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, l
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
-import { parsePrecio } from '../../utils/calculations'
+import NumberInput from '../ui/NumberInput'
 import { supabase } from '../../lib/supabase'
 import { CompactErrorBoundary } from '../ErrorBoundary'
 import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
@@ -1178,13 +1178,12 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Costo neto</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={itemRapido.costo || ''}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, costo: parsePrecio(e.target.value) }))}
+              <NumberInput
+                min={0}
+                emptyValue={0}
+                value={itemRapido.costo || 0}
+                onChange={(n) => setItemRapido(prev => ({ ...prev, costo: n }))}
+                commitOnChange
                 placeholder="0.00"
                 className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
               />
@@ -1266,38 +1265,36 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
         <div className="grid grid-cols-4 gap-2">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Cant.</label>
-            <input
-              type="number"
-              inputMode="numeric"
-              step="1"
-              min="1"
+            <NumberInput
+              integer
+              min={1}
+              emptyValue={1}
               value={item.cantidad}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+              onChange={(n) => onActualizarItem(index, 'cantidad', n)}
+              commitOnChange
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Bonif.%</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              max="100"
-              step="0.01"
+            <NumberInput
+              min={0}
+              max={100}
+              emptyValue={0}
               value={item.bonificacion}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseFloat(e.target.value) || 0)}
+              onChange={(n) => onActualizarItem(index, 'bonificacion', n)}
+              commitOnChange
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Neto</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
+            <NumberInput
+              min={0}
+              emptyValue={0}
               value={item.costoUnitario}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parsePrecio(e.target.value))}
+              onChange={(n) => onActualizarItem(index, 'costoUnitario', n)}
+              commitOnChange
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
           </div>
@@ -1327,36 +1324,34 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
           <p className="text-xs text-gray-500">Stock: {item.stockActual} | IVA: {item.porcentajeIva}%</p>
         </div>
         <div className="col-span-2">
-          <input
-            type="number"
-            inputMode="numeric"
-            step="1"
-            min="1"
+          <NumberInput
+            integer
+            min={1}
+            emptyValue={1}
             value={item.cantidad}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'cantidad', parseInt(e.target.value) || 0)}
+            onChange={(n) => onActualizarItem(index, 'cantidad', n)}
+            commitOnChange
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
         <div className="col-span-1">
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            max="100"
-            step="0.01"
+          <NumberInput
+            min={0}
+            max={100}
+            emptyValue={0}
             value={item.bonificacion}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'bonificacion', parseFloat(e.target.value) || 0)}
+            onChange={(n) => onActualizarItem(index, 'bonificacion', n)}
+            commitOnChange
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
         <div className="col-span-2">
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
+          <NumberInput
+            min={0}
+            emptyValue={0}
             value={item.costoUnitario}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => onActualizarItem(index, 'costoUnitario', parsePrecio(e.target.value))}
+            onChange={(n) => onActualizarItem(index, 'costoUnitario', n)}
+            commitOnChange
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
         </div>
@@ -1721,13 +1716,12 @@ function ItemPendienteRow({
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-0.5">Costo sin IVA</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
+            <NumberInput
+              min={0}
+              emptyValue={0}
               value={costoNuevo}
-              onChange={(e) => setCostoNuevo(parsePrecio(e.target.value))}
+              onChange={(n) => setCostoNuevo(n)}
+              commitOnChange
               className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
             />
           </div>

@@ -2,6 +2,7 @@ import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalMermaSchema } from '../../lib/schemas'
+import NumberInput from '../ui/NumberInput'
 import type { Producto } from '../../types'
 
 type MotivoMermaValue = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'promociones' | 'otro';
@@ -154,14 +155,14 @@ export default function ModalMermaStock({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Cantidad a dar de baja *
             </label>
-            <input
-              type="number"
-              inputMode="numeric"
-              step="1"
-              min="1"
+            <NumberInput
+              integer
+              min={1}
               max={producto.stock}
-              value={cantidad}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setCantidad(e.target.value)}
+              emptyValue={1}
+              commitOnChange
+              value={Number(cantidad) || 0}
+              onChange={(n) => setCantidad(n)}
               className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
               required
             />

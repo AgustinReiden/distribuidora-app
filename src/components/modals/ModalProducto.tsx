@@ -2,6 +2,7 @@ import { useState, memo } from 'react';
 import type { ChangeEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
+import NumberInput from '../ui/NumberInput';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProductoSchema } from '../../lib/schemas';
 import {
@@ -260,18 +261,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           </div>
           <div className="col-span-2 sm:col-span-1">
             <label className="block text-sm font-medium mb-1">Stock *</label>
-            <input
-              type="number"
-              inputMode="numeric"
-              step="1"
-              value={form.stock}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                const val = e.target.value;
-                // Permitir campo vacío temporalmente mientras escribe, pero validar como número
-                handleFieldChange('stock', val === '' ? '' : (parseInt(val, 10) || 0));
-              }}
+            <NumberInput
+              integer
+              min={0}
+              emptyValue={0}
+              value={Number(form.stock) || 0}
+              onChange={(n) => handleFieldChange('stock', n)}
+              commitOnChange
               className={inputClass('stock')}
-              min="0"
             />
             {errores.stock && <p className="text-red-500 text-xs mt-1">{errores.stock}</p>}
           </div>
@@ -279,12 +276,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
 
         <div>
           <label className="block text-sm font-medium mb-1">Stock Minimo de Seguridad</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            step="1"
+          <NumberInput
+            integer
+            min={0}
+            emptyValue={0}
             value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange('stock_minimo', parseInt(e.target.value) || 0)}
+            onChange={(n) => handleFieldChange('stock_minimo', n)}
+            commitOnChange
             className={inputClass('stock_minimo')}
             placeholder="10"
           />
@@ -436,14 +434,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             </div>
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos (%)</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
-                max="100"
-                value={form.impuestos_internos || ''}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => handleImpuestosInternosChange(e.target.value)}
+              <NumberInput
+                min={0}
+                max={100}
+                emptyValue={0}
+                value={parsePrecio(form.impuestos_internos)}
+                onChange={(n) => handleImpuestosInternosChange(String(n))}
+                commitOnChange
                 className="w-full px-3 py-2 border rounded-lg text-sm"
                 placeholder="0"
               />
@@ -458,12 +455,12 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Costo Neto</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={form.costo_sin_iva || ''}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => handleCostoSinIvaChange(e.target.value)}
+              <NumberInput
+                min={0}
+                emptyValue={0}
+                value={parsePrecio(form.costo_sin_iva)}
+                onChange={(n) => handleCostoSinIvaChange(String(n))}
+                commitOnChange
                 className="w-full px-3 py-2 border rounded-lg text-sm"
                 placeholder="0.00"
               />
@@ -492,12 +489,12 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Precio Final (con IVA + Imp.Int.) *</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={form.precio}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => handlePrecioChange(e.target.value)}
+              <NumberInput
+                min={0}
+                emptyValue={0}
+                value={parsePrecio(form.precio)}
+                onChange={(n) => handlePrecioChange(String(n))}
+                commitOnChange
                 className={`w-full px-3 py-2 border rounded-lg font-semibold ${errores.precio ? 'border-red-500 bg-red-50' : ''}`}
                 placeholder="0.00"
               />
@@ -522,12 +519,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Margen (%)</label>
               <div className="relative">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  value={margen}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleMargenChange(e.target.value)}
+                <NumberInput
+                  value={parsePrecio(margen)}
+                  emptyValue={0}
+                  onChange={(n) => handleMargenChange(String(n))}
+                  commitOnChange
                   disabled={parsePrecio(String(form.costo_con_iva)) <= 0}
                   className="w-full px-3 py-2 pr-7 border rounded-lg disabled:bg-gray-100 disabled:cursor-not-allowed"
                   placeholder="0.0"
