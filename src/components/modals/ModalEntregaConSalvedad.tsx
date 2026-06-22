@@ -6,6 +6,7 @@
 import React, { useState, useCallback } from 'react'
 import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
+import NumberInput from '../ui/NumberInput'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
 interface MotivoOption {
@@ -267,14 +268,14 @@ export default function ModalEntregaConSalvedad({
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                               Cantidad con problema
                             </label>
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              step="1"
-                              min="1"
+                            <NumberInput
+                              integer
+                              min={1}
                               max={itemSalv.item.cantidad}
+                              emptyValue={1}
+                              commitOnChange
                               value={itemSalv.cantidadAfectada}
-                              onChange={(e) => updateItemSalvedad(itemSalv.item.id, { cantidadAfectada: parseInt(e.target.value) || 0 })}
+                              onChange={(n) => updateItemSalvedad(itemSalv.item.id, { cantidadAfectada: n })}
                               onClick={(e) => e.stopPropagation()}
                               className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 dark:bg-gray-700 dark:text-white"
                             />

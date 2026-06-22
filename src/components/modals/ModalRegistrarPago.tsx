@@ -2,6 +2,7 @@ import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import NumberInput from '../ui/NumberInput'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { modalPagoSchema } from '../../lib/schemas'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
@@ -459,13 +460,12 @@ export default function ModalRegistrarPago({
                     <div className="flex-1">
                       <div className="relative">
                         <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          value={pago.monto}
-                          onChange={e => handlePagoChange(index, 'monto', e.target.value)}
+                        <NumberInput
+                          min={0}
+                          emptyValue={0}
+                          commitOnChange
+                          value={Number(pago.monto) || 0}
+                          onChange={(n) => handlePagoChange(index, 'monto', String(n))}
                           placeholder="0.00"
                           className="w-full pl-7 pr-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold"
                         />
@@ -522,13 +522,12 @@ export default function ModalRegistrarPago({
                 </label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    min="0"
-                    value={monto}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setMonto(e.target.value)}
+                  <NumberInput
+                    min={0}
+                    emptyValue={0}
+                    commitOnChange
+                    value={Number(monto) || 0}
+                    onChange={(n) => setMonto(String(n))}
                     placeholder="0.00"
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg font-semibold"
                     required

@@ -19,6 +19,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Loader2, DollarSign, Plus, Trash2, AlertCircle, X } from 'lucide-react'
 import ModalBase from './ModalBase'
+import NumberInput from '../ui/NumberInput'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
@@ -322,13 +323,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                     </select>
                     <div className="relative flex-1">
                       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.01"
-                        min="0"
-                        value={linea.monto}
-                        onChange={e => handleLineaChange(index, { monto: e.target.value })}
+                      <NumberInput
+                        min={0}
+                        emptyValue={0}
+                        commitOnChange
+                        value={Number(linea.monto) || 0}
+                        onChange={(n) => handleLineaChange(index, { monto: String(n) })}
                         placeholder="0.00"
                         className="w-full pl-6 pr-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-semibold"
                       />

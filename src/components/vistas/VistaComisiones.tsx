@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Percent, TrendingUp, Calendar } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import NumberInput from '../ui/NumberInput';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import type { ReportePreventista } from '../../types';
 
@@ -64,13 +65,13 @@ export default function VistaComisiones({
         <div className="flex items-center gap-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3 py-2 shadow-sm">
           <Percent className="w-4 h-4 text-gray-500" />
           <label className="text-sm font-medium dark:text-gray-300">Comision:</label>
-          <input
-            type="number"
-            min="0"
-            max="100"
-            step="0.5"
+          <NumberInput
+            min={0}
+            max={100}
             value={porcentaje}
-            onChange={e => setPorcentaje(parseFloat(e.target.value) || 0)}
+            onChange={(n) => setPorcentaje(n)}
+            commitOnChange
+            emptyValue={0}
             className="w-16 px-2 py-1 border rounded text-center text-sm font-semibold dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />
           <span className="text-sm font-medium dark:text-gray-300">%</span>

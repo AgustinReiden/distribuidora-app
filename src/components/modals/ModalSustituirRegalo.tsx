@@ -21,6 +21,7 @@
 import { useMemo, useState, memo } from 'react'
 import { Loader2, Gift, AlertTriangle, ChevronDown, ChevronUp, Info } from 'lucide-react'
 import ModalBase from './ModalBase'
+import NumberInput from '../ui/NumberInput'
 import { useProductosQuery, usePromoAcumuladorQuery } from '../../hooks/queries'
 import { useSustituirRegaloMutation } from '../../hooks/queries/useSustituirRegaloMutation'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -188,13 +189,12 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Cantidad *
           </label>
-          <input
-            type="number"
-            inputMode="decimal"
-            step="0.01"
-            min="0"
-            value={cantidadNueva}
-            onChange={e => setCantidadNueva(e.target.value)}
+          <NumberInput
+            min={0}
+            emptyValue={0}
+            commitOnChange
+            value={Number(cantidadNueva) || 0}
+            onChange={(n) => setCantidadNueva(String(n))}
             className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />
           {productoNuevo && regaloMueveStock && !stockSuficiente && (

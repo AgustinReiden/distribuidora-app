@@ -6,6 +6,7 @@ import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { useSimularSalvedadPromoImpactoQuery } from '../../hooks/queries'
+import NumberInput from '../ui/NumberInput'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
 
 interface MotivoOption {
@@ -213,14 +214,14 @@ export default function ModalSalvedadItem({
               >
                 <Minus className="w-6 h-6" />
               </button>
-              <input
-                type="number"
-                inputMode="numeric"
-                step="1"
-                min="1"
+              <NumberInput
+                integer
+                min={1}
                 max={item.cantidad}
-                value={cantidad}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setCantidad(e.target.value)}
+                emptyValue={1}
+                commitOnChange
+                value={Number(cantidad) || 0}
+                onChange={(n) => setCantidad(n)}
                 className="flex-1 h-14 text-center text-2xl font-bold border-2 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 dark:bg-gray-700 dark:text-white"
                 required
               />

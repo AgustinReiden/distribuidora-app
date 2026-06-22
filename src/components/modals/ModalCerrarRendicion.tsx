@@ -12,6 +12,7 @@
 import { useState, memo, useMemo } from 'react'
 import { Loader2, Plus, Trash2, CheckCircle2, AlertTriangle, FileText } from 'lucide-react'
 import ModalBase from './ModalBase'
+import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import type { RendicionGastoInput } from '../../types'
 
@@ -233,13 +234,12 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
                     placeholder="Descripción (ej: combustible)"
                     className="flex-1 px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   />
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    min="0"
-                    value={g.monto}
-                    onChange={e => updateGasto(idx, 'monto', e.target.value)}
+                  <NumberInput
+                    min={0}
+                    emptyValue={0}
+                    commitOnChange
+                    value={Number(g.monto) || 0}
+                    onChange={(n) => updateGasto(idx, 'monto', String(n))}
                     placeholder="0.00"
                     className="w-28 px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   />

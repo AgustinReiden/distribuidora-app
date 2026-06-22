@@ -5,6 +5,7 @@
 import { memo, useMemo, useState } from 'react'
 import { Loader2, Search, Plus, Trash2, Building2 } from 'lucide-react'
 import ModalBase from './ModalBase'
+import NumberInput from '../ui/NumberInput'
 import type { ProductoDB, SucursalDB } from '../../types'
 
 interface LineaItem {
@@ -117,9 +118,13 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
                   <p className="text-sm font-medium dark:text-white truncate">{l.nombre}</p>
                   <p className="text-xs text-gray-400">stock disponible: {l.stock}</p>
                 </div>
-                <input
-                  type="number" min="1" inputMode="numeric" value={l.cantidad}
-                  onChange={e => setCantidad(l.productoId, Math.max(0, parseInt(e.target.value) || 0))}
+                <NumberInput
+                  integer
+                  min={0}
+                  emptyValue={0}
+                  commitOnChange
+                  value={l.cantidad}
+                  onChange={(n) => setCantidad(l.productoId, n)}
                   className="w-20 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 />
                 <button type="button" onClick={() => quitar(l.productoId)} className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded">

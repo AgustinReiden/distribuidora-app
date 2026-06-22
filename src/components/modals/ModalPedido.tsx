@@ -9,6 +9,7 @@ import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
 import GeolocationGate from '../GeolocationGate';
+import NumberInput from '../ui/NumberInput';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -725,7 +726,16 @@ const ModalPedido = memo(function ModalPedido({
                               <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                                 <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, 0); }} className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="Eliminar producto"><Trash2 className="w-4 h-4" /></button>
                                 <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, Math.max(item.cantidad - 1, minCantidad)); }} className={`w-7 h-7 rounded-full text-sm ${item.cantidad <= minCantidad ? 'bg-gray-100 text-gray-400 dark:bg-gray-700' : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500'}`} disabled={item.cantidad <= minCantidad}>-</button>
-                                <span className="w-6 text-center font-medium text-sm dark:text-white">{item.cantidad}</span>
+                                <NumberInput
+                                  integer
+                                  min={minCantidad}
+                                  emptyValue={minCantidad}
+                                  value={item.cantidad}
+                                  onChange={(n) => onActualizarCantidad(item.productoId, Math.max(n, minCantidad))}
+                                  onClick={(e) => e.stopPropagation()}
+                                  aria-label="Cantidad"
+                                  className="w-12 text-center font-medium text-sm border dark:border-gray-600 rounded px-1 py-0.5 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
                                 <button onClick={(e) => { e.stopPropagation(); onActualizarCantidad(item.productoId, item.cantidad + 1); }} className="w-7 h-7 rounded-full text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500">+</button>
                                 <p className="w-20 text-right font-semibold text-sm dark:text-white">{formatPrecio(subtotal)}</p>
                               </div>
