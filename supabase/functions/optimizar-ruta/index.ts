@@ -24,7 +24,12 @@ import {
   type RutaUnida,
   unirTramos,
 } from "./tramos.ts";
-import { optimizeTours } from "./route-optimization.ts";
+import {
+  optimizeTours,
+  optimizeToursMulti,
+  type RepartidorVehiculo,
+  type PedidoRutaZona,
+} from "./route-optimization.ts";
 import { navegarTramo } from "./navegar-tramo.ts";
 
 const CORS_HEADERS: Record<string, string> = {
@@ -45,12 +50,14 @@ interface RequestBody {
   /** Punto de llegada para optimizar (opcional; si falta, fin = depósito). */
   destino_lat?: number | null;
   destino_lng?: number | null;
-  pedidos?: Array<Partial<PedidoRuta> & { latitud?: number | null; longitud?: number | null }>;
+  pedidos?: Array<Partial<PedidoRuta> & { latitud?: number | null; longitud?: number | null; zona_id?: number | null }>;
   /** Ancla temporal para respetar ventanas horarias (solo optimizeTours). */
   fecha?: string; // "YYYY-MM-DD"
   hora_inicio?: string; // "HH:MM"
   /** Ventanas de entrega por pedido (derivadas de cliente.horario_entrega). */
   ventanas?: Array<{ pedido_id: string | number; inicio: string; fin: string }>;
+  /** Split multi-repartidor: si viene (≥1), divide la ruta en N recorridos. */
+  repartidores?: Array<{ transportista_id: string; max_paradas?: number | null; zonas_preferidas?: number[] | null }>;
 }
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
@@ -212,6 +219,64 @@ serve(async (req: Request) => {
       mensaje: "Los clientes deben tener latitud y longitud para optimizar la ruta",
       pedidos_sin_coordenadas: sinCoords.length,
     });
+  }
+
+  // --- Split multi-repartidor: N vehículos en una sola optimización ---
+  // Requiere el motor optimizeTours (SA key); el fallback computeRoutes no
+  // soporta múltiples vehículos. Los pedidos sin coordenadas los reparte el
+  // front entre los choferes (no entran al optimizador).
+  const repartidores = body.repartidores ?? [];
+  if (repartidores.length > 0) {
+    if (!saKey) {
+      return jsonResponse({
+        success: false,
+        error: "Split no configurado",
+        mensaje: "Dividir la ruta entre repartidores requiere GOOGLE_SA_KEY (Route Optimization).",
+      });
+    }
+    try {
+      const result = await optimizeToursMulti(
+        saKey,
+        deposito,
+        conCoords as PedidoRutaZona[],
+        destino,
+        { fecha: body.fecha, horaInicio: body.hora_inicio, ventanas: body.ventanas },
+        repartidores as RepartidorVehiculo[],
+      );
+      const recorridos = result.recorridos.map((r) => {
+        const km = Math.round(r.distanciaTotalMetros / 10) / 100;
+        const min = Math.round(r.duracionTotalSegundos / 60);
+        const h = Math.floor(min / 60);
+        const m = min % 60;
+        return {
+          transportista_id: r.transportista_id,
+          total_pedidos: r.ordenOptimizado.length,
+          orden_optimizado: r.ordenOptimizado,
+          polylines: r.polylines,
+          distancia_total: r.distanciaTotalMetros,
+          distancia_total_km: km,
+          duracion_total: r.duracionTotalSegundos,
+          duracion_total_minutos: min,
+          duracion_formato: h > 0 ? `${h}h ${m}m` : `${m} minutos`,
+          distancia_formato: `${km} km`,
+        };
+      });
+      return jsonResponse({
+        success: true,
+        optimizado_por: `Google Route Optimization (${repartidores.length} vehículos)`,
+        recorridos,
+        pedidos_sin_coordenadas: sinCoords.length,
+        pedidos_sin_coordenadas_ids: sinCoords.map((p) => String(p.pedido_id ?? "")),
+        skipped: result.skipped,
+      });
+    } catch (err) {
+      console.error("[optimizar-ruta] split multi error:", err);
+      return jsonResponse({
+        success: false,
+        error: "Error al dividir la ruta",
+        mensaje: err instanceof Error ? err.message : "No se pudo optimizar el split",
+      });
+    }
   }
 
   // Ventanas horarias: solo las respeta optimizeTours (el fallback computeRoutes

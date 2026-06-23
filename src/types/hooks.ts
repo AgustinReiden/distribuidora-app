@@ -153,6 +153,22 @@ export interface PedidoDB {
   gps_accuracy?: number | null;
   gps_capturado_at?: string | null;
   gps_status?: 'ok' | 'denied' | 'unavailable' | 'timeout' | 'error' | null;
+  // Canal de origen del pedido. 'cambio' marca una parada de cambio/devolución
+  // (pedido especial total=0; mig 089), no una venta.
+  canal?: string;
+  // Detalle del cambio embebido (recorrido_cambios) cuando canal='cambio'.
+  // Lo adjunta la ruta activa del transportista para mostrar qué retirar/entregar.
+  cambio?: ParadaCambioDetalle | null;
+}
+
+/** Detalle de una parada de cambio/devolución (recorrido_cambios, mig 089). */
+export interface ParadaCambioDetalle {
+  producto_devuelto_nombre?: string | null;
+  cantidad_devuelta?: number | null;
+  producto_entregado_nombre?: string | null;
+  cantidad_entregada?: number | null;
+  observaciones?: string | null;
+  aplicado_at?: string | null;
 }
 
 export interface MermaDB {

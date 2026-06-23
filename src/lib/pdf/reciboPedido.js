@@ -373,6 +373,7 @@ function calcularAlturaComanda(pedido) {
   if (pedido.cliente?.horarios_atencion) height += 8 // horario (hasta 2 lineas)
   height += 10 // divider + header tabla productos
   height += items.length * 12 // productos (nombre puede envolver + detalle precio unit)
+  if (pedido.canal === 'cambio') height += 18 // banner CAMBIO/DEVOLUCION + retirar/entregar
   height += 32 // total + forma pago + estado
   if (pedido.estado_pago === 'parcial') height += 6
   if (pedido.notas) height += 18
@@ -448,6 +449,22 @@ function dibujarComanda(doc, pedido) {
 
   drawDivider(doc, y, margin, ticketWidth - margin, 0.3)
   y += 4
+
+  // === CAMBIO / DEVOLUCIÓN (parada canal='cambio'): banner + qué retirar/entregar ===
+  if (pedido.canal === 'cambio') {
+    setHeaderStyle(doc, 11)
+    doc.text('CAMBIO / DEVOLUCION', ticketWidth / 2, y, { align: 'center' })
+    y += 5
+    const c = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
+    setNormalStyle(doc, 9)
+    if (c) {
+      doc.splitTextToSize(`Retirar: ${c.cantidad_devuelta ?? '?'}x ${c.producto_devuelto_nombre || 'producto'}`, contentWidth)
+        .forEach(line => { doc.text(line, margin, y); y += 4 })
+      doc.splitTextToSize(`Entregar: ${c.cantidad_entregada ?? '?'}x ${c.producto_entregado_nombre || 'producto'}`, contentWidth)
+        .forEach(line => { doc.text(line, margin, y); y += 4 })
+    }
+    y += 1
+  }
 
   // === PRODUCTOS ===
   // Agrupamos bonificaciones repetidas: 3 filas de 2 unidades de la misma

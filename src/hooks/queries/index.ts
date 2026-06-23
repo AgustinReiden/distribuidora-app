@@ -118,6 +118,8 @@ export {
 export {
   cambiosProductosKeys,
   useRegistrarCambioProductoMutation,
+  useCrearPedidoCambioEnRutaMutation,
+  useAplicarCambioParadaMutation,
 } from './useCambiosProductosQuery'
 export type { RegistrarCambioInput } from './useCambiosProductosQuery'
 

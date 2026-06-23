@@ -54,6 +54,39 @@ export interface VentanaPedido {
   fin: string;    // "HH:MM" (puede ser "24:00")
 }
 
+// === Split multi-repartidor ===
+
+/** Repartidor disponible + sus parámetros para el split. */
+export interface RepartidorParam {
+  transportista_id: string;
+  /** Tope de paradas (loadLimit). Vacío = sin tope. */
+  max_paradas?: number | null;
+  /** Zonas que prefiere (zona_id). Sesgo soft hacia este chofer. */
+  zonas_preferidas?: number[] | null;
+}
+
+/** Ruta optimizada de un repartidor (devuelta por el modo multi). */
+export interface RutaPorRepartidor {
+  transportista_id: string;
+  total_pedidos: number;
+  orden_optimizado: OrdenOptimizadoItem[];
+  polylines?: string[];
+  distancia_total?: number;
+  duracion_total?: number;
+  distancia_formato?: string;
+  duracion_formato?: string;
+}
+
+export interface RutaMultiVehiculoResponse {
+  success?: boolean;
+  recorridos: RutaPorRepartidor[];
+  pedidos_sin_coordenadas?: number;
+  pedidos_sin_coordenadas_ids?: string[];
+  skipped?: string[];
+  error?: string;
+  mensaje?: string;
+}
+
 export interface OptimizarRutaRequestBody {
   transportista_id: string;
   deposito_lat: number;
@@ -76,6 +109,8 @@ export interface UseOptimizarRutaReturn {
   rutaOptimizada: RutaOptimizadaResponse | null;
   error: string | null;
   optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: { fecha?: string; horaInicio?: string }) => Promise<RutaOptimizadaResponse | null>;
+  /** Split multi-repartidor: divide los pedidos en N recorridos optimizados. */
+  optimizarRutaMulti: (repartidores: RepartidorParam[], pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: { fecha?: string; horaInicio?: string }) => Promise<RutaMultiVehiculoResponse | null>;
   /** Permite al caller reflejar la ruta realmente armada (p.ej. agregando las
    *  paradas sin coordenadas que el optimizador no devuelve) para que el modal
    *  muestre el resultado y los botones de hoja de ruta / comandas. */
@@ -319,6 +354,94 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
   }, []);
 
   /**
+   * Optimización multi-repartidor: divide los pedidos seleccionados en N
+   * recorridos (uno por chofer). Devuelve un recorrido por repartidor con su
+   * orden_optimizado y polylines. NO toca `rutaOptimizada` (shape distinto): el
+   * caller maneja el resultado por chofer. Los pedidos sin coordenadas no entran
+   * (el caller los reparte) y se devuelven en pedidos_sin_coordenadas_ids.
+   */
+  const optimizarRutaMulti = useCallback(async (
+    repartidores: RepartidorParam[],
+    pedidos: PedidoDB[] = [],
+    deposito?: DepositoCoords,
+    destino?: DepositoCoords | null,
+    opts?: { fecha?: string; horaInicio?: string }
+  ): Promise<RutaMultiVehiculoResponse | null> => {
+    if (!repartidores.length) {
+      setError('Elegí al menos un repartidor');
+      return null;
+    }
+
+    const pedidosConCoordenadas = pedidos
+      .filter((p): p is PedidoDB & { cliente: ClienteDB & { latitud: number; longitud: number } } =>
+        p.cliente?.latitud != null && p.cliente?.longitud != null
+      )
+      .map(p => ({
+        pedido_id: p.id,
+        cliente_id: p.cliente_id,
+        cliente_nombre: p.cliente?.nombre_fantasia || 'Sin nombre',
+        direccion: p.cliente?.direccion || '',
+        latitud: p.cliente.latitud,
+        longitud: p.cliente.longitud,
+        // zona_id del cliente (para el sesgo por zona). Puede no venir.
+        zona_id: p.cliente?.zona_id != null ? Number(p.cliente.zona_id) : null,
+      }));
+
+    const ventanas: VentanaPedido[] = [];
+    for (const p of pedidos) {
+      const fr = parsearFranjas(p.cliente?.horario_entrega)[0];
+      if (fr?.apertura && fr?.cierre) {
+        ventanas.push({ pedido_id: p.id, inicio: fr.apertura, fin: fr.cierre });
+      }
+    }
+
+    if (pedidosConCoordenadas.length === 0) {
+      return {
+        success: true,
+        recorridos: [],
+        pedidos_sin_coordenadas: pedidos.length,
+        mensaje: 'No hay pedidos con coordenadas para optimizar',
+      };
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const dep = deposito ?? getDepositoCoords();
+    const body = {
+      deposito_lat: dep.lat,
+      deposito_lng: dep.lng,
+      destino_lat: destino?.lat ?? null,
+      destino_lng: destino?.lng ?? null,
+      pedidos: pedidosConCoordenadas,
+      fecha: opts?.fecha,
+      hora_inicio: opts?.horaInicio,
+      ventanas: ventanas.length > 0 ? ventanas : undefined,
+      repartidores,
+    };
+
+    try {
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        'optimizar-ruta',
+        { body }
+      );
+      if (fnError) {
+        throw new Error(fnError.message || 'No se pudo contactar el servicio de optimización');
+      }
+      const data = fnData as RutaMultiVehiculoResponse;
+      if (data?.error) {
+        throw new Error(data.mensaje || data.error);
+      }
+      return data;
+    } catch (err) {
+      setError((err as Error).message || 'Error al dividir la ruta');
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /**
    * Limpia los datos de la ruta optimizada
    */
   const limpiarRuta = useCallback((): void => {
@@ -331,6 +454,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
     rutaOptimizada,
     error,
     optimizarRuta,
+    optimizarRutaMulti,
     setRutaOptimizada,
     limpiarRuta
   };

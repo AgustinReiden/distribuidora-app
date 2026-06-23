@@ -30,10 +30,14 @@ import {
   useCrearClienteMutation,
   useDepositoCoords,
   useDestinoCoords,
+  useCrearPedidoCambioEnRutaMutation,
+  useAplicarCambioParadaMutation,
+  useZonasEstandarizadasQuery,
+  type RegistrarCambioInput,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { useOptimizarRuta } from '../../hooks/useOptimizarRuta'
+import { useOptimizarRuta, type RepartidorParam } from '../../hooks/useOptimizarRuta'
 import { usePromocionPedido } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
@@ -44,6 +48,7 @@ import { usePagos } from '../../hooks/supabase/usePagos'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
+import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
 
 // Lazy load de componentes
 const VistaPedidos = lazy(() => import('../vistas/VistaPedidos'))
@@ -56,6 +61,7 @@ const ModalEditarNotas = lazy(() => import('../modals/ModalEditarNotas'))
 const ModalFiltroFecha = lazy(() => import('../modals/ModalFiltroFecha'))
 const ModalExportarPDF = lazy(() => import('../modals/ModalExportarPDF'))
 const ModalGestionRutas = lazy(() => import('../modals/ModalGestionRutas'))
+const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
 const ModalEntregaConSalvedad = lazy(() => import('../modals/ModalEntregaConSalvedad'))
 const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas'))
 const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
@@ -124,6 +130,8 @@ export default function PedidosContainer(): React.ReactElement {
   const { data: clientes = [] } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: transportistas = [] } = useTransportistasQuery()
+  // Zonas activas (para elegir zonas preferidas por chofer en el split)
+  const { data: zonasRuta = [] } = useZonasEstandarizadasQuery()
   const { data: usuariosTodos = [] } = useUsuariosQuery()
   const usuarios = useMemo(
     () => (isAdmin ? usuariosTodos : []),
@@ -142,9 +150,11 @@ export default function PedidosContainer(): React.ReactElement {
   const cancelarPedidoMut = useCancelarPedidoMutation()
   const pagosMasivos = usePagosMasivosMutation()
   const crearClienteMut = useCrearClienteMutation()
+  const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
+  const aplicarCambioParadaMut = useAplicarCambioParadaMutation()
 
   // Route optimization
-  const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, setRutaOptimizada, limpiarRuta } = useOptimizarRuta()
+  const { loading: loadingOptimizacion, rutaOptimizada, error: errorOptimizacion, optimizarRuta, optimizarRutaMulti, setRutaOptimizada, limpiarRuta } = useOptimizarRuta()
   const deposito = useDepositoCoords()
   const destinoRuta = useDestinoCoords()
   // Inyecta el depósito (origen) y el punto de llegada opcional (destino) de la
@@ -154,6 +164,11 @@ export default function PedidosContainer(): React.ReactElement {
     (transportistaId: string, pedidosData?: PedidoDB[], fecha?: string, horaInicio?: string) =>
       optimizarRuta(transportistaId, pedidosData, deposito, destinoRuta, { fecha, horaInicio }),
     [optimizarRuta, deposito, destinoRuta],
+  )
+  const optimizarRutaMultiConDeposito = useCallback(
+    (repartidores: RepartidorParam[], pedidosData?: PedidoDB[], fecha?: string, horaInicio?: string) =>
+      optimizarRutaMulti(repartidores, pedidosData, deposito, destinoRuta, { fecha, horaInicio }),
+    [optimizarRutaMulti, deposito, destinoRuta],
   )
 
   // Export
@@ -179,6 +194,10 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalPagoPedidoOpen, setModalPagoPedidoOpen] = useState(false)
   const [modalMarcarVisitaOpen, setModalMarcarVisitaOpen] = useState(false)
   const [modalVisitasHoyOpen, setModalVisitasHoyOpen] = useState(false)
+  // Cambio/devolución como parada (desde la pantalla de Pedidos)
+  const [cambioEnRutaOpen, setCambioEnRutaOpen] = useState(false)
+  // Resultado del split multi-repartidor (vista de resultado del modal de rutas)
+  const [rutaMultiResultado, setRutaMultiResultado] = useState<RutaMultiResultadoUI | null>(null)
   const [pedidoPago, setPedidoPago] = useState<PedidoDB | null>(null)
   const [pagosPreviosPedido, setPagosPreviosPedido] = useState<PagoDBWithUsuario[]>([])
 
@@ -212,6 +231,8 @@ export default function PedidosContainer(): React.ReactElement {
     setModalFiltroFechaOpen(false)
     setModalExportarPDFOpen(false)
     setModalOptimizarRutaOpen(false)
+    setCambioEnRutaOpen(false)
+    setRutaMultiResultado(null)
     setModalEntregaSalvedadOpen(false)
     setModalEntregasMasivasOpen(false)
     setModalCancelarOpen(false)
@@ -296,6 +317,25 @@ export default function PedidosContainer(): React.ReactElement {
   }, [fetchPagosPedido])
 
   const handleMarcarEntregado = useCallback(async (pedido: PedidoDB) => {
+    // Parada de cambio/devolución (canal='cambio'): al completarla se ajusta
+    // stock + saldo (aplicar_cambio_de_parada, idempotente) y recién después se
+    // marca el pedido entregado. No hay cobro (total 0).
+    if (pedido.canal === 'cambio') {
+      setConfirmConfig({
+        visible: true, titulo: 'Confirmar cambio/devolución',
+        mensaje: `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock y la cuenta del cliente.`,
+        tipo: 'success',
+        onConfirm: async () => {
+          try {
+            await aplicarCambioParadaMut.mutateAsync(String(pedido.id))
+            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+            notify.success('Cambio/devolución completado')
+          } catch (e) { notify.error((e as Error).message) }
+          setConfirmConfig({ visible: false })
+        },
+      })
+      return
+    }
     if (pedido.estado_pago === 'pagado') {
       setConfirmConfig({
         visible: true, titulo: 'Confirmar entrega',
@@ -316,7 +356,7 @@ export default function PedidosContainer(): React.ReactElement {
     setPagosPreviosPedido([])
     setModalPagoPedidoOpen(true)
     await refreshPagosPedido(String(pedido.id))
-  }, [cambiarEstado, notify, refreshPagosPedido])
+  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut])
 
   const handleDesmarcarEntregado = useCallback((pedido: PedidoDB) => {
     setConfirmConfig({
@@ -1093,6 +1133,107 @@ export default function PedidosContainer(): React.ReactElement {
     }
   }, [optimizarRutaConDeposito, handleAplicarOrden, setRutaOptimizada])
 
+  // Split multi-repartidor: optimiza dividiendo los pedidos entre N choferes y
+  // persiste un recorrido por chofer (aplicar_orden_ruta una vez por cada uno).
+  // Los pedidos sin coordenadas (que el optimizador no rutea) se reparten por
+  // zona preferida o round-robin antes de persistir.
+  const handleArmarRutaMulti = useCallback(async (repartidores: RepartidorParam[], pedidosSeleccionados: PedidoDB[], fecha: string, horaInicio: string) => {
+    if (!repartidores.length || pedidosSeleccionados.length === 0) return
+    const resp = await optimizarRutaMultiConDeposito(repartidores, pedidosSeleccionados, fecha, horaInicio)
+    if (!resp) return // error ya notificado por el hook
+
+    const byId = new Map(pedidosSeleccionados.map(p => [String(p.id), p]))
+
+    // Orden por repartidor desde el resultado del optimizador (geocodificados).
+    const ordenPorRep = new Map<string, Array<{ pedido_id: string; orden: number }>>()
+    for (const rep of repartidores) ordenPorRep.set(rep.transportista_id, [])
+    for (const r of resp.recorridos) {
+      ordenPorRep.set(
+        r.transportista_id,
+        (r.orden_optimizado ?? []).map(o => ({ pedido_id: String(o.pedido_id), orden: o.orden })),
+      )
+    }
+
+    // Pedidos sin coordenadas: el optimizador no los devuelve → repartir por
+    // zona preferida (si el cliente tiene zona) o round-robin, y anexar al final.
+    const sinCoordsIds = resp.pedidos_sin_coordenadas_ids
+      ?? pedidosSeleccionados
+        .filter(p => p.cliente?.latitud == null || p.cliente?.longitud == null)
+        .map(p => String(p.id))
+    let rr = 0
+    for (const pid of sinCoordsIds) {
+      const pedido = byId.get(String(pid))
+      const zonaId = pedido?.cliente?.zona_id != null ? Number(pedido.cliente.zona_id) : null
+      let target = zonaId != null
+        ? repartidores.find(r => Array.isArray(r.zonas_preferidas) && r.zonas_preferidas.includes(zonaId))?.transportista_id
+        : undefined
+      if (!target) { target = repartidores[rr % repartidores.length].transportista_id; rr++ }
+      const lista = ordenPorRep.get(target)!
+      const maxOrden = lista.reduce((m, o) => Math.max(m, o.orden), 0)
+      lista.push({ pedido_id: String(pid), orden: maxOrden + 1 })
+    }
+
+    // Métricas (distancia/duración/polylines) por chofer desde el optimizador.
+    const metricsByRep = new Map(resp.recorridos.map(r => [r.transportista_id, r]))
+
+    setGuardando(true)
+    const recorridosUI: RutaMultiResultadoUI['recorridos'] = []
+    try {
+      for (const rep of repartidores) {
+        const lista = ordenPorRep.get(rep.transportista_id) ?? []
+        if (lista.length === 0) continue
+        const m = metricsByRep.get(rep.transportista_id)
+        const { error } = await supabase.rpc('aplicar_orden_ruta', {
+          p_transportista_id: rep.transportista_id,
+          p_pedidos: lista.map(o => ({ pedido_id: o.pedido_id, orden_entrega: o.orden })),
+          p_distancia: m?.distancia_total ?? null,
+          p_duracion: m?.duracion_total != null ? Math.round(m.duracion_total) : null,
+          p_polylines: m?.polylines ?? null,
+          p_fecha: fecha,
+        })
+        if (error) throw error
+        recorridosUI.push({
+          transportista_id: rep.transportista_id,
+          transportista_nombre: transportistas.find(t => t.id === rep.transportista_id)?.nombre || 'Transportista',
+          total_pedidos: lista.length,
+          distancia_formato: m?.distancia_formato,
+          duracion_formato: m?.duracion_formato,
+          pedido_ids: lista.slice().sort((a, b) => a.orden - b.orden).map(o => o.pedido_id),
+        })
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
+
+      setRutaMultiResultado({ recorridos: recorridosUI, skipped: resp.skipped ?? [] })
+      const noAsignados = (resp.skipped ?? []).length
+      notify.success(
+        `Ruta dividida en ${recorridosUI.length} recorrido(s)` +
+        (noAsignados > 0 ? ` · ${noAsignados} pedido(s) sin asignar (capacidad)` : ''),
+      )
+    } catch (e) {
+      notify.error('Error al guardar las rutas: ' + (e as Error).message)
+    }
+    setGuardando(false)
+  }, [optimizarRutaMultiConDeposito, transportistas, notify, queryClient])
+
+  // Crea una parada de cambio/devolución (pedido especial canal='cambio'). La
+  // usa tanto el modal de armar ruta (que además la suma a la selección con el
+  // pedido_id que devuelve) como la pantalla de Pedidos. Devuelve el pedido_id.
+  const handleCrearCambioEnRuta = useCallback(async (data: RegistrarCambioInput): Promise<string | null> => {
+    try {
+      const pedidoId = await crearCambioEnRutaMut.mutateAsync(data)
+      notify.success('Cambio/devolución agregado como parada')
+      return pedidoId != null ? String(pedidoId) : null
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo crear la parada de cambio')
+      return null
+    }
+  }, [crearCambioEnRutaMut, notify])
+
   const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[]) => {
     try {
       const { generarHojaRutaOptimizada } = await import('../../lib/pdfExport')
@@ -1245,6 +1386,7 @@ export default function PedidosContainer(): React.ReactElement {
           onPageChange={handlePageChange}
           onNuevoPedido={() => setModalPedidoOpen(true)}
           onOptimizarRuta={() => setModalOptimizarRutaOpen(true)}
+          onCambioEnRuta={(isAdmin || isEncargado) ? () => setCambioEnRutaOpen(true) : undefined}
           onExportarPDF={() => setModalExportarPDFOpen(true)}
           onExportarExcel={handleExportarExcel}
           onModalFiltroFecha={() => setModalFiltroFechaOpen(true)}
@@ -1462,14 +1604,33 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalGestionRutas
             transportistas={transportistas}
             pedidos={pedidosParaRuta}
+            clientes={clientes}
+            productos={productos}
+            zonas={zonasRuta}
+            onCrearCambio={handleCrearCambioEnRuta}
             onArmarRuta={handleArmarRutaDelDia as Parameters<typeof ModalGestionRutas>[0]['onArmarRuta']}
+            onArmarRutaMulti={handleArmarRutaMulti as Parameters<typeof ModalGestionRutas>[0]['onArmarRutaMulti']}
             onExportarPDF={handleExportarHojaRutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['onExportarPDF']}
             onImprimirComandas={handleImprimirComandas as Parameters<typeof ModalGestionRutas>[0]['onImprimirComandas']}
-            onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta() }}
+            onClose={() => { setModalOptimizarRutaOpen(false); limpiarRuta(); setRutaMultiResultado(null) }}
             loading={loadingOptimizacion || loadingPedidosRuta}
             guardando={guardando}
             rutaOptimizada={rutaOptimizada as Parameters<typeof ModalGestionRutas>[0]['rutaOptimizada']}
+            rutaMulti={rutaMultiResultado}
             error={errorOptimizacion}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Cambio/Devolución como parada (desde la pantalla de Pedidos) */}
+      {cambioEnRutaOpen && (
+        <Suspense fallback={null}>
+          <ModalCambioProducto
+            clientes={clientes}
+            productos={productos}
+            modo="enRuta"
+            onSave={async (data) => { await handleCrearCambioEnRuta(data as RegistrarCambioInput) }}
+            onClose={() => setCambioEnRutaOpen(false)}
           />
         </Suspense>
       )}

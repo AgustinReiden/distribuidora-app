@@ -23,7 +23,7 @@
 import React from 'react';
 import {
   Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown,
-  MapPin, History, Boxes, Download, type LucideIcon,
+  MapPin, History, Boxes, Download, ArrowLeftRight, type LucideIcon,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
@@ -43,6 +43,8 @@ export interface PedidoToolbarProps {
   totalCount: number;
   onNuevoPedido: () => void;
   onOptimizarRuta: () => void;
+  /** Abre el modal de cambio/devolución como parada (admin/encargado). */
+  onCambioEnRuta?: () => void;
   onExportarPDF: () => void;
   onExportarExcel: (modo: 'pagina' | 'filtro') => void;
   onEntregasMasivas?: () => void;
@@ -178,6 +180,7 @@ export default function PedidoToolbar({
   totalCount,
   onNuevoPedido,
   onOptimizarRuta,
+  onCambioEnRuta,
   onExportarPDF,
   onExportarExcel,
   onEntregasMasivas,
@@ -274,6 +277,17 @@ export default function PedidoToolbar({
             >
               Armar ruta del día
             </ToolbarButton>
+            {onCambioEnRuta && (
+              <ToolbarButton
+                icon={ArrowLeftRight}
+                iconClassName="text-indigo-600"
+                mobileLabel="Cambio"
+                onClick={onCambioEnRuta}
+                title="Agregar un cambio/devolución como parada del recorrido"
+              >
+                Cambio/devolución
+              </ToolbarButton>
+            )}
           </div>
         )}
 
@@ -321,6 +335,17 @@ export default function PedidoToolbar({
             >
               Armar ruta del día
             </ToolbarButton>
+            {onCambioEnRuta && (
+              <ToolbarButton
+                icon={ArrowLeftRight}
+                iconClassName="text-indigo-600"
+                mobileLabel="Cambio"
+                onClick={onCambioEnRuta}
+                title="Agregar un cambio/devolución como parada del recorrido"
+              >
+                Cambio/devolución
+              </ToolbarButton>
+            )}
           </>
         )}
 

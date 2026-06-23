@@ -11,7 +11,10 @@ import {
   useCrearClienteMutation,
   useActualizarClienteMutation,
   useEliminarClienteMutation,
-  useZonasEstandarizadasQuery
+  useZonasEstandarizadasQuery,
+  useProductosQuery,
+  useCrearPedidoCambioEnRutaMutation,
+  type RegistrarCambioInput,
 } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -31,6 +34,7 @@ const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalZonas = lazy(() => import('../modals/ModalZonas'))
 const ModalRegistrarPago = lazy(() => import('../modals/ModalRegistrarPago'))
 const ModalDeudoresMora = lazy(() => import('../modals/ModalDeudoresMora'))
+const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
 
 function LoadingState() {
   return (
@@ -66,11 +70,14 @@ export default function ClientesContainer(): React.ReactElement {
   // entre ediciones del cliente — el espejo legacy debe seguir resolviendo
   // aunque la zona ya no esté disponible en el selector activo.
   const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true })
+  const { data: productos = [] } = useProductosQuery()
+  const puedeCambio = isAdmin || isEncargado
 
   // Mutations
   const crearCliente = useCrearClienteMutation()
   const actualizarCliente = useActualizarClienteMutation()
   const eliminarCliente = useEliminarClienteMutation()
+  const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
 
   // Estado de modales
   const [modalClienteOpen, setModalClienteOpen] = useState(false)
@@ -80,6 +87,8 @@ export default function ClientesContainer(): React.ReactElement {
   const [clienteFichaId, setClienteFichaId] = useState<string | null>(null)
   const [clientePago, setClientePago] = useState<ClienteDB | null>(null)
   const [saldoPendientePago, setSaldoPendientePago] = useState<number>(0)
+  // Cambio/devolución como parada, desde la ficha del cliente.
+  const [cambioCliente, setCambioCliente] = useState<ClienteDB | null>(null)
 
   // Ficha cliente hook - ModalFichaCliente lo usa internamente
   useFichaCliente(clienteFichaId)
@@ -98,6 +107,7 @@ export default function ClientesContainer(): React.ReactElement {
     setModalFichaOpen(false)
     setModalZonasOpen(false)
     setModalDeudoresOpen(false)
+    setCambioCliente(null)
     setClienteFichaId(null)
     setClientePago(null)
     setClienteEditando(null)
@@ -132,6 +142,17 @@ export default function ClientesContainer(): React.ReactElement {
       },
     })
   }, [clientes, eliminarCliente, notify])
+
+  const handleGuardarCambioEnRuta = useCallback(async (data: RegistrarCambioInput) => {
+    try {
+      await crearCambioEnRutaMut.mutateAsync(data)
+      notify.success('Cambio/devolución agregado como parada del recorrido')
+      setCambioCliente(null)
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo crear la parada de cambio')
+      throw err
+    }
+  }, [crearCambioEnRutaMut, notify])
 
   const handleVerFichaCliente = useCallback((cliente: ClienteDB) => {
     setClienteFichaId(cliente.id)
@@ -403,6 +424,21 @@ export default function ClientesContainer(): React.ReactElement {
               setClienteFichaId(null)
             }}
             onRegistrarPago={puedePago ? handleAbrirRegistrarPago : undefined}
+            onCambioEnRuta={puedeCambio ? (cliente) => setCambioCliente(cliente) : undefined}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Cambio/Devolución como parada (cliente fijo desde su ficha) */}
+      {cambioCliente && (
+        <Suspense fallback={null}>
+          <ModalCambioProducto
+            clientes={clientes}
+            productos={productos}
+            modo="enRuta"
+            clienteFijo={cambioCliente}
+            onSave={async (data) => { await handleGuardarCambioEnRuta(data as RegistrarCambioInput) }}
+            onClose={() => setCambioCliente(null)}
           />
         </Suspense>
       )}

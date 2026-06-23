@@ -92,6 +92,32 @@ function buildCardOps(doc, pedido, orderNumber) {
     ops.push({ kind: 'text', text: line, fontSize: 11, bold: true, advance: 5 })
   })
 
+  // Parada de cambio/devolución (canal='cambio'): cartel prominente + qué
+  // retirar/entregar (si el detalle está disponible en pedido.cambio).
+  const esCambio = pedido.canal === 'cambio'
+  if (esCambio) {
+    ops.push({ kind: 'text', text: '** CAMBIO / DEVOLUCION **', fontSize: 10, bold: true, advance: 5 })
+    // recorrido_cambios puede venir como objeto o array según el origen.
+    const c = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
+    if (c) {
+      const retirar = `Retirar: ${c.cantidad_devuelta ?? '?'}x ${c.producto_devuelto_nombre || 'producto'}`
+      const entregar = `Entregar: ${c.cantidad_entregada ?? '?'}x ${c.producto_entregado_nombre || 'producto'}`
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.splitTextToSize(retirar, CARD_CONTENT_WIDTH).forEach((line) => {
+        ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
+      })
+      doc.splitTextToSize(entregar, CARD_CONTENT_WIDTH).forEach((line) => {
+        ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
+      })
+      if (c.observaciones) {
+        doc.splitTextToSize(`* ${c.observaciones}`, CARD_CONTENT_WIDTH).slice(0, 2).forEach((line) => {
+          ops.push({ kind: 'italic', text: line, fontSize: 8, advance: 3.5 })
+        })
+      }
+    }
+  }
+
   // Razon social en linea aparte si existe y difiere del nombre de fantasia
   if (pedido.cliente?.razon_social && pedido.cliente.razon_social !== pedido.cliente.nombre_fantasia) {
     doc.setFont('helvetica', 'normal')
@@ -240,15 +266,17 @@ function buildCardOps(doc, pedido, orderNumber) {
     })
   }
 
-  // Total pedido
-  ops.push({ kind: 'spacer', advance: 1 })
-  ops.push({
-    kind: 'total',
-    label: 'Total pedido:',
-    value: formatPrecio(pedido.total),
-    fontSize: 10,
-    advance: 4.5
-  })
+  // Total pedido (no aplica a paradas de cambio: total 0, no es una venta)
+  if (!esCambio) {
+    ops.push({ kind: 'spacer', advance: 1 })
+    ops.push({
+      kind: 'total',
+      label: 'Total pedido:',
+      value: formatPrecio(pedido.total),
+      fontSize: 10,
+      advance: 4.5
+    })
+  }
 
   // Notas
   if (pedido.notas) {

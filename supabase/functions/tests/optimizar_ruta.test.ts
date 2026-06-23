@@ -10,7 +10,7 @@ import {
   type PedidoRuta,
   unirTramos,
 } from "../optimizar-ruta/tramos.ts";
-import { parseOptimizeTours } from "../optimizar-ruta/route-optimization.ts";
+import { parseOptimizeTours, parseOptimizeToursMulti } from "../optimizar-ruta/route-optimization.ts";
 
 const DEPOSITO = { latitude: -26.8241, longitude: -65.2226 };
 
@@ -197,4 +197,73 @@ Deno.test("parseOptimizeTours ignora visits sin label y rutas sin polyline", () 
   assertEquals(ruta.ordenOptimizado[0].pedido_id, "1");
   assertEquals(ruta.polylines, []);
   assertEquals(ruta.duracionTotalSegundos, 0);
+});
+
+// --- Split multi-vehículo (parseOptimizeToursMulti) ---
+
+Deno.test("parseOptimizeToursMulti reparte las visitas por vehicleLabel (transportista)", () => {
+  const pedidos: PedidoRuta[] = [
+    { pedido_id: "1", cliente_nombre: "A", latitud: -26.80, longitud: -65.20 },
+    { pedido_id: "2", cliente_nombre: "B", latitud: -26.81, longitud: -65.21 },
+    { pedido_id: "3", cliente_nombre: "C", latitud: -26.82, longitud: -65.22 },
+  ];
+  const data = {
+    routes: [
+      {
+        vehicleLabel: "chofer-A",
+        visits: [{ shipmentLabel: "1" }, { shipmentLabel: "3" }],
+        routePolyline: { points: "abc" },
+        metrics: { travelDistanceMeters: 1200, totalDuration: "600s" },
+      },
+      {
+        vehicleLabel: "chofer-B",
+        visits: [{ shipmentLabel: "2" }],
+        routePolyline: { points: "def" },
+        metrics: { travelDistanceMeters: 800, totalDuration: "300s" },
+      },
+    ],
+  };
+
+  const { recorridos, skipped } = parseOptimizeToursMulti(data, pedidos, ["chofer-A", "chofer-B"]);
+  assertEquals(recorridos.length, 2);
+  assertEquals(recorridos[0].transportista_id, "chofer-A");
+  assertEquals(recorridos[0].ordenOptimizado.map((o) => o.pedido_id), ["1", "3"]);
+  assertEquals(recorridos[0].ordenOptimizado.map((o) => o.orden), [1, 2]);
+  assertEquals(recorridos[0].polylines, ["abc"]);
+  assertEquals(recorridos[0].distanciaTotalMetros, 1200);
+  assertEquals(recorridos[0].duracionTotalSegundos, 600);
+  assertEquals(recorridos[1].transportista_id, "chofer-B");
+  assertEquals(recorridos[1].ordenOptimizado.map((o) => o.pedido_id), ["2"]);
+  assertEquals(skipped, []);
+});
+
+Deno.test("parseOptimizeToursMulti usa vehicleIndex cuando falta el label y saltea rutas vacías", () => {
+  const pedidos: PedidoRuta[] = [
+    { pedido_id: "1", latitud: -26.80, longitud: -65.20 },
+    { pedido_id: "2", latitud: -26.81, longitud: -65.21 },
+  ];
+  const data = {
+    routes: [
+      { vehicleIndex: 0, visits: [{ shipmentLabel: "1" }, { shipmentLabel: "2" }] },
+      { vehicleIndex: 1, visits: [] }, // chofer sin paradas → se saltea
+    ],
+  };
+  const { recorridos } = parseOptimizeToursMulti(data, pedidos, ["uuid-A", "uuid-B"]);
+  assertEquals(recorridos.length, 1);
+  assertEquals(recorridos[0].transportista_id, "uuid-A");
+  assertEquals(recorridos[0].ordenOptimizado.length, 2);
+});
+
+Deno.test("parseOptimizeToursMulti devuelve los pedidos no asignados (skippedShipments)", () => {
+  const pedidos: PedidoRuta[] = [
+    { pedido_id: "1", latitud: -26.80, longitud: -65.20 },
+    { pedido_id: "2", latitud: -26.81, longitud: -65.21 },
+  ];
+  const data = {
+    routes: [{ vehicleLabel: "A", visits: [{ shipmentLabel: "1" }] }],
+    skippedShipments: [{ index: 1, label: "2", reasons: [{ code: "DEMAND_EXCEEDS_VEHICLE_CAPACITY" }] }],
+  };
+  const { recorridos, skipped } = parseOptimizeToursMulti(data, pedidos, ["A"]);
+  assertEquals(recorridos.length, 1);
+  assertEquals(skipped, ["2"]);
 });

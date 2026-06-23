@@ -3,12 +3,16 @@ import type { ChangeEvent } from 'react';
 import {
   Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation,
   Settings, Save, FileText, ChevronDown, ChevronUp, Phone,
-  DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays, Pencil
+  DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays, Pencil,
+  ArrowLeftRight
 } from 'lucide-react';
 import ModalBase from './ModalBase';
+import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioProducto';
 import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery } from '../../hooks/queries';
+import type { RegistrarCambioInput } from '../../hooks/queries';
+import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
-import type { PedidoDB, PerfilDB } from '../../types';
+import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 
 // =============================================================================
 // TIPOS
@@ -40,6 +44,23 @@ export interface AplicarOrdenData {
   duracion: number | null;
 }
 
+/** Resultado del split multi-repartidor: una ruta armada por chofer. */
+export interface RecorridoArmadoUI {
+  transportista_id: string;
+  transportista_nombre: string;
+  total_pedidos: number;
+  distancia_formato?: string;
+  duracion_formato?: string;
+  /** Paradas (pedido_id en orden) para reconstruir la lista en la vista resultado. */
+  pedido_ids: string[];
+}
+
+export interface RutaMultiResultadoUI {
+  recorridos: RecorridoArmadoUI[];
+  /** pedido_id de pedidos que no se pudieron asignar (capacidad). */
+  skipped: string[];
+}
+
 /** Pedido con orden optimizado extendido */
 interface PedidoOrdenado extends PedidoDB {
   orden_optimizado?: number;
@@ -57,11 +78,24 @@ interface PedidoRutaCardProps {
 export interface ModalGestionRutasProps {
   transportistas: PerfilDB[];
   pedidos: PedidoDB[];
+  /** Para el modal de cambio/devolución embebido (agregar parada). */
+  clientes?: ClienteDB[];
+  productos?: ProductoDB[];
+  /**
+   * Crea una parada de cambio (pedido especial canal='cambio') y devuelve su
+   * pedido_id, que se agrega automáticamente a la selección de la ruta.
+   */
+  onCrearCambio?: (data: RegistrarCambioInput) => Promise<string | null>;
   /**
    * Arma la ruta del día: optimiza los pedidos seleccionados y la guarda en
    * un solo paso (el container encadena optimizar + aplicar_orden_ruta).
    */
   onArmarRuta: (transportistaId: string, pedidos: PedidoDB[], fecha: string, horaInicio: string) => void;
+  /**
+   * Divide los pedidos seleccionados entre varios repartidores (N recorridos).
+   * Cada repartidor puede traer máx paradas y zonas preferidas.
+   */
+  onArmarRutaMulti?: (repartidores: RepartidorParam[], pedidos: PedidoDB[], fecha: string, horaInicio: string) => void;
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
   /** Imprime las comandas (duplicado por pedido) de la ruta recién armada. */
   onImprimirComandas?: (pedidos: PedidoOrdenado[]) => void;
@@ -70,6 +104,10 @@ export interface ModalGestionRutasProps {
   loading: boolean;
   guardando: boolean;
   rutaOptimizada: RutaOptimizadaResult | null;
+  /** Resultado del split multi-repartidor (vista de resultado). */
+  rutaMulti?: RutaMultiResultadoUI | null;
+  /** Zonas activas (para elegir zonas preferidas por chofer en modo dividir). */
+  zonas?: Array<{ id: string; nombre: string }>;
   error: string | null;
 }
 
@@ -177,15 +215,27 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
 const ModalGestionRutas = memo(function ModalGestionRutas({
   transportistas,
   pedidos,
+  clientes = [],
+  productos = [],
+  onCrearCambio,
   onArmarRuta,
+  onArmarRutaMulti,
   onExportarPDF,
   onImprimirComandas,
   onClose,
   loading,
   guardando,
   rutaOptimizada,
+  rutaMulti = null,
+  zonas = [],
   error
 }: ModalGestionRutasProps) {
+  const [cambioOpen, setCambioOpen] = useState<boolean>(false);
+  // Modo de armado: un solo chofer (con edición in-place) o dividir entre varios.
+  const [modoDividir, setModoDividir] = useState<boolean>(false);
+  // Modo dividir: repartidores elegidos + sus parámetros (máx paradas, zonas).
+  const [repartidoresSel, setRepartidoresSel] = useState<Set<string>>(new Set());
+  const [paramsPorChofer, setParamsPorChofer] = useState<Record<string, { maxParadas: string; zonas: string[] }>>({});
   const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
   // Fecha de entrega de la ruta. Generalmente se arma el día anterior, así que
   // el default es mañana; se puede elegir de hoy en adelante.
@@ -232,6 +282,13 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     }
   }, [rutaOptimizada]);
 
+  // Modo dividir: pasar a la vista resultado cuando llega el split armado.
+  useEffect(() => {
+    if ((rutaMulti?.recorridos?.length ?? 0) > 0) {
+      setVistaActiva('resultado');
+    }
+  }, [rutaMulti]);
+
   const filtroActivo = !!(filtroDesde || filtroHasta);
 
   // Ruta ya armada (en_curso) de este transportista+fecha: sus paradas se
@@ -258,25 +315,36 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     });
   }, [pedidos, filtroActivo, filtroDesde, filtroHasta]);
 
-  // Lista visible al elegir transportista: paradas de su ruta (si existe) +
-  // disponibles, sin duplicar (las paradas existentes ganan y van primero).
+  // Lista visible. En modo dividir: todo el pool (no hay edición in-place). En
+  // modo 1 chofer: paradas de su ruta (si existe) + disponibles, sin duplicar
+  // (las paradas existentes ganan y van primero).
   const pedidosVisibles = useMemo((): PedidoDB[] => {
+    if (modoDividir) {
+      return [...disponiblesFiltrados].sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
+    }
     if (!transportistaSeleccionado) return [];
     const map = new Map<string, PedidoDB>();
     for (const p of paradasExistentes) map.set(p.id, p);
     for (const p of disponiblesFiltrados) if (!map.has(p.id)) map.set(p.id, p);
     return Array.from(map.values())
       .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
-  }, [transportistaSeleccionado, paradasExistentes, disponiblesFiltrados]);
+  }, [modoDividir, transportistaSeleccionado, paradasExistentes, disponiblesFiltrados]);
 
-  // Selección de paradas. Se siembra una vez por (transportista, fecha): en
-  // edición, con las paradas de la ruta existente; en ruta nueva, vacía (el
-  // admin tilda las que entran). No se re-siembra en refetch para no pisar la
-  // selección en curso.
+  // Selección de paradas. En modo dividir se siembra con TODO el pool (el caso
+  // común es rutear todo y dividir). En modo 1 chofer se siembra una vez por
+  // (transportista, fecha): en edición con las paradas existentes; en ruta
+  // nueva, vacía. No se re-siembra en refetch para no pisar la selección.
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
-  const rutaKey = `${transportistaSeleccionado}|${fechaEntrega}`;
+  const rutaKey = modoDividir ? `multi|${fechaEntrega}` : `${transportistaSeleccionado}|${fechaEntrega}`;
   const seededKeyRef = useRef<string>('');
   useEffect(() => {
+    if (modoDividir) {
+      if (seededKeyRef.current === rutaKey) return;
+      if (pedidos.length === 0) return; // esperar a que cargue el pool
+      seededKeyRef.current = rutaKey;
+      setSeleccionados(new Set(disponiblesFiltrados.map(p => p.id)));
+      return;
+    }
     if (!transportistaSeleccionado) {
       if (seededKeyRef.current !== '') { setSeleccionados(new Set()); seededKeyRef.current = ''; }
       return;
@@ -285,7 +353,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     if (seededKeyRef.current === rutaKey) return;
     seededKeyRef.current = rutaKey;
     setSeleccionados(new Set(paradasExistentes.map(p => p.id)));
-  }, [transportistaSeleccionado, rutaKey, rutaExistente, paradasExistentes]);
+  }, [modoDividir, transportistaSeleccionado, rutaKey, rutaExistente, paradasExistentes, disponiblesFiltrados, pedidos.length]);
 
   const pedidosSeleccionados = useMemo(
     () => pedidosVisibles.filter(p => seleccionados.has(p.id)),
@@ -377,6 +445,54 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     }
   };
 
+  // === Modo dividir: repartidores + parámetros ===
+  const toggleRepartidor = (id: string): void => {
+    setRepartidoresSel(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const setMaxParadas = (id: string, valor: string): void => {
+    setParamsPorChofer(prev => ({ ...prev, [id]: { maxParadas: valor, zonas: prev[id]?.zonas ?? [] } }));
+  };
+  const toggleZonaChofer = (id: string, zonaId: string): void => {
+    setParamsPorChofer(prev => {
+      const actual = prev[id] ?? { maxParadas: '', zonas: [] };
+      const zonas = actual.zonas.includes(zonaId)
+        ? actual.zonas.filter(z => z !== zonaId)
+        : [...actual.zonas, zonaId];
+      return { ...prev, [id]: { ...actual, zonas } };
+    });
+  };
+
+  const repartidoresParam = useMemo((): RepartidorParam[] => {
+    return Array.from(repartidoresSel).map(id => {
+      const pp = paramsPorChofer[id] ?? { maxParadas: '', zonas: [] };
+      const max = parseInt(pp.maxParadas, 10);
+      return {
+        transportista_id: id,
+        max_paradas: Number.isFinite(max) && max > 0 ? max : null,
+        zonas_preferidas: pp.zonas.length ? pp.zonas.map(z => Number(z)) : null,
+      };
+    });
+  }, [repartidoresSel, paramsPorChofer]);
+
+  const handleDividir = (): void => {
+    if (onArmarRutaMulti && repartidoresParam.length > 0 && pedidosSeleccionados.length > 0) {
+      onArmarRutaMulti(repartidoresParam, pedidosSeleccionados, fechaEntrega, horaInicio);
+    }
+  };
+
+  // Crea la parada de cambio y la agrega (pre-tildada) a la selección de la
+  // ruta. El pool se refresca e incorpora el pedido de cambio recién creado.
+  const handleGuardarCambio = async (data: CambioProductoSaveData): Promise<void> => {
+    if (!onCrearCambio) return;
+    const id = await onCrearCambio(data as RegistrarCambioInput);
+    if (id) setSeleccionados(prev => { const n = new Set(prev); n.add(id); return n; });
+    setCambioOpen(false);
+  };
+
   const handleGuardarDeposito = (): void => {
     const lat = parseFloat(depositoLat);
     const lng = parseFloat(depositoLng);
@@ -421,6 +537,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const transportistaInfo = transportistas.find(t => t.id === transportistaSeleccionado);
 
   return (
+    <>
     <ModalBase title="Armar ruta del día" onClose={onClose} maxWidth="max-w-4xl">
       <div className="flex flex-col h-[75vh]">
         {/* Tabs de navegacion */}
@@ -437,8 +554,8 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
             Armar ruta
           </button>
           <button
-            onClick={() => rutaOptimizada?.orden_optimizado && setVistaActiva('resultado')}
-            disabled={!rutaOptimizada?.orden_optimizado}
+            onClick={() => (rutaOptimizada?.orden_optimizado || rutaMulti) && setVistaActiva('resultado')}
+            disabled={!rutaOptimizada?.orden_optimizado && !rutaMulti}
             className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
               vistaActiva === 'resultado'
                 ? 'border-green-500 text-green-600'
@@ -446,8 +563,12 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
             }`}
           >
             <CheckCircle className="w-4 h-4 inline mr-2" />
-            Ruta guardada
-            {rutaOptimizada?.orden_optimizado && (
+            {rutaMulti ? 'Rutas guardadas' : 'Ruta guardada'}
+            {rutaMulti ? (
+              <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                {rutaMulti.recorridos.length}
+              </span>
+            ) : rutaOptimizada?.orden_optimizado && (
               <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
                 {rutaOptimizada.orden_optimizado.length}
               </span>
@@ -653,29 +774,108 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 </div>
               </div>
 
-              {/* Selector de transportista */}
-              <div className="bg-white border rounded-lg p-4">
-                <label className="block text-sm font-medium mb-2">Seleccionar Transportista</label>
-                <select
-                  value={transportistaSeleccionado}
-                  onChange={(e: ChangeEvent<HTMLSelectElement>) => setTransportistaSeleccionado(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  disabled={loading}
-                >
-                  <option value="">Seleccionar transportista...</option>
-                  {transportistas.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.nombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Modo: un transportista (con edición) o dividir entre varios */}
+              {onArmarRutaMulti && (
+                <div className="bg-white border rounded-lg p-1.5 flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setModoDividir(false)}
+                    className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${!modoDividir ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                  >
+                    Un transportista
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModoDividir(true)}
+                    className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${modoDividir ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                  >
+                    Dividir entre varios
+                  </button>
+                </div>
+              )}
 
-              {/* Info del transportista */}
-              {transportistaSeleccionado && (
+              {/* Selector de transportista (modo 1 chofer) */}
+              {!modoDividir ? (
+                <div className="bg-white border rounded-lg p-4">
+                  <label className="block text-sm font-medium mb-2">Seleccionar Transportista</label>
+                  <select
+                    value={transportistaSeleccionado}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => setTransportistaSeleccionado(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    disabled={loading}
+                  >
+                    <option value="">Seleccionar transportista...</option>
+                    {transportistas.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                /* Repartidores disponibles + parámetros (modo dividir) */
+                <div className="bg-white border rounded-lg p-4 space-y-2">
+                  <label className="block text-sm font-medium">Repartidores disponibles</label>
+                  {transportistas.map(t => {
+                    const checked = repartidoresSel.has(t.id);
+                    const pp = paramsPorChofer[t.id] ?? { maxParadas: '', zonas: [] };
+                    return (
+                      <div key={t.id} className={`border rounded-lg p-2.5 ${checked ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200'}`}>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={checked} onChange={() => toggleRepartidor(t.id)} className="rounded" />
+                          <span className="font-medium text-gray-800">{t.nombre}</span>
+                        </label>
+                        {checked && (
+                          <div className="mt-2 pl-6 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-gray-500">Máx paradas</label>
+                              <input
+                                type="number"
+                                min="1"
+                                inputMode="numeric"
+                                value={pp.maxParadas}
+                                onChange={(e: ChangeEvent<HTMLInputElement>) => setMaxParadas(t.id, e.target.value)}
+                                placeholder="sin tope"
+                                className="w-28 px-2 py-1 border rounded text-sm"
+                              />
+                            </div>
+                            {zonas.length > 0 && (
+                              <div>
+                                <p className="text-xs text-gray-500 mb-1">Zonas preferidas</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {zonas.map(z => {
+                                    const on = pp.zonas.includes(z.id);
+                                    return (
+                                      <button
+                                        key={z.id}
+                                        type="button"
+                                        onClick={() => toggleZonaChofer(t.id, z.id)}
+                                        className={`px-2 py-0.5 text-xs rounded-full border ${on ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                                      >
+                                        {z.nombre}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <p className="text-xs text-gray-500">
+                    Sin tope = se reparte lo más parejo posible. Las zonas son una preferencia (no estricta).
+                  </p>
+                </div>
+              )}
+
+              {/* Info / lista de pedidos: visible al elegir transportista (single)
+                  o siempre en modo dividir. */}
+              {(modoDividir || transportistaSeleccionado) && (
                 <>
-                  {/* Edición de ruta existente: aviso de que se modificará la armada */}
-                  {editando && (
+                  {/* Edición de ruta existente (solo modo 1 chofer) */}
+                  {!modoDividir && editando && (
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
                       <Pencil className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
                       <p className="text-sm text-amber-800">
@@ -685,23 +885,43 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                     </div>
                   )}
 
-                  <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-4 text-white">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                          <Truck className="w-6 h-6" />
+                  {modoDividir ? (
+                    <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 rounded-xl p-4 text-white">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+                            <Truck className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-lg">{repartidoresSel.size} repartidor(es)</h3>
+                            <p className="text-indigo-100 text-sm">{pedidosSeleccionados.length} paradas a dividir</p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-lg">{transportistaInfo?.nombre}</h3>
-                          <p className="text-blue-100 text-sm">{pedidosSeleccionados.length} paradas seleccionadas</p>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold">${totales.total.toLocaleString('es-AR')}</p>
+                          <p className="text-indigo-100 text-sm">Total a cobrar</p>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold">${totales.total.toLocaleString('es-AR')}</p>
-                        <p className="text-blue-100 text-sm">Total a cobrar</p>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-4 text-white">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+                            <Truck className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-lg">{transportistaInfo?.nombre}</h3>
+                            <p className="text-blue-100 text-sm">{pedidosSeleccionados.length} paradas seleccionadas</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold">${totales.total.toLocaleString('es-AR')}</p>
+                          <p className="text-blue-100 text-sm">Total a cobrar</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Advertencia de pedidos sin coordenadas */}
                   {pedidosSinCoordenadas.length > 0 && (
@@ -724,6 +944,19 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         </div>
                       </div>
                     </div>
+                  )}
+
+                  {/* Agregar una parada de cambio/devolución (no es un pedido):
+                      crea el pedido especial y lo suma pre-tildado a la ruta. */}
+                  {onCrearCambio && (
+                    <button
+                      type="button"
+                      onClick={() => setCambioOpen(true)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-dashed border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 text-sm font-medium transition-colors"
+                    >
+                      <ArrowLeftRight className="w-4 h-4" />
+                      Agregar cambio/devolución
+                    </button>
                   )}
 
                   {/* Lista de pedidos: el admin elige cuáles entran en la ruta del
@@ -799,6 +1032,58 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   </div>
                 </div>
               )}
+            </div>
+          ) : rutaMulti ? (
+            /* Vista de resultado: split multi-repartidor */
+            <div className="space-y-4">
+              <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-4 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+                    <Route className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Ruta dividida y guardada</h3>
+                    <p className="text-green-100 text-sm">{rutaMulti.recorridos.length} recorrido(s) · {formatFecha(fechaEntrega)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {rutaMulti.skipped.length > 0 && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-yellow-800">
+                    {rutaMulti.skipped.length} pedido(s) no se pudieron asignar (capacidad). Subí el máximo de paradas o sumá un repartidor.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {rutaMulti.recorridos.map(r => (
+                  <div key={r.transportista_id} className="bg-white border rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center">
+                          <Truck className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <span className="font-semibold text-gray-800">{r.transportista_nombre}</span>
+                      </div>
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                        {r.total_pedidos} paradas
+                      </span>
+                    </div>
+                    {(r.distancia_formato || r.duracion_formato) && (
+                      <div className="mt-2 flex gap-4 text-xs text-gray-500">
+                        {r.duracion_formato && <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{r.duracion_formato}</span>}
+                        {r.distancia_formato && <span className="flex items-center gap-1"><Navigation className="w-3.5 h-3.5" />{r.distancia_formato}</span>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Cada repartidor ya tiene su recorrido del día. Las hojas de ruta por chofer se descargan desde la pantalla de Recorridos.
+              </p>
             </div>
           ) : (
             /* Vista de resultado */
@@ -920,21 +1205,34 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
           <div className="flex space-x-3">
             {vistaActiva === 'optimizar' ? (
-              <button
-                onClick={handleArmar}
-                disabled={!transportistaSeleccionado || loading || guardando || pedidosSeleccionados.length === 0}
-                className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {(loading || guardando) ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Route className="w-5 h-5" />
-                )}
-                <span>
-                  {loading ? 'Optimizando…' : guardando ? 'Guardando…' : `Armar ruta del día (${pedidosSeleccionados.length})`}
-                </span>
-              </button>
-            ) : (
+              modoDividir ? (
+                <button
+                  onClick={handleDividir}
+                  disabled={repartidoresSel.size === 0 || loading || guardando || pedidosSeleccionados.length === 0}
+                  className="flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {(loading || guardando) ? <Loader2 className="w-5 h-5 animate-spin" /> : <Route className="w-5 h-5" />}
+                  <span>
+                    {loading ? 'Optimizando…' : guardando ? 'Guardando…' : `Dividir y armar (${repartidoresSel.size} chofer/es)`}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleArmar}
+                  disabled={!transportistaSeleccionado || loading || guardando || pedidosSeleccionados.length === 0}
+                  className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {(loading || guardando) ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Route className="w-5 h-5" />
+                  )}
+                  <span>
+                    {loading ? 'Optimizando…' : guardando ? 'Guardando…' : `Armar ruta del día (${pedidosSeleccionados.length})`}
+                  </span>
+                </button>
+              )
+            ) : rutaMulti ? null : (
               <>
                 <button
                   onClick={handleExportarPDF}
@@ -958,6 +1256,18 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
         </div>
       </div>
     </ModalBase>
+
+    {/* Cambio/devolución como parada: se renderiza por encima del modal de ruta. */}
+    {cambioOpen && onCrearCambio && (
+      <ModalCambioProducto
+        clientes={clientes}
+        productos={productos}
+        modo="enRuta"
+        onSave={handleGuardarCambio}
+        onClose={() => setCambioOpen(false)}
+      />
+    )}
+    </>
   );
 });
 

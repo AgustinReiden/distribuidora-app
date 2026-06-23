@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent } from 'lucide-react'
+import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -22,6 +22,8 @@ export interface ModalFichaClienteProps {
   onClose: () => void;
   onRegistrarPago?: (cliente: ClienteDB) => void;
   onVerPedido?: (pedido: PedidoDB) => void;
+  /** Abre el modal de cambio/devolución como parada con el cliente fijo. */
+  onCambioEnRuta?: (cliente: ClienteDB) => void;
 }
 
 /** Colores de tarjeta estadistica */
@@ -42,7 +44,7 @@ interface TabItem {
   icon: LucideIcon;
 }
 
-export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido }: ModalFichaClienteProps) {
+export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido, onCambioEnRuta }: ModalFichaClienteProps) {
   const { pedidosCliente, estadisticas, loading } = useFichaCliente(cliente?.id)
   const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta } = usePagos()
   const { perfil } = useAuthData()
@@ -172,6 +174,16 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 >
                   <Plus className="w-4 h-4" />
                   Registrar Pago
+                </button>
+              )}
+              {onCambioEnRuta && (
+                <button
+                  onClick={() => onCambioEnRuta(cliente)}
+                  className="ml-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2"
+                  title="Agregar un cambio/devolución como parada del recorrido"
+                >
+                  <ArrowLeftRight className="w-4 h-4" />
+                  Cambio/devolución
                 </button>
               )}
             </div>

@@ -34,7 +34,8 @@ const RECORRIDO_ACTIVO_SELECT = `id, polylines,
     pedido:pedidos(
       *,
       cliente:clientes(id, nombre_fantasia, razon_social, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion),
-      items:pedido_items(*, producto:productos(id, nombre, codigo, etiqueta_bulto, unidades_de_venta_por_fardo))
+      items:pedido_items(*, producto:productos(id, nombre, codigo, etiqueta_bulto, unidades_de_venta_por_fardo)),
+      cambio:recorrido_cambios(producto_devuelto_nombre, cantidad_devuelta, producto_entregado_nombre, cantidad_entregada, observaciones, aplicado_at)
     )
   )`
 
@@ -63,10 +64,18 @@ async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoA
     // El orden de entrega del recorrido es la fuente de verdad
     .sort((a, b) => (a.orden_entrega ?? 999) - (b.orden_entrega ?? 999))
 
-  const paradas = rps.map(rp => ({
-    ...(rp.pedido as object),
-    orden_entrega: rp.orden_entrega ?? rp.pedido?.orden_entrega ?? null,
-  })) as unknown as PedidoConCliente[]
+  const paradas = rps.map(rp => {
+    const pedido = rp.pedido as Record<string, unknown> & { orden_entrega?: number | null; cambio?: unknown }
+    // recorrido_cambios viene como objeto (FK única) o array según PostgREST:
+    // lo normalizamos a objeto | null.
+    const cambioRaw = pedido?.cambio
+    const cambio = Array.isArray(cambioRaw) ? (cambioRaw[0] ?? null) : (cambioRaw ?? null)
+    return {
+      ...pedido,
+      cambio,
+      orden_entrega: rp.orden_entrega ?? pedido?.orden_entrega ?? null,
+    }
+  }) as unknown as PedidoConCliente[]
 
   return {
     id: String(data.id),
