@@ -58,6 +58,9 @@ interface PromocionRow {
   prioridad: number | null;
   regalo_mueve_stock: boolean | null;
   modo_exclusion: string | null;
+  ajuste_producto_id: number | null;
+  unidades_por_bloque: number | null;
+  descripcion_regalo: string | null;
 }
 interface PromocionProductoRow {
   promocion_id: number;
@@ -236,7 +239,7 @@ async function loadPromoMap(
   const { data: promos, error: errPromos } = await supabase
     .from("promociones")
     .select(
-      "id, nombre, tipo, activo, fecha_inicio, fecha_fin, sucursal_id, producto_regalo_id, prioridad, regalo_mueve_stock, modo_exclusion",
+      "id, nombre, tipo, activo, fecha_inicio, fecha_fin, sucursal_id, producto_regalo_id, prioridad, regalo_mueve_stock, modo_exclusion, ajuste_producto_id, unidades_por_bloque, descripcion_regalo",
     )
     .eq("sucursal_id", sucursalId)
     .eq("activo", true)
@@ -290,6 +293,9 @@ async function loadPromoMap(
       prioridad: promo.prioridad ?? 0,
       regaloMueveStock: promo.regalo_mueve_stock ?? false,
       modoExclusion: (promo.modo_exclusion ?? "acumulable") as PromocionActiva["modoExclusion"],
+      ajusteProductoId: promo.ajuste_producto_id ? String(promo.ajuste_producto_id) : undefined,
+      unidadesPorBloque: promo.unidades_por_bloque ?? undefined,
+      descripcionRegalo: promo.descripcion_regalo ?? undefined,
     };
 
     for (const productoId of productosDePromo) {

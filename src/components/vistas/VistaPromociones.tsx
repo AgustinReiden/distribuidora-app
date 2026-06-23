@@ -295,7 +295,10 @@ export default function VistaPromociones({
                       <div className="mb-3 space-y-2">
                         {visibles.map(acc => {
                           const porBloque = acc.unidades_por_bloque ?? promo.unidades_por_bloque ?? 1
-                          const pendientes = acc.usos_pendientes
+                          // Defensa: el acumulador puede venir fuera de rango desde la BD
+                          // (bug historico del subsistema de bloques: negativos o > tope).
+                          // Clampeamos a [0, porBloque] para no mostrar "24/12" o "-10/12".
+                          const pendientes = Math.max(0, Math.min(acc.usos_pendientes, porBloque))
                           const falta = Math.max(porBloque - pendientes, 0)
                           const progreso = porBloque > 0 ? Math.min((pendientes / porBloque) * 100, 100) : 0
                           const esDefault = defaultProductoId !== null
