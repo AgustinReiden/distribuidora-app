@@ -9,8 +9,9 @@
  */
 import React, { useState, memo, useContext } from 'react';
 import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle, Gift, RefreshCw } from 'lucide-react';
+import { importConRecarga } from '../../utils/lazyWithReload';
 const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda' } = {}) => {
-  const mod = await import('../../lib/pdfExport') as any
+  const mod = await importConRecarga(() => import('../../lib/pdfExport')) as any
   return mod.generarReciboPedido(pedido, _empresa, options)
 };
 import { formatPrecio, formatFecha, formatHora, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';

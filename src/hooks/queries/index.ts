@@ -55,6 +55,7 @@ export {
   useCambiarEstadoMutation,
   useActualizarPagoMutation,
   useAsignarTransportistaMutation,
+  useQuitarPedidoDeRecorridosMutation,
   useEliminarPedidoMutation,
   usePedidosNoEntregadosQuery,
   usePedidosAsignadosQuery,
