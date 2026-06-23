@@ -116,6 +116,13 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const usosSustAntes = Number(acumuladorSustituto?.usos_pendientes ?? 0)
   const usosSustDespues = usosSustAntes + cantidadNum
   const bloque = unidadesPorBloque ?? acumuladorOriginal?.unidades_por_bloque ?? 1
+  // Defensa display: los acumuladores pueden venir fuera de rango (bug backend de bloques).
+  // Clampeamos los valores que se muestran al usuario a [0, bloque].
+  const clampBloque = (n: number) => Math.max(0, Math.min(n, bloque))
+  const dispOrigAntes = clampBloque(usosOrigAntes)
+  const dispOrigDespues = clampBloque(usosOrigDespues)
+  const dispSustAntes = clampBloque(usosSustAntes)
+  const dispSustDespues = clampBloque(usosSustDespues)
   const cruzaAbajo = Math.floor(usosOrigDespues / bloque) < Math.floor(usosOrigAntes / bloque)
   const cruzaArriba = Math.floor(usosSustDespues / bloque) > Math.floor(usosSustAntes / bloque)
 
@@ -234,7 +241,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                 <>
                   <p>
                     ✓ El contador de <b>{productoOriginal.nombre}</b> baja
-                    de <b>{usosOrigAntes}/{bloque}</b> a <b>{usosOrigDespues}/{bloque}</b>.
+                    de <b>{dispOrigAntes}/{bloque}</b> a <b>{dispOrigDespues}/{bloque}</b>.
                   </p>
                   {cruzaAbajo && (
                     <p className="text-emerald-700 dark:text-emerald-300 ml-3">
@@ -243,7 +250,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                   )}
                   <p>
                     ✓ El contador de <b>{productoNuevo.nombre}</b> sube
-                    de <b>{usosSustAntes}/{bloque}</b> a <b>{usosSustDespues}/{bloque}</b>.
+                    de <b>{dispSustAntes}/{bloque}</b> a <b>{dispSustDespues}/{bloque}</b>.
                   </p>
                   {cruzaArriba ? (
                     <p className="text-orange-700 dark:text-orange-300 ml-3">
