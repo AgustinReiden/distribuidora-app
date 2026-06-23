@@ -630,6 +630,36 @@ export function useAsignarTransportistaMutation() {
 }
 
 /**
+ * Quita un pedido de las rutas (recorridos) en curso a las que pertenece.
+ * Se usa al "Volver a pendiente" un pedido ya asignado para que no quede como
+ * parada fantasma en la ruta activa. Va por RPC SECURITY DEFINER (mig 093)
+ * porque recorrido_pedidos no tiene policy de DELETE para el cliente.
+ */
+async function quitarPedidoDeRecorridos(pedidoId: string): Promise<void> {
+  const { data, error } = await supabase.rpc('quitar_pedido_de_recorridos_activos', {
+    p_pedido_id: Number(pedidoId),
+  })
+  if (error) throw error
+  if (data && typeof data === 'object' && 'success' in data && !(data as { success: boolean }).success) {
+    throw new Error((data as { error?: string }).error || 'No se pudo quitar el pedido de la ruta')
+  }
+}
+
+export function useQuitarPedidoDeRecorridosMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: ({ pedidoId }: { pedidoId: string }) => quitarPedidoDeRecorridos(pedidoId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // La ruta activa perdió una parada: refrescar recorridos.
+      queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+    },
+  })
+}
+
+/**
  * Hook para eliminar un pedido
  */
 export function useEliminarPedidoMutation() {

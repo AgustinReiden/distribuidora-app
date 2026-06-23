@@ -19,6 +19,7 @@ import {
   useCrearPedidoMutation,
   useCambiarEstadoMutation,
   useAsignarTransportistaMutation,
+  useQuitarPedidoDeRecorridosMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
   usePagosMasivosMutation,
@@ -46,6 +47,7 @@ import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { supabase } from '../../hooks/supabase/base'
 import { usePagos } from '../../hooks/supabase/usePagos'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { importConRecarga } from '../../utils/lazyWithReload'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
@@ -146,6 +148,7 @@ export default function PedidosContainer(): React.ReactElement {
   const { capturarGps, registrarGpsPedido } = useRegistrarGeolocalizacionPedido()
   const cambiarEstado = useCambiarEstadoMutation()
   const asignarTransportistaMut = useAsignarTransportistaMutation()
+  const quitarDeRecorridosMut = useQuitarPedidoDeRecorridosMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
   const pagosMasivos = usePagosMasivosMutation()
@@ -392,19 +395,22 @@ export default function PedidosContainer(): React.ReactElement {
   const handleVolverAPendiente = useCallback((pedido: PedidoDB) => {
     setConfirmConfig({
       visible: true, titulo: 'Volver a pendiente',
-      mensaje: `¿Volver el pedido #${pedido.id} a estado "Pendiente"?`, tipo: 'warning',
+      mensaje: `¿Volver el pedido #${pedido.id} a estado "Pendiente"? Si está en una ruta activa, se quitará de ella.`, tipo: 'warning',
       onConfirm: async () => {
         try {
           if (pedido.transportista_id) {
             await asignarTransportistaMut.mutateAsync({ pedidoId: pedido.id, transportistaId: null })
           }
           await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'pendiente' })
+          // Sacarlo de la(s) ruta(s) en curso para que no quede como parada
+          // fantasma; así reaparece limpio en el pool de "Armar ruta".
+          await quitarDeRecorridosMut.mutateAsync({ pedidoId: pedido.id })
           notify.warning('Pedido vuelto a pendiente')
         } catch (e) { notify.error((e as Error).message) }
         setConfirmConfig({ visible: false })
       },
     })
-  }, [cambiarEstado, asignarTransportistaMut, notify])
+  }, [cambiarEstado, asignarTransportistaMut, quitarDeRecorridosMut, notify])
 
   const handleVerHistorial = useCallback(async (pedido: PedidoDB) => {
     setPedidoHistorial(pedido)
@@ -1015,7 +1021,7 @@ export default function PedidosContainer(): React.ReactElement {
   // ModalExportarPDF handlers (lazy PDF generation)
   const handleExportarOrdenPreparacion = useCallback(async (pedidosExport: PedidoDB[]) => {
     try {
-      const { generarOrdenPreparacion } = await import('../../lib/pdfExport')
+      const { generarOrdenPreparacion } = await importConRecarga(() => import('../../lib/pdfExport'))
       generarOrdenPreparacion(pedidosExport)
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
@@ -1023,14 +1029,14 @@ export default function PedidosContainer(): React.ReactElement {
   const handleExportarHojaRuta = useCallback(async (transportista: PerfilDB | undefined, pedidosExport: PedidoDB[]) => {
     if (!transportista) return
     try {
-      const { generarHojaRutaOptimizada } = await import('../../lib/pdfExport')
+      const { generarHojaRutaOptimizada } = await importConRecarga(() => import('../../lib/pdfExport'))
       generarHojaRutaOptimizada(transportista, pedidosExport)
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
 
   const handleImprimirComandas = useCallback(async (pedidosExport: PedidoDB[]) => {
     try {
-      const { generarComandasMultiples } = await import('../../lib/pdfExport')
+      const { generarComandasMultiples } = await importConRecarga(() => import('../../lib/pdfExport'))
       generarComandasMultiples(pedidosExport)
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
@@ -1236,7 +1242,7 @@ export default function PedidosContainer(): React.ReactElement {
 
   const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[]) => {
     try {
-      const { generarHojaRutaOptimizada } = await import('../../lib/pdfExport')
+      const { generarHojaRutaOptimizada } = await importConRecarga(() => import('../../lib/pdfExport'))
       if (transportista) generarHojaRutaOptimizada(transportista, pedidosOrdenados)
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])

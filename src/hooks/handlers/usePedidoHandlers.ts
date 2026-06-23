@@ -11,6 +11,7 @@ import { resolverPreciosMayorista, aplicarPreciosMayorista, validarMOQPedido } f
 import { resolverPromociones } from '../../utils/promociones'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente'
+import { importConRecarga } from '../../utils/lazyWithReload'
 import type { User } from '@supabase/supabase-js'
 import type {
   ProductoDB,
@@ -762,7 +763,7 @@ export function usePedidoHandlers({
 
   const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB, pedidosOrdenados: PedidoDB[]): Promise<void> => {
     try {
-      const { generarHojaRutaOptimizada } = await import('../../lib/pdfExport')
+      const { generarHojaRutaOptimizada } = await importConRecarga(() => import('../../lib/pdfExport'))
       const rutaOptimizada = rutaOptimizadaRef.current
       generarHojaRutaOptimizada(transportista, pedidosOrdenados, (rutaOptimizada as { distanciaTotal?: number })?.distanciaTotal, (rutaOptimizada as { duracionTotal?: number })?.duracionTotal)
       notify.success('PDF generado correctamente')
@@ -808,11 +809,11 @@ export function usePedidoHandlers({
     handleCerrarModalOptimizar,
     // PDF exports (lazy loaded)
     generarOrdenPreparacion: async (...args: unknown[]) => {
-      const mod = await import('../../lib/pdfExport')
+      const mod = await importConRecarga(() => import('../../lib/pdfExport'))
       return mod.generarOrdenPreparacion(...args as Parameters<typeof mod.generarOrdenPreparacion>)
     },
     generarHojaRuta: async (...args: unknown[]) => {
-      const mod = await import('../../lib/pdfExport')
+      const mod = await importConRecarga(() => import('../../lib/pdfExport'))
       return mod.generarHojaRuta(...args as Parameters<typeof mod.generarHojaRuta>)
     }
   }
