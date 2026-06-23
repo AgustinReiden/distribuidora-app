@@ -19,16 +19,16 @@ export const sucursalesKeys = {
 }
 
 async function fetchSucursales(): Promise<SucursalDB[]> {
-  // Multi-tenant (C3): filter out tenant rows (ManaosApp/TP Export, tipo
-  // 'principal' / 'secundaria') from the transfer-destination dropdown.
-  // Only sub-sucursales (tipo='distribuidora') are valid transfer targets;
-  // otherwise the UI would let a user move stock into the tenant row itself,
-  // which has no warehouse semantics.
+  // Todas las sucursales ACTIVAS son destinos válidos de movimiento. NO se
+  // filtra por `tipo`: en este deployment las sucursales operativas reales se
+  // etiquetaron 'principal'/'secundaria' (id 1 Tucumán, id 2 Taco Pozo) y la
+  // única 'distribuidora' era una sucursal fantasma vacía; filtrar por
+  // tipo='distribuidora' dejaba el selector mostrando solo el fantasma y rompía
+  // los envíos entre sucursales reales. El container excluye la sucursal actual.
   const { data, error } = await supabase
     .from('sucursales')
     .select('*')
     .eq('activa', true)
-    .eq('tipo', 'distribuidora')
     .order('nombre', { ascending: true })
 
   if (error) {

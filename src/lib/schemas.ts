@@ -705,10 +705,11 @@ export const modalCambioProductoSchema = z.object({
     .number({ error: 'La cantidad debe ser un número' })
     .int({ message: 'La cantidad debe ser un número entero' })
     .positive({ message: 'La cantidad debe ser mayor a 0' }),
-  observaciones: z.string().optional()
-}).refine(d => d.productoDevueltoId !== d.productoEntregadoId, {
-  message: 'Los productos deben ser distintos',
-  path: ['productoEntregadoId']
+  observaciones: z.string().optional(),
+  // Motivo del cambio: define si el producto devuelto reingresa al stock
+  // (vencimiento/rotura → se da de baja; erroneo/otro → reingresa). Se permite
+  // el mismo producto (caso vencimiento: se cambia por el mismo fresco).
+  motivo: z.enum(['vencimiento', 'rotura', 'erroneo', 'otro']).default('erroneo')
 })
 
 /** Inferred type for ModalCambioProducto schema */
