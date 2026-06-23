@@ -257,37 +257,46 @@ export default function VistaPromociones({
                 )}
 
                 {/* Subunidades pendientes para descontar stock — multi-barra (mig 059).
-                    Si hay acumuladores en promo_acumuladores los mostramos uno por uno;
-                    para el regalo default siempre se muestra incluso si esta en 0/N
-                    (con leyenda "Bloque recien cerrado"); los acumuladores
-                    alternativos (sustituciones) solo se muestran si usos_pendientes > 0. */}
+                    El bar del regalo DEFAULT se lee SIEMPRE del contador global vivo
+                    (promociones.usos_pendientes): los pedidos normales actualizan ese
+                    contador, no el acumulador (que solo lo mueve la sustitucion), asi que
+                    leerlo del global mantiene la barra al dia. Los acumuladores
+                    alternativos (sustituciones) se muestran desde su fila, solo si > 0. */}
                 {promo.ajuste_automatico && promo.unidades_por_bloque && promo.unidades_por_bloque > 0 && (
                   (() => {
-                    const acumuladores = (acumuladoresPorPromo?.get(String(promo.id)) ?? []).slice()
+                    const accRows = acumuladoresPorPromo?.get(String(promo.id)) ?? []
                     const defaultProductoId = promo.producto_regalo_id ? String(promo.producto_regalo_id) : null
 
-                    // Si NO hay acumuladores en la tabla, sintetizamos uno default desde promo.usos_pendientes.
-                    if (acumuladores.length === 0 && defaultProductoId) {
-                      acumuladores.push({
-                        id: `legacy-${promo.id}`,
+                    const visibles: PromoAcumuladorDB[] = []
+
+                    // Bar DEFAULT: valor desde el contador global (vivo). Tomamos el
+                    // contenedor/config del acumulador default si existe (nombre correcto),
+                    // si no del propio promo.
+                    if (defaultProductoId) {
+                      const accDefault = accRows.find(
+                        a => String(a.producto_regalo_id) === defaultProductoId
+                      )
+                      visibles.push({
+                        id: `default-${promo.id}`,
                         promocion_id: String(promo.id),
                         producto_regalo_id: defaultProductoId,
-                        ajuste_producto_id: promo.ajuste_producto_id ? String(promo.ajuste_producto_id) : null,
-                        unidades_por_bloque: promo.unidades_por_bloque,
-                        stock_por_bloque: promo.stock_por_bloque,
+                        ajuste_producto_id: accDefault?.ajuste_producto_id
+                          ?? (promo.ajuste_producto_id ? String(promo.ajuste_producto_id) : null),
+                        unidades_por_bloque: accDefault?.unidades_por_bloque ?? promo.unidades_por_bloque,
+                        stock_por_bloque: accDefault?.stock_por_bloque ?? promo.stock_por_bloque,
                         usos_pendientes: promo.usos_pendientes ?? 0,
-                        sucursal_id: 0,
+                        sucursal_id: accDefault?.sucursal_id ?? 0,
                         created_at: '',
                         updated_at: '',
                       } as PromoAcumuladorDB)
                     }
 
-                    // Filtrar: mostrar default siempre, alternativos solo si > 0.
-                    const visibles = acumuladores.filter(acc => {
-                      const esDefault = defaultProductoId !== null
-                        && String(acc.producto_regalo_id) === defaultProductoId
-                      return esDefault || acc.usos_pendientes > 0
-                    })
+                    // Barras de SUSTITUTOS: desde sus acumuladores, distintos del default
+                    // y con usos pendientes > 0.
+                    for (const acc of accRows) {
+                      if (String(acc.producto_regalo_id) === defaultProductoId) continue
+                      if (acc.usos_pendientes > 0) visibles.push(acc)
+                    }
 
                     if (visibles.length === 0) return null
 
