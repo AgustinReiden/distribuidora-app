@@ -6,6 +6,8 @@ import { formatPrecio } from '../../utils/formatters'
 import NumberInput from '../ui/NumberInput'
 import type { ClienteDB, ProductoDB } from '../../types'
 
+export type MotivoCambio = 'vencimiento' | 'rotura' | 'erroneo' | 'otro'
+
 export interface CambioProductoSaveData {
   clienteId: string
   productoDevueltoId: string
@@ -13,7 +15,17 @@ export interface CambioProductoSaveData {
   productoEntregadoId: string
   cantidadEntregada: number
   observaciones: string
+  motivo: MotivoCambio
 }
+
+/** Motivos del cambio y si el producto devuelto reingresa al stock (igual que
+ *  la entrega con salvedad: vencimiento/rotura se dan de baja). */
+const MOTIVOS_CAMBIO: Array<{ value: MotivoCambio; label: string; reingresa: boolean }> = [
+  { value: 'erroneo', label: 'Cambio común (producto en buen estado)', reingresa: true },
+  { value: 'vencimiento', label: 'Producto vencido', reingresa: false },
+  { value: 'rotura', label: 'Producto roto / dañado', reingresa: false },
+  { value: 'otro', label: 'Otro', reingresa: true },
+]
 
 export interface ModalCambioProductoProps {
   clientes: ClienteDB[]
@@ -60,8 +72,11 @@ export default function ModalCambioProducto({
   const [cantidadEntregada, setCantidadEntregada] = useState<number | string>(1)
 
   const [observaciones, setObservaciones] = useState<string>('')
+  const [motivo, setMotivo] = useState<MotivoCambio>('erroneo')
   const [guardando, setGuardando] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+
+  const motivoSeleccionado = MOTIVOS_CAMBIO.find(m => m.value === motivo) ?? MOTIVOS_CAMBIO[0]
 
   const clienteSeleccionado = useMemo(
     () => clientes.find(c => c.id === clienteId) || null,
@@ -91,11 +106,12 @@ export default function ModalCambioProducto({
     ).slice(0, 8)
   }, [clientes, busquedaCliente])
 
-  const filtrarProductos = (busqueda: string, excluirId: string): ProductoDB[] => {
+  // Se permite el MISMO producto en ambos lados (caso vencimiento: el cliente
+  // devuelve el vencido y recibe el mismo producto fresco), así que no se excluye.
+  const filtrarProductos = (busqueda: string): ProductoDB[] => {
     const termino = normalizar(busqueda)
     if (!termino) return []
     return productos
-      .filter(p => p.id !== excluirId)
       .filter(p =>
         normalizar(p.nombre).includes(termino) ||
         normalizar(p.codigo).includes(termino),
@@ -104,15 +120,15 @@ export default function ModalCambioProducto({
   }
 
   const productosDevueltoFiltrados = useMemo(
-    () => filtrarProductos(busquedaDevuelto, productoEntregadoId),
+    () => filtrarProductos(busquedaDevuelto),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [productos, busquedaDevuelto, productoEntregadoId],
+    [productos, busquedaDevuelto],
   )
 
   const productosEntregadoFiltrados = useMemo(
-    () => filtrarProductos(busquedaEntregado, productoDevueltoId),
+    () => filtrarProductos(busquedaEntregado),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [productos, busquedaEntregado, productoDevueltoId],
+    [productos, busquedaEntregado],
   )
 
   const cantDevNum = typeof cantidadDevuelta === 'string' ? parseInt(cantidadDevuelta) || 0 : cantidadDevuelta
@@ -153,6 +169,7 @@ export default function ModalCambioProducto({
       productoEntregadoId,
       cantidadEntregada: cantEntNum,
       observaciones,
+      motivo,
     })
     if (!result.success) {
       setError(getFirstError() || 'Error de validación')
@@ -173,6 +190,7 @@ export default function ModalCambioProducto({
         productoEntregadoId: result.data.productoEntregadoId,
         cantidadEntregada: result.data.cantidadEntregada,
         observaciones: result.data.observaciones || '',
+        motivo: result.data.motivo,
       })
       onClose()
     } catch (err) {
@@ -417,11 +435,39 @@ export default function ModalCambioProducto({
             </div>
           )}
 
+          {/* Motivo del cambio: define si el producto devuelto reingresa al stock */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Motivo del cambio
+            </label>
+            <select
+              value={motivo}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setMotivo(e.target.value as MotivoCambio)}
+              className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white"
+            >
+              {MOTIVOS_CAMBIO.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <div className={`mt-2 p-2 rounded-lg flex items-start gap-2 text-sm border ${
+              motivoSeleccionado.reingresa
+                ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+            }`}>
+              <AlertTriangle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${motivoSeleccionado.reingresa ? 'text-green-600' : 'text-red-600'}`} />
+              <span className={motivoSeleccionado.reingresa ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}>
+                {motivoSeleccionado.reingresa
+                  ? 'El producto devuelto reingresa al stock (canje); el entregado sale del stock.'
+                  : 'El producto devuelto NO reingresa al stock (se da de baja como merma); el entregado sale del stock.'}
+              </span>
+            </div>
+          </div>
+
           {/* Observaciones */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               <FileText className="w-4 h-4 inline mr-1" />
-              Observaciones (motivo del cambio)
+              Observaciones
             </label>
             <textarea
               value={observaciones}

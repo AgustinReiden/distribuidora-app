@@ -277,17 +277,6 @@ export default function PedidoToolbar({
             >
               Armar ruta del día
             </ToolbarButton>
-            {onCambioEnRuta && (
-              <ToolbarButton
-                icon={ArrowLeftRight}
-                iconClassName="text-indigo-600"
-                mobileLabel="Cambio"
-                onClick={onCambioEnRuta}
-                title="Agregar un cambio/devolución como parada del recorrido"
-              >
-                Cambio/devolución
-              </ToolbarButton>
-            )}
           </div>
         )}
 
@@ -318,7 +307,24 @@ export default function PedidoToolbar({
           </div>
         )}
 
-        {canCreate && <PrimaryNewButton onClick={onNuevoPedido} fullWidth />}
+        {canCreate && (
+          onCambioEnRuta ? (
+            <div className="grid grid-cols-2 gap-2 [&>*]:w-full [&>*]:justify-center [&>*]:px-2">
+              <ToolbarButton
+                icon={ArrowLeftRight}
+                iconClassName="text-indigo-600"
+                mobileLabel="Cambio"
+                onClick={onCambioEnRuta}
+                title="Agregar un cambio/devolución como parada del recorrido"
+              >
+                Cambio/devolución
+              </ToolbarButton>
+              <PrimaryNewButton onClick={onNuevoPedido} fullWidth />
+            </div>
+          ) : (
+            <PrimaryNewButton onClick={onNuevoPedido} fullWidth />
+          )
+        )}
       </div>
 
       {/* ╔══ DESKTOP (sm+): layout original — fila a la derecha ══╗ */}
@@ -335,17 +341,6 @@ export default function PedidoToolbar({
             >
               Armar ruta del día
             </ToolbarButton>
-            {onCambioEnRuta && (
-              <ToolbarButton
-                icon={ArrowLeftRight}
-                iconClassName="text-indigo-600"
-                mobileLabel="Cambio"
-                onClick={onCambioEnRuta}
-                title="Agregar un cambio/devolución como parada del recorrido"
-              >
-                Cambio/devolución
-              </ToolbarButton>
-            )}
           </>
         )}
 
@@ -376,6 +371,18 @@ export default function PedidoToolbar({
           </>
         )}
 
+        {/* Cambio/devolución: en la línea de "Nuevo pedido" (a su izquierda). */}
+        {onCambioEnRuta && (
+          <ToolbarButton
+            icon={ArrowLeftRight}
+            iconClassName="text-indigo-600"
+            mobileLabel="Cambio"
+            onClick={onCambioEnRuta}
+            title="Agregar un cambio/devolución como parada del recorrido"
+          >
+            Cambio/devolución
+          </ToolbarButton>
+        )}
         {canCreate && <PrimaryNewButton onClick={onNuevoPedido} />}
       </div>
     </>
