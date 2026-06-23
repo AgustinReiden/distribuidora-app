@@ -54,6 +54,7 @@ export interface VistaPedidosProps {
   onPageChange: (page: number) => void;
   onNuevoPedido: () => void;
   onOptimizarRuta: () => void;
+  onCambioEnRuta?: () => void;
   onExportarPDF: () => void;
   onExportarExcel: (modo: 'pagina' | 'filtro') => void;
   onModalFiltroFecha: () => void;
@@ -124,6 +125,7 @@ export default function VistaPedidos({
   onPageChange,
   onNuevoPedido,
   onOptimizarRuta,
+  onCambioEnRuta,
   onExportarPDF,
   onExportarExcel,
   onModalFiltroFecha,
@@ -175,6 +177,7 @@ export default function VistaPedidos({
             totalCount={totalCount}
             onNuevoPedido={onNuevoPedido}
             onOptimizarRuta={onOptimizarRuta}
+            onCambioEnRuta={onCambioEnRuta}
             onExportarPDF={onExportarPDF}
             onExportarExcel={onExportarExcel}
             onEntregasMasivas={onEntregasMasivas}

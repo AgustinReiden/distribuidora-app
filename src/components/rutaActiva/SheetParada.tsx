@@ -9,7 +9,7 @@
  */
 import { useState, useEffect } from 'react';
 import {
-  Navigation, Square, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, ChevronUp, ChevronDown, Map as MapIcon,
+  Navigation, Square, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, ChevronUp, ChevronDown, Map as MapIcon, ArrowLeftRight,
 } from 'lucide-react';
 import { formatPrecio, getFormaPagoLabel } from '../../utils/formatters';
 import { formatDistancia } from '../../utils/geo';
@@ -46,6 +46,11 @@ function navUrl(p: PedidoConCliente): string {
     : googleMapsSearchUrl(p.cliente?.direccion || '');
 }
 
+/** ¿La parada es un cambio/devolución (pedido especial canal='cambio')? */
+function esCambio(p: PedidoConCliente | null | undefined): boolean {
+  return p?.canal === 'cambio';
+}
+
 /** Fila compacta de una parada (lista "Todas las paradas"). */
 function FilaParada({ parada, numero, activa, onSelect }: {
   parada: PedidoConCliente;
@@ -74,9 +79,15 @@ function FilaParada({ parada, numero, activa, onSelect }: {
           {parada.cliente?.direccion || 'Sin dirección'}
         </span>
       </span>
-      <span className="flex-shrink-0 text-sm font-semibold text-gray-700 dark:text-gray-300">
-        {formatPrecio(parada.total)}
-      </span>
+      {esCambio(parada) ? (
+        <span className="flex flex-shrink-0 items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+          <ArrowLeftRight className="h-3 w-3" /> Cambio
+        </span>
+      ) : (
+        <span className="flex-shrink-0 text-sm font-semibold text-gray-700 dark:text-gray-300">
+          {formatPrecio(parada.total)}
+        </span>
+      )}
       <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400" />
     </button>
   );
@@ -150,27 +161,56 @@ export default function SheetParada({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    paradaActiva.estado_pago === 'pagado'
-                      ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                      : paradaActiva.estado_pago === 'parcial'
-                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
-                        : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                  }`}>
-                    {paradaActiva.estado_pago === 'pagado' ? 'PAGADO' : paradaActiva.estado_pago === 'parcial' ? 'PARCIAL' : 'A COBRAR'}
-                  </span>
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {getFormaPagoLabel(paradaActiva.forma_pago || '')}
-                  </span>
-                  <span className="font-semibold text-gray-900 dark:text-white">{formatPrecio(paradaActiva.total)}</span>
-                  {paradaActiva.cliente?.telefono && (
-                    <a href={`tel:${paradaActiva.cliente.telefono}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                      <Phone className="h-3.5 w-3.5" />
-                      {paradaActiva.cliente.telefono}
-                    </a>
-                  )}
-                </div>
+                {esCambio(paradaActiva) ? (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                        <ArrowLeftRight className="h-3.5 w-3.5" /> CAMBIO/DEVOLUCIÓN
+                      </span>
+                      {paradaActiva.cliente?.telefono && (
+                        <a href={`tel:${paradaActiva.cliente.telefono}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                          <Phone className="h-3.5 w-3.5" />
+                          {paradaActiva.cliente.telefono}
+                        </a>
+                      )}
+                    </div>
+                    <div className="space-y-1 rounded-lg border border-indigo-200 bg-indigo-50 p-2.5 text-sm dark:border-indigo-800 dark:bg-indigo-900/20">
+                      <p className="text-gray-700 dark:text-gray-200">
+                        <strong>Retirar del cliente:</strong>{' '}
+                        {(paradaActiva.cambio?.cantidad_devuelta ?? '?')}x {paradaActiva.cambio?.producto_devuelto_nombre || 'producto'}
+                      </p>
+                      <p className="text-gray-700 dark:text-gray-200">
+                        <strong>Entregar al cliente:</strong>{' '}
+                        {(paradaActiva.cambio?.cantidad_entregada ?? '?')}x {paradaActiva.cambio?.producto_entregado_nombre || 'producto'}
+                      </p>
+                      {paradaActiva.cambio?.observaciones && (
+                        <p className="italic text-gray-500 dark:text-gray-400">{paradaActiva.cambio.observaciones}</p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      paradaActiva.estado_pago === 'pagado'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                        : paradaActiva.estado_pago === 'parcial'
+                          ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+                          : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                    }`}>
+                      {paradaActiva.estado_pago === 'pagado' ? 'PAGADO' : paradaActiva.estado_pago === 'parcial' ? 'PARCIAL' : 'A COBRAR'}
+                    </span>
+                    <span className="text-gray-500 dark:text-gray-400">
+                      {getFormaPagoLabel(paradaActiva.forma_pago || '')}
+                    </span>
+                    <span className="font-semibold text-gray-900 dark:text-white">{formatPrecio(paradaActiva.total)}</span>
+                    {paradaActiva.cliente?.telefono && (
+                      <a href={`tel:${paradaActiva.cliente.telefono}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                        <Phone className="h-3.5 w-3.5" />
+                        {paradaActiva.cliente.telefono}
+                      </a>
+                    )}
+                  </div>
+                )}
 
                 {paradaActiva.notas && (
                   <p className="rounded-lg border border-yellow-200 bg-yellow-50 p-2 text-xs text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
@@ -210,7 +250,7 @@ export default function SheetParada({
                     }`}
                   >
                     <Check className="h-5 w-5" />
-                    Entregar
+                    {esCambio(paradaActiva) ? 'Completar cambio' : 'Entregar'}
                   </button>
                 </div>
               </div>
@@ -331,7 +371,7 @@ export default function SheetParada({
                   onClick={() => entregar(paradaActiva)}
                   className="flex h-12 flex-shrink-0 items-center gap-1.5 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white active:bg-green-800"
                 >
-                  <Check className="h-5 w-5" /> Entregar
+                  <Check className="h-5 w-5" /> {esCambio(paradaActiva) ? 'Completar' : 'Entregar'}
                 </button>
               ) : guiando && onToggleGuia ? (
                 <button

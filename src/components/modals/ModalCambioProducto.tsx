@@ -20,6 +20,14 @@ export interface ModalCambioProductoProps {
   productos: ProductoDB[]
   onSave: (data: CambioProductoSaveData) => Promise<void>
   onClose: () => void
+  /**
+   * 'standalone' (default): cambio de dep\u00F3sito, ajusta stock/saldo al registrar.
+   * 'enRuta': crea una parada de cambio en el recorrido; el ajuste ocurre cuando
+   * el chofer la completa. Solo cambia textos/t\u00EDtulo.
+   */
+  modo?: 'standalone' | 'enRuta'
+  /** Si viene, el cliente queda fijo (no se puede buscar/cambiar). */
+  clienteFijo?: ClienteDB | null
 }
 
 function normalizar(s: string | null | undefined): string {
@@ -31,11 +39,17 @@ export default function ModalCambioProducto({
   productos,
   onSave,
   onClose,
+  modo = 'standalone',
+  clienteFijo = null,
 }: ModalCambioProductoProps): React.ReactElement {
   const { validate, getFirstError } = useZodValidation(modalCambioProductoSchema)
 
-  const [clienteId, setClienteId] = useState<string>('')
-  const [busquedaCliente, setBusquedaCliente] = useState<string>('')
+  const enRuta = modo === 'enRuta'
+
+  const [clienteId, setClienteId] = useState<string>(clienteFijo?.id ?? '')
+  const [busquedaCliente, setBusquedaCliente] = useState<string>(
+    clienteFijo ? (clienteFijo.nombre_fantasia || clienteFijo.razon_social || '') : '',
+  )
 
   const [productoDevueltoId, setProductoDevueltoId] = useState<string>('')
   const [busquedaDevuelto, setBusquedaDevuelto] = useState<string>('')
@@ -186,8 +200,14 @@ export default function ModalCambioProducto({
               <ArrowLeftRight className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Cambio de productos</h2>
-              <p className="text-sm text-gray-500">El cliente devuelve uno y se le entrega otro</p>
+              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
+                {enRuta ? 'Cambio/devolución en la ruta' : 'Cambio de productos'}
+              </h2>
+              <p className="text-sm text-gray-500">
+                {enRuta
+                  ? 'Se agrega como parada; el stock y el saldo se ajustan al completarla'
+                  : 'El cliente devuelve uno y se le entrega otro'}
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" aria-label="Cerrar">
@@ -211,11 +231,12 @@ export default function ModalCambioProducto({
                   setBusquedaCliente(e.target.value)
                   setClienteId('')
                 }}
+                disabled={!!clienteFijo}
                 placeholder="Buscar por nombre, razón social o CUIT..."
-                className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white"
+                className="w-full pl-10 pr-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-900 disabled:text-gray-500"
               />
             </div>
-            {!clienteId && clientesFiltrados.length > 0 && (
+            {!clienteFijo && !clienteId && clientesFiltrados.length > 0 && (
               <ul className="absolute z-20 mt-1 w-full bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-lg max-h-56 overflow-auto">
                 {clientesFiltrados.map(c => (
                   <li key={c.id}>
@@ -433,11 +454,11 @@ export default function ModalCambioProducto({
               className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 dark:disabled:bg-indigo-800 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
             >
               {guardando ? (
-                <span className="animate-pulse">Registrando...</span>
+                <span className="animate-pulse">{enRuta ? 'Agregando...' : 'Registrando...'}</span>
               ) : (
                 <>
                   <ArrowLeftRight className="w-4 h-4" />
-                  Registrar cambio
+                  {enRuta ? 'Agregar a la ruta' : 'Registrar cambio'}
                 </>
               )}
             </button>
