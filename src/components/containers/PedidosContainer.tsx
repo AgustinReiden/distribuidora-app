@@ -22,6 +22,7 @@ import {
   useQuitarPedidoDeRecorridosMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
+  useCambiarClientePedidoMutation,
   usePagosMasivosMutation,
   usePedidosAsignadosQuery,
   useClientesQuery,
@@ -50,6 +51,7 @@ import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWith
 import { importConRecarga } from '../../utils/lazyWithReload'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
+import type { CambiarClientePayload } from '../modals/ModalCambiarCliente'
 import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
 
 // Lazy load de componentes
@@ -151,6 +153,7 @@ export default function PedidosContainer(): React.ReactElement {
   const quitarDeRecorridosMut = useQuitarPedidoDeRecorridosMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
+  const cambiarClientePedidoMut = useCambiarClientePedidoMutation()
   const pagosMasivos = usePagosMasivosMutation()
   const crearClienteMut = useCrearClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -737,6 +740,31 @@ export default function PedidosContainer(): React.ReactElement {
       throw e
     }
   }, [pedidoEditando, queryClient, notify])
+
+  // Cambiar el cliente de un pedido cargado al cliente equivocado: cancela el
+  // viejo y crea uno nuevo idéntico (precios recalculados en el modal) para el
+  // cliente correcto, transfiriendo los pagos. Atómico (RPC). Solo admin.
+  const handleCambiarClientePedido = useCallback(async (payload: CambiarClientePayload) => {
+    if (!pedidoEditando) return
+    try {
+      const { nuevoPedidoId } = await cambiarClientePedidoMut.mutateAsync({
+        pedidoId: String(pedidoEditando.id),
+        nuevoClienteId: payload.nuevoClienteId,
+        usuarioId: user?.id ?? null,
+        items: payload.items,
+        total: payload.total,
+        totalNeto: payload.totalNeto,
+        totalIva: payload.totalIva,
+        motivo: payload.motivo,
+      })
+      setModalEditarOpen(false)
+      setPedidoEditando(null)
+      notify.success(`Cliente cambiado: se creó el pedido #${nuevoPedidoId} y se canceló el anterior`, { persist: true })
+    } catch (e) {
+      notify.error((e as Error).message || 'Error al cambiar el cliente del pedido')
+      throw e
+    }
+  }, [pedidoEditando, cambiarClientePedidoMut, user, notify])
 
   // ===========================================================================
   // ModalPagoPedido handlers (registrar/anular pagos sobre un pedido)
@@ -1532,9 +1560,12 @@ export default function PedidosContainer(): React.ReactElement {
             }
             canSustituirRegalo={isAdmin || isEncargado}
             canEditPreventista={isAdmin}
+            canCambiarCliente={isAdmin}
+            clientes={clientes}
             onSave={handleGuardarEdicion}
             onSaveItems={handleGuardarItemsEdicion}
             onCambiarPreventista={handleCambiarPreventistaPedido}
+            onCambiarCliente={handleCambiarClientePedido}
             onClose={() => { setModalEditarOpen(false); setPedidoEditando(null) }}
             guardando={guardando}
           />

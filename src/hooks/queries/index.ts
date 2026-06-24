@@ -61,6 +61,7 @@ export {
   usePedidosAsignadosQuery,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
+  useCambiarClientePedidoMutation,
   usePedidosNoPagadosQuery,
   usePagosMasivosMutation,
 } from './usePedidosQuery'
