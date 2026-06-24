@@ -25,8 +25,8 @@ export interface RegistrarCambioInput {
   productoEntregadoId: string
   cantidadEntregada: number
   observaciones?: string
-  /** Motivo del cambio (vencimiento/rotura → no reingresa el devuelto). */
-  motivo?: 'vencimiento' | 'rotura' | 'erroneo' | 'otro'
+  /** Motivo del cambio (vencimiento/rotura/mal_estado → no reingresa el devuelto). */
+  motivo?: 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' | 'otro'
 }
 
 async function registrarCambio(input: RegistrarCambioInput): Promise<number> {

@@ -709,7 +709,7 @@ export const modalCambioProductoSchema = z.object({
   // Motivo del cambio: define si el producto devuelto reingresa al stock
   // (vencimiento/rotura → se da de baja; erroneo/otro → reingresa). Se permite
   // el mismo producto (caso vencimiento: se cambia por el mismo fresco).
-  motivo: z.enum(['vencimiento', 'rotura', 'erroneo', 'otro']).default('erroneo')
+  motivo: z.enum(['vencimiento', 'rotura', 'mal_estado', 'erroneo', 'otro']).default('erroneo')
 })
 
 /** Inferred type for ModalCambioProducto schema */
