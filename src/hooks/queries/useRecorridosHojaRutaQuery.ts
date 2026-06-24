@@ -27,11 +27,15 @@ export const recorridosHojaRutaKeys = {
     ['recorridos-hoja-ruta', sucursalId, fecha] as const,
 }
 
+// Se agrega `cambio:recorrido_cambios(...)` SOLO acá (no en el PEDIDO_SELECT
+// global, para no inflar la lista de pedidos): la hoja de ruta necesita el
+// detalle del cambio para mostrar qué retirar/entregar en la parada y para
+// sumar el producto entregado al manifiesto de carga del camión.
 const SELECT = `id,
   transportista:perfiles!transportista_id(id, nombre),
   recorrido_pedidos(
     orden_entrega,
-    pedido:pedidos(${PEDIDO_SELECT})
+    pedido:pedidos(${PEDIDO_SELECT}, cambio:recorrido_cambios(producto_devuelto_nombre, cantidad_devuelta, producto_entregado_id, producto_entregado_nombre, cantidad_entregada, observaciones, motivo))
   )`
 
 interface RecorridoHojaRutaRaw {

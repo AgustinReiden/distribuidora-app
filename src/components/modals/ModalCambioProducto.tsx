@@ -1,12 +1,36 @@
 import React, { useState, useMemo, FormEvent, ChangeEvent } from 'react'
+import { z } from 'zod'
 import { X, ArrowLeftRight, ArrowDown, ArrowUp, FileText, Search, Package, AlertTriangle, User as UserIcon } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
-import { modalCambioProductoSchema } from '../../lib/schemas'
 import { formatPrecio } from '../../utils/formatters'
 import NumberInput from '../ui/NumberInput'
 import type { ClienteDB, ProductoDB } from '../../types'
 
 export type MotivoCambio = 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' | 'otro'
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
+// compartido, un deploy podía dejar el schema viejo cacheado en el PWA y
+// desincronizarlo de las opciones que muestra este modal — el motivo nuevo
+// 'mal_estado' daba "Invalid input" validado contra un enum viejo. Acá la
+// validación viaja SIEMPRE en el mismo chunk que la UI: no pueden desfasarse.
+// Las opciones del enum deben coincidir con MOTIVOS_CAMBIO / MotivoCambio.
+const modalCambioProductoSchema = z.object({
+  clienteId: z.string().min(1, { message: 'Debe seleccionar un cliente' }),
+  productoDevueltoId: z.string().min(1, { message: 'Debe seleccionar el producto a devolver' }),
+  cantidadDevuelta: z.coerce
+    .number({ error: 'La cantidad debe ser un número' })
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+  productoEntregadoId: z.string().min(1, { message: 'Debe seleccionar el producto a entregar' }),
+  cantidadEntregada: z.coerce
+    .number({ error: 'La cantidad debe ser un número' })
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+  observaciones: z.string().optional(),
+  // vencimiento/rotura/mal_estado → el devuelto se da de baja; erroneo/otro →
+  // reingresa. Se permite el mismo producto (caso vencimiento: mismo fresco).
+  motivo: z.enum(['vencimiento', 'rotura', 'mal_estado', 'erroneo', 'otro']).default('erroneo'),
+})
 
 export interface CambioProductoSaveData {
   clienteId: string

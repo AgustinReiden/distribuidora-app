@@ -4,7 +4,7 @@ import {
   Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation,
   Settings, Save, FileText, ChevronDown, ChevronUp, Phone,
   DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays, Pencil,
-  ArrowLeftRight
+  ArrowLeftRight, Search
 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioProducto';
@@ -13,6 +13,10 @@ import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
+
+// Normaliza para búsquedas: saca acentos y pasa a minúsculas.
+const normTexto = (s?: string | null): string =>
+  (s || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 
 // =============================================================================
 // TIPOS
@@ -237,6 +241,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const [repartidoresSel, setRepartidoresSel] = useState<Set<string>>(new Set());
   const [paramsPorChofer, setParamsPorChofer] = useState<Record<string, { maxParadas: string; zonas: string[] }>>({});
   const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
+  const [busquedaPedido, setBusquedaPedido] = useState<string>('');
   // Fecha de entrega de la ruta. Generalmente se arma el día anterior, así que
   // el default es mañana; se puede elegir de hoy en adelante.
   const hoyISO = fechaLocalISO();
@@ -329,6 +334,19 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     return Array.from(map.values())
       .sort((a, b) => (a.orden_entrega || 999) - (b.orden_entrega || 999));
   }, [modoDividir, transportistaSeleccionado, paradasExistentes, disponiblesFiltrados]);
+
+  // Filtro de búsqueda SOLO para la vista de la lista (no afecta selección ni
+  // contadores): encontrar/destildar un pedido rápido en listas largas.
+  const pedidosVisiblesFiltrados = useMemo((): PedidoDB[] => {
+    const q = normTexto(busquedaPedido);
+    if (!q) return pedidosVisibles;
+    return pedidosVisibles.filter(p =>
+      String(p.id).includes(q)
+      || normTexto(p.cliente?.nombre_fantasia).includes(q)
+      || normTexto(p.cliente?.razon_social).includes(q)
+      || normTexto(p.cliente?.direccion).includes(q)
+    );
+  }, [pedidosVisibles, busquedaPedido]);
 
   // Selección de paradas. En modo dividir se siembra con TODO el pool (el caso
   // común es rutear todo y dividir). En modo 1 chofer se siembra una vez por
@@ -973,8 +991,22 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           Seleccionar todos
                         </label>
                       </div>
+                      <div className="p-2 border-b">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" aria-hidden="true" />
+                          <input
+                            type="text"
+                            value={busquedaPedido}
+                            onChange={(e: ChangeEvent<HTMLInputElement>) => setBusquedaPedido(e.target.value)}
+                            placeholder="Buscar por cliente, dirección o N° de pedido…"
+                            className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg"
+                          />
+                        </div>
+                      </div>
                       <div className="max-h-60 overflow-y-auto divide-y">
-                        {pedidosVisibles.map((pedido) => {
+                        {pedidosVisiblesFiltrados.length === 0 ? (
+                          <p className="p-3 text-sm text-gray-500 text-center">Sin pedidos que coincidan con la búsqueda.</p>
+                        ) : pedidosVisiblesFiltrados.map((pedido) => {
                           const checked = seleccionados.has(pedido.id);
                           const enRuta = idsExistentes.has(pedido.id);
                           return (
