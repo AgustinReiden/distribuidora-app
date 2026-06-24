@@ -7,6 +7,7 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen } from '../../types'
 import { productosKeys } from './useProductosQuery'
+import { clientesKeys } from './useClientesQuery'
 
 // Query keys
 export const pedidosKeys = {
@@ -59,6 +60,19 @@ interface CrearPedidoInput {
   // el RPC usa auth.uid() (comportamiento histórico). Si difiere, el RPC
   // exige que el actor sea admin (mig 060).
   preventistaId?: string | null
+}
+
+interface CambiarClienteInput {
+  pedidoId: string
+  nuevoClienteId: string
+  usuarioId: string | null
+  // Items YA recalculados para el cliente nuevo (mayorista/promo/descuento +
+  // desglose fiscal). Mismo shape que CrearPedidoInput.items.
+  items: PedidoItemInput[]
+  total: number
+  totalNeto?: number
+  totalIva?: number
+  motivo?: string
 }
 
 interface ActualizarEstadoInput {
@@ -822,6 +836,71 @@ export function useCancelarPedidoMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+// =========================================================================
+// Cambiar cliente del pedido (cancela el viejo + crea uno nuevo)
+// =========================================================================
+
+/**
+ * Cambia el cliente de un pedido cargado al cliente equivocado. La RPC cancela
+ * el pedido actual y crea uno nuevo idéntico para el cliente correcto, con los
+ * precios ya recalculados en el front y transfiriendo los pagos. Atómico.
+ */
+async function cambiarClientePedido(input: CambiarClienteInput): Promise<{ nuevoPedidoId: string }> {
+  const itemsParaRPC = input.items.map(item => ({
+    producto_id: item.productoId || item.producto_id,
+    cantidad: item.cantidad,
+    precio_unitario: item.precioUnitario ?? item.precio_unitario ?? 0,
+    ...(item.esBonificacion ? { es_bonificacion: true } : {}),
+    ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+    ...(item.neto_unitario != null ? { neto_unitario: item.neto_unitario } : {}),
+    ...(item.iva_unitario != null ? { iva_unitario: item.iva_unitario } : {}),
+    ...(item.impuestos_internos_unitario != null ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
+    ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
+  }))
+
+  const { data, error } = await supabase.rpc('cambiar_cliente_pedido', {
+    p_pedido_id: input.pedidoId,
+    p_nuevo_cliente_id: input.nuevoClienteId,
+    p_usuario_id: input.usuarioId,
+    p_items: itemsParaRPC,
+    p_total: input.total,
+    p_total_neto: input.totalNeto ?? input.total,
+    p_total_iva: input.totalIva ?? 0,
+    ...(input.motivo ? { p_motivo: input.motivo } : {}),
+  })
+
+  if (error) throw error
+
+  const result = data as { success: boolean; nuevo_pedido_id?: string; error?: string; errores?: string[] }
+  if (!result.success) {
+    throw new Error(result.error || result.errores?.join(', ') || 'Error al cambiar el cliente del pedido')
+  }
+
+  return { nuevoPedidoId: String(result.nuevo_pedido_id) }
+}
+
+/**
+ * Hook para cambiar el cliente de un pedido. Invalida pedidos, productos (stock),
+ * recorridos (pudo salir de una ruta) y clientes (saldo de ambos clientes).
+ */
+export function useCambiarClientePedidoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: cambiarClientePedido,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     },
   })
 }

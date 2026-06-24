@@ -11,9 +11,11 @@ import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
-import type { PedidoDB, ProductoDB, PedidoItemDB } from '../../types';
+import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
+import type { CambiarClientePayload } from './ModalCambiarCliente';
 
 const ModalSustituirRegalo = lazy(() => import('./ModalSustituirRegalo'));
+const ModalCambiarCliente = lazy(() => import('./ModalCambiarCliente'));
 
 /** Item del pedido para edición. Incluye fiscales opcionales que se pueblan al guardar. */
 export interface PedidoEditItem {
@@ -56,6 +58,12 @@ export interface ModalEditarPedidoProps {
   canSustituirRegalo?: boolean;
   /** Permite reasignar el preventista del pedido. Default: false. Solo admin. */
   canEditPreventista?: boolean;
+  /** Permite cambiar el cliente del pedido (cancela el viejo + crea uno nuevo). Default: false. Solo admin. */
+  canCambiarCliente?: boolean;
+  /** Lista de clientes para el buscador del cambio de cliente. */
+  clientes?: ClienteDB[];
+  /** Callback al confirmar el cambio de cliente. Resuelve cuando la RPC terminó. */
+  onCambiarCliente?: (payload: CambiarClientePayload) => Promise<void>;
   /** @deprecated usar canEditItems/canEditPrices/canEditFechaEntrega. Mantiene compat. */
   isAdmin?: boolean;
   /** Callback al guardar datos */
@@ -78,10 +86,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   canEditFechaEntrega,
   canSustituirRegalo = false,
   canEditPreventista = false,
+  canCambiarCliente = false,
+  clientes = [],
   isAdmin = false,
   onSave,
   onSaveItems,
   onCambiarPreventista,
+  onCambiarCliente,
   onClose,
   guardando
 }: ModalEditarPedidoProps) {
@@ -120,8 +131,33 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Sustitucion de regalos: el row persistido a editar (id real de pedido_items).
   const [sustItemTarget, setSustItemTarget] = useState<PedidoItemDB | null>(null);
 
+  // Cambio de cliente: abre el sub-modal y trackea el loading de la RPC.
+  const [mostrarCambioCliente, setMostrarCambioCliente] = useState<boolean>(false);
+  const [cambiandoCliente, setCambiandoCliente] = useState<boolean>(false);
+
   // Verificar si el pedido está entregado (no editable)
   const pedidoEntregado = pedido?.estado === 'entregado';
+
+  // Cambiar cliente: solo admin, pedido no entregado/cancelado y que no sea un
+  // pedido de cambio/devolución (canal='cambio', total=0). Se exige no tener
+  // cambios de items sin guardar para no recrear con datos inconsistentes.
+  const puedeCambiarCliente = Boolean(
+    canCambiarCliente && onCambiarCliente && pedido &&
+    pedido.estado !== 'entregado' && pedido.estado !== 'cancelado' && pedido.canal !== 'cambio',
+  );
+
+  const handleConfirmarCambioCliente = async (payload: CambiarClientePayload): Promise<void> => {
+    if (!onCambiarCliente) return;
+    setCambiandoCliente(true);
+    try {
+      await onCambiarCliente(payload);
+      setMostrarCambioCliente(false); // el container suele cerrar todo el modal en éxito
+    } catch {
+      // El caller notifica el error; dejamos el sub-modal abierto para reintentar.
+    } finally {
+      setCambiandoCliente(false);
+    }
+  };
 
   // Regalos persistidos en DB (items con es_bonificacion=true). A diferencia
   // de las bonificacionesCalculadas que se recalculan localmente, estas son
@@ -861,6 +897,28 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           </div>
         </div>
 
+        {/* Cambiar cliente (solo admin). Recrea el pedido para otro cliente
+            cuando se eligió mal el cliente al cargarlo. */}
+        {puedeCambiarCliente && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setMostrarCambioCliente(true)}
+              disabled={guardando || cambiandoCliente || itemsModificados}
+              title={itemsModificados ? 'Guardá los cambios de items antes de cambiar el cliente' : undefined}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <UserCheck className="w-4 h-4" />
+              Cambiar cliente
+            </button>
+            {itemsModificados && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Guardá primero los cambios de items para poder cambiar el cliente.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Fecha del pedido (solo admin/encargado) */}
         {puedeEditarFechas && (
           <div>
@@ -1000,6 +1058,20 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               />
             );
           })()}
+        </Suspense>
+      )}
+
+      {/* Modal de cambio de cliente (lazy) */}
+      {mostrarCambioCliente && pedido && (
+        <Suspense fallback={null}>
+          <ModalCambiarCliente
+            pedido={pedido}
+            productos={productos}
+            clientes={clientes}
+            onConfirmar={handleConfirmarCambioCliente}
+            onClose={() => setMostrarCambioCliente(false)}
+            guardando={cambiandoCliente}
+          />
         </Suspense>
       )}
     </ModalBase>
