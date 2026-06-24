@@ -446,6 +446,20 @@ function buildManifiestoOps(doc, pedidos) {
     })
   })
 
+  // Paradas de cambio/devolución (canal='cambio'): el producto que se ENTREGA al
+  // cliente también se carga en el camión, así que suma al manifiesto. El detalle
+  // vive en recorrido_cambios (cargado como pedido.cambio en la hoja de ruta).
+  // Si el entregado coincide con un producto comprado, se acumulan en la misma fila.
+  pedidos.forEach((pedido) => {
+    if (pedido.canal !== 'cambio') return
+    const c = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
+    if (!c) return
+    const cantidad = Number(c.cantidad_entregada) || 0
+    if (cantidad <= 0) return
+    const key = c.producto_entregado_id ?? c.producto_entregado_nombre ?? 'cambio-sin-id'
+    acumular(totalesCompras, key, c.producto_entregado_nombre || 'Producto', cantidad)
+  })
+
   // Partir las fracciones consolidadas UNA vez por producto: fardos completos +
   // el resto como sueltas (a lo sumo upb-1 sueltas por producto en toda la ruta).
   Object.values(totalesBonifFraccion).forEach((f) => {

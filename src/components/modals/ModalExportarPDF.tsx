@@ -1,10 +1,14 @@
 import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import type { ChangeEvent } from 'react';
-import { FileDown, Package, Truck, Printer, Loader2, CalendarDays } from 'lucide-react';
+import { FileDown, Package, Truck, Printer, Loader2, CalendarDays, Search } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { useRecorridosHojaRutaQuery } from '../../hooks/queries';
 import type { PedidoDB, PerfilDB } from '../../types';
+
+// Normaliza para búsquedas: saca acentos y pasa a minúsculas.
+const normTexto = (s?: string | null): string =>
+  (s || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 
 // =============================================================================
 // TIPOS
@@ -42,6 +46,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   const [transportistaSeleccionado, setTransportistaSeleccionado] = useState<string>('');
   const [pedidosSeleccionados, setPedidosSeleccionados] = useState<string[]>([]);
   const [seleccionarTodos, setSeleccionarTodos] = useState<boolean>(false);
+  const [busquedaPedido, setBusquedaPedido] = useState<string>('');
   const [todosLosPedidos, setTodosLosPedidos] = useState<PedidoDB[] | null>(null);
   const [cargandoTodos, setCargandoTodos] = useState(false);
   // Hoja de ruta Y comandas: se descargan desde la ruta YA armada de un día +
@@ -78,6 +83,16 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
       );
     }
   }, [pedidosBase, tipoExport, transportistaSeleccionado]);
+
+  // Filtro de búsqueda para encontrar/destildar pedidos rápido en listas largas.
+  const coincideBusqueda = (p: PedidoDB): boolean => {
+    const q = normTexto(busquedaPedido);
+    if (!q) return true;
+    return String(p.id).includes(q)
+      || normTexto(p.cliente?.nombre_fantasia).includes(q)
+      || normTexto(p.cliente?.razon_social).includes(q)
+      || normTexto(p.cliente?.direccion).includes(q);
+  };
 
   // Cargar todos los pedidos cuando se selecciona "todos"
   const handleAlcanceChange = useCallback(async (nuevoAlcance: AlcanceExport) => {
@@ -159,6 +174,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
     setPedidosSeleccionados([]);
     setSeleccionarTodos(false);
     setTransportistaSeleccionado('');
+    setBusquedaPedido('');
   };
 
   const handleTransportistaChange = (id: string): void => {
@@ -361,8 +377,21 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                   Destildá los pedidos que no quieras incluir en la impresión.
                 </p>
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" aria-hidden="true" />
+                  <input
+                    type="text"
+                    value={busquedaPedido}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setBusquedaPedido(e.target.value)}
+                    placeholder="Buscar por cliente, dirección o N° de pedido…"
+                    className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  />
+                </div>
                 <div className="border rounded-lg max-h-56 overflow-y-auto dark:border-gray-600">
-                  {recorridoSeleccionado.paradas.map((pedido, idx) => (
+                  {recorridoSeleccionado.paradas
+                    .map((pedido, idx) => ({ pedido, idx }))
+                    .filter(({ pedido }) => coincideBusqueda(pedido))
+                    .map(({ pedido, idx }) => (
                     <div
                       key={pedido.id}
                       onClick={() => handleTogglePedido(pedido.id)}
@@ -387,6 +416,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                       </div>
                     </div>
                   ))}
+                  {recorridoSeleccionado.paradas.filter(coincideBusqueda).length === 0 && (
+                    <p className="p-3 text-sm text-gray-500 text-center">Sin pedidos que coincidan con la búsqueda.</p>
+                  )}
                 </div>
               </div>
             )}
@@ -414,6 +446,19 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
               )}
             </div>
 
+            {pedidosFiltrados.length > 0 && (
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" aria-hidden="true" />
+                <input
+                  type="text"
+                  value={busquedaPedido}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setBusquedaPedido(e.target.value)}
+                  placeholder="Buscar por cliente, dirección o N° de pedido…"
+                  className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+              </div>
+            )}
+
             {cargandoTodos ? (
               <div className="flex items-center justify-center py-8 bg-gray-50 dark:bg-gray-900 rounded-lg">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-600 mr-2" />
@@ -427,7 +472,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
               </div>
             ) : (
               <div className="border rounded-lg max-h-64 overflow-y-auto">
-                {pedidosFiltrados.map(pedido => (
+                {pedidosFiltrados.filter(coincideBusqueda).map(pedido => (
                   <div
                     key={pedido.id}
                     onClick={() => handleTogglePedido(pedido.id)}
@@ -455,6 +500,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                     </div>
                   </div>
                 ))}
+                {pedidosFiltrados.filter(coincideBusqueda).length === 0 && (
+                  <p className="p-3 text-sm text-gray-500 text-center">Sin pedidos que coincidan con la búsqueda.</p>
+                )}
               </div>
             )}
           </div>

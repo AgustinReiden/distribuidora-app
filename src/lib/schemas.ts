@@ -690,30 +690,12 @@ export const modalMermaSchema = z.object({
 /** Inferred type for ModalMerma schema */
 export type ModalMermaFormData = z.infer<typeof modalMermaSchema>
 
-/**
- * Schema para ModalCambioProducto
- */
-export const modalCambioProductoSchema = z.object({
-  clienteId: z.string().min(1, { message: 'Debe seleccionar un cliente' }),
-  productoDevueltoId: z.string().min(1, { message: 'Debe seleccionar el producto a devolver' }),
-  cantidadDevuelta: z.coerce
-    .number({ error: 'La cantidad debe ser un número' })
-    .int({ message: 'La cantidad debe ser un número entero' })
-    .positive({ message: 'La cantidad debe ser mayor a 0' }),
-  productoEntregadoId: z.string().min(1, { message: 'Debe seleccionar el producto a entregar' }),
-  cantidadEntregada: z.coerce
-    .number({ error: 'La cantidad debe ser un número' })
-    .int({ message: 'La cantidad debe ser un número entero' })
-    .positive({ message: 'La cantidad debe ser mayor a 0' }),
-  observaciones: z.string().optional(),
-  // Motivo del cambio: define si el producto devuelto reingresa al stock
-  // (vencimiento/rotura → se da de baja; erroneo/otro → reingresa). Se permite
-  // el mismo producto (caso vencimiento: se cambia por el mismo fresco).
-  motivo: z.enum(['vencimiento', 'rotura', 'mal_estado', 'erroneo', 'otro']).default('erroneo')
-})
-
-/** Inferred type for ModalCambioProducto schema */
-export type ModalCambioProductoFormData = z.infer<typeof modalCambioProductoSchema>
+// NOTA: el schema de ModalCambioProducto se movió DENTRO del propio modal
+// (src/components/modals/ModalCambioProducto.tsx). Vivía acá, en este chunk
+// compartido, y un deploy podía dejar la versión vieja cacheada en el PWA y
+// desincronizarla de las opciones que muestra el modal (p. ej. el motivo nuevo
+// 'mal_estado' fallaba con "Invalid input" contra el schema viejo). Co-locado,
+// la validación viaja siempre en el mismo chunk que la UI.
 
 /**
  * Schema para ModalProveedor
