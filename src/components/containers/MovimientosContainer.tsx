@@ -22,6 +22,7 @@ import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 const VistaMovimientos = lazy(() => import('../vistas/VistaMovimientos'))
 const ModalCrearMovimiento = lazy(() => import('../modals/ModalCrearMovimiento'))
 const ModalAceptarMovimiento = lazy(() => import('../modals/ModalAceptarMovimiento'))
+const ModalDetalleMovimiento = lazy(() => import('../modals/ModalDetalleMovimiento'))
 
 type TabEstado = EstadoMovimiento | 'todos'
 
@@ -37,11 +38,13 @@ export default function MovimientosContainer(): React.ReactElement {
   const [estado, setEstado] = useState<TabEstado>('pendiente')
   const [crearOpen, setCrearOpen] = useState(false)
   const [aceptarMov, setAceptarMov] = useState<MovimientoSucursalDB | null>(null)
+  const [detalleMov, setDetalleMov] = useState<MovimientoSucursalDB | null>(null)
 
   const { data: movimientos = [], isLoading } = useMovimientosQuery({ estado })
   const { data: sucursales = [] } = useSucursalesQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: itemsAceptar = [], isLoading: loadingItems } = useMovimientoItemsQuery(aceptarMov ? String(aceptarMov.id) : null)
+  const { data: itemsDetalle = [], isLoading: loadingItemsDetalle } = useMovimientoItemsQuery(detalleMov ? String(detalleMov.id) : null)
 
   const crear = useCrearMovimientoMutation()
   const aceptar = useAceptarMovimientoMutation()
@@ -51,6 +54,7 @@ export default function MovimientosContainer(): React.ReactElement {
   useResetOnSucursalChange(() => {
     setCrearOpen(false)
     setAceptarMov(null)
+    setDetalleMov(null)
     setEstado('pendiente')
   })
 
@@ -92,6 +96,7 @@ export default function MovimientosContainer(): React.ReactElement {
           onNuevaSalida={() => setCrearOpen(true)}
           onAceptar={setAceptarMov}
           onDenegar={setAceptarMov}
+          onVerDetalle={setDetalleMov}
         />
       </Suspense>
 
@@ -118,6 +123,18 @@ export default function MovimientosContainer(): React.ReactElement {
             onConfirmar={handleAceptar}
             onDenegar={handleDenegar}
             onClose={() => setAceptarMov(null)}
+          />
+        </Suspense>
+      )}
+
+      {detalleMov && (
+        <Suspense fallback={null}>
+          <ModalDetalleMovimiento
+            movimiento={detalleMov}
+            items={itemsDetalle}
+            loadingItems={loadingItemsDetalle}
+            productos={productos}
+            onClose={() => setDetalleMov(null)}
           />
         </Suspense>
       )}
