@@ -6,7 +6,7 @@ import { formatPrecio } from '../../utils/formatters'
 import NumberInput from '../ui/NumberInput'
 import type { ClienteDB, ProductoDB } from '../../types'
 
-export type MotivoCambio = 'vencimiento' | 'rotura' | 'erroneo' | 'otro'
+export type MotivoCambio = 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' | 'otro'
 
 export interface CambioProductoSaveData {
   clienteId: string
@@ -24,6 +24,7 @@ const MOTIVOS_CAMBIO: Array<{ value: MotivoCambio; label: string; reingresa: boo
   { value: 'erroneo', label: 'Cambio común (producto en buen estado)', reingresa: true },
   { value: 'vencimiento', label: 'Producto vencido', reingresa: false },
   { value: 'rotura', label: 'Producto roto / dañado', reingresa: false },
+  { value: 'mal_estado', label: 'Producto en mal estado (húmedo, feo, con hongos…)', reingresa: false },
   { value: 'otro', label: 'Otro', reingresa: true },
 ]
 
@@ -54,7 +55,7 @@ export default function ModalCambioProducto({
   modo = 'standalone',
   clienteFijo = null,
 }: ModalCambioProductoProps): React.ReactElement {
-  const { validate, getFirstError } = useZodValidation(modalCambioProductoSchema)
+  const { validate } = useZodValidation(modalCambioProductoSchema)
 
   const enRuta = modo === 'enRuta'
 
@@ -172,7 +173,9 @@ export default function ModalCambioProducto({
       motivo,
     })
     if (!result.success) {
-      setError(getFirstError() || 'Error de validación')
+      // Usar result.errors (fresco): getFirstError() leería el estado `errors`
+      // del hook que aún no se actualizó en este tick y mostraría el genérico.
+      setError(Object.values(result.errors)[0] || 'Error de validación')
       return
     }
 
