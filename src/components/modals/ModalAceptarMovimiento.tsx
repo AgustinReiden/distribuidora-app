@@ -6,7 +6,7 @@
  * (copiando el de origen). Al aceptar, el backend mueve el stock atómicamente.
  */
 import { memo, useEffect, useMemo, useState } from 'react'
-import { Loader2, Check, X, AlertTriangle } from 'lucide-react'
+import { Loader2, Check, X, AlertTriangle, Search, ChevronDown } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { formatPrecio } from '../../utils/formatters'
 import { sugerirMatchProducto } from '../../utils/matchProducto'
@@ -14,6 +14,96 @@ import type { ProductoDB } from '../../types'
 import type { MovimientoSucursalDB, MovimientoItemDB, ResolucionItem } from '../../hooks/queries'
 
 const NUEVO = '__nuevo__'
+
+function normalizar(s: string | null | undefined): string {
+  return (s || '').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+/**
+ * Combobox con barra de búsqueda para elegir el producto del destino que matchea
+ * el item de origen. Reemplaza al <select> nativo para encontrar rápido entre
+ * muchos productos.
+ */
+function MatchSelector({ productos, value, onChange }: {
+  productos: ProductoDB[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
+
+  const seleccionado = value !== NUEVO ? productos.find(p => String(p.id) === value) : null
+  const label = value === NUEVO
+    ? '➕ Crear nuevo (copia de origen)'
+    : (seleccionado ? `${seleccionado.nombre}${seleccionado.codigo ? ` (${seleccionado.codigo})` : ''}` : 'Seleccionar producto...')
+
+  const filtrados = useMemo(() => {
+    const t = normalizar(q)
+    const base = t
+      ? productos.filter(p => normalizar(p.nombre).includes(t) || normalizar(p.codigo).includes(t))
+      : productos
+    return base.slice(0, 50)
+  }, [productos, q])
+
+  const elegir = (v: string) => { onChange(v); setOpen(false); setQ('') }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-2 py-2 text-sm border rounded-lg text-left dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+      >
+        <span className={`truncate ${value === NUEVO ? 'text-blue-600 dark:text-blue-400' : ''}`}>{label}</span>
+        <ChevronDown className="w-4 h-4 flex-shrink-0 text-gray-400" />
+      </button>
+
+      {open && (
+        <>
+          {/* Backdrop para cerrar al tocar afuera */}
+          <button type="button" className="fixed inset-0 z-10 cursor-default" aria-hidden="true" onClick={() => { setOpen(false); setQ('') }} />
+          <div className="absolute z-20 mt-1 w-full bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-lg">
+            <div className="relative p-2 border-b dark:border-gray-700">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
+              <input
+                autoFocus
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                placeholder="Buscar por nombre o código..."
+                className="w-full pl-9 pr-2 py-1.5 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+            </div>
+            <ul className="max-h-56 overflow-auto py-1">
+              <li>
+                <button
+                  type="button"
+                  onClick={() => elegir(NUEVO)}
+                  className="w-full px-3 py-2 text-left text-sm text-blue-600 dark:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  ➕ Crear nuevo (copia de origen)
+                </button>
+              </li>
+              {filtrados.map(p => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => elegir(String(p.id))}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-white ${String(p.id) === value ? 'bg-gray-50 dark:bg-gray-700/60' : ''}`}
+                  >
+                    {p.nombre}{p.codigo ? <span className="text-gray-400"> ({p.codigo})</span> : ''}
+                  </button>
+                </li>
+              ))}
+              {filtrados.length === 0 && (
+                <li className="px-3 py-2 text-sm text-gray-400">Sin resultados</li>
+              )}
+            </ul>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 export interface ModalAceptarMovimientoProps {
   movimiento: MovimientoSucursalDB
@@ -110,16 +200,11 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
                 </div>
                 <div className="mt-2">
                   <label className="block text-xs font-medium mb-1 text-gray-600 dark:text-gray-400">Producto en esta sucursal</label>
-                  <select
+                  <MatchSelector
+                    productos={productosDestino}
                     value={v}
-                    onChange={e => setSel(prev => ({ ...prev, [it.id]: e.target.value }))}
-                    className="w-full px-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  >
-                    <option value={NUEVO}>➕ Crear nuevo (copia de origen)</option>
-                    {productosDestino.map(p => (
-                      <option key={p.id} value={p.id}>{p.nombre}{p.codigo ? ` (${p.codigo})` : ''}</option>
-                    ))}
-                  </select>
+                    onChange={(nuevo) => setSel(prev => ({ ...prev, [it.id]: nuevo }))}
+                  />
                   <p className="text-xs text-gray-500 mt-1">
                     {v === NUEVO
                       ? `Se creará el producto copiando precio y costo de origen.`

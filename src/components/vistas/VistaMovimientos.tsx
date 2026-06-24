@@ -6,7 +6,7 @@
  * (admin/encargado). Los salientes son solo lectura (esperan aprobación).
  */
 import { memo } from 'react'
-import { Loader2, ArrowDownLeft, ArrowUpRight, Plus, Check, X, PackageX } from 'lucide-react'
+import { Loader2, ArrowDownLeft, ArrowUpRight, Plus, Check, X, PackageX, Eye } from 'lucide-react'
 import { formatPrecio, formatDateTime } from '../../utils/formatters'
 import type { MovimientoSucursalDB, EstadoMovimiento } from '../../hooks/queries'
 
@@ -22,6 +22,7 @@ export interface VistaMovimientosProps {
   onNuevaSalida: () => void
   onAceptar: (mov: MovimientoSucursalDB) => void
   onDenegar: (mov: MovimientoSucursalDB) => void
+  onVerDetalle: (mov: MovimientoSucursalDB) => void
 }
 
 const TABS: Array<{ value: TabEstado; label: string }> = [
@@ -39,7 +40,7 @@ const ESTADO_BADGE: Record<EstadoMovimiento, string> = {
 
 const VistaMovimientos = memo(function VistaMovimientos({
   movimientos, loading, currentSucursalId, canResolver, estado, onEstadoChange,
-  onNuevaSalida, onAceptar, onDenegar,
+  onNuevaSalida, onAceptar, onDenegar, onVerDetalle,
 }: VistaMovimientosProps) {
   return (
     <div className="space-y-4">
@@ -122,27 +123,34 @@ const VistaMovimientos = memo(function VistaMovimientos({
                   </div>
                 </div>
 
-                {puedeResolver && (
-                  <div className="flex justify-end gap-2 mt-3 pt-3 border-t dark:border-gray-700">
-                    <button
-                      onClick={() => onDenegar(mov)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400"
-                    >
-                      <X className="w-4 h-4" /> Denegar
-                    </button>
-                    <button
-                      onClick={() => onAceptar(mov)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700"
-                    >
-                      <Check className="w-4 h-4" /> Aceptar
-                    </button>
-                  </div>
-                )}
-                {!entrante && mov.estado === 'pendiente' && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 pt-2 border-t dark:border-gray-700">
-                    Esperando aprobación de {mov.destino?.nombre || 'la sucursal destino'}.
-                  </p>
-                )}
+                <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t dark:border-gray-700">
+                  <button
+                    onClick={() => onVerDetalle(mov)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Eye className="w-4 h-4" /> Ver detalle
+                  </button>
+                  {puedeResolver ? (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => onDenegar(mov)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400"
+                      >
+                        <X className="w-4 h-4" /> Denegar
+                      </button>
+                      <button
+                        onClick={() => onAceptar(mov)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700"
+                      >
+                        <Check className="w-4 h-4" /> Aceptar
+                      </button>
+                    </div>
+                  ) : (!entrante && mov.estado === 'pendiente') ? (
+                    <span className="text-xs text-amber-600 dark:text-amber-400">
+                      Esperando aprobación de {mov.destino?.nombre || 'la sucursal destino'}.
+                    </span>
+                  ) : null}
+                </div>
               </div>
             )
           })}
