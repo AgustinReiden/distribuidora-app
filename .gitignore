@@ -54,3 +54,6 @@ backups/
 !scripts/verify-multi-tenant.sql
 !migrations/*.sql
 !migrations/**/*.sql
+
+# Informes gerenciales con datos sensibles (no publicar en el repo)
+reportes-privados/

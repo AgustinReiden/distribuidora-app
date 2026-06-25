@@ -225,6 +225,24 @@ export {
   useInvalidateMetricas,
 } from './useMetricasQuery'
 
+// Reportes Gerenciales (dashboard vivo + análisis mensual, mig 095)
+export {
+  reporteGerencialKeys,
+  useReporteGerencialQuery,
+  useAnalisisMensualQuery,
+} from './useReporteGerencialQuery'
+export type {
+  ReporteGerencial,
+  ReporteKpis,
+  ReporteMes,
+  ReporteVendedor,
+  ReporteCategoria,
+  ReporteProducto,
+  ReporteCliente,
+  ReporteCobranza,
+  AnalisisMensual,
+} from './useReporteGerencialQuery'
+
 // Geolocalización de preventistas (panel admin)
 export {
   geolocalizacionKeys,
