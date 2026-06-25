@@ -389,6 +389,7 @@ function buildCierreOps(pedidos) {
  */
 function buildManifiestoOps(doc, pedidos) {
   const totalesCompras = {} // por producto_id (items vendidos)
+  const totalesCambios = {} // entregados de paradas de cambio (canal='cambio'), sección aparte
   const totalesBonifFardos = {} // por producto_id (bonifs en unidades de venta / fardos)
   const totalesBonifSueltas = {} // por descripcion_regalo (botellas/paquetes sueltos)
   // Bonifs de tipo Fracción: se acumulan en subunidades CRUDAS por producto y se
@@ -447,9 +448,9 @@ function buildManifiestoOps(doc, pedidos) {
   })
 
   // Paradas de cambio/devolución (canal='cambio'): el producto que se ENTREGA al
-  // cliente también se carga en el camión, así que suma al manifiesto. El detalle
-  // vive en recorrido_cambios (cargado como pedido.cambio en la hoja de ruta).
-  // Si el entregado coincide con un producto comprado, se acumulan en la misma fila.
+  // cliente también hay que cargarlo, pero va en una sección APARTE del manifiesto
+  // (no se mezcla con la venta del día). El detalle vive en recorrido_cambios
+  // (cargado como pedido.cambio en la hoja de ruta).
   pedidos.forEach((pedido) => {
     if (pedido.canal !== 'cambio') return
     const c = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
@@ -457,7 +458,7 @@ function buildManifiestoOps(doc, pedidos) {
     const cantidad = Number(c.cantidad_entregada) || 0
     if (cantidad <= 0) return
     const key = c.producto_entregado_id ?? c.producto_entregado_nombre ?? 'cambio-sin-id'
-    acumular(totalesCompras, key, c.producto_entregado_nombre || 'Producto', cantidad)
+    acumular(totalesCambios, key, c.producto_entregado_nombre || 'Producto', cantidad)
   })
 
   // Partir las fracciones consolidadas UNA vez por producto: fardos completos +
@@ -481,6 +482,7 @@ function buildManifiestoOps(doc, pedidos) {
   const filasCompras = ordenar(totalesCompras)
   const filasBonifFardos = ordenar(totalesBonifFardos)
   const filasBonifSueltas = ordenar(totalesBonifSueltas)
+  const filasCambios = ordenar(totalesCambios)
 
   const lineaConAclaracion = (f) => {
     // preConvertidoAFardos: la cantidad ya está en fardos, la etiqueta va directa.
@@ -539,6 +541,17 @@ function buildManifiestoOps(doc, pedidos) {
     })
     filasBonifFardos.forEach((f) => pushLinea(`${f.cantidad}x`, lineaConAclaracion(f)))
     filasBonifSueltas.forEach((f) => pushLinea(`${f.cantidad}x`, nombreSuelta(f.nombre)))
+  }
+  // Cambios/devoluciones: productos a entregar en las paradas de cambio, en su
+  // propia sección para que el chofer no los confunda con la venta del día.
+  if (filasCambios.length > 0) {
+    ops.push({ kind: 'spacer', advance: 1.5 })
+    ops.push({
+      kind: 'manifiesto-subtitle',
+      text: 'CAMBIOS / DEVOLUCIONES (cargar aparte)',
+      advance: 4.5
+    })
+    filasCambios.forEach((f) => pushLinea(`${f.cantidad}x`, f.nombre))
   }
   ops.push({ kind: 'spacer', advance: 2 })
   ops.push({ kind: 'manifiesto-firma', advance: 5.5 })
