@@ -60,6 +60,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'] },
       { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin'], hidden: true },
       { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
+      { id: 'reportes-gerenciales', icon: BarChart3, label: 'Reportes Gerenciales', roles: ['admin'] },
       { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin'], hidden: true },
       { id: 'comisiones', icon: Percent, label: 'Comisiones', roles: ['admin'] },
     ]

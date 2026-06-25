@@ -44,6 +44,7 @@ const VistaGeolocalizacion = lazyWithReload(() => import('./components/vistas/Vi
 const AnalyticsContainer = lazyWithReload(() => import('./components/containers/AnalyticsContainer'))
 const ReportesContainer = lazyWithReload(() => import('./components/containers/ReportesContainer'))
 const ComisionesContainer = lazyWithReload(() => import('./components/containers/ComisionesContainer'))
+const ReportesGerencialesContainer = lazyWithReload(() => import('./components/containers/ReportesGerencialesContainer'))
 const RecorridosContainer = lazyWithReload(() => import('./components/containers/RecorridosContainer'))
 const RecorridoPreventistaContainer = lazyWithReload(() => import('./components/containers/RecorridoPreventistaContainer'))
 const MovimientosContainer = lazyWithReload(() => import('./components/containers/MovimientosContainer'))
@@ -323,6 +324,11 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/comisiones"
                   element={isAdmin ? <ComisionesContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                <Route
+                  path="/reportes-gerenciales"
+                  element={isAdmin ? <ReportesGerencialesContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route

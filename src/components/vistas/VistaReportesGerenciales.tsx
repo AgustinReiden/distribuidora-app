@@ -1,0 +1,413 @@
+import React, { useState, useMemo, useEffect } from 'react'
+import {
+  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange,
+} from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import NumberInput from '../ui/NumberInput'
+import { money, moneyC, pct, N, rolLabel } from './reportes-gerenciales/formato'
+import {
+  EvolucionChart, DiarioChart, VendedoresChart, CategoriasChart, WaterfallChart, CobranzaDonut,
+} from './reportes-gerenciales/charts'
+import type { ReporteGerencial, AnalisisMensual } from '../../hooks/queries'
+
+export interface PeriodoOpt {
+  key: string
+  label: string
+  desde: string
+  hasta: string
+  esMes: boolean
+  periodoMes: string | null // YYYY-MM-01 si es un mes, para el análisis
+  parcial: boolean
+}
+
+export interface SucursalOpt {
+  id: number | null // null = red consolidada
+  nombre: string
+}
+
+export interface VistaReportesGerencialesProps {
+  reporte: ReporteGerencial | undefined
+  loading: boolean
+  error: string | null
+  sucursalSel: number | null
+  periodoSel: PeriodoOpt
+  opcionesSucursal: SucursalOpt[]
+  opcionesPeriodo: PeriodoOpt[]
+  onSucursal: (id: number | null) => void
+  onPeriodo: (p: PeriodoOpt) => void
+  analisis: AnalisisMensual | null
+}
+
+// ---- helpers de UI -------------------------------------------------------
+function Card({ children, className = '' }: { children: React.ReactNode; className?: string }): React.ReactElement {
+  return (
+    <div className={`bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-sm ${className}`}>
+      {children}
+    </div>
+  )
+}
+
+function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub?: React.ReactNode; accent: string }): React.ReactElement {
+  return (
+    <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-sm p-4 relative overflow-hidden">
+      <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: accent }} />
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 pl-1">{label}</div>
+      <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1.5 pl-1">{value}</div>
+      {sub && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 pl-1">{sub}</div>}
+    </div>
+  )
+}
+
+function SectionTitle({ icon: Icon, title, hint, right }: { icon: React.ElementType; title: string; hint?: string; right?: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="flex items-start justify-between gap-3 mb-4">
+      <div className="flex items-center gap-2.5">
+        <Icon className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">{title}</h2>
+          {hint && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{hint}</p>}
+        </div>
+      </div>
+      {right}
+    </div>
+  )
+}
+
+const th = 'px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
+const td = 'px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200'
+const ACCENTS = { blue: '#2563eb', emerald: '#059669', amber: '#d97706', violet: '#7c3aed', red: '#dc2626', cyan: '#0891b2', slate: '#64748b' }
+
+export default function VistaReportesGerenciales({
+  reporte, loading, error, sucursalSel, periodoSel, opcionesSucursal, opcionesPeriodo,
+  onSucursal, onPeriodo, analisis,
+}: VistaReportesGerencialesProps): React.ReactElement {
+  const [comPct, setComPct] = useState(2)
+  const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
+
+  useEffect(() => {
+    if (reporte?.kpis?.comision_pct_default) setComPct(reporte.kpis.comision_pct_default)
+  }, [reporte?.kpis?.comision_pct_default])
+
+  const k = reporte?.kpis
+  const derived = useMemo(() => {
+    if (!k) return null
+    const comBaseTotal = comBase === 'nc' ? k.base_comision : k.venta
+    const comision = comBaseTotal * comPct / 100
+    const contrib = k.margen_neto - k.mermas - comision
+    return { comision, contrib }
+  }, [k, comPct, comBase])
+
+  return (
+    <div className="space-y-5">
+      {/* Header + selectores */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reportes Gerenciales</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {reporte ? `${reporte.meta.sucursal_nombre} · ${periodoSel.label}` : 'Cargando…'}
+            {periodoSel.parcial && <span className="text-amber-600 dark:text-amber-400 font-medium"> · período en curso (parcial)</span>}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-2.5 py-1.5 shadow-sm">
+            <Building2 className="w-4 h-4 text-gray-400" />
+            <select
+              value={String(sucursalSel ?? 'red')}
+              onChange={(e) => onSucursal(e.target.value === 'red' ? null : Number(e.target.value))}
+              className="bg-transparent text-sm font-medium text-gray-800 dark:text-gray-100 focus:outline-none"
+            >
+              {opcionesSucursal.map(s => (
+                <option key={String(s.id ?? 'red')} value={String(s.id ?? 'red')}>{s.nombre}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-2.5 py-1.5 shadow-sm">
+            <CalendarRange className="w-4 h-4 text-gray-400" />
+            <select
+              value={periodoSel.key}
+              onChange={(e) => { const p = opcionesPeriodo.find(o => o.key === e.target.value); if (p) onPeriodo(p) }}
+              className="bg-transparent text-sm font-medium text-gray-800 dark:text-gray-100 focus:outline-none"
+            >
+              {opcionesPeriodo.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <Card className="p-5 border-red-200 dark:border-red-900">
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        </Card>
+      )}
+
+      {loading || !reporte || !k || !derived ? (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        </div>
+      ) : (
+        <>
+          {/* KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KpiCard label="Venta entregada" value={moneyC(k.venta)} sub={`${N.format(k.pedidos)} pedidos`} accent={ACCENTS.blue} />
+            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> antes de bonif.</>} accent={ACCENTS.cyan} />
+            <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber} />
+            <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pct(k.margen_neto / k.venta)}</b> post bonif.</>} accent={ACCENTS.violet} />
+            <KpiCard label={`Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={`base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate} />
+            <KpiCard label="Mermas" value={moneyC(k.mermas)} sub="producto perdido" accent={ACCENTS.red} />
+            <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald} />
+            <KpiCard label="Ticket promedio" value={moneyC(k.ticket)} sub={`${N.format(k.clientes)} clientes · ${N.format(k.clientes_nuevos)} nuevos`} accent={ACCENTS.blue} />
+          </div>
+
+          {/* Flag: productos sin costo */}
+          {reporte.flags.pct_sin_costo >= 1 && (
+            <div className="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                <b>Margen sobreestimado:</b> el {pct(reporte.flags.pct_sin_costo / 100)} de la venta ({money(reporte.flags.ingreso_sin_costo)}) proviene de productos sin costo cargado,
+                que se computan con costo cero. El margen real es algo menor. Conviene completar el maestro de costos.
+              </p>
+            </div>
+          )}
+
+          {/* Evolución mensual */}
+          <Card className="p-5">
+            <SectionTitle icon={TrendingUp} title="Evolución mensual" hint="Venta, bonificaciones y margen neto por mes." />
+            <div className="grid lg:grid-cols-3 gap-5">
+              <div className="lg:col-span-2 h-72"><EvolucionChart data={reporte.mensual} /></div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead><tr className="border-b dark:border-gray-700">
+                    <th className={`${th} text-left`}>Mes</th><th className={`${th} text-right`}>Venta</th>
+                    <th className={`${th} text-right`}>Bonif.</th><th className={`${th} text-right`}>Mg neto</th>
+                  </tr></thead>
+                  <tbody className="divide-y dark:divide-gray-700/60">
+                    {reporte.mensual.map(m => (
+                      <tr key={m.mes}>
+                        <td className={`${td} font-medium`}>{m.mes}</td>
+                        <td className={`${td} text-right tabular-nums`}>{moneyC(m.venta)}</td>
+                        <td className={`${td} text-right tabular-nums`}>{moneyC(m.bonif)}</td>
+                        <td className={`${td} text-right tabular-nums`}>{pct(m.venta ? (m.venta - m.cmv - m.bonif) / m.venta : 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+
+          {/* Waterfall + diario */}
+          <div className="grid lg:grid-cols-2 gap-5">
+            <Card className="p-5">
+              <SectionTitle icon={TrendingUp} title="De la venta a la contribución" hint="Composición del resultado, paso a paso." />
+              <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} /></div>
+            </Card>
+            <Card className="p-5">
+              <SectionTitle icon={TrendingUp} title="Ritmo diario de ventas" hint="Facturación entregada por día." />
+              <div className="h-72"><DiarioChart data={reporte.serie_diaria} /></div>
+            </Card>
+          </div>
+
+          {/* Vendedores + comisiones */}
+          <Card className="p-5">
+            <SectionTitle
+              icon={Percent} title="Equipo comercial y comisiones"
+              hint="La comisión se recalcula en vivo."
+              right={
+                <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/40 border dark:border-gray-600 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Comisión</span>
+                    <NumberInput min={0} max={100} value={comPct} onChange={setComPct} commitOnChange emptyValue={0}
+                      className="w-14 px-2 py-1 border rounded text-center text-sm font-semibold dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                    <span className="text-sm font-medium text-gray-600 dark:text-gray-300">%</span>
+                  </div>
+                  <select value={comBase} onChange={(e) => setComBase(e.target.value as 'nc' | 'ent')}
+                    className="text-xs font-medium bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1 text-gray-700 dark:text-gray-200">
+                    <option value="nc">No cancelado</option>
+                    <option value="ent">Entregado</option>
+                  </select>
+                </div>
+              }
+            />
+            <div className="grid lg:grid-cols-3 gap-5">
+              <div className="lg:col-span-2 overflow-x-auto">
+                <table className="w-full">
+                  <thead><tr className="border-b dark:border-gray-700">
+                    <th className={`${th} text-left`}>Vendedor</th><th className={`${th} text-right`}>Venta</th>
+                    <th className={`${th} text-right`}>Mg neto</th><th className={`${th} text-right`}>% neto</th>
+                    <th className={`${th} text-right`}>Comisión</th>
+                  </tr></thead>
+                  <tbody className="divide-y dark:divide-gray-700/60">
+                    {[...reporte.vendedores].sort((a, b) => b.venta - a.venta).map((v, i) => {
+                      const mn = v.margen_comercial - v.bonif
+                      const base = comBase === 'nc' ? v.base_nc : v.venta
+                      const mnp = v.venta ? mn / v.venta : 0
+                      return (
+                        <tr key={v.nombre + i} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                          <td className={td}>
+                            <span className="font-semibold text-gray-800 dark:text-white">{v.nombre}</span>
+                            <span className="ml-2 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400">{rolLabel(v.rol)}</span>
+                          </td>
+                          <td className={`${td} text-right tabular-nums`}>{moneyC(v.venta)}</td>
+                          <td className={`${td} text-right tabular-nums ${mn < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{moneyC(mn)}</td>
+                          <td className={`${td} text-right tabular-nums font-medium ${mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pct(mnp)}</td>
+                          <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>{money(base * comPct / 100)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 dark:border-gray-600 font-bold">
+                      <td className={`${td} text-gray-900 dark:text-white`}>Total</td>
+                      <td className={`${td} text-right tabular-nums`}>{moneyC(reporte.vendedores.reduce((s, v) => s + v.venta, 0))}</td>
+                      <td className={`${td} text-right tabular-nums`}>{moneyC(reporte.vendedores.reduce((s, v) => s + v.margen_comercial - v.bonif, 0))}</td>
+                      <td className={td}></td>
+                      <td className={`${td} text-right tabular-nums`}>{money(reporte.vendedores.reduce((s, v) => s + (comBase === 'nc' ? v.base_nc : v.venta) * comPct / 100, 0))}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div className="h-72"><VendedoresChart data={reporte.vendedores} /></div>
+            </div>
+          </Card>
+
+          {/* Categorías */}
+          <Card className="p-5">
+            <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = margen inflado por productos sin costo." />
+            <div className="grid lg:grid-cols-3 gap-5">
+              <div className="lg:col-span-2 h-80"><CategoriasChart data={reporte.categorias} /></div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead><tr className="border-b dark:border-gray-700">
+                    <th className={`${th} text-left`}>Categoría</th><th className={`${th} text-right`}>Venta</th><th className={`${th} text-right`}>Mg com.</th>
+                  </tr></thead>
+                  <tbody className="divide-y dark:divide-gray-700/60">
+                    {reporte.categorias.map(c => (
+                      <tr key={c.categoria}>
+                        <td className={`${td} font-medium`}>{c.sin_costo && <span className="text-amber-500">△ </span>}{c.categoria}</td>
+                        <td className={`${td} text-right tabular-nums`}>{moneyC(c.venta)}</td>
+                        <td className={`${td} text-right tabular-nums ${c.margen_comercial < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{moneyC(c.margen_comercial)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+
+          {/* Top productos / clientes */}
+          <div className="grid lg:grid-cols-2 gap-5">
+            <Card className="p-5">
+              <SectionTitle icon={TrendingUp} title="Top 10 productos" hint="Por facturación de venta real." />
+              <table className="w-full">
+                <thead><tr className="border-b dark:border-gray-700">
+                  <th className={`${th} text-left`}>Producto</th><th className={`${th} text-right`}>Unid.</th><th className={`${th} text-right`}>Venta</th>
+                </tr></thead>
+                <tbody className="divide-y dark:divide-gray-700/60">
+                  {reporte.top_productos.map((p, i) => (
+                    <tr key={p.nombre}>
+                      <td className={td}><span className="text-gray-400 font-semibold mr-1.5">{i + 1}</span>{p.nombre}</td>
+                      <td className={`${td} text-right tabular-nums`}>{N.format(p.unidades)}</td>
+                      <td className={`${td} text-right tabular-nums`}>{moneyC(p.venta)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+            <Card className="p-5">
+              <SectionTitle icon={TrendingUp} title="Top 10 clientes" hint="Por facturación entregada." />
+              <table className="w-full">
+                <thead><tr className="border-b dark:border-gray-700">
+                  <th className={`${th} text-left`}>Cliente</th><th className={`${th} text-right`}>Ped.</th><th className={`${th} text-right`}>Venta</th>
+                </tr></thead>
+                <tbody className="divide-y dark:divide-gray-700/60">
+                  {reporte.top_clientes.map((c, i) => (
+                    <tr key={c.cliente + i}>
+                      <td className={td}><span className="text-gray-400 font-semibold mr-1.5">{i + 1}</span>{c.cliente}</td>
+                      <td className={`${td} text-right tabular-nums`}>{c.pedidos}</td>
+                      <td className={`${td} text-right tabular-nums`}>{moneyC(c.venta)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
+
+          {/* Cobranza + costos */}
+          <div className="grid lg:grid-cols-2 gap-5">
+            <Card className="p-5">
+              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} />
+              <div className="grid grid-cols-2 gap-4 items-center">
+                <div className="h-48"><CobranzaDonut cobranza={reporte.cobranza} /></div>
+                <table className="w-full">
+                  <tbody className="divide-y dark:divide-gray-700/60">
+                    {reporte.cobranza.formas.map(f => (
+                      <tr key={f.forma_pago}>
+                        <td className={`${td} capitalize`}>{f.forma_pago}</td>
+                        <td className={`${td} text-right tabular-nums`}>{moneyC(f.monto)}</td>
+                      </tr>
+                    ))}
+                    <tr className="font-semibold">
+                      <td className={`${td} text-emerald-600 dark:text-emerald-400`}>Cobrado</td>
+                      <td className={`${td} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}>{moneyC(reporte.cobranza.cobrado)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+            <Card className="p-5">
+              <SectionTitle icon={TrendingUp} title="Otros costos del período" hint="Mermas, bonificaciones y reposición." />
+              <table className="w-full">
+                <thead><tr className="border-b dark:border-gray-700">
+                  <th className={`${th} text-left`}>Mes</th><th className={`${th} text-right`}>Mermas</th><th className={`${th} text-right`}>Bonif.</th><th className={`${th} text-right`}>Compras</th>
+                </tr></thead>
+                <tbody className="divide-y dark:divide-gray-700/60">
+                  {reporte.mensual.map(m => (
+                    <tr key={m.mes}>
+                      <td className={`${td} font-medium`}>{m.mes}</td>
+                      <td className={`${td} text-right tabular-nums`}>{moneyC(m.mermas)}</td>
+                      <td className={`${td} text-right tabular-nums`}>{moneyC(m.bonif)}</td>
+                      <td className={`${td} text-right tabular-nums`}>{moneyC(m.compras)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
+
+          {/* Análisis mensual (Claude Code) */}
+          <Card className="p-5">
+            <SectionTitle icon={FileText} title="Análisis del período" hint="Lectura ejecutiva generada con Claude Code." />
+            {analisis?.analisis_md ? (
+              <div className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed space-y-2">
+                <ReactMarkdown components={{
+                  h1: ({ children }) => <h3 className="text-base font-bold text-gray-900 dark:text-white mt-3 mb-1">{children}</h3>,
+                  h2: ({ children }) => <h3 className="text-base font-bold text-gray-900 dark:text-white mt-3 mb-1">{children}</h3>,
+                  h3: ({ children }) => <h4 className="text-sm font-bold text-gray-800 dark:text-gray-100 mt-2 mb-1">{children}</h4>,
+                  p: ({ children }) => <p className="mb-2">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc pl-5 space-y-1 mb-2">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-5 space-y-1 mb-2">{children}</ol>,
+                  strong: ({ children }) => <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>,
+                }}>{analisis.analisis_md}</ReactMarkdown>
+                {analisis.generado_at && (
+                  <p className="text-xs text-gray-400 pt-2 border-t dark:border-gray-700">
+                    Generado por {analisis.generado_por ?? '—'} · {new Date(analisis.generado_at).toLocaleDateString('es-AR')}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <FileText className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                <p className="font-medium">Sin análisis para {periodoSel.esMes ? periodoSel.label : 'el período'}</p>
+                <p className="text-xs mt-1">
+                  {periodoSel.esMes
+                    ? 'Generalo desde Claude Code con el comando /reporte-mensual.'
+                    : 'El análisis escrito se asocia a meses; elegí un mes para verlo.'}
+                </p>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
