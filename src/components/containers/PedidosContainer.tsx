@@ -40,7 +40,7 @@ import {
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, type RepartidorParam } from '../../hooks/useOptimizarRuta'
-import { usePromocionPedido } from '../../hooks/usePromocionPedido'
+import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
@@ -271,6 +271,9 @@ export default function PedidosContainer(): React.ReactElement {
     preventistaId: undefined as string | undefined,
   })
 
+  // Override del producto del regalo al crear (solo admin). promoId -> producto elegido.
+  const [regalosOverride, setRegalosOverride] = useState<Record<string, RegaloOverride>>({})
+
   const resetNuevoPedido = useCallback(() => {
     setNuevoPedido({
       clienteId: '', items: [], notas: '',
@@ -280,10 +283,22 @@ export default function PedidosContainer(): React.ReactElement {
       fechaEntregaProgramada: undefined,
       preventistaId: undefined,
     })
+    setRegalosOverride({})
   }, [])
 
-  // Resolve wholesale prices for current pedido items
-  const { itemsFinales } = usePromocionPedido(nuevoPedido.items)
+  // Admin elige/cambia el producto del regalo de una promo al crear el pedido.
+  // El producto elegido se persiste en la bonificación; el RPC ajusta el stock
+  // (modo A descuenta el producto elegido; modo Fracción su contenedor por sabor).
+  const handleCambiarRegaloCreacion = useCallback((promoId: string, productoId: string) => {
+    const prod = productos.find(p => String(p.id) === String(productoId))
+    setRegalosOverride(prev => ({
+      ...prev,
+      [String(promoId)]: { productoId: String(productoId), descripcionRegalo: prod?.nombre },
+    }))
+  }, [productos])
+
+  // Resolve wholesale prices + promos (con override del regalo elegido por admin)
+  const { itemsFinales } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride)
 
   // =========================================================================
   // VistaPedidos handlers
@@ -1462,6 +1477,8 @@ export default function PedidosContainer(): React.ReactElement {
             clientes={clientes}
             categorias={[...new Set(productos.map(p => p.categoria).filter(Boolean))] as string[]}
             nuevoPedido={nuevoPedido}
+            regalosOverride={regalosOverride}
+            onCambiarRegaloCreacion={handleCambiarRegaloCreacion}
             onClose={() => { setModalPedidoOpen(false); resetNuevoPedido() }}
             onClienteChange={(id: string) => setNuevoPedido(prev => ({ ...prev, clienteId: id }))}
             onAgregarItem={(productoId: string) => {
