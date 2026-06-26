@@ -62,20 +62,42 @@ interface UsePromocionPedidoReturn {
   violacionesMOQ: ViolacionMOQ[]
 }
 
+/** Override del producto del regalo de una promo (admin lo elige al crear el pedido). */
+export interface RegaloOverride {
+  productoId: string
+  descripcionRegalo?: string
+}
+
 export function usePromocionPedido(
   items: ItemPedido[],
   fechaReferencia?: string,
+  /** Override del producto del regalo por promoId. El admin puede elegir otro
+   *  producto para la bonificación al crear el pedido (paridad con "Cambiar
+   *  regalo" de la edición). */
+  overridesRegalo?: Record<string, RegaloOverride>,
 ): UsePromocionPedidoReturn {
   const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
   const { data: promoMap, isLoading: loadingPromos } = usePromoMapQuery(fechaReferencia)
 
   // 1. Resolver promociones
-  const promoResolucion = useMemo((): PromoResolucion => {
+  const promoResolucionRaw = useMemo((): PromoResolucion => {
     if (!promoMap || promoMap.size === 0 || items.length === 0) {
       return { bonificaciones: [], productosConPromo: new Set() }
     }
     return resolverPromociones(items, promoMap)
   }, [items, promoMap])
+
+  // 1b. Aplicar override del regalo: solo cambia el producto/descripción de la
+  //     bonificación; los disparadores (productosConPromo) y reglas no se tocan.
+  //     Así itemsFinales y el display muestran/persisten el producto elegido.
+  const promoResolucion = useMemo((): PromoResolucion => {
+    if (!overridesRegalo || Object.keys(overridesRegalo).length === 0) return promoResolucionRaw
+    const bonificaciones = promoResolucionRaw.bonificaciones.map(b => {
+      const ov = overridesRegalo[String(b.promoId)]
+      return ov ? { ...b, productoId: ov.productoId, descripcionRegalo: ov.descripcionRegalo } : b
+    })
+    return { bonificaciones, productosConPromo: promoResolucionRaw.productosConPromo }
+  }, [promoResolucionRaw, overridesRegalo])
 
   // 2. Resolver mayorista EXCLUYENDO productos con promo
   const preciosResueltos = useMemo(() => {

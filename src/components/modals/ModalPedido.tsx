@@ -3,7 +3,7 @@ import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck,
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
-import { usePromocionPedido } from '../../hooks/usePromocionPedido';
+import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
@@ -110,6 +110,10 @@ export interface ModalPedidoProps {
   onPreventistaChange?: (preventistaId: string) => void;
   /** ID del usuario actual (default del selector de preventista) */
   currentUserId?: string;
+  /** Override del producto del regalo por promoId (admin lo elige al crear). */
+  regalosOverride?: Record<string, RegaloOverride>;
+  /** Callback cuando el admin cambia el producto del regalo de una promo al crear. */
+  onCambiarRegaloCreacion?: (promoId: string, productoId: string) => void;
 }
  
 
@@ -137,7 +141,9 @@ const ModalPedido = memo(function ModalPedido({
   onFechaEntregaProgramadaChange,
   onActualizarPrecio,
   onPreventistaChange,
-  currentUserId
+  currentUserId,
+  regalosOverride,
+  onCambiarRegaloCreacion
 }: ModalPedidoProps) {
   // Solo admin puede reasignar preventista al pedido. La query se habilita
   // condicionalmente para no traer perfiles para preventistas/encargados.
@@ -172,6 +178,12 @@ const ModalPedido = memo(function ModalPedido({
       return matchNombre && matchCategoria && tieneStock;
     });
   }, [productos, busquedaProducto, categoriaSeleccionada]);
+
+  // Opciones para el selector de regalo (admin): todos los productos, ordenados.
+  const productosRegaloOpciones = useMemo(
+    () => [...productos].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')),
+    [productos]
+  );
 
   const clientesFiltrados = useMemo(() => {
     if (busquedaCliente.length < 2) return [];
@@ -262,7 +274,7 @@ const ModalPedido = memo(function ModalPedido({
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
   // Precios mayoristas, promociones y cantidades mínimas
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items);
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride);
 
   // Descuento del cliente (general + por categoría) aplicado en vivo sobre los
   // items ya resueltos (mayorista/promo). La categoría prevalece sobre el general.
@@ -752,7 +764,7 @@ const ModalPedido = memo(function ModalPedido({
                         // 600cc"). Si no hay, fallback al nombre del producto.
                         const labelRegalo = bonif.descripcionRegalo?.trim() || prod?.nombre;
                         return (
-                          <div key={`bonif-${bonif.productoId}`} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
+                          <div key={`bonif-${bonif.promoId ?? bonif.productoId}`} className="px-3 py-2.5 bg-green-50 dark:bg-green-900/10">
                             <div className="flex justify-between items-center gap-2">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
@@ -763,6 +775,21 @@ const ModalPedido = memo(function ModalPedido({
                                   </span>
                                 </div>
                                 <p className="text-xs text-green-600 dark:text-green-400">{bonif.promoNombre}</p>
+                                {/* Admin: elegir/cambiar el producto del regalo al crear. */}
+                                {isAdmin && onCambiarRegaloCreacion && bonif.promoId && (
+                                  <select
+                                    value={String(bonif.productoId)}
+                                    onChange={e => onCambiarRegaloCreacion(String(bonif.promoId), e.target.value)}
+                                    className="mt-1 w-full max-w-xs text-xs px-2 py-1 border border-green-300 dark:border-green-700 rounded bg-white dark:bg-gray-700 dark:text-white"
+                                    title="Cambiar el producto del regalo"
+                                  >
+                                    {productosRegaloOpciones.map(p => (
+                                      <option key={p.id} value={String(p.id)}>
+                                        {p.nombre}{(p.stock ?? 0) > 0 ? '' : ' · sin stock'}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="w-6 text-center font-medium text-sm text-green-700 dark:text-green-400">{bonif.cantidadBonificacion}</span>
