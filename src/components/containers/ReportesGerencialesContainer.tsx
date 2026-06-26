@@ -1,8 +1,7 @@
-import React, { lazy, Suspense, useMemo, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
-import { supabase } from '../../lib/supabase'
 import { useReporteGerencialQuery, useAnalisisMensualQuery } from '../../hooks/queries'
+import { useSucursal } from '../../contexts/SucursalContext'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 
 const VistaReportesGerenciales = lazy(() => import('../vistas/VistaReportesGerenciales'))
@@ -18,7 +17,6 @@ function generarPeriodos(): PeriodoOpt[] {
   const hoy = new Date()
   const opts: PeriodoOpt[] = []
 
-  // Trimestre en curso
   const qStart = Math.floor(hoy.getMonth() / 3) * 3
   const qDesde = new Date(hoy.getFullYear(), qStart, 1)
   const qFin = new Date(hoy.getFullYear(), qStart + 3, 0)
@@ -33,7 +31,6 @@ function generarPeriodos(): PeriodoOpt[] {
     parcial: qParcial,
   })
 
-  // Últimos 6 meses
   for (let i = 0; i < 6; i++) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1)
     const y = d.getFullYear()
@@ -57,33 +54,39 @@ function generarPeriodos(): PeriodoOpt[] {
 export default function ReportesGerencialesContainer(): React.ReactElement {
   const periodos = useMemo(() => generarPeriodos(), [])
   const [periodoSel, setPeriodoSel] = useState<PeriodoOpt>(() => periodos[0])
-  const [sucursalSel, setSucursalSel] = useState<number | null>(null) // null = red consolidada
 
-  const { data: sucursalesDb } = useQuery({
-    queryKey: ['sucursales-activas-reporte'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('sucursales').select('id, nombre').eq('activa', true).order('id')
-      if (error) throw new Error(error.message)
-      return data as { id: number; nombre: string }[]
-    },
-    staleTime: 60 * 60 * 1000,
-  })
+  // Sólo las sucursales que el usuario tiene asignadas (SucursalContext).
+  // El backend (RPC) refuerza esto: un admin de una sola sucursal no puede ver
+  // datos de otra ni el consolidado de la red.
+  const { sucursales, hasMultipleSucursales, loading: sucLoading } = useSucursal()
 
   const opcionesSucursal: SucursalOpt[] = useMemo(() => {
-    const list = (sucursalesDb ?? []).map(s => ({ id: s.id as number | null, nombre: s.nombre }))
-    return [{ id: null, nombre: 'Red (consolidado)' }, ...list]
-  }, [sucursalesDb])
+    const list: SucursalOpt[] = sucursales.map(s => ({ id: s.id as number | null, nombre: s.nombre }))
+    // El consolidado de red sólo se ofrece a quien tiene 2+ sucursales asignadas.
+    return hasMultipleSucursales ? [{ id: null, nombre: 'Red (consolidado)' }, ...list] : list
+  }, [sucursales, hasMultipleSucursales])
 
-  const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucursalSel, periodoSel.desde, periodoSel.hasta)
-  const { data: analisis } = useAnalisisMensualQuery(sucursalSel, periodoSel.periodoMes, periodoSel.esMes)
+  // Default: red si tiene varias; su única sucursal si tiene una.
+  const [sucursalSel, setSucursalSel] = useState<number | null | undefined>(undefined)
+  useEffect(() => {
+    if (sucursalSel === undefined && sucursales.length > 0) {
+      setSucursalSel(hasMultipleSucursales ? null : sucursales[0].id)
+    }
+  }, [sucursales, hasMultipleSucursales, sucursalSel])
+
+  const ready = sucursalSel !== undefined
+  const sucParam = sucursalSel ?? null
+
+  const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucParam, periodoSel.desde, periodoSel.hasta, ready)
+  const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
 
   return (
     <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}>
       <VistaReportesGerenciales
         reporte={reporte}
-        loading={isLoading}
+        loading={isLoading || !ready || sucLoading}
         error={error ? (error as Error).message : null}
-        sucursalSel={sucursalSel}
+        sucursalSel={sucParam}
         periodoSel={periodoSel}
         opcionesSucursal={opcionesSucursal}
         opcionesPeriodo={periodos}
