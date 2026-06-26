@@ -29,24 +29,48 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_sucursales bigint[];
-  v_nombre     text;
-  v_result     jsonb;
+  v_sucursales  bigint[];
+  v_asignadas   bigint[];
+  v_nombre      text;
+  v_result      jsonb;
+  v_es_servicio boolean := (auth.uid() IS NULL);
 BEGIN
-  -- Auth: si hay usuario (JWT desde la app), debe ser admin. Si auth.uid() es
-  -- NULL (service_role / Claude Code vía MCP), se permite (contexto privilegiado).
-  IF auth.uid() IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND rol = 'admin') THEN
-    RAISE EXCEPTION 'Acceso denegado: se requiere rol admin';
+  -- Auth: desde la app (con JWT) el usuario debe ser admin Y sólo puede ver las
+  -- sucursales que tiene asignadas (usuario_sucursales). Si auth.uid() es NULL
+  -- (service_role / Claude Code vía MCP) es contexto privilegiado: acceso total
+  -- (lo usa el comando /reporte-mensual para generar todas las sucursales + red).
+  IF NOT v_es_servicio THEN
+    IF NOT EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND rol = 'admin') THEN
+      RAISE EXCEPTION 'Acceso denegado: se requiere rol admin';
+    END IF;
+    SELECT array_agg(sucursal_id) INTO v_asignadas
+    FROM usuario_sucursales WHERE usuario_id = auth.uid();
+    IF v_asignadas IS NULL THEN
+      RAISE EXCEPTION 'Acceso denegado: el usuario no tiene sucursales asignadas';
+    END IF;
   END IF;
 
-  -- Sucursales objetivo. NULL = todas las activas (consolidado de red).
+  -- Sucursales objetivo.
   IF p_sucursal_id IS NULL THEN
+    -- Consolidado: sucursales activas; para un usuario, sólo las que tiene
+    -- asignadas (un admin de una sola sucursal NO ve datos de otras).
     SELECT array_agg(id) INTO v_sucursales FROM sucursales WHERE activa;
+    IF NOT v_es_servicio THEN
+      SELECT array_agg(s) INTO v_sucursales
+      FROM unnest(v_sucursales) AS s WHERE s = ANY(v_asignadas);
+    END IF;
     v_nombre := 'Red (consolidado)';
   ELSE
+    -- Sucursal puntual: el usuario debe tenerla asignada.
+    IF NOT v_es_servicio AND NOT (p_sucursal_id = ANY(v_asignadas)) THEN
+      RAISE EXCEPTION 'Acceso denegado: la sucursal % no está asignada al usuario', p_sucursal_id;
+    END IF;
     v_sucursales := ARRAY[p_sucursal_id];
     SELECT nombre INTO v_nombre FROM sucursales WHERE id = p_sucursal_id;
+  END IF;
+
+  IF v_sucursales IS NULL OR array_length(v_sucursales, 1) IS NULL THEN
+    RAISE EXCEPTION 'Acceso denegado: sin sucursales disponibles para el usuario';
   END IF;
 
   WITH
