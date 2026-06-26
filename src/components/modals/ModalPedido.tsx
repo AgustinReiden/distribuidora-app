@@ -10,6 +10,9 @@ import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQ
 import ModalBase from './ModalBase';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
+import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
+import { serializarFranjas, validarFranjas } from '../../utils/horariosCliente';
+import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -46,6 +49,8 @@ export interface NuevoClienteData {
   razonSocial?: string; // Se usa "nombre" como razonSocial en creación rápida
   latitud?: number | null;
   longitud?: number | null;
+  // Horarios de atención serializados ("HH:MM-HH:MM y …"); vacío si no se cargan.
+  horariosAtencion?: string;
 }
 
 /** Advertencia de stock */
@@ -158,6 +163,8 @@ const ModalPedido = memo(function ModalPedido({
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('');
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState<boolean>(false);
   const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
+  // Horarios de atención del alta rápida (mismo editor de franjas que "Editar cliente").
+  const [franjasAtencion, setFranjasAtencion] = useState<FranjaHoraria[]>([{ apertura: '', cierre: '' }]);
   const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
   const [errorCliente, setErrorCliente] = useState<string>('');
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
@@ -238,6 +245,11 @@ const ModalPedido = memo(function ModalPedido({
       setErrorCliente(`Completá: ${camposFaltantes.join(', ')}`);
       return;
     }
+    // Las franjas son opcionales, pero si hay alguna cargada debe ser válida.
+    if (!validarFranjas(franjasAtencion).valido) {
+      setErrorCliente('Revisá los horarios de atención: la apertura debe ser anterior al cierre y las franjas no pueden superponerse.');
+      return;
+    }
     setErrorCliente('');
 
     setGuardandoCliente(true);
@@ -246,11 +258,13 @@ const ModalPedido = memo(function ModalPedido({
       const clienteData = {
         ...nuevoCliente,
         razonSocial: nombre, // El "Nombre completo" es la razón social
+        horariosAtencion: serializarFranjas(franjasAtencion),
       };
       const cliente = await onCrearCliente(clienteData);
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
       setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
+      setFranjasAtencion([{ apertura: '', cierre: '' }]);
       setGpsAccuracy(null);
       setGpsError(null);
     } catch (err) {
@@ -404,6 +418,7 @@ const ModalPedido = memo(function ModalPedido({
                     )}
                   </div>
                 )}
+                <FranjasHorariasEditor franjas={franjasAtencion} onChange={setFranjasAtencion} />
                 {errorCliente && (
                   <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 px-3 py-2 rounded-lg">{errorCliente}</p>
                 )}

@@ -2,6 +2,7 @@ import { useState, memo, useRef, useMemo } from 'react';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import NumberInput from '../ui/NumberInput';
+import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
@@ -311,27 +312,12 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const horarioOriginalAtencion = convAtencionInicial.franjas.length === 0
     ? (cliente?.horarios_atencion ?? '')
     : '';
+  // El editor de franjas (FranjasHorariasEditor) emite el array completo; acá se
+  // serializa al string del form y se preserva el texto libre legacy si no hay franjas.
   const sincronizarAtencion = (filas: FranjaHoraria[]): void => {
     setFranjasAtencion(filas);
     setForm(prev => ({ ...prev, horarios_atencion: serializarFranjas(filas) || horarioOriginalAtencion }));
   };
-  const agregarFranjaAtencion = (): void =>
-    sincronizarAtencion([...franjasAtencion, { apertura: '', cierre: '' }]);
-  const quitarFranjaAtencion = (index: number): void =>
-    sincronizarAtencion(franjasAtencion.filter((_, i) => i !== index));
-  const actualizarFranjaAtencion = (index: number, campo: keyof FranjaHoraria, valor: string): void =>
-    sincronizarAtencion(
-      franjasAtencion.map((f, i) => {
-        if (i !== index) return f;
-        const next = { ...f, [campo]: valor };
-        // Al cambiar la apertura, si el cierre quedó vacío o <= apertura, lo limpiamos.
-        if (campo === 'apertura' && next.cierre &&
-            (!valor || horaAMinutos(next.cierre) <= horaAMinutos(valor))) {
-          next.cierre = '';
-        }
-        return next;
-      }),
-    );
 
   // Franja única de entrega; el campo queda vacío ("Sin preferencia") si está incompleta.
   const sincronizarEntrega = (franja: FranjaHoraria): void => {
@@ -756,72 +742,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
 
         {/* Horarios de Atención: una o más franjas con apertura/cierre (horario cortado) */}
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
-            <Clock className="w-4 h-4" />
-            Horarios de Atención
-          </label>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-            Cargá apertura y cierre. Si el horario es cortado (ej: mañana y tarde), agregá otra franja.
-          </p>
-          {franjasAtencion.length > 0 && (
-            <div className="space-y-2 mb-2">
-              {franjasAtencion.map((f, index) => {
-                const tieneError = Boolean(validacionAtencion.erroresPorFila[index]);
-                const selectClass = `flex-1 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:text-white text-sm ${
-                  tieneError ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : 'dark:border-gray-600'
-                }`;
-                return (
-                  <div key={index}>
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={f.apertura}
-                        onChange={e => actualizarFranjaAtencion(index, 'apertura', e.target.value)}
-                        aria-label="Hora de apertura"
-                        className={selectClass}
-                      >
-                        <option value="">Apertura</option>
-                        {opcionesApertura.map(h => <option key={h} value={h}>{h}</option>)}
-                      </select>
-                      <span className="text-gray-400 text-sm">a</span>
-                      <select
-                        value={f.cierre}
-                        onChange={e => actualizarFranjaAtencion(index, 'cierre', e.target.value)}
-                        aria-label="Hora de cierre"
-                        className={selectClass}
-                      >
-                        <option value="">Cierre</option>
-                        {opcionesCierre
-                          .filter(h => !f.apertura || horaAMinutos(h) > horaAMinutos(f.apertura))
-                          .map(h => <option key={h} value={h}>{h}</option>)}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => quitarFranjaAtencion(index)}
-                        className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg"
-                        aria-label="Quitar franja horaria"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                    {tieneError && (
-                      <p className="text-red-500 text-xs mt-1">{validacionAtencion.erroresPorFila[index]}</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {validacionAtencion.errorSolapamiento && (
-            <p className="text-red-500 text-xs mb-2">{validacionAtencion.errorSolapamiento}</p>
-          )}
-          <button
-            type="button"
-            onClick={agregarFranjaAtencion}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
-          >
-            <Plus className="w-4 h-4" />
-            Agregar franja
-          </button>
+          <FranjasHorariasEditor franjas={franjasAtencion} onChange={sincronizarAtencion} />
           {convAtencionInicial.huboLegacy && (
             <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
               Convertimos tus horarios anteriores a rangos. Revisá y guardá para confirmar.
