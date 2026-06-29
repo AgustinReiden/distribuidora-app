@@ -155,6 +155,8 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
       total_ventas: Number(r.total_ventas ?? 0),
       pedidos_count: Number(r.pedidos_count ?? 0),
       ticket_promedio: Number(r.ticket_promedio ?? 0),
+      en_curso_monto: Number(r.en_curso_monto ?? 0),
+      en_curso_pedidos: Number(r.en_curso_pedidos ?? 0),
       consulta_realizada_at: consultaRealizadaAt,
       top_clientes: (r.top_clientes ?? []).map((c) => ({
         id: Number(c.id),
