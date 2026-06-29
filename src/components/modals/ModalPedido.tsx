@@ -153,7 +153,12 @@ const ModalPedido = memo(function ModalPedido({
   // Solo admin puede reasignar preventista al pedido. La query se habilita
   // condicionalmente para no traer perfiles para preventistas/encargados.
   const { data: preventistasAsignables = [] } = usePreventistasAsignablesQuery();
-  const preventistaSeleccionado = nuevoPedido.preventistaId ?? currentUserId ?? '';
+  // Atribución explícita: el admin DEBE elegir quién vende (sin default silencioso
+  // a su propio nombre, que cargaba ventas de preventistas al admin). El usuario_id
+  // del pedido = el vendedor elegido; creado_por (quién carga) se setea server-side.
+  const preventistaSeleccionado = nuevoPedido.preventistaId ?? '';
+  const debeElegirPreventista =
+    isAdmin && preventistasAsignables.length > 0 && !preventistaSeleccionado;
 
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
@@ -885,19 +890,25 @@ const ModalPedido = memo(function ModalPedido({
                     <div>
                       <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
                         <UserCheck className="w-4 h-4 text-blue-600" />
-                        Preventista asignado
+                        Preventista asignado *
                       </label>
                       <select
                         value={preventistaSeleccionado}
                         onChange={e => onPreventistaChange?.(e.target.value)}
-                        className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                        className={`w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:text-white text-sm ${debeElegirPreventista ? 'border-amber-500 ring-1 ring-amber-500' : 'dark:border-gray-600'}`}
                       >
+                        <option value="">— Elegí quién vende —</option>
                         {preventistasAsignables.map(p => (
                           <option key={p.id} value={p.id}>
                             {p.nombre}{p.id === currentUserId ? ' (vos)' : ''}
                           </option>
                         ))}
                       </select>
+                      {debeElegirPreventista && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          Elegí a quién se le acredita la venta (a vos o al preventista que la hizo).
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -995,7 +1006,7 @@ const ModalPedido = memo(function ModalPedido({
           <button
             type="button"
             onClick={onGuardar}
-            disabled={guardando || violacionesMOQ.length > 0 || !hayItems}
+            disabled={guardando || violacionesMOQ.length > 0 || !hayItems || debeElegirPreventista}
             className="px-5 bg-green-600 text-white font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 text-sm"
           >
             {guardando && <Loader2 className="w-4 h-4 animate-spin" />}

@@ -24,6 +24,10 @@ export interface VentasPeriodoResult {
   total_ventas: number;
   pedidos_count: number;
   ticket_promedio: number;
+  // Pedidos cargados pero AÚN NO entregados (asignado/pendiente) en el período.
+  // NO son venta: van aparte para que el usuario no los confunda con lo vendido.
+  en_curso_monto: number;
+  en_curso_pedidos: number;
   // Momento en que se ejecutó el RPC (zona ART). El LLM debe mostrarlo al
   // final de la respuesta para que el usuario pueda contrastar contra el
   // panel sabiendo que el panel puede haberse refrescado en otro instante.
@@ -54,8 +58,11 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
     "top productos y el timestamp ART en que se ejecutó la consulta " +
     "(consulta_realizada_at) para que el usuario pueda contrastar contra el " +
     "panel sabiendo cuándo se tomó el dato. Las fechas son inclusive en " +
-    "formato YYYY-MM-DD. Filtra por sucursal del bot user. Excluye pedidos " +
-    "cancelados/anulados.",
+    "formato YYYY-MM-DD. Filtra por sucursal del bot user. total_ventas cuenta " +
+    "SOLO ventas ENTREGADAS (estado='entregado', canal='app') — coincide con el " +
+    "reporte gerencial. Los pedidos cargados pero todavía no entregados " +
+    "(asignado/pendiente) se devuelven aparte en en_curso_monto/en_curso_pedidos " +
+    "y NO deben sumarse a la venta.",
   parameters: {
     type: "object",
     properties: {
@@ -126,6 +133,8 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
       total_ventas: number | string;
       pedidos_count: number;
       ticket_promedio: number | string;
+      en_curso_monto: number | string;
+      en_curso_pedidos: number;
       top_clientes: RpcCliente[];
       top_productos: RpcProducto[];
     };
@@ -146,6 +155,8 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
       total_ventas: Number(r.total_ventas ?? 0),
       pedidos_count: Number(r.pedidos_count ?? 0),
       ticket_promedio: Number(r.ticket_promedio ?? 0),
+      en_curso_monto: Number(r.en_curso_monto ?? 0),
+      en_curso_pedidos: Number(r.en_curso_pedidos ?? 0),
       consulta_realizada_at: consultaRealizadaAt,
       top_clientes: (r.top_clientes ?? []).map((c) => ({
         id: Number(c.id),
