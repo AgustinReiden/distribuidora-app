@@ -33,3 +33,14 @@ jobs:
             exit 0
           fi
           node scripts/check-integridad.mjs
+
+      - name: Drift-check de migraciones (repo vs prod)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::warning::Faltan secrets — drift-check omitido."
+            exit 0
+          fi
+          node scripts/check-migrations.mjs
