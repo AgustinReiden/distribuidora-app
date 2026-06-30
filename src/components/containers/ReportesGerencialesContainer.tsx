@@ -48,17 +48,6 @@ function generarPeriodos(): PeriodoOpt[] {
   return opts
 }
 
-/** Período anterior: misma cantidad de días, inmediatamente antes del rango dado. */
-function periodoAnterior(desde: string, hasta: string): { desde: string; hasta: string } {
-  const d0 = new Date(`${desde}T00:00:00`)
-  const d1 = new Date(`${hasta}T00:00:00`)
-  const dia = 24 * 60 * 60 * 1000
-  const dias = Math.round((d1.getTime() - d0.getTime()) / dia) + 1
-  const prevHasta = new Date(d0.getTime() - dia)
-  const prevDesde = new Date(prevHasta.getTime() - (dias - 1) * dia)
-  return { desde: ymd(prevDesde), hasta: ymd(prevHasta) }
-}
-
 function periodoCustom(desde: string, hasta: string): PeriodoOpt {
   return {
     key: 'custom',
@@ -83,8 +72,6 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const [incluirNoEntregados, setIncluirNoEntregados] = useState(false)
   const [comparar, setComparar] = useState(true)
 
-  const periodoPrev = useMemo(() => periodoAnterior(periodoSel.desde, periodoSel.hasta), [periodoSel.desde, periodoSel.hasta])
-
   // Cambia el rango personalizado (date pickers de la vista).
   const onRango = (desde: string, hasta: string) => {
     if (!desde || !hasta || desde > hasta) return
@@ -108,8 +95,7 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const ready = sucursalSel !== undefined
   const sucParam = sucursalSel ?? null
 
-  const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucParam, periodoSel.desde, periodoSel.hasta, incluirNoEntregados, ready)
-  const { data: comparativo } = useReporteGerencialQuery(sucParam, periodoPrev.desde, periodoPrev.hasta, incluirNoEntregados, ready && comparar)
+  const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucParam, periodoSel.desde, periodoSel.hasta, incluirNoEntregados, comparar, ready)
   const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
 
   return (
@@ -127,7 +113,6 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
         onRango={onRango}
         incluirNoEntregados={incluirNoEntregados}
         onIncluirNoEntregados={setIncluirNoEntregados}
-        comparativo={comparativo}
         comparar={comparar}
         onComparar={setComparar}
         analisis={analisis ?? null}

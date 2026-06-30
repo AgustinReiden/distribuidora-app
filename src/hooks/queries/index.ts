@@ -241,6 +241,7 @@ export type {
   ReporteProducto,
   ReporteCliente,
   ReporteCobranza,
+  Alerta,
   AnalisisMensual,
 } from './useReporteGerencialQuery'
 

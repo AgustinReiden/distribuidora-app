@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import {
-  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange,
+  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange, ChevronDown,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import NumberInput from '../ui/NumberInput'
@@ -8,6 +8,8 @@ import { money, moneyC, pct, N, rolLabel } from './reportes-gerenciales/formato'
 import {
   EvolucionChart, DiarioChart, VendedoresChart, CategoriasChart, WaterfallChart, CobranzaDonut,
 } from './reportes-gerenciales/charts'
+import Sparkline from './reportes-gerenciales/Sparkline'
+import Alertas from './reportes-gerenciales/Alertas'
 import type { ReporteGerencial, AnalisisMensual } from '../../hooks/queries'
 
 export interface PeriodoOpt {
@@ -38,16 +40,15 @@ export interface VistaReportesGerencialesProps {
   onRango: (desde: string, hasta: string) => void
   incluirNoEntregados: boolean
   onIncluirNoEntregados: (v: boolean) => void
-  comparativo: ReporteGerencial | null | undefined
   comparar: boolean
   onComparar: (v: boolean) => void
   analisis: AnalisisMensual | null
 }
 
 // ---- helpers de UI -------------------------------------------------------
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }): React.ReactElement {
+function Card({ children, className = '', id }: { children: React.ReactNode; className?: string; id?: string }): React.ReactElement {
   return (
-    <div className={`bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-sm ${className}`}>
+    <div id={id} className={`bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-sm ${className}`}>
       {children}
     </div>
   )
@@ -103,10 +104,16 @@ const ACCENTS = { blue: '#2563eb', emerald: '#059669', amber: '#d97706', violet:
 export default function VistaReportesGerenciales({
   reporte, loading, error, sucursalSel, periodoSel, opcionesSucursal, opcionesPeriodo,
   onSucursal, onPeriodo, onRango, incluirNoEntregados, onIncluirNoEntregados,
-  comparativo, comparar, onComparar, analisis,
+  comparar, onComparar, analisis,
 }: VistaReportesGerencialesProps): React.ReactElement {
   const [comPct, setComPct] = useState(2)
   const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
+  const [detalleAbierto, setDetalleAbierto] = useState(false)
+
+  const irASeccion = (seccion: string): void => {
+    setDetalleAbierto(true)
+    setTimeout(() => document.getElementById(`sec-${seccion}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80)
+  }
 
   useEffect(() => {
     if (reporte?.kpis?.comision_pct_default) setComPct(reporte.kpis.comision_pct_default)
@@ -121,9 +128,9 @@ export default function VistaReportesGerenciales({
     return { comision, contrib }
   }, [k, comPct, comBase])
 
-  // Período anterior (misma duración, justo antes) para mostrar variaciones.
-  const kp = comparativo?.kpis ?? null
-  const cmp = comparar && !!kp
+  // Período anterior (lo calcula el RPC y viene en reporte.comparativo).
+  const kp = comparar ? (reporte?.comparativo ?? null) : null
+  const cmp = !!kp
   const derivedPrev = useMemo(() => {
     if (!kp) return null
     const base = comBase === 'nc' ? kp.base_comision : kp.venta
@@ -140,7 +147,7 @@ export default function VistaReportesGerenciales({
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {reporte ? `${reporte.meta.sucursal_nombre} · ${periodoSel.label}` : 'Cargando…'}
             <span className="font-medium"> · {incluirNoEntregados ? 'Todos los pedidos' : 'Ventas entregadas'}</span>
-            {cmp && comparativo && <span className="text-gray-400"> · vs {comparativo.meta.desde} → {comparativo.meta.hasta}</span>}
+            {cmp && reporte?.comparativo && <span className="text-gray-400"> · vs {reporte.comparativo.desde} → {reporte.comparativo.hasta}</span>}
             {periodoSel.parcial && <span className="text-amber-600 dark:text-amber-400 font-medium"> · período en curso (parcial)</span>}
           </p>
         </div>
@@ -229,7 +236,7 @@ export default function VistaReportesGerenciales({
           {/* KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KpiCard label={incluirNoEntregados ? 'Venta (todos)' : 'Venta entregada'} value={moneyC(k.venta)} sub={`${N.format(k.pedidos)} pedidos`} accent={ACCENTS.blue}
-              delta={cmp ? <Delta cur={k.venta} prev={kp!.venta} /> : undefined} />
+              delta={<div className="flex items-center justify-between gap-2">{cmp ? <Delta cur={k.venta} prev={kp!.venta} /> : <span />}<Sparkline data={(reporte.serie_diaria ?? []).map((s) => Number(s[1]))} /></div>} />
             <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> antes de bonif.</>} accent={ACCENTS.cyan}
               delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
             <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
@@ -257,8 +264,22 @@ export default function VistaReportesGerenciales({
             </div>
           )}
 
+          {/* Qué requiere tu atención */}
+          <Alertas items={reporte.alertas ?? []} onSelect={irASeccion} />
+
+          {/* Detalle completo: colapsable; los gráficos montan recién al abrir (perf) */}
+          <button
+            type="button"
+            onClick={() => setDetalleAbierto((o) => !o)}
+            className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform ${detalleAbierto ? 'rotate-180' : ''}`} />
+            {detalleAbierto ? 'Ocultar detalle' : 'Ver detalle completo (evolución, vendedores, categorías, cobranza…)'}
+          </button>
+
+          {detalleAbierto && (<>
           {/* Evolución mensual */}
-          <Card className="p-5">
+          <Card id="sec-evolucion" className="p-5">
             <SectionTitle icon={TrendingUp} title="Evolución mensual" hint="Venta, bonificaciones y margen neto por mes." />
             <div className="grid lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2 h-72"><EvolucionChart data={reporte.mensual} /></div>
@@ -359,7 +380,7 @@ export default function VistaReportesGerenciales({
           </Card>
 
           {/* Categorías */}
-          <Card className="p-5">
+          <Card id="sec-categorias" className="p-5">
             <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = margen inflado por productos sin costo." />
             <div className="grid lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2 h-80"><CategoriasChart data={reporte.categorias} /></div>
@@ -401,7 +422,7 @@ export default function VistaReportesGerenciales({
                 </tbody>
               </table>
             </Card>
-            <Card className="p-5">
+            <Card id="sec-clientes" className="p-5">
               <SectionTitle icon={TrendingUp} title="Top 10 clientes" hint="Por facturación entregada." />
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
@@ -422,7 +443,7 @@ export default function VistaReportesGerenciales({
 
           {/* Cobranza + costos */}
           <div className="grid lg:grid-cols-2 gap-5">
-            <Card className="p-5">
+            <Card id="sec-cobranza" className="p-5">
               <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} />
               <div className="grid grid-cols-2 gap-4 items-center">
                 <div className="h-48"><CobranzaDonut cobranza={reporte.cobranza} /></div>
@@ -442,7 +463,7 @@ export default function VistaReportesGerenciales({
                 </table>
               </div>
             </Card>
-            <Card className="p-5">
+            <Card id="sec-mermas" className="p-5">
               <SectionTitle icon={TrendingUp} title="Otros costos del período" hint="Mermas, bonificaciones y reposición." />
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
@@ -494,6 +515,7 @@ export default function VistaReportesGerenciales({
               </div>
             )}
           </Card>
+          </>)}
         </>
       )}
     </div>
