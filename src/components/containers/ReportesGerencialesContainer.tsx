@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useReporteGerencialQuery, useAnalisisMensualQuery } from '../../hooks/queries'
+import { useReporteGerencialQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 
@@ -97,6 +97,14 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
 
   const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucParam, periodoSel.desde, periodoSel.hasta, incluirNoEntregados, comparar, ready)
   const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
+  const { data: metas } = useMetasGerencialQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
+  const guardarMeta = useGuardarMetaMutation()
+
+  const onGuardarMeta = (venta: number | null, margenNeto: number | null): void => {
+    if (!periodoSel.periodoMes) return
+    if (venta != null) guardarMeta.mutate({ sucursalId: sucParam, periodo: periodoSel.periodoMes, metrica: 'venta', valor: venta })
+    if (margenNeto != null) guardarMeta.mutate({ sucursalId: sucParam, periodo: periodoSel.periodoMes, metrica: 'margen_neto', valor: margenNeto })
+  }
 
   return (
     <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>}>
@@ -115,6 +123,10 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
         onIncluirNoEntregados={setIncluirNoEntregados}
         comparar={comparar}
         onComparar={setComparar}
+        metas={metas ?? null}
+        metasEditable={periodoSel.esMes}
+        onGuardarMeta={onGuardarMeta}
+        guardandoMeta={guardarMeta.isPending}
         analisis={analisis ?? null}
       />
     </Suspense>

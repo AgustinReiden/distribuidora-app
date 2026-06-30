@@ -1,25 +1,16 @@
 -- ============================================================================
--- 108 — Metas gerenciales (objetivos mensuales por sucursal / red)
+-- 108 · Metas gerenciales (objetivos mensuales) — BI Fase 2
 -- ============================================================================
--- Soporta el panel BI: objetivos mensuales editables por (sucursal, metrica)
--- contra los que el reporte gerencial compara la venta / margen real.
---
---   - metrica IN ('venta','margen_neto')
---   - sucursal_id NULL = meta de la RED (toda la distribuidora)
---   - UNIQUE por (sucursal_id, periodo, metrica) tratando NULL como -1
---     (no se puede usar UNIQUE directo con NULL, de ahi el indice COALESCE).
---   - guardar_meta_gerencial(): upsert idempotente, gateado admin + sucursal
---     asignada; trunca periodo al primer dia del mes.
---
--- NOTA: este archivo es el ESPEJO de lo aplicado en prod
--- (schema_migrations version 20260630154130). La tabla ya existe en prod; se
--- versiona aca para que migrations/ refleje la realidad. Ver migrations/MANIFEST.md.
+-- Tabla de metas por sucursal y mes (sucursal_id NULL = red consolidada) para
+-- venta y margen_neto. El semáforo (cumplimiento) se calcula en el front contra
+-- estas metas (prorrateadas por días si el mes está en curso). Escritura por RPC
+-- admin-only; lectura por RLS admin. NO toca reporte_gerencial.
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS public.metas_gerenciales (
   id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  sucursal_id bigint REFERENCES sucursales(id),
-  periodo     date NOT NULL,
+  sucursal_id bigint REFERENCES sucursales(id),         -- NULL = red consolidada
+  periodo     date NOT NULL,                            -- primer día del mes
   metrica     text NOT NULL CHECK (metrica IN ('venta','margen_neto')),
   valor       numeric NOT NULL CHECK (valor >= 0),
   usuario_id  uuid,
@@ -39,7 +30,11 @@ DROP POLICY IF EXISTS metas_gerenciales_admin_select ON public.metas_gerenciales
 CREATE POLICY metas_gerenciales_admin_select ON public.metas_gerenciales
   FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid() AND rol = 'admin'));
+-- Escritura: sólo vía guardar_meta_gerencial (SECURITY DEFINER) o service_role.
 
+-- ----------------------------------------------------------------------------
+-- RPC upsert de meta (admin-only; valida sucursal asignada)
+-- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.guardar_meta_gerencial(
   p_sucursal_id bigint,
   p_periodo     date,

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import {
-  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange, ChevronDown,
+  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange, ChevronDown, Target,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import NumberInput from '../ui/NumberInput'
@@ -10,7 +10,8 @@ import {
 } from './reportes-gerenciales/charts'
 import Sparkline from './reportes-gerenciales/Sparkline'
 import Alertas from './reportes-gerenciales/Alertas'
-import type { ReporteGerencial, AnalisisMensual } from '../../hooks/queries'
+import ModalMetas from './reportes-gerenciales/ModalMetas'
+import type { ReporteGerencial, AnalisisMensual, MetasGerenciales } from '../../hooks/queries'
 
 export interface PeriodoOpt {
   key: string
@@ -42,6 +43,10 @@ export interface VistaReportesGerencialesProps {
   onIncluirNoEntregados: (v: boolean) => void
   comparar: boolean
   onComparar: (v: boolean) => void
+  metas: MetasGerenciales | null
+  metasEditable: boolean
+  onGuardarMeta: (venta: number | null, margenNeto: number | null) => void
+  guardandoMeta: boolean
   analisis: AnalisisMensual | null
 }
 
@@ -82,6 +87,20 @@ function Delta({ cur, prev, invert = false }: { cur: number; prev: number | null
   )
 }
 
+/** Semáforo de cumplimiento vs meta. factor prorratea la meta por días del mes en curso. */
+function Semaforo({ cur, meta, factor }: { cur: number; meta: number | null | undefined; factor: number }): React.ReactElement | null {
+  if (meta == null || meta <= 0) return null
+  const objetivo = meta * factor
+  const cumpl = objetivo > 0 ? cur / objetivo : 0
+  const color = cumpl >= 1 ? 'text-emerald-600 dark:text-emerald-400' : cumpl >= 0.85 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'
+  const dot = cumpl >= 1 ? 'bg-emerald-500' : cumpl >= 0.85 ? 'bg-amber-500' : 'bg-red-500'
+  return (
+    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${color}`} title={factor < 1 ? 'Meta prorrateada por días transcurridos' : 'Meta del mes'}>
+      <span className={`w-2 h-2 rounded-full ${dot}`} />{pct(cumpl)} de la meta
+    </span>
+  )
+}
+
 function SectionTitle({ icon: Icon, title, hint, right }: { icon: React.ElementType; title: string; hint?: string; right?: React.ReactNode }): React.ReactElement {
   return (
     <div className="flex items-start justify-between gap-3 mb-4">
@@ -104,11 +123,24 @@ const ACCENTS = { blue: '#2563eb', emerald: '#059669', amber: '#d97706', violet:
 export default function VistaReportesGerenciales({
   reporte, loading, error, sucursalSel, periodoSel, opcionesSucursal, opcionesPeriodo,
   onSucursal, onPeriodo, onRango, incluirNoEntregados, onIncluirNoEntregados,
-  comparar, onComparar, analisis,
+  comparar, onComparar, metas, metasEditable, onGuardarMeta, guardandoMeta, analisis,
 }: VistaReportesGerencialesProps): React.ReactElement {
   const [comPct, setComPct] = useState(2)
   const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
   const [detalleAbierto, setDetalleAbierto] = useState(false)
+  const [showMetas, setShowMetas] = useState(false)
+
+  // Prorrateo de la meta: en un mes en curso compara contra la parte transcurrida.
+  const metaFactor = useMemo(() => {
+    if (!periodoSel.esMes || !periodoSel.periodoMes) return 1
+    const [yy, mm] = periodoSel.periodoMes.split('-').map(Number)
+    const diasMes = new Date(yy, mm, 0).getDate()
+    if (!periodoSel.parcial) return 1
+    const diaHasta = Number(periodoSel.hasta.split('-')[2])
+    return Math.min(Math.max(diaHasta, 1) / diasMes, 1)
+  }, [periodoSel.esMes, periodoSel.periodoMes, periodoSel.parcial, periodoSel.hasta])
+
+  const metasOn = periodoSel.esMes && !!metas && (metas.venta != null || metas.margen_neto != null)
 
   const irASeccion = (seccion: string): void => {
     setDetalleAbierto(true)
@@ -174,6 +206,16 @@ export default function VistaReportesGerenciales({
           >
             Comparar
           </button>
+          {metasEditable && (
+            <button
+              type="button"
+              onClick={() => setShowMetas(true)}
+              title="Cargar las metas (objetivos) del mes"
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border shadow-sm bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <Target className="w-3.5 h-3.5" /> Metas
+            </button>
+          )}
           <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-2.5 py-1.5 shadow-sm">
             <Building2 className="w-4 h-4 text-gray-400" />
             <select
@@ -236,13 +278,19 @@ export default function VistaReportesGerenciales({
           {/* KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KpiCard label={incluirNoEntregados ? 'Venta (todos)' : 'Venta entregada'} value={moneyC(k.venta)} sub={`${N.format(k.pedidos)} pedidos`} accent={ACCENTS.blue}
-              delta={<div className="flex items-center justify-between gap-2">{cmp ? <Delta cur={k.venta} prev={kp!.venta} /> : <span />}<Sparkline data={(reporte.serie_diaria ?? []).map((s) => Number(s[1]))} /></div>} />
+              delta={<div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">{cmp ? <Delta cur={k.venta} prev={kp!.venta} /> : <span />}<Sparkline data={(reporte.serie_diaria ?? []).map((s) => Number(s[1]))} /></div>
+                {metasOn && metas?.venta != null && <Semaforo cur={k.venta} meta={metas.venta} factor={metaFactor} />}
+              </div>} />
             <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> antes de bonif.</>} accent={ACCENTS.cyan}
               delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
             <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
               delta={cmp ? <Delta cur={k.bonif} prev={kp!.bonif} invert /> : undefined} />
             <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pct(k.margen_neto / k.venta)}</b> post bonif.</>} accent={ACCENTS.violet}
-              delta={cmp ? <Delta cur={k.margen_neto} prev={kp!.margen_neto} /> : undefined} />
+              delta={<div className="space-y-1">
+                {cmp && <Delta cur={k.margen_neto} prev={kp!.margen_neto} />}
+                {metasOn && metas?.margen_neto != null && <Semaforo cur={k.margen_neto} meta={metas.margen_neto} factor={metaFactor} />}
+              </div>} />
             <KpiCard label={`Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={`base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate}
               delta={cmp && derivedPrev ? <Delta cur={derived.comision} prev={derivedPrev.comision} invert /> : undefined} />
             <KpiCard label="Mermas" value={moneyC(k.mermas)} sub="producto perdido" accent={ACCENTS.red}
@@ -517,6 +565,17 @@ export default function VistaReportesGerenciales({
           </Card>
           </>)}
         </>
+      )}
+
+      {showMetas && (
+        <ModalMetas
+          metas={metas}
+          periodoLabel={periodoSel.label}
+          sucursalNombre={reporte?.meta.sucursal_nombre ?? ''}
+          guardando={guardandoMeta}
+          onGuardar={(v, m) => { onGuardarMeta(v, m); setShowMetas(false) }}
+          onClose={() => setShowMetas(false)}
+        />
       )}
     </div>
   )
