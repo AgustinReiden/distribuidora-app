@@ -1,0 +1,35 @@
+name: Integridad de datos
+
+# Gate de integridad (Capa 3 del plan docs/plan-auditoria-integridad.md).
+# Corre auditoria_integridad() contra prod y falla si hay checks critical/high
+# en rojo. Diario + a demanda. Requiere los secrets SUPABASE_URL y
+# SUPABASE_SERVICE_ROLE_KEY (service_role, NO la anon key).
+
+on:
+  schedule:
+    - cron: '0 11 * * *' # 08:00 ART (11:00 UTC), todos los días
+  workflow_dispatch: {}
+
+jobs:
+  auditoria-integridad:
+    name: Auditoría de integridad
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Correr batería de invariantes
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::warning::Faltan secrets SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY — gate omitido."
+            exit 0
+          fi
+          node scripts/check-integridad.mjs
