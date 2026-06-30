@@ -35,6 +35,9 @@ export interface VistaReportesGerencialesProps {
   opcionesPeriodo: PeriodoOpt[]
   onSucursal: (id: number | null) => void
   onPeriodo: (p: PeriodoOpt) => void
+  onRango: (desde: string, hasta: string) => void
+  incluirNoEntregados: boolean
+  onIncluirNoEntregados: (v: boolean) => void
   analisis: AnalisisMensual | null
 }
 
@@ -79,7 +82,7 @@ const ACCENTS = { blue: '#2563eb', emerald: '#059669', amber: '#d97706', violet:
 
 export default function VistaReportesGerenciales({
   reporte, loading, error, sucursalSel, periodoSel, opcionesSucursal, opcionesPeriodo,
-  onSucursal, onPeriodo, analisis,
+  onSucursal, onPeriodo, onRango, incluirNoEntregados, onIncluirNoEntregados, analisis,
 }: VistaReportesGerencialesProps): React.ReactElement {
   const [comPct, setComPct] = useState(2)
   const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
@@ -105,10 +108,25 @@ export default function VistaReportesGerenciales({
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reportes Gerenciales</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {reporte ? `${reporte.meta.sucursal_nombre} · ${periodoSel.label}` : 'Cargando…'}
+            <span className="font-medium"> · {incluirNoEntregados ? 'Todos los pedidos' : 'Ventas entregadas'}</span>
             {periodoSel.parcial && <span className="text-amber-600 dark:text-amber-400 font-medium"> · período en curso (parcial)</span>}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Toggle: ventas entregadas vs todos los pedidos (pendientes/en camino/entregados) */}
+          <div className="flex items-center bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg p-0.5 shadow-sm">
+            {([['Entregadas', false], ['Todos', true]] as const).map(([lbl, val]) => (
+              <button
+                key={lbl}
+                type="button"
+                onClick={() => onIncluirNoEntregados(val)}
+                title={val ? 'Incluye pendientes, en camino (asignados) y entregados' : 'Solo ventas efectivamente entregadas'}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${incluirNoEntregados === val ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-2.5 py-1.5 shadow-sm">
             <Building2 className="w-4 h-4 text-gray-400" />
             <select
@@ -128,9 +146,31 @@ export default function VistaReportesGerenciales({
               onChange={(e) => { const p = opcionesPeriodo.find(o => o.key === e.target.value); if (p) onPeriodo(p) }}
               className="bg-transparent text-sm font-medium text-gray-800 dark:text-gray-100 focus:outline-none"
             >
-              {opcionesPeriodo.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+              {opcionesPeriodo.map(p => <option key={p.key} value={p.key}>{p.key === 'custom' ? 'Personalizado…' : p.label}</option>)}
             </select>
           </div>
+          {/* Rango personalizado: date pickers desde/hasta */}
+          {periodoSel.key === 'custom' && (
+            <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-2.5 py-1.5 shadow-sm">
+              <input
+                type="date"
+                value={periodoSel.desde}
+                max={periodoSel.hasta || undefined}
+                onChange={(e) => onRango(e.target.value, periodoSel.hasta)}
+                className="bg-transparent text-sm text-gray-800 dark:text-gray-100 focus:outline-none"
+                aria-label="Desde"
+              />
+              <span className="text-gray-400 text-xs">→</span>
+              <input
+                type="date"
+                value={periodoSel.hasta}
+                min={periodoSel.desde || undefined}
+                onChange={(e) => onRango(periodoSel.desde, e.target.value)}
+                className="bg-transparent text-sm text-gray-800 dark:text-gray-100 focus:outline-none"
+                aria-label="Hasta"
+              />
+            </div>
+          )}
         </div>
       </div>
 
