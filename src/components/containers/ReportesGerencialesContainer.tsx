@@ -12,61 +12,92 @@ function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** Opciones de período: trimestre en curso + últimos 6 meses (el mes actual es parcial). */
+/**
+ * Presets de fecha tipo BI. El primero (Este mes) es el default — NO hay un
+ * trimestre hardcodeado. Además del listado, el usuario puede elegir un rango
+ * personalizado (manejado vía onRango en la vista).
+ */
 function generarPeriodos(): PeriodoOpt[] {
   const hoy = new Date()
+  const y = hoy.getFullYear()
+  const m = hoy.getMonth()
+  const hoyYmd = ymd(hoy)
   const opts: PeriodoOpt[] = []
-
-  const qStart = Math.floor(hoy.getMonth() / 3) * 3
-  const qDesde = new Date(hoy.getFullYear(), qStart, 1)
-  const qFin = new Date(hoy.getFullYear(), qStart + 3, 0)
-  const qParcial = hoy < qFin
-  opts.push({
-    key: 'trimestre',
-    label: `Trimestre ${MESES_ES[qStart].slice(0, 3)}–${MESES_ES[qStart + 2].slice(0, 3)} ${hoy.getFullYear()}`,
-    desde: ymd(qDesde),
-    hasta: ymd(qParcial ? hoy : qFin),
-    esMes: false,
-    periodoMes: null,
-    parcial: qParcial,
-  })
-
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1)
-    const y = d.getFullYear()
-    const m = d.getMonth()
-    const ultimo = new Date(y, m + 1, 0)
-    const esActual = i === 0
+  const add = (key: string, label: string, desde: Date, hasta: Date, esMes = false, periodoMes: Date | null = null) => {
     opts.push({
-      key: `${y}-${String(m + 1).padStart(2, '0')}`,
-      label: `${MESES_ES[m]} ${y}`,
-      desde: ymd(new Date(y, m, 1)),
-      hasta: ymd(esActual ? hoy : ultimo),
-      esMes: true,
-      periodoMes: ymd(new Date(y, m, 1)),
-      parcial: esActual,
+      key, label,
+      desde: ymd(desde), hasta: ymd(hasta > hoy ? hoy : hasta),
+      esMes, periodoMes: periodoMes ? ymd(periodoMes) : null,
+      parcial: ymd(hasta) >= hoyYmd, // el período llega hasta hoy ⇒ todavía abierto
     })
   }
 
+  add('mes-actual', 'Este mes', new Date(y, m, 1), hoy, true, new Date(y, m, 1))
+  const pm = new Date(y, m - 1, 1)
+  add('mes-pasado', 'Mes pasado', pm, new Date(y, m, 0), true, pm)
+  const qStart = Math.floor(m / 3) * 3
+  add('trimestre', 'Trimestre en curso', new Date(y, qStart, 1), hoy)
+  add('anio', 'Año en curso', new Date(y, 0, 1), hoy)
+  // Meses anteriores (para el análisis narrativo guardado por mes).
+  for (let i = 2; i < 12; i++) {
+    const d = new Date(y, m - i, 1)
+    const yy = d.getFullYear()
+    const mm = d.getMonth()
+    add(`${yy}-${String(mm + 1).padStart(2, '0')}`, `${MESES_ES[mm]} ${yy}`, new Date(yy, mm, 1), new Date(yy, mm + 1, 0), true, new Date(yy, mm, 1))
+  }
   return opts
+}
+
+/** Período anterior: misma cantidad de días, inmediatamente antes del rango dado. */
+function periodoAnterior(desde: string, hasta: string): { desde: string; hasta: string } {
+  const d0 = new Date(`${desde}T00:00:00`)
+  const d1 = new Date(`${hasta}T00:00:00`)
+  const dia = 24 * 60 * 60 * 1000
+  const dias = Math.round((d1.getTime() - d0.getTime()) / dia) + 1
+  const prevHasta = new Date(d0.getTime() - dia)
+  const prevDesde = new Date(prevHasta.getTime() - (dias - 1) * dia)
+  return { desde: ymd(prevDesde), hasta: ymd(prevHasta) }
+}
+
+function periodoCustom(desde: string, hasta: string): PeriodoOpt {
+  return {
+    key: 'custom',
+    label: desde && hasta ? `${desde} → ${hasta}` : 'Personalizado',
+    desde, hasta,
+    esMes: false, periodoMes: null,
+    parcial: hasta >= ymd(new Date()),
+  }
 }
 
 export default function ReportesGerencialesContainer(): React.ReactElement {
   const periodos = useMemo(() => generarPeriodos(), [])
-  const [periodoSel, setPeriodoSel] = useState<PeriodoOpt>(() => periodos[0])
+  // Opción "Personalizado" al final del selector (rango default: últimos 30 días).
+  const customDefault = useMemo(() => {
+    const hoy = new Date()
+    const hace30 = new Date(hoy.getTime() - 29 * 24 * 60 * 60 * 1000)
+    return periodoCustom(ymd(hace30), ymd(hoy))
+  }, [])
+  const opcionesPeriodo = useMemo<PeriodoOpt[]>(() => [...periodos, customDefault], [periodos, customDefault])
 
-  // Sólo las sucursales que el usuario tiene asignadas (SucursalContext).
-  // El backend (RPC) refuerza esto: un admin de una sola sucursal no puede ver
-  // datos de otra ni el consolidado de la red.
+  const [periodoSel, setPeriodoSel] = useState<PeriodoOpt>(() => periodos[0]) // default: Este mes
+  const [incluirNoEntregados, setIncluirNoEntregados] = useState(false)
+  const [comparar, setComparar] = useState(true)
+
+  const periodoPrev = useMemo(() => periodoAnterior(periodoSel.desde, periodoSel.hasta), [periodoSel.desde, periodoSel.hasta])
+
+  // Cambia el rango personalizado (date pickers de la vista).
+  const onRango = (desde: string, hasta: string) => {
+    if (!desde || !hasta || desde > hasta) return
+    setPeriodoSel(periodoCustom(desde, hasta))
+  }
+
   const { sucursales, hasMultipleSucursales, loading: sucLoading } = useSucursal()
 
   const opcionesSucursal: SucursalOpt[] = useMemo(() => {
     const list: SucursalOpt[] = sucursales.map(s => ({ id: s.id as number | null, nombre: s.nombre }))
-    // El consolidado de red sólo se ofrece a quien tiene 2+ sucursales asignadas.
     return hasMultipleSucursales ? [{ id: null, nombre: 'Red (consolidado)' }, ...list] : list
   }, [sucursales, hasMultipleSucursales])
 
-  // Default: red si tiene varias; su única sucursal si tiene una.
   const [sucursalSel, setSucursalSel] = useState<number | null | undefined>(undefined)
   useEffect(() => {
     if (sucursalSel === undefined && sucursales.length > 0) {
@@ -77,7 +108,8 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const ready = sucursalSel !== undefined
   const sucParam = sucursalSel ?? null
 
-  const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucParam, periodoSel.desde, periodoSel.hasta, ready)
+  const { data: reporte, isLoading, error } = useReporteGerencialQuery(sucParam, periodoSel.desde, periodoSel.hasta, incluirNoEntregados, ready)
+  const { data: comparativo } = useReporteGerencialQuery(sucParam, periodoPrev.desde, periodoPrev.hasta, incluirNoEntregados, ready && comparar)
   const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
 
   return (
@@ -89,9 +121,15 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
         sucursalSel={sucParam}
         periodoSel={periodoSel}
         opcionesSucursal={opcionesSucursal}
-        opcionesPeriodo={periodos}
+        opcionesPeriodo={opcionesPeriodo}
         onSucursal={setSucursalSel}
         onPeriodo={setPeriodoSel}
+        onRango={onRango}
+        incluirNoEntregados={incluirNoEntregados}
+        onIncluirNoEntregados={setIncluirNoEntregados}
+        comparativo={comparativo}
+        comparar={comparar}
+        onComparar={setComparar}
         analisis={analisis ?? null}
       />
     </Suspense>

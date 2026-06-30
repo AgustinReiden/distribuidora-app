@@ -84,6 +84,7 @@ export interface ReporteGerencial {
     desde: string
     hasta: string
     generado_at: string
+    incluye_no_entregados?: boolean
   }
   kpis: ReporteKpis
   mensual: ReporteMes[]
@@ -106,8 +107,8 @@ export interface AnalisisMensual {
 
 export const reporteGerencialKeys = {
   all: ['reporte-gerencial'] as const,
-  range: (suc: number | null, desde: string, hasta: string) =>
-    ['reporte-gerencial', suc, desde, hasta] as const,
+  range: (suc: number | null, desde: string, hasta: string, incluirNoEntregados: boolean) =>
+    ['reporte-gerencial', suc, desde, hasta, incluirNoEntregados] as const,
   analisis: (suc: number | null, periodo: string | null) =>
     ['reporte-gerencial-analisis', suc, periodo] as const,
 }
@@ -117,15 +118,17 @@ export function useReporteGerencialQuery(
   sucursalId: number | null,
   desde: string,
   hasta: string,
+  incluirNoEntregados = false,
   enabled = true,
 ) {
   return useQuery({
-    queryKey: reporteGerencialKeys.range(sucursalId, desde, hasta),
+    queryKey: reporteGerencialKeys.range(sucursalId, desde, hasta, incluirNoEntregados),
     queryFn: async (): Promise<ReporteGerencial> => {
       const { data, error } = await supabase.rpc('reporte_gerencial', {
         p_sucursal_id: sucursalId,
         p_desde: desde,
         p_hasta: hasta,
+        p_incluir_no_entregados: incluirNoEntregados,
       })
       if (error) throw new Error(error.message)
       return data as ReporteGerencial
