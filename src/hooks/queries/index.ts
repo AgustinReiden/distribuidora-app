@@ -64,6 +64,7 @@ export {
   useCambiarClientePedidoMutation,
   usePedidosNoPagadosQuery,
   usePagosMasivosMutation,
+  useEntregaYPagoMasivosMutation,
 } from './usePedidosQuery'
 export type { PaginatedResult } from './usePedidosQuery'
 export { usePedidoStatsQuery, EMPTY_PEDIDO_STATS_SUMMARY } from './usePedidoStatsQuery'
