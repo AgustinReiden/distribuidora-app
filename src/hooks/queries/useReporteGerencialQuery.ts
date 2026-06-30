@@ -77,6 +77,15 @@ export interface ReporteCobranza {
   pendiente: number
 }
 
+export interface Alerta {
+  severidad: 'critical' | 'warning' | 'info'
+  codigo: string
+  titulo: string
+  detalle: string
+  valor: number
+  seccion: string
+}
+
 export interface ReporteGerencial {
   meta: {
     sucursal_id: number | null
@@ -95,6 +104,9 @@ export interface ReporteGerencial {
   cobranza: ReporteCobranza
   serie_diaria: [string, number][]
   flags: { ingreso_sin_costo: number; pct_sin_costo: number }
+  // KPIs del período anterior (cuando se pide comparar) + alertas, ambos del RPC.
+  comparativo?: (ReporteKpis & { desde: string; hasta: string }) | null
+  alertas?: Alerta[]
 }
 
 export interface AnalisisMensual {
@@ -107,8 +119,8 @@ export interface AnalisisMensual {
 
 export const reporteGerencialKeys = {
   all: ['reporte-gerencial'] as const,
-  range: (suc: number | null, desde: string, hasta: string, incluirNoEntregados: boolean) =>
-    ['reporte-gerencial', suc, desde, hasta, incluirNoEntregados] as const,
+  range: (suc: number | null, desde: string, hasta: string, incluirNoEntregados: boolean, comparar: boolean) =>
+    ['reporte-gerencial', suc, desde, hasta, incluirNoEntregados, comparar] as const,
   analisis: (suc: number | null, periodo: string | null) =>
     ['reporte-gerencial-analisis', suc, periodo] as const,
 }
@@ -119,16 +131,18 @@ export function useReporteGerencialQuery(
   desde: string,
   hasta: string,
   incluirNoEntregados = false,
+  comparar = false,
   enabled = true,
 ) {
   return useQuery({
-    queryKey: reporteGerencialKeys.range(sucursalId, desde, hasta, incluirNoEntregados),
+    queryKey: reporteGerencialKeys.range(sucursalId, desde, hasta, incluirNoEntregados, comparar),
     queryFn: async (): Promise<ReporteGerencial> => {
       const { data, error } = await supabase.rpc('reporte_gerencial', {
         p_sucursal_id: sucursalId,
         p_desde: desde,
         p_hasta: hasta,
         p_incluir_no_entregados: incluirNoEntregados,
+        p_comparar: comparar,
       })
       if (error) throw new Error(error.message)
       return data as ReporteGerencial
