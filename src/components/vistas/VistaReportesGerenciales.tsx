@@ -38,6 +38,9 @@ export interface VistaReportesGerencialesProps {
   onRango: (desde: string, hasta: string) => void
   incluirNoEntregados: boolean
   onIncluirNoEntregados: (v: boolean) => void
+  comparativo: ReporteGerencial | null | undefined
+  comparar: boolean
+  onComparar: (v: boolean) => void
   analisis: AnalisisMensual | null
 }
 
@@ -50,14 +53,31 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
   )
 }
 
-function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub?: React.ReactNode; accent: string }): React.ReactElement {
+function KpiCard({ label, value, sub, accent, delta }: { label: string; value: string; sub?: React.ReactNode; accent: string; delta?: React.ReactNode }): React.ReactElement {
   return (
     <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-sm p-4 relative overflow-hidden">
       <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: accent }} />
       <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 pl-1">{label}</div>
       <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1.5 pl-1">{value}</div>
+      {delta && <div className="mt-0.5 pl-1">{delta}</div>}
       {sub && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 pl-1">{sub}</div>}
     </div>
+  )
+}
+
+/** Variación vs período anterior. invert=true ⇒ subir es malo (costos, mermas). */
+function Delta({ cur, prev, invert = false }: { cur: number; prev: number | null | undefined; invert?: boolean }): React.ReactElement | null {
+  if (prev == null || !isFinite(prev) || prev === 0) return null
+  const d = cur - prev
+  const ratio = d / Math.abs(prev)
+  const flat = Math.abs(ratio) < 0.0005
+  const good = invert ? d < 0 : d > 0
+  const color = flat ? 'text-gray-400' : good ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+  const arrow = flat ? '→' : d > 0 ? '▲' : '▼'
+  return (
+    <span className={`text-[11px] font-semibold ${color}`}>
+      {arrow} {pct(Math.abs(ratio))} <span className="font-normal text-gray-400">vs ant.</span>
+    </span>
   )
 }
 
@@ -82,7 +102,8 @@ const ACCENTS = { blue: '#2563eb', emerald: '#059669', amber: '#d97706', violet:
 
 export default function VistaReportesGerenciales({
   reporte, loading, error, sucursalSel, periodoSel, opcionesSucursal, opcionesPeriodo,
-  onSucursal, onPeriodo, onRango, incluirNoEntregados, onIncluirNoEntregados, analisis,
+  onSucursal, onPeriodo, onRango, incluirNoEntregados, onIncluirNoEntregados,
+  comparativo, comparar, onComparar, analisis,
 }: VistaReportesGerencialesProps): React.ReactElement {
   const [comPct, setComPct] = useState(2)
   const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
@@ -100,6 +121,16 @@ export default function VistaReportesGerenciales({
     return { comision, contrib }
   }, [k, comPct, comBase])
 
+  // Período anterior (misma duración, justo antes) para mostrar variaciones.
+  const kp = comparativo?.kpis ?? null
+  const cmp = comparar && !!kp
+  const derivedPrev = useMemo(() => {
+    if (!kp) return null
+    const base = comBase === 'nc' ? kp.base_comision : kp.venta
+    const comision = base * comPct / 100
+    return { comision, contrib: kp.margen_neto - kp.mermas - comision }
+  }, [kp, comPct, comBase])
+
   return (
     <div className="space-y-5">
       {/* Header + selectores */}
@@ -109,6 +140,7 @@ export default function VistaReportesGerenciales({
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {reporte ? `${reporte.meta.sucursal_nombre} · ${periodoSel.label}` : 'Cargando…'}
             <span className="font-medium"> · {incluirNoEntregados ? 'Todos los pedidos' : 'Ventas entregadas'}</span>
+            {cmp && comparativo && <span className="text-gray-400"> · vs {comparativo.meta.desde} → {comparativo.meta.hasta}</span>}
             {periodoSel.parcial && <span className="text-amber-600 dark:text-amber-400 font-medium"> · período en curso (parcial)</span>}
           </p>
         </div>
@@ -127,6 +159,14 @@ export default function VistaReportesGerenciales({
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => onComparar(!comparar)}
+            title="Comparar contra el período anterior de igual duración"
+            className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg border shadow-sm transition-colors ${comparar ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+          >
+            Comparar
+          </button>
           <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-2.5 py-1.5 shadow-sm">
             <Building2 className="w-4 h-4 text-gray-400" />
             <select
@@ -188,14 +228,22 @@ export default function VistaReportesGerenciales({
         <>
           {/* KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KpiCard label="Venta entregada" value={moneyC(k.venta)} sub={`${N.format(k.pedidos)} pedidos`} accent={ACCENTS.blue} />
-            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> antes de bonif.</>} accent={ACCENTS.cyan} />
-            <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber} />
-            <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pct(k.margen_neto / k.venta)}</b> post bonif.</>} accent={ACCENTS.violet} />
-            <KpiCard label={`Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={`base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate} />
-            <KpiCard label="Mermas" value={moneyC(k.mermas)} sub="producto perdido" accent={ACCENTS.red} />
-            <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald} />
-            <KpiCard label="Ticket promedio" value={moneyC(k.ticket)} sub={`${N.format(k.clientes)} clientes · ${N.format(k.clientes_nuevos)} nuevos`} accent={ACCENTS.blue} />
+            <KpiCard label={incluirNoEntregados ? 'Venta (todos)' : 'Venta entregada'} value={moneyC(k.venta)} sub={`${N.format(k.pedidos)} pedidos`} accent={ACCENTS.blue}
+              delta={cmp ? <Delta cur={k.venta} prev={kp!.venta} /> : undefined} />
+            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> antes de bonif.</>} accent={ACCENTS.cyan}
+              delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
+            <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
+              delta={cmp ? <Delta cur={k.bonif} prev={kp!.bonif} invert /> : undefined} />
+            <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pct(k.margen_neto / k.venta)}</b> post bonif.</>} accent={ACCENTS.violet}
+              delta={cmp ? <Delta cur={k.margen_neto} prev={kp!.margen_neto} /> : undefined} />
+            <KpiCard label={`Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={`base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate}
+              delta={cmp && derivedPrev ? <Delta cur={derived.comision} prev={derivedPrev.comision} invert /> : undefined} />
+            <KpiCard label="Mermas" value={moneyC(k.mermas)} sub="producto perdido" accent={ACCENTS.red}
+              delta={cmp ? <Delta cur={k.mermas} prev={kp!.mermas} invert /> : undefined} />
+            <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald}
+              delta={cmp && derivedPrev ? <Delta cur={derived.contrib} prev={derivedPrev.contrib} /> : undefined} />
+            <KpiCard label="Ticket promedio" value={moneyC(k.ticket)} sub={`${N.format(k.clientes)} clientes · ${N.format(k.clientes_nuevos)} nuevos`} accent={ACCENTS.blue}
+              delta={cmp ? <Delta cur={k.ticket} prev={kp!.ticket} /> : undefined} />
           </div>
 
           {/* Flag: productos sin costo */}
