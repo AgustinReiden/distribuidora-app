@@ -231,6 +231,8 @@ export {
   reporteGerencialKeys,
   useReporteGerencialQuery,
   useAnalisisMensualQuery,
+  useMetasGerencialQuery,
+  useGuardarMetaMutation,
 } from './useReporteGerencialQuery'
 export type {
   ReporteGerencial,
@@ -242,6 +244,7 @@ export type {
   ReporteCliente,
   ReporteCobranza,
   Alerta,
+  MetasGerenciales,
   AnalisisMensual,
 } from './useReporteGerencialQuery'
 
