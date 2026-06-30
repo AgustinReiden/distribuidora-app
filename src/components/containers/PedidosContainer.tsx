@@ -24,6 +24,7 @@ import {
   useCancelarPedidoMutation,
   useCambiarClientePedidoMutation,
   usePagosMasivosMutation,
+  useEntregaYPagoMasivosMutation,
   usePedidosAsignadosQuery,
   useClientesQuery,
   useProductosQuery,
@@ -70,6 +71,7 @@ const ModalEntregaConSalvedad = lazy(() => import('../modals/ModalEntregaConSalv
 const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas'))
 const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
 const ModalPagosMasivos = lazy(() => import('../modals/ModalPagosMasivos'))
+const ModalEntregaYPagoMasivos = lazy(() => import('../modals/ModalEntregaYPagoMasivos'))
 const ModalMarcarVisita = lazy(() => import('../modals/ModalMarcarVisita'))
 const ModalVisitasHoy = lazy(() => import('../modals/ModalVisitasHoy'))
 const ModalMotivoSinGps = lazy(() => import('../modals/ModalMotivoSinGps'))
@@ -155,6 +157,7 @@ export default function PedidosContainer(): React.ReactElement {
   const cancelarPedidoMut = useCancelarPedidoMutation()
   const cambiarClientePedidoMut = useCambiarClientePedidoMutation()
   const pagosMasivos = usePagosMasivosMutation()
+  const entregaYPagoMasivos = useEntregaYPagoMasivosMutation()
   const crearClienteMut = useCrearClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
   const aplicarCambioParadaMut = useAplicarCambioParadaMutation()
@@ -196,6 +199,7 @@ export default function PedidosContainer(): React.ReactElement {
   const [modalEntregasMasivasOpen, setModalEntregasMasivasOpen] = useState(false)
   const [modalCancelarOpen, setModalCancelarOpen] = useState(false)
   const [modalPagosMasivosOpen, setModalPagosMasivosOpen] = useState(false)
+  const [modalEntregaYPagoMasivosOpen, setModalEntregaYPagoMasivosOpen] = useState(false)
   const [modalNotasOpen, setModalNotasOpen] = useState(false)
   const [modalPagoPedidoOpen, setModalPagoPedidoOpen] = useState(false)
   const [modalMarcarVisitaOpen, setModalMarcarVisitaOpen] = useState(false)
@@ -243,6 +247,7 @@ export default function PedidosContainer(): React.ReactElement {
     setModalEntregasMasivasOpen(false)
     setModalCancelarOpen(false)
     setModalPagosMasivosOpen(false)
+    setModalEntregaYPagoMasivosOpen(false)
     setModalNotasOpen(false)
     setModalPagoPedidoOpen(false)
     setModalMarcarVisitaOpen(false)
@@ -531,6 +536,16 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [pagosMasivos, notify])
+
+  const handleEntregaYPagoMasivos = useCallback(async (transportistaId: string, formaPago: string, pedidoIds: string[], fecha: string) => {
+    setGuardando(true)
+    try {
+      await entregaYPagoMasivos.mutateAsync({ pedidoIds, transportistaId, formaPago, fecha })
+      setModalEntregaYPagoMasivosOpen(false)
+      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} entregado${pedidoIds.length !== 1 ? 's' : ''} y pagado${pedidoIds.length !== 1 ? 's' : ''}`)
+    } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
+    setGuardando(false)
+  }, [entregaYPagoMasivos, notify])
 
   // Fetch todos los pedidos con filtros actuales (sin paginación) para export
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
@@ -1450,6 +1465,7 @@ export default function PedidosContainer(): React.ReactElement {
           onCancelarPedido={handleCancelarPedido}
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
+          onEntregaYPagoMasivos={() => setModalEntregaYPagoMasivosOpen(true)}
           onMarcarVisita={() => setModalMarcarVisitaOpen(true)}
           onVerVisitasHoy={() => setModalVisitasHoyOpen(true)}
           onRegistrarSalvedad={handleRegistrarSalvedadSingle}
@@ -1733,6 +1749,20 @@ export default function PedidosContainer(): React.ReactElement {
           <ModalPagosMasivos
             onConfirm={handlePagosMasivos}
             onClose={() => setModalPagosMasivosOpen(false)}
+            guardando={guardando}
+            isEncargado={isEncargado}
+            isAdmin={isAdmin}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Entrega y Pago Masivos (combinado) */}
+      {modalEntregaYPagoMasivosOpen && (
+        <Suspense fallback={null}>
+          <ModalEntregaYPagoMasivos
+            transportistas={transportistas}
+            onConfirm={handleEntregaYPagoMasivos}
+            onClose={() => setModalEntregaYPagoMasivosOpen(false)}
             guardando={guardando}
             isEncargado={isEncargado}
             isAdmin={isAdmin}

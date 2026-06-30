@@ -997,3 +997,62 @@ export function usePagosMasivosMutation() {
     },
   })
 }
+
+// =========================================================================
+// Entrega y Pago Masivos (combinado: entregar + cobrar en un solo paso)
+// =========================================================================
+
+async function marcarEntregaYPagoMasivo(
+  pedidoIds: string[],
+  transportistaId: string,
+  formaPago: string,
+  fecha?: string | null
+): Promise<void> {
+  // RPC combinada: entrega (asigna transportista + fecha) y registra el pago
+  // por el saldo pendiente de cada pedido, en una transacción atómica.
+  const rpcArgs: Record<string, unknown> = {
+    p_pedido_ids: pedidoIds.map(id => Number(id)),
+    p_transportista_id: transportistaId,
+    p_forma_pago: formaPago,
+  }
+  if (fecha) rpcArgs.p_fecha = fecha
+
+  const { error } = await supabase.rpc('marcar_entrega_y_pago_masivo', rpcArgs)
+  if (error) throw error
+
+  // Historial best-effort (no bloquea)
+  const fechaHistorial = fecha ? `${fecha}T12:00:00-03:00` : new Date().toISOString()
+  const historialEntries = pedidoIds.map(pedidoId => ({
+    pedido_id: pedidoId,
+    accion: 'entregado',
+    descripcion: `Entrega+pago masivo - Transportista: ${transportistaId} - Forma: ${formaPago}`,
+    fecha: fechaHistorial,
+  }))
+
+  await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
+}
+
+/**
+ * Hook para entregar + cobrar multiples pedidos en un solo paso (con fecha opcional).
+ * Invalida pedidos, clientes (cambia el saldo) y recorridos (la entrega puede
+ * cerrar paradas de una ruta activa).
+ */
+export function useEntregaYPagoMasivosMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: ({ pedidoIds, transportistaId, formaPago, fecha }: {
+      pedidoIds: string[];
+      transportistaId: string;
+      formaPago: string;
+      fecha?: string | null
+    }) => marcarEntregaYPagoMasivo(pedidoIds, transportistaId, formaPago, fecha),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
+    },
+  })
+}

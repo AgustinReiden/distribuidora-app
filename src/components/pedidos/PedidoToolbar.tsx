@@ -23,7 +23,7 @@
 import React from 'react';
 import {
   Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown,
-  MapPin, History, Boxes, Download, ArrowLeftRight, type LucideIcon,
+  MapPin, History, Boxes, Download, ArrowLeftRight, HandCoins, type LucideIcon,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
@@ -49,6 +49,7 @@ export interface PedidoToolbarProps {
   onExportarExcel: (modo: 'pagina' | 'filtro') => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
+  onEntregaYPagoMasivos?: () => void;
   onMarcarVisita?: () => void;
   onVerVisitasHoy?: () => void;
 }
@@ -185,6 +186,7 @@ export default function PedidoToolbar({
   onExportarExcel,
   onEntregasMasivas,
   onPagosMasivos,
+  onEntregaYPagoMasivos,
   onMarcarVisita,
   onVerVisitasHoy,
 }: PedidoToolbarProps): React.ReactElement {
@@ -194,7 +196,7 @@ export default function PedidoToolbar({
 
   // ¿Hay al menos una acción masiva habilitada? (para mostrar el dropdown)
   const hasMasivas = Boolean(
-    onPagosMasivos || onEntregasMasivas,
+    onPagosMasivos || onEntregasMasivas || onEntregaYPagoMasivos,
   );
 
   // Dropdowns "Acciones masivas" y "Exportaciones" — reusados en ambos layouts.
@@ -215,6 +217,12 @@ export default function PedidoToolbar({
         <DropdownMenuItem onSelect={onEntregasMasivas}>
           <PackageCheck className="w-4 h-4 text-teal-600" />
           <span>Entregas Masivas</span>
+        </DropdownMenuItem>
+      )}
+      {onEntregaYPagoMasivos && (
+        <DropdownMenuItem onSelect={onEntregaYPagoMasivos}>
+          <HandCoins className="w-4 h-4 text-indigo-600" />
+          <span>Entrega y Pago</span>
         </DropdownMenuItem>
       )}
     </ToolbarDropdown>

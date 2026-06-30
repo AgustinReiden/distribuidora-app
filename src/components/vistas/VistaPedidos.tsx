@@ -69,6 +69,7 @@ export interface VistaPedidosProps {
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
+  onEntregaYPagoMasivos?: () => void;
   /** Abre el modal para que el preventista marque una visita a un cliente. */
   onMarcarVisita?: () => void;
   /** Abre el modal con el timeline de visitas del día del preventista logueado. */
@@ -140,6 +141,7 @@ export default function VistaPedidos({
   onCancelarPedido,
   onEntregasMasivas,
   onPagosMasivos,
+  onEntregaYPagoMasivos,
   onMarcarVisita,
   onVerVisitasHoy,
   onRegistrarSalvedad,
@@ -182,6 +184,7 @@ export default function VistaPedidos({
             onExportarExcel={onExportarExcel}
             onEntregasMasivas={onEntregasMasivas}
             onPagosMasivos={onPagosMasivos}
+            onEntregaYPagoMasivos={onEntregaYPagoMasivos}
             onMarcarVisita={onMarcarVisita}
             onVerVisitasHoy={onVerVisitasHoy}
           />
