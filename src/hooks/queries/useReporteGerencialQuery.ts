@@ -6,7 +6,7 @@
  * de red. El análisis narrativo mensual vive en la tabla `reportes_mensuales`
  * (lo escribe Claude Code vía el comando /reporte-mensual).
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 
 export interface ReporteKpis {
@@ -149,6 +149,54 @@ export function useReporteGerencialQuery(
     },
     enabled,
     staleTime: 5 * 60 * 1000,
+  })
+}
+
+export interface MetasGerenciales {
+  venta: number | null
+  margen_neto: number | null
+}
+
+/** Metas (objetivos) del mes para una sucursal (null = red). Sólo aplica a meses. */
+export function useMetasGerencialQuery(
+  sucursalId: number | null,
+  periodoMes: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['metas-gerenciales', sucursalId, periodoMes] as const,
+    queryFn: async (): Promise<MetasGerenciales> => {
+      let q = supabase.from('metas_gerenciales').select('metrica, valor').eq('periodo', periodoMes as string)
+      q = sucursalId == null ? q.is('sucursal_id', null) : q.eq('sucursal_id', sucursalId)
+      const { data, error } = await q
+      if (error) throw new Error(error.message)
+      const rows = (data as { metrica: string; valor: number }[] | null) ?? []
+      return {
+        venta: rows.find((r) => r.metrica === 'venta')?.valor ?? null,
+        margen_neto: rows.find((r) => r.metrica === 'margen_neto')?.valor ?? null,
+      }
+    },
+    enabled: enabled && !!periodoMes,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/** Upsert de una meta mensual (admin). Invalida metas tras guardar. */
+export function useGuardarMetaMutation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { sucursalId: number | null; periodo: string; metrica: 'venta' | 'margen_neto'; valor: number }) => {
+      const { error } = await supabase.rpc('guardar_meta_gerencial', {
+        p_sucursal_id: vars.sucursalId,
+        p_periodo: vars.periodo,
+        p_metrica: vars.metrica,
+        p_valor: vars.valor,
+      })
+      if (error) throw new Error(error.message)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['metas-gerenciales'] })
+    },
   })
 }
 
