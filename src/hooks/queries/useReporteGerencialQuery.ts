@@ -157,6 +157,33 @@ export interface MetasGerenciales {
   margen_neto: number | null
 }
 
+export interface AlertaDetalleItem {
+  nombre: string
+  valor: number
+  detalle: string
+}
+
+/** Lista detrás de una alerta (lazy: solo al hacer click). codigo = alerta.codigo. */
+export function useAlertaDetalleQuery(
+  sucursalId: number | null,
+  codigo: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['alerta-detalle', sucursalId, codigo] as const,
+    queryFn: async (): Promise<AlertaDetalleItem[]> => {
+      const { data, error } = await supabase.rpc('reporte_alerta_detalle', {
+        p_sucursal_id: sucursalId,
+        p_codigo: codigo,
+      })
+      if (error) throw new Error(error.message)
+      return (data as AlertaDetalleItem[] | null) ?? []
+    },
+    enabled: enabled && !!codigo,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
 /** Metas (objetivos) del mes para una sucursal (null = red). Sólo aplica a meses. */
 export function useMetasGerencialQuery(
   sucursalId: number | null,

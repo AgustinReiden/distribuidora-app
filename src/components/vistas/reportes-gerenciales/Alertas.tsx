@@ -9,7 +9,7 @@ const STYLE: Record<Alerta['severidad'], { icon: React.ElementType; cls: string 
 }
 
 /** Panel "Qué requiere tu atención". Cada alerta es clickeable → drill a su sección. */
-export default function Alertas({ items, onSelect }: { items: Alerta[]; onSelect?: (seccion: string) => void }): React.ReactElement | null {
+export default function Alertas({ items, onSelect }: { items: Alerta[]; onSelect?: (alerta: Alerta) => void }): React.ReactElement | null {
   if (!items?.length) return null
   return (
     <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-sm p-4">
@@ -24,7 +24,7 @@ export default function Alertas({ items, onSelect }: { items: Alerta[]; onSelect
             <button
               key={a.codigo}
               type="button"
-              onClick={() => onSelect?.(a.seccion)}
+              onClick={() => onSelect?.(a)}
               className={`flex items-start gap-2 text-left border rounded-lg px-3 py-2 transition hover:brightness-95 ${s.cls}`}
             >
               <Icon className="w-4 h-4 mt-0.5 shrink-0" />

@@ -233,6 +233,7 @@ export {
   useAnalisisMensualQuery,
   useMetasGerencialQuery,
   useGuardarMetaMutation,
+  useAlertaDetalleQuery,
 } from './useReporteGerencialQuery'
 export type {
   ReporteGerencial,
@@ -245,6 +246,7 @@ export type {
   ReporteCobranza,
   Alerta,
   MetasGerenciales,
+  AlertaDetalleItem,
   AnalisisMensual,
 } from './useReporteGerencialQuery'
 
