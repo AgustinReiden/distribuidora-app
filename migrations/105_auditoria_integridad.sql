@@ -95,10 +95,11 @@ BEGIN
     ('STK-D','info','movimientos origen=auto sin referencia (trazabilidad pendiente P1)',
       (SELECT count(*) FROM stock_historico WHERE origen='auto' AND referencia_id IS NULL)),
     -- ===== Cuenta corriente / pagos =====
-    ('CC-A','critical','saldo_cuenta = SUM(total - monto_pagado) de no cancelados',
-      (SELECT count(*) FROM clientes c WHERE abs(COALESCE(c.saldo_cuenta,0) -
+    ('CC-A','critical','saldo_cuenta = Σ(total-monto_pagado no cancelados) − Σ(pagos a cuenta sin pedido = saldo a favor)',
+      (SELECT count(*) FROM clientes c WHERE abs(COALESCE(c.saldo_cuenta,0) - (
         COALESCE((SELECT sum(p.total-COALESCE(p.monto_pagado,0)) FROM pedidos p
-          WHERE p.cliente_id=c.id AND p.estado NOT IN ('cancelado','anulado')),0))>0.01)),
+          WHERE p.cliente_id=c.id AND p.estado NOT IN ('cancelado','anulado')),0)
+        - COALESCE((SELECT sum(pg.monto) FROM pagos pg WHERE pg.cliente_id=c.id AND pg.pedido_id IS NULL),0)))>0.01)),
     ('CC-PAGOS-CANCEL','high','ningún pago imputado a un pedido cancelado',
       (SELECT count(*) FROM pagos pg JOIN pedidos p ON p.id=pg.pedido_id WHERE p.estado='cancelado')),
     -- ===== Compras =====
