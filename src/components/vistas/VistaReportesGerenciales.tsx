@@ -11,7 +11,11 @@ import {
 import Sparkline from './reportes-gerenciales/Sparkline'
 import Alertas from './reportes-gerenciales/Alertas'
 import ModalMetas from './reportes-gerenciales/ModalMetas'
-import type { ReporteGerencial, AnalisisMensual, MetasGerenciales } from '../../hooks/queries'
+import ModalAlertaDetalle from './reportes-gerenciales/ModalAlertaDetalle'
+import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta } from '../../hooks/queries'
+
+// Alertas cuyo detalle es una LISTA (modal). El resto hace scroll a su sección.
+const ALERTA_CON_LISTA = new Set(['cobranza_vencida', 'clientes_inactivos', 'productos_sin_costo'])
 
 export interface PeriodoOpt {
   key: string
@@ -142,9 +146,18 @@ export default function VistaReportesGerenciales({
 
   const metasOn = periodoSel.esMes && !!metas && (metas.venta != null || metas.margen_neto != null)
 
+  const [alertaDetalle, setAlertaDetalle] = useState<Alerta | null>(null)
+
   const irASeccion = (seccion: string): void => {
     setDetalleAbierto(true)
     setTimeout(() => document.getElementById(`sec-${seccion}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80)
+  }
+
+  // Click en una alerta: si tiene lista (clientes que deben, inactivos…) abre un
+  // modal con esa lista; si no, baja a la sección relacionada.
+  const onAlerta = (a: Alerta): void => {
+    if (ALERTA_CON_LISTA.has(a.codigo)) setAlertaDetalle(a)
+    else irASeccion(a.seccion)
   }
 
   useEffect(() => {
@@ -313,7 +326,7 @@ export default function VistaReportesGerenciales({
           )}
 
           {/* Qué requiere tu atención */}
-          <Alertas items={reporte.alertas ?? []} onSelect={irASeccion} />
+          <Alertas items={reporte.alertas ?? []} onSelect={onAlerta} />
 
           {/* Detalle completo: colapsable; los gráficos montan recién al abrir (perf) */}
           <button
@@ -575,6 +588,15 @@ export default function VistaReportesGerenciales({
           guardando={guardandoMeta}
           onGuardar={(v, m) => { onGuardarMeta(v, m); setShowMetas(false) }}
           onClose={() => setShowMetas(false)}
+        />
+      )}
+
+      {alertaDetalle && (
+        <ModalAlertaDetalle
+          titulo={alertaDetalle.titulo}
+          codigo={alertaDetalle.codigo}
+          sucursalId={sucursalSel}
+          onClose={() => setAlertaDetalle(null)}
         />
       )}
     </div>
