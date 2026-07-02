@@ -75,6 +75,9 @@ export function usePromocionPedido(
    *  producto para la bonificación al crear el pedido (paridad con "Cambiar
    *  regalo" de la edición). */
   overridesRegalo?: Record<string, RegaloOverride>,
+  /** Ids de promos que el usuario quitó a mano (crear/editar). Se excluyen de la
+   *  resolución: sin regalo y con los disparadores liberados para mayorista. */
+  promosEliminadas?: ReadonlySet<string>,
 ): UsePromocionPedidoReturn {
   const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
   const { data: promoMap, isLoading: loadingPromos } = usePromoMapQuery(fechaReferencia)
@@ -84,8 +87,8 @@ export function usePromocionPedido(
     if (!promoMap || promoMap.size === 0 || items.length === 0) {
       return { bonificaciones: [], productosConPromo: new Set() }
     }
-    return resolverPromociones(items, promoMap)
-  }, [items, promoMap])
+    return resolverPromociones(items, promoMap, promosEliminadas)
+  }, [items, promoMap, promosEliminadas])
 
   // 1b. Aplicar override del regalo: solo cambia el producto/descripción de la
   //     bonificación; los disparadores (productosConPromo) y reglas no se tocan.

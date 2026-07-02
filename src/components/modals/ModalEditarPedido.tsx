@@ -56,6 +56,8 @@ export interface ModalEditarPedidoProps {
   canEditFechaEntrega?: boolean;
   /** Permite sustituir el producto de un regalo de promo. Default: false. Solo admin/encargado. */
   canSustituirRegalo?: boolean;
+  /** Permite quitar una promoción del pedido (con confirmación). Default: false. Admin/preventista/encargado. */
+  canEliminarPromo?: boolean;
   /** Permite reasignar el preventista del pedido. Default: false. Solo admin. */
   canEditPreventista?: boolean;
   /** Permite cambiar el cliente del pedido (cancela el viejo + crea uno nuevo). Default: false. Solo admin. */
@@ -85,6 +87,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   canEditPrices,
   canEditFechaEntrega,
   canSustituirRegalo = false,
+  canEliminarPromo = false,
   canEditPreventista = false,
   canCambiarCliente = false,
   clientes = [],
@@ -111,6 +114,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [fechaEntregaProgramada, setFechaEntregaProgramada] = useState<string>(fechaEntregaProgramadaOriginal);
   const [errorValidacion, setErrorValidacion] = useState<string>('');
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
+
+  // Promos que el usuario quitó a mano en esta edición. Guarda {id, nombre} para
+  // mostrar la fila "quitada" + restaurar sin re-resolver. Al guardar, la promo
+  // excluida no viaja en itemsBonif y actualizar_pedido_items borra su regalo.
+  const [promosEliminadas, setPromosEliminadas] = useState<Array<{ promoId: string; promoNombre: string }>>([]);
 
   // Zod validation (solo notas; el pago se maneja en ModalRegistrarPago)
   const { validate } = useZodValidation(modalEditarPedidoSchema);
@@ -265,12 +273,39 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Así promos vigentes al momento de la creación siguen aplicando; y promos
   // creadas DESPUÉS del pedido no se aplican retroactivamente.
   const fechaReferenciaPromo = pedido?.fecha || undefined;
+  const promosEliminadasSet = useMemo(
+    () => new Set(promosEliminadas.map(p => p.promoId)),
+    [promosEliminadas],
+  );
   const {
     itemsFinales,
     totalFinal,
     moqMap,
     isLoading: promosLoading,
-  } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo);
+  } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, undefined, promosEliminadasSet);
+
+  const hayPromosQuitadas = promosEliminadas.length > 0;
+
+  // Quitar una promo del pedido (con alerta). Se aplica al guardar: la promo
+  // excluida no genera bonificación y el RPC borra su regalo + restaura stock.
+  const handleQuitarPromo = (promoId: string, promoNombre: string): void => {
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: 'Quitar promoción',
+      mensaje: `¿Quitar la promoción "${promoNombre}" de este pedido? Al guardar se elimina la bonificación y se restaura el stock si corresponde.`,
+      onConfirm: () => {
+        setConfirmConfig(null);
+        setPromosEliminadas(prev =>
+          prev.some(p => p.promoId === promoId) ? prev : [...prev, { promoId, promoNombre }],
+        );
+      },
+    });
+  };
+
+  const handleRestaurarPromo = (promoId: string): void => {
+    setPromosEliminadas(prev => prev.filter(p => p.promoId !== promoId));
+  };
 
   // Mapa de precios resueltos para mostrar en cada item no-bonif
   const preciosResueltosMap = useMemo(() => {
@@ -502,9 +537,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     fechaEntregaCambio: boolean,
   ): Promise<void> => {
     try {
-      // Si hay cambios en items y el usuario puede editarlos, guardar items con
-      // precios mayoristas resueltos, desglose fiscal y bonificaciones recalculadas.
-      if (itemsModificados && puedeEditarItems && onSaveItems) {
+      // Si hay cambios en items (con permiso de edición) O se quitó alguna promo
+      // a mano, guardar items con precios resueltos, desglose fiscal y las
+      // bonificaciones recalculadas (que ya excluyen las promos quitadas). Quitar
+      // una promo no requiere permiso de edición de ítems: el RPC
+      // actualizar_pedido_items autoriza admin/encargado/preventista.
+      if (((itemsModificados && puedeEditarItems) || hayPromosQuitadas) && onSaveItems) {
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
 
         // Items no-bonif del estado → con precio resuelto + desglose fiscal
@@ -597,7 +635,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               <span className="text-xs text-gray-500">(solo lectura)</span>
             </div>
             <div className="divide-y dark:divide-gray-600">
-              {pedido.items?.map(item => (
+              {/* Se oculta el regalo de una promo quitada (aún sin guardar): su
+                  gestión vive en "Promociones aplicadas". El resto se muestra igual. */}
+              {pedido.items?.filter(item => !(item.es_bonificacion && item.promocion_id != null && promosEliminadasSet.has(String(item.promocion_id)))).map(item => (
                 <div key={item.producto_id} className="p-3 flex items-center justify-between">
                   <div className="flex-1">
                     <p className="font-medium text-sm dark:text-white">{item.producto?.nombre || 'Producto'}</p>
@@ -830,7 +870,86 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       </p>
                     </div>
                   </div>
-                  <span className="text-sm font-bold text-green-600">$0</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-sm font-bold text-green-600">$0</span>
+                    {canEliminarPromo && bonif.promocionId && (
+                      <button
+                        type="button"
+                        onClick={() => handleQuitarPromo(String(bonif.promocionId), bonif.promoNombre ?? bonif.nombre)}
+                        className="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
+                        title="Quitar esta promoción del pedido"
+                        aria-label="Quitar promoción"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {/* Promos quitadas a mano — restaurables antes de guardar */}
+              {promosEliminadas.map(p => (
+                <div key={`promo-quitada-${p.promoId}`} className="p-3 flex items-center justify-between bg-gray-50 dark:bg-gray-800/40">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 min-w-0 truncate">
+                    Promoción quitada: <span className="font-medium">{p.promoNombre}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleRestaurarPromo(p.promoId)}
+                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                  >
+                    Restaurar
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Promociones aplicadas — visible cuando NO se editan ítems (encargado/
+            preventista ven la vista de solo lectura), para poder quitar/restaurar
+            una promo. Los admins la manejan en la lista editable de arriba. */}
+        {canEliminarPromo && !puedeEditarItems && !pedidoEntregado && (bonificacionesCalculadas.length > 0 || hayPromosQuitadas) && (
+          <div className="border dark:border-gray-600 rounded-lg overflow-hidden">
+            <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 flex items-center gap-2">
+              <Gift className="w-5 h-5 text-green-600" />
+              <span className="font-medium dark:text-white">Promociones aplicadas</span>
+            </div>
+            <div className="divide-y dark:divide-gray-600">
+              {bonificacionesCalculadas.map(bonif => (
+                <div key={`promo-ro-${bonif.productoId}-${bonif.promocionId ?? 'anon'}`} className="p-3 flex items-center justify-between bg-green-50 dark:bg-green-900/20">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Gift className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm dark:text-white truncate">{bonif.nombre}</p>
+                      <p className="text-xs text-green-600 font-medium">
+                        REGALO x{bonif.cantidad}{bonif.promoNombre ? ` · ${bonif.promoNombre}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  {bonif.promocionId && (
+                    <button
+                      type="button"
+                      onClick={() => handleQuitarPromo(String(bonif.promocionId), bonif.promoNombre ?? bonif.nombre)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-lg shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Quitar
+                    </button>
+                  )}
+                </div>
+              ))}
+              {promosEliminadas.map(p => (
+                <div key={`promo-ro-quitada-${p.promoId}`} className="p-3 flex items-center justify-between bg-gray-50 dark:bg-gray-800/40">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 min-w-0 truncate">
+                    Promoción quitada: <span className="font-medium">{p.promoNombre}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleRestaurarPromo(p.promoId)}
+                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                  >
+                    Restaurar
+                  </button>
                 </div>
               ))}
             </div>

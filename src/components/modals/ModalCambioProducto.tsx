@@ -14,14 +14,25 @@ export type MotivoCambio = 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' |
 // 'mal_estado' daba "Invalid input" validado contra un enum viejo. Acá la
 // validación viaja SIEMPRE en el mismo chunk que la UI: no pueden desfasarse.
 // Las opciones del enum deben coincidir con MOTIVOS_CAMBIO / MotivoCambio.
-const modalCambioProductoSchema = z.object({
-  clienteId: z.string().min(1, { message: 'Debe seleccionar un cliente' }),
-  productoDevueltoId: z.string().min(1, { message: 'Debe seleccionar el producto a devolver' }),
+//
+// Los ids se validan con z.coerce.string(): clientes.id y productos.id son
+// bigint en Postgres y PostgREST los devuelve como NUMBER en runtime (los hooks
+// useClientesQuery/useProductosQuery no los stringifican, a diferencia de
+// pedidos/promos). Con z.string() el número fallaba el chequeo de tipo base y
+// devolvía "Invalid input" — por eso el cambio nunca se pudo cargar. coerce
+// normaliza number→string; '' (sin selección) sigue fallando el .min(1).
+//
+// Se exporta SÓLO para el test unitario de regresión; debe seguir co-locado acá
+// (mover el schema reintroduce el riesgo de chunk desincronizado del PWA).
+// eslint-disable-next-line react-refresh/only-export-components
+export const modalCambioProductoSchema = z.object({
+  clienteId: z.coerce.string().min(1, { message: 'Debe seleccionar un cliente' }),
+  productoDevueltoId: z.coerce.string().min(1, { message: 'Debe seleccionar el producto a devolver' }),
   cantidadDevuelta: z.coerce
     .number({ error: 'La cantidad debe ser un número' })
     .int({ message: 'La cantidad debe ser un número entero' })
     .positive({ message: 'La cantidad debe ser mayor a 0' }),
-  productoEntregadoId: z.string().min(1, { message: 'Debe seleccionar el producto a entregar' }),
+  productoEntregadoId: z.coerce.string().min(1, { message: 'Debe seleccionar el producto a entregar' }),
   cantidadEntregada: z.coerce
     .number({ error: 'La cantidad debe ser un número' })
     .int({ message: 'La cantidad debe ser un número entero' })

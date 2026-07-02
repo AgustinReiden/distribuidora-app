@@ -279,6 +279,11 @@ export default function PedidosContainer(): React.ReactElement {
   // Override del producto del regalo al crear (solo admin). promoId -> producto elegido.
   const [regalosOverride, setRegalosOverride] = useState<Record<string, RegaloOverride>>({})
 
+  // Promos quitadas a mano al crear el pedido (admin/preventista/encargado).
+  // Guarda {id, nombre} para mostrar la fila "quitada" y restaurar sin re-resolver.
+  const [promosEliminadas, setPromosEliminadas] = useState<Array<{ promoId: string; promoNombre: string }>>([])
+  const promosEliminadasSet = useMemo(() => new Set(promosEliminadas.map(p => p.promoId)), [promosEliminadas])
+
   const resetNuevoPedido = useCallback(() => {
     setNuevoPedido({
       clienteId: '', items: [], notas: '',
@@ -289,6 +294,7 @@ export default function PedidosContainer(): React.ReactElement {
       preventistaId: undefined,
     })
     setRegalosOverride({})
+    setPromosEliminadas([])
   }, [])
 
   // Admin elige/cambia el producto del regalo de una promo al crear el pedido.
@@ -302,8 +308,30 @@ export default function PedidosContainer(): React.ReactElement {
     }))
   }, [productos])
 
-  // Resolve wholesale prices + promos (con override del regalo elegido por admin)
-  const { itemsFinales } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride)
+  // Quitar una promo del pedido en creación, con alerta de confirmación de por
+  // medio. Disponible para quien pueda crear pedidos (admin/preventista/encargado).
+  const handleEliminarPromoCreacion = useCallback((promoId: string, promoNombre: string) => {
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: 'Quitar promoción',
+      mensaje: `¿Quitar la promoción "${promoNombre}" de este pedido? El cliente no recibirá la bonificación.`,
+      onConfirm: () => {
+        setConfirmConfig({ visible: false })
+        setPromosEliminadas(prev =>
+          prev.some(p => p.promoId === promoId) ? prev : [...prev, { promoId, promoNombre }],
+        )
+      },
+    })
+  }, [])
+
+  const handleRestaurarPromoCreacion = useCallback((promoId: string) => {
+    setPromosEliminadas(prev => prev.filter(p => p.promoId !== promoId))
+  }, [])
+
+  // Resolve wholesale prices + promos (con override del regalo elegido por admin
+  // y las promos que el usuario haya quitado a mano)
+  const { itemsFinales } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet)
 
   // =========================================================================
   // VistaPedidos handlers
@@ -1495,6 +1523,9 @@ export default function PedidosContainer(): React.ReactElement {
             nuevoPedido={nuevoPedido}
             regalosOverride={regalosOverride}
             onCambiarRegaloCreacion={handleCambiarRegaloCreacion}
+            promosEliminadas={promosEliminadas}
+            onEliminarPromoCreacion={handleEliminarPromoCreacion}
+            onRestaurarPromoCreacion={handleRestaurarPromoCreacion}
             onClose={() => { setModalPedidoOpen(false); resetNuevoPedido() }}
             onClienteChange={(id: string) => setNuevoPedido(prev => ({ ...prev, clienteId: id }))}
             onAgregarItem={(productoId: string) => {
@@ -1593,6 +1624,7 @@ export default function PedidosContainer(): React.ReactElement {
               (isPreventista && preventistaPuedeEditar(pedidoEditando, user?.id))
             }
             canSustituirRegalo={isAdmin || isEncargado}
+            canEliminarPromo={isAdmin || isPreventista || isEncargado}
             canEditPreventista={isAdmin}
             canCambiarCliente={isAdmin}
             clientes={clientes}

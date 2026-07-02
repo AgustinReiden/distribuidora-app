@@ -119,6 +119,12 @@ export interface ModalPedidoProps {
   regalosOverride?: Record<string, RegaloOverride>;
   /** Callback cuando el admin cambia el producto del regalo de una promo al crear. */
   onCambiarRegaloCreacion?: (promoId: string, productoId: string) => void;
+  /** Promos quitadas a mano del pedido (para mostrar la fila "quitada" + restaurar). */
+  promosEliminadas?: Array<{ promoId: string; promoNombre: string }>;
+  /** Callback al quitar una promo del pedido (abre la confirmación en el container). */
+  onEliminarPromoCreacion?: (promoId: string, promoNombre: string) => void;
+  /** Callback al restaurar una promo previamente quitada. */
+  onRestaurarPromoCreacion?: (promoId: string) => void;
 }
  
 
@@ -148,7 +154,10 @@ const ModalPedido = memo(function ModalPedido({
   onPreventistaChange,
   currentUserId,
   regalosOverride,
-  onCambiarRegaloCreacion
+  onCambiarRegaloCreacion,
+  promosEliminadas,
+  onEliminarPromoCreacion,
+  onRestaurarPromoCreacion
 }: ModalPedidoProps) {
   // Solo admin puede reasignar preventista al pedido. La query se habilita
   // condicionalmente para no traer perfiles para preventistas/encargados.
@@ -292,8 +301,14 @@ const ModalPedido = memo(function ModalPedido({
 
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
+  // Promos quitadas a mano → se excluyen de la resolución (display y submit).
+  const promosEliminadasSet = useMemo(
+    () => new Set((promosEliminadas ?? []).map(p => p.promoId)),
+    [promosEliminadas],
+  );
+
   // Precios mayoristas, promociones y cantidades mínimas
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride);
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet);
 
   // Descuento del cliente (general + por categoría) aplicado en vivo sobre los
   // items ya resueltos (mayorista/promo). La categoría prevalece sobre el general.
@@ -814,11 +829,39 @@ const ModalPedido = memo(function ModalPedido({
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="w-6 text-center font-medium text-sm text-green-700 dark:text-green-400">{bonif.cantidadBonificacion}</span>
                                 <p className="w-20 text-right font-semibold text-sm text-green-600">GRATIS</p>
+                                {(isAdmin || isPreventista || isEncargado) && onEliminarPromoCreacion && bonif.promoId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onEliminarPromoCreacion(String(bonif.promoId), bonif.promoNombre)}
+                                    className="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
+                                    title="Quitar esta promoción del pedido"
+                                    aria-label="Quitar promoción"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
                         );
                       })}
+                      {/* Promos quitadas a mano — se pueden restaurar */}
+                      {(promosEliminadas ?? []).map(p => (
+                        <div key={`promo-quitada-${p.promoId}`} className="px-3 py-2 bg-gray-50 dark:bg-gray-800/40 flex items-center justify-between gap-2">
+                          <p className="text-xs text-gray-500 dark:text-gray-400 min-w-0 truncate">
+                            Promoción quitada: <span className="font-medium">{p.promoNombre}</span>
+                          </p>
+                          {onRestaurarPromoCreacion && (
+                            <button
+                              type="button"
+                              onClick={() => onRestaurarPromoCreacion(p.promoId)}
+                              className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                            >
+                              Restaurar
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
 
                     {/* Nudges para alcanzar siguiente tier */}
