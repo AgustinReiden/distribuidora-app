@@ -67,7 +67,11 @@ export interface PromoResolucion {
  */
 export function resolverPromociones(
   items: ItemPedido[],
-  promoMap: PromoMap
+  promoMap: PromoMap,
+  /** Ids de promos que el usuario quitó manualmente (al crear o editar el pedido).
+   *  Se excluyen de la resolución: no generan bonificación y sus disparadores
+   *  vuelven a poder tomar precio mayorista. */
+  promosEliminadas?: ReadonlySet<string>,
 ): PromoResolucion {
   const bonificaciones: BonificacionResult[] = []
   const productosConPromo = new Set<string>()
@@ -77,6 +81,12 @@ export function resolverPromociones(
   //    su promo (el precio manual cambia el precio, no la elegibilidad). Ej: regalar
   //    un producto bajándole el precio no debe anular la botella de regalo de la promo.
   const promosVistas = acumularPromos(items, promoMap, { skipOverride: false })
+
+  // 1a. Sacar las promos quitadas a mano ANTES de derivar productosConPromo y
+  //     bonificaciones, así desaparecen por completo (regalo + reclamo de precio).
+  if (promosEliminadas && promosEliminadas.size > 0) {
+    for (const id of promosEliminadas) promosVistas.delete(id)
+  }
 
   for (const entry of promosVistas.values()) {
     for (const pid of entry.productoIdsEnPedido) productosConPromo.add(pid)
