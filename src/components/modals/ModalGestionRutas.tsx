@@ -249,10 +249,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // Hora a la que arranca el recorrido (sale del depósito). Ancla las ventanas
   // horarias en la optimización para priorizar los horarios de entrega.
   const [horaInicio, setHoraInicio] = useState<string>('08:00');
-  // Filtro de fecha (por fecha de pedido) para acotar el pool de disponibles:
-  // suelen acumularse pendientes/en preparación de varios días.
+  // Filtro de fecha para acotar el pool de disponibles (suelen acumularse
+  // pendientes/en preparación de varios días). Se puede filtrar por fecha de
+  // pedido o por fecha de entrega programada (ver filtroTipoFecha).
   const [filtroDesde, setFiltroDesde] = useState<string>('');
   const [filtroHasta, setFiltroHasta] = useState<string>('');
+  // Columna por la que filtra el pool: 'pedido' (fecha) o 'entrega'
+  // (fecha_entrega_programada, con fallback a fecha). Default 'entrega' porque la
+  // ruta del día se identifica por su fecha de reparto.
+  const [filtroTipoFecha, setFiltroTipoFecha] = useState<'pedido' | 'entrega'>('entrega');
   const [mostrarConfigDeposito, setMostrarConfigDeposito] = useState<boolean>(false);
   const [depositoLat, setDepositoLat] = useState<string>('');
   const [depositoLng, setDepositoLng] = useState<string>('');
@@ -308,17 +313,21 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const idsExistentes = useMemo(() => new Set(paradasExistentes.map(p => p.id)), [paradasExistentes]);
 
   // Disponibles para sumar a la ruta: pendiente/en_preparacion (vienen del
-  // container) filtrados por fecha de pedido.
+  // container) filtrados por fecha de pedido o de entrega (según filtroTipoFecha).
   const disponiblesFiltrados = useMemo((): PedidoDB[] => {
     return pedidos.filter(p => {
       if (!filtroActivo) return true;
-      const f = p.fecha || null;
+      // Columna según el modo: 'entrega' usa fecha_entrega_programada con fallback
+      // a la fecha de pedido; 'pedido' usa fecha.
+      const f = filtroTipoFecha === 'entrega'
+        ? (p.fecha_entrega_programada || p.fecha || null)
+        : (p.fecha || null);
       if (!f) return true; // sin fecha conocida: incluir antes que ocultar
       if (filtroDesde && f < filtroDesde) return false;
       if (filtroHasta && f > filtroHasta) return false;
       return true;
     });
-  }, [pedidos, filtroActivo, filtroDesde, filtroHasta]);
+  }, [pedidos, filtroActivo, filtroDesde, filtroHasta, filtroTipoFecha]);
 
   // Lista visible. En modo dividir: todo el pool (no hay edición in-place). En
   // modo 1 chofer: paradas de su ruta (si existe) + disponibles, sin duplicar
@@ -740,13 +749,30 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 )}
               </div>
 
-              {/* Filtro por fecha de pedido: acota el pool de pendientes/en
-                  preparación cuando se acumulan de varios días */}
+              {/* Filtro por fecha (pedido o entrega): acota el pool de
+                  pendientes/en preparación cuando se acumulan de varios días */}
               <div className="bg-white border rounded-lg p-4">
                 <label className="block text-sm font-medium mb-2 flex items-center gap-1.5">
                   <CalendarDays className="w-4 h-4 text-gray-500" />
-                  Filtrar disponibles por fecha de pedido
+                  Filtrar disponibles por {filtroTipoFecha === 'entrega' ? 'fecha de entrega' : 'fecha de pedido'}
                 </label>
+                {/* Selector de columna: por fecha de pedido o de entrega programada */}
+                <div className="inline-flex rounded-lg border border-gray-200 p-0.5 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setFiltroTipoFecha('pedido')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md ${filtroTipoFecha === 'pedido' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                  >
+                    Fecha de pedido
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltroTipoFecha('entrega')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md ${filtroTipoFecha === 'entrega' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                  >
+                    Fecha de entrega
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Desde</label>
@@ -771,10 +797,8 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   <button
                     type="button"
                     onClick={() => {
-                      const hoy = new Date();
-                      const f = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
-                      setFiltroDesde(f);
-                      setFiltroHasta(f);
+                      setFiltroDesde(hoyISO);
+                      setFiltroHasta(hoyISO);
                     }}
                     className="px-3 py-1.5 text-xs font-medium rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                   >
@@ -1030,7 +1054,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                   )}
                                 </p>
                                 <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
-                                <p className="text-xs text-gray-400">Pedido: {pedido.fecha || '—'}</p>
+                                <p className="text-xs text-gray-400">Pedido: {pedido.fecha || '—'} · Entrega: {pedido.fecha_entrega_programada || '—'}</p>
                               </div>
                               <div className="text-right ml-2">
                                 <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>

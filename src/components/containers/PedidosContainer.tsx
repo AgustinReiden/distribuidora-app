@@ -721,6 +721,25 @@ export default function PedidosContainer(): React.ReactElement {
       if (data.fechaEntregaProgramada) updateData.fecha_entrega_programada = data.fechaEntregaProgramada
       const { error } = await supabase.from('pedidos').update(updateData).eq('id', pedidoEditando.id)
       if (error) throw error
+
+      // Si el pedido estaba "en camino" (asignado a una ruta activa) y se le
+      // cambió alguna fecha, vuelve a pendiente y sale de la ruta: al moverlo de
+      // día ya no pertenece a esa ruta y debe poder re-rutearse. Mismo patrón que
+      // "Volver a pendiente" (handleVolverAPendiente). data.fecha llega siempre que
+      // el usuario puede editar fechas, así que se compara contra el valor original.
+      const fechaCambio =
+        (data.fecha !== undefined && data.fecha !== pedidoEditando.fecha) ||
+        (data.fechaEntregaProgramada !== undefined &&
+          data.fechaEntregaProgramada !== (pedidoEditando.fecha_entrega_programada || ''))
+      const revertido = fechaCambio && pedidoEditando.estado === 'asignado'
+      if (revertido) {
+        if (pedidoEditando.transportista_id) {
+          await asignarTransportistaMut.mutateAsync({ pedidoId: pedidoEditando.id, transportistaId: null })
+        }
+        await cambiarEstado.mutateAsync({ pedidoId: pedidoEditando.id, nuevoEstado: 'pendiente' })
+        await quitarDeRecorridosMut.mutateAsync({ pedidoId: pedidoEditando.id })
+      }
+
       // Invalidar cache para que los cambios se reflejen en la UI. Incluye la
       // familia recorridos* para que la hoja de ruta/comanda re-descargada desde
       // Exportaciones refleje cambios de fecha/notas (sino sirve datos cacheados).
@@ -731,10 +750,14 @@ export default function PedidosContainer(): React.ReactElement {
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       setModalEditarOpen(false)
       setPedidoEditando(null)
-      notify.success('Pedido actualizado')
+      if (revertido) {
+        notify.warning('Pedido actualizado. Estaba en camino: volvió a pendiente y se quitó de la ruta activa.')
+      } else {
+        notify.success('Pedido actualizado')
+      }
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
-  }, [pedidoEditando, notify, queryClient])
+  }, [pedidoEditando, notify, queryClient, asignarTransportistaMut, cambiarEstado, quitarDeRecorridosMut])
 
   // ModalEditarPedido: onSaveItems - guardar cambios de items via RPC.
   // Reenvía el desglose fiscal para que el RPC actualice correctamente
