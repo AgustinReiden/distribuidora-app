@@ -3,7 +3,7 @@ import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, Shopping
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import NumberInput from '../ui/NumberInput';
-import { formatPrecio } from '../../utils/formatters';
+import { formatPrecio, parseDateSafe, fechaHaceDias } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
@@ -1045,7 +1045,29 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             <input
               type="date"
               value={fecha}
-              onChange={e => setFecha(e.target.value)}
+              onChange={e => {
+                const nueva = e.target.value;
+                // Cascade: la fecha de entrega programada acompaña a la de pedido,
+                // preservando el desfase (día siguiente por defecto, como en el alta).
+                // No aplica a pedidos ya entregados (ese input no se muestra).
+                if (nueva && !pedidoEntregado) {
+                  if (fecha) {
+                    const delta = Math.round(
+                      (parseDateSafe(nueva).getTime() - parseDateSafe(fecha).getTime()) / 86400000
+                    );
+                    if (delta !== 0) {
+                      setFechaEntregaProgramada(
+                        fechaEntregaProgramada
+                          ? fechaHaceDias(-delta, parseDateSafe(fechaEntregaProgramada))
+                          : fechaHaceDias(-1, parseDateSafe(nueva))
+                      );
+                    }
+                  } else if (!fechaEntregaProgramada) {
+                    setFechaEntregaProgramada(fechaHaceDias(-1, parseDateSafe(nueva)));
+                  }
+                }
+                setFecha(nueva);
+              }}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
           </div>
