@@ -24,6 +24,7 @@ export const pedidosKeys = {
     [...pedidosKeys.all(sucursalId), 'paginated', page, pageSize, filters] as const,
   noEntregados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'no-entregados'] as const,
   noPagados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'no-pagados'] as const,
+  paraEntregaYPago: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'para-entrega-y-pago'] as const,
   asignados: (sucursalId: number | null) => [...pedidosKeys.all(sucursalId), 'asignados'] as const,
 }
 
@@ -757,6 +758,68 @@ export function usePedidosNoEntregadosQuery(enabled = false) {
   })
 }
 
+// Universo del modal "Entrega y Pago Masivos": pedidos que todavia requieren
+// alguna accion, es decir NO cancelados y NO (entregado Y pagado). A diferencia
+// de fetchPedidosNoEntregados, este SI incluye los ya entregados que siguen con
+// saldo (p.ej. una "entrega con salvedad" que quedo impaga): en ese caso solo se
+// cobran, sin re-entregar. Preserva los prepagos-no-entregados (siguen necesitando
+// la entrega).
+async function fetchPedidosParaEntregaYPago(sucursalId: number | null): Promise<PedidoDB[]> {
+  let query = supabase
+    .from('pedidos')
+    .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
+    .neq('estado', 'cancelado')
+    .or('estado.neq.entregado,estado_pago.neq.pagado')
+
+  if (sucursalId != null) {
+    query = query.eq('sucursal_id', sucursalId)
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: false })
+
+  if (error) throw error
+
+  // Enrich with transportista names
+  const transportistaIds = new Set<string>()
+  for (const pedido of (data || [])) {
+    if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
+  }
+
+  let perfilesMap: Record<string, PerfilDB> = {}
+  if (transportistaIds.size > 0) {
+    const { data: perfiles } = await supabase
+      .from('perfiles')
+      .select('id, nombre, email')
+      .in('id', Array.from(transportistaIds))
+
+    if (perfiles) {
+      perfilesMap = Object.fromEntries(
+        (perfiles as PerfilDB[]).map(p => [p.id, p])
+      )
+    }
+  }
+
+  return (data || []).map(pedido => ({
+    ...pedido,
+    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+  })) as PedidoDB[]
+}
+
+/**
+ * Hook para el universo del modal "Entrega y Pago Masivos" (sin paginacion).
+ * Incluye no-entregados y entregados-impagos; excluye cancelados y entregado+pagado.
+ * Se habilita solo cuando enabled=true (modal abierto).
+ */
+export function usePedidosParaEntregaYPagoQuery(enabled = false) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: pedidosKeys.paraEntregaYPago(currentSucursalId),
+    queryFn: () => fetchPedidosParaEntregaYPago(currentSucursalId),
+    enabled: enabled && !!currentSucursalId,
+    staleTime: 30 * 1000, // 30 segundos
+  })
+}
+
 async function entregarPedidosMasivo(
   pedidoIds: string[],
   transportistaId: string,
@@ -1042,12 +1105,20 @@ export function useEntregaYPagoMasivosMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: ({ pedidoIds, transportistaId, formaPago, fecha }: {
-      pedidoIds: string[];
+    mutationFn: async ({ idsEntregar, idsCobrar, transportistaId, formaPago, fecha }: {
+      idsEntregar: string[];
+      idsCobrar: string[];
       transportistaId: string;
       formaPago: string;
       fecha?: string | null
-    }) => marcarEntregaYPagoMasivo(pedidoIds, transportistaId, formaPago, fecha),
+    }) => {
+      // Pedidos YA entregados (p.ej. entrega con salvedad impaga): solo se cobran,
+      // sin re-entregar. marcar_pagos_masivo registra el pago real en `pagos` y no
+      // toca estado / transportista_id / fecha_entrega.
+      if (idsCobrar.length) await marcarPagosMasivo(idsCobrar, formaPago, fecha)
+      // Pedidos NO entregados: entrega + cobro en un solo paso.
+      if (idsEntregar.length) await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })

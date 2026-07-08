@@ -1,7 +1,7 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar, AlertTriangle, Truck } from 'lucide-react'
 import ModalBase from './ModalBase'
-import { usePedidosNoEntregadosQuery, useRendicionCerradaQuery } from '../../hooks/queries'
+import { usePedidosParaEntregaYPagoQuery, useRendicionCerradaQuery } from '../../hooks/queries'
 import {
   getEstadoColor, getEstadoLabel,
   getEstadoPagoColor, getEstadoPagoLabel,
@@ -16,10 +16,16 @@ export interface ModalEntregaYPagoMasivosProps {
    * Callback de confirmación.
    * @param transportistaId - ID del transportista a asignar a la entrega
    * @param formaPago - Forma de pago a registrar
-   * @param pedidoIds - IDs de los pedidos seleccionados
+   * @param ids - IDs partidos por acción: `idsEntregar` (no entregados → entregar+cobrar)
+   *   e `idsCobrar` (ya entregados, p.ej. entrega con salvedad → solo cobrar).
    * @param fecha - Fecha contable de entrega y pago (YYYY-MM-DD)
    */
-  onConfirm: (transportistaId: string, formaPago: string, pedidoIds: string[], fecha: string) => Promise<void>
+  onConfirm: (
+    transportistaId: string,
+    formaPago: string,
+    ids: { idsEntregar: string[]; idsCobrar: string[] },
+    fecha: string,
+  ) => Promise<void>
   onClose: () => void
   guardando: boolean
   /** Si el caller es encargado (no admin): fecha bloqueada a hoy y check de rendicion. */
@@ -45,8 +51,9 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
   const [fechaHasta, setFechaHasta] = useState('')
   const [fecha, setFecha] = useState<string>(hoy)
 
-  // Universo: pedidos NO entregados (la entrega es la acción que habilita el combo).
-  const { data: pedidos = [], isLoading } = usePedidosNoEntregadosQuery(true)
+  // Universo: pedidos que aún requieren acción = NO cancelados y NO (entregado Y pagado).
+  // Incluye entregados-con-salvedad impagos (solo se cobran, sin re-entregar).
+  const { data: pedidos = [], isLoading } = usePedidosParaEntregaYPagoQuery(true)
   const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fecha, fechaBloqueada)
 
   const pedidosFiltrados = useMemo(() => {
@@ -83,8 +90,20 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
 
   const allSelected = pedidosFiltrados.length > 0 && selectedIds.size === pedidosFiltrados.length
   const bloqueadoPorRendicion = fechaBloqueada && rendicionCerrada
+
+  // Los ya entregados (p.ej. entrega con salvedad impaga) solo se cobran; los demás
+  // se entregan + cobran. El transportista solo aplica al segundo grupo.
+  const { idsEntregar, idsCobrar } = useMemo(() => {
+    const sel = pedidos.filter(p => selectedIds.has(p.id))
+    return {
+      idsEntregar: sel.filter(p => p.estado !== 'entregado').map(p => p.id),
+      idsCobrar: sel.filter(p => p.estado === 'entregado').map(p => p.id),
+    }
+  }, [pedidos, selectedIds])
+  const requiereTransportista = idsEntregar.length > 0
+
   const canConfirm =
-    !!selectedTransportista &&
+    (!requiereTransportista || !!selectedTransportista) &&
     !!selectedFormaPago &&
     selectedIds.size > 0 &&
     !guardando &&
@@ -118,6 +137,11 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
                 <option key={t.id} value={t.id}>{t.nombre}</option>
               ))}
             </select>
+            {!requiereTransportista && selectedIds.size > 0 && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Solo cobro: los pedidos seleccionados ya están entregados.
+              </p>
+            )}
           </div>
 
           {/* Selector de forma de pago */}
@@ -220,7 +244,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
             </div>
           ) : pedidosFiltrados.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              No hay pedidos disponibles para entregar
+              No hay pedidos disponibles para entregar o cobrar
             </div>
           ) : (
             pedidosFiltrados.map(pedido => {
@@ -288,7 +312,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
             Cancelar
           </button>
           <button
-            onClick={() => canConfirm && onConfirm(selectedTransportista, selectedFormaPago, Array.from(selectedIds), fecha)}
+            onClick={() => canConfirm && onConfirm(selectedTransportista, selectedFormaPago, { idsEntregar, idsCobrar }, fecha)}
             disabled={!canConfirm}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >

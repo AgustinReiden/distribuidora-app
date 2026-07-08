@@ -63,6 +63,7 @@ export {
   useCancelarPedidoMutation,
   useCambiarClientePedidoMutation,
   usePedidosNoPagadosQuery,
+  usePedidosParaEntregaYPagoQuery,
   usePagosMasivosMutation,
   useEntregaYPagoMasivosMutation,
 } from './usePedidosQuery'

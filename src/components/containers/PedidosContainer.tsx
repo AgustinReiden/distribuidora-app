@@ -565,12 +565,18 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [pagosMasivos, notify])
 
-  const handleEntregaYPagoMasivos = useCallback(async (transportistaId: string, formaPago: string, pedidoIds: string[], fecha: string) => {
+  const handleEntregaYPagoMasivos = useCallback(async (
+    transportistaId: string,
+    formaPago: string,
+    ids: { idsEntregar: string[]; idsCobrar: string[] },
+    fecha: string,
+  ) => {
     setGuardando(true)
     try {
-      await entregaYPagoMasivos.mutateAsync({ pedidoIds, transportistaId, formaPago, fecha })
+      await entregaYPagoMasivos.mutateAsync({ ...ids, transportistaId, formaPago, fecha })
       setModalEntregaYPagoMasivosOpen(false)
-      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} entregado${pedidoIds.length !== 1 ? 's' : ''} y pagado${pedidoIds.length !== 1 ? 's' : ''}`)
+      const total = ids.idsEntregar.length + ids.idsCobrar.length
+      notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [entregaYPagoMasivos, notify])
