@@ -592,21 +592,31 @@ export interface VentaPorDia {
   pedidos: number;
 }
 
+// Buckets de estado del dashboard. 'en_preparacion' (hoy sin uso en la BD)
+// se agrupa dentro de `pendiente` (pre-reparto).
 export interface PedidosPorEstado {
   pendiente: number;
-  en_preparacion: number;
   asignado: number;
   entregado: number;
 }
 
 export interface DashboardMetricasExtended {
+  /** $ de pedidos ENTREGADOS del período (convención: venta = entregado). */
   ventasPeriodo: number;
+  /** $ de pedidos pendiente+asignado del período (aún no entregados). */
+  ventasEnCurso: number;
+  /** Pedidos no cancelados del período (actividad total). */
   pedidosPeriodo: number;
+  /** Base del ticket promedio. */
+  pedidosEntregados: number;
+  pedidosEnCurso: number;
+  /** Ventana anterior de igual duración; null si historico o rango sin desde. */
   ventasPeriodoAnterior?: number | null;
   pedidosPeriodoAnterior?: number | null;
   productosMasVendidos: ProductoVendido[];
   clientesMasActivos: ClienteActivo[];
   pedidosPorEstado: PedidosPorEstado;
+  /** Siempre los últimos 7 días calendario, independiente del período. */
   ventasPorDia: VentaPorDia[];
 }
 

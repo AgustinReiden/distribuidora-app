@@ -6,13 +6,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
+import {
+  addDiasISO,
+  agregarMetricasPeriodo,
+  serieVentas7Dias,
+  ventanaAnterior,
+  ventanaPeriodoDashboard,
+  type PedidoMetricaRow,
+} from '../../utils/metricasDashboard'
 import type {
   DashboardMetricasExtended,
   ReportePreventista,
-  ProductoVendido,
-  ClienteActivo,
-  VentaPorDia,
-  PedidosPorEstado,
   PedidoDB
 } from '../../types'
 
@@ -31,24 +35,6 @@ export const metricasKeys = {
     [...metricasKeys.all(sucursalId), 'reporte-preventistas', fechaDesde, fechaHasta] as const,
 }
 
-interface PedidoWithRelations {
-  id: string
-  cliente_id: string
-  cliente?: { nombre_fantasia?: string } | null
-  usuario_id?: string
-  estado: string
-  estado_pago?: string
-  total: number
-  monto_pagado?: number
-  fecha?: string
-  created_at?: string
-  items?: Array<{
-    producto_id: string
-    cantidad: number
-    producto?: { nombre?: string } | null
-  }>
-}
-
 type FiltroPeriodo = 'hoy' | 'semana' | 'mes' | 'anio' | 'historico' | 'personalizado'
 
 interface MetricasParams {
@@ -62,146 +48,74 @@ interface MetricasParams {
 async function calcularMetricas(params: MetricasParams): Promise<DashboardMetricasExtended> {
   const { periodo, fechaDesde, fechaHasta, usuarioId } = params
 
-  // Calcular ventana de fecha ANTES de la query para poder filtrar server-side.
-  // Con 10k+ pedidos, traer todo y filtrar en JS es KB/MB innecesarios.
-  const hoy = new Date()
-  const hoyStr = fechaLocalISO(hoy)
-  let fechaInicioStr: string | null = null
+  const hoyISO = fechaLocalISO()
+  // Ventana [desde, hasta] sobre `pedidos.fecha` (fecha de entrega, editable):
+  // filtrar por fecha server-side incluye los pedidos re-fechados (patrón del
+  // fix de rutas PR #414) y elimina el viejo hack de +1 día sobre created_at
+  // que perdía el último día del rango personalizado.
+  const ventana = ventanaPeriodoDashboard(periodo, hoyISO, fechaDesde, fechaHasta)
 
-  switch (periodo) {
-    case 'hoy':
-      fechaInicioStr = hoyStr
-      break
-    case 'semana': {
-      const hace7Dias = new Date()
-      hace7Dias.setDate(hace7Dias.getDate() - 7)
-      fechaInicioStr = fechaLocalISO(hace7Dias)
-      break
-    }
-    case 'mes': {
-      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
-      fechaInicioStr = fechaLocalISO(inicioMes)
-      break
-    }
-    case 'anio': {
-      const inicioAnio = new Date(hoy.getFullYear(), 0, 1)
-      fechaInicioStr = fechaLocalISO(inicioAnio)
-      break
-    }
-    case 'personalizado':
-      fechaInicioStr = fechaDesde || null
-      break
-    case 'historico':
-    default:
-      fechaInicioStr = null
-      break
-  }
+  // -- Query principal del período (para 'historico' baja todo: intencional) --
+  const principalPromise = (async () => {
+    let query = supabase
+      .from('pedidos')
+      .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+      .neq('estado', 'cancelado')
+    if (usuarioId) query = query.eq('usuario_id', usuarioId)
+    if (ventana.desde) query = query.gte('fecha', ventana.desde)
+    if (ventana.hasta) query = query.lte('fecha', ventana.hasta)
+    const { data, error } = await query.order('created_at', { ascending: false })
+    if (error) throw error
+    return (data as PedidoMetricaRow[]) || []
+  })()
 
-  let query = supabase
-    .from('pedidos')
-    .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+  // -- Período anterior de igual duración terminando el día antes (misma
+  //    convención que el comparativo del RPC reporte_gerencial). Sin `desde`
+  //    (historico) no hay comparación posible.
+  const prev = ventana.desde ? ventanaAnterior(ventana.desde, ventana.hasta ?? hoyISO) : null
+  const anteriorPromise = (async () => {
+    if (!prev) return null
+    let query = supabase
+      .from('pedidos')
+      .select('total, estado')
+      .neq('estado', 'cancelado')
+      .gte('fecha', prev.desde)
+      .lte('fecha', prev.hasta)
+    if (usuarioId) query = query.eq('usuario_id', usuarioId)
+    const { data, error } = await query
+    if (error) throw error
+    return (data as Array<{ total: number | null; estado: string }>) || []
+  })()
 
-  if (usuarioId) {
-    query = query.eq('usuario_id', usuarioId)
-  }
+  // -- Últimos 7 días para el gráfico, SIEMPRE (ventana propia, independiente
+  //    del período elegido). Mantiene "no cancelados": con entregado-only los
+  //    días recientes se verían vacíos hasta cerrar el reparto.
+  const seriePromise = (async () => {
+    let query = supabase
+      .from('pedidos')
+      .select('total, fecha')
+      .neq('estado', 'cancelado')
+      .gte('fecha', addDiasISO(hoyISO, -6))
+      .lte('fecha', hoyISO)
+    if (usuarioId) query = query.eq('usuario_id', usuarioId)
+    const { data, error } = await query
+    if (error) throw error
+    return (data as Array<{ total: number | null; fecha: string | null }>) || []
+  })()
 
-  // Filtro server-side: evita descargar histórico completo.
-  // Para 'historico' (sin fechaInicioStr) se respeta el comportamiento actual
-  // de descargar todo (export ilimitado intencional).
-  if (fechaInicioStr) {
-    query = query.gte('created_at', fechaInicioStr)
-  }
-  if (periodo === 'personalizado' && fechaHasta) {
-    // Sumar un día para incluir pedidos de fechaHasta (timestamptz vs date).
-    const hastaDate = new Date(fechaHasta)
-    hastaDate.setDate(hastaDate.getDate() + 1)
-    query = query.lt('created_at', fechaLocalISO(hastaDate))
-  }
-
-  const { data: todosPedidos, error } = await query.order('created_at', { ascending: false })
-
-  if (error) throw error
-  if (!todosPedidos) {
-    return {
-      ventasPeriodo: 0,
-      pedidosPeriodo: 0,
-      productosMasVendidos: [],
-      clientesMasActivos: [],
-      pedidosPorEstado: { pendiente: 0, en_preparacion: 0, asignado: 0, entregado: 0 },
-      ventasPorDia: []
-    }
-  }
-
-  const pedidosTyped = (todosPedidos as PedidoWithRelations[]).filter(p => p.estado !== 'cancelado')
-
-  // Redundant client-side filter preservado: la columna `fecha` puede diferir
-  // de `created_at` (ej. pedidos reprogramados) y algunos cálculos de UI
-  // (ventasPorDia) usan `fecha` cuando existe.
-  let pedidosFiltrados = pedidosTyped
-  if (fechaInicioStr) {
-    pedidosFiltrados = pedidosTyped.filter(p => (p.fecha ?? p.created_at?.split('T')[0] ?? '') >= fechaInicioStr!)
-  }
-  if (periodo === 'personalizado' && fechaHasta) {
-    pedidosFiltrados = pedidosFiltrados.filter(p => (p.fecha ?? p.created_at?.split('T')[0] ?? '') <= fechaHasta)
-  }
-
-  // Productos más vendidos
-  const productosVendidos: Record<string, ProductoVendido> = {}
-  pedidosFiltrados.forEach(p => p.items?.forEach(i => {
-    const id = i.producto_id
-    if (!productosVendidos[id]) productosVendidos[id] = { id, nombre: i.producto?.nombre || 'N/A', cantidad: 0 }
-    productosVendidos[id].cantidad += i.cantidad
-  }))
-  const topProductos: ProductoVendido[] = Object.values(productosVendidos)
-    .sort((a, b) => b.cantidad - a.cantidad)
-    .slice(0, 5)
-
-  // Clientes más activos
-  const clientesActivos: Record<string, ClienteActivo> = {}
-  pedidosFiltrados.forEach(p => {
-    const id = p.cliente_id
-    if (!clientesActivos[id]) clientesActivos[id] = {
-      id,
-      nombre: (p.cliente as { nombre_fantasia?: string })?.nombre_fantasia || 'N/A',
-      total: 0,
-      pedidos: 0
-    }
-    clientesActivos[id].total += p.total || 0
-    clientesActivos[id].pedidos += 1
-  })
-  const topClientes: ClienteActivo[] = Object.values(clientesActivos)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 5)
-
-  // Ventas por día (últimos 7 días)
-  const ventasPorDia: VentaPorDia[] = []
-  for (let i = 6; i >= 0; i--) {
-    const fecha = new Date()
-    fecha.setDate(fecha.getDate() - i)
-    const fechaStr = fechaLocalISO(fecha)
-    const pedidosDia = pedidosTyped.filter(p => (p.fecha ?? p.created_at?.split('T')[0]) === fechaStr)
-    ventasPorDia.push({
-      dia: fecha.toLocaleDateString('es-AR', { weekday: 'short' }),
-      ventas: pedidosDia.reduce((s, p) => s + (p.total || 0), 0),
-      pedidos: pedidosDia.length
-    })
-  }
-
-  // Pedidos por estado
-  const pedidosPorEstado: PedidosPorEstado = {
-    pendiente: pedidosTyped.filter(p => p.estado === 'pendiente').length,
-    en_preparacion: pedidosTyped.filter(p => p.estado === 'en_preparacion').length,
-    asignado: pedidosTyped.filter(p => p.estado === 'asignado').length,
-    entregado: pedidosTyped.filter(p => p.estado === 'entregado').length
-  }
+  const [pedidos, pedidosAnterior, filasSerie] = await Promise.all([
+    principalPromise,
+    anteriorPromise,
+    seriePromise,
+  ])
 
   return {
-    ventasPeriodo: pedidosFiltrados.reduce((s, p) => s + (p.total || 0), 0),
-    pedidosPeriodo: pedidosFiltrados.length,
-    productosMasVendidos: topProductos,
-    clientesMasActivos: topClientes,
-    pedidosPorEstado,
-    ventasPorDia
+    ...agregarMetricasPeriodo(pedidos),
+    ventasPeriodoAnterior: pedidosAnterior
+      ? pedidosAnterior.filter(p => p.estado === 'entregado').reduce((s, p) => s + (p.total || 0), 0)
+      : null,
+    pedidosPeriodoAnterior: pedidosAnterior ? pedidosAnterior.length : null,
+    ventasPorDia: serieVentas7Dias(filasSerie, hoyISO),
   }
 }
 
