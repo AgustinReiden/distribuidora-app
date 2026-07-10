@@ -245,6 +245,8 @@ export type {
   ReporteProducto,
   ReporteCliente,
   ReporteCobranza,
+  MermaMotivo,
+  BonifPromo,
   Alerta,
   MetasGerenciales,
   AlertaDetalleItem,

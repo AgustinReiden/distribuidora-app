@@ -1,10 +1,11 @@
 /**
  * TanStack Query hooks para los Reportes Gerenciales.
  *
- * Los datos salen del RPC `reporte_gerencial(sucursal, desde, hasta)` (mig 095),
- * que devuelve TODO el dashboard en un JSONB. p_sucursal_id NULL = consolidado
- * de red. El análisis narrativo mensual vive en la tabla `reportes_mensuales`
- * (lo escribe Claude Code vía el comando /reporte-mensual).
+ * Los datos salen del RPC `reporte_gerencial(sucursal, desde, hasta, ...)`
+ * (mig 095, última reescritura 110: cobranza real desde `pagos`, split de
+ * mermas y `bonif_promos`), que devuelve TODO el dashboard en un JSONB.
+ * p_sucursal_id NULL = consolidado de red. El análisis narrativo mensual vive
+ * en la tabla `reportes_mensuales` (lo escribe Claude Code vía /reporte-mensual).
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -23,9 +24,36 @@ export interface ReporteKpis {
   margen_neto: number
   base_comision: number
   comision_pct_default: number
+  /** Total operativo (la contribución resta este número). */
   mermas: number
+  /** Split del total (mig 110): perdida+ajuste+muestra = mermas.
+   *  Opcionales por compat con respuestas cacheadas pre-110. */
+  mermas_perdida?: number
+  mermas_ajuste?: number
+  mermas_muestra?: number
   compras: number
   ingreso_sin_costo: number
+}
+
+/** Fila de mermas por motivo, con clasificación de negocio (mig 110). */
+export interface MermaMotivo {
+  motivo: string
+  unidades: number
+  costo: number
+  clasificacion: 'perdida' | 'ajuste' | 'muestra'
+}
+
+/** Lo regalado por promoción × producto (mig 110). */
+export interface BonifPromo {
+  promocion: string
+  producto: string
+  /** BOTELLAS si es_fraccion, fardos si no. */
+  unidades: number
+  es_fraccion: boolean
+  /** Costo real (misma convención que kpis.bonif). */
+  costo: number
+  /** Valuado a precio de lista actual (÷ unidades_por_bloque si fracción). */
+  valor_venta: number
 }
 
 export interface ReporteMes {
@@ -72,8 +100,11 @@ export interface ReporteCliente {
 }
 
 export interface ReporteCobranza {
+  /** Cobros REALES (tabla pagos) de los pedidos del período, por forma (mig 110). */
   formas: { forma_pago: string; monto: number }[]
+  /** Σ LEAST(monto_pagado, total): un pago parcial cuenta lo pagado. */
   cobrado: number
+  /** Σ GREATEST(total − monto_pagado, 0). */
   pendiente: number
 }
 
@@ -104,6 +135,10 @@ export interface ReporteGerencial {
   cobranza: ReporteCobranza
   serie_diaria: [string, number][]
   flags: { ingreso_sin_costo: number; pct_sin_costo: number }
+  // Detalle de mermas y de bonificaciones por promo (mig 110; opcionales por
+  // compat con respuestas cacheadas del RPC anterior).
+  mermas_motivo?: MermaMotivo[]
+  bonif_promos?: BonifPromo[]
   // KPIs del período anterior (cuando se pide comparar) + alertas, ambos del RPC.
   comparativo?: (ReporteKpis & { desde: string; hasta: string }) | null
   alertas?: Alerta[]

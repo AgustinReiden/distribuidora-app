@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-06-30** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-07-10** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -89,11 +89,12 @@ desfasan y **se realinean en `101`**:
 | `105_auditoria_integridad.sql` | `105_…` + `105_…_ventana_2h` + `105_…_fix_cc_saldo_a_favor` |
 | (bot 014–020) | hotfix `020_bot_fix_pgcrypto_schema` plegado en la tanda, sin archivo propio |
 
-**Cadena `reporte_gerencial`** (reescrita ~8 veces por `CREATE OR REPLACE`): el repo versiona
-los hitos (`095`, `097` grants, `098`, `103`, `106`, `107`). Los intermedios del ledger
+**Cadena `reporte_gerencial`** (reescrita ~9 veces por `CREATE OR REPLACE`): el repo versiona
+los hitos (`095`, `097` grants, `098`, `103`, `106`, `107`, `110`). Los intermedios del ledger
 `reporte_gerencial_restringir_por_sucursal_asignada` y `reporte_gerencial_desglose_bonif_mermas`
 **no tienen archivo dedicado**: su lógica (p.ej. el gate `v_asignadas`) **sobrevive en el body
-vivo**, que equivale al último archivo (`107`).
+vivo**, que equivale al último archivo (`110`: cobranza desde `pagos`, parciales por monto,
+compras sin canceladas, split de mermas, `bonif_promos`).
 
 ---
 
