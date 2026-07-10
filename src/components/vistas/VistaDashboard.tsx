@@ -1,7 +1,7 @@
 import React, { useState, useMemo, memo } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  DollarSign, ShoppingCart, Clock, Package, Truck, Check,
+  DollarSign, ShoppingCart, Clock, Truck, Check,
   TrendingUp, TrendingDown, Minus, Target, Users, AlertTriangle,
 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
@@ -273,18 +273,12 @@ const METRICAS_SEMANTICA: Record<'ventas' | 'pedidos' | 'ticket' | 'clientes', M
   },
 };
 
-const ESTADOS_SEMANTICA: Record<'pendiente' | 'preparacion' | 'camino' | 'entregado', EstadoSemantica> = {
+const ESTADOS_SEMANTICA: Record<'pendiente' | 'camino' | 'entregado', EstadoSemantica> = {
   pendiente: {
     accentBorder: 'border-l-amber-500',
     accentText: 'text-amber-700 dark:text-amber-300',
     badgeBg: 'bg-amber-100 dark:bg-amber-500/15',
     badgeIcon: 'text-amber-600 dark:text-amber-400',
-  },
-  preparacion: {
-    accentBorder: 'border-l-orange-500',
-    accentText: 'text-orange-700 dark:text-orange-300',
-    badgeBg: 'bg-orange-100 dark:bg-orange-500/15',
-    badgeIcon: 'text-orange-600 dark:text-orange-400',
   },
   camino: {
     accentBorder: 'border-l-blue-500',
@@ -335,14 +329,13 @@ export default function VistaDashboard({
   const metricasCalculadas = useMemo((): MetricasCalculadas | null => {
     if (!metricas) return null;
 
-    const ticketPromedio = metricas.pedidosPeriodo > 0
-      ? metricas.ventasPeriodo / metricas.pedidosPeriodo
+    const ticketPromedio = metricas.pedidosEntregados > 0
+      ? metricas.ventasPeriodo / metricas.pedidosEntregados
       : 0;
 
     const tasaEntrega = metricas.pedidosPorEstado
       ? (metricas.pedidosPorEstado.entregado /
          (metricas.pedidosPorEstado.pendiente +
-          metricas.pedidosPorEstado.en_preparacion +
           metricas.pedidosPorEstado.asignado +
           metricas.pedidosPorEstado.entregado || 1)) * 100
       : 0;
@@ -465,9 +458,11 @@ export default function VistaDashboard({
         {verMontosAgregados && (
           <MetricaCard
             icono={DollarSign}
-            titulo="Ventas"
+            titulo="Venta entregada"
             valor={formatPrecio(metricas.ventasPeriodo)}
-            subtitulo={periodoLabels[filtroPeriodo]}
+            subtitulo={metricas.ventasEnCurso > 0
+              ? `+${formatPrecio(metricas.ventasEnCurso)} en curso (${metricas.pedidosEnCurso})`
+              : periodoLabels[filtroPeriodo]}
             semantica={METRICAS_SEMANTICA.ventas}
             tendencia={<TendenciaIndicator valor={metricas.ventasPeriodo} comparacion={metricas.ventasPeriodoAnterior} />}
           />
@@ -485,7 +480,7 @@ export default function VistaDashboard({
             icono={Target}
             titulo="Ticket promedio"
             valor={formatPrecio(metricasCalculadas?.ticketPromedio || 0)}
-            subtitulo="Por pedido"
+            subtitulo="Por pedido entregado"
             semantica={METRICAS_SEMANTICA.ticket}
           />
         )}
@@ -503,9 +498,8 @@ export default function VistaDashboard({
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500 dark:text-stone-400 mb-2.5">
           Estado de pedidos
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <EstadoCard icono={Clock} titulo="Pendientes" valor={metricas.pedidosPorEstado.pendiente} semantica={ESTADOS_SEMANTICA.pendiente} />
-          <EstadoCard icono={Package} titulo="En preparación" valor={metricas.pedidosPorEstado.en_preparacion || 0} semantica={ESTADOS_SEMANTICA.preparacion} />
           <EstadoCard icono={Truck} titulo="En camino" valor={metricas.pedidosPorEstado.asignado} semantica={ESTADOS_SEMANTICA.camino} />
           <EstadoCard icono={Check} titulo="Entregados" valor={metricas.pedidosPorEstado.entregado} semantica={ESTADOS_SEMANTICA.entregado} />
         </div>
