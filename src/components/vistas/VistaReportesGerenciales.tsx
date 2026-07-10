@@ -6,13 +6,13 @@ import ReactMarkdown from 'react-markdown'
 import NumberInput from '../ui/NumberInput'
 import { money, moneyC, pct, N, rolLabel } from './reportes-gerenciales/formato'
 import {
-  EvolucionChart, DiarioChart, VendedoresChart, CategoriasChart, WaterfallChart, CobranzaDonut,
+  EvolucionChart, DiarioChart, VendedoresChart, CategoriasChart, WaterfallChart, CobranzaDonut, BonifPromosChart,
 } from './reportes-gerenciales/charts'
 import Sparkline from './reportes-gerenciales/Sparkline'
 import Alertas from './reportes-gerenciales/Alertas'
 import ModalMetas from './reportes-gerenciales/ModalMetas'
 import ModalAlertaDetalle from './reportes-gerenciales/ModalAlertaDetalle'
-import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta } from '../../hooks/queries'
+import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta, BonifPromo } from '../../hooks/queries'
 
 // Alertas cuyo detalle es una LISTA (modal). El resto hace scroll a su sección.
 const ALERTA_CON_LISTA = new Set(['cobranza_vencida', 'clientes_inactivos', 'productos_sin_costo'])
@@ -183,6 +183,29 @@ export default function VistaReportesGerenciales({
     return { comision, contrib: kp.margen_neto - kp.mermas - comision }
   }, [kp, comPct, comBase])
 
+  // Bonificaciones agrupadas por promoción (subtotales + filas por producto).
+  const bonifAgrupado = useMemo(() => {
+    const grupos = new Map<string, { promocion: string; costo: number; valor_venta: number; items: BonifPromo[] }>()
+    for (const b of reporte?.bonif_promos ?? []) {
+      const g = grupos.get(b.promocion) ?? { promocion: b.promocion, costo: 0, valor_venta: 0, items: [] }
+      g.costo += b.costo
+      g.valor_venta += b.valor_venta
+      g.items.push(b)
+      grupos.set(b.promocion, g)
+    }
+    return [...grupos.values()]
+      .map(g => ({ ...g, items: [...g.items].sort((a, b) => b.valor_venta - a.valor_venta) }))
+      .sort((a, b) => b.valor_venta - a.valor_venta)
+  }, [reporte?.bonif_promos])
+
+  const totBonif = useMemo(
+    () => bonifAgrupado.reduce(
+      (acc, g) => ({ costo: acc.costo + g.costo, valor_venta: acc.valor_venta + g.valor_venta }),
+      { costo: 0, valor_venta: 0 },
+    ),
+    [bonifAgrupado],
+  )
+
   return (
     <div className="space-y-5">
       {/* Header + selectores */}
@@ -306,7 +329,11 @@ export default function VistaReportesGerenciales({
               </div>} />
             <KpiCard label={`Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={`base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate}
               delta={cmp && derivedPrev ? <Delta cur={derived.comision} prev={derivedPrev.comision} invert /> : undefined} />
-            <KpiCard label="Mermas" value={moneyC(k.mermas)} sub="producto perdido" accent={ACCENTS.red}
+            <KpiCard label="Mermas" value={moneyC(k.mermas)}
+              sub={k.mermas_perdida != null
+                ? <>Pérdida <b>{moneyC(k.mermas_perdida)}</b> · Ajustes {moneyC(k.mermas_ajuste ?? 0)} · Muestras {moneyC(k.mermas_muestra ?? 0)}</>
+                : 'producto perdido'}
+              accent={ACCENTS.red}
               delta={cmp ? <Delta cur={k.mermas} prev={kp!.mermas} invert /> : undefined} />
             <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald}
               delta={cmp && derivedPrev ? <Delta cur={derived.contrib} prev={derivedPrev.contrib} /> : undefined} />
@@ -505,7 +532,7 @@ export default function VistaReportesGerenciales({
           {/* Cobranza + costos */}
           <div className="grid lg:grid-cols-2 gap-5">
             <Card id="sec-cobranza" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} />
+              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`Pagos registrados de las ventas del período. ${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} />
               <div className="grid grid-cols-2 gap-4 items-center">
                 <div className="h-48"><CobranzaDonut cobranza={reporte.cobranza} /></div>
                 <table className="w-full">
@@ -519,6 +546,10 @@ export default function VistaReportesGerenciales({
                     <tr className="font-semibold">
                       <td className={`${td} text-emerald-600 dark:text-emerald-400`}>Cobrado</td>
                       <td className={`${td} text-right tabular-nums text-emerald-600 dark:text-emerald-400`}>{moneyC(reporte.cobranza.cobrado)}</td>
+                    </tr>
+                    <tr className="font-semibold">
+                      <td className={`${td} text-rose-600 dark:text-rose-400`}>Pendiente</td>
+                      <td className={`${td} text-right tabular-nums text-rose-600 dark:text-rose-400`}>{moneyC(reporte.cobranza.pendiente)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -543,6 +574,58 @@ export default function VistaReportesGerenciales({
               </table>
             </Card>
           </div>
+
+          {/* Bonificaciones y promociones: qué se regaló y cuánto vale */}
+          {bonifAgrupado.length > 0 && (
+            <Card id="sec-bonif" className="p-5">
+              <SectionTitle
+                icon={TrendingUp} title="Bonificaciones y promociones"
+                hint="Qué se regaló, de qué promoción salió y cuánto vale: costo real vs precio de lista. Unidades en botellas (bot.) cuando la promo es fraccionada."
+              />
+              <div className="grid lg:grid-cols-3 gap-5">
+                <div className="lg:col-span-2 h-72"><BonifPromosChart data={reporte.bonif_promos ?? []} /></div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead><tr className="border-b dark:border-gray-700">
+                      <th className={`${th} text-left`}>Producto</th><th className={`${th} text-right`}>Unid.</th>
+                      <th className={`${th} text-right`}>Costo</th><th className={`${th} text-right`}>Valor venta</th>
+                    </tr></thead>
+                    {bonifAgrupado.map(g => (
+                      <tbody key={g.promocion} className="divide-y dark:divide-gray-700/60">
+                        <tr className="bg-gray-50 dark:bg-gray-700/40">
+                          <td colSpan={2} className={`${td} font-semibold text-gray-900 dark:text-white`}>
+                            {g.promocion}
+                            <span className="ml-2 text-[10px] font-medium text-gray-400">{pct(g.valor_venta / (k.venta || 1))} de la venta</span>
+                          </td>
+                          <td className={`${td} text-right tabular-nums font-semibold`}>{moneyC(g.costo)}</td>
+                          <td className={`${td} text-right tabular-nums font-semibold`}>{moneyC(g.valor_venta)}</td>
+                        </tr>
+                        {g.items.map(b => (
+                          <tr key={g.promocion + b.producto}>
+                            <td className={`${td} pl-5`}>
+                              {b.producto}
+                              {b.es_fraccion && <span className="ml-1.5 text-[10px] font-semibold uppercase px-1 py-0.5 rounded border border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400">bot.</span>}
+                            </td>
+                            <td className={`${td} text-right tabular-nums`}>{N.format(b.unidades)}</td>
+                            <td className={`${td} text-right tabular-nums`}>{moneyC(b.costo)}</td>
+                            <td className={`${td} text-right tabular-nums`}>{moneyC(b.valor_venta)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    ))}
+                    <tfoot>
+                      <tr className="border-t-2 dark:border-gray-600 font-bold">
+                        <td className={`${td} text-gray-900 dark:text-white`}>Total</td>
+                        <td className={td}></td>
+                        <td className={`${td} text-right tabular-nums`}>{moneyC(totBonif.costo)}</td>
+                        <td className={`${td} text-right tabular-nums`}>{moneyC(totBonif.valor_venta)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Análisis mensual (Claude Code) */}
           <Card className="p-5">

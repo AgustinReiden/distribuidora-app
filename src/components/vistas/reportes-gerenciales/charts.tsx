@@ -16,7 +16,7 @@ import {
 import { Bar, Line, Doughnut } from 'react-chartjs-2'
 import { useTheme } from '../../../contexts/ThemeContext'
 import { money } from './formato'
-import type { ReporteMes, ReporteVendedor, ReporteCategoria, ReporteCobranza } from '../../../hooks/queries'
+import type { ReporteMes, ReporteVendedor, ReporteCategoria, ReporteCobranza, BonifPromo } from '../../../hooks/queries'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement, PointElement,
@@ -202,6 +202,44 @@ export function WaterfallChart({
         scales: {
           y: { ticks: { callback: fmtM, color: t.tick }, grid: { color: t.grid }, border: { display: false } },
           x: { ticks: { color: t.tick, font: { size: 10 } }, grid: { display: false }, border: { color: t.border } },
+        },
+      }}
+    />
+  )
+}
+
+// --- Bonificaciones: costo vs valor de venta por promoción (barras horiz.) ---
+export function BonifPromosChart({ data }: { data: BonifPromo[] }): React.ReactElement {
+  const t = useChartTheme()
+  // Agrupar por promoción y quedarse con las 10 de mayor valor de venta.
+  const porPromo = new Map<string, { costo: number; valor_venta: number }>()
+  for (const b of data) {
+    const acc = porPromo.get(b.promocion) ?? { costo: 0, valor_venta: 0 }
+    acc.costo += b.costo
+    acc.valor_venta += b.valor_venta
+    porPromo.set(b.promocion, acc)
+  }
+  const top = [...porPromo.entries()]
+    .sort((a, b) => b[1].valor_venta - a[1].valor_venta)
+    .slice(0, 10)
+  return (
+    <Bar
+      data={{
+        labels: top.map(([promo]) => promo),
+        datasets: [
+          { label: 'Valor de venta', data: top.map(([, v]) => v.valor_venta), backgroundColor: PALETTE.blue, borderRadius: 4 },
+          { label: 'Costo real', data: top.map(([, v]) => v.costo), backgroundColor: PALETTE.amber, borderRadius: 4 },
+        ],
+      }}
+      options={{
+        maintainAspectRatio: false, indexAxis: 'y',
+        plugins: {
+          legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8, padding: 12, color: t.tick } },
+          tooltip: { ...baseTooltip(t.tooltipBg), callbacks: { label: (c) => ` ${c.dataset.label}: ${money(Number(c.raw))}` } },
+        },
+        scales: {
+          x: { ticks: { callback: fmtM, color: t.tick }, grid: { color: t.grid }, border: { display: false } },
+          y: { ticks: { color: t.tick, font: { size: 11 } }, grid: { display: false }, border: { color: t.border } },
         },
       }}
     />
