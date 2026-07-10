@@ -61,10 +61,13 @@ export default function DashboardContainer(): React.ReactElement {
       <VistaDashboard
         metricas={metricas || {
           ventasPeriodo: 0,
+          ventasEnCurso: 0,
           pedidosPeriodo: 0,
+          pedidosEntregados: 0,
+          pedidosEnCurso: 0,
           productosMasVendidos: [],
           clientesMasActivos: [],
-          pedidosPorEstado: { pendiente: 0, en_preparacion: 0, asignado: 0, entregado: 0 },
+          pedidosPorEstado: { pendiente: 0, asignado: 0, entregado: 0 },
           ventasPorDia: []
         }}
         loading={loadingMetricas}
