@@ -33,6 +33,8 @@ export interface ClienteDB {
   dias_credito?: number;
   saldo_cuenta?: number;
   descuento_porcentaje?: number;
+  /** FC/ZZ por defecto al crear pedidos de este cliente (mig 116) */
+  tipo_factura_default?: 'ZZ' | 'FC';
   /**
    * Descuentos por categoría (override del descuento general). N-a-1 via
    * cliente_descuentos_categoria. Para productos de una categoría con descuento

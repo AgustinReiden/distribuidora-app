@@ -165,6 +165,8 @@ interface ClienteCreateInput {
   preventista_id?: string | null
   preventista_ids?: string[]
   descuentos_categoria?: { categoria: string; descuento_porcentaje: number }[]
+  /** FC/ZZ por defecto al crear pedidos de este cliente (mig 116) */
+  tipo_factura_default?: 'ZZ' | 'FC'
 }
 
 // Mutation functions
@@ -220,6 +222,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       horario_entrega: clienteFields.horario_entrega || null,
       rubro: clienteFields.rubro || null,
       notas: clienteFields.notas || null,
+      tipo_factura_default: clienteFields.tipo_factura_default ?? 'ZZ',
       sucursal_id: sucursalId,
       ...(clienteFields.preventista_id ? { preventista_id: clienteFields.preventista_id } : {})
     }])

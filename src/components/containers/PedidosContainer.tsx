@@ -1549,7 +1549,12 @@ export default function PedidosContainer(): React.ReactElement {
             onEliminarPromoCreacion={handleEliminarPromoCreacion}
             onRestaurarPromoCreacion={handleRestaurarPromoCreacion}
             onClose={() => { setModalPedidoOpen(false); resetNuevoPedido() }}
-            onClienteChange={(id: string) => setNuevoPedido(prev => ({ ...prev, clienteId: id }))}
+            onClienteChange={(id: string) => setNuevoPedido(prev => ({
+              ...prev,
+              clienteId: id,
+              // Preseleccionar FC/ZZ según el default del cliente (mig 116); pisable por pedido.
+              tipoFactura: ((clientes.find(c => String(c.id) === String(id)) as { tipo_factura_default?: 'ZZ' | 'FC' } | undefined)?.tipo_factura_default ?? 'ZZ'),
+            }))}
             onAgregarItem={(productoId: string) => {
               setNuevoPedido(prev => {
                 const existe = prev.items.find(i => i.productoId === productoId)
