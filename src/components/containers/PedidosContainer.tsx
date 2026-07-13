@@ -308,21 +308,14 @@ export default function PedidosContainer(): React.ReactElement {
     }))
   }, [productos])
 
-  // Quitar una promo del pedido en creación, con alerta de confirmación de por
-  // medio. Disponible para quien pueda crear pedidos (admin/preventista/encargado).
+  // Quitar una promo del pedido en creación. La confirmación se muestra DENTRO
+  // de ModalPedido (Radix Dialog modal); una confirmación disparada desde acá
+  // quedaba detrás del overlay y era inalcanzable, así que la quita fallaba en
+  // silencio. Este callback recibe la orden ya confirmada y solo la aplica.
   const handleEliminarPromoCreacion = useCallback((promoId: string, promoNombre: string) => {
-    setConfirmConfig({
-      visible: true,
-      tipo: 'warning',
-      titulo: 'Quitar promoción',
-      mensaje: `¿Quitar la promoción "${promoNombre}" de este pedido? El cliente no recibirá la bonificación.`,
-      onConfirm: () => {
-        setConfirmConfig({ visible: false })
-        setPromosEliminadas(prev =>
-          prev.some(p => p.promoId === promoId) ? prev : [...prev, { promoId, promoNombre }],
-        )
-      },
-    })
+    setPromosEliminadas(prev =>
+      prev.some(p => p.promoId === promoId) ? prev : [...prev, { promoId, promoNombre }],
+    )
   }, [])
 
   const handleRestaurarPromoCreacion = useCallback((promoId: string) => {
