@@ -8,6 +8,7 @@ import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente } from '../..
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
@@ -300,6 +301,12 @@ const ModalPedido = memo(function ModalPedido({
   };
 
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
+
+  // Confirmación de quitar promo: vive DENTRO del modal (no en el container),
+  // porque ModalBase es un Radix Dialog modal y una confirmación renderizada
+  // afuera queda detrás del overlay y es inalcanzable → la quita fallaba en
+  // silencio. Mismo patrón que ModalEditarPedido.
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
 
   // Promos quitadas a mano → se excluyen de la resolución (display y submit).
   const promosEliminadasSet = useMemo(
@@ -832,7 +839,16 @@ const ModalPedido = memo(function ModalPedido({
                                 {(isAdmin || isPreventista || isEncargado) && onEliminarPromoCreacion && bonif.promoId && (
                                   <button
                                     type="button"
-                                    onClick={() => onEliminarPromoCreacion(String(bonif.promoId), bonif.promoNombre)}
+                                    onClick={() => setConfirmConfig({
+                                      visible: true,
+                                      tipo: 'warning',
+                                      titulo: 'Quitar promoción',
+                                      mensaje: `¿Quitar la promoción "${bonif.promoNombre}" de este pedido? El cliente no recibirá la bonificación.`,
+                                      onConfirm: () => {
+                                        setConfirmConfig(null);
+                                        onEliminarPromoCreacion(String(bonif.promoId), bonif.promoNombre);
+                                      },
+                                    })}
                                     className="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
                                     title="Quitar esta promoción del pedido"
                                     aria-label="Quitar promoción"
@@ -1057,6 +1073,7 @@ const ModalPedido = memo(function ModalPedido({
           </button>
         </div>
       </GeolocationGate>
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
   );
 });
