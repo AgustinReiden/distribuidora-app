@@ -166,6 +166,84 @@ export function calcularCostoFinanciero(
 }
 
 // ============================================
+// CÁLCULOS DE COMPRAS (desglose fiscal completo)
+// ============================================
+
+export interface CompraItemCalculo {
+  cantidad: number;
+  costoUnitario: number;
+  bonificacion?: number;
+  porcentajeIva?: number;
+  /** Tasa efectiva de imp. internos (%) */
+  impuestosInternos?: number;
+}
+
+export interface CompraExtras {
+  percepcionIva?: number;
+  percepcionIibb?: number;
+  noGravado?: number;
+  otrosImpuestos?: number;
+}
+
+export interface TotalesCompra {
+  subtotalBruto: number;
+  bonificacionTotal: number;
+  /** Neto gravado (bruto − bonif) */
+  subtotal: number;
+  iva: number;
+  impuestosInternos: number;
+  percepcionIva: number;
+  percepcionIibb: number;
+  noGravado: number;
+  otrosImpuestos: number;
+  total: number;
+}
+
+/**
+ * Totales de una compra según tipo de comprobante (fuente única del modal de
+ * compras; estructura = factura A real: total = gravado + IVA + II +
+ * percepciones + no gravado + otros).
+ *
+ * ZZ (sin factura): lo pagado es todo — sin IVA, sin II, sin percepciones ni
+ * no gravado. total = subtotal.
+ */
+export function calcularTotalesCompra(
+  items: CompraItemCalculo[],
+  tipoFactura: 'ZZ' | 'FC' = 'FC',
+  extras: CompraExtras = {}
+): TotalesCompra {
+  let subtotalBruto = 0;
+  let bonificacionTotal = 0;
+  let iva = 0;
+  let impuestosInternos = 0;
+
+  for (const item of items) {
+    const bruto = (item.cantidad || 0) * (item.costoUnitario || 0);
+    const bonif = bruto * (item.bonificacion || 0) / 100;
+    const neto = bruto - bonif;
+    subtotalBruto += bruto;
+    bonificacionTotal += bonif;
+    if (tipoFactura === 'FC') {
+      iva += neto * ((item.porcentajeIva ?? 21) / 100);
+      impuestosInternos += neto * ((item.impuestosInternos || 0) / 100);
+    }
+  }
+
+  const subtotal = subtotalBruto - bonificacionTotal;
+  const esFC = tipoFactura === 'FC';
+  const percepcionIva = esFC ? (extras.percepcionIva || 0) : 0;
+  const percepcionIibb = esFC ? (extras.percepcionIibb || 0) : 0;
+  const noGravado = esFC ? (extras.noGravado || 0) : 0;
+  const otrosImpuestos = esFC ? (extras.otrosImpuestos || 0) : 0;
+  const total = subtotal + iva + impuestosInternos + percepcionIva + percepcionIibb + noGravado + otrosImpuestos;
+
+  return {
+    subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos,
+    percepcionIva, percepcionIibb, noGravado, otrosImpuestos, total,
+  };
+}
+
+// ============================================
 // CÁLCULOS DE PEDIDOS
 // ============================================
 
@@ -331,6 +409,7 @@ export default {
   calcularNetoVenta,
   calcularCostoReal,
   calcularCostoFinanciero,
+  calcularTotalesCompra,
   calcularSubtotalItem,
   calcularTotalPedido,
   calcularMargenPorcentaje,

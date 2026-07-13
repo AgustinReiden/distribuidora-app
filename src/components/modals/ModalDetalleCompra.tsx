@@ -49,6 +49,10 @@ interface CompraDetalle {
   forma_pago: FormaPagoCompra;
   subtotal: number;
   iva: number;
+  impuestos_internos?: number;
+  percepcion_iva?: number;
+  percepcion_iibb?: number;
+  no_gravado?: number;
   otros_impuestos?: number;
   total: number;
   notas?: string;
@@ -247,6 +251,30 @@ export default function ModalDetalleCompra({
                 <span className="text-gray-600 dark:text-gray-400">IVA:</span>
                 <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.iva)}</span>
               </div>
+              {(compra.impuestos_internos ?? 0) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Impuestos internos:</span>
+                  <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.impuestos_internos!)}</span>
+                </div>
+              )}
+              {(compra.percepcion_iva ?? 0) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Percepción IVA:</span>
+                  <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.percepcion_iva!)}</span>
+                </div>
+              )}
+              {(compra.percepcion_iibb ?? 0) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Percepción IIBB:</span>
+                  <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.percepcion_iibb!)}</span>
+                </div>
+              )}
+              {(compra.no_gravado ?? 0) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">No gravado:</span>
+                  <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.no_gravado!)}</span>
+                </div>
+              )}
               {compra.otros_impuestos && compra.otros_impuestos > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Otros impuestos:</span>

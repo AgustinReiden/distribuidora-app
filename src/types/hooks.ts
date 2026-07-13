@@ -865,6 +865,11 @@ export interface CompraItemDBExtended {
   costo_unitario: number;
   subtotal?: number;
   bonificacion?: number;
+  /** Snapshots fiscales por línea (mig 113); NULL en líneas previas */
+  porcentaje_iva?: number | null;
+  impuestos_internos?: number | null;
+  costo_neto_unitario?: number | null;
+  costo_real_unitario?: number | null;
 }
 
 export interface CompraDBExtended {
@@ -878,6 +883,11 @@ export interface CompraDBExtended {
   fecha_compra?: string;
   subtotal?: number;
   iva?: number;
+  /** Desglose fiscal de cabecera (mig 113) */
+  impuestos_internos?: number;
+  percepcion_iva?: number;
+  percepcion_iibb?: number;
+  no_gravado?: number;
   otros_impuestos?: number;
   total: number;
   forma_pago?: string;
@@ -895,6 +905,11 @@ export interface CompraFormInputExtended {
   fechaCompra?: string;
   subtotal?: number;
   iva?: number;
+  /** Desglose fiscal de cabecera (mig 113/114). Percepciones y no gravado NO integran costo. */
+  impuestosInternos?: number;
+  percepcionIva?: number;
+  percepcionIibb?: number;
+  noGravado?: number;
   otrosImpuestos?: number;
   total?: number;
   formaPago?: string;

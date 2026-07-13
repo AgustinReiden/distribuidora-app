@@ -53,6 +53,9 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
 }: ModalEditarCompraProps) {
   const esZZ = compra.tipo_factura === 'ZZ'
   const otrosImpuestos = compra.otros_impuestos ?? 0
+  // Percepciones y no gravado (cabecera) no se editan acá: se conservan.
+  const percepciones = (compra.percepcion_iva ?? 0) + (compra.percepcion_iibb ?? 0)
+  const noGravado = compra.no_gravado ?? 0
 
   const [items, setItems] = useState<ItemEdit[]>(() =>
     (compra.items ?? []).map((it) => ({
@@ -61,11 +64,10 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
       cantidad: it.cantidad ?? 0,
       costoUnitario: it.costo_unitario ?? 0,
       bonificacion: it.bonificacion ?? 0,
-      // CompraItemDBExtended no expone porcentaje_iva/impuestos_internos por
-      // ahora — usamos defaults razonables al editar. Si en el futuro el
-      // select trae esos campos, se pueden leer del producto/compra.
-      porcentajeIva: esZZ ? 0 : 21,
-      impuestosInternos: 0,
+      // Snapshot de la línea (mig 113); líneas viejas caen a los atributos
+      // fiscales actuales del producto y por último a defaults.
+      porcentajeIva: esZZ ? 0 : (it.porcentaje_iva ?? it.producto?.porcentaje_iva ?? 21),
+      impuestosInternos: esZZ ? 0 : (it.impuestos_internos ?? it.producto?.impuestos_internos ?? 0),
       marcadoParaEliminar: false,
     })),
   )
@@ -75,21 +77,24 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
   // Items que efectivamente se persisten (los no eliminados).
   const itemsActivos = useMemo(() => items.filter((i) => !i.marcadoParaEliminar), [items])
 
-  // Totales calculados.
+  // Totales calculados (incluye imp. internos por línea; percepciones y no
+  // gravado de la cabecera se conservan tal cual).
   const totales = useMemo(() => {
     let subtotal = 0
     let iva = 0
+    let impuestosInternos = 0
     for (const it of itemsActivos) {
       const netoUnitario = it.costoUnitario * (1 - it.bonificacion / 100)
       const subtotalItem = it.cantidad * netoUnitario
       subtotal += subtotalItem
       if (!esZZ) {
         iva += subtotalItem * (it.porcentajeIva / 100)
+        impuestosInternos += subtotalItem * ((it.impuestosInternos || 0) / 100)
       }
     }
-    const total = subtotal + iva + otrosImpuestos
-    return { subtotal, iva, total }
-  }, [itemsActivos, esZZ, otrosImpuestos])
+    const total = subtotal + iva + impuestosInternos + percepciones + noGravado + otrosImpuestos
+    return { subtotal, iva, impuestosInternos, total }
+  }, [itemsActivos, esZZ, otrosImpuestos, percepciones, noGravado])
 
   function updateItem<K extends keyof ItemEdit>(productoId: string, field: K, value: ItemEdit[K]) {
     setItems((prev) =>
@@ -154,6 +159,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
       subtotal: totales.subtotal,
       iva: totales.iva,
       total: totales.total,
+      impuestosInternos: totales.impuestosInternos,
       items: itemsPayload,
     })
   }
@@ -297,6 +303,24 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
             <span>IVA{esZZ ? ' (ZZ → 0)' : ''}</span>
             <span className="tabular-nums">{formatPrecio(totales.iva)}</span>
           </div>
+          {totales.impuestosInternos > 0 && (
+            <div className="flex justify-between dark:text-gray-300">
+              <span>Impuestos internos</span>
+              <span className="tabular-nums">{formatPrecio(totales.impuestosInternos)}</span>
+            </div>
+          )}
+          {percepciones > 0 && (
+            <div className="flex justify-between dark:text-gray-300">
+              <span>Percepciones (sin cambio)</span>
+              <span className="tabular-nums">{formatPrecio(percepciones)}</span>
+            </div>
+          )}
+          {noGravado > 0 && (
+            <div className="flex justify-between dark:text-gray-300">
+              <span>No gravado (sin cambio)</span>
+              <span className="tabular-nums">{formatPrecio(noGravado)}</span>
+            </div>
+          )}
           {otrosImpuestos > 0 && (
             <div className="flex justify-between dark:text-gray-300">
               <span>Otros impuestos (sin cambio)</span>
