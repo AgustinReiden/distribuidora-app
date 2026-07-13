@@ -123,29 +123,46 @@ export function calcularNetoVenta(
 }
 
 /**
- * Calcula el costo neto de una compra según tipo de factura
+ * Costo REAL por unidad (canónico, espejo de la función SQL costo_real_unitario).
  *
- * FC (con factura): costo neto = costo sin IVA (IVA es crédito fiscal)
- * ZZ (sin factura): costo neto = costo total (no hay IVA que descontar)
+ * FC: neto post-bonif + impuestos internos (el IVA y las percepciones son
+ *     créditos fiscales, NO costo).
+ * ZZ: lo pagado tal cual (nada recuperable; el precio informal ya incluye todo,
+ *     no se agrega II encima).
  *
- * @param costoSinIva - Costo neto sin IVA del producto
- * @param porcentajeIva - Porcentaje de IVA
+ * @param costoNeto - Costo unitario post-bonificación (FC: neto de factura; ZZ: pagado)
+ * @param porcentajeImpInternos - Tasa efectiva de imp. internos (ej: 8.6956, 4.1667)
  * @param tipoFactura - 'ZZ' o 'FC'
- * @returns Costo neto real
  */
-export function calcularNetoCosto(
-  costoSinIva: number | string,
-  porcentajeIva: number | string = 21,
+export function calcularCostoReal(
+  costoNeto: number | string,
+  porcentajeImpInternos: number | string = 0,
   tipoFactura: 'ZZ' | 'FC' = 'FC'
 ): number {
-  const costo = parseFloat(String(costoSinIva)) || 0;
-  const iva = parseFloat(String(porcentajeIva)) || 0;
+  const costo = parseFloat(String(costoNeto)) || 0;
+  if (tipoFactura === 'ZZ') return costo;
+  const impInt = parseFloat(String(porcentajeImpInternos)) || 0;
+  return redondear(costo * (1 + impInt / 100), 4);
+}
 
-  if (tipoFactura === 'FC') {
-    return costo; // IVA es crédito fiscal, no es costo
-  }
-  // ZZ: IVA no existe, el costo total es el neto
-  return costo * (1 + iva / 100);
+/**
+ * Costo FINANCIERO por unidad (desembolso, sin percepciones; espejo SQL de
+ * costo_financiero_unitario). Alimenta productos.costo_con_iva.
+ * NO usar para margen real: para eso está calcularCostoReal.
+ *
+ * FC: neto × (1 + IVA% + II%). ZZ: lo pagado.
+ */
+export function calcularCostoFinanciero(
+  costoNeto: number | string,
+  porcentajeIva: number | string = 21,
+  porcentajeImpInternos: number | string = 0,
+  tipoFactura: 'ZZ' | 'FC' = 'FC'
+): number {
+  const costo = parseFloat(String(costoNeto)) || 0;
+  if (tipoFactura === 'ZZ') return costo;
+  const iva = parseFloat(String(porcentajeIva)) || 0;
+  const impInt = parseFloat(String(porcentajeImpInternos)) || 0;
+  return redondear(costo * (1 + iva / 100 + impInt / 100), 4);
 }
 
 // ============================================
@@ -312,7 +329,8 @@ export default {
   calcularNetoDesdeTotal,
   calcularMontoIva,
   calcularNetoVenta,
-  calcularNetoCosto,
+  calcularCostoReal,
+  calcularCostoFinanciero,
   calcularSubtotalItem,
   calcularTotalPedido,
   calcularMargenPorcentaje,

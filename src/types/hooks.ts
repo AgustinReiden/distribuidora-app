@@ -65,6 +65,10 @@ export interface ProductoDB {
   impuestos_internos?: number | null;
   precio_sin_iva?: number | null;
   porcentaje_iva?: number | null;
+  /** Costo real canónico: FC = neto×(1+II/100); ZZ = pagado (mig 111) */
+  costo_real?: number | null;
+  /** Tipo de la última compra que fijó el costo (mig 111) */
+  ultimo_tipo_compra?: 'ZZ' | 'FC' | null;
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -277,6 +281,9 @@ export interface ProductoFormInput {
   costo_con_iva?: number | string;
   impuestos_internos?: number | string;
   precio_sin_iva?: number | string;
+  porcentaje_iva?: number;
+  /** Costo real canónico calculado en el modal (mig 111) */
+  costo_real?: number | null;
   unidades_de_venta_por_fardo?: number | null;
   etiqueta_bulto?: string | null;
 }

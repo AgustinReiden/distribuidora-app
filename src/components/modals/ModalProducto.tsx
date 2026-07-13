@@ -10,6 +10,7 @@ import {
   calcularNetoDesdeTotal,
   calcularMargenPorcentaje,
   calcularPrecioDesdeMargen,
+  calcularCostoReal,
   parsePrecio,
 } from '../../utils/calculations';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
@@ -33,6 +34,8 @@ export interface ProductoFormData {
   impuestos_internos: number | string;
   precio_sin_iva: number | string;
   precio: number | string;
+  /** Costo real canónico (neto + imp. internos si FC; pagado si ZZ) — calculado al guardar */
+  costo_real?: number | null;
   /** Cuántas unidades de venta hacen 1 fardo/bulto (ej: 2 = vendés medio fardo) */
   unidades_de_venta_por_fardo?: number;
   /** Etiqueta del bulto: FARDO, CAJA, PACK, BULTO... */
@@ -100,7 +103,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     proveedor_id: producto.proveedor_id || '',
     stock: producto.stock ?? '',
     stock_minimo: producto.stock_minimo ?? 10,
-    porcentaje_iva: 21,
+    // Atributo fiscal del producto: preservar el real (ej: 10.5) en vez de resetear a 21.
+    porcentaje_iva: producto.porcentaje_iva ?? 21,
     costo_sin_iva: producto.costo_sin_iva ?? '',
     costo_con_iva: producto.costo_con_iva ?? '',
     impuestos_internos: producto.impuestos_internos ?? '',
@@ -231,7 +235,19 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
       const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
         ? nuevaCategoria.trim()
         : formNormalizado.categoria;
-      onSave({ ...formNormalizado, categoria: categoriaFinal, id: producto?.id });
+      // Mantener el costo_real canónico alineado con la edición manual del costo.
+      // La semántica FC/ZZ la da la última compra registrada (sin compra → FC).
+      const costoReal = calcularCostoReal(
+        formNormalizado.costo_sin_iva,
+        formNormalizado.impuestos_internos,
+        producto?.ultimo_tipo_compra ?? 'FC',
+      );
+      onSave({
+        ...formNormalizado,
+        categoria: categoriaFinal,
+        id: producto?.id,
+        costo_real: costoReal > 0 ? costoReal : null,
+      });
       return;
     }
     // Validación falló: scrollear al primer mensaje de error inline para que sea visible
@@ -479,7 +495,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            Costo real = Neto + Imp. Internos (sin IVA) = ${(parsePrecio(String(form.costo_sin_iva)) * (1 + (parseFloat(String(form.impuestos_internos)) || 0) / 100)).toFixed(2)}
+            Costo real{(producto?.ultimo_tipo_compra ?? 'FC') === 'ZZ' ? ' (última compra ZZ: lo pagado, sin add-ons)' : ' = Neto + Imp. Internos (sin IVA)'} = ${calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC').toFixed(2)}
           </p>
         </div>
 
