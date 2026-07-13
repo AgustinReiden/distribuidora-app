@@ -33,7 +33,7 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { runAgent } from "../_shared/gemini/agent.ts";
-import { truncateHistory } from "../_shared/gemini/memory.ts";
+import { dropToValidStart, truncateHistory } from "../_shared/gemini/memory.ts";
 import type { GeminiContent } from "../_shared/gemini/types.ts";
 import {
   clearSystemPromptCache,
@@ -697,6 +697,63 @@ Deno.test("truncateHistory no toca history de longitud <= cap", () => {
   ];
   const tr = truncateHistory(h, 12);
   assertEquals(tr, h);
+});
+
+Deno.test("truncateHistory devuelve [] si el tail entero es tool-call sin user-text (regresión: history envenenado)", () => {
+  // Reproduce el estado que atascó al bot en prod (2026-06-29): una conversación
+  // con muchísimas tool calls creció > cap; al truncar a 12 quedaron solo
+  // functionResponse (role user) + el texto final del modelo, SIN ningún
+  // "user text turn". Antes se devolvía tal cual → Gemini 400 "function response
+  // turn comes immediately after a function call turn" en CADA mensaje siguiente,
+  // y como el turno crasheaba antes de re-guardar, la fila quedaba atascada para
+  // siempre. Ahora debe colapsar a [] (arranque limpio).
+  const envenenado: GeminiContent[] = [];
+  // 8 turnos planos al inicio (quedan fuera del tail de 12) para forzar el
+  // recorte real, tal como pasó en prod.
+  for (let i = 0; i < 4; i++) {
+    envenenado.push({ role: "user", parts: [{ text: `vieja q${i}` }] });
+    envenenado.push({ role: "model", parts: [{ text: `vieja a${i}` }] });
+  }
+  // Los últimos 12 turnos: puro functionResponse + el texto final del modelo.
+  for (let i = 0; i < 11; i++) {
+    envenenado.push({
+      role: "user",
+      parts: [{ functionResponse: { name: "ventas_periodo", response: { result: i } } }],
+    });
+  }
+  envenenado.push({ role: "model", parts: [{ text: "acá va el catálogo..." }] });
+  assertEquals(envenenado.length, 20);
+
+  const tr = truncateHistory(envenenado, 12);
+  assertEquals(tr, [], "un tail sin user-text turn debe colapsar a [] en vez de persistir corrupción");
+});
+
+Deno.test("dropToValidStart descarta functionResponse huérfanos del frente y auto-cura el history", () => {
+  // Vacío → vacío.
+  assertEquals(dropToValidStart([]), []);
+
+  // Empieza limpio → intacto (misma referencia lógica).
+  const limpio: GeminiContent[] = [
+    { role: "user", parts: [{ text: "hola" }] },
+    { role: "model", parts: [{ text: "buenas" }] },
+  ];
+  assertEquals(dropToValidStart(limpio), limpio);
+
+  // functionResponse huérfano al frente → se descarta hasta el primer user-text.
+  const conHuerfano: GeminiContent[] = [
+    { role: "user", parts: [{ functionResponse: { name: "x", response: { result: 1 } } }] },
+    { role: "model", parts: [{ text: "resultado" }] },
+    { role: "user", parts: [{ text: "gracias" }] },
+    { role: "model", parts: [{ text: "de nada" }] },
+  ];
+  assertEquals(dropToValidStart(conHuerfano), conHuerfano.slice(2));
+
+  // Sin ningún user-text turn → [].
+  const soloTools: GeminiContent[] = [
+    { role: "user", parts: [{ functionResponse: { name: "x", response: {} } }] },
+    { role: "model", parts: [{ text: "algo" }] },
+  ];
+  assertEquals(dropToValidStart(soloTools), []);
 });
 
 // ============================================================================

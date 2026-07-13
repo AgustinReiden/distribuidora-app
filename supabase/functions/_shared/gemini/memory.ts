@@ -44,13 +44,22 @@ export async function loadConversation(
   if (!Array.isArray(arr)) return [];
 
   // Validar shape mínima de cada turn antes de usarlo en el loop.
-  return arr.filter((t): t is GeminiContent => {
+  const cleaned = arr.filter((t): t is GeminiContent => {
     if (typeof t !== "object" || t === null) return false;
     const turn = t as { role?: unknown; parts?: unknown };
     if (turn.role !== "user" && turn.role !== "model") return false;
     if (!Array.isArray(turn.parts)) return false;
     return true;
   });
+
+  // Sanear el arranque: si una escritura previa dejó el history empezando con
+  // un `functionResponse` huérfano (ej: se truncó una conversación con muchas
+  // tool calls y quedaron los responses sin sus calls), Gemini rechaza TODO el
+  // turno con 400 "function response turn comes immediately after a function
+  // call turn". Y como ese turno crashea ANTES de re-guardar un history sano,
+  // la fila queda atascada y el bot deja de responderle a ese usuario para
+  // siempre. Descartar el arranque inválido en la carga auto-cura ese estado.
+  return dropToValidStart(cleaned);
 }
 
 /**
@@ -79,42 +88,53 @@ export async function saveConversation(
 }
 
 /**
- * Trunca el history a los últimos N turnos manteniendo emparejamientos
- * coherentes. Si el primer turno del tail empieza con un functionResponse
- * (huérfano sin su functionCall correspondiente), descartamos hasta encontrar
- * el primer turno "user" con texto plano.
+ * Descarta turnos desde el frente hasta que el history empiece en un punto
+ * VÁLIDO para Gemini: un turno `user` cuyas parts son TODAS de texto (el
+ * comienzo natural de un intercambio del usuario).
  *
- * Edge cases:
- *   * `history.length <= maxTurns` → retorna tal cual.
- *   * Si NINGÚN turno del tail es "user con texto plano", retornamos el
- *     tail original — preferimos un history un poco roto a uno vacío que
- *     pierda el contexto.
+ * Esto garantiza la invariante que Gemini exige —un `functionResponse` (que va
+ * en un turno con role "user") SIEMPRE debe venir inmediatamente después de un
+ * `functionCall` (turno "model")— evitando el error 400 "function response
+ * turn comes immediately after a function call turn" cuando el history quedó
+ * con un `functionResponse` huérfano al frente.
+ *
+ * Si NINGÚN turno es un "user text turn", devuelve [] — arrancar sin contexto
+ * es infinitamente preferible a mandar un history que rompe TODAS las
+ * respuestas del usuario de forma permanente.
+ */
+export function dropToValidStart(history: GeminiContent[]): GeminiContent[] {
+  for (let i = 0; i < history.length; i++) {
+    const t = history[i];
+    if (
+      t.role === "user" &&
+      t.parts.length > 0 &&
+      t.parts.every((p) => isTextPart(p))
+    ) {
+      return i === 0 ? history : history.slice(i);
+    }
+  }
+  return [];
+}
+
+/**
+ * Trunca el history a los últimos N turnos y garantiza SIEMPRE un arranque
+ * válido para Gemini. Tras cortar al tail, `dropToValidStart` descarta
+ * cualquier `functionResponse` huérfano que haya quedado al frente (o devuelve
+ * [] si el tail entero es tool-call sin un "user text turn" — el caso
+ * patológico que antes se persistía roto y dejaba al usuario atascado).
+ *
+ * El saneo corre aun cuando no hace falta recortar (`length <= maxTurns`): un
+ * history sano queda intacto (`dropToValidStart` devuelve el mismo arranque),
+ * así que es barato y hace que la función nunca persista un arranque inválido.
  */
 export function truncateHistory(
   history: GeminiContent[],
   maxTurns: number,
 ): GeminiContent[] {
-  if (history.length <= maxTurns) return history;
-  const tail = history.slice(history.length - maxTurns);
-
-  // Buscar el primer turno user-only-text. Si existe, cortamos desde ahí —
-  // sino dejamos el tail tal cual (evita devolver [] y perder TODO el contexto).
-  for (let i = 0; i < tail.length; i++) {
-    const t = tail[i];
-    if (t.role === "user" && t.parts.every((p) => isTextPart(p))) {
-      return i === 0 ? tail : tail.slice(i);
-    }
-  }
-  // Caso raro pero posible: el tail entero está hecho de turns model + user
-  // con functionResponse. Devolverlo tal cual puede dejar a Gemini con un
-  // functionResponse huérfano al frente del próximo prompt → riesgo de error.
-  // No cambiamos el comportamiento (preferimos history roto a vacío) pero
-  // dejamos visibilidad para detectarlo en logs.
-  console.warn(
-    "[memory] truncateHistory: no user-text turn found in tail; returning " +
-      "tail as-is, may have orphan functionResponse at head",
-  );
-  return tail;
+  const tail = history.length <= maxTurns
+    ? history
+    : history.slice(history.length - maxTurns);
+  return dropToValidStart(tail);
 }
 
 /** Para tests: expone el cap. */
