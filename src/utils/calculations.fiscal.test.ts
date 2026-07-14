@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta } from './calculations'
+import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta, calcularTotalesCompra } from './calculations'
 
 // Fixture: factura A 0005-00455160 de Refres Now (Manaos) → T.P. Export,
 // 16/06/2026. Tasas efectivas de imp. internos sobre el neto:
@@ -57,5 +57,35 @@ describe('calcularNetoVenta con impuestos internos (estructura de la factura)', 
     expect(calcularNetoVenta(10000, 21, 8.6956, 'ZZ')).toEqual({
       neto: 10000, iva: 0, impuestosInternos: 0,
     })
+  })
+})
+
+describe('calcularTotalesCompra (estructura de la factura A)', () => {
+  const items = [
+    // MANAOS COLA 3000cc: 240 packs, bonif 0,60%, II 8,6956%
+    { cantidad: 240, costoUnitario: 5397.25, bonificacion: 0.6, porcentajeIva: 21, impuestosInternos: 8.6956 },
+    // AGUA S/G 600: 120 packs, bonif 0,60%, II 4,1667%
+    { cantidad: 120, costoUnitario: 2796.27, bonificacion: 0.6, porcentajeIva: 21, impuestosInternos: 4.1667 },
+    // SODA SIFON: sin II
+    { cantidad: 150, costoUnitario: 5123.97, bonificacion: 0.6, porcentajeIva: 21, impuestosInternos: 0 },
+  ]
+
+  it('FC: total = gravado + IVA + II + percepciones + no gravado', () => {
+    const t = calcularTotalesCompra(items, 'FC', { percepcionIva: 1000, percepcionIibb: 500, noGravado: 2000 })
+    const gravadoEsperado = 240 * 5397.25 * 0.994 + 120 * 2796.27 * 0.994 + 150 * 5123.97 * 0.994
+    expect(t.subtotal).toBeCloseTo(gravadoEsperado, 2)
+    expect(t.iva).toBeCloseTo(gravadoEsperado * 0.21, 0)
+    expect(t.impuestosInternos).toBeCloseTo(
+      240 * 5397.25 * 0.994 * 0.086956 + 120 * 2796.27 * 0.994 * 0.041667, 2)
+    expect(t.total).toBeCloseTo(t.subtotal + t.iva + t.impuestosInternos + 1000 + 500 + 2000, 2)
+  })
+
+  it('ZZ: lo pagado es todo — sin IVA, II ni extras aunque vengan cargados', () => {
+    const t = calcularTotalesCompra(items, 'ZZ', { percepcionIva: 1000, noGravado: 2000 })
+    expect(t.iva).toBe(0)
+    expect(t.impuestosInternos).toBe(0)
+    expect(t.percepcionIva).toBe(0)
+    expect(t.noGravado).toBe(0)
+    expect(t.total).toBeCloseTo(t.subtotal, 2)
   })
 })

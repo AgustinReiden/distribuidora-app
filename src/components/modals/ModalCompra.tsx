@@ -8,6 +8,8 @@ import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, l
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { calcularTotalesCompra } from '../../utils/calculations'
+import type { TotalesCompra } from '../../utils/calculations'
 import NumberInput from '../ui/NumberInput'
 import { supabase } from '../../lib/supabase'
 import { CompactErrorBoundary } from '../ErrorBoundary'
@@ -105,8 +107,24 @@ function construirCompraItemDesdeScan(
   }
 }
 
+/** Totales impresos en la factura física, para el panel "Control contra factura" (0 = no cargado) */
+export interface ControlFactura {
+  gravado: number;
+  iva: number;
+  impuestosInternos: number;
+  percepciones: number;
+  total: number;
+}
+
 /** Estado del reducer de compra */
 export interface CompraState {
+  /** Percepción de IVA de la factura (crédito fiscal, no costo) — solo FC */
+  percepcionIva: number;
+  /** Percepción de IIBB de la factura (crédito fiscal, no costo) — solo FC */
+  percepcionIibb: number;
+  /** Conceptos no gravados (ej: pallets valorizados) — solo FC */
+  noGravado: number;
+  controlFactura: ControlFactura;
   proveedorId: string;
   proveedorNombre: string;
   usarProveedorNuevo: boolean;
@@ -157,7 +175,10 @@ type CompraActionType =
   | { type: 'RESOLVER_PENDIENTE_VINCULAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_CREAR'; payload: { index: number; producto: ProductoDB } }
   | { type: 'RESOLVER_PENDIENTE_OMITIR'; payload: { index: number } }
-  | { type: 'LIMPIAR_PENDIENTES_SCAN' };
+  | { type: 'LIMPIAR_PENDIENTES_SCAN' }
+  | { type: 'SET_EXTRAS'; payload: Partial<Pick<CompraState, 'percepcionIva' | 'percepcionIibb' | 'noGravado'>> }
+  | { type: 'SET_CONTROL'; payload: Partial<ControlFactura> }
+  | { type: 'APLICAR_BONIF_GLOBAL'; payload: number };
 
 /** Props del componente principal */
 export interface ModalCompraProps {
@@ -212,22 +233,9 @@ interface ItemRowProps {
 
 /** Props de ResumenSection */
 interface ResumenSectionProps {
-  subtotalBruto: number;
-  bonificacionTotal: number;
-  subtotal: number;
-  iva: number;
-  impuestosInternos: number;
-  total: number;
-}
-
-/** Return type del hook de cálculos */
-interface CalculosImpuestos {
-  subtotalBruto: number;
-  bonificacionTotal: number;
-  subtotal: number;
-  iva: number;
-  impuestosInternos: number;
-  total: number;
+  totales: TotalesCompra;
+  state: CompraState;
+  dispatch: React.Dispatch<CompraActionType>;
 }
 
 // Constantes
@@ -243,6 +251,11 @@ const FORMAS_PAGO = [
 
 // Estado inicial
 const initialState: CompraState = {
+  // Desglose fiscal extra (solo FC)
+  percepcionIva: 0,
+  percepcionIibb: 0,
+  noGravado: 0,
+  controlFactura: { gravado: 0, iva: 0, impuestosInternos: 0, percepciones: 0, total: 0 },
   // Proveedor
   proveedorId: '',
   proveedorNombre: '',
@@ -439,36 +452,37 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
     case 'LIMPIAR_PENDIENTES_SCAN':
       return { ...state, itemsPendientesScan: [] }
 
+    case 'SET_EXTRAS':
+      return { ...state, ...action.payload }
+
+    case 'SET_CONTROL':
+      return { ...state, controlFactura: { ...state.controlFactura, ...action.payload } }
+
+    case 'APLICAR_BONIF_GLOBAL':
+      return {
+        ...state,
+        items: state.items.map(item => ({ ...item, bonificacion: action.payload }))
+      }
+
     default:
       return state
   }
 }
 
-// Hook para cálculos de impuestos (bonificacion e imp. internos como porcentaje)
-function useCalculosImpuestos(items: CompraItemForm[], tipoFactura: 'ZZ' | 'FC' = 'FC'): CalculosImpuestos {
-  return useMemo(() => {
-    let subtotalBruto = 0
-    let bonificacionTotal = 0
-    let iva = 0
-    let impuestosInternos = 0
-
-    for (const item of items) {
-      const bruto = item.cantidad * item.costoUnitario
-      const bonif = bruto * (item.bonificacion || 0) / 100
-      const neto = bruto - bonif
-      subtotalBruto += bruto
-      bonificacionTotal += bonif
-      // ZZ: no hay IVA discriminado
-      if (tipoFactura === 'FC') {
-        iva += neto * ((item.porcentajeIva ?? 21) / 100)
-      }
-      impuestosInternos += neto * ((item.impuestosInternos || 0) / 100)
-    }
-
-    const subtotal = subtotalBruto - bonificacionTotal
-    const total = subtotal + iva + impuestosInternos
-    return { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total }
-  }, [items, tipoFactura])
+// Hook para cálculos de impuestos: delega en calcularTotalesCompra (fuente
+// única, testeada con la factura Manaos). ZZ: lo pagado es todo (sin IVA, II
+// ni percepciones).
+function useCalculosImpuestos(
+  items: CompraItemForm[],
+  tipoFactura: 'ZZ' | 'FC',
+  percepcionIva: number,
+  percepcionIibb: number,
+  noGravado: number
+): TotalesCompra {
+  return useMemo(
+    () => calcularTotalesCompra(items, tipoFactura, { percepcionIva, percepcionIibb, noGravado }),
+    [items, tipoFactura, percepcionIva, percepcionIibb, noGravado]
+  )
 }
 
 const N8N_FACTURA_WEBHOOK_URL: string = import.meta.env.VITE_N8N_FACTURA_WEBHOOK_URL || ''
@@ -478,7 +492,8 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
-  const { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total } = useCalculosImpuestos(state.items, state.tipoFactura)
+  const totales = useCalculosImpuestos(state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado)
+  const { subtotal, iva, impuestosInternos, total } = totales
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Productos filtrados
@@ -638,7 +653,11 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         fechaCompra: state.fechaCompra,
         subtotal,
         iva,
-        otrosImpuestos: impuestosInternos,
+        impuestosInternos,
+        percepcionIva: state.tipoFactura === 'FC' ? state.percepcionIva : 0,
+        percepcionIibb: state.tipoFactura === 'FC' ? state.percepcionIibb : 0,
+        noGravado: state.tipoFactura === 'FC' ? state.noGravado : 0,
+        otrosImpuestos: 0,
         total,
         formaPago: state.formaPago,
         notas: state.notas,
@@ -786,14 +805,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
             {/* Totales */}
             {state.items.length > 0 && (
-              <ResumenSection
-                subtotalBruto={subtotalBruto}
-                bonificacionTotal={bonificacionTotal}
-                subtotal={subtotal}
-                iva={iva}
-                impuestosInternos={impuestosInternos}
-                total={total}
-              />
+              <ResumenSection totales={totales} state={state} dispatch={dispatch} />
             )}
 
             {/* Notas */}
@@ -1750,13 +1762,124 @@ function ItemPendienteRow({
   )
 }
 
-function ResumenSection({ subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, total }: ResumenSectionProps) {
+/** Fila del panel de control: calculado vs impreso en la factura */
+function ControlRow({ label, calculado, impreso, onChange }: {
+  label: string;
+  calculado: number;
+  impreso: number;
+  onChange: (n: number) => void;
+}) {
+  const cargado = impreso > 0
+  const diff = impreso - calculado
+  const ok = Math.abs(diff) <= 1
   return (
-    <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <Calculator className="w-5 h-5 text-green-600" />
-        <h3 className="font-medium text-gray-800 dark:text-white">Resumen</h3>
+    <div className="grid grid-cols-12 gap-2 items-center text-sm">
+      <span className="col-span-4 text-gray-600 dark:text-gray-400">{label}</span>
+      <span className="col-span-3 text-right text-gray-800 dark:text-white">{formatPrecio(calculado)}</span>
+      <div className="col-span-3">
+        <NumberInput
+          min={0}
+          emptyValue={0}
+          value={impreso}
+          onChange={onChange}
+          commitOnChange
+          className="w-full px-2 py-1 text-right border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+          placeholder="factura"
+        />
       </div>
+      <span className={`col-span-2 text-right text-xs font-medium ${!cargado ? 'text-gray-400' : ok ? 'text-green-600' : 'text-red-600'}`}>
+        {!cargado ? '—' : ok ? '✓' : formatPrecio(diff)}
+      </span>
+    </div>
+  )
+}
+
+function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
+  const { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, percepcionIva, percepcionIibb, noGravado, total } = totales
+  const esFC = state.tipoFactura === 'FC'
+  const [bonifGlobal, setBonifGlobal] = useState(0)
+  const [mostrarControl, setMostrarControl] = useState(false)
+  const ctrl = state.controlFactura
+  const percepcionesCalc = percepcionIva + percepcionIibb
+
+  return (
+    <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Calculator className="w-5 h-5 text-green-600" />
+          <h3 className="font-medium text-gray-800 dark:text-white">Resumen</h3>
+        </div>
+        {/* Bonificación global (ej: 0,60% de Refres Now) aplicada a todas las líneas */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500">Bonif. global %</span>
+          <NumberInput
+            min={0}
+            max={100}
+            emptyValue={0}
+            value={bonifGlobal}
+            onChange={setBonifGlobal}
+            commitOnChange
+            className="w-16 px-2 py-1 text-center border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => dispatch({ type: 'APLICAR_BONIF_GLOBAL', payload: bonifGlobal })}
+            className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+          >
+            Aplicar
+          </button>
+        </div>
+      </div>
+
+      {esFC && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">
+              Percepción IVA
+              <button
+                type="button"
+                onClick={() => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIva: Math.round(subtotal * 3) / 100 } })}
+                className="ml-2 text-blue-600 hover:underline"
+                title="RG 5329: 3% sobre el gravado"
+              >
+                3% del gravado
+              </button>
+            </label>
+            <NumberInput
+              min={0}
+              emptyValue={0}
+              value={state.percepcionIva}
+              onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIva: n } })}
+              commitOnChange
+              className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Percepción IIBB</label>
+            <NumberInput
+              min={0}
+              emptyValue={0}
+              value={state.percepcionIibb}
+              onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { percepcionIibb: n } })}
+              commitOnChange
+              className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1" title="Conceptos fuera del IVA (ej: pallets/separadores valorizados)">
+              No gravado
+            </label>
+            <NumberInput
+              min={0}
+              emptyValue={0}
+              value={state.noGravado}
+              onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { noGravado: n } })}
+              commitOnChange
+              className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
+            />
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         {bonificacionTotal > 0 && (
@@ -1772,17 +1895,31 @@ function ResumenSection({ subtotalBruto, bonificacionTotal, subtotal, iva, impue
           </>
         )}
         <div className="flex justify-between text-sm">
-          <span className="text-gray-600 dark:text-gray-400">Subtotal Neto:</span>
+          <span className="text-gray-600 dark:text-gray-400">{esFC ? 'Gravado (neto):' : 'Subtotal Neto:'}</span>
           <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(subtotal)}</span>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-600 dark:text-gray-400">IVA (sobre neto):</span>
-          <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(iva)}</span>
-        </div>
+        {esFC && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600 dark:text-gray-400">IVA (sobre neto):</span>
+            <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(iva)}</span>
+          </div>
+        )}
         {impuestosInternos > 0 && (
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">Impuestos Internos:</span>
             <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(impuestosInternos)}</span>
+          </div>
+        )}
+        {percepcionesCalc > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600 dark:text-gray-400">Percepciones (IVA + IIBB):</span>
+            <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(percepcionesCalc)}</span>
+          </div>
+        )}
+        {noGravado > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600 dark:text-gray-400">No gravado:</span>
+            <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(noGravado)}</span>
           </div>
         )}
         <div className="flex justify-between text-lg font-bold pt-2 border-t dark:border-gray-600">
@@ -1790,6 +1927,43 @@ function ResumenSection({ subtotalBruto, bonificacionTotal, subtotal, iva, impue
           <span className="text-green-600">{formatPrecio(total)}</span>
         </div>
       </div>
+
+      {/* Control contra factura: reemplaza las columnas "control" del Excel */}
+      {esFC && (
+        <div className="pt-2 border-t dark:border-gray-700">
+          <button
+            type="button"
+            onClick={() => setMostrarControl(v => !v)}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            {mostrarControl ? 'Ocultar control contra factura' : 'Control contra factura ▸'}
+          </button>
+          {mostrarControl && (
+            <div className="mt-2 space-y-1.5">
+              <div className="grid grid-cols-12 gap-2 text-xs text-gray-500">
+                <span className="col-span-4">Concepto</span>
+                <span className="col-span-3 text-right">Calculado</span>
+                <span className="col-span-3 text-right">Factura dice</span>
+                <span className="col-span-2 text-right">Dif.</span>
+              </div>
+              <ControlRow label="Gravado" calculado={subtotal} impreso={ctrl.gravado}
+                onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { gravado: n } })} />
+              <ControlRow label="IVA" calculado={iva} impreso={ctrl.iva}
+                onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { iva: n } })} />
+              <ControlRow label="Imp. internos" calculado={impuestosInternos} impreso={ctrl.impuestosInternos}
+                onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { impuestosInternos: n } })} />
+              <ControlRow label="Percepciones" calculado={percepcionesCalc} impreso={ctrl.percepciones}
+                onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { percepciones: n } })} />
+              <ControlRow label="TOTAL" calculado={total} impreso={ctrl.total}
+                onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { total: n } })} />
+              <p className="text-xs text-gray-500 pt-1">
+                Tipeá los totales impresos en la factura: si una diferencia no da ✓ (± $1), revisá
+                bonificaciones, tasas de II del producto o el no gravado antes de registrar.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

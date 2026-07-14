@@ -114,7 +114,11 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     p_notas: compraData.notas || null,
     p_usuario_id: compraData.usuarioId || null,
     p_items: itemsParaRPC,
-    p_tipo_factura: compraData.tipoFactura || 'FC'
+    p_tipo_factura: compraData.tipoFactura || 'FC',
+    p_impuestos_internos: compraData.impuestosInternos || 0,
+    p_percepcion_iva: compraData.percepcionIva || 0,
+    p_percepcion_iibb: compraData.percepcionIibb || 0,
+    p_no_gravado: compraData.noGravado || 0
   })
 
   if (error) throw error
@@ -127,40 +131,25 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
   return { success: true, compraId: result.compra_id }
 }
 
-async function anularCompra(compraId: string, compras: CompraDBExtended[]): Promise<void> {
-  const compra = compras.find(c => c.id === compraId)
-  if (!compra) throw new Error('Compra no encontrada')
+/**
+ * Anula una compra via RPC atómico (mig 115): reversa de stock con invariante
+ * de no-negatividad + restauración del costo del producto desde la última
+ * compra restante. Reemplaza el loop client-side no atómico que clampeaba el
+ * stock en 0 (perdía reversa) y no restauraba costos.
+ */
+async function anularCompra(compraId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
 
-  // Obtener stock ACTUAL de todos los productos afectados
-  const productIds = (compra.items || []).map(i => i.producto_id).filter(Boolean)
-  if (productIds.length > 0) {
-    const { data: productosActuales } = await supabase
-      .from('productos')
-      .select('id, stock')
-      .in('id', productIds)
-
-    const stockMap: Record<string, number> = Object.fromEntries(
-      ((productosActuales || []) as Array<{ id: string; stock: number }>).map(p => [p.id, p.stock || 0])
-    )
-
-    // Revertir stock de cada item (restar del stock ACTUAL)
-    for (const item of (compra.items || [])) {
-      const stockActual = stockMap[item.producto_id] || 0
-      const nuevoStock = stockActual - item.cantidad
-      await supabase
-        .from('productos')
-        .update({ stock: Math.max(0, nuevoStock) })
-        .eq('id', item.producto_id)
-    }
-  }
-
-  // Marcar compra como cancelada
-  const { error } = await supabase
-    .from('compras')
-    .update({ estado: 'cancelada' })
-    .eq('id', compraId)
+  const { data, error } = await supabase.rpc('anular_compra_atomica', {
+    p_compra_id: compraId,
+    p_usuario_id: user?.id ?? null,
+  })
 
   if (error) throw error
+  const result = data as { success: boolean; error?: string }
+  if (!result.success) {
+    throw new Error(result.error || 'Error al anular la compra')
+  }
 }
 
 // Hooks
@@ -230,6 +219,11 @@ export interface ActualizarCompraItemsInput {
   subtotal: number
   iva: number
   total: number
+  /** Cabecera fiscal (mig 114). undefined = conservar el valor actual. */
+  impuestosInternos?: number
+  percepcionIva?: number
+  percepcionIibb?: number
+  noGravado?: number
   items: Array<{
     productoId: string
     cantidad: number
@@ -259,6 +253,10 @@ async function actualizarCompraItems(input: ActualizarCompraItemsInput): Promise
     p_iva: input.iva,
     p_total: input.total,
     p_usuario_id: input.usuarioId,
+    p_impuestos_internos: input.impuestosInternos ?? null,
+    p_percepcion_iva: input.percepcionIva ?? null,
+    p_percepcion_iibb: input.percepcionIibb ?? null,
+    p_no_gravado: input.noGravado ?? null,
   })
 
   if (error) throw error
@@ -295,8 +293,7 @@ export function useAnularCompraMutation() {
 
   return useMutation({
     mutationFn: async (compraId: string) => {
-      const compras = queryClient.getQueryData<CompraDBExtended[]>(comprasKeys.lists(currentSucursalId)) || []
-      await anularCompra(compraId, compras)
+      await anularCompra(compraId)
       return compraId
     },
     // Optimistic update
