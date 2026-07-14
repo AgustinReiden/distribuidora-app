@@ -189,17 +189,23 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
           productoStats[id].cantidadVendida += item.cantidad
           ventasBrutas += subtotalItem
 
-          // Usar neto_unitario si existe (pedidos nuevos), sino calcular
-          if (tipoFactura === 'FC' && (item as Record<string, unknown>).neto_unitario != null) {
-            const netoItem = ((item as Record<string, unknown>).neto_unitario as number) * item.cantidad
-            const ivaItem = ((item as Record<string, unknown>).iva_unitario as number || 0) * item.cantidad
-            const impIntItem = ((item as Record<string, unknown>).impuestos_internos_unitario as number || 0) * item.cantidad
+          // Ingreso REAL por item (mig 123): FC = neto (el IVA se remite), ZZ =
+          // precio final. Snapshot en ingreso_real_unitario; fallback por tipo
+          // para filas legacy.
+          const itemRec = item as Record<string, unknown>
+          const realUnit = itemRec.ingreso_real_unitario as number | null | undefined
+          if (realUnit != null) {
+            productoStats[id].ingresos += realUnit * item.cantidad
+            ivaDiscriminado += ((itemRec.iva_unitario as number) || 0) * item.cantidad
+            impuestosInternosTotales += ((itemRec.impuestos_internos_unitario as number) || 0) * item.cantidad
+            ventasNetas += ((itemRec.neto_unitario as number) ?? realUnit) * item.cantidad
+          } else if (tipoFactura === 'FC' && itemRec.neto_unitario != null) {
+            const netoItem = (itemRec.neto_unitario as number) * item.cantidad
             productoStats[id].ingresos += netoItem
-            ivaDiscriminado += ivaItem
-            impuestosInternosTotales += impIntItem
+            ivaDiscriminado += ((itemRec.iva_unitario as number) || 0) * item.cantidad
             ventasNetas += netoItem
           } else {
-            // Pedidos ZZ o legacy sin desglose: neto = total
+            // ZZ o legacy sin desglose: real = final
             productoStats[id].ingresos += subtotalItem
             ventasNetas += subtotalItem
           }

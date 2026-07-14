@@ -132,28 +132,41 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   const [nuevaCategoria, setNuevaCategoria] = useState<string>('');
   const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState<boolean>(false);
 
-  // Margen (markup sobre el costo FINAL) — solo UI, bidireccional con el precio
-  // final. Si edito el margen se recalcula el precio final; si edito el precio
-  // final se recalcula el margen.
-  const [margen, setMargen] = useState<string>(() => {
-    const costoFinal = calcularTotalConIva(
-      producto?.costo_sin_iva ?? '',
-      producto?.porcentaje_iva ?? 21,
-      producto?.impuestos_internos ?? '',
-    );
-    const precioFinal = parsePrecio(String(producto?.precio ?? ''));
-    if (costoFinal > 0 && precioFinal > 0) {
-      return calcularMargenPorcentaje(precioFinal, costoFinal).toFixed(1);
-    }
-    return '';
+  // ── Márgenes (solo UI, bidireccionales con el precio final) ───────────────
+  // Lógica del negocio (mig 123):
+  //   · MARGEN BRUTO = precio final − costo total (neto + IVA + II): la plata
+  //     desembolsada vs la cobrada. % = markup sobre el costo total.
+  //   · MARGEN NETO  = precio neto (precio/1+IVA%) − costo final (neto + II =
+  //     costo real). Es el margen fiscal FC. % = markup sobre el costo real.
+  // Editar cualquiera de los dos % recalcula el precio final (y el otro %).
+
+  /** Costo total con IVA (desembolso) y costo real (neto+II) desde el form. */
+  const costosDesdeForm = (f: ProductoFormData) => ({
+    costoTotal: calcularTotalConIva(f.costo_sin_iva, f.porcentaje_iva, f.impuestos_internos),
+    costoReal: calcularCostoReal(f.costo_sin_iva, f.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC'),
   });
 
+  const margenesDesdeForm = (f: ProductoFormData): { bruto: string; neto: string } => {
+    const { costoTotal, costoReal } = costosDesdeForm(f);
+    const precioFinal = parsePrecio(String(f.precio));
+    const precioNeto = calcularNetoDesdeTotal(f.precio, f.porcentaje_iva, 0);
+    return {
+      bruto: costoTotal > 0 && precioFinal > 0
+        ? calcularMargenPorcentaje(precioFinal, costoTotal).toFixed(1) : '',
+      neto: costoReal > 0 && precioNeto > 0
+        ? calcularMargenPorcentaje(precioNeto, costoReal).toFixed(1) : '',
+    };
+  };
+
+  // Inicialización lazy desde el producto (el modal se remonta al abrir).
+  const [margenBruto, setMargenBruto] = useState<string>(() => margenesDesdeForm(form).bruto);
+  const [margenNeto, setMargenNeto] = useState<string>(() => margenesDesdeForm(form).neto);
+
   // Recalcula los campos derivados a partir del form:
-  //  - costo_con_iva (costo final) desde el costo neto + IVA + imp. internos
-  //  - precio_sin_iva (precio neto) HACIA ATRÁS desde el precio final (el usuario
-  //    edita el precio final; en venta ZZ el ingreso es el final, en FC el neto).
-  //    OJO: la VENTA no discrimina imp. internos (no somos agente, mig 122):
-  //    el precio neto es precio / (1 + IVA%), sin II. El II solo afecta el costo.
+  //  - costo_con_iva (costo total) desde el costo neto + IVA + imp. internos
+  //  - precio_sin_iva (precio neto) HACIA ATRÁS desde el precio final. OJO: la
+  //    VENTA no discrimina imp. internos (no somos agente, mig 122): el precio
+  //    neto es precio / (1 + IVA%), sin II. El II solo afecta el costo.
   const recalcularTotales = (nuevoForm: ProductoFormData): ProductoFormData => {
     const costoTotal = calcularTotalConIva(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
     const precioNeto = calcularNetoDesdeTotal(nuevoForm.precio, nuevoForm.porcentaje_iva, 0);
@@ -164,57 +177,51 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     };
   };
 
-  // Margen derivado del precio final vs costo final (markup sobre costo).
-  const margenDesdeForm = (f: ProductoFormData): string => {
-    const costoFinal = calcularTotalConIva(f.costo_sin_iva, f.porcentaje_iva, f.impuestos_internos);
-    const precioFinal = parsePrecio(String(f.precio));
-    if (costoFinal > 0 && precioFinal > 0) {
-      return calcularMargenPorcentaje(precioFinal, costoFinal).toFixed(1);
-    }
-    return '';
+  const aplicarForm = (nuevoForm: ProductoFormData): void => {
+    const conTotales = recalcularTotales(nuevoForm);
+    setForm(conTotales);
+    const margenes = margenesDesdeForm(conTotales);
+    setMargenBruto(margenes.bruto);
+    setMargenNeto(margenes.neto);
   };
 
-  // Manejar cambio de costo neto: el precio final se mantiene, se recalcula el margen.
-  const handleCostoSinIvaChange = (valor: string): void => {
-    const nuevoForm = recalcularTotales({ ...form, costo_sin_iva: valor });
-    setForm(nuevoForm);
-    setMargen(margenDesdeForm(nuevoForm));
-  };
+  // Cambios de costo/atributos fiscales: el precio final se mantiene, se
+  // recalculan derivados y ambos márgenes.
+  const handleCostoSinIvaChange = (valor: string): void => aplicarForm({ ...form, costo_sin_iva: valor });
+  const handleImpuestosInternosChange = (valor: string): void => aplicarForm({ ...form, impuestos_internos: valor });
+  const handlePorcentajeIvaChange = (valor: string): void => aplicarForm({ ...form, porcentaje_iva: parseFloat(valor) });
 
-  // Imp. internos: solo cambian el costo final (la venta no los discrimina); recalcular margen.
-  const handleImpuestosInternosChange = (valor: string): void => {
-    const nuevoForm = recalcularTotales({ ...form, impuestos_internos: valor });
-    setForm(nuevoForm);
-    setMargen(margenDesdeForm(nuevoForm));
-  };
-
-  // % IVA: ídem imp. internos.
-  const handlePorcentajeIvaChange = (valor: string): void => {
-    const nuevoForm = recalcularTotales({ ...form, porcentaje_iva: parseFloat(valor) });
-    setForm(nuevoForm);
-    setMargen(margenDesdeForm(nuevoForm));
-  };
-
-  // Manejar cambio de PRECIO FINAL (lo edita el usuario) → recalcula neto + margen.
+  // Cambio de PRECIO FINAL (lo edita el usuario) → recalcula neto + márgenes.
   const handlePrecioChange = (valor: string): void => {
-    const nuevoForm = recalcularTotales({ ...form, precio: valor });
-    setForm(nuevoForm);
-    setMargen(margenDesdeForm(nuevoForm));
+    aplicarForm({ ...form, precio: valor });
     if (intentoGuardar && errores.precio) {
       clearFieldError('precio');
     }
   };
 
-  // Manejar cambio de MARGEN → recalcula el precio final (y el neto).
-  const handleMargenChange = (valor: string): void => {
-    setMargen(valor);
-    const costoFinal = calcularTotalConIva(form.costo_sin_iva, form.porcentaje_iva, form.impuestos_internos);
-    if (costoFinal > 0 && valor.trim() !== '' && !Number.isNaN(parseFloat(valor))) {
-      const precioFinal = calcularPrecioDesdeMargen(costoFinal, valor);
-      setForm(recalcularTotales({ ...form, precio: precioFinal.toFixed(2) }));
-      if (intentoGuardar && errores.precio) {
-        clearFieldError('precio');
-      }
+  // Margen BRUTO editado → precio final = costo total × (1 + %).
+  const handleMargenBrutoChange = (valor: string): void => {
+    setMargenBruto(valor);
+    const { costoTotal } = costosDesdeForm(form);
+    if (costoTotal > 0 && valor.trim() !== '' && !Number.isNaN(parseFloat(valor))) {
+      const precioFinal = calcularPrecioDesdeMargen(costoTotal, valor);
+      aplicarForm({ ...form, precio: precioFinal.toFixed(2) });
+      setMargenBruto(valor); // preservar lo tipeado (aplicarForm lo pisa con el derivado)
+      if (intentoGuardar && errores.precio) clearFieldError('precio');
+    }
+  };
+
+  // Margen NETO editado → precio neto = costo real × (1 + %) → precio final = neto × (1 + IVA%).
+  const handleMargenNetoChange = (valor: string): void => {
+    setMargenNeto(valor);
+    const { costoReal } = costosDesdeForm(form);
+    if (costoReal > 0 && valor.trim() !== '' && !Number.isNaN(parseFloat(valor))) {
+      const precioNeto = calcularPrecioDesdeMargen(costoReal, valor);
+      const iva = parseFloat(String(form.porcentaje_iva)) || 0;
+      const precioFinal = precioNeto * (1 + iva / 100);
+      aplicarForm({ ...form, precio: precioFinal.toFixed(2) });
+      setMargenNeto(valor); // preservar lo tipeado
+      if (intentoGuardar && errores.precio) clearFieldError('precio');
     }
   };
 
@@ -470,7 +477,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         {/* Seccion de Costos */}
         <div className="border-t pt-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Costos (compra)</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Costo Neto</label>
               <NumberInput
@@ -484,20 +491,41 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Costo Total (Neto + IVA + Imp.Int.)</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos ($)</label>
+              <input
+                type="text"
+                value={(parsePrecio(form.costo_sin_iva) * ((parseFloat(String(form.impuestos_internos)) || 0) / 100)).toFixed(2)}
+                readOnly
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Costo final (Neto + II)</label>
+              <input
+                type="text"
+                value={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC').toFixed(2)}
+                readOnly
+                className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-blue-50 font-semibold"
+                title="Costo REAL: el que se aplica en márgenes, mermas y bonificaciones"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Costo total (con IVA)</label>
               <input
                 type="number"
                 inputMode="decimal"
                 step="0.01"
                 value={form.costo_con_iva || ''}
                 readOnly
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100 font-semibold"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100"
                 placeholder="0.00"
               />
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            Costo real{(producto?.ultimo_tipo_compra ?? 'FC') === 'ZZ' ? ' (última compra ZZ: lo pagado, sin add-ons)' : ' = Neto + Imp. Internos (sin IVA)'} = ${calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC').toFixed(2)}
+            {(producto?.ultimo_tipo_compra ?? 'FC') === 'ZZ'
+              ? 'Última compra ZZ: el costo final es lo pagado (sin add-on de II).'
+              : 'El costo final (neto + imp. internos) es el costo REAL: el IVA de la compra es crédito fiscal, no costo.'}
           </p>
         </div>
 
@@ -532,15 +560,23 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             </div>
           </div>
 
-          {/* Margen: markup sobre el costo final, bidireccional con el precio final */}
-          <div className="grid grid-cols-2 gap-4 mt-3">
-            <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Margen (%)</label>
+          {/* Márgenes bruto y neto: markup sobre costo, bidireccionales con el precio final */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+            {/* MARGEN BRUTO: precio final − costo total (con IVA + II) */}
+            <div className="p-3 bg-gray-50 dark:bg-gray-900 border rounded-lg">
+              <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">
+                Margen BRUTO
+                {(parsePrecio(String(form.costo_con_iva)) > 0 && parsePrecio(String(form.precio)) > 0) && (
+                  <span className="ml-2 text-blue-700 dark:text-blue-300">
+                    ${(parsePrecio(String(form.precio)) - parsePrecio(String(form.costo_con_iva))).toFixed(2)}
+                  </span>
+                )}
+              </p>
               <div className="relative">
                 <NumberInput
-                  value={parsePrecio(margen)}
+                  value={parsePrecio(margenBruto)}
                   emptyValue={0}
-                  onChange={(n) => handleMargenChange(String(n))}
+                  onChange={(n) => handleMargenBrutoChange(String(n))}
                   commitOnChange
                   disabled={parsePrecio(String(form.costo_con_iva)) <= 0}
                   className="w-full px-3 py-2 pr-7 border rounded-lg disabled:bg-gray-100 disabled:cursor-not-allowed"
@@ -549,26 +585,44 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                {parsePrecio(String(form.costo_con_iva)) > 0
-                  ? 'Markup sobre el costo final. Editá margen o precio final indistintamente.'
-                  : 'Cargá el costo para usar el margen.'}
+                Precio final − costo total (con IVA + II). Markup s/ costo total.
               </p>
             </div>
-            {(parsePrecio(String(form.costo_con_iva)) > 0 && parsePrecio(String(form.precio)) > 0) && (
-              <div className="flex items-center">
-                <div className="p-3 bg-blue-50 rounded-lg w-full">
-                  <p className="text-xs font-medium text-blue-800">
-                    Ganancia final: ${(parsePrecio(String(form.precio)) - parsePrecio(String(form.costo_con_iva))).toFixed(2)}
-                  </p>
-                  <p className="text-xs text-blue-600 mt-1">Precio final − costo final (con IVA e imp. internos)</p>
-                </div>
+
+            {/* MARGEN NETO: precio neto − costo final (neto + II = costo real) */}
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+              <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 mb-2">
+                Margen NETO
+                {(() => {
+                  const costoReal = calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC');
+                  const precioNeto = parsePrecio(String(form.precio_sin_iva));
+                  return costoReal > 0 && precioNeto > 0 ? (
+                    <span className="ml-2">${(precioNeto - costoReal).toFixed(2)}</span>
+                  ) : null;
+                })()}
+              </p>
+              <div className="relative">
+                <NumberInput
+                  value={parsePrecio(margenNeto)}
+                  emptyValue={0}
+                  onChange={(n) => handleMargenNetoChange(String(n))}
+                  commitOnChange
+                  disabled={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC') <= 0}
+                  className="w-full px-3 py-2 pr-7 border rounded-lg disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  placeholder="0.0"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
               </div>
-            )}
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+                Precio neto − costo final (neto + II). Markup s/ costo real. Es el margen real si vendés FC.
+              </p>
+            </div>
           </div>
 
           <p className="text-xs text-gray-500 mt-2">
             * El precio final incluye IVA ({form.porcentaje_iva || 21}%). El neto se calcula hacia atrás.
             La venta no discrimina imp. internos (no somos agente): el II solo integra el costo.
+            Editá cualquiera de los dos márgenes o el precio final indistintamente.
           </p>
         </div>
       </div>

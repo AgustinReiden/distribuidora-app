@@ -209,6 +209,7 @@ interface ProductosSectionProps {
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
   productosFiltrados: ProductoDB[];
+  iiMaster: Record<string, number>;
   onAgregarItem: (producto: ProductoDB) => void;
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
   onEliminarItem: (index: number) => void;
@@ -221,6 +222,8 @@ interface ItemsListProps {
   items: CompraItemForm[];
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
   onEliminarItem: (index: number) => void;
+  /** Tasa de II vigente del producto (para avisar si la línea difiere) */
+  iiMaster: Record<string, number>;
 }
 
 /** Props de ItemRow */
@@ -229,6 +232,8 @@ interface ItemRowProps {
   index: number;
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
   onEliminarItem: (index: number) => void;
+  /** Tasa de II vigente en el maestro del producto (undefined = desconocida) */
+  iiDelProducto?: number;
 }
 
 /** Props de ResumenSection */
@@ -494,6 +499,13 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
   const totales = useCalculosImpuestos(state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado)
   const { subtotal, iva, impuestosInternos, total } = totales
+
+  // Tasa de II vigente por producto: para autocompletar y detectar líneas que
+  // difieren (alícuota cambiada en la factura → se propaga al producto al guardar).
+  const iiMaster = useMemo<Record<string, number>>(
+    () => Object.fromEntries(productos.map(p => [String(p.id), Number(p.impuestos_internos ?? 0)])),
+    [productos]
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Productos filtrados
@@ -659,6 +671,17 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         noGravado: state.tipoFactura === 'FC' ? state.noGravado : 0,
         otrosImpuestos: 0,
         total,
+        // Líneas FC cuya tasa de II fue editada a mano: la alícuota nueva se
+        // propaga al producto tras registrar la compra (con toast resumen).
+        cambiosImpuestosInternos: state.tipoFactura === 'FC'
+          ? state.items
+              .filter(it => difiereII(it, iiMaster[String(it.productoId)]))
+              .map(it => ({
+                productoId: it.productoId,
+                nombre: it.productoNombre,
+                impuestosInternos: it.impuestosInternos || 0,
+              }))
+          : [],
         formaPago: state.formaPago,
         notas: state.notas,
         tipoFactura: state.tipoFactura,
@@ -686,7 +709,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-3 sm:p-4 border-b dark:border-gray-700 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
@@ -796,6 +819,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
               state={state}
               dispatch={dispatch}
               productosFiltrados={productosFiltrados}
+              iiMaster={iiMaster}
               onAgregarItem={handleAgregarItem}
               onActualizarItem={handleActualizarItem}
               onEliminarItem={handleEliminarItem}
@@ -1022,7 +1046,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, onActualizarItem, onEliminarItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
+function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, onAgregarItem, onActualizarItem, onEliminarItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
   const [creandoItem, setCreandoItem] = useState(false)
   const buscadorRef = useRef<HTMLDivElement>(null)
@@ -1218,7 +1242,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
 
       {/* Lista de items */}
       {state.items.length > 0 ? (
-        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onEliminarItem={onEliminarItem} />
+        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onEliminarItem={onEliminarItem} iiMaster={iiMaster} />
       ) : (
         <div className="text-center py-8 text-gray-500">
           <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -1230,7 +1254,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, onAgregarItem, 
   )
 }
 
-function ItemsList({ items, onActualizarItem, onEliminarItem }: ItemsListProps) {
+function ItemsList({ items, onActualizarItem, onEliminarItem, iiMaster }: ItemsListProps) {
   return (
     <div className="space-y-2">
       {/* Header solo en desktop */}
@@ -1250,15 +1274,23 @@ function ItemsList({ items, onActualizarItem, onEliminarItem }: ItemsListProps) 
           index={index}
           onActualizarItem={onActualizarItem}
           onEliminarItem={onEliminarItem}
+          iiDelProducto={iiMaster[String(item.productoId)]}
         />
       ))}
     </div>
   )
 }
 
-function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps) {
+/** ¿La tasa de II de la línea difiere de la vigente en el producto? */
+function difiereII(item: CompraItemForm, iiDelProducto?: number): boolean {
+  if (iiDelProducto === undefined) return false
+  return Math.abs((item.impuestosInternos || 0) - iiDelProducto) > 0.0001
+}
+
+function ItemRow({ item, index, onActualizarItem, onEliminarItem, iiDelProducto }: ItemRowProps) {
+  const iiDifiere = difiereII(item, iiDelProducto)
   return (
-    <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border dark:border-gray-600">
+    <div className={`bg-white dark:bg-gray-800 p-3 rounded-lg border ${iiDifiere ? 'border-amber-400 dark:border-amber-600' : 'dark:border-gray-600'}`}>
       {/* Mobile: Layout en cards */}
       <div className="md:hidden space-y-3">
         <div className="flex justify-between items-start">
@@ -1312,17 +1344,23 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">II%</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
+            <NumberInput
+              min={0}
+              emptyValue={0}
               value={item.impuestosInternos || 0}
-              readOnly
-              className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded bg-gray-100 dark:bg-gray-600 dark:text-gray-300 text-sm cursor-not-allowed"
+              onChange={(n) => onActualizarItem(index, 'impuestosInternos', n)}
+              commitOnChange
+              className={`w-full px-2 py-1 text-center border rounded text-sm dark:bg-gray-700 dark:text-white ${
+                iiDifiere ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'dark:border-gray-600'
+              }`}
             />
           </div>
         </div>
+        {iiDifiere && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            ⚠ II difiere del producto ({iiDelProducto}% → {item.impuestosInternos}%): al registrar se actualiza la alícuota del producto.
+          </p>
+        )}
         <div className="flex justify-between items-center pt-2 border-t dark:border-gray-600">
           <span className="text-sm text-gray-500">Subtotal:</span>
           <span className="font-semibold text-gray-800 dark:text-white">{formatPrecio(item.cantidad * item.costoUnitario * (1 - (item.bonificacion || 0) / 100))}</span>
@@ -1368,14 +1406,16 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
           />
         </div>
         <div className="col-span-2">
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
+          <NumberInput
+            min={0}
+            emptyValue={0}
             value={item.impuestosInternos || 0}
-            readOnly
-            className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded bg-gray-100 dark:bg-gray-600 dark:text-gray-300 text-sm cursor-not-allowed"
+            onChange={(n) => onActualizarItem(index, 'impuestosInternos', n)}
+            commitOnChange
+            title={iiDifiere ? `Difiere del producto (${iiDelProducto}%): al registrar se actualiza la alícuota` : 'Tasa efectiva de imp. internos (autocompletada del producto)'}
+            className={`w-full px-2 py-1 text-center border rounded text-sm dark:bg-gray-700 dark:text-white ${
+              iiDifiere ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'dark:border-gray-600'
+            }`}
           />
         </div>
         <div className="col-span-1 text-right font-medium text-gray-800 dark:text-white text-sm">
@@ -1391,6 +1431,11 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem }: ItemRowProps
           </button>
         </div>
       </div>
+      {iiDifiere && (
+        <p className="hidden md:block text-xs text-amber-700 dark:text-amber-300 mt-1">
+          ⚠ II difiere del producto ({iiDelProducto}% → {item.impuestosInternos}%): al registrar se actualiza la alícuota del producto.
+        </p>
+      )}
     </div>
   )
 }

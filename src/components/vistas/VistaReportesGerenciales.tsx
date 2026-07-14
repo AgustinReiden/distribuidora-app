@@ -324,7 +324,11 @@ export default function VistaReportesGerenciales({
                 <div className="flex items-center justify-between gap-2">{cmp ? <Delta cur={k.venta} prev={kp!.venta} /> : <span />}<Sparkline data={(reporte.serie_diaria ?? []).map((s) => Number(s[1]))} /></div>
                 {metasOn && metas?.venta != null && <Semaforo cur={k.venta} meta={metas.venta} factor={metaFactor} />}
               </div>} />
-            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> antes de bonif.</>} accent={ACCENTS.cyan}
+            <KpiCard label="Margen real" value={moneyC(k.margen_real ?? k.margen_comercial)}
+              sub={<><b>{pct((k.margen_real ?? k.margen_comercial) / (k.venta_real ?? k.venta))}</b> s/ venta real (Σ ingresos reales − costos reales)</>}
+              accent={ACCENTS.emerald}
+              delta={cmp && kp!.margen_real != null ? <Delta cur={k.margen_real ?? 0} prev={kp!.margen_real} /> : undefined} />
+            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> s/ venta final, antes de bonif.</>} accent={ACCENTS.cyan}
               delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
             <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
               delta={cmp ? <Delta cur={k.bonif} prev={kp!.bonif} invert /> : undefined} />
@@ -347,11 +351,12 @@ export default function VistaReportesGerenciales({
               delta={cmp ? <Delta cur={k.ticket} prev={kp!.ticket} /> : undefined} />
           </div>
 
-          {/* Fiscal (mig 120): solo si hay ventas FC en el período (todo-ZZ ⇒ venta neta = venta) */}
-          {(k.fc_pedidos ?? 0) > 0 && k.venta_neta != null && (
+          {/* Terna fiscal (mig 124): solo si hay ventas FC en el período (todo-ZZ ⇒ real = final) */}
+          {(k.fc_pedidos ?? 0) > 0 && k.venta_real != null && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2.5 text-sm text-blue-900 dark:text-blue-200">
-              <span><b>Venta neta</b> (sin IVA de FC): <b>{moneyC(k.venta_neta)}</b></span>
-              <span>Margen comercial s/neta: <b>{moneyC(k.margen_comercial_neto ?? (k.venta_neta - k.cmv))}</b></span>
+              <span>Venta <b>final</b>: {moneyC(k.venta)}</span>
+              <span>Venta <b>neta</b> (sin IVA): {moneyC(k.venta_neta ?? 0)}</span>
+              <span>Venta <b>real</b> (FC neto · ZZ final): <b>{moneyC(k.venta_real)}</b></span>
               <span>IVA débito: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
               <span>Mix: FC {moneyC(k.fc_venta ?? 0)} ({N.format(k.fc_pedidos ?? 0)}) · ZZ {moneyC(k.zz_venta ?? 0)} ({N.format(k.zz_pedidos ?? 0)})</span>
             </div>
