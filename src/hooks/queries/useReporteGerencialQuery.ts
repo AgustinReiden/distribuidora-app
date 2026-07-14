@@ -33,6 +33,57 @@ export interface ReporteKpis {
   mermas_muestra?: number
   compras: number
   ingreso_sin_costo: number
+  /** Fiscal (mig 120, opcionales por compat con respuestas cacheadas):
+   *  venta_neta = Σ total_neto (ZZ: total; FC: sin IVA/II) — margen comparable
+   *  entre canales; iva_debito = Σ total_iva de ventas FC. */
+  venta_neta?: number
+  iva_debito?: number
+  margen_comercial_neto?: number
+  fc_venta?: number
+  fc_pedidos?: number
+  zz_venta?: number
+  zz_pedidos?: number
+}
+
+/** Resultado del RPC posicion_fiscal (mig 121). Estimación de gestión. */
+export interface PosicionFiscal {
+  meta: {
+    sucursal_id: number | null
+    sucursal_nombre: string
+    desde: string
+    hasta: string
+    generado_at: string
+    nota: string
+  }
+  ventas: {
+    fc_pedidos: number
+    fc_venta: number
+    fc_neto: number
+    iva_debito: number
+    ii_ventas_fc: number
+    zz_pedidos: number
+    zz_venta: number
+    pct_fc: number
+  }
+  compras: {
+    fc_compras: number
+    fc_total: number
+    fc_neto: number
+    iva_credito: number
+    ii_compras: number
+    percepcion_iva: number
+    percepcion_iibb: number
+    zz_compras: number
+    zz_total: number
+    pct_fc: number
+  }
+  posicion: {
+    /** iva_debito − iva_credito − percepcion_iva. Positivo = IVA a pagar estimado. */
+    saldo_tecnico: number
+    iva_debito: number
+    iva_credito: number
+    percepciones_a_favor: number
+  }
 }
 
 /** Fila de mermas por motivo, con clasificación de negocio (mig 110). */
@@ -181,6 +232,29 @@ export function useReporteGerencialQuery(
       })
       if (error) throw new Error(error.message)
       return data as ReporteGerencial
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/** Posición fiscal del período (mig 121). sucursalId null = red. */
+export function usePosicionFiscalQuery(
+  sucursalId: number | null,
+  desde: string,
+  hasta: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['posicion-fiscal', sucursalId, desde, hasta] as const,
+    queryFn: async (): Promise<PosicionFiscal> => {
+      const { data, error } = await supabase.rpc('posicion_fiscal', {
+        p_sucursal_id: sucursalId,
+        p_desde: desde,
+        p_hasta: hasta,
+      })
+      if (error) throw new Error(error.message)
+      return data as PosicionFiscal
     },
     enabled,
     staleTime: 5 * 60 * 1000,
