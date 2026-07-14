@@ -85,6 +85,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
       impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
       precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null,
+      porcentaje_iva: producto.porcentaje_iva ?? 21,
+      costo_real: producto.costo_real ?? null,
       // Bulto/fardo (migración 031): 0 es válido, sólo usamos null cuando viene undefined
       unidades_de_venta_por_fardo: producto.unidades_de_venta_por_fardo == null ? null : producto.unidades_de_venta_por_fardo,
       etiqueta_bulto: producto.etiqueta_bulto || null,
@@ -110,6 +112,8 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
   if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null
   if (producto.precio_sin_iva !== undefined) updateData.precio_sin_iva = producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
+  if (producto.porcentaje_iva !== undefined) updateData.porcentaje_iva = producto.porcentaje_iva
+  if (producto.costo_real !== undefined) updateData.costo_real = producto.costo_real
   // Bulto/fardo (migración 031): tratá undefined como "no tocar", null como "limpiar"
   if (producto.unidades_de_venta_por_fardo !== undefined) {
     updateData.unidades_de_venta_por_fardo = producto.unidades_de_venta_por_fardo
