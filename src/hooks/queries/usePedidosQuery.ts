@@ -550,6 +550,34 @@ export function useCrearPedidoMutation() {
 }
 
 /**
+ * Hook para cambiar el tipo de factura (FC ↔ ZZ) de un pedido (mig 118).
+ * El total NO cambia: solo se redistribuye neto/IVA/II. Admin siempre;
+ * encargado solo antes de la entrega (lo valida el RPC).
+ */
+export function useCambiarTipoFacturaMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ pedidoId, tipo }: { pedidoId: string; tipo: 'ZZ' | 'FC' }) => {
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data, error } = await supabase.rpc('cambiar_tipo_factura_pedido', {
+        p_pedido_id: pedidoId,
+        p_tipo: tipo,
+        p_usuario_id: user?.id ?? null,
+      })
+      if (error) throw error
+      const result = data as { success: boolean; error?: string }
+      if (!result.success) throw new Error(result.error || 'No se pudo cambiar el tipo de factura')
+      return result
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
  * Hook para cambiar estado de un pedido (optimistic update)
  */
 export function useCambiarEstadoMutation() {

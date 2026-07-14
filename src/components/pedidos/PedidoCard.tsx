@@ -17,6 +17,7 @@ const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { f
 import { formatPrecio, formatFecha, formatHora, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
+import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQuery';
 import { PedidoActionsCtx } from '../../contexts/HandlersContext';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo';
@@ -80,6 +81,65 @@ function calcularDiasAntiguedad(fechaCreacion: string | undefined): number {
 // =============================================================================
 // SUB-COMPONENTS
 // =============================================================================
+
+/**
+ * Badge FC/ZZ del pedido. Para admin (siempre) y encargado (antes de la
+ * entrega) es clickeable: primer click arma la confirmación inline, segundo
+ * click ejecuta el flip vía RPC cambiar_tipo_factura_pedido (mig 118).
+ * El total no cambia — solo se redistribuye neto/IVA/II.
+ */
+function BadgeTipoFactura({ pedido, isAdmin, isEncargado }: {
+  pedido: PedidoDB;
+  isAdmin?: boolean;
+  isEncargado?: boolean;
+}): React.ReactElement | null {
+  const cambiarTipo = useCambiarTipoFacturaMutation();
+  const [confirmando, setConfirmando] = useState(false);
+  const tipo = (pedido.tipo_factura ?? 'ZZ') as 'ZZ' | 'FC';
+  const destino: 'ZZ' | 'FC' = tipo === 'FC' ? 'ZZ' : 'FC';
+  const puedeCambiar = pedido.estado !== 'cancelado'
+    && (isAdmin || (isEncargado && pedido.estado !== 'entregado'));
+
+  const claseBase = tipo === 'FC'
+    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+    : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400';
+
+  if (!puedeCambiar) {
+    // Solo lectura: mantener el comportamiento previo (badge solo si es FC)
+    if (tipo !== 'FC') return null;
+    return (
+      <span className={`px-2 py-0.5 rounded text-[11px] font-bold tracking-wider ${claseBase}`}>FC</span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={cambiarTipo.isPending}
+      title={confirmando ? `Confirmar cambio a ${destino}` : `Cambiar a ${destino} (el total no cambia)`}
+      onClick={async () => {
+        if (!confirmando) {
+          setConfirmando(true);
+          setTimeout(() => setConfirmando(false), 3000);
+          return;
+        }
+        setConfirmando(false);
+        try {
+          await cambiarTipo.mutateAsync({ pedidoId: String(pedido.id), tipo: destino });
+        } catch {
+          // el error se refleja via invalidación / toast global si existe
+        }
+      }}
+      className={`px-2 py-0.5 rounded text-[11px] font-bold tracking-wider transition-colors ${
+        confirmando
+          ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-400 dark:bg-amber-900/40 dark:text-amber-300'
+          : `${claseBase} hover:ring-1 hover:ring-blue-300`
+      } disabled:opacity-50`}
+    >
+      {cambiarTipo.isPending ? '…' : confirmando ? `→ ${destino}?` : tipo}
+    </button>
+  );
+}
 
 // Componente de badge de antiguedad
 function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactElement | null {
@@ -313,11 +373,7 @@ function PedidoCard({
                   {getEstadoPagoLabel(pedido.estado_pago)}
                 </span>
               )}
-              {pedido.tipo_factura === 'FC' && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                  FC
-                </span>
-              )}
+              <BadgeTipoFactura pedido={pedido} isAdmin={isAdmin} isEncargado={isEncargado} />
             </div>
           </div>
           <AccionesDropdown
@@ -376,11 +432,7 @@ function PedidoCard({
               {getEstadoPagoLabel(pedido.estado_pago)}
             </span>
           )}
-          {pedido.tipo_factura === 'FC' && (
-            <span className="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-              FC
-            </span>
-          )}
+          <BadgeTipoFactura pedido={pedido} isAdmin={isAdmin} isEncargado={isEncargado} />
         </div>
       </div>
 

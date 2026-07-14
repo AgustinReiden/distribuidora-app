@@ -347,6 +347,9 @@ export default function ClientesContainer(): React.ReactElement {
       // cliente_descuentos_categoria exige es_admin()). Para no-admin omitimos
       // la clave para que replaceCategoriaDiscounts ni se ejecute.
       ...(isAdmin ? {
+        // FC/ZZ por defecto de pedidos (mig 116): solo admin lo edita (el guard
+        // trigger de clientes lo bloquea para preventistas de todas formas).
+        tipo_factura_default: data.tipoFacturaDefault ?? 'ZZ',
         descuentos_categoria: data.descuentosPorCategoria
           .filter(d => d.categoria && d.categoria.trim() !== '')
           .map(d => ({ categoria: d.categoria.trim(), descuento_porcentaje: d.porcentaje })),

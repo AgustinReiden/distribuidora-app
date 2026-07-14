@@ -53,6 +53,8 @@ export interface ClienteFormData {
   limiteCredito: number;
   diasCredito: number;
   descuentoPorcentaje: number;
+  /** FC = se le factura (emisión externa), ZZ = sin factura. Default de pedidos. */
+  tipoFacturaDefault: 'ZZ' | 'FC';
   /** Descuentos por categoría (override del general). Porcentaje entero. */
   descuentosPorCategoria: Array<{ categoria: string; porcentaje: number }>;
   preventista_id: string;
@@ -167,6 +169,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     limiteCredito: cliente.limite_credito || 0,
     diasCredito: cliente.dias_credito || 30,
     descuentoPorcentaje: cliente.descuento_porcentaje || 0,
+    tipoFacturaDefault: cliente.tipo_factura_default ?? 'ZZ',
     descuentosPorCategoria: (cliente.descuentos_categoria || []).map(d => ({
       categoria: d.categoria,
       porcentaje: Number(d.descuento_porcentaje) || 0,
@@ -193,6 +196,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     limiteCredito: 0,
     diasCredito: 30,
     descuentoPorcentaje: 0,
+    tipoFacturaDefault: 'ZZ',
     descuentosPorCategoria: [],
     preventista_id: '',
     preventista_ids: []
@@ -865,6 +869,18 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
                   placeholder="0"
                 />
                 <p className="text-xs text-gray-500 mt-1">Se aplica al precio_unitario al armar pedidos</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 dark:text-gray-200">Comprobante por defecto</label>
+                <select
+                  value={form.tipoFacturaDefault}
+                  onChange={(e) => handleFieldChange('tipoFacturaDefault', e.target.value as 'ZZ' | 'FC')}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                >
+                  <option value="ZZ">ZZ — Sin factura</option>
+                  <option value="FC">FC — Con factura</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Preselecciona el tipo al crear pedidos de este cliente</p>
               </div>
             </div>
 
