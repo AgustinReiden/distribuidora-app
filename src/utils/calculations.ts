@@ -91,21 +91,27 @@ export interface DesgloseNetoVenta {
 }
 
 /**
- * Calcula el ingreso neto de una venta según tipo de factura
+ * Calcula el ingreso neto de una venta según tipo de factura (espejo del SQL
+ * calcular_desglose_venta, mig 122).
  *
- * ZZ (sin factura): todo el precio final es ingreso neto
- * FC (con factura): el neto es el precio sin IVA ni impuestos, el IVA se remite a AFIP
+ * ZZ (sin factura): todo el precio final es ingreso neto.
+ * FC (con factura): neto = precio / (1 + IVA%); el IVA se remite a AFIP.
  *
- * @param precioFinal - Precio final al consumidor (incluye IVA + imp internos)
+ * La venta NUNCA discrimina impuestos internos: la distribuidora no es agente
+ * de II — el II existe solo en el COSTO de compra (calcularCostoReal). El
+ * parámetro porcentajeImpInternos se conserva por compatibilidad pero se
+ * ignora (mig 122; antes dividía por 1+iva+II y subestimaba el neto).
+ *
+ * @param precioFinal - Precio final al consumidor (incluye IVA)
  * @param porcentajeIva - Porcentaje de IVA del producto (ej: 21, 10.5, 0)
- * @param porcentajeImpInternos - Porcentaje de impuestos internos (ej: 5, 8)
+ * @param _porcentajeImpInternos - IGNORADO (compat de firma)
  * @param tipoFactura - 'ZZ' o 'FC'
- * @returns Desglose con neto, iva e impuestos internos
+ * @returns Desglose con neto, iva e impuestos internos (siempre 0)
  */
 export function calcularNetoVenta(
   precioFinal: number | string,
   porcentajeIva: number | string = 21,
-  porcentajeImpInternos: number | string = 0,
+  _porcentajeImpInternos: number | string = 0,
   tipoFactura: 'ZZ' | 'FC' = 'ZZ'
 ): DesgloseNetoVenta {
   const precio = parseFloat(String(precioFinal)) || 0;
@@ -114,12 +120,11 @@ export function calcularNetoVenta(
     return { neto: precio, iva: 0, impuestosInternos: 0 };
   }
 
-  // FC: back-calculate neto from final price
-  const neto = calcularNetoDesdeTotal(precio, porcentajeIva, porcentajeImpInternos);
+  // FC: back-calculate neto from final price (solo IVA; sin II)
+  const neto = calcularNetoDesdeTotal(precio, porcentajeIva, 0);
   const iva = calcularMontoIva(neto, porcentajeIva);
-  const impInt = neto * (parseFloat(String(porcentajeImpInternos)) || 0) / 100;
 
-  return { neto, iva, impuestosInternos: impInt };
+  return { neto, iva, impuestosInternos: 0 };
 }
 
 /**
