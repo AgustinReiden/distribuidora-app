@@ -350,7 +350,7 @@ export default function VistaReportesGerenciales({
           {/* Fiscal (mig 120): solo si hay ventas FC en el período (todo-ZZ ⇒ venta neta = venta) */}
           {(k.fc_pedidos ?? 0) > 0 && k.venta_neta != null && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2.5 text-sm text-blue-900 dark:text-blue-200">
-              <span><b>Venta neta</b> (sin IVA/II de FC): <b>{moneyC(k.venta_neta)}</b></span>
+              <span><b>Venta neta</b> (sin IVA de FC): <b>{moneyC(k.venta_neta)}</b></span>
               <span>Margen comercial s/neta: <b>{moneyC(k.margen_comercial_neto ?? (k.venta_neta - k.cmv))}</b></span>
               <span>IVA débito: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
               <span>Mix: FC {moneyC(k.fc_venta ?? 0)} ({N.format(k.fc_pedidos ?? 0)}) · ZZ {moneyC(k.zz_venta ?? 0)} ({N.format(k.zz_pedidos ?? 0)})</span>

@@ -152,9 +152,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   //  - costo_con_iva (costo final) desde el costo neto + IVA + imp. internos
   //  - precio_sin_iva (precio neto) HACIA ATRÁS desde el precio final (el usuario
   //    edita el precio final; en venta ZZ el ingreso es el final, en FC el neto).
+  //    OJO: la VENTA no discrimina imp. internos (no somos agente, mig 122):
+  //    el precio neto es precio / (1 + IVA%), sin II. El II solo afecta el costo.
   const recalcularTotales = (nuevoForm: ProductoFormData): ProductoFormData => {
     const costoTotal = calcularTotalConIva(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
-    const precioNeto = calcularNetoDesdeTotal(nuevoForm.precio, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
+    const precioNeto = calcularNetoDesdeTotal(nuevoForm.precio, nuevoForm.porcentaje_iva, 0);
     return {
       ...nuevoForm,
       costo_con_iva: costoTotal ? costoTotal.toFixed(2) : '',
@@ -179,7 +181,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     setMargen(margenDesdeForm(nuevoForm));
   };
 
-  // Imp. internos: cambian costo final y precio neto (precio final fijo); recalcular margen.
+  // Imp. internos: solo cambian el costo final (la venta no los discrimina); recalcular margen.
   const handleImpuestosInternosChange = (valor: string): void => {
     const nuevoForm = recalcularTotales({ ...form, impuestos_internos: valor });
     setForm(nuevoForm);
@@ -565,7 +567,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           </div>
 
           <p className="text-xs text-gray-500 mt-2">
-            * El precio final incluye IVA ({form.porcentaje_iva || 21}%) + Imp. Internos ({form.impuestos_internos || 0}%). El neto se calcula hacia atrás.
+            * El precio final incluye IVA ({form.porcentaje_iva || 21}%). El neto se calcula hacia atrás.
+            La venta no discrimina imp. internos (no somos agente): el II solo integra el costo.
           </p>
         </div>
       </div>
