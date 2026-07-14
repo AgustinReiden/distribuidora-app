@@ -204,8 +204,13 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
             ventasNetas += subtotalItem
           }
 
-          const costoUnitario = prod.costo_sin_iva || 0
-          productoStats[id].costos += costoUnitario * item.cantidad
+          // Costo canónico (mig 120): snapshot congelado al crear el pedido;
+          // fallback a productos.costo_real (mig 111) y por último a la
+          // fórmula vieja. Antes usaba costo_sin_iva vivo SIN imp. internos.
+          const costoUnitario = ((item as Record<string, unknown>).costo_unitario_al_crear as number | null)
+            ?? prod.costo_real
+            ?? ((prod.costo_sin_iva || 0) * (1 + (prod.impuestos_internos || 0) / 100))
+          productoStats[id].costos += (costoUnitario || 0) * item.cantidad
         })
       })
 

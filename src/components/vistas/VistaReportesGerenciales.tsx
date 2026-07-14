@@ -13,6 +13,7 @@ import Alertas from './reportes-gerenciales/Alertas'
 import ModalMetas from './reportes-gerenciales/ModalMetas'
 import ModalAlertaDetalle from './reportes-gerenciales/ModalAlertaDetalle'
 import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta, BonifPromo } from '../../hooks/queries'
+import { usePosicionFiscalQuery } from '../../hooks/queries/useReporteGerencialQuery'
 
 // Alertas cuyo detalle es una LISTA (modal). El resto hace scroll a su sección.
 const ALERTA_CON_LISTA = new Set(['cobranza_vencida', 'clientes_inactivos', 'productos_sin_costo'])
@@ -133,6 +134,11 @@ export default function VistaReportesGerenciales({
   const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
   const [detalleAbierto, setDetalleAbierto] = useState(false)
   const [showMetas, setShowMetas] = useState(false)
+
+  // Posición fiscal (mig 121): se pide recién al abrir el detalle (perf).
+  const { data: posFiscal } = usePosicionFiscalQuery(
+    sucursalSel, periodoSel.desde, periodoSel.hasta, detalleAbierto,
+  )
 
   // Prorrateo de la meta: en un mes en curso compara contra la parte transcurrida.
   const metaFactor = useMemo(() => {
@@ -341,6 +347,16 @@ export default function VistaReportesGerenciales({
               delta={cmp ? <Delta cur={k.ticket} prev={kp!.ticket} /> : undefined} />
           </div>
 
+          {/* Fiscal (mig 120): solo si hay ventas FC en el período (todo-ZZ ⇒ venta neta = venta) */}
+          {(k.fc_pedidos ?? 0) > 0 && k.venta_neta != null && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2.5 text-sm text-blue-900 dark:text-blue-200">
+              <span><b>Venta neta</b> (sin IVA/II de FC): <b>{moneyC(k.venta_neta)}</b></span>
+              <span>Margen comercial s/neta: <b>{moneyC(k.margen_comercial_neto ?? (k.venta_neta - k.cmv))}</b></span>
+              <span>IVA débito: <b>{moneyC(k.iva_debito ?? 0)}</b></span>
+              <span>Mix: FC {moneyC(k.fc_venta ?? 0)} ({N.format(k.fc_pedidos ?? 0)}) · ZZ {moneyC(k.zz_venta ?? 0)} ({N.format(k.zz_pedidos ?? 0)})</span>
+            </div>
+          )}
+
           {/* Flag: productos sin costo */}
           {reporte.flags.pct_sin_costo >= 1 && (
             <div className="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3">
@@ -366,6 +382,47 @@ export default function VistaReportesGerenciales({
           </button>
 
           {detalleAbierto && (<>
+          {/* Posición fiscal del período (mig 121) — estimación de gestión */}
+          {posFiscal && (
+            <Card id="sec-fiscal" className="p-5">
+              <SectionTitle icon={FileText} title="Posición fiscal (FC/ZZ)" hint="Estimación de gestión — no reemplaza la liquidación del contador. II es costo; percepciones son créditos." />
+              <div className="grid md:grid-cols-3 gap-5 text-sm">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Ventas</p>
+                  <div className="space-y-1 text-gray-700 dark:text-gray-300">
+                    <p>FC: <b>{moneyC(posFiscal.ventas.fc_venta)}</b> ({N.format(posFiscal.ventas.fc_pedidos)} pedidos · {posFiscal.ventas.pct_fc}%)</p>
+                    <p>ZZ: <b>{moneyC(posFiscal.ventas.zz_venta)}</b> ({N.format(posFiscal.ventas.zz_pedidos)} pedidos)</p>
+                    <p>IVA débito: <b>{moneyC(posFiscal.ventas.iva_debito)}</b></p>
+                    <p>II contenido en FC: {moneyC(posFiscal.ventas.ii_ventas_fc)}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Compras</p>
+                  <div className="space-y-1 text-gray-700 dark:text-gray-300">
+                    <p>FC: <b>{moneyC(posFiscal.compras.fc_total)}</b> ({N.format(posFiscal.compras.fc_compras)} · {posFiscal.compras.pct_fc}%)</p>
+                    <p>ZZ: <b>{moneyC(posFiscal.compras.zz_total)}</b> ({N.format(posFiscal.compras.zz_compras)})</p>
+                    <p>IVA crédito: <b>{moneyC(posFiscal.compras.iva_credito)}</b></p>
+                    <p>Imp. internos soportados: {moneyC(posFiscal.compras.ii_compras)}</p>
+                    <p>Percepciones: IVA {moneyC(posFiscal.compras.percepcion_iva)} · IIBB {moneyC(posFiscal.compras.percepcion_iibb)}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Posición IVA</p>
+                  <div className="space-y-1 text-gray-700 dark:text-gray-300">
+                    <p>Débito − crédito − percepción IVA:</p>
+                    <p className={`text-xl font-bold ${posFiscal.posicion.saldo_tecnico >= 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {moneyC(posFiscal.posicion.saldo_tecnico)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {posFiscal.posicion.saldo_tecnico >= 0 ? 'IVA a pagar estimado del período' : 'Crédito fiscal a favor del período'}
+                    </p>
+                    <p className="text-xs text-gray-500">Percepciones a favor acumuladas: {moneyC(posFiscal.posicion.percepciones_a_favor)}</p>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+
           {/* Evolución mensual */}
           <Card id="sec-evolucion" className="p-5">
             <SectionTitle icon={TrendingUp} title="Evolución mensual" hint="Venta, bonificaciones y margen neto por mes." />

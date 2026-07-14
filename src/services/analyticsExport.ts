@@ -52,7 +52,8 @@ export async function fetchVentasDetallado(
         cantidad,
         precio_unitario,
         subtotal,
-        producto:productos(id, nombre, codigo, categoria, costo_con_iva)
+        costo_unitario_al_crear,
+        producto:productos(id, nombre, codigo, categoria, costo_con_iva, costo_real)
       )
     `)
     .gte('created_at', `${desde}T00:00:00`)
@@ -87,7 +88,11 @@ export async function fetchVentasDetallado(
 
     for (const item of items) {
       const producto = item.producto as Record<string, unknown> | null
-      const costoUnitario = Number(producto?.costo_con_iva || 0)
+      // Costo canónico (mig 120): snapshot al crear → costo_real vivo → legacy
+      // costo_con_iva (que incluía IVA y sobreestimaba el costo).
+      const costoUnitario = Number(
+        item.costo_unitario_al_crear ?? producto?.costo_real ?? producto?.costo_con_iva ?? 0
+      )
       const precioUnitario = Number(item.precio_unitario || 0)
       const cantidad = Number(item.cantidad || 0)
       const subtotal = Number(item.subtotal || precioUnitario * cantidad)
@@ -236,7 +241,8 @@ export async function fetchProductosDimension(
 
   return (productosRes.data || []).map(p => {
     const ventas = ventasPorProducto.get(p.id) || { cantidad: 0, ingresos: 0, dias: new Set() }
-    const costoUnitario = Number(p.costo_con_iva || 0)
+    // Costo real canónico (mig 111); fallback legacy a costo_con_iva.
+    const costoUnitario = Number(p.costo_real ?? p.costo_con_iva ?? 0)
     const costoTotal = costoUnitario * ventas.cantidad
     const margenTotal = ventas.ingresos - costoTotal
 
@@ -254,6 +260,7 @@ export async function fetchProductosDimension(
       stock_minimo: p.stock_minimo ?? 0,
       costo_sin_iva: p.costo_sin_iva ?? 0,
       costo_con_iva: p.costo_con_iva ?? 0,
+      costo_real: p.costo_real ?? 0,
       activo: p.activo !== false ? 'Si' : 'No',
       total_vendido: ventas.cantidad,
       total_ingresos: Number(ventas.ingresos.toFixed(2)),
@@ -282,11 +289,21 @@ export async function fetchComprasFact(
       created_at,
       total,
       estado,
+      tipo_factura,
+      subtotal,
+      iva,
+      impuestos_internos,
+      percepcion_iva,
+      percepcion_iibb,
+      no_gravado,
       proveedor:proveedores(nombre, cuit),
       items:compra_items(
         cantidad,
         costo_unitario,
+        bonificacion,
         subtotal,
+        costo_neto_unitario,
+        costo_real_unitario,
         producto:productos(nombre, codigo, categoria)
       )
     `)
@@ -314,8 +331,18 @@ export async function fetchComprasFact(
         producto_categoria: safe(producto?.categoria),
         cantidad: item.cantidad,
         costo_unitario: item.costo_unitario,
+        bonificacion: item.bonificacion ?? 0,
+        costo_neto_unitario: item.costo_neto_unitario ?? '',
+        costo_real_unitario: item.costo_real_unitario ?? '',
         subtotal: item.subtotal,
         estado: safe(compra.estado),
+        tipo_factura: safe(compra.tipo_factura),
+        compra_subtotal: compra.subtotal ?? 0,
+        compra_iva: compra.iva ?? 0,
+        compra_impuestos_internos: compra.impuestos_internos ?? 0,
+        compra_percepcion_iva: compra.percepcion_iva ?? 0,
+        compra_percepcion_iibb: compra.percepcion_iibb ?? 0,
+        compra_no_gravado: compra.no_gravado ?? 0,
       })
     }
   }
