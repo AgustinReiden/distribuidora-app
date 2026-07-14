@@ -85,28 +85,33 @@ export function calcularMontoIva(
 // ============================================
 
 export interface DesgloseNetoVenta {
+  /** Precio sin IVA, SIEMPRE (teórico en ZZ) */
   neto: number;
+  /** IVA discriminado: solo FC (débito real); 0 en ZZ */
   iva: number;
+  /** Siempre 0: la venta no discrimina imp. internos (mig 122) */
   impuestosInternos: number;
+  /** Ingreso REAL: FC = neto (el IVA se remite) · ZZ = precio final */
+  ingresoReal: number;
 }
 
 /**
- * Calcula el ingreso neto de una venta según tipo de factura (espejo del SQL
- * calcular_desglose_venta, mig 122).
+ * Terna de ingresos por unidad de venta (espejo del SQL calcular_desglose_venta,
+ * mig 123):
  *
- * ZZ (sin factura): todo el precio final es ingreso neto.
- * FC (con factura): neto = precio / (1 + IVA%); el IVA se remite a AFIP.
+ *   · neto        = precio / (1 + IVA%) — SIEMPRE, también en ZZ (teórico)
+ *   · iva         = IVA discriminado, solo FC (débito real); 0 en ZZ
+ *   · ingresoReal = neto si FC (el IVA se remite) · precio final si ZZ
  *
  * La venta NUNCA discrimina impuestos internos: la distribuidora no es agente
  * de II — el II existe solo en el COSTO de compra (calcularCostoReal). El
  * parámetro porcentajeImpInternos se conserva por compatibilidad pero se
- * ignora (mig 122; antes dividía por 1+iva+II y subestimaba el neto).
+ * ignora (mig 122).
  *
  * @param precioFinal - Precio final al consumidor (incluye IVA)
  * @param porcentajeIva - Porcentaje de IVA del producto (ej: 21, 10.5, 0)
  * @param _porcentajeImpInternos - IGNORADO (compat de firma)
  * @param tipoFactura - 'ZZ' o 'FC'
- * @returns Desglose con neto, iva e impuestos internos (siempre 0)
  */
 export function calcularNetoVenta(
   precioFinal: number | string,
@@ -115,16 +120,14 @@ export function calcularNetoVenta(
   tipoFactura: 'ZZ' | 'FC' = 'ZZ'
 ): DesgloseNetoVenta {
   const precio = parseFloat(String(precioFinal)) || 0;
+  const neto = calcularNetoDesdeTotal(precio, porcentajeIva, 0);
 
   if (tipoFactura === 'ZZ') {
-    return { neto: precio, iva: 0, impuestosInternos: 0 };
+    return { neto, iva: 0, impuestosInternos: 0, ingresoReal: precio };
   }
 
-  // FC: back-calculate neto from final price (solo IVA; sin II)
-  const neto = calcularNetoDesdeTotal(precio, porcentajeIva, 0);
   const iva = calcularMontoIva(neto, porcentajeIva);
-
-  return { neto, iva, impuestosInternos: 0 };
+  return { neto, iva, impuestosInternos: 0, ingresoReal: neto };
 }
 
 /**

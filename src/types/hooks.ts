@@ -93,10 +93,14 @@ export interface PedidoItemDB {
   promocion?: {
     unidades_por_bloque?: number | null;
   } | null;
+  /** Precio sin IVA por unidad, SIEMPRE (teórico en ZZ; mig 123) */
   neto_unitario?: number;
+  /** IVA discriminado: solo FC (débito real); 0 en ZZ */
   iva_unitario?: number;
   impuestos_internos_unitario?: number;
   porcentaje_iva?: number;
+  /** Ingreso REAL por unidad: FC = neto · ZZ = precio final (mig 123) */
+  ingreso_real_unitario?: number;
 }
 
 export interface PerfilDB {
@@ -129,8 +133,11 @@ export interface PedidoDB {
   estado_pago?: 'pendiente' | 'parcial' | 'pagado';
   forma_pago?: string;
   total: number;
+  /** Σ neto (sin IVA, SIEMPRE — teórico en ZZ; mig 123) */
   total_neto?: number;
   total_iva?: number;
+  /** Σ ingreso real (FC: neto · ZZ: final; mig 123) — base del margen real */
+  total_real?: number;
   tipo_factura?: 'ZZ' | 'FC';
   monto_pagado?: number;
   notas?: string | null;
@@ -927,6 +934,8 @@ export interface CompraFormInputExtended {
     porcentajeIva?: number;
     impuestosInternos?: number;
   }>;
+  /** Líneas cuya tasa de II fue editada a mano: se propaga al producto tras registrar (mig 123 UI). */
+  cambiosImpuestosInternos?: Array<{ productoId: string; nombre: string; impuestosInternos: number }>;
 }
 
 export interface ProveedorFormInputExtended {

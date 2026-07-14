@@ -39,6 +39,11 @@ export interface ReporteKpis {
   venta_neta?: number
   iva_debito?: number
   margen_comercial_neto?: number
+  /** Terna real (mig 124): venta_real = Σ total_real (FC: neto · ZZ: final).
+   *  margen_real = venta_real − cmv es LA métrica del negocio. */
+  venta_real?: number
+  margen_real?: number
+  margen_real_neto?: number
   fc_venta?: number
   fc_pedidos?: number
   zz_venta?: number

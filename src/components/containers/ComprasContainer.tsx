@@ -17,6 +17,7 @@ import {
   useNotasCreditoByCompraQuery,
   useNotasCreditoResumenQuery,
   useRegistrarNotaCreditoMutation,
+  useActualizarProductoMutation,
 } from '../../hooks/queries'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -62,6 +63,7 @@ export default function ComprasContainer(): React.ReactElement {
   const actualizarCompra = useActualizarCompraMutation()
   const anularCompra = useAnularCompraMutation()
   const crearProducto = useCrearProductoMutation()
+  const actualizarProducto = useActualizarProductoMutation()
   const crearProveedor = useCrearProveedorMutation()
   const registrarNC = useRegistrarNotaCreditoMutation()
 
@@ -131,7 +133,27 @@ export default function ComprasContainer(): React.ReactElement {
       notify.error(msg)
       throw err
     }
-  }, [registrarCompra, notify, user])
+
+    // Propagar alícuotas de II editadas en la factura al maestro de productos
+    // (la alícuota pudo cambiar; el costo de ESTA compra ya usó la de la línea).
+    const cambios = data.cambiosImpuestosInternos ?? []
+    if (cambios.length > 0) {
+      const fallidos: string[] = []
+      for (const c of cambios) {
+        try {
+          await actualizarProducto.mutateAsync({
+            id: c.productoId,
+            data: { impuestos_internos: c.impuestosInternos },
+          })
+        } catch {
+          fallidos.push(c.nombre)
+        }
+      }
+      const ok = cambios.length - fallidos.length
+      if (ok > 0) notify.success(`Alícuota de imp. internos actualizada en ${ok} producto${ok === 1 ? '' : 's'}`)
+      if (fallidos.length > 0) notify.error(`No se pudo actualizar la alícuota de: ${fallidos.join(', ')}`)
+    }
+  }, [registrarCompra, actualizarProducto, notify, user])
 
   const handleCrearProductoRapido = useCallback(async (data: { nombre: string; codigo: string; costoSinIva: number }) => {
     const producto = await crearProducto.mutateAsync({

@@ -40,24 +40,27 @@ describe('calcularCostoFinanciero (desembolso por unidad, sin percepciones)', ()
   })
 })
 
-describe('calcularNetoVenta (mig 122: la venta NO discrimina imp. internos)', () => {
-  it('FC: neto = precio/(1+IVA%); el II del producto se ignora (no somos agente)', () => {
+describe('calcularNetoVenta (mig 123: terna neto / iva / ingreso real)', () => {
+  it('FC: neto = precio/(1+IVA%); ingreso real = neto; el II se ignora (no somos agente)', () => {
     // Venta FC de una cola a $10.000 final: aunque el producto tenga II 8,6956%,
     // la factura de venta discrimina solo neto + IVA.
     const d = calcularNetoVenta(10000, 21, 8.6956, 'FC')
     expect(d.neto).toBeCloseTo(8264.46, 2)
     expect(d.iva).toBeCloseTo(1735.54, 2)
     expect(d.impuestosInternos).toBe(0)
+    expect(d.ingresoReal).toBeCloseTo(8264.46, 2)
     // Reconstrucción: neto + iva = precio final
     expect(d.neto + d.iva).toBeCloseTo(10000, 2)
     // IVA es exactamente 21% del gravado
     expect(d.iva).toBeCloseTo(d.neto * 0.21, 2)
   })
 
-  it('ZZ: todo el precio final es ingreso neto', () => {
-    expect(calcularNetoVenta(10000, 21, 8.6956, 'ZZ')).toEqual({
-      neto: 10000, iva: 0, impuestosInternos: 0,
-    })
+  it('ZZ: ingreso real = precio final; neto teórico sin IVA; IVA discriminado 0', () => {
+    const d = calcularNetoVenta(10000, 21, 8.6956, 'ZZ')
+    expect(d.ingresoReal).toBe(10000)
+    expect(d.neto).toBeCloseTo(8264.46, 2)
+    expect(d.iva).toBe(0)
+    expect(d.impuestosInternos).toBe(0)
   })
 })
 
