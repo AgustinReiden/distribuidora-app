@@ -63,11 +63,15 @@ const ModalCambiarProveedor = memo(function ModalCambiarProveedor({
 
   async function handleConfirmar() {
     if (!puedeConfirmar) return
-    await onConfirmar({
-      nuevoProveedorId: nuevoProveedorId || null,
-      nuevoProveedorNombre: null,
-      motivo: 'Cambio de proveedor',
-    })
+    try {
+      await onConfirmar({
+        nuevoProveedorId: nuevoProveedorId || null,
+        nuevoProveedorNombre: null,
+        motivo: 'Cambio de proveedor',
+      })
+    } catch {
+      // el container ya notificó el error; el modal queda abierto para reintentar
+    }
   }
 
   return (

@@ -649,6 +649,14 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
       dispatch({ type: 'SET_ERROR', payload: 'La fecha de compra es obligatoria' })
       return
     }
+    // Proveedor obligatorio: existente (proveedorId) o nombre nuevo escrito.
+    const tieneProveedor = state.usarProveedorNuevo
+      ? !!(state.proveedorNombre || '').trim()
+      : !!state.proveedorId
+    if (!tieneProveedor) {
+      dispatch({ type: 'SET_ERROR', payload: 'Debe seleccionar un proveedor' })
+      return
+    }
     for (const item of state.items) {
       if (!item.cantidad || item.cantidad <= 0) {
         dispatch({ type: 'SET_ERROR', payload: `"${item.productoNombre}" debe tener cantidad mayor a 0` })
@@ -938,7 +946,7 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
     <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4 space-y-3">
       <div className="flex items-center gap-2 mb-2">
         <Building2 className="w-5 h-5 text-gray-500" />
-        <h3 className="font-medium text-gray-800 dark:text-white">Proveedor</h3>
+        <h3 className="font-medium text-gray-800 dark:text-white">Proveedor <span className="text-red-500">*</span></h3>
       </div>
 
       <div className="flex items-center gap-2">
@@ -947,7 +955,7 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
           onChange={(e: ChangeEvent<HTMLSelectElement>) => dispatch({ type: 'SET_PROVEEDOR_ID', payload: e.target.value })}
           className="flex-1 px-3 sm:px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm sm:text-base"
         >
-          <option value="">Seleccionar proveedor (opcional)...</option>
+          <option value="">Seleccionar proveedor...</option>
           {proveedores.map(p => (
             <option key={p.id} value={p.id}>{p.nombre} {p.cuit ? `(${p.cuit})` : ''}</option>
           ))}
