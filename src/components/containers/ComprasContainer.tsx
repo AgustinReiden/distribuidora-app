@@ -33,6 +33,7 @@ const ModalCompra = lazy(() => import('../modals/ModalCompra'))
 const ModalDetalleCompra = lazy(() => import('../modals/ModalDetalleCompra'))
 const ModalNotaCredito = lazy(() => import('../modals/ModalNotaCredito'))
 const ModalEditarCompra = lazy(() => import('../modals/ModalEditarCompra'))
+const ModalCambiarProveedor = lazy(() => import('../modals/ModalCambiarProveedor'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
@@ -75,11 +76,13 @@ export default function ComprasContainer(): React.ReactElement {
   const [modalDetalleOpen, setModalDetalleOpen] = useState(false)
   const [modalNotaCreditoOpen, setModalNotaCreditoOpen] = useState(false)
   const [modalEditarOpen, setModalEditarOpen] = useState(false)
+  const [modalCambiarProveedorOpen, setModalCambiarProveedorOpen] = useState(false)
 
   // Estado de detalle
   const [compraDetalle, setCompraDetalle] = useState<CompraDBExtended | null>(null)
   const [compraParaNC, setCompraParaNC] = useState<CompraDBExtended | null>(null)
   const [compraParaEditar, setCompraParaEditar] = useState<CompraDBExtended | null>(null)
+  const [compraParaCambiarProveedor, setCompraParaCambiarProveedor] = useState<CompraDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
 
   // Cerrar modales al cambiar de sucursal: las compras son por sucursal.
@@ -88,9 +91,11 @@ export default function ComprasContainer(): React.ReactElement {
     setModalDetalleOpen(false)
     setModalNotaCreditoOpen(false)
     setModalEditarOpen(false)
+    setModalCambiarProveedorOpen(false)
     setCompraDetalle(null)
     setCompraParaNC(null)
     setCompraParaEditar(null)
+    setCompraParaCambiarProveedor(null)
     setConfirmConfig({ visible: false })
   })
 
@@ -193,27 +198,37 @@ export default function ComprasContainer(): React.ReactElement {
     }
   }, [actualizarCompra, notify])
 
+  // Abrir el cambio de proveedor desde "Editar compra": cierra el modal de
+  // edición y abre el de cambio (un solo modal a la vez).
+  const handleAbrirCambioProveedor = useCallback(() => {
+    if (!compraParaEditar) return
+    setCompraParaCambiarProveedor(compraParaEditar)
+    setModalEditarOpen(false)
+    setCompraParaEditar(null)
+    setModalCambiarProveedorOpen(true)
+  }, [compraParaEditar])
+
   // Cambiar proveedor: anula la compra vieja y crea una nueva idéntica con el
   // proveedor correcto (RPC atómico, no mueve stock/costos). Ver mig 125.
   const handleCambiarProveedorCompra = useCallback(async (payload: CambiarProveedorPayload) => {
-    if (!compraParaEditar) return
+    if (!compraParaCambiarProveedor) return
     try {
       const { nuevaCompraId } = await cambiarProveedorMut.mutateAsync({
-        compraId: compraParaEditar.id,
+        compraId: compraParaCambiarProveedor.id,
         nuevoProveedorId: payload.nuevoProveedorId,
         nuevoProveedorNombre: payload.nuevoProveedorNombre,
         usuarioId: user?.id ?? null,
         motivo: payload.motivo,
       })
       notify.success(`Proveedor cambiado: se creó la compra #${nuevaCompraId} y se anuló la anterior`, { persist: true })
-      setModalEditarOpen(false)
-      setCompraParaEditar(null)
+      setModalCambiarProveedorOpen(false)
+      setCompraParaCambiarProveedor(null)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al cambiar el proveedor'
       notify.error(msg)
       throw err
     }
-  }, [cambiarProveedorMut, compraParaEditar, notify, user])
+  }, [cambiarProveedorMut, compraParaCambiarProveedor, notify, user])
 
   const handleGuardarNC = useCallback(async (data: NotaCreditoFormInput) => {
     try {
@@ -294,8 +309,23 @@ export default function ComprasContainer(): React.ReactElement {
             }}
             guardando={actualizarCompra.isPending}
             canCambiarProveedor={isAdmin}
+            onCambiarProveedor={handleAbrirCambioProveedor}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Cambiar Proveedor (admin): anula + recrea la compra con otro proveedor */}
+      {modalCambiarProveedorOpen && compraParaCambiarProveedor && (
+        <Suspense fallback={null}>
+          <ModalCambiarProveedor
+            compra={compraParaCambiarProveedor}
             proveedores={proveedores}
-            onCambiarProveedor={handleCambiarProveedorCompra}
+            onConfirmar={handleCambiarProveedorCompra}
+            onClose={() => {
+              setModalCambiarProveedorOpen(false)
+              setCompraParaCambiarProveedor(null)
+            }}
+            guardando={cambiarProveedorMut.isPending}
             onCrearProveedor={handleCrearProveedorDesdeCompra}
           />
         </Suspense>
