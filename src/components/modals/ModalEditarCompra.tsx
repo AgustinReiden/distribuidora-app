@@ -16,13 +16,16 @@
  * reciente del producto.
  */
 
-import { useState, memo, useMemo } from 'react'
-import { Loader2, Trash2, AlertCircle } from 'lucide-react'
+import { useState, memo, useMemo, lazy, Suspense } from 'react'
+import { Loader2, Trash2, AlertCircle, Building2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
-import type { CompraDBExtended } from '../../types'
+import type { CompraDBExtended, ProveedorDBExtended, ProveedorFormInputExtended } from '../../types'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
+import type { CambiarProveedorPayload } from './ModalCambiarProveedor'
+
+const ModalCambiarProveedor = lazy(() => import('./ModalCambiarProveedor'))
 
 /** Item editable dentro del modal. */
 interface ItemEdit {
@@ -42,6 +45,11 @@ export interface ModalEditarCompraProps {
   onGuardar: (input: ActualizarCompraItemsInput) => Promise<void>
   onClose: () => void
   guardando: boolean
+  /** Cambiar proveedor (admin): anula + recrea la compra con otro proveedor. */
+  canCambiarProveedor?: boolean
+  proveedores?: ProveedorDBExtended[]
+  onCambiarProveedor?: (payload: CambiarProveedorPayload) => Promise<void>
+  onCrearProveedor?: (data: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>
 }
 
 const ModalEditarCompra = memo(function ModalEditarCompra({
@@ -50,6 +58,10 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
   onGuardar,
   onClose,
   guardando,
+  canCambiarProveedor = false,
+  proveedores,
+  onCambiarProveedor,
+  onCrearProveedor,
 }: ModalEditarCompraProps) {
   const esZZ = compra.tipo_factura === 'ZZ'
   const otrosImpuestos = compra.otros_impuestos ?? 0
@@ -76,6 +88,59 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
 
   // Items que efectivamente se persisten (los no eliminados).
   const itemsActivos = useMemo(() => items.filter((i) => !i.marcadoParaEliminar), [items])
+
+  // --- Cambiar proveedor (admin): anula + recrea la compra con otro proveedor ---
+  const [mostrarCambioProveedor, setMostrarCambioProveedor] = useState(false)
+  const [cambiandoProveedor, setCambiandoProveedor] = useState(false)
+
+  // Snapshot inicial de items para detectar ediciones sin guardar: el cambio de
+  // proveedor clona los items DE LA BD, no los del modal, así que si hay cambios
+  // sin guardar se bloquea para no recrear con datos inconsistentes.
+  const itemsIniciales = useMemo(
+    () =>
+      (compra.items ?? []).map((it) => ({
+        productoId: it.producto_id,
+        cantidad: it.cantidad ?? 0,
+        costoUnitario: it.costo_unitario ?? 0,
+        bonificacion: it.bonificacion ?? 0,
+        porcentajeIva: esZZ ? 0 : (it.porcentaje_iva ?? it.producto?.porcentaje_iva ?? 21),
+        impuestosInternos: esZZ ? 0 : (it.impuestos_internos ?? it.producto?.impuestos_internos ?? 0),
+      })),
+    [compra.items, esZZ],
+  )
+
+  const itemsModificados = useMemo(() => {
+    if (items.some((i) => i.marcadoParaEliminar)) return true
+    if (items.length !== itemsIniciales.length) return true
+    return items.some((it) => {
+      const orig = itemsIniciales.find((o) => o.productoId === it.productoId)
+      if (!orig) return true
+      return (
+        orig.cantidad !== it.cantidad ||
+        orig.costoUnitario !== it.costoUnitario ||
+        orig.bonificacion !== it.bonificacion ||
+        orig.porcentajeIva !== it.porcentajeIva ||
+        orig.impuestosInternos !== it.impuestosInternos
+      )
+    })
+  }, [items, itemsIniciales])
+
+  const puedeCambiarProveedor = Boolean(
+    canCambiarProveedor && onCambiarProveedor && compra.estado !== 'cancelada',
+  )
+
+  async function handleConfirmarCambioProveedor(payload: CambiarProveedorPayload) {
+    if (!onCambiarProveedor) return
+    setCambiandoProveedor(true)
+    try {
+      await onCambiarProveedor(payload)
+      setMostrarCambioProveedor(false) // el container cierra el modal de edición al tener éxito
+    } catch {
+      // dejar abierto para reintentar; el container ya notificó el error
+    } finally {
+      setCambiandoProveedor(false)
+    }
+  }
 
   // Totales calculados (incluye imp. internos por línea; percepciones y no
   // gravado de la cabecera se conservan tal cual).
@@ -194,11 +259,35 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>
-            Solo se editan items. La cabecera (proveedor, fecha, factura, tipo) queda inmutable.
-            Si necesitás cambiar la cabecera, anulá la compra y volvé a cargarla. No se pueden
-            agregar items nuevos: anulá y rehacé si falta cargar uno.
+            Solo se editan items. La cabecera (fecha, factura, tipo) queda inmutable. Para corregir
+            el <strong>proveedor</strong> usá el botón de abajo; para el resto, anulá la compra y
+            volvé a cargarla. No se pueden agregar items nuevos: anulá y rehacé si falta cargar uno.
           </span>
         </div>
+
+        {puedeCambiarProveedor && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMostrarCambioProveedor(true)}
+              disabled={itemsModificados || cambiandoProveedor}
+              title={
+                itemsModificados
+                  ? 'Guardá o descartá los cambios de items primero'
+                  : 'Anular y recrear la compra con otro proveedor'
+              }
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Building2 className="w-4 h-4" />
+              Cambiar proveedor
+            </button>
+            {itemsModificados && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                Guardá los cambios de items primero.
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Tabla de items */}
         <div className="overflow-x-auto">
@@ -361,6 +450,20 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
           </button>
         </div>
       </div>
+
+      {/* Cambiar proveedor (anidado): anula + recrea la compra con otro proveedor */}
+      {mostrarCambioProveedor && puedeCambiarProveedor && (
+        <Suspense fallback={null}>
+          <ModalCambiarProveedor
+            compra={compra}
+            proveedores={proveedores ?? []}
+            onConfirmar={handleConfirmarCambioProveedor}
+            onClose={() => setMostrarCambioProveedor(false)}
+            guardando={cambiandoProveedor}
+            onCrearProveedor={onCrearProveedor}
+          />
+        </Suspense>
+      )}
     </ModalBase>
   )
 })

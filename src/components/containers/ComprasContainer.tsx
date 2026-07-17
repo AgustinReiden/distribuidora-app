@@ -11,6 +11,7 @@ import {
   useRegistrarCompraMutation,
   useActualizarCompraMutation,
   useAnularCompraMutation,
+  useCambiarProveedorCompraMutation,
   useProductosQuery,
   useCrearProductoMutation,
   useCrearProveedorMutation,
@@ -20,6 +21,7 @@ import {
   useActualizarProductoMutation,
 } from '../../hooks/queries'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
+import type { CambiarProveedorPayload } from '../modals/ModalCambiarProveedor'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
@@ -66,6 +68,7 @@ export default function ComprasContainer(): React.ReactElement {
   const actualizarProducto = useActualizarProductoMutation()
   const crearProveedor = useCrearProveedorMutation()
   const registrarNC = useRegistrarNotaCreditoMutation()
+  const cambiarProveedorMut = useCambiarProveedorCompraMutation()
 
   // Estado de modales
   const [modalCompraOpen, setModalCompraOpen] = useState(false)
@@ -190,6 +193,28 @@ export default function ComprasContainer(): React.ReactElement {
     }
   }, [actualizarCompra, notify])
 
+  // Cambiar proveedor: anula la compra vieja y crea una nueva idéntica con el
+  // proveedor correcto (RPC atómico, no mueve stock/costos). Ver mig 125.
+  const handleCambiarProveedorCompra = useCallback(async (payload: CambiarProveedorPayload) => {
+    if (!compraParaEditar) return
+    try {
+      const { nuevaCompraId } = await cambiarProveedorMut.mutateAsync({
+        compraId: compraParaEditar.id,
+        nuevoProveedorId: payload.nuevoProveedorId,
+        nuevoProveedorNombre: payload.nuevoProveedorNombre,
+        usuarioId: user?.id ?? null,
+        motivo: payload.motivo,
+      })
+      notify.success(`Proveedor cambiado: se creó la compra #${nuevaCompraId} y se anuló la anterior`, { persist: true })
+      setModalEditarOpen(false)
+      setCompraParaEditar(null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al cambiar el proveedor'
+      notify.error(msg)
+      throw err
+    }
+  }, [cambiarProveedorMut, compraParaEditar, notify, user])
+
   const handleGuardarNC = useCallback(async (data: NotaCreditoFormInput) => {
     try {
       await registrarNC.mutateAsync(data)
@@ -268,6 +293,10 @@ export default function ComprasContainer(): React.ReactElement {
               setCompraParaEditar(null)
             }}
             guardando={actualizarCompra.isPending}
+            canCambiarProveedor={isAdmin}
+            proveedores={proveedores}
+            onCambiarProveedor={handleCambiarProveedorCompra}
+            onCrearProveedor={handleCrearProveedorDesdeCompra}
           />
         </Suspense>
       )}
