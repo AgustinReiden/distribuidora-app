@@ -99,7 +99,7 @@ const ModalCambiarProveedor = memo(function ModalCambiarProveedor({
             <select
               value={nuevoProveedorId}
               onChange={(e) => setNuevoProveedorId(e.target.value)}
-              className="flex-1 px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
+              className="flex-1 min-w-0 px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             >
               <option value="">Seleccionar proveedor...</option>
               {proveedores.map((p) => (
@@ -113,7 +113,7 @@ const ModalCambiarProveedor = memo(function ModalCambiarProveedor({
               <button
                 type="button"
                 onClick={() => setModalProveedorOpen(true)}
-                className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors whitespace-nowrap text-sm"
+                className="flex items-center gap-1 shrink-0 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors whitespace-nowrap text-sm"
                 title="Crear proveedor nuevo"
               >
                 <Plus className="w-4 h-4" />
