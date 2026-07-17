@@ -323,3 +323,54 @@ export function useAnularCompraMutation() {
     },
   })
 }
+
+/**
+ * Input para cambiar el proveedor de una compra (admin only).
+ * En vez de reescribir la fila, el RPC anula la compra vieja y crea una nueva
+ * idéntica (mismos items, importes, fecha, factura) con el proveedor nuevo, sin
+ * tocar stock ni costos. Analogo a cambiar_cliente_pedido. Ver mig 125.
+ */
+export interface CambiarProveedorCompraInput {
+  compraId: string
+  /** id del proveedor existente elegido; null si se usa un nombre nuevo. */
+  nuevoProveedorId: string | null
+  /** nombre denormalizado si no hay id (fallback). */
+  nuevoProveedorNombre: string | null
+  usuarioId: string | null
+  motivo?: string
+}
+
+async function cambiarProveedorCompra(input: CambiarProveedorCompraInput): Promise<{ nuevaCompraId: string }> {
+  const { data, error } = await supabase.rpc('cambiar_proveedor_compra', {
+    p_compra_id: input.compraId,
+    p_usuario_id: input.usuarioId,
+    // ids son bigint: mandar numero, no string (ver cambio "Invalid input")
+    p_nuevo_proveedor_id: input.nuevoProveedorId ? Number(input.nuevoProveedorId) : null,
+    p_nuevo_proveedor_nombre: input.nuevoProveedorNombre || null,
+    ...(input.motivo ? { p_motivo: input.motivo } : {}),
+  })
+
+  if (error) throw error
+  const result = data as { success: boolean; nueva_compra_id?: string | number; error?: string }
+  if (!result.success) {
+    throw new Error(result.error || 'Error al cambiar el proveedor')
+  }
+  return { nuevaCompraId: String(result.nueva_compra_id) }
+}
+
+/**
+ * Hook para cambiar el proveedor de una compra: anula la vieja y crea una nueva
+ * idéntica con el proveedor correcto, vía RPC atómico. No mueve stock/costos.
+ */
+export function useCambiarProveedorCompraMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: cambiarProveedorCompra,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: ['productos'] })
+    },
+  })
+}

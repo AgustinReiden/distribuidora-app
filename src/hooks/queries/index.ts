@@ -93,8 +93,9 @@ export {
   useRegistrarCompraMutation,
   useActualizarCompraMutation,
   useAnularCompraMutation,
+  useCambiarProveedorCompraMutation,
 } from './useComprasQuery'
-export type { ActualizarCompraItemsInput } from './useComprasQuery'
+export type { ActualizarCompraItemsInput, CambiarProveedorCompraInput } from './useComprasQuery'
 
 // Proveedores
 export {
