@@ -69,6 +69,8 @@ export interface ProductoDB {
   porcentaje_iva?: number | null;
   /** Costo real canónico: FC = neto×(1+II/100); ZZ = pagado (mig 111) */
   costo_real?: number | null;
+  /** Costo promedio ponderado: valuación de stock y CMV (mig 127) */
+  costo_promedio?: number | null;
   /** Tipo de la última compra que fijó el costo (mig 111) */
   ultimo_tipo_compra?: 'ZZ' | 'FC' | null;
   activo?: boolean;
@@ -293,6 +295,8 @@ export interface ProductoFormInput {
   porcentaje_iva?: number;
   /** Costo real canónico calculado en el modal (mig 111) */
   costo_real?: number | null;
+  /** Costo promedio ponderado; solo se envía si el admin lo corrige a mano (mig 127) */
+  costo_promedio?: number | null;
   unidades_de_venta_por_fardo?: number | null;
   etiqueta_bulto?: string | null;
 }

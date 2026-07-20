@@ -313,6 +313,7 @@ export default function ProductosContainer(): React.ReactElement {
               setProductoEditando(null)
             }}
             guardando={crearProducto.isPending || actualizarProducto.isPending}
+            esAdmin={isAdmin}
           />
         </Suspense>
       )}

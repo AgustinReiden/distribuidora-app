@@ -36,6 +36,8 @@ export interface ProductoFormData {
   precio: number | string;
   /** Costo real canónico (neto + imp. internos si FC; pagado si ZZ) — calculado al guardar */
   costo_real?: number | null;
+  /** Costo promedio ponderado (valuación/CMV, mig 127) — solo se envía si el admin lo corrige */
+  costo_promedio?: number | null;
   /** Cuántas unidades de venta hacen 1 fardo/bulto (ej: 2 = vendés medio fardo) */
   unidades_de_venta_por_fardo?: number;
   /** Etiqueta del bulto: FARDO, CAJA, PACK, BULTO... */
@@ -71,6 +73,8 @@ export interface ModalProductoProps {
   onClose: () => void;
   /** Indica si está guardando */
   guardando: boolean;
+  /** Habilita corregir a mano el costo promedio (solo admin) */
+  esAdmin?: boolean;
 }
 
 // Opciones de IVA disponibles
@@ -90,7 +94,7 @@ const getCategoryKey = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : (cat.id || cat.nombre);
 };
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando }: ModalProductoProps) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando, esAdmin = false }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -131,6 +135,16 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   });
   const [nuevaCategoria, setNuevaCategoria] = useState<string>('');
   const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState<boolean>(false);
+
+  // ── Costo promedio (valuación, mig 127) ───────────────────────────────────
+  // Solo lectura por defecto: lo recalcula cada compra (forward-only). El admin
+  // puede corregirlo a mano para sanear distorsiones (ediciones/anulaciones de
+  // compras no lo retro-ajustan). Solo se persiste si se corrigió.
+  const [corrigiendoCpp, setCorrigiendoCpp] = useState<boolean>(false);
+  const [cppValor, setCppValor] = useState<string>(
+    producto?.costo_promedio != null ? String(producto.costo_promedio) : ''
+  );
+  const [cppEditado, setCppEditado] = useState<boolean>(false);
 
   // ── Márgenes (solo UI, bidireccionales con el precio final) ───────────────
   // Lógica del negocio (mig 123):
@@ -251,11 +265,16 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         formNormalizado.impuestos_internos,
         producto?.ultimo_tipo_compra ?? 'FC',
       );
+      // CPP: solo se persiste si el admin lo corrigió a mano (undefined = no tocar).
+      const cppCorregido = cppEditado && corrigiendoCpp
+        ? (parsePrecio(cppValor) > 0 ? parsePrecio(cppValor) : null)
+        : undefined;
       onSave({
         ...formNormalizado,
         categoria: categoriaFinal,
         id: producto?.id,
         costo_real: costoReal > 0 ? costoReal : null,
+        ...(cppCorregido !== undefined ? { costo_promedio: cppCorregido } : {}),
       });
       return;
     }
@@ -500,13 +519,15 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Costo final (Neto + II)</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">
+                Costo reposición{producto?.ultimo_tipo_compra ? ` (últ. ${producto.ultimo_tipo_compra})` : ''}
+              </label>
               <input
                 type="text"
                 value={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC').toFixed(2)}
                 readOnly
                 className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-blue-50 font-semibold"
-                title="Costo REAL: el que se aplica en márgenes, mermas y bonificaciones"
+                title="Costo de REPOSICIÓN (última compra, neto + II si FC): la base para fijar precios"
               />
             </div>
             <div>
@@ -524,9 +545,54 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           </div>
           <p className="text-xs text-gray-500 mt-2">
             {(producto?.ultimo_tipo_compra ?? 'FC') === 'ZZ'
-              ? 'Última compra ZZ: el costo final es lo pagado (sin add-on de II).'
-              : 'El costo final (neto + imp. internos) es el costo REAL: el IVA de la compra es crédito fiscal, no costo.'}
+              ? 'Última compra ZZ: el costo de reposición es lo pagado (sin add-on de II).'
+              : 'El costo de reposición (neto + imp. internos) refleja la última compra: el IVA es crédito fiscal, no costo.'}
           </p>
+
+          {/* Costo promedio ponderado (valuación/CMV, mig 127). Solo en edición:
+              un producto nuevo arranca con CPP = costo real. */}
+          {producto && (
+            <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium mb-1 text-amber-800 dark:text-amber-200">
+                    Costo promedio (valuación)
+                  </label>
+                  <NumberInput
+                    min={0}
+                    emptyValue={0}
+                    value={parsePrecio(cppValor)}
+                    onChange={(n) => { setCppValor(String(n)); setCppEditado(true); }}
+                    commitOnChange
+                    disabled={!corrigiendoCpp}
+                    className="w-full px-3 py-2 border rounded-lg text-sm font-semibold disabled:bg-amber-100/60 dark:disabled:bg-amber-900/30 disabled:cursor-not-allowed"
+                    placeholder="—"
+                  />
+                </div>
+                {esAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (corrigiendoCpp) {
+                        // Cancelar: volver al valor original sin persistir
+                        setCppValor(producto?.costo_promedio != null ? String(producto.costo_promedio) : '');
+                        setCppEditado(false);
+                      }
+                      setCorrigiendoCpp(!corrigiendoCpp);
+                    }}
+                    className="px-3 py-2 text-xs font-medium border rounded-lg text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                  >
+                    {corrigiendoCpp ? 'Cancelar' : 'Corregir'}
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                {corrigiendoCpp
+                  ? '⚠ Esto reescribe la valuación de TODO el stock actual y el CMV de las próximas ventas. Usalo solo para corregir distorsiones.'
+                  : 'Promedio ponderado de las compras: valúa el stock y el CMV de reportes. Lo recalcula cada compra; editar o anular compras viejas NO lo ajusta.'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Seccion de Precios de Venta */}
@@ -618,6 +684,20 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               </p>
             </div>
           </div>
+
+          {/* Informativo: margen sobre el costo promedio (valuación). Los márgenes
+              editables de arriba siguen sobre reposición: esa es la base de pricing. */}
+          {(() => {
+            const cpp = parsePrecio(cppValor);
+            const precioNeto = parsePrecio(String(form.precio_sin_iva));
+            if (!(producto && cpp > 0 && precioNeto > 0)) return null;
+            return (
+              <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                Margen s/ costo promedio: {calcularMargenPorcentaje(precioNeto, cpp).toFixed(1)}%
+                (${(precioNeto - cpp).toFixed(2)} por unidad — el que verás en reportes hasta agotar el stock valuado).
+              </p>
+            );
+          })()}
 
           <p className="text-xs text-gray-500 mt-2">
             * El precio final incluye IVA ({form.porcentaje_iva || 21}%). El neto se calcula hacia atrás.

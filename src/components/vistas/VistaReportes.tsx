@@ -13,7 +13,7 @@
  */
 import React, { useState, useEffect, ChangeEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, MapPin } from 'lucide-react';
+import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { useReportesFinancieros } from '../../hooks/supabase';
 import type {
@@ -32,7 +32,8 @@ import {
   ReporteCuentasPorCobrar,
   ReporteRentabilidadSection,
   ReporteVentasClientes,
-  ReporteVentasZonas
+  ReporteVentasZonas,
+  ReporteValuacionInventario
 } from './reportes';
 
 // =============================================================================
@@ -53,7 +54,7 @@ interface TabConfig {
   icon: LucideIcon;
 }
 
-type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas';
+type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion';
 
 // =============================================================================
 // COMPONENT
@@ -95,7 +96,8 @@ export default function VistaReportes({
     { id: 'cuentas', label: 'Cuentas por Cobrar', icon: DollarSign },
     { id: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
     { id: 'clientes', label: 'Por Cliente', icon: Users },
-    { id: 'zonas', label: 'Por Zona', icon: MapPin }
+    { id: 'zonas', label: 'Por Zona', icon: MapPin },
+    { id: 'valuacion', label: 'Valuación de Stock', icon: Boxes }
   ];
 
   // Cargar reporte automáticamente solo la primera vez
@@ -207,7 +209,8 @@ export default function VistaReportes({
         ))}
       </div>
 
-      {/* Filtros */}
+      {/* Filtros de fecha (la valuación es una foto del stock actual: no aplican) */}
+      {activeTab !== 'valuacion' && (
       <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4">
         <h2 className="font-semibold mb-3 text-gray-700 dark:text-gray-200">Filtrar por Fecha</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
@@ -266,6 +269,7 @@ export default function VistaReportes({
           </div>
         </div>
       </div>
+      )}
 
       {/* Contenido según tab */}
       {activeTab === 'preventistas' && (
@@ -308,6 +312,10 @@ export default function VistaReportes({
           loading={loadingFinanciero}
           formatPrecio={formatPrecio}
         />
+      )}
+
+      {activeTab === 'valuacion' && (
+        <ReporteValuacionInventario formatPrecio={formatPrecio} />
       )}
     </div>
   );

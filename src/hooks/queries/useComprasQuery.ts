@@ -235,7 +235,16 @@ export interface ActualizarCompraItemsInput {
   }>
 }
 
-async function actualizarCompraItems(input: ActualizarCompraItemsInput): Promise<{ compraId: string }> {
+/** Producto cuyo CPP puede haber quedado distorsionado al editar una compra vieja (mig 128). */
+export interface WarningCostoPromedio {
+  producto_id: number
+  costo_real_anterior: number
+  costo_real_nuevo: number
+}
+
+async function actualizarCompraItems(
+  input: ActualizarCompraItemsInput
+): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[] }> {
   const itemsParaRPC: CompraItemRPC[] = input.items.map(item => ({
     producto_id: item.productoId,
     cantidad: item.cantidad,
@@ -260,11 +269,16 @@ async function actualizarCompraItems(input: ActualizarCompraItemsInput): Promise
   })
 
   if (error) throw error
-  const result = data as { success: boolean; compra_id: string; error?: string }
+  const result = data as {
+    success: boolean
+    compra_id: string
+    error?: string
+    warning_costo_promedio?: WarningCostoPromedio[] | null
+  }
   if (!result.success) {
     throw new Error(result.error || 'Error al actualizar compra')
   }
-  return { compraId: result.compra_id }
+  return { compraId: result.compra_id, warningCostoPromedio: result.warning_costo_promedio ?? [] }
 }
 
 /**
