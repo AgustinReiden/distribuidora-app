@@ -16,3 +16,6 @@ export type { ReporteVentasClientesProps } from './ReporteVentasClientes';
 
 export { ReporteVentasZonas } from './ReporteVentasZonas';
 export type { ReporteVentasZonasProps } from './ReporteVentasZonas';
+
+export { ReporteValuacionInventario } from './ReporteValuacionInventario';
+export type { ReporteValuacionInventarioProps } from './ReporteValuacionInventario';

@@ -187,8 +187,19 @@ export default function ComprasContainer(): React.ReactElement {
 
   const handleGuardarEdicionCompra = useCallback(async (input: ActualizarCompraItemsInput) => {
     try {
-      await actualizarCompra.mutateAsync(input)
+      const res = await actualizarCompra.mutateAsync(input)
       notify.success('Compra actualizada')
+      // CPP forward-only (mig 128): editar una compra que NO es la última del
+      // producto no re-promedia el costo — avisar para corregirlo en la ficha.
+      if (res.warningCostoPromedio.length > 0) {
+        const nombres = res.warningCostoPromedio
+          .map(w => productos.find(p => String(p.id) === String(w.producto_id))?.nombre ?? `#${w.producto_id}`)
+          .join(', ')
+        notify.warning(
+          `El costo promedio de ${nombres} no se recalculó (la compra editada no es la última). ` +
+          'Si el cambio de costo es relevante, corregilo desde la ficha del producto.'
+        )
+      }
       setModalEditarOpen(false)
       setCompraParaEditar(null)
     } catch (err) {
@@ -196,7 +207,7 @@ export default function ComprasContainer(): React.ReactElement {
       notify.error(msg)
       throw err
     }
-  }, [actualizarCompra, notify])
+  }, [actualizarCompra, notify, productos])
 
   // Abrir el cambio de proveedor desde "Editar compra": cierra el modal de
   // edición y abre el de cambio (un solo modal a la vez).

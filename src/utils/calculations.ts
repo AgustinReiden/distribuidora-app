@@ -173,6 +173,34 @@ export function calcularCostoFinanciero(
   return redondear(costo * (1 + iva / 100 + impInt / 100), 4);
 }
 
+/**
+ * Costo PROMEDIO PONDERADO tras una compra (espejo de la fórmula SQL en
+ * registrar_compra_completa, mig 128). Base de valuación de stock y CMV;
+ * el costo de reposición (calcularCostoReal) sigue siendo la base de pricing.
+ *
+ * Guardas (mig 128): stock anterior ≤ 0 o CPP nulo/≤ 0 ⇒ el promedio se
+ * resetea al costo real de la compra.
+ *
+ * @param stockAnterior - Stock antes de ingresar la compra
+ * @param costoPromedioActual - CPP vigente del producto (null si nunca se calculó)
+ * @param cantidad - Unidades que ingresan
+ * @param costoRealNuevo - Costo real unitario de la compra (calcularCostoReal)
+ */
+export function calcularCostoPromedioPonderado(
+  stockAnterior: number,
+  costoPromedioActual: number | null | undefined,
+  cantidad: number,
+  costoRealNuevo: number
+): number {
+  const stock = Number(stockAnterior) || 0;
+  const cant = Number(cantidad) || 0;
+  const costoNuevo = Number(costoRealNuevo) || 0;
+  const cppActual = Number(costoPromedioActual) || 0;
+  if (cant <= 0) return redondear(cppActual > 0 ? cppActual : costoNuevo, 4);
+  if (stock <= 0 || cppActual <= 0) return redondear(costoNuevo, 4);
+  return redondear((stock * cppActual + cant * costoNuevo) / (stock + cant), 4);
+}
+
 // ============================================
 // CÁLCULOS DE COMPRAS (desglose fiscal completo)
 // ============================================
