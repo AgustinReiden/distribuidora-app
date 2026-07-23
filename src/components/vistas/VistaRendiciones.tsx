@@ -17,9 +17,12 @@ import {
   ChevronUp,
   AlertTriangle,
   FileText,
-  Receipt
+  Receipt,
+  Download,
+  Users
 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
+import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useTransportistasQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -61,6 +64,19 @@ const ESTADO_STYLES: Record<EstadoRendicion, { label: string; badge: string; bor
   }
 }
 
+/** Fila del detalle por cliente de una rendición (RPC obtener_detalle_rendicion, mig 135). */
+interface DetalleRendicionCliente {
+  cliente_id: number
+  cliente_nombre: string
+  total: number
+  total_entregas: number
+  total_ctascte: number
+  efectivo: number
+  transferencia: number
+  otros: number
+  cantidad_pagos: number
+}
+
 interface ResumenCardProps {
   resumen: ResumenRendicionDiaria
   onCerrar: (resumen: ResumenRendicionDiaria) => void
@@ -69,6 +85,9 @@ interface ResumenCardProps {
 
 function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
+  const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
+  const [loadingDetalle, setLoadingDetalle] = useState(false)
+  const [exportando, setExportando] = useState(false)
   const estadoStyle = ESTADO_STYLES[resumen.estado]
 
   const desgloses = useMemo(() => {
@@ -92,6 +111,66 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
     : diferencia > 0
       ? `+${formatMoney(diferencia)} cobrado sobre entregado`
       : `${formatMoney(diferencia)} cobrado menos que entregado`
+
+  // Detalle por cliente: se carga la primera vez que se expande la tarjeta.
+  useEffect(() => {
+    if (!expandido || detalle !== null || loadingDetalle) return
+    let cancelado = false
+    setLoadingDetalle(true)
+    void (async () => {
+      const { data, error } = await supabase.rpc('obtener_detalle_rendicion', {
+        p_fecha: resumen.fecha,
+        p_transportista_id: resumen.transportista_id
+      })
+      if (cancelado) return
+      if (error) {
+        setDetalle([])
+      } else {
+        setDetalle((data || []).map((r: Record<string, unknown>) => ({
+          cliente_id: Number(r.cliente_id),
+          cliente_nombre: String(r.cliente_nombre ?? 'Cliente'),
+          total: Number(r.total) || 0,
+          total_entregas: Number(r.total_entregas) || 0,
+          total_ctascte: Number(r.total_ctascte) || 0,
+          efectivo: Number(r.efectivo) || 0,
+          transferencia: Number(r.transferencia) || 0,
+          otros: Number(r.otros) || 0,
+          cantidad_pagos: Number(r.cantidad_pagos) || 0
+        })))
+      }
+      setLoadingDetalle(false)
+    })()
+    return () => { cancelado = true }
+  }, [expandido, detalle, loadingDetalle, resumen.fecha, resumen.transportista_id])
+
+  const clientesCtasCtes = useMemo(
+    () => (detalle ?? []).filter(d => d.total_ctascte > 0),
+    [detalle]
+  )
+
+  const handleExportarExcel = useCallback(async () => {
+    if (!detalle || detalle.length === 0) return
+    setExportando(true)
+    try {
+      const filas = detalle.map(d => ({
+        Cliente: d.cliente_nombre,
+        Total: d.total,
+        'Entregas (dia)': d.total_entregas,
+        'Ctas Ctes': d.total_ctascte,
+        Efectivo: d.efectivo,
+        Transferencia: d.transferencia,
+        Otros: d.otros,
+        'Nro pagos': d.cantidad_pagos
+      }))
+      const { createMultiSheetExcel } = await import('../../utils/excel')
+      await createMultiSheetExcel(
+        [{ name: 'Detalle', data: filas, columnWidths: [28, 14, 14, 14, 12, 14, 10, 8] }],
+        `rendicion-${resumen.transportista_nombre}-${resumen.fecha}`.replace(/\s+/g, '_')
+      )
+    } finally {
+      setExportando(false)
+    }
+  }, [detalle, resumen.transportista_nombre, resumen.fecha])
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border-l-4 ${estadoStyle.border} overflow-hidden`}>
@@ -267,6 +346,59 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                 <div><span className="text-gray-500">Vale Blanco:</span> <span className="font-medium">{formatMoney(resumen.total_vale_blanco)}</span></div>
                 <div><span className="text-gray-500">Otros:</span> <span className="font-medium">{formatMoney(resumen.total_otros)}</span></div>
               </div>
+            </div>
+
+            {/* Detalle por cliente (Ítem 4) + export a Excel */}
+            <div>
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <p className="text-xs text-gray-500 flex items-center gap-1 flex-wrap">
+                  <Users className="w-3 h-3" />
+                  Detalle por cliente
+                  {detalle && (
+                    <span className="text-gray-400">
+                      · {detalle.length} cliente{detalle.length !== 1 ? 's' : ''}
+                      {clientesCtasCtes.length > 0 && ` · ${clientesCtasCtes.length} con ctas ctes (${formatMoney(resumen.total_ctascte)})`}
+                    </span>
+                  )}
+                </p>
+                <button
+                  onClick={() => { void handleExportarExcel() }}
+                  disabled={exportando || !detalle || detalle.length === 0}
+                  className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                  <Download className="w-3 h-3" />
+                  {exportando ? 'Exportando…' : 'Exportar Excel'}
+                </button>
+              </div>
+
+              {loadingDetalle ? (
+                <p className="text-xs text-gray-400 py-2">Cargando detalle…</p>
+              ) : detalle && detalle.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500 dark:text-gray-400 text-left border-b border-gray-200 dark:border-gray-700">
+                        <th className="py-1 pr-2 font-medium">Cliente</th>
+                        <th className="py-1 px-2 font-medium text-right">Total</th>
+                        <th className="py-1 px-2 font-medium text-right">Entregas</th>
+                        <th className="py-1 pl-2 font-medium text-right">Ctas Ctes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detalle.map(d => (
+                        <tr key={d.cliente_id} className="border-b border-gray-100 dark:border-gray-700/50">
+                          <td className="py-1 pr-2 text-gray-700 dark:text-gray-300">{d.cliente_nombre}</td>
+                          <td className="py-1 px-2 text-right font-medium text-gray-800 dark:text-gray-200">{formatMoney(d.total)}</td>
+                          <td className="py-1 px-2 text-right text-emerald-600 dark:text-emerald-400">{d.total_entregas > 0 ? formatMoney(d.total_entregas) : '—'}</td>
+                          <td className="py-1 pl-2 text-right text-blue-600 dark:text-blue-400">{d.total_ctascte > 0 ? formatMoney(d.total_ctascte) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 py-2">Sin pagos ese día.</p>
+              )}
             </div>
 
             <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
