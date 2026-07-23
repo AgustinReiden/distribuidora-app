@@ -8,6 +8,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen } from '../../types'
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
+import { fechaLocalISO } from '../../utils/formatters'
 
 // Query keys
 export const pedidosKeys = {
@@ -383,9 +384,21 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
 }
 
 async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB> {
+  // Al marcar 'entregado' hay que estampar fecha_entrega (mediodia AR, igual que
+  // las RPC masivas marcar_entregas_masivo / marcar_entrega_y_pago_masivo) para
+  // que las rendiciones clasifiquen el cobro como "Entrega del dia". Sin esto el
+  // pedido queda entregado con fecha_entrega NULL y el cobro cae en "Ctas Ctes"
+  // (bug sistemico: ~38% de las entregas quedaron sin fecha desde abr-2026).
+  // Al pasar a cualquier otro estado (desmarcar/reasignar) se limpia.
+  const updateData: Record<string, unknown> = {
+    estado: input.nuevoEstado,
+    updated_at: new Date().toISOString(),
+    fecha_entrega: input.nuevoEstado === 'entregado' ? `${fechaLocalISO()}T12:00:00-03:00` : null,
+  }
+
   const { data, error } = await supabase
     .from('pedidos')
-    .update({ estado: input.nuevoEstado })
+    .update(updateData)
     .eq('id', input.pedidoId)
     .select()
     .single()

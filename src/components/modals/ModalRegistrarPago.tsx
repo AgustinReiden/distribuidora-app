@@ -4,6 +4,7 @@ import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/forma
 import { parsePrecio } from '../../utils/calculations'
 import NumberInput from '../ui/NumberInput'
 import { useZodValidation } from '../../hooks/useZodValidation'
+import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import { modalPagoSchema } from '../../lib/schemas'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
 
@@ -97,6 +98,8 @@ export default function ModalRegistrarPago({
   const [resultadoFIFO, setResultadoFIFO] = useState<RegistrarPagoFifoResult | null>(null)
   const [error, setError] = useState<string>('')
   const [fecha, setFecha] = useState<string>(fechaLocalISO())
+  // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
+  const fechaMinima = useFechaMinimaPago()
 
   // Pago dividido
   const [pagoDividido, setPagoDividido] = useState<boolean>(false)
@@ -418,11 +421,13 @@ export default function ModalRegistrarPago({
             <input
               type="date"
               value={fecha}
+              min={fechaMinima}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setFecha(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Se imputa a la rendición de esa fecha. Por defecto hoy.
+              {fechaMinima && ' No se permiten fechas con la caja ya cerrada.'}
             </p>
           </div>
 

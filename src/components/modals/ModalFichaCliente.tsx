@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { LucideIcon } from 'lucide-react'
-import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight } from 'lucide-react'
+import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight, Trash2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
-import { puedeVerSaldoCliente, puedeVerHistorialVentasCliente, puedeRegistrarPagoCliente } from '../../lib/permisos'
+import { useNotification } from '../../contexts/NotificationContext'
+import { puedeVerSaldoCliente, puedeVerHistorialVentasCliente, puedeRegistrarPagoCliente, puedeAnularPago } from '../../lib/permisos'
 import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
@@ -46,15 +48,21 @@ interface TabItem {
 
 export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido, onCambioEnRuta }: ModalFichaClienteProps) {
   const { pedidosCliente, estadisticas, loading } = useFichaCliente(cliente?.id)
-  const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta } = usePagos()
+  const { pagos, loading: loadingPagos, fetchPagosCliente, obtenerResumenCuenta, eliminarPago } = usePagos()
   const { perfil } = useAuthData()
+  const notify = useNotification()
+  const queryClient = useQueryClient()
   const rol = perfil?.rol
   const verSaldo = puedeVerSaldoCliente(rol)
   const verHistorialVentas = puedeVerHistorialVentasCliente(rol)
   const puedeRegistrarPago = puedeRegistrarPagoCliente(rol)
+  const puedeAnular = puedeAnularPago(rol)
   const [resumenCuenta, setResumenCuenta] = useState<ResumenCuenta | null>(null)
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen')
   const [expandedPedido, setExpandedPedido] = useState<string | null>(null)
+  // Anulacion de pagos (solo admin): confirmacion inline dentro del modal.
+  const [anulandoId, setAnulandoId] = useState<string | null>(null)
+  const [procesandoAnular, setProcesandoAnular] = useState<boolean>(false)
 
 
   useEffect(() => {
@@ -76,6 +84,27 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
     if (resumenCuenta?.saldo_actual !== undefined) return resumenCuenta.saldo_actual
     return 0
   }, [resumenCuenta])
+
+  // Anular un pago (admin). El borrado dispara los triggers que revierten el
+  // saldo del cliente (mig 086) y recalculan el pedido (mig 035). No lo bloquea
+  // el guard de caja cerrada (ese solo aplica a INSERT/UPDATE, no a DELETE).
+  const handleConfirmarAnular = async (pagoId: string | number): Promise<void> => {
+    if (!cliente?.id) return
+    setProcesandoAnular(true)
+    try {
+      await eliminarPago(String(pagoId))
+      await fetchPagosCliente(cliente.id)
+      const res = await obtenerResumenCuenta(cliente.id)
+      setResumenCuenta(res)
+      queryClient.invalidateQueries({ queryKey: ['clientes'] })
+      notify.success('Pago anulado. Se ajustó el saldo del cliente.')
+      setAnulandoId(null)
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo anular el pago')
+    } finally {
+      setProcesandoAnular(false)
+    }
+  }
 
   const limiteCredito: number = cliente?.limite_credito || 0
   const creditoDisponible: number = limiteCredito - saldoActual
@@ -456,21 +485,63 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 </div>
               ) : (
                 pagos.map(pago => (
-                  <div key={pago.id} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-gray-900 dark:text-white">
-                        {formatCurrency(pago.monto)}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {formatDate(pago.created_at)} • {pago.forma_pago}
-                        {pago.referencia && ` • Ref: ${pago.referencia}`}
-                      </p>
-                      {pago.notas && <p className="text-sm text-gray-400 mt-1">{pago.notas}</p>}
+                  <div key={pago.id} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-900 dark:text-white">
+                          {formatCurrency(pago.monto)}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {formatDate(pago.created_at)} • {pago.forma_pago}
+                          {pago.referencia && ` • Ref: ${pago.referencia}`}
+                        </p>
+                        {pago.notas && <p className="text-sm text-gray-400 mt-1">{pago.notas}</p>}
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <div className="text-right text-sm text-gray-500">
+                          {pago.usuario?.nombre || 'Sistema'}
+                          {pago.pedido_id && <p>Pedido #{pago.pedido_id}</p>}
+                        </div>
+                        {puedeAnular && anulandoId !== String(pago.id) && (
+                          <button
+                            onClick={() => setAnulandoId(String(pago.id))}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                            title="Anular pago"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-right text-sm text-gray-500">
-                      {pago.usuario?.nombre || 'Sistema'}
-                      {pago.pedido_id && <p>Pedido #{pago.pedido_id}</p>}
-                    </div>
+                    {anulandoId === String(pago.id) && (
+                      <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                        <p className="text-sm text-red-700 dark:text-red-300 mb-2 flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                          <span>
+                            ¿Anular este pago de <strong>{formatCurrency(pago.monto)}</strong>?{' '}
+                            {pago.pedido_id
+                              ? 'Se revertirá la imputación al pedido y se ajustará el saldo del cliente.'
+                              : 'Es un pago a cuenta / saldo a favor: se ajustará el saldo del cliente.'}
+                          </span>
+                        </p>
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={() => setAnulandoId(null)}
+                            disabled={procesandoAnular}
+                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={() => { void handleConfirmarAnular(pago.id) }}
+                            disabled={procesandoAnular}
+                            className="px-3 py-1.5 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+                          >
+                            {procesandoAnular ? 'Anulando…' : 'Sí, anular'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
