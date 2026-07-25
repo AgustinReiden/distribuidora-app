@@ -19,6 +19,7 @@ import {
   FileText,
   Receipt,
   Download,
+  Wallet,
   Users
 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
@@ -31,6 +32,7 @@ import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoI
 
 const ModalCerrarRendicion = lazy(() => import('../modals/ModalCerrarRendicion'))
 const ModalResolverRendicion = lazy(() => import('../modals/ModalResolverRendicion'))
+const ModalCtaCtePendiente = lazy(() => import('../modals/ModalCtaCtePendiente'))
 
 function formatMoney(value: number | undefined | null): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)
@@ -525,6 +527,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const [cerrarResumen, setCerrarResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [resolverResumen, setResolverResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [guardando, setGuardando] = useState(false)
+  const [verCtaCte, setVerCtaCte] = useState(false)
 
   const cargar = useCallback(async (): Promise<void> => {
     await fetchResumen(fechaDesde, fechaHasta, transportistaFiltro || null)
@@ -607,14 +610,25 @@ export default function VistaRendiciones(): React.ReactElement {
             Resumen auto-calculado por transportista y día (basado en fecha de pago)
           </p>
         </div>
-        <button
-          onClick={cargar}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refrescar
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Deuda del mismo rango que la rendición, para poder cuadrar
+              entregado vs cobrado vs pendiente en un solo lugar. */}
+          <button
+            onClick={() => setVerCtaCte(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <Wallet className="w-4 h-4" />
+            Cta cte pendiente
+          </button>
+          <button
+            onClick={cargar}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refrescar
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -751,6 +765,17 @@ export default function VistaRendiciones(): React.ReactElement {
             onResolver={handleResolver}
             onClose={() => setResolverResumen(null)}
             guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {verCtaCte && (
+        <Suspense fallback={null}>
+          <ModalCtaCtePendiente
+            fechaDesde={fechaDesde}
+            fechaHasta={fechaHasta}
+            transportistaId={transportistaFiltro}
+            onClose={() => setVerCtaCte(false)}
           />
         </Suspense>
       )}
