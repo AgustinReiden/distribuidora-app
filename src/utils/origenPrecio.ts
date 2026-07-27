@@ -27,6 +27,26 @@ export type OrigenPrecio =
   | 'manual'
   | 'bonificacion'
 
+/**
+ * Cómo se nombra cada origen en pantalla. `desconocido` y `sin_dato` son
+ * distintos a propósito: el primero es un ítem nuevo que no se pudo determinar,
+ * el segundo uno anterior a la mig 148, donde el dato no existe.
+ */
+export const ETIQUETAS_ORIGEN: Record<string, string> = {
+  lista: 'Precio de lista',
+  mayorista: 'Descuento por volumen',
+  desc_cliente: 'Descuento del cliente',
+  desc_categoria: 'Descuento por categoría',
+  manual: 'Precio manual',
+  bonificacion: 'Bonificación',
+  desconocido: 'Sin determinar',
+  sin_dato: 'Anterior al desglose',
+}
+
+export function etiquetaOrigen(origen: string): string {
+  return ETIQUETAS_ORIGEN[origen] ?? origen
+}
+
 /** Lo que el RPC `registrar_origen_precio_items` espera por ítem. */
 export interface OrigenPrecioItem {
   producto_id: string

@@ -149,6 +149,23 @@ export {
 } from './useGruposPrecioQuery'
 export type { ActualizarPrecioEscalaInput } from './useGruposPrecioQuery'
 
+// Comisiones variables (migs 148-150)
+export {
+  comisionesKeys,
+  useCalcularComisionesQuery,
+  useComisionReglasQuery,
+  useGuardarComisionReglaMutation,
+  useDesactivarComisionReglaMutation,
+} from './useComisionesQuery'
+export type {
+  ComisionesResultado,
+  ComisionPreventista,
+  ComisionPorOrigen,
+  ComisionRegla,
+  OrigenComision,
+  GuardarComisionReglaInput,
+} from './useComisionesQuery'
+
 // Zonas estandarizadas
 export {
   zonasKeys,
