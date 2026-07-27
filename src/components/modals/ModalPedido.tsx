@@ -12,6 +12,7 @@ import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirma
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
+import DiasAtencionSelector from '../ui/DiasAtencionSelector';
 import { serializarFranjas, validarFranjas } from '../../utils/horariosCliente';
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ProductoDB, ClienteDB } from '../../types';
@@ -52,6 +53,8 @@ export interface NuevoClienteData {
   longitud?: number | null;
   // Horarios de atención serializados ("HH:MM-HH:MM y …"); vacío si no se cargan.
   horariosAtencion?: string;
+  /** Días que abre, bitmask Lunes→Domingo (mig 137). */
+  dias_atencion?: string | null;
 }
 
 /** Advertencia de stock */
@@ -180,6 +183,8 @@ const ModalPedido = memo(function ModalPedido({
   const [nuevoCliente, setNuevoCliente] = useState<NuevoClienteData>({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
   // Horarios de atención del alta rápida (mismo editor de franjas que "Editar cliente").
   const [franjasAtencion, setFranjasAtencion] = useState<FranjaHoraria[]>([{ apertura: '', cierre: '' }]);
+  // Días que abre (bitmask L→D). El ruteo lo usa para no visitar un local cerrado.
+  const [diasAtencion, setDiasAtencion] = useState<string | null>(null);
   const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
   const [errorCliente, setErrorCliente] = useState<string>('');
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
@@ -274,12 +279,14 @@ const ModalPedido = memo(function ModalPedido({
         ...nuevoCliente,
         razonSocial: nombre, // El "Nombre completo" es la razón social
         horariosAtencion: serializarFranjas(franjasAtencion),
+        dias_atencion: diasAtencion,
       };
       const cliente = await onCrearCliente(clienteData);
       onClienteChange(cliente.id.toString());
       setMostrarNuevoCliente(false);
       setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
       setFranjasAtencion([{ apertura: '', cierre: '' }]);
+      setDiasAtencion(null);
       setGpsAccuracy(null);
       setGpsError(null);
     } catch (err) {
@@ -446,6 +453,7 @@ const ModalPedido = memo(function ModalPedido({
                   </div>
                 )}
                 <FranjasHorariasEditor franjas={franjasAtencion} onChange={setFranjasAtencion} />
+                <DiasAtencionSelector valor={diasAtencion} onChange={setDiasAtencion} />
                 {errorCliente && (
                   <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 px-3 py-2 rounded-lg">{errorCliente}</p>
                 )}

@@ -1593,6 +1593,7 @@ export default function PedidosContainer(): React.ReactElement {
                   latitud: (clienteData.latitud as number | null) ?? null,
                   longitud: (clienteData.longitud as number | null) ?? null,
                   horarios_atencion: (clienteData.horariosAtencion as string) || undefined,
+                  dias_atencion: (clienteData.dias_atencion as string | null) ?? null,
                 }
                 const newCliente = await crearClienteMut.mutateAsync(dbData)
                 notify.success(`Cliente "${newCliente.nombre_fantasia}" creado`)

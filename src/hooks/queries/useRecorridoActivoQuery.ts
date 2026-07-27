@@ -33,7 +33,7 @@ const RECORRIDO_ACTIVO_SELECT = `id, polylines,
     orden_entrega, estado_entrega, hora_entrega,
     pedido:pedidos(
       *,
-      cliente:clientes(id, nombre_fantasia, razon_social, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion),
+      cliente:clientes(id, nombre_fantasia, razon_social, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion),
       items:pedido_items(*, producto:productos(id, nombre, codigo, etiqueta_bulto, unidades_de_venta_por_fardo)),
       cambio:recorrido_cambios(producto_devuelto_nombre, cantidad_devuelta, producto_entregado_nombre, cantidad_entregada, observaciones, aplicado_at)
     )
