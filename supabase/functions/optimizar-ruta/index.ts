@@ -29,9 +29,11 @@ import {
   ORDEN_BARRIDAS,
   optimizeTours,
   optimizeToursMulti,
+  optimizeToursMultiPorBarridas,
   optimizeToursPorBarridas,
   type PedidoRutaBarrida,
   type RepartidorVehiculo,
+  type RutaMultiResultado,
   type PedidoRutaZona,
 } from "./route-optimization.ts";
 import { navegarTramo } from "./navegar-tramo.ts";
@@ -301,6 +303,19 @@ serve(async (req: Request) => {
     });
   }
 
+  // Barridas: el orden entre bloques es duro. La clasificación la hace el
+  // cliente (src/utils/barridas.ts) y viaja en el request.
+  const barridaPorPedido = new Map<string, Barrida>();
+  for (const b of body.barridas ?? []) {
+    barridaPorPedido.set(String(b.pedido_id), b.barrida);
+  }
+  const usarBarridas = barridaPorPedido.size > 0;
+  const conBarrida: PedidoRutaBarrida[] = conCoords.map((p) => ({
+    ...p,
+    barrida: barridaPorPedido.get(String(p.pedido_id)) ?? 2,
+  }));
+  let composicion: Record<Barrida, number> | null = null;
+
   // --- Split multi-repartidor: N vehículos en una sola optimización ---
   // Requiere el motor optimizeTours (SA key); el fallback computeRoutes no
   // soporta múltiples vehículos. Los pedidos sin coordenadas los reparte el
@@ -315,14 +330,33 @@ serve(async (req: Request) => {
       });
     }
     try {
-      const result = await optimizeToursMulti(
-        saKey,
-        deposito,
-        conCoords as PedidoRutaZona[],
-        destino,
-        { fecha: body.fecha, horaInicio: body.hora_inicio, ventanas: body.ventanas },
-        repartidores as RepartidorVehiculo[],
-      );
+      const optsMulti = {
+        fecha: body.fecha,
+        horaInicio: body.hora_inicio,
+        ventanas: body.ventanas,
+      };
+      let result: RutaMultiResultado;
+      if (usarBarridas) {
+        const conBarridas = await optimizeToursMultiPorBarridas(
+          saKey,
+          deposito,
+          conBarrida as Array<PedidoRutaZona & { barrida?: Barrida }>,
+          destino,
+          optsMulti,
+          repartidores as RepartidorVehiculo[],
+        );
+        composicion = conBarridas.composicion;
+        result = conBarridas;
+      } else {
+        result = await optimizeToursMulti(
+          saKey,
+          deposito,
+          conCoords as PedidoRutaZona[],
+          destino,
+          optsMulti,
+          repartidores as RepartidorVehiculo[],
+        );
+      }
       const recorridos = result.recorridos.map((r) => {
         const km = Math.round(r.distanciaTotalMetros / 10) / 100;
         const min = Math.round(r.duracionTotalSegundos / 60);
@@ -343,11 +377,13 @@ serve(async (req: Request) => {
       });
       return jsonResponse({
         success: true,
-        optimizado_por: `Google Route Optimization (${repartidores.length} vehículos)`,
+        optimizado_por: `Google Route Optimization (${repartidores.length} vehículos${usarBarridas ? ", 3 barridas" : ""})`,
         recorridos,
         pedidos_sin_coordenadas: sinCoords.length,
         pedidos_sin_coordenadas_ids: sinCoords.map((p) => String(p.pedido_id ?? "")),
         skipped: result.skipped,
+        barridas_aplicadas: usarBarridas,
+        composicion,
       });
     } catch (err) {
       console.error("[optimizar-ruta] split multi error:", err);
@@ -363,19 +399,6 @@ serve(async (req: Request) => {
   // no soporta time windows). ventanas_aplicadas avisa al front si se respetaron.
   const tieneVentanas = !!(body.fecha && body.hora_inicio && body.ventanas && body.ventanas.length > 0);
   let ventanasAplicadas = false;
-
-  // Barridas: el orden entre bloques es duro. El fallback también las respeta
-  // (procesa un bloque por vez), solo pierde el horario fino dentro de cada uno.
-  const barridaPorPedido = new Map<string, Barrida>();
-  for (const b of body.barridas ?? []) {
-    barridaPorPedido.set(String(b.pedido_id), b.barrida);
-  }
-  const usarBarridas = barridaPorPedido.size > 0;
-  const conBarrida: PedidoRutaBarrida[] = conCoords.map((p) => ({
-    ...p,
-    barrida: barridaPorPedido.get(String(p.pedido_id)) ?? 2,
-  }));
-  let composicion: Record<Barrida, number> | null = null;
 
   // Motor de optimización: Route Optimization (SA) con fallback a computeRoutes.
   let ruta: RutaUnida;

@@ -361,10 +361,17 @@ export interface RepartidorVehiculo {
   max_paradas?: number | null;
   /** Zonas que prefiere (soft). Pedidos de esas zonas se sesgan hacia él. */
   zonas_preferidas?: number[] | null;
+  /**
+   * Dónde arranca este chofer. Solo se usa al encadenar barridas: en la 2ª y 3ª
+   * cada uno sale de donde terminó la anterior, no del depósito.
+   */
+  origen?: LatLng | null;
+  /** "HH:MM" de arranque propio de este chofer (fin de su barrida anterior). */
+  horaInicio?: string | null;
 }
 
 /** Ruta optimizada de un repartidor. */
-export interface RutaPorVehiculo extends RutaUnida {
+export interface RutaPorVehiculo extends RutaTramo {
   transportista_id: string;
 }
 
@@ -375,8 +382,9 @@ export interface RutaMultiResultado {
 }
 
 /** Construye el ordenOptimizado + métricas de una sola ruta (vehículo). */
-function parseRutaVehiculo(route: OptimizeToursRoute, byLabel: Map<string, PedidoRuta>): RutaUnida {
+function parseRutaVehiculo(route: OptimizeToursRoute, byLabel: Map<string, PedidoRuta>): RutaTramo {
   const ordenOptimizado: OrdenOptimizadoItem[] = [];
+  let ultimaParada: LatLng | null = null;
   for (const v of route.visits ?? []) {
     if (v.shipmentLabel == null) continue;
     const p = byLabel.get(String(v.shipmentLabel));
@@ -387,11 +395,19 @@ function parseRutaVehiculo(route: OptimizeToursRoute, byLabel: Map<string, Pedid
       cliente: p.cliente_nombre ?? p.nombre_fantasia ?? "Sin nombre",
       direccion: p.direccion ?? "",
     });
+    ultimaParada = { latitude: p.latitud, longitude: p.longitud };
   }
   const distanciaTotalMetros = route.metrics?.travelDistanceMeters ?? 0;
   const duracionTotalSegundos = parseDuracion(route.metrics?.totalDuration);
   const polylines = route.routePolyline?.points ? [route.routePolyline.points] : [];
-  return { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos, polylines };
+  return {
+    ordenOptimizado,
+    distanciaTotalMetros,
+    duracionTotalSegundos,
+    polylines,
+    ultimaParada,
+    horaFin: hhmmDesdeIso(route.vehicleEndTime),
+  };
 }
 
 /**
@@ -436,7 +452,7 @@ export async function optimizeToursMulti(
   saKeyJson: string,
   deposito: LatLng,
   pedidos: PedidoRutaZona[],
-  destino: LatLng = deposito,
+  destino: LatLng | null = deposito,
   opts: OptimizeToursOpts = {},
   repartidores: RepartidorVehiculo[] = [],
 ): Promise<RutaMultiResultado> {
@@ -491,18 +507,24 @@ export async function optimizeToursMulti(
       return shipment;
     }),
     vehicles: repartidores.map((r) => {
+      // Al encadenar barridas, cada chofer arranca donde terminó la anterior.
+      const origen = r.origen ?? deposito;
       const vehicle: Record<string, unknown> = {
         label: r.transportista_id,
-        startLocation: { latitude: deposito.latitude, longitude: deposito.longitude },
-        endLocation: { latitude: destino.latitude, longitude: destino.longitude },
+        startLocation: { latitude: origen.latitude, longitude: origen.longitude },
       };
+      // destino null = ruta abierta (barrida intermedia): termina en la última parada.
+      if (destino) {
+        vehicle.endLocation = { latitude: destino.latitude, longitude: destino.longitude };
+      }
       if (r.max_paradas != null && r.max_paradas > 0) {
         vehicle.loadLimits = { paradas: { maxLoad: String(Math.floor(r.max_paradas)) } };
       }
       if (usarTiempos) {
+        const arranque = r.horaInicio ?? opts.horaInicio!;
         vehicle.startTimeWindows = [{
-          startTime: isoFecha(opts.fecha!, opts.horaInicio!),
-          endTime: isoFecha(opts.fecha!, opts.horaInicio!),
+          startTime: isoFecha(opts.fecha!, arranque),
+          endTime: isoFecha(opts.fecha!, arranque),
         }];
       }
       return vehicle;
@@ -528,4 +550,112 @@ export async function optimizeToursMulti(
     throw new Error(data.error.message ?? `Route Optimization HTTP ${res.status}`);
   }
   return parseOptimizeToursMulti(data, pedidos, repartidores.map((r) => r.transportista_id));
+}
+
+/**
+ * Split multi-repartidor CON barridas: el orden entre bloques es duro también
+ * cuando la ruta se divide entre varios choferes.
+ *
+ * Se resuelve una barrida por vez con `optimizeToursMulti`, y entre barridas
+ * cada vehículo se re-ancla:
+ *  - arranca en su última parada de la barrida anterior (o el depósito si no le
+ *    tocó nada);
+ *  - arranca a la hora en que terminó;
+ *  - se le DESCUENTA el cupo ya usado de `max_paradas`. Sin esto el tope se
+ *    aplicaría entero en cada barrida y un chofer con tope 20 podía terminar
+ *    con 60 paradas.
+ */
+export async function optimizeToursMultiPorBarridas(
+  saKeyJson: string,
+  deposito: LatLng,
+  pedidos: Array<PedidoRutaZona & { barrida?: Barrida }>,
+  destino: LatLng | null = deposito,
+  opts: OptimizeToursOpts = {},
+  repartidores: RepartidorVehiculo[] = [],
+): Promise<RutaMultiResultado & { composicion: Record<Barrida, number> }> {
+  if (repartidores.length === 0) throw new Error("No hay repartidores para el split");
+
+  const grupos: Record<Barrida, Array<PedidoRutaZona & { barrida?: Barrida }>> = { 1: [], 2: [], 3: [] };
+  for (const p of pedidos) grupos[p.barrida ?? 2].push(p);
+
+  const conPedidos = ORDEN_BARRIDAS.filter((b) => grupos[b].length > 0);
+  const composicion: Record<Barrida, number> = {
+    1: grupos[1].length,
+    2: grupos[2].length,
+    3: grupos[3].length,
+  };
+
+  // Estado de cada chofer entre barridas.
+  const estado = new Map<string, { origen: LatLng; horaInicio: string | null; usadas: number }>();
+  for (const r of repartidores) {
+    estado.set(r.transportista_id, { origen: deposito, horaInicio: opts.horaInicio ?? null, usadas: 0 });
+  }
+
+  const acumulado = new Map<string, RutaPorVehiculo>();
+  const skipped: string[] = [];
+
+  for (let i = 0; i < conPedidos.length; i++) {
+    const barrida = conPedidos[i];
+    const esUltima = i === conPedidos.length - 1;
+
+    // Vehículos con su arranque y cupo restante para ESTA barrida.
+    const vehiculos: RepartidorVehiculo[] = [];
+    for (const r of repartidores) {
+      const st = estado.get(r.transportista_id)!;
+      const restante = r.max_paradas != null && r.max_paradas > 0
+        ? r.max_paradas - st.usadas
+        : null;
+      // Un chofer que ya agotó su cupo no participa de las barridas siguientes.
+      if (restante != null && restante <= 0) continue;
+      vehiculos.push({
+        ...r,
+        max_paradas: restante,
+        origen: st.origen,
+        horaInicio: st.horaInicio,
+      });
+    }
+    if (vehiculos.length === 0) {
+      // Sin capacidad: los pedidos de esta barrida quedan sin asignar.
+      skipped.push(...grupos[barrida].map((p) => String(p.pedido_id)));
+      continue;
+    }
+
+    const res = await optimizeToursMulti(
+      saKeyJson,
+      deposito,
+      grupos[barrida],
+      esUltima ? destino : null,
+      opts,
+      vehiculos,
+    );
+    skipped.push(...res.skipped);
+
+    for (const r of res.recorridos) {
+      const prev = acumulado.get(r.transportista_id);
+      if (!prev) {
+        acumulado.set(r.transportista_id, {
+          ...r,
+          ordenOptimizado: r.ordenOptimizado.map((it, idx) => ({ ...it, orden: idx + 1, barrida })),
+        });
+      } else {
+        for (const it of r.ordenOptimizado) {
+          prev.ordenOptimizado.push({ ...it, orden: prev.ordenOptimizado.length + 1, barrida });
+        }
+        prev.polylines.push(...r.polylines);
+        prev.distanciaTotalMetros += r.distanciaTotalMetros;
+        prev.duracionTotalSegundos += r.duracionTotalSegundos;
+        prev.ultimaParada = r.ultimaParada ?? prev.ultimaParada;
+        prev.horaFin = r.horaFin ?? prev.horaFin;
+      }
+
+      const st = estado.get(r.transportista_id);
+      if (st) {
+        st.usadas += r.ordenOptimizado.length;
+        if (r.ultimaParada) st.origen = r.ultimaParada;
+        if (r.horaFin) st.horaInicio = r.horaFin;
+      }
+    }
+  }
+
+  return { recorridos: [...acumulado.values()], skipped, composicion };
 }

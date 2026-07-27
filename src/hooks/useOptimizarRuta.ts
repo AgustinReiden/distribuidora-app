@@ -434,7 +434,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
         zona_id: p.cliente?.zona_id != null ? Number(p.cliente.zona_id) : null,
       }));
 
-    const { ventanas } = derivarVentanasYBarridas(pedidos);
+    const { ventanas, barridas } = derivarVentanasYBarridas(pedidos);
 
     if (pedidosConCoordenadas.length === 0) {
       return {
@@ -458,6 +458,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       fecha: opts?.fecha,
       hora_inicio: opts?.horaInicio,
       ventanas: ventanas.length > 0 ? ventanas : undefined,
+      barridas: barridas.length > 0 ? barridas : undefined,
       repartidores,
     };
 
