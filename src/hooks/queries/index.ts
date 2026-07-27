@@ -144,7 +144,10 @@ export {
   useActualizarGrupoPrecioMutation,
   useEliminarGrupoPrecioMutation,
   useToggleGrupoPrecioActivoMutation,
+  useGruposPrecioPorProductoQuery,
+  useActualizarPrecioEscalaMutation,
 } from './useGruposPrecioQuery'
+export type { ActualizarPrecioEscalaInput } from './useGruposPrecioQuery'
 
 // Zonas estandarizadas
 export {

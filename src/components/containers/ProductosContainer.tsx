@@ -17,13 +17,14 @@ import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
 import { useCategoriasQuery } from '../../hooks/queries'
+import { useCrearGrupoPrecioMutation } from '../../hooks/queries'
 import { useAplicarControlStockMutation } from '../../hooks/queries/useControlStockQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { puedeControlarStock as puedeControlarStockRol, puedeCargarControlStock as puedeCargarControlStockRol } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
-import type { ProductoDB, ProductoFormInput, MermaFormInputExtended } from '../../types'
+import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
 
 // Lazy load de componentes
 const VistaProductos = lazy(() => import('../vistas/VistaProductos'))
@@ -32,6 +33,7 @@ const ModalMermaStock = lazy(() => import('../modals/ModalMermaStock'))
 const ModalHistorialMermas = lazy(() => import('../modals/ModalHistorialMermas'))
 const ModalActualizacionMasivaPrecios = lazy(() => import('../modals/ModalActualizacionMasivaPrecios'))
 const ModalMinimoVentaMasivo = lazy(() => import('../modals/ModalMinimoVentaMasivo'))
+const ModalGrupoPrecio = lazy(() => import('../modals/ModalGrupoPrecio'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
 const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
@@ -78,6 +80,7 @@ export default function ProductosContainer(): React.ReactElement {
   const registrarMerma = useRegistrarMermaMutation()
   const registrarCambioProducto = useRegistrarCambioProductoMutation()
   const aplicarControlStock = useAplicarControlStockMutation()
+  const crearGrupoPrecio = useCrearGrupoPrecioMutation()
 
   // Estado de modales
   const [modalProductoOpen, setModalProductoOpen] = useState(false)
@@ -85,6 +88,8 @@ export default function ProductosContainer(): React.ReactElement {
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
   const [modalActualizacionMasivaOpen, setModalActualizacionMasivaOpen] = useState(false)
   const [modalMinimoVentaOpen, setModalMinimoVentaOpen] = useState(false)
+  // Producto para el que se está creando una condición mayorista desde su ficha.
+  const [condicionParaProducto, setCondicionParaProducto] = useState<ProductoDB | null>(null)
   const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
   const [modalCambioOpen, setModalCambioOpen] = useState(false)
   const [modalStockBajoOpen, setModalStockBajoOpen] = useState(false)
@@ -106,6 +111,7 @@ export default function ProductosContainer(): React.ReactElement {
     setModalHistorialOpen(false)
     setModalActualizacionMasivaOpen(false)
     setModalMinimoVentaOpen(false)
+    setCondicionParaProducto(null)
     setModalCategoriasOpen(false)
     setModalCambioOpen(false)
     setModalStockBajoOpen(false)
@@ -270,6 +276,31 @@ export default function ProductosContainer(): React.ReactElement {
     }
   }, [productoEditando, actualizarProducto, crearProducto, notify])
 
+  // "Crear condición" desde la ficha: se cierra la ficha y se abre el modal de
+  // condición mayorista con el producto ya tildado. No se anidan los dos
+  // modales a propósito — el de adentro pelearía con el focus trap y el Escape
+  // del de afuera. Los cambios sin guardar de la ficha se descartan, así que el
+  // botón vive en la sección de solo lectura, lejos de los campos del form.
+  const handleCrearCondicionMayorista = useCallback(() => {
+    if (!productoEditando) return
+    setCondicionParaProducto(productoEditando)
+    setModalProductoOpen(false)
+    setProductoEditando(null)
+  }, [productoEditando])
+
+  const handleGuardarCondicionMayorista = useCallback(async (data: GrupoPrecioFormInput) => {
+    try {
+      await crearGrupoPrecio.mutateAsync(data)
+      notify.success('Condición mayorista creada')
+      setCondicionParaProducto(null)
+      return { success: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar la condición'
+      notify.error(msg)
+      return { success: false, error: msg }
+    }
+  }, [crearGrupoPrecio, notify])
+
   const handleGuardarMerma = useCallback(async (data: MermaFormInputExtended) => {
     try {
       await registrarMerma.mutateAsync(data)
@@ -322,6 +353,20 @@ export default function ProductosContainer(): React.ReactElement {
             }}
             guardando={crearProducto.isPending || actualizarProducto.isPending}
             esAdmin={isAdmin}
+            onCrearCondicionMayorista={isAdmin ? handleCrearCondicionMayorista : undefined}
+          />
+        </Suspense>
+      )}
+
+      {/* Condición mayorista nueva, con el producto de la ficha preseleccionado */}
+      {condicionParaProducto && (
+        <Suspense fallback={null}>
+          <ModalGrupoPrecio
+            grupo={null}
+            productos={productos}
+            productosPreseleccionados={[condicionParaProducto.id]}
+            onSave={handleGuardarCondicionMayorista}
+            onClose={() => setCondicionParaProducto(null)}
           />
         </Suspense>
       )}

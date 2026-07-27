@@ -1,4 +1,4 @@
-import { useState, memo } from 'react';
+import { useState, memo, lazy, Suspense } from 'react';
 import type { ChangeEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
@@ -14,6 +14,9 @@ import {
   parsePrecio,
 } from '../../utils/calculations';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
+
+// Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
+const ProductoCondicionesMayoristas = lazy(() => import('../productos/ProductoCondicionesMayoristas'));
 
 // =============================================================================
 // TYPES
@@ -80,6 +83,12 @@ export interface ModalProductoProps {
   guardando: boolean;
   /** Habilita corregir a mano el costo promedio (solo admin) */
   esAdmin?: boolean;
+  /**
+   * Abre el modal de condición mayorista con este producto preseleccionado.
+   * Lo resuelve el container: cierra la ficha y abre el otro modal, en vez de
+   * anidar dos modales (el de adentro pelea con el focus trap del de afuera).
+   */
+  onCrearCondicionMayorista?: () => void;
 }
 
 // Opciones de IVA disponibles
@@ -99,7 +108,7 @@ const getCategoryKey = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : (cat.id || cat.nombre);
 };
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando, esAdmin = false }: ModalProductoProps) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -740,6 +749,23 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             Editá cualquiera de los dos márgenes o el precio final indistintamente.
           </p>
         </div>
+
+        {/* Condiciones mayoristas de ESTE producto, con su margen. Solo en
+            edición: sin id no hay a qué grupo pertenecer todavía. Los costos
+            salen del form, así el margen se mueve mientras editás el costo. */}
+        {producto?.id && (
+          <Suspense fallback={null}>
+            <ProductoCondicionesMayoristas
+              productoId={producto.id}
+              precioLista={parsePrecio(String(form.precio))}
+              costoTotal={costosDesdeForm(form).costoTotal}
+              costoReal={costosDesdeForm(form).costoReal}
+              porcentajeIva={Number(form.porcentaje_iva) || 21}
+              puedeEditar={esAdmin}
+              onCrearCondicion={onCrearCondicionMayorista}
+            />
+          </Suspense>
+        )}
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
