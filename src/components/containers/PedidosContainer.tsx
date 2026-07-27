@@ -526,11 +526,11 @@ export default function PedidosContainer(): React.ReactElement {
     setModalCancelarOpen(true)
   }, [])
 
-  const handleConfirmarCancelacion = useCallback(async (motivo: string) => {
+  const handleConfirmarCancelacion = useCallback(async (motivo: string, tipo?: string) => {
     if (!pedidoCancelando) return
     setGuardando(true)
     try {
-      await cancelarPedidoMut.mutateAsync({ pedidoId: pedidoCancelando.id, motivo, usuarioId: user?.id })
+      await cancelarPedidoMut.mutateAsync({ pedidoId: pedidoCancelando.id, motivo, usuarioId: user?.id, tipo })
       setModalCancelarOpen(false)
       setPedidoCancelando(null)
       notify.success('Pedido cancelado y stock restaurado')

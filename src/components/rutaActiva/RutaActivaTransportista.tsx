@@ -28,6 +28,10 @@ import SheetParada, { type LinkRutaMaps } from './SheetParada';
 import BannerManiobra from './BannerManiobra';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 import ModalRegistrarPago from '../modals/ModalRegistrarPago';
+import ModalNoEntrega from '../modals/ModalNoEntrega';
+import { supabase } from '../../hooks/supabase/base';
+import { useQueryClient } from '@tanstack/react-query';
+import type { MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
@@ -80,11 +84,32 @@ export default function RutaActivaTransportista({
   // Parada seleccionada manualmente (tap en mapa o en la lista). null = automática.
   const [paradaSeleccionadaId, setParadaSeleccionadaId] = useState<string | null>(null);
 
+  const queryClient = useQueryClient();
+
+  /**
+   * Registra que no se pudo entregar. El RPC (mig 141) libera el pedido para
+   * re-rutearlo y le avisa al preventista con el motivo; acá solo hay que
+   * refrescar la ruta para que la parada desaparezca del recorrido del día.
+   */
+  const onMarcarNoEntregado = useCallback(
+    async (pedidoId: string, motivo: MotivoNoEntrega, nota: string): Promise<void> => {
+      const { error } = await supabase.rpc('marcar_no_entregado', {
+        p_pedido_id: Number(pedidoId),
+        p_motivo: motivo,
+        p_nota: nota || null,
+      });
+      if (error) throw new Error(error.message);
+      await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] });
+    },
+    [queryClient],
+  );
+
   const entrega = useEntregaParada({
     onMarcarEntregado,
     onRegistrarPago,
     onEntregarSinCobrar,
     onRegistrarSalvedad,
+    onMarcarNoEntregado,
   });
 
   // Paradas de la ruta del día (ya vienen ordenadas y enriquecidas del recorrido)
@@ -362,6 +387,7 @@ export default function RutaActivaTransportista({
         llegaste={llegaste}
         onSeleccionarParada={(id) => { setParadaSeleccionadaId(id); setSeguirPosicion(false); }}
         onEntregar={(p) => { if (guiando) pararGuia(); entrega.marcarEntregado(p); }}
+        onNoEntregar={(p) => { if (guiando) pararGuia(); entrega.abrirNoEntrega(p); }}
         onSalvedad={onRegistrarSalvedad ? entrega.abrirSalvedad : undefined}
         linksRutaMaps={linksRutaMaps}
         onToggleGuia={toggleGuia}
@@ -369,6 +395,18 @@ export default function RutaActivaTransportista({
       />
 
       {/* Modales del flujo de entrega (mismos que la vista anterior) */}
+      <ModalNoEntrega
+        abierto={entrega.pedidoNoEntregado !== null}
+        clienteNombre={
+          entrega.pedidoNoEntregado?.cliente?.nombre_fantasia
+          ?? `Pedido #${entrega.pedidoNoEntregado?.id ?? ''}`
+        }
+        guardando={entrega.guardandoNoEntrega}
+        error={entrega.errorNoEntrega}
+        onCancelar={entrega.cerrarNoEntrega}
+        onConfirmar={entrega.confirmarNoEntrega}
+      />
+
       {entrega.salvedadModal && (
         <ModalSalvedadItem
           pedidoId={entrega.salvedadModal.pedidoId}

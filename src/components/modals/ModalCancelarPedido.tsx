@@ -2,14 +2,23 @@ import { useState, memo } from 'react'
 import { Loader2, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { formatPrecio } from '../../utils/formatters'
+import { MOTIVOS_NO_ENTREGA, MOTIVOS_CANCELACION_ADMIN } from '../../constants/motivosNoEntrega'
 import type { PedidoDB } from '../../types'
 
 export interface ModalCancelarPedidoProps {
   pedido: PedidoDB
-  onConfirm: (motivo: string) => Promise<void>
+  /** `motivo` es el texto que se guarda como nota; `tipo` es el valor tipificado. */
+  onConfirm: (motivo: string, tipo: string) => Promise<void>
   onClose: () => void
   guardando: boolean
 }
+
+/** Motivos elegibles al cancelar: los logísticos + los administrativos (mig 140). */
+const OPCIONES = [
+  ...MOTIVOS_NO_ENTREGA.filter(m => m.valor !== 'otro').map(m => ({ valor: m.valor as string, label: m.label })),
+  ...MOTIVOS_CANCELACION_ADMIN.map(m => ({ valor: m.valor as string, label: m.label })),
+  { valor: 'otro', label: 'Otro' },
+]
 
 const ModalCancelarPedido = memo(function ModalCancelarPedido({
   pedido,
@@ -17,9 +26,19 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
   onClose,
   guardando,
 }: ModalCancelarPedidoProps) {
-  const [motivo, setMotivo] = useState('')
+  const [tipo, setTipo] = useState('')
+  const [nota, setNota] = useState('')
 
-  const canConfirm = motivo.trim().length >= 3 && !guardando
+  // "Otro" sin explicación es el que después nadie puede interpretar: se exige nota.
+  const faltaNota = tipo === 'otro' && nota.trim().length < 3
+  const canConfirm = tipo !== '' && !faltaNota && !guardando
+
+  const confirmar = (): void => {
+    const label = OPCIONES.find(o => o.valor === tipo)?.label ?? tipo
+    // El texto queda legible en el histórico (y compatible con lo ya cargado).
+    const texto = nota.trim() ? `${label} — ${nota.trim()}` : label
+    void onConfirm(texto, tipo)
+  }
 
   return (
     <ModalBase title="Cancelar Pedido" onClose={onClose}>
@@ -44,22 +63,43 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
           <p className="text-lg font-bold text-blue-600 mt-1">{formatPrecio(pedido.total)}</p>
         </div>
 
-        {/* Motivo */}
+        {/* Motivo: lista cerrada. Antes era texto libre y el histórico quedó
+            con "CERRADO", "SIN PLATA", "Prueba" y decenas de variantes, así que
+            no se podía medir nada. */}
         <div>
-          <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-            Motivo de cancelacion <span className="text-red-500">*</span>
+          <label htmlFor="motivo-cancelacion" className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+            Motivo de cancelación <span className="text-red-500">*</span>
           </label>
-          <textarea
-            value={motivo}
-            onChange={e => setMotivo(e.target.value)}
-            placeholder="Ingresa el motivo de la cancelacion..."
-            rows={3}
-            className="w-full px-3 py-2 border rounded-lg resize-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          />
-          {motivo.length > 0 && motivo.trim().length < 3 && (
-            <p className="text-xs text-red-500 mt-1">El motivo debe tener al menos 3 caracteres</p>
-          )}
+          <select
+            id="motivo-cancelacion"
+            value={tipo}
+            onChange={e => setTipo(e.target.value)}
+            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          >
+            <option value="">Elegí un motivo…</option>
+            {OPCIONES.map(o => (
+              <option key={o.valor} value={o.valor}>{o.label}</option>
+            ))}
+          </select>
         </div>
+
+        {tipo !== '' && (
+          <div>
+            <label htmlFor="nota-cancelacion" className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+              {tipo === 'otro' ? 'Contá qué pasó *' : 'Aclaración (opcional)'}
+            </label>
+            <textarea
+              id="nota-cancelacion"
+              value={nota}
+              onChange={e => setNota(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 border rounded-lg resize-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+            {faltaNota && nota.length > 0 && (
+              <p className="text-xs text-red-500 mt-1">Escribí al menos 3 caracteres</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -71,7 +111,7 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
           Volver
         </button>
         <button
-          onClick={() => canConfirm && onConfirm(motivo.trim())}
+          onClick={() => canConfirm && confirmar()}
           disabled={!canConfirm}
           className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
         >
