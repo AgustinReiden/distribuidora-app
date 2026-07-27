@@ -93,7 +93,7 @@ interface ActualizarPagoInput {
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
 const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
-const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, horario_entrega, zona, zona_id' as const
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
@@ -912,7 +912,12 @@ export function useEntregasMasivasMutation() {
 // Cancelar Pedido
 // =========================================================================
 
-async function cancelarPedido(pedidoId: string, motivo: string, usuarioId?: string): Promise<void> {
+async function cancelarPedido(
+  pedidoId: string,
+  motivo: string,
+  usuarioId?: string,
+  tipo?: string,
+): Promise<void> {
   const { data, error } = await supabase.rpc('cancelar_pedido_con_stock', {
     p_pedido_id: pedidoId,
     p_motivo: motivo,
@@ -925,6 +930,17 @@ async function cancelarPedido(pedidoId: string, motivo: string, usuarioId?: stri
   if (!result.success) {
     throw new Error(result.error || 'Error al cancelar pedido')
   }
+
+  // El motivo tipificado (mig 143) se guarda aparte para no reescribir
+  // `cancelar_pedido_con_stock`, que además restaura stock. Si este update
+  // fallara, el pedido igual queda cancelado con su motivo en texto.
+  if (tipo) {
+    const { error: errTipo } = await supabase
+      .from('pedidos')
+      .update({ motivo_cancelacion_tipo: tipo })
+      .eq('id', pedidoId)
+    if (errTipo) console.error('[pedidos] no se pudo guardar el motivo tipificado:', errTipo)
+  }
 }
 
 /**
@@ -935,8 +951,8 @@ export function useCancelarPedidoMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: ({ pedidoId, motivo, usuarioId }: { pedidoId: string; motivo: string; usuarioId?: string }) =>
-      cancelarPedido(pedidoId, motivo, usuarioId),
+    mutationFn: ({ pedidoId, motivo, usuarioId, tipo }: { pedidoId: string; motivo: string; usuarioId?: string; tipo?: string }) =>
+      cancelarPedido(pedidoId, motivo, usuarioId, tipo),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })

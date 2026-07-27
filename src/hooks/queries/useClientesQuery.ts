@@ -159,6 +159,8 @@ interface ClienteCreateInput {
   descuento_porcentaje?: number
   contacto?: string
   horarios_atencion?: string
+  /** Días que abre, bitmask Lunes→Domingo (mig 140). null = abre todos. */
+  dias_atencion?: string | null
   horario_entrega?: string
   rubro?: string
   notas?: string
@@ -219,6 +221,7 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       descuento_porcentaje: clienteFields.descuento_porcentaje ?? 0,
       contacto: clienteFields.contacto || null,
       horarios_atencion: clienteFields.horarios_atencion || null,
+      dias_atencion: clienteFields.dias_atencion || null,
       horario_entrega: clienteFields.horario_entrega || null,
       rubro: clienteFields.rubro || null,
       notas: clienteFields.notas || null,

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from 'react';
 import type { ChangeEvent } from 'react';
 import {
   Package, Edit2, Trash2, Search, Minus,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, AlertTriangle,
 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
@@ -61,8 +61,18 @@ export default function VistaProductos({
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
   const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState<boolean>(false);
+  const [mostrarSoloSinPrecio, setMostrarSoloSinPrecio] = useState<boolean>(false);
   const [paginaActual, setPaginaActual] = useState(1);
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
+
+  // Un producto sin precio de venta no se puede vender (el backend lo rechaza,
+  // mig 139). Se muestra bien visible para que se cargue el precio: el caso real
+  // fue un alta por movimiento entre sucursales que lo creó en $0 sin que nadie
+  // lo notara durante días.
+  const productosSinPrecio = useMemo(
+    (): ProductoDB[] => productos.filter(p => !(Number(p.precio) > 0)),
+    [productos],
+  );
 
   // Obtener categorías únicas
   const categorias = useMemo((): string[] => {
@@ -81,9 +91,11 @@ export default function VistaProductos({
 
       const matchStockBajo = !mostrarSoloStockBajo || p.stock < (p.stock_minimo || 10);
 
-      return matchBusqueda && matchCategoria && matchStockBajo;
+      const matchSinPrecio = !mostrarSoloSinPrecio || !(Number(p.precio) > 0);
+
+      return matchBusqueda && matchCategoria && matchStockBajo && matchSinPrecio;
     });
-  }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo]);
+  }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo, mostrarSoloSinPrecio]);
 
   // Pagination
   const totalPaginas = Math.ceil(productosFiltrados.length / ITEMS_PER_PAGE);
@@ -95,6 +107,7 @@ export default function VistaProductos({
   const handleBusqueda = (e: ChangeEvent<HTMLInputElement>) => { setBusqueda(e.target.value); setPaginaActual(1); };
   const handleCategoria = (cat: string) => { setFiltroCategoria(cat); setPaginaActual(1); };
   const handleStockBajoToggle = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
+  const handleSinPrecioToggle = () => { setMostrarSoloSinPrecio(!mostrarSoloSinPrecio); setPaginaActual(1); };
 
   const proveedoresMap = useMemo(() => {
     return new Map(proveedores.map(p => [p.id, p.nombre]));
@@ -134,6 +147,31 @@ export default function VistaProductos({
           />
         }
       />
+
+      {/* Alerta: productos sin precio de venta — no se pueden vender */}
+      {productosSinPrecio.length > 0 && (
+        <div className="flex items-start gap-3 p-3 rounded-xl border border-rose-300 dark:border-rose-800/60 bg-rose-50 dark:bg-rose-900/20">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-rose-800 dark:text-rose-200">
+              {productosSinPrecio.length === 1
+                ? '1 producto pendiente de carga de precio de venta'
+                : `${productosSinPrecio.length} productos pendientes de carga de precio de venta`}
+            </p>
+            <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
+              No se pueden vender hasta que cargues el precio.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSinPrecioToggle}
+            className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-gray-800 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700/60 hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
+            aria-pressed={mostrarSoloSinPrecio}
+          >
+            {mostrarSoloSinPrecio ? 'Ver todos' : 'Ver cuáles'}
+          </button>
+        </div>
+      )}
 
       {/* Búsqueda — full width */}
       <div className="relative w-full">
@@ -256,8 +294,20 @@ export default function VistaProductos({
                       <td className="px-4 py-3 text-sm text-stone-600 dark:text-gray-400">
                         {producto.proveedor_id ? (proveedoresMap.get(producto.proveedor_id) || '-') : '-'}
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
-                        {formatPrecio(producto.precio)}
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {Number(producto.precio) > 0 ? (
+                          <span className="font-semibold text-blue-700 dark:text-blue-300">
+                            {formatPrecio(producto.precio)}
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700/50"
+                            title="No se puede vender hasta cargar el precio de venta"
+                          >
+                            <AlertTriangle className="w-3 h-3" aria-hidden="true" />
+                            Sin precio
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-sm font-semibold tabular-nums ${getStockColor(producto)}`}>
@@ -342,9 +392,16 @@ export default function VistaProductos({
                       <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
                         <span className="text-stone-800 dark:text-gray-200">
                           <span className="text-stone-500 dark:text-gray-400">Precio:</span>{' '}
-                          <span className="font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
-                            {formatPrecio(producto.precio)}
-                          </span>
+                          {Number(producto.precio) > 0 ? (
+                            <span className="font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
+                              {formatPrecio(producto.precio)}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700/50">
+                              <AlertTriangle className="w-3 h-3" aria-hidden="true" />
+                              Sin precio
+                            </span>
+                          )}
                         </span>
                         <span
                           className={cn(

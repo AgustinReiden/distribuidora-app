@@ -25,9 +25,15 @@ import {
   unirTramos,
 } from "./tramos.ts";
 import {
+  type Barrida,
+  ORDEN_BARRIDAS,
   optimizeTours,
   optimizeToursMulti,
+  optimizeToursMultiPorBarridas,
+  optimizeToursPorBarridas,
+  type PedidoRutaBarrida,
   type RepartidorVehiculo,
+  type RutaMultiResultado,
   type PedidoRutaZona,
 } from "./route-optimization.ts";
 import { navegarTramo } from "./navegar-tramo.ts";
@@ -54,8 +60,20 @@ interface RequestBody {
   /** Ancla temporal para respetar ventanas horarias (solo optimizeTours). */
   fecha?: string; // "YYYY-MM-DD"
   hora_inicio?: string; // "HH:MM"
-  /** Ventanas de entrega por pedido (derivadas de cliente.horario_entrega). */
-  ventanas?: Array<{ pedido_id: string | number; inicio: string; fin: string }>;
+  /**
+   * Ventanas de entrega por pedido, derivadas del horario del cliente. Cada
+   * pedido puede traer más de una franja (horario cortado).
+   */
+  ventanas?: Array<{
+    pedido_id: string | number;
+    franjas: Array<{ inicio: string; fin: string }>;
+  }>;
+  /**
+   * Barrida de cada pedido (1 = cierra al mediodía, 2 = sin horario,
+   * 3 = corrido/abre tarde). Si viene, el orden ENTRE barridas es duro.
+   * La clasificación la hace el cliente (src/utils/barridas.ts).
+   */
+  barridas?: Array<{ pedido_id: string | number; barrida: Barrida }>;
   /** Split multi-repartidor: si viene (≥1), divide la ruta en N recorridos. */
   repartidores?: Array<{ transportista_id: string; max_paradas?: number | null; zonas_preferidas?: number[] | null }>;
 }
@@ -108,12 +126,18 @@ async function llamarGoogle(
   return route as GoogleRoute;
 }
 
+interface ResultadoFallback {
+  ruta: RutaUnida;
+  tramos: number;
+  composicion?: Record<Barrida, number>;
+}
+
 async function viaComputeRoutes(
   apiKey: string,
   deposito: LatLng,
   conCoords: PedidoRuta[],
   destino: LatLng = deposito,
-): Promise<{ ruta: RutaUnida; tramos: number }> {
+): Promise<ResultadoFallback> {
   const tramos = partirEnTramos(deposito, conCoords, destino);
   const rutas: GoogleRoute[] = [];
   // Secuencial a propósito: son 1-3 requests y simplifica el rate limiting.
@@ -121,6 +145,64 @@ async function viaComputeRoutes(
     rutas.push(await llamarGoogle(apiKey, tramo.origen, tramo.destino, tramo.intermedios));
   }
   return { ruta: unirTramos(tramos, rutas), tramos: tramos.length };
+}
+
+/**
+ * Fallback con barridas: procesa un bloque por vez y concatena.
+ *
+ * computeRoutes no soporta ventanas horarias, así que dentro de cada barrida se
+ * optimiza solo por distancia. Lo que SÍ se conserva es lo importante: el orden
+ * entre bloques, porque se resuelven en secuencia. Es una degradación aceptable
+ * frente a perder las barridas por completo cuando no hay service account.
+ */
+async function viaComputeRoutesPorBarridas(
+  apiKey: string,
+  deposito: LatLng,
+  pedidos: PedidoRutaBarrida[],
+  destino: LatLng = deposito,
+): Promise<ResultadoFallback> {
+  const grupos: Record<Barrida, PedidoRutaBarrida[]> = { 1: [], 2: [], 3: [] };
+  for (const p of pedidos) grupos[p.barrida ?? 2].push(p);
+
+  const conPedidos = ORDEN_BARRIDAS.filter((b) => grupos[b].length > 0);
+  const composicion: Record<Barrida, number> = {
+    1: grupos[1].length,
+    2: grupos[2].length,
+    3: grupos[3].length,
+  };
+
+  const ordenOptimizado: RutaUnida["ordenOptimizado"] = [];
+  const polylines: string[] = [];
+  let distanciaTotalMetros = 0;
+  let duracionTotalSegundos = 0;
+  let tramosTotales = 0;
+  let origen = deposito;
+
+  for (let i = 0; i < conPedidos.length; i++) {
+    const barrida = conPedidos[i];
+    const esUltima = i === conPedidos.length - 1;
+    // Las barridas intermedias terminan en su última parada, no en el depósito.
+    const grupo = grupos[barrida];
+    const finTramo = esUltima
+      ? destino
+      : { latitude: grupo[grupo.length - 1].latitud, longitude: grupo[grupo.length - 1].longitud };
+
+    const r = await viaComputeRoutes(apiKey, origen, grupo, finTramo);
+    for (const item of r.ruta.ordenOptimizado) {
+      ordenOptimizado.push({ ...item, orden: ordenOptimizado.length + 1, barrida });
+    }
+    polylines.push(...r.ruta.polylines);
+    distanciaTotalMetros += r.ruta.distanciaTotalMetros;
+    duracionTotalSegundos += r.ruta.duracionTotalSegundos;
+    tramosTotales += r.tramos;
+    origen = finTramo;
+  }
+
+  return {
+    ruta: { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos, polylines },
+    tramos: tramosTotales,
+    composicion,
+  };
 }
 
 serve(async (req: Request) => {
@@ -221,6 +303,19 @@ serve(async (req: Request) => {
     });
   }
 
+  // Barridas: el orden entre bloques es duro. La clasificación la hace el
+  // cliente (src/utils/barridas.ts) y viaja en el request.
+  const barridaPorPedido = new Map<string, Barrida>();
+  for (const b of body.barridas ?? []) {
+    barridaPorPedido.set(String(b.pedido_id), b.barrida);
+  }
+  const usarBarridas = barridaPorPedido.size > 0;
+  const conBarrida: PedidoRutaBarrida[] = conCoords.map((p) => ({
+    ...p,
+    barrida: barridaPorPedido.get(String(p.pedido_id)) ?? 2,
+  }));
+  let composicion: Record<Barrida, number> | null = null;
+
   // --- Split multi-repartidor: N vehículos en una sola optimización ---
   // Requiere el motor optimizeTours (SA key); el fallback computeRoutes no
   // soporta múltiples vehículos. Los pedidos sin coordenadas los reparte el
@@ -235,14 +330,33 @@ serve(async (req: Request) => {
       });
     }
     try {
-      const result = await optimizeToursMulti(
-        saKey,
-        deposito,
-        conCoords as PedidoRutaZona[],
-        destino,
-        { fecha: body.fecha, horaInicio: body.hora_inicio, ventanas: body.ventanas },
-        repartidores as RepartidorVehiculo[],
-      );
+      const optsMulti = {
+        fecha: body.fecha,
+        horaInicio: body.hora_inicio,
+        ventanas: body.ventanas,
+      };
+      let result: RutaMultiResultado;
+      if (usarBarridas) {
+        const conBarridas = await optimizeToursMultiPorBarridas(
+          saKey,
+          deposito,
+          conBarrida as Array<PedidoRutaZona & { barrida?: Barrida }>,
+          destino,
+          optsMulti,
+          repartidores as RepartidorVehiculo[],
+        );
+        composicion = conBarridas.composicion;
+        result = conBarridas;
+      } else {
+        result = await optimizeToursMulti(
+          saKey,
+          deposito,
+          conCoords as PedidoRutaZona[],
+          destino,
+          optsMulti,
+          repartidores as RepartidorVehiculo[],
+        );
+      }
       const recorridos = result.recorridos.map((r) => {
         const km = Math.round(r.distanciaTotalMetros / 10) / 100;
         const min = Math.round(r.duracionTotalSegundos / 60);
@@ -263,11 +377,13 @@ serve(async (req: Request) => {
       });
       return jsonResponse({
         success: true,
-        optimizado_por: `Google Route Optimization (${repartidores.length} vehículos)`,
+        optimizado_por: `Google Route Optimization (${repartidores.length} vehículos${usarBarridas ? ", 3 barridas" : ""})`,
         recorridos,
         pedidos_sin_coordenadas: sinCoords.length,
         pedidos_sin_coordenadas_ids: sinCoords.map((p) => String(p.pedido_id ?? "")),
         skipped: result.skipped,
+        barridas_aplicadas: usarBarridas,
+        composicion,
       });
     } catch (err) {
       console.error("[optimizar-ruta] split multi error:", err);
@@ -290,23 +406,40 @@ serve(async (req: Request) => {
   try {
     if (saKey) {
       try {
-        ruta = await optimizeTours(saKey, deposito, conCoords, destino, {
-          fecha: body.fecha,
-          horaInicio: body.hora_inicio,
-          ventanas: body.ventanas,
-        });
-        optimizadoPor = "Google Route Optimization";
+        if (usarBarridas) {
+          const r = await optimizeToursPorBarridas(saKey, deposito, conBarrida, destino, {
+            fecha: body.fecha,
+            horaInicio: body.hora_inicio,
+            ventanas: body.ventanas,
+          });
+          ruta = r;
+          composicion = r.composicion;
+          optimizadoPor = "Google Route Optimization (3 barridas)";
+        } else {
+          ruta = await optimizeTours(saKey, deposito, conCoords, destino, {
+            fecha: body.fecha,
+            horaInicio: body.hora_inicio,
+            ventanas: body.ventanas,
+          });
+          optimizadoPor = "Google Route Optimization";
+        }
         ventanasAplicadas = tieneVentanas;
       } catch (err) {
         if (!apiKey) throw err;
         console.error("[optimizar-ruta] Route Optimization falló, usando computeRoutes:", err);
-        const r = await viaComputeRoutes(apiKey, deposito, conCoords, destino);
+        const r = usarBarridas
+          ? await viaComputeRoutesPorBarridas(apiKey, deposito, conBarrida, destino)
+          : await viaComputeRoutes(apiKey, deposito, conCoords, destino);
         ruta = r.ruta;
+        composicion = r.composicion ?? null;
         optimizadoPor = `Google Routes API (${r.tramos} tramos, fallback)`;
       }
     } else {
-      const r = await viaComputeRoutes(apiKey, deposito, conCoords, destino);
+      const r = usarBarridas
+        ? await viaComputeRoutesPorBarridas(apiKey, deposito, conBarrida, destino)
+        : await viaComputeRoutes(apiKey, deposito, conCoords, destino);
       ruta = r.ruta;
+      composicion = r.composicion ?? null;
       optimizadoPor = r.tramos > 1 ? `Google Routes API (${r.tramos} tramos)` : "Google Routes API";
     }
   } catch (err) {
@@ -320,7 +453,8 @@ serve(async (req: Request) => {
 
   const { ordenOptimizado, distanciaTotalMetros, duracionTotalSegundos, polylines } = ruta;
 
-  // Pedidos sin coordenadas: al final de la lista, marcados.
+  // Pedidos sin coordenadas: al final de la lista, marcados. No entran al
+  // optimizador, así que tampoco tienen barrida real.
   for (const p of sinCoords) {
     ordenOptimizado.push({
       pedido_id: String(p.pedido_id ?? ""),
@@ -351,5 +485,7 @@ serve(async (req: Request) => {
     orden_optimizado: ordenOptimizado,
     polylines,
     ventanas_aplicadas: ventanasAplicadas,
+    barridas_aplicadas: usarBarridas,
+    composicion,
   });
 });

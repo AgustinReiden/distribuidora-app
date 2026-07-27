@@ -86,7 +86,6 @@ interface ProductoRow {
   stock: number;
   porcentaje_iva: number | null;
   impuestos_internos: number | null;
-  activo: boolean;
   sucursal_id: number;
 }
 
@@ -187,8 +186,17 @@ export const previsualizarPedidoTool: Tool<
     const productoIds = items.map((it) => it.producto_id);
     const productosById = await loadProductos(sb, productoIds, sucursalId);
     for (const it of items) {
-      if (!productosById.has(it.producto_id)) {
-        throw new Error(`Producto ${it.producto_id} no encontrado o no activo`);
+      const prod = productosById.get(it.producto_id);
+      if (!prod) {
+        throw new Error(`Producto ${it.producto_id} no encontrado en esta sucursal`);
+      }
+      // Sin precio de venta cargado no se puede vender: el backend lo rechaza
+      // igual (trigger trg_validar_precio_item_pedido, mig 139), pero acá el
+      // preventista recibe el motivo real en vez de un error opaco al confirmar.
+      if (!(Number(prod.precio) > 0)) {
+        throw new Error(
+          `«${prod.nombre}» está pendiente de carga de precio de venta y no se puede vender. Avisá a administración.`,
+        );
       }
     }
 
@@ -415,12 +423,17 @@ async function loadProductos(
   sucursalId: number,
 ): Promise<Map<number, ProductoRow>> {
   const uniqIds = [...new Set(ids)];
+  // NOTA: `productos` NO tiene columna `activo` (a diferencia de `clientes` o
+  // `promociones`). Pedirla y filtrar por ella hacía fallar la query entera con
+  // 42703, así que esta tool nunca pudo tomar un pedido. El equivalente real de
+  // "no vendible" es no tener precio de venta, y eso se valida abajo con un
+  // mensaje explícito en vez de filtrarlo (si se filtrara, el preventista vería
+  // "producto no encontrado" y no entendería por qué).
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, activo, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, sucursal_id")
     .in("id", uniqIds)
-    .eq("sucursal_id", sucursalId)
-    .eq("activo", true);
+    .eq("sucursal_id", sucursalId);
   if (error) {
     throw new Error(`previsualizar_pedido: productos lookup: ${error.message}`);
   }
@@ -438,10 +451,9 @@ async function loadProducto(
 ): Promise<ProductoRow | null> {
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, activo, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, sucursal_id")
     .eq("id", id)
     .eq("sucursal_id", sucursalId)
-    .eq("activo", true)
     .maybeSingle();
   if (error) {
     throw new Error(`previsualizar_pedido: producto regalo lookup: ${error.message}`);

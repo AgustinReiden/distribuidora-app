@@ -24,8 +24,17 @@ export interface ClienteDB {
   /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string | null;
   zona_id?: string | null;
+  /** Formato canónico "HH:MM-HH:MM y …" (mig 140). Fuente de las ventanas del ruteo. */
   horarios_atencion?: string | null;
-  // Franja en la que el cliente pide recibir el pedido (se imprime en hoja de ruta)
+  /** Días que abre, bitmask de 7 chars Lunes→Domingo. null = abre todos (mig 140). */
+  dias_atencion?: string | null;
+  /** Texto libre tal como estaba antes del backfill de la mig 141. Solo lectura. */
+  horarios_atencion_original?: string | null;
+  /**
+   * @deprecated (mig 140) Los preventistas nunca tuvieron permiso de escribirla,
+   * por eso quedó vacía en 619/621. El horario canónico es `horarios_atencion`.
+   * Se conserva porque la imprimen los PDFs y porque tiene precedencia si está cargada.
+   */
   horario_entrega?: string | null;
   rubro?: string | null;
   notas?: string | null;
@@ -270,6 +279,9 @@ export interface ClienteFormInput {
   zona?: string;
   zona_id?: string | null;
   horarios_atencion?: string;
+  /** Días que abre, bitmask Lunes→Domingo (mig 140). */
+  dias_atencion?: string | null;
+  /** @deprecated ver ClienteDB.horario_entrega */
   horario_entrega?: string;
   rubro?: string;
   notas?: string;
