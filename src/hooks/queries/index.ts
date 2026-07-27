@@ -191,7 +191,8 @@ export {
   useSucursalesQuery,
 } from './useTransferenciasQuery'
 
-// Movimientos entre sucursales (con aprobación, mig 076)
+// Movimientos entre sucursales (con aprobación, mig 076;
+// descuento preventivo de stock + editar/cancelar, mig 139)
 export {
   movimientosKeys,
   MOVIMIENTOS_PAGE_SIZE,
@@ -200,6 +201,8 @@ export {
   useCrearMovimientoMutation,
   useAceptarMovimientoMutation,
   useDenegarMovimientoMutation,
+  useCancelarMovimientoMutation,
+  useEditarMovimientoMutation,
 } from './useMovimientosQuery'
 export type {
   EstadoMovimiento,

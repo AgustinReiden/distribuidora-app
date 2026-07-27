@@ -66,10 +66,15 @@ const ESTADO_STYLES: Record<EstadoRendicion, { label: string; badge: string; bor
   }
 }
 
-/** Fila del detalle por cliente de una rendición (RPC obtener_detalle_rendicion, migs 135/137). */
+/** Fila del detalle de una rendición: cliente + quién cobró (RPC obtener_detalle_rendicion, migs 135/137/140). */
 interface DetalleRendicionCliente {
   cliente_id: number
   cliente_nombre: string
+  /** Usuario que registró el pago. Ojo: puede no ser el transportista de la
+   *  rendición — un saldo viejo cobrado en el mostrador figura bajo el
+   *  transportista que repartió ese pedido. */
+  cobrado_por_id: string | null
+  cobrado_por: string
   total: number
   total_entregas: number
   total_ctascte: number
@@ -152,6 +157,8 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
         setDetalle((data || []).map((r: Record<string, unknown>) => ({
           cliente_id: Number(r.cliente_id),
           cliente_nombre: String(r.cliente_nombre ?? 'Cliente'),
+          cobrado_por_id: (r.cobrado_por_id as string | null) ?? null,
+          cobrado_por: String(r.cobrado_por ?? 'Sin usuario'),
           total: Number(r.total) || 0,
           total_entregas: Number(r.total_entregas) || 0,
           total_ctascte: Number(r.total_ctascte) || 0,
@@ -174,6 +181,15 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
     [detalle]
   )
 
+  // Cuánto cobró cada persona dentro de esta rendición. Sirve para el control
+  // de caja: la rendición agrupa por transportista, pero la plata la puede
+  // haber cobrado otro (p. ej. un saldo viejo cobrado en el mostrador).
+  const porCobrador = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of detalle ?? []) m.set(d.cobrado_por, (m.get(d.cobrado_por) ?? 0) + d.total)
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [detalle])
+
   // Filas visibles: con filtro activo, solo los clientes que aportaron a esa forma.
   const detalleVisible = useMemo(() => {
     if (!detalle) return []
@@ -187,6 +203,7 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
     try {
       const filas = detalle.map(d => ({
         Cliente: d.cliente_nombre,
+        Cobró: d.cobrado_por,
         Total: d.total,
         'Entregas (dia)': d.total_entregas,
         'Ctas Ctes': d.total_ctascte,
@@ -200,7 +217,7 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
       }))
       const { createMultiSheetExcel } = await import('../../utils/excel')
       await createMultiSheetExcel(
-        [{ name: 'Detalle', data: filas, columnWidths: [28, 14, 14, 14, 12, 14, 12, 12, 12, 10, 8] }],
+        [{ name: 'Detalle', data: filas, columnWidths: [28, 16, 14, 14, 14, 12, 14, 12, 12, 12, 10, 8] }],
         `rendicion-${resumen.transportista_nombre}-${resumen.fecha}`.replace(/\s+/g, '_')
       )
     } finally {
@@ -434,6 +451,22 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                 </button>
               </div>
 
+              {/* Quién cobró: la rendición agrupa por transportista, pero la
+                  plata la puede haber cobrado otro (típico: un saldo viejo
+                  cobrado en el mostrador desde la ficha del cliente). */}
+              {!loadingDetalle && porCobrador.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {porCobrador.map(([nombre, monto]) => (
+                    <span
+                      key={nombre}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                    >
+                      Cobró {nombre}: <strong>{formatMoney(monto)}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {loadingDetalle ? (
                 <p className="text-xs text-gray-400 py-2">Cargando detalle…</p>
               ) : detalleVisible.length > 0 ? (
@@ -442,6 +475,7 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                     <thead>
                       <tr className="text-gray-500 dark:text-gray-400 text-left border-b border-gray-200 dark:border-gray-700">
                         <th className="py-1 pr-2 font-medium">Cliente</th>
+                        <th className="py-1 px-2 font-medium">Cobró</th>
                         {formaFiltro && <th className="py-1 px-2 font-medium text-right">{FORMA_LABELS[formaFiltro]}</th>}
                         <th className="py-1 px-2 font-medium text-right">Total</th>
                         <th className="py-1 px-2 font-medium text-right">Entregas</th>
@@ -450,8 +484,9 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                     </thead>
                     <tbody>
                       {detalleVisible.map(d => (
-                        <tr key={d.cliente_id} className="border-b border-gray-100 dark:border-gray-700/50">
+                        <tr key={`${d.cliente_id}-${d.cobrado_por_id ?? 'x'}`} className="border-b border-gray-100 dark:border-gray-700/50">
                           <td className="py-1 pr-2 text-gray-700 dark:text-gray-300">{d.cliente_nombre}</td>
+                          <td className="py-1 px-2 text-gray-500">{d.cobrado_por}</td>
                           {formaFiltro && (
                             <td className="py-1 px-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatMoney(d[formaFiltro])}</td>
                           )}
@@ -464,7 +499,7 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                     {formaFiltro && (
                       <tfoot>
                         <tr className="border-t border-gray-300 dark:border-gray-600">
-                          <td className="py-1 pr-2 font-medium text-gray-600 dark:text-gray-300">Total {FORMA_LABELS[formaFiltro]}</td>
+                          <td className="py-1 pr-2 font-medium text-gray-600 dark:text-gray-300" colSpan={2}>Total {FORMA_LABELS[formaFiltro]}</td>
                           <td className="py-1 px-2 text-right font-bold text-blue-700 dark:text-blue-300">
                             {formatMoney(detalleVisible.reduce((acc, d) => acc + (d[formaFiltro] || 0), 0))}
                           </td>

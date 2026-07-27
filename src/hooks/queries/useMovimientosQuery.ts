@@ -15,7 +15,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 
 export const MOVIMIENTOS_PAGE_SIZE = 50
 
-export type EstadoMovimiento = 'pendiente' | 'aceptada' | 'denegada'
+export type EstadoMovimiento = 'pendiente' | 'aceptada' | 'denegada' | 'cancelada'
 
 export interface MovimientoSucursalDB {
   id: number
@@ -23,15 +23,24 @@ export interface MovimientoSucursalDB {
   sucursal_destino_id: number
   estado: EstadoMovimiento
   total_costo: number
+  /** Unidades totales del envío (mig 139): la lista no trae los items. */
+  total_unidades: number
+  /** true = el origen tiene estas unidades descontadas AHORA (mig 139). */
+  stock_descontado: boolean
   notas: string | null
   motivo_rechazo: string | null
   creado_por: string
   resuelto_por: string | null
+  editado_por: string | null
   created_at: string
   resuelto_at: string | null
+  editado_at: string | null
   origen?: { id: number; nombre: string } | null
   destino?: { id: number; nombre: string } | null
   creador?: { id: string; nombre: string } | null
+  /** Quien aceptó, denegó o canceló. */
+  resuelto?: { id: string; nombre: string } | null
+  editor?: { id: string; nombre: string } | null
 }
 
 export interface MovimientoItemDB {
@@ -52,6 +61,11 @@ export interface MovimientoItemDB {
   producto_destino_id: number | null
   resolucion: 'match_existente' | 'creado_nuevo' | null
   costo_aplicado_destino: number | null
+  /** Asiento de stock. El origen se llena al crear/editar (mig 139); el destino al aceptar. */
+  stock_origen_anterior: number | null
+  stock_origen_nuevo: number | null
+  stock_destino_anterior: number | null
+  stock_destino_nuevo: number | null
 }
 
 export interface MovimientosFiltros {
@@ -90,7 +104,9 @@ async function fetchMovimientos(opts: FetchOpts): Promise<MovimientoSucursalDB[]
       *,
       origen:sucursales!sucursal_origen_id(id, nombre),
       destino:sucursales!sucursal_destino_id(id, nombre),
-      creador:perfiles!creado_por(id, nombre)
+      creador:perfiles!creado_por(id, nombre),
+      resuelto:perfiles!resuelto_por(id, nombre),
+      editor:perfiles!editado_por(id, nombre)
     `)
     .gte('created_at', `${opts.desde}T00:00:00`)
     .lte('created_at', `${opts.hasta}T23:59:59`)
@@ -157,6 +173,33 @@ async function denegarMovimiento(input: { movimientoId: number; motivo?: string 
   if (!r.success) throw new Error(r.error || 'Error al denegar el movimiento')
 }
 
+/** Cancela un envío pendiente desde el origen y le devuelve el stock (mig 139). */
+async function cancelarMovimiento(input: { movimientoId: number; motivo?: string | null }): Promise<void> {
+  const { data, error } = await supabase.rpc('cancelar_movimiento_sucursal', {
+    p_movimiento_id: input.movimientoId,
+    p_motivo: input.motivo ?? null,
+  })
+  if (error) throw error
+  const r = data as RPCResult
+  if (!r.success) throw new Error(r.error || 'Error al cancelar el movimiento')
+}
+
+/** Edita un envío pendiente desde el origen ajustando el stock por delta (mig 139). */
+async function editarMovimiento(input: {
+  movimientoId: number
+  notas?: string | null
+  items: Array<{ producto_id: number; cantidad: number }>
+}): Promise<void> {
+  const { data, error } = await supabase.rpc('editar_movimiento_sucursal', {
+    p_movimiento_id: input.movimientoId,
+    p_notas: input.notas ?? null,
+    p_items: input.items,
+  })
+  if (error) throw error
+  const r = data as RPCResult
+  if (!r.success) throw new Error(r.error || 'Error al editar el movimiento')
+}
+
 export function useMovimientosQuery(filtros: MovimientosFiltros = {}) {
   const { currentSucursalId } = useSucursal()
   const desde = filtros.desde ?? fechaHaceDias(60)
@@ -188,7 +231,9 @@ function useInvalidarMovimientos() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
   return () => {
-    queryClient.invalidateQueries({ queryKey: movimientosKeys.lists(currentSucursalId) })
+    // `all` y no `lists`: la edición cambia los items, así que el detalle
+    // cacheado (movimientosKeys.items) también tiene que invalidarse.
+    queryClient.invalidateQueries({ queryKey: movimientosKeys.all(currentSucursalId) })
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['notificaciones'] })
   }
@@ -207,4 +252,14 @@ export function useAceptarMovimientoMutation() {
 export function useDenegarMovimientoMutation() {
   const invalidar = useInvalidarMovimientos()
   return useMutation({ mutationFn: denegarMovimiento, onSuccess: invalidar })
+}
+
+export function useCancelarMovimientoMutation() {
+  const invalidar = useInvalidarMovimientos()
+  return useMutation({ mutationFn: cancelarMovimiento, onSuccess: invalidar })
+}
+
+export function useEditarMovimientoMutation() {
+  const invalidar = useInvalidarMovimientos()
+  return useMutation({ mutationFn: editarMovimiento, onSuccess: invalidar })
 }
