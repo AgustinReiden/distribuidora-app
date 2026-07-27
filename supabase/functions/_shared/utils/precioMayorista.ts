@@ -1,14 +1,14 @@
 /**
  * Utilidades para resolución de precios mayoristas por volumen
  *
- * ⚠ AUTO-SYNCED desde src/utils/precioMayorista.ts — NO EDITAR ACÁ.
- * El bot edge function (Deno) y la app web (Vite) comparten esta lógica
+ * AUTO-SYNCED desde src/utils/precioMayorista.ts - NO EDITAR ACA.
+ * El bot edge function (Deno) y la app web (Vite) comparten esta logica
  * para que los precios calculados desde Telegram coincidan con los de la
  * app. Cualquier cambio se hace primero en src/utils/precioMayorista.ts y
- * después se propaga acá.
+ * despues se propaga aca.
  *
- * Sync verification: el test `tests/sync_utils.test.ts` valida que ambas
- * copias matcheen byte-a-byte. Si falla, ejecutá:
+ * Sync verification: el test tests/sync_utils.test.ts valida que ambas
+ * copias matcheen byte-a-byte. Si falla, ejecuta:
  *   cp src/utils/precioMayorista.ts supabase/functions/_shared/utils/
  *   cp src/utils/promociones.ts    supabase/functions/_shared/utils/
  *
@@ -38,6 +38,12 @@ export interface ReglaProducto {
 }
 
 export interface EscalaPrecio {
+  /**
+   * Id de `grupo_precio_escalas`. Se persiste en `pedido_items` para poder
+   * decir DESPUÉS qué escala aplicó (mig 148). Opcional: los tests y cualquier
+   * escala armada a mano no lo tienen.
+   */
+  escalaId?: string
   cantidadMinima: number
   /** Precio unitario base de la escala. Fallback para productos sin override. */
   precioUnitario: number
@@ -76,6 +82,8 @@ export interface PrecioResuelto {
   etiqueta: string | null
   cantidadEnGrupo: number
   cantidadMinima: number | null
+  /** Escala que fijó el precio, para trazar el descuento por volumen (mig 148). */
+  escalaId?: string | null
 }
 
 export interface FaltanteParaTier {
@@ -240,6 +248,7 @@ export function resolverPreciosMayorista(
     let mejorEtiqueta: string | null = null
     let mejorCantidadEnGrupo = item.cantidad
     let mejorCantidadMinima: number | null = null
+    let mejorEscalaId: string | null = null
 
     for (const grupo of grupos) {
       const productoIdsStr = grupo.productoIds.map(String)
@@ -271,6 +280,7 @@ export function resolverPreciosMayorista(
         mejorEtiqueta = escalaElegida.etiqueta
         mejorCantidadEnGrupo = totalPorGrupo.get(grupo.grupoId) || 0
         mejorCantidadMinima = escalaElegida.cantidadMinima
+        mejorEscalaId = escalaElegida.escalaId ?? null
       }
     }
 
@@ -281,7 +291,8 @@ export function resolverPreciosMayorista(
       grupoNombre: mejorGrupoNombre,
       etiqueta: mejorEtiqueta,
       cantidadEnGrupo: mejorCantidadEnGrupo,
-      cantidadMinima: mejorCantidadMinima
+      cantidadMinima: mejorCantidadMinima,
+      escalaId: mejorEscalaId
     })
   }
 

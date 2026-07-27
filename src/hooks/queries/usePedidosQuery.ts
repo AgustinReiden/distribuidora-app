@@ -9,6 +9,7 @@ import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalve
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
+import type { OrigenPrecioItem } from '../../utils/origenPrecio'
 
 // Query keys
 export const pedidosKeys = {
@@ -62,6 +63,13 @@ interface CrearPedidoInput {
   // el RPC usa auth.uid() (comportamiento histórico). Si difiere, el RPC
   // exige que el actor sea admin (mig 060).
   preventistaId?: string | null
+  /**
+   * Por qué se cobró cada precio (mig 148/149). Se registra en un segundo paso,
+   * después de crear el pedido: es metadato analítico y no justifica tocar
+   * `crear_pedido_completo`. Si falta o falla, los ítems quedan en
+   * 'desconocido' y el reporte de comisiones los cuenta como sin desglose.
+   */
+  origenes?: OrigenPrecioItem[]
 }
 
 interface CambiarClienteInput {
@@ -380,7 +388,34 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     throw new Error(result.errores?.join(', ') || 'Error al crear pedido')
   }
 
+  await registrarOrigenPrecio(result.pedido_id!, input.origenes)
+
   return { id: result.pedido_id! }
+}
+
+/**
+ * Registra por qué se cobró cada precio (mig 149).
+ *
+ * Deliberadamente NO propaga el error: el pedido ya está creado y cobrado. Si
+ * esta llamada falla, lo que se pierde es resolución en el reporte de
+ * comisiones —los ítems quedan 'desconocido' y el RPC los reporta como sin
+ * desglose—, no plata. Hacer fallar la creación del pedido por un metadato
+ * sería el peor intercambio posible.
+ */
+async function registrarOrigenPrecio(
+  pedidoId: string,
+  origenes: OrigenPrecioItem[] | undefined,
+): Promise<void> {
+  if (!pedidoId || !origenes || origenes.length === 0) return
+  try {
+    const { error } = await supabase.rpc('registrar_origen_precio_items', {
+      p_pedido_id: pedidoId,
+      p_origenes: origenes,
+    })
+    if (error) throw error
+  } catch (e) {
+    console.warn('No se pudo registrar el origen del precio de los items:', e)
+  }
 }
 
 async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB> {

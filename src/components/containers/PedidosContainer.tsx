@@ -7,7 +7,12 @@
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { calcularNetoVenta } from '../../utils/calculations'
-import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente'
+import {
+  aplicarDescuentoClienteItems,
+  esDescuentoDeCategoria,
+  resolverDescuentoPctCliente,
+} from '../../utils/descuentoCliente'
+import { construirOrigenPrecioItems } from '../../utils/origenPrecio'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
@@ -324,7 +329,10 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Resolve wholesale prices + promos (con override del regalo elegido por admin
   // y las promos que el usuario haya quitado a mano)
-  const { itemsFinales } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet)
+  // `preciosResueltos` se usa además para etiquetar el origen del precio de cada
+  // ítem al guardar (mig 148/149): es lo único que sabe si el precio lo fijó una
+  // escala mayorista y cuál.
+  const { itemsFinales, preciosResueltos } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet)
 
   // =========================================================================
   // VistaPedidos handlers
@@ -1039,9 +1047,40 @@ export default function PedidosContainer(): React.ReactElement {
           porcentaje_iva: pctIva,
         }
       })
+      // Por qué se cobró cada precio (mig 148/149). Se arma ANTES de mandar,
+      // con el mismo `itemsFinales` que produjo los precios: acá todavía se sabe
+      // si el precio vino de una escala mayorista, de un descuento del cliente o
+      // de un override manual. Después de guardar, ese contexto se pierde.
+      const origenes = construirOrigenPrecioItems(
+        itemsFinales.map(item => ({
+          productoId: item.productoId,
+          precioUnitario: item.precioUnitario,
+          esBonificacion: item.esBonificacion,
+          precioOverride: item.precioOverride,
+        })),
+        {
+          preciosResueltos,
+          descuentoClientePct: new Map(
+            itemsFinales.map(item => {
+              const prod = productos.find(p => String(p.id) === String(item.productoId))
+              return [String(item.productoId), resolverDescuentoPctCliente(clienteSel, prod?.categoria)]
+            }),
+          ),
+          descuentoPorCategoria: new Set(
+            itemsFinales
+              .filter(item => {
+                const prod = productos.find(p => String(p.id) === String(item.productoId))
+                return esDescuentoDeCategoria(clienteSel, prod?.categoria)
+              })
+              .map(item => String(item.productoId)),
+          ),
+        },
+      )
+
       const pedidoCreado = await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
+        origenes,
         total: totalConDescuento,
         usuarioId: user?.id ?? null,
         notas: nuevoPedido.notas,
@@ -1068,7 +1107,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.

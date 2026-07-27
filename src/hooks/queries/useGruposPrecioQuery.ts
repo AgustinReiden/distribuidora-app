@@ -123,6 +123,9 @@ async function fetchPricingMap(): Promise<PricingMap> {
           })
         }
         return {
+          // Se arrastra el id para poder registrar en `pedido_items` qué escala
+          // fijó el precio (mig 148/149).
+          escalaId: String(e.id),
           cantidadMinima: e.cantidad_minima,
           precioUnitario: Number(e.precio_unitario),
           etiqueta: e.etiqueta || null,
