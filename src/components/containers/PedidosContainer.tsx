@@ -1209,7 +1209,7 @@ export default function PedidosContainer(): React.ReactElement {
     // optimizarRuta ya mostró el mensaje y no armamos nada.
     if (!ruta) return
 
-    const optimizados = (ruta.orden_optimizado ?? []) as Array<{ pedido_id: string; orden: number }>
+    const optimizados = (ruta.orden_optimizado ?? []) as Array<{ pedido_id: string; orden: number; barrida?: 1 | 2 | 3 }>
     // Los pedidos sin coordenadas NO los devuelve el optimizador, pero igual deben
     // formar parte de la ruta (son entregables). Se anexan al final, después de las
     // paradas optimizadas, con orden_entrega secuencial. Antes se perdían y la ruta
@@ -1231,6 +1231,19 @@ export default function PedidosContainer(): React.ReactElement {
       polylines: ruta.polylines ?? null,
       fecha,
     })
+
+    // Marcar la barrida de cada parada. Va aparte de aplicar_orden_ruta a
+    // propósito (ver mig 139): es un dato informativo y de medición, así que si
+    // falla no se rompe la ruta ya armada — solo se pierden las etiquetas.
+    const conBarrida = optimizados
+      .filter(o => o.barrida != null)
+      .map(o => ({ pedido_id: o.pedido_id, barrida: o.barrida }))
+    if (conBarrida.length > 0) {
+      const { error: errBarridas } = await supabase.rpc('actualizar_barridas_recorrido', {
+        p_items: conBarrida,
+      })
+      if (errBarridas) console.error('[rutas] no se pudieron marcar las barridas:', errBarridas)
+    }
 
     // Reflejar en el resultado la ruta REALMENTE armada (optimizadas + sin
     // coordenadas). El optimizador no devuelve las paradas sin coordenadas, así
