@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { supabase } from './supabase/base';
 import { parsearFranjas } from '../utils/horariosCliente';
+import { clasificarBarrida, type Barrida } from '../utils/barridas';
 import type { PedidoDB, ClienteDB } from '../types';
 
 // ============================================================================
@@ -47,11 +48,61 @@ export interface RutaOptimizadaResponse {
   error?: string;
 }
 
-/** Ventana horaria de entrega de un pedido, derivada de cliente.horario_entrega. */
+/**
+ * Ventanas horarias de un pedido, derivadas del horario del cliente.
+ *
+ * Son varias franjas y no una sola: un local de horario cortado (08-14 y 17-23)
+ * antes perdía la ventana de la tarde porque se mandaba únicamente la primera.
+ */
 export interface VentanaPedido {
   pedido_id: string;
-  inicio: string; // "HH:MM"
-  fin: string;    // "HH:MM" (puede ser "24:00")
+  franjas: Array<{ inicio: string; fin: string }>;
+}
+
+/** Barrida asignada a un pedido (ver src/utils/barridas.ts). */
+export interface BarridaPedido {
+  pedido_id: string;
+  barrida: Barrida;
+}
+
+/**
+ * Horario que manda para rutear.
+ *
+ * `horarios_atencion` es el canónico desde la mig 137: es el que los
+ * preventistas cargan y el único que tienen permiso de escribir.
+ * `horario_entrega` quedó deprecada pero se respeta si alguien la cargó,
+ * porque "cuándo recibe mercadería" es más específico que "cuándo abre".
+ */
+export function horarioParaRutear(cliente?: Partial<ClienteDB> | null): string | null {
+  const entrega = cliente?.horario_entrega;
+  if (entrega && parsearFranjas(entrega).length > 0) return entrega;
+  return cliente?.horarios_atencion ?? null;
+}
+
+/**
+ * Deriva ventanas horarias y barridas de los pedidos a rutear.
+ *
+ * Los pedidos sin horario utilizable no aportan ventana (quedan flexibles) y
+ * caen en la barrida 2.
+ */
+export function derivarVentanasYBarridas(
+  pedidos: PedidoDB[],
+): { ventanas: VentanaPedido[]; barridas: BarridaPedido[] } {
+  const ventanas: VentanaPedido[] = [];
+  const barridas: BarridaPedido[] = [];
+
+  for (const p of pedidos) {
+    const { barrida, ventanas: franjas } = clasificarBarrida(horarioParaRutear(p.cliente));
+    barridas.push({ pedido_id: String(p.id), barrida });
+    if (franjas.length > 0) {
+      ventanas.push({
+        pedido_id: String(p.id),
+        franjas: franjas.map(f => ({ inicio: f.apertura, fin: f.cierre })),
+      });
+    }
+  }
+
+  return { ventanas, barridas };
 }
 
 // === Split multi-repartidor ===
@@ -99,8 +150,10 @@ export interface OptimizarRutaRequestBody {
    *  respetar ventanas horarias (solo optimizeTours; el fallback las ignora). */
   fecha?: string;
   hora_inicio?: string;
-  /** Ventanas por pedido (de horario_entrega). Solo se respetan con optimizeTours. */
+  /** Ventanas por pedido (del horario del cliente). Solo se respetan con optimizeTours. */
   ventanas?: VentanaPedido[];
+  /** Barrida por pedido: hace que el orden entre bloques sea duro. */
+  barridas?: BarridaPedido[];
   google_api_key?: string;
 }
 
@@ -226,16 +279,9 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
         longitud: p.cliente.longitud
       }));
 
-    // Ventanas horarias por pedido desde horario_entrega del cliente (1ª franja
-    // estructurada "HH:MM-HH:MM"). Solo las respeta optimizeTours; sin dato =
-    // pedido flexible (sin restricción).
-    const ventanas: VentanaPedido[] = [];
-    for (const p of pedidos) {
-      const fr = parsearFranjas(p.cliente?.horario_entrega)[0];
-      if (fr?.apertura && fr?.cierre) {
-        ventanas.push({ pedido_id: p.id, inicio: fr.apertura, fin: fr.cierre });
-      }
-    }
+    // Ventanas horarias + barrida por pedido, desde el horario del cliente.
+    // Sin horario utilizable: el pedido queda flexible y va a la barrida 2.
+    const { ventanas, barridas } = derivarVentanasYBarridas(pedidos);
 
     if (pedidosConCoordenadas.length === 0) {
       const emptyResult: RutaOptimizadaResponse = {
@@ -264,7 +310,8 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       pedidos: pedidosConCoordenadas,
       fecha: opts?.fecha,
       hora_inicio: opts?.horaInicio,
-      ventanas: ventanas.length > 0 ? ventanas : undefined
+      ventanas: ventanas.length > 0 ? ventanas : undefined,
+      barridas: barridas.length > 0 ? barridas : undefined
     };
 
     try {
@@ -387,13 +434,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
         zona_id: p.cliente?.zona_id != null ? Number(p.cliente.zona_id) : null,
       }));
 
-    const ventanas: VentanaPedido[] = [];
-    for (const p of pedidos) {
-      const fr = parsearFranjas(p.cliente?.horario_entrega)[0];
-      if (fr?.apertura && fr?.cierre) {
-        ventanas.push({ pedido_id: p.id, inicio: fr.apertura, fin: fr.cierre });
-      }
-    }
+    const { ventanas } = derivarVentanasYBarridas(pedidos);
 
     if (pedidosConCoordenadas.length === 0) {
       return {
