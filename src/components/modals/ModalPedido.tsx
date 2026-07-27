@@ -598,15 +598,24 @@ const ModalPedido = memo(function ModalPedido({
               productosFiltrados.map(p => {
                 const moq = moqMap.get(String(p.id))
                 const yaAgregado = nuevoPedido.items.some(i => i.productoId === p.id);
+                // Sin precio de venta cargado no se puede vender (el backend lo
+                // rechaza, mig 136). Se muestra igual —deshabilitado y con el
+                // motivo— para que el preventista sepa que el producto existe y
+                // pueda pedir que le carguen el precio.
+                const sinPrecio = !(Number(p.precio) > 0);
                 return (
                   <div
                     key={p.id}
-                    className={`flex justify-between items-center px-3 py-2.5 border-b dark:border-gray-600 cursor-pointer transition-colors ${
-                      yaAgregado
-                        ? 'bg-blue-50 dark:bg-blue-900/20'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                    className={`flex justify-between items-center px-3 py-2.5 border-b dark:border-gray-600 transition-colors ${
+                      sinPrecio
+                        ? 'opacity-60 cursor-not-allowed bg-stone-50 dark:bg-gray-900/40'
+                        : yaAgregado
+                          ? 'bg-blue-50 dark:bg-blue-900/20 cursor-pointer'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer'
                     }`}
-                    onClick={() => onAgregarItem(p.id, moq || 1)}
+                    onClick={sinPrecio ? undefined : () => onAgregarItem(p.id, moq || 1)}
+                    aria-disabled={sinPrecio}
+                    title={sinPrecio ? 'Pendiente de carga de precio de venta: no se puede vender' : undefined}
                   >
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-sm dark:text-white truncate">{p.nombre}</p>
@@ -617,8 +626,17 @@ const ModalPedido = memo(function ModalPedido({
                       </p>
                     </div>
                     <div className="text-right ml-3 shrink-0">
-                      <p className="font-semibold text-sm text-blue-600 dark:text-blue-400">{formatPrecio(p.precio)}</p>
-                      <span className="text-xs text-blue-500">{yaAgregado ? '+ Mas' : '+ Agregar'}</span>
+                      {sinPrecio ? (
+                        <>
+                          <p className="font-semibold text-xs text-rose-600 dark:text-rose-400">Sin precio</p>
+                          <span className="text-xs text-stone-500 dark:text-gray-400">No disponible</span>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-semibold text-sm text-blue-600 dark:text-blue-400">{formatPrecio(p.precio)}</p>
+                          <span className="text-xs text-blue-500">{yaAgregado ? '+ Mas' : '+ Agregar'}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
