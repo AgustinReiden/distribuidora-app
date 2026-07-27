@@ -1,10 +1,10 @@
 -- =========================================================================
--- 143_sync_categoria_id.sql
+-- 146_sync_categoria_id.sql
 --
 -- Mantiene `productos.categoria_id` sincronizado con el texto `categoria`.
 --
 -- Por trigger y no en el front por el mismo motivo que la guarda de precios
--- (mig 136): cubre TODOS los caminos de alta y edición —modal de producto,
+-- (mig 139): cubre TODOS los caminos de alta y edición —modal de producto,
 -- movimientos entre sucursales, imports, bot y cualquier RPC futuro— sin tener
 -- que acordarse de resolver el FK en cada uno. Si el texto no matchea ninguna
 -- categoría de esa sucursal, `categoria_id` queda NULL y el producto aparece
@@ -43,4 +43,4 @@ CREATE TRIGGER trg_sync_producto_categoria_id
   EXECUTE FUNCTION public.sync_producto_categoria_id();
 
 COMMENT ON FUNCTION public.sync_producto_categoria_id() IS
-  'Resuelve productos.categoria_id desde el texto de categoria, por sucursal. Mig 143.';
+  'Resuelve productos.categoria_id desde el texto de categoria, por sucursal. Mig 146.';

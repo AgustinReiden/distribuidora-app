@@ -389,7 +389,7 @@ export interface ViolacionMOQ {
 
 /**
  * Mínimo de venta propio de cada producto (productos.cantidad_minima_venta,
- * mig 144). Es el que se usa para "mínimo 3 unidades de cada sabor": aplica
+ * mig 147). Es el que se usa para "mínimo 3 unidades de cada sabor": aplica
  * al producto exista o no una condición mayorista.
  */
 export type MinimosProducto = Map<string, number>

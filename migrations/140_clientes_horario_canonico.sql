@@ -1,5 +1,5 @@
 -- =========================================================================
--- 137_clientes_horario_canonico.sql
+-- 140_clientes_horario_canonico.sql
 --
 -- OBJETIVO: que el horario del cliente deje de ser texto libre y pase a un
 -- formato que el ruteo pueda usar. Es la base de las 3 barridas.
@@ -50,13 +50,13 @@ BEGIN
 END $$;
 
 COMMENT ON COLUMN public.clientes.dias_atencion IS
-  'Días en que abre, bitmask de 7 chars orden Lunes→Domingo. "1111110" = lunes a sábado. NULL = sin especificar (el ruteo asume que abre todos los días). Mig 137.';
+  'Días en que abre, bitmask de 7 chars orden Lunes→Domingo. "1111110" = lunes a sábado. NULL = sin especificar (el ruteo asume que abre todos los días). Mig 140.';
 COMMENT ON COLUMN public.clientes.horarios_atencion_original IS
-  'Texto libre tal como estaba antes de convertirlo al formato canónico. Permite auditar y revertir el backfill. Mig 137.';
+  'Texto libre tal como estaba antes de convertirlo al formato canónico. Permite auditar y revertir el backfill. Mig 140.';
 COMMENT ON COLUMN public.clientes.horarios_atencion IS
-  'Horario de atención en formato canónico "HH:MM-HH:MM" unido por " y ". Fuente única de las ventanas horarias del ruteo desde la mig 137.';
+  'Horario de atención en formato canónico "HH:MM-HH:MM" unido por " y ". Fuente única de las ventanas horarias del ruteo desde la mig 140.';
 COMMENT ON COLUMN public.clientes.horario_entrega IS
-  'DEPRECADA (mig 137): quedó vacía en 619/621 porque los preventistas nunca tuvieron permiso de escribirla. Se conserva porque la imprimen los PDFs y porque, si tiene valor, tiene precedencia sobre horarios_atencion.';
+  'DEPRECADA (mig 140): quedó vacía en 619/621 porque los preventistas nunca tuvieron permiso de escribirla. Se conserva porque la imprimen los PDFs y porque, si tiene valor, tiene precedencia sobre horarios_atencion.';
 
 -- -------------------------------------------------------------------------
 -- 2. Permitir que el preventista cargue los días.
@@ -99,7 +99,7 @@ BEGIN
     AND o.key NOT IN (
       'razon_social', 'direccion', 'aclaracion_direccion', 'latitud',
       'longitud', 'telefono', 'contacto', 'horarios_atencion', 'rubro', 'notas',
-      -- Mig 137: el horario canónico se carga junto con los días.
+      -- Mig 140: el horario canónico se carga junto con los días.
       'dias_atencion', 'horarios_atencion_original'
     );
 
@@ -177,4 +177,4 @@ REVOKE ALL ON FUNCTION public.guardar_horarios_clientes_masivo(jsonb) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.guardar_horarios_clientes_masivo(jsonb) TO authenticated;
 
 COMMENT ON FUNCTION public.guardar_horarios_clientes_masivo(jsonb) IS
-  'Aplica horarios canónicos + días a varios clientes. Preserva el texto libre original. Admin/encargado. Mig 137.';
+  'Aplica horarios canónicos + días a varios clientes. Preserva el texto libre original. Admin/encargado. Mig 140.';

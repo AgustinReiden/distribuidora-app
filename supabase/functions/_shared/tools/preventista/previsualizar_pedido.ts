@@ -191,7 +191,7 @@ export const previsualizarPedidoTool: Tool<
         throw new Error(`Producto ${it.producto_id} no encontrado en esta sucursal`);
       }
       // Sin precio de venta cargado no se puede vender: el backend lo rechaza
-      // igual (trigger trg_validar_precio_item_pedido, mig 136), pero acá el
+      // igual (trigger trg_validar_precio_item_pedido, mig 139), pero acá el
       // preventista recibe el motivo real en vez de un error opaco al confirmar.
       if (!(Number(prod.precio) > 0)) {
         throw new Error(

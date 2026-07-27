@@ -13,7 +13,7 @@ export interface ModalCancelarPedidoProps {
   guardando: boolean
 }
 
-/** Motivos elegibles al cancelar: los logísticos + los administrativos (mig 140). */
+/** Motivos elegibles al cancelar: los logísticos + los administrativos (mig 143). */
 const OPCIONES = [
   ...MOTIVOS_NO_ENTREGA.filter(m => m.valor !== 'otro').map(m => ({ valor: m.valor as string, label: m.label })),
   ...MOTIVOS_CANCELACION_ADMIN.map(m => ({ valor: m.valor as string, label: m.label })),

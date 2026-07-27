@@ -54,7 +54,7 @@ export interface UseEntregaParadaArgs {
   onRegistrarPago?: (data: DatosPago) => Promise<unknown>;
   onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
-  /** Marca la parada como no entregada (RPC marcar_no_entregado, mig 141). */
+  /** Marca la parada como no entregada (RPC marcar_no_entregado, mig 144). */
   onMarcarNoEntregado?: (pedidoId: string, motivo: MotivoNoEntrega, nota: string) => Promise<void>;
 }
 

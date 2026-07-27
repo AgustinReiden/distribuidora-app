@@ -1,5 +1,5 @@
 -- =========================================================================
--- 141_marcar_no_entregado.sql
+-- 144_marcar_no_entregado.sql
 --
 -- Le da al chofer la acción que no existía: "no pude entregar", con motivo.
 --
@@ -130,4 +130,4 @@ REVOKE ALL ON FUNCTION public.marcar_no_entregado(bigint, varchar, text) FROM PU
 GRANT EXECUTE ON FUNCTION public.marcar_no_entregado(bigint, varchar, text) TO authenticated;
 
 COMMENT ON FUNCTION public.marcar_no_entregado(bigint, varchar, text) IS
-  'El chofer marca que no pudo entregar, con motivo tipificado. Libera el pedido para re-rutear y avisa al preventista. Mig 141.';
+  'El chofer marca que no pudo entregar, con motivo tipificado. Libera el pedido para re-rutear y avisa al preventista. Mig 144.';

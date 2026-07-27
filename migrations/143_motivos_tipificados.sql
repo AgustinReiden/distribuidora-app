@@ -1,5 +1,5 @@
 -- =========================================================================
--- 140_motivos_tipificados.sql
+-- 143_motivos_tipificados.sql
 --
 -- PROBLEMA: hoy el chofer NO tiene forma de marcar "no entregué". Sus únicas
 -- opciones son Entregar o reportar una salvedad por ítem. Cuando un local está
@@ -43,7 +43,7 @@ BEGIN
 END $$;
 
 COMMENT ON COLUMN public.recorrido_pedidos.motivo_no_entrega IS
-  'Por qué no se pudo entregar, lista cerrada. Lo carga el chofer. Mig 140.';
+  'Por qué no se pudo entregar, lista cerrada. Lo carga el chofer. Mig 143.';
 
 -- -------------------------------------------------------------------------
 -- 2. Cancelación (la carga un admin). Incluye los motivos logísticos porque el
@@ -67,7 +67,7 @@ BEGIN
 END $$;
 
 COMMENT ON COLUMN public.pedidos.motivo_cancelacion_tipo IS
-  'Motivo de cancelación tipificado. `motivo_cancelacion` (text) queda como nota complementaria. Mig 140.';
+  'Motivo de cancelación tipificado. `motivo_cancelacion` (text) queda como nota complementaria. Mig 143.';
 
 -- -------------------------------------------------------------------------
 -- 3. Backfill del histórico. Lo que no encaja con seguridad queda en 'otro'

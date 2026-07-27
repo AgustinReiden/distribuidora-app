@@ -66,7 +66,7 @@ export default function VistaProductos({
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
 
   // Un producto sin precio de venta no se puede vender (el backend lo rechaza,
-  // mig 136). Se muestra bien visible para que se cargue el precio: el caso real
+  // mig 139). Se muestra bien visible para que se cargue el precio: el caso real
   // fue un alta por movimiento entre sucursales que lo creó en $0 sin que nadie
   // lo notara durante días.
   const productosSinPrecio = useMemo(

@@ -53,7 +53,7 @@ export interface NuevoClienteData {
   longitud?: number | null;
   // Horarios de atención serializados ("HH:MM-HH:MM y …"); vacío si no se cargan.
   horariosAtencion?: string;
-  /** Días que abre, bitmask Lunes→Domingo (mig 137). */
+  /** Días que abre, bitmask Lunes→Domingo (mig 140). */
   dias_atencion?: string | null;
 }
 
@@ -607,7 +607,7 @@ const ModalPedido = memo(function ModalPedido({
                 const moq = moqMap.get(String(p.id))
                 const yaAgregado = nuevoPedido.items.some(i => i.productoId === p.id);
                 // Sin precio de venta cargado no se puede vender (el backend lo
-                // rechaza, mig 136). Se muestra igual —deshabilitado y con el
+                // rechaza, mig 139). Se muestra igual —deshabilitado y con el
                 // motivo— para que el preventista sepa que el producto existe y
                 // pueda pedir que le carguen el precio.
                 const sinPrecio = !(Number(p.precio) > 0);

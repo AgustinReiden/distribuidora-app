@@ -1,5 +1,5 @@
 -- =========================================================================
--- 142_categorias_normalizadas.sql
+-- 145_categorias_normalizadas.sql
 --
 -- `productos.categoria` es texto libre y no tiene FK, aunque existe la tabla
 -- `categorias`. Consecuencias verificadas en prod:
@@ -87,4 +87,4 @@ WHERE c.sucursal_id = p.sucursal_id
   AND p.categoria_id IS DISTINCT FROM c.id;
 
 COMMENT ON COLUMN public.productos.categoria_id IS
-  'FK a categorias (por sucursal). Fuente de verdad de la categoría. `categoria` (text) se mantiene sincronizada hasta migrar todos los consumidores. Mig 142.';
+  'FK a categorias (por sucursal). Fuente de verdad de la categoría. `categoria` (text) se mantiene sincronizada hasta migrar todos los consumidores. Mig 145.';

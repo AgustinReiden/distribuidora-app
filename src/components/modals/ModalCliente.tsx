@@ -45,9 +45,9 @@ export interface ClienteFormData {
   /** FK a tabla zonas. Cadena vacía representa "sin zona". */
   zona_id: string;
   horarios_atencion: string;
-  /** Días que abre, bitmask Lunes→Domingo. null = abre todos (mig 137). */
+  /** Días que abre, bitmask Lunes→Domingo. null = abre todos (mig 140). */
   dias_atencion: string | null;
-  /** @deprecated (mig 137) ya no se edita; el horario canónico es horarios_atencion. */
+  /** @deprecated (mig 140) ya no se edita; el horario canónico es horarios_atencion. */
   horario_entrega: string;
   rubro: string;
   notas: string;
@@ -312,7 +312,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
 
   // Valor original (texto libre legacy) que no se pudo convertir a franjas: si el
   // usuario no carga franjas estructuradas se conserva tal cual para no perder el
-  // dato (quedan ~54 clientes con horarios ambiguos sin convertir, mig 138).
+  // dato (quedan ~54 clientes con horarios ambiguos sin convertir, mig 141).
   const horarioOriginalAtencion = convAtencionInicial.franjas.length === 0
     ? (cliente?.horarios_atencion ?? '')
     : '';

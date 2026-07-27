@@ -1,5 +1,5 @@
 -- =========================================================================
--- 144_producto_cantidad_minima_venta.sql
+-- 147_producto_cantidad_minima_venta.sql
 --
 -- "La compra mínima de cada sabor quiero que sea 3 unidades" (ej: fideos).
 --
@@ -27,10 +27,10 @@ BEGIN
 END $$;
 
 COMMENT ON COLUMN public.productos.cantidad_minima_venta IS
-  'Mínimo de unidades por pedido para este producto. NULL = sin mínimo. Distinto de stock_minimo, que es alerta de reposición. Mig 144.';
+  'Mínimo de unidades por pedido para este producto. NULL = sin mínimo. Distinto de stock_minimo, que es alerta de reposición. Mig 147.';
 
 -- -------------------------------------------------------------------------
--- Guarda server-side. Igual que la de precio (mig 136), por trigger: cubre
+-- Guarda server-side. Igual que la de precio (mig 139), por trigger: cubre
 -- app, bot, edición y cola offline sin reescribir los RPCs.
 -- Las bonificaciones quedan exentas: un regalo de 1 unidad es válido aunque
 -- el mínimo de venta sea 3.
@@ -109,4 +109,4 @@ REVOKE ALL ON FUNCTION public.actualizar_minimo_venta_masivo(uuid, integer) FROM
 GRANT EXECUTE ON FUNCTION public.actualizar_minimo_venta_masivo(uuid, integer) TO authenticated;
 
 COMMENT ON FUNCTION public.actualizar_minimo_venta_masivo(uuid, integer) IS
-  'Aplica un mínimo de venta a todos los productos de una categoría en la sucursal activa. NULL lo quita. Mig 144.';
+  'Aplica un mínimo de venta a todos los productos de una categoría en la sucursal activa. NULL lo quita. Mig 147.';

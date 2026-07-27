@@ -68,7 +68,7 @@ export interface BarridaPedido {
 /**
  * Horario que manda para rutear.
  *
- * `horarios_atencion` es el canónico desde la mig 137: es el que los
+ * `horarios_atencion` es el canónico desde la mig 140: es el que los
  * preventistas cargan y el único que tienen permiso de escribir.
  * `horario_entrega` quedó deprecada pero se respeta si alguien la cargó,
  * porque "cuándo recibe mercadería" es más específico que "cuándo abre".

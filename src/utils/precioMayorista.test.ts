@@ -401,7 +401,7 @@ describe('resolverPreciosMayorista - edge cases', () => {
  * MOQ: el mínimo de venta.
  *
  * Antes no había ningún test de esta parte, y el mínimo solo podía existir
- * dentro de una condición mayorista. Desde la mig 144 el producto tiene su
+ * dentro de una condición mayorista. Desde la mig 147 el producto tiene su
  * propio `cantidad_minima_venta`, que es el que resuelve el pedido del dueño
  * ("mínimo 3 unidades de cada sabor de fideos").
  */

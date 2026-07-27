@@ -1,5 +1,5 @@
 -- =========================================================================
--- 138_backfill_horarios_canonicos.sql
+-- 141_backfill_horarios_canonicos.sql
 --
 -- Convierte el horario de atención escrito a mano al formato canónico
 -- "HH:MM-HH:MM y …" + bitmask de días, para que el ruteo por barridas pueda

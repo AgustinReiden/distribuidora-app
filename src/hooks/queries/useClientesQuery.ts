@@ -159,7 +159,7 @@ interface ClienteCreateInput {
   descuento_porcentaje?: number
   contacto?: string
   horarios_atencion?: string
-  /** Días que abre, bitmask Lunes→Domingo (mig 137). null = abre todos. */
+  /** Días que abre, bitmask Lunes→Domingo (mig 140). null = abre todos. */
   dias_atencion?: string | null
   horario_entrega?: string
   rubro?: string

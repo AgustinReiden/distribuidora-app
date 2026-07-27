@@ -1,5 +1,5 @@
 -- =========================================================================
--- 136_guarda_precio_venta.sql
+-- 139_guarda_precio_venta.sql
 --
 -- PROBLEMA (verificado en prod 2026-07-27):
 --   4 productos con precio = 0 y stock disponible, vendibles a $0. Dos de
@@ -133,6 +133,6 @@ CREATE TRIGGER trg_notificar_producto_sin_precio_upd
   EXECUTE FUNCTION public.notificar_producto_sin_precio();
 
 COMMENT ON FUNCTION public.validar_precio_item_pedido() IS
-  'Impide vender a precio 0 (salvo bonificaciones de promo) y bloquea el alta de items de productos sin precio de lista. Mig 136.';
+  'Impide vender a precio 0 (salvo bonificaciones de promo) y bloquea el alta de items de productos sin precio de lista. Mig 139.';
 COMMENT ON FUNCTION public.notificar_producto_sin_precio() IS
-  'Avisa a admins/encargados cuando un producto queda sin precio de venta. Mig 136.';
+  'Avisa a admins/encargados cuando un producto queda sin precio de venta. Mig 139.';

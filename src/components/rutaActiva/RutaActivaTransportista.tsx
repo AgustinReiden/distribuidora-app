@@ -87,7 +87,7 @@ export default function RutaActivaTransportista({
   const queryClient = useQueryClient();
 
   /**
-   * Registra que no se pudo entregar. El RPC (mig 141) libera el pedido para
+   * Registra que no se pudo entregar. El RPC (mig 144) libera el pedido para
    * re-rutearlo y le avisa al preventista con el motivo; acá solo hay que
    * refrescar la ruta para que la parada desaparezca del recorrido del día.
    */

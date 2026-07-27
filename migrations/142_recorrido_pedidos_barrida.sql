@@ -1,5 +1,5 @@
 -- =========================================================================
--- 139_recorrido_pedidos_barrida.sql
+-- 142_recorrido_pedidos_barrida.sql
 --
 -- Guarda en qué barrida quedó cada parada, para:
 --   1. mostrarla al chofer en la hoja de ruta y en la ruta activa;
@@ -30,7 +30,7 @@ BEGIN
 END $$;
 
 COMMENT ON COLUMN public.recorrido_pedidos.barrida IS
-  'Bloque de reparto: 1 = cierra al mediodía, 2 = sin horario cargado, 3 = corrido o abre tarde. NULL = ruta armada sin barridas. Mig 139.';
+  'Bloque de reparto: 1 = cierra al mediodía, 2 = sin horario cargado, 3 = corrido o abre tarde. NULL = ruta armada sin barridas. Mig 142.';
 
 CREATE OR REPLACE FUNCTION public.actualizar_barridas_recorrido(p_items jsonb)
 RETURNS jsonb
@@ -79,4 +79,4 @@ REVOKE ALL ON FUNCTION public.actualizar_barridas_recorrido(jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.actualizar_barridas_recorrido(jsonb) TO authenticated;
 
 COMMENT ON FUNCTION public.actualizar_barridas_recorrido(jsonb) IS
-  'Marca la barrida de cada parada del recorrido en curso. Admin/encargado. Mig 139.';
+  'Marca la barrida de cada parada del recorrido en curso. Admin/encargado. Mig 142.';

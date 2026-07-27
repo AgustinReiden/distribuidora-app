@@ -1233,7 +1233,7 @@ export default function PedidosContainer(): React.ReactElement {
     })
 
     // Marcar la barrida de cada parada. Va aparte de aplicar_orden_ruta a
-    // propósito (ver mig 139): es un dato informativo y de medición, así que si
+    // propósito (ver mig 142): es un dato informativo y de medición, así que si
     // falla no se rompe la ruta ya armada — solo se pierden las etiquetas.
     const conBarrida = optimizados
       .filter(o => o.barrida != null)

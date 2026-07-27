@@ -319,7 +319,7 @@ export function usePedidoHandlers({
     // Un producto sin precio de venta no puede entrar al pedido: antes caía
     // en `producto?.precio || 0` y se vendía a $0. El picker ya lo deshabilita
     // (ModalPedido); esto es la defensa en profundidad del lado del estado.
-    // El backend además lo rechaza (trigger trg_validar_precio_item_pedido, mig 136).
+    // El backend además lo rechaza (trigger trg_validar_precio_item_pedido, mig 139).
     if (!existe && !(Number(producto?.precio) > 0)) return
     if (existe) {
       setNuevoPedido(prev => ({

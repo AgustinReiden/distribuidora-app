@@ -1,5 +1,5 @@
 /**
- * Motivos tipificados de no entrega y de cancelación (mig 140).
+ * Motivos tipificados de no entrega y de cancelación (mig 143).
  *
  * Antes esto era un textarea libre. Los 218 cancelados históricos tenían
  * "CERRADO", "SIN PLATA", "NO TENIA PLATA", "Prueba", "UNIFICAMOS PEDIDO" y

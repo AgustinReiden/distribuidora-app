@@ -32,7 +32,7 @@ export interface SheetParadaProps {
   llegaste: boolean;
   onSeleccionarParada: (pedidoId: string) => void;
   onEntregar: (pedido: PedidoConCliente) => void;
-  /** Abre el flujo de "no se pudo entregar" (motivo tipificado, mig 141). */
+  /** Abre el flujo de "no se pudo entregar" (motivo tipificado, mig 144). */
   onNoEntregar?: (pedido: PedidoConCliente) => void;
   onSalvedad?: (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }) => void;
   linksRutaMaps: LinkRutaMaps[];

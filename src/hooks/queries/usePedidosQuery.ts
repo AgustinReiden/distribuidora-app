@@ -931,7 +931,7 @@ async function cancelarPedido(
     throw new Error(result.error || 'Error al cancelar pedido')
   }
 
-  // El motivo tipificado (mig 140) se guarda aparte para no reescribir
+  // El motivo tipificado (mig 143) se guarda aparte para no reescribir
   // `cancelar_pedido_con_stock`, que además restaura stock. Si este update
   // fallara, el pedido igual queda cancelado con su motivo en texto.
   if (tipo) {
