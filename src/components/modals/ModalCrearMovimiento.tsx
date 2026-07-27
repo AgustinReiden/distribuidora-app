@@ -1,17 +1,23 @@
 /**
  * ModalCrearMovimiento — la sucursal origen crea una "salida" hacia otra
- * sucursal. Queda pendiente de aprobación; NO mueve stock todavía.
+ * sucursal, o edita una pendiente (`modo="editar"`, solo admin).
+ *
+ * Desde la mig 139 crear DESCUENTA el stock del origen en el acto (la
+ * mercadería ya salió del depósito), y editar lo ajusta por diferencia.
  */
-import { memo, useMemo, useState } from 'react'
-import { Loader2, Search, Plus, Trash2, Building2 } from 'lucide-react'
+import { memo, useEffect, useMemo, useState } from 'react'
+import { Loader2, Search, Plus, Trash2, Building2, PackageMinus } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
+import { stockDisponibleParaEnvio } from '../../utils/movimientos'
+import type { MovimientoSucursalDB, MovimientoItemDB } from '../../hooks/queries'
 import type { ProductoDB, SucursalDB } from '../../types'
 
 interface LineaItem {
   productoId: string
   nombre: string
   cantidad: number
+  /** Tope editable: stock en góndola + lo que este envío ya tenía reservado. */
   stock: number
 }
 
@@ -20,8 +26,17 @@ export interface ModalCrearMovimientoProps {
   productos: ProductoDB[]
   guardando: boolean
   onClose: () => void
-  onConfirmar: (payload: {
+  onConfirmar?: (payload: {
     sucursalDestinoId: number
+    notas?: string
+    items: Array<{ producto_id: number; cantidad: number }>
+  }) => Promise<void>
+  /** Modo edición de un envío pendiente. */
+  modo?: 'crear' | 'editar'
+  movimiento?: MovimientoSucursalDB
+  itemsIniciales?: MovimientoItemDB[]
+  loadingItems?: boolean
+  onGuardarEdicion?: (payload: {
     notas?: string
     items: Array<{ producto_id: number; cantidad: number }>
   }) => Promise<void>
@@ -29,12 +44,44 @@ export interface ModalCrearMovimientoProps {
 
 const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
   sucursales, productos, guardando, onClose, onConfirmar,
+  modo = 'crear', movimiento, itemsIniciales, loadingItems, onGuardarEdicion,
 }: ModalCrearMovimientoProps) {
-  const [destino, setDestino] = useState<string>('')
-  const [notas, setNotas] = useState<string>('')
+  const esEditar = modo === 'editar'
+  const [destino, setDestino] = useState<string>(esEditar ? String(movimiento?.sucursal_destino_id ?? '') : '')
+  const [notas, setNotas] = useState<string>(esEditar ? (movimiento?.notas ?? '') : '')
   const [busqueda, setBusqueda] = useState<string>('')
   const [lineas, setLineas] = useState<LineaItem[]>([])
   const [error, setError] = useState<string>('')
+
+  // Cantidades que este envío ya tiene reservadas, por producto: en edición el
+  // stock de `productos` viene descontado por este mismo envío.
+  const reservadoPorProducto = useMemo(() => {
+    const m = new Map<string, number>()
+    if (!esEditar) return m
+    for (const it of itemsIniciales ?? []) {
+      const k = String(it.producto_origen_id)
+      m.set(k, (m.get(k) ?? 0) + it.cantidad)
+    }
+    return m
+  }, [esEditar, itemsIniciales])
+
+  const stockDe = (productoId: string, stockActual: number) =>
+    stockDisponibleParaEnvio(stockActual, reservadoPorProducto.get(productoId) ?? 0)
+
+  // Prellenar las líneas cuando llegan los items del envío que se edita.
+  useEffect(() => {
+    if (!esEditar || !itemsIniciales?.length) return
+    setLineas(itemsIniciales.map(it => {
+      const pid = String(it.producto_origen_id)
+      const prod = productos.find(p => String(p.id) === pid)
+      return {
+        productoId: pid,
+        nombre: prod?.nombre ?? it.origen_nombre,
+        cantidad: it.cantidad,
+        stock: stockDisponibleParaEnvio(prod?.stock ?? 0, it.cantidad),
+      }
+    }))
+  }, [esEditar, itemsIniciales, productos])
 
   const resultados = useMemo(() => {
     const term = busqueda.trim().toLowerCase()
@@ -47,7 +94,7 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
   const agregar = (p: ProductoDB) => {
     setLineas(prev => prev.some(l => l.productoId === p.id)
       ? prev
-      : [...prev, { productoId: p.id, nombre: p.nombre, cantidad: 1, stock: p.stock || 0 }])
+      : [...prev, { productoId: p.id, nombre: p.nombre, cantidad: 1, stock: stockDe(p.id, p.stock || 0) }])
     setBusqueda('')
   }
 
@@ -58,19 +105,46 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
 
   const handleSubmit = async () => {
     setError('')
-    if (!destino) { setError('Elegí la sucursal destino.'); return }
+    if (!esEditar && !destino) { setError('Elegí la sucursal destino.'); return }
     const items = lineas.filter(l => l.cantidad > 0).map(l => ({ producto_id: Number(l.productoId), cantidad: l.cantidad }))
-    if (items.length === 0) { setError('Agregá al menos un producto con cantidad.'); return }
+    if (items.length === 0) {
+      setError(esEditar
+        ? 'Un envío no puede quedar sin productos. Si querés darlo de baja, usá Cancelar.'
+        : 'Agregá al menos un producto con cantidad.')
+      return
+    }
+    const excedido = lineas.find(l => l.cantidad > l.stock)
+    if (excedido) { setError(`${excedido.nombre}: no hay stock para ${excedido.cantidad} (disponible ${excedido.stock}).`); return }
     try {
-      await onConfirmar({ sucursalDestinoId: Number(destino), notas: notas.trim() || undefined, items })
+      if (esEditar) {
+        await onGuardarEdicion?.({ notas: notas.trim() || undefined, items })
+      } else {
+        await onConfirmar?.({ sucursalDestinoId: Number(destino), notas: notas.trim() || undefined, items })
+      }
     } catch (e) {
-      setError((e as Error).message || 'Error al crear el movimiento')
+      setError((e as Error).message || `Error al ${esEditar ? 'editar' : 'crear'} el movimiento`)
     }
   }
 
   return (
-    <ModalBase title="Nueva salida de stock" description="Enviá productos a otra sucursal. Queda pendiente hasta que la sucursal destino lo acepte." onClose={onClose} maxWidth="max-w-xl">
+    <ModalBase
+      title={esEditar ? `Editar envío #${movimiento?.id}` : 'Nueva salida de stock'}
+      description={esEditar
+        ? 'El stock de esta sucursal se ajusta según los cambios que hagas.'
+        : 'El stock sale de esta sucursal al confirmar. La otra sucursal lo ingresa cuando lo recibe.'}
+      onClose={onClose}
+      maxWidth="max-w-xl"
+    >
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="flex gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+          <PackageMinus className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-800 dark:text-amber-200">
+            {esEditar
+              ? 'Este envío ya descontó su stock. Si subís una cantidad se descuenta la diferencia; si la bajás o quitás un producto, vuelve al stock.'
+              : 'Al crear la salida el stock se descuenta de esta sucursal, porque la mercadería ya salió del depósito.'}
+          </p>
+        </div>
+
         <div>
           <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
             <Building2 className="w-4 h-4" /> Sucursal destino
@@ -78,11 +152,17 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
           <select
             value={destino}
             onChange={e => setDestino(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            disabled={esEditar}
+            className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <option value="">Seleccionar sucursal...</option>
             {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
           </select>
+          {esEditar && (
+            <p className="text-xs text-gray-500 mt-1">
+              El destino no se puede cambiar. Para eso, cancelá el envío y creá uno nuevo.
+            </p>
+          )}
         </div>
 
         <div>
@@ -103,12 +183,18 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
                   className="w-full flex items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700/50"
                 >
                   <span className="truncate dark:text-white">{p.nombre}</span>
-                  <span className="text-xs text-gray-400 flex-shrink-0 ml-2">stock {p.stock ?? 0}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0 ml-2">stock {stockDe(p.id, p.stock ?? 0)}</span>
                 </button>
               ))}
             </div>
           )}
         </div>
+
+        {esEditar && loadingItems && (
+          <p className="text-sm text-gray-500 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Cargando el envío…
+          </p>
+        )}
 
         {lineas.length > 0 && (
           <div className="border rounded-lg divide-y dark:border-gray-600 dark:divide-gray-600">
@@ -116,11 +202,14 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
               <div key={l.productoId} className="flex items-center gap-2 px-3 py-2">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium dark:text-white truncate">{l.nombre}</p>
-                  <p className="text-xs text-gray-400">stock disponible: {l.stock}</p>
+                  <p className={`text-xs ${l.cantidad > l.stock ? 'text-red-500' : 'text-gray-400'}`}>
+                    stock disponible: {l.stock}
+                  </p>
                 </div>
                 <NumberInput
                   integer
                   min={0}
+                  max={l.stock}
                   emptyValue={0}
                   commitOnChange
                   value={l.cantidad}
@@ -161,7 +250,7 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
           {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-          Crear salida
+          {esEditar ? 'Guardar cambios' : 'Crear salida'}
         </button>
       </div>
     </ModalBase>
