@@ -307,7 +307,11 @@ export function usePedidoHandlers({
   // ==========================================================================
 
   // Item management - usa refs para evitar dependencias de valores cambiantes
-  const agregarItemPedido = useCallback((productoId: string): void => {
+  // `cantidad` permite prellenar con el mínimo de venta del producto. El picker
+  // ya lo mandaba (ModalPedido: `onAgregarItem(p.id, moq || 1)`) pero acá se
+  // ignoraba y se hardcodeaba 1, así que el usuario caía directo en la
+  // violación del mínimo que el propio picker le acababa de mostrar.
+  const agregarItemPedido = useCallback((productoId: string, cantidad = 1): void => {
     const nuevoPedido = nuevoPedidoRef.current
     const productos = productosRef.current
     const existe = nuevoPedido.items.find(i => i.productoId === productoId)
@@ -325,7 +329,7 @@ export function usePedidoHandlers({
     } else {
       setNuevoPedido(prev => ({
         ...prev,
-        items: [...prev.items, { productoId, cantidad: 1, precioUnitario: producto?.precio || 0 }]
+        items: [...prev.items, { productoId, cantidad: Math.max(1, cantidad), precioUnitario: producto?.precio || 0 }]
       }))
     }
   }, [nuevoPedidoRef, productosRef, setNuevoPedido])

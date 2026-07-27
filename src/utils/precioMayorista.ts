@@ -377,17 +377,29 @@ export interface ViolacionMOQ {
 }
 
 /**
- * Obtiene el MOQ efectivo de un producto.
- * Si pertenece a varios grupos, toma el más restrictivo (máximo).
- * Retorna 1 si no tiene MOQ configurado.
+ * Mínimo de venta propio de cada producto (productos.cantidad_minima_venta,
+ * mig 144). Es el que se usa para "mínimo 3 unidades de cada sabor": aplica
+ * al producto exista o no una condición mayorista.
  */
-export function obtenerMOQ(productoId: string, pricingMap: PricingMap): number {
+export type MinimosProducto = Map<string, number>
+
+/**
+ * Obtiene el MOQ efectivo de un producto: el más restrictivo (máximo) entre el
+ * mínimo propio del producto y el de cada condición mayorista que lo incluya.
+ * Retorna 1 si no tiene ninguno configurado.
+ */
+export function obtenerMOQ(
+  productoId: string,
+  pricingMap: PricingMap,
+  minimosProducto?: MinimosProducto,
+): number {
+  let maxMoq = minimosProducto?.get(String(productoId)) ?? 1
   const grupos = pricingMap.get(String(productoId))
-  if (!grupos) return 1
-  let maxMoq = 1
-  for (const grupo of grupos) {
-    const moq = grupo.moqPorProducto.get(String(productoId))
-    if (moq && moq > maxMoq) maxMoq = moq
+  if (grupos) {
+    for (const grupo of grupos) {
+      const moq = grupo.moqPorProducto.get(String(productoId))
+      if (moq && moq > maxMoq) maxMoq = moq
+    }
   }
   return maxMoq
 }
@@ -395,10 +407,14 @@ export function obtenerMOQ(productoId: string, pricingMap: PricingMap): number {
 /**
  * Construye un mapa de productoId → MOQ efectivo para una lista de items.
  */
-export function construirMOQMap(items: ItemPedido[], pricingMap: PricingMap): Map<string, number> {
+export function construirMOQMap(
+  items: ItemPedido[],
+  pricingMap: PricingMap,
+  minimosProducto?: MinimosProducto,
+): Map<string, number> {
   const map = new Map<string, number>()
   for (const item of items) {
-    const moq = obtenerMOQ(item.productoId, pricingMap)
+    const moq = obtenerMOQ(item.productoId, pricingMap, minimosProducto)
     if (moq > 1) {
       map.set(String(item.productoId), moq)
     }
@@ -410,9 +426,27 @@ export function construirMOQMap(items: ItemPedido[], pricingMap: PricingMap): Ma
  * Valida que todos los items cumplan con su cantidad mínima de pedido.
  * Retorna las violaciones encontradas.
  */
-export function validarMOQPedido(items: ItemPedido[], pricingMap: PricingMap): ViolacionMOQ[] {
+export function validarMOQPedido(
+  items: ItemPedido[],
+  pricingMap: PricingMap,
+  minimosProducto?: MinimosProducto,
+): ViolacionMOQ[] {
   const violaciones: ViolacionMOQ[] = []
   for (const item of items) {
+    // El mínimo propio del producto se evalúa siempre, aunque no esté en
+    // ninguna condición mayorista: antes el MOQ solo existía dentro de un
+    // grupo y un producto suelto no podía tener mínimo.
+    const minProducto = minimosProducto?.get(String(item.productoId))
+    if (minProducto && item.cantidad < minProducto) {
+      violaciones.push({
+        productoId: String(item.productoId),
+        cantidadActual: item.cantidad,
+        cantidadMinima: minProducto,
+        grupoNombre: 'Mínimo del producto',
+      })
+      continue
+    }
+
     const grupos = pricingMap.get(String(item.productoId))
     if (!grupos) continue
     for (const grupo of grupos) {
