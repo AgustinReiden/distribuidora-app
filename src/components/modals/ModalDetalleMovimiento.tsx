@@ -8,17 +8,12 @@
  * (matcheado a un producto del destino o creado nuevo).
  */
 import { memo, useMemo } from 'react'
-import { Loader2, ArrowRight, Check, PlusCircle } from 'lucide-react'
+import { Loader2, ArrowRight, Check, PlusCircle, PackageMinus } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { formatPrecio, formatDateTime } from '../../utils/formatters'
+import { ESTADO_MOVIMIENTO_BADGE, VERBO_RESOLUCION } from '../../constants/movimientos'
 import type { ProductoDB } from '../../types'
-import type { MovimientoSucursalDB, MovimientoItemDB, EstadoMovimiento } from '../../hooks/queries'
-
-const ESTADO_BADGE: Record<EstadoMovimiento, string> = {
-  pendiente: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  aceptada: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-  denegada: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-}
+import type { MovimientoSucursalDB, MovimientoItemDB } from '../../hooks/queries'
 
 export interface ModalDetalleMovimientoProps {
   movimiento: MovimientoSucursalDB
@@ -54,17 +49,39 @@ const ModalDetalleMovimiento = memo(function ModalDetalleMovimiento({
             <ArrowRight className="w-4 h-4 text-gray-400" />
             <span>{movimiento.destino?.nombre || 'Destino'}</span>
           </div>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_BADGE[movimiento.estado]}`}>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_MOVIMIENTO_BADGE[movimiento.estado]}`}>
             {movimiento.estado}
           </span>
         </div>
 
+        {movimiento.estado === 'pendiente' && movimiento.stock_descontado && (
+          <div className="flex gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+            <PackageMinus className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-800 dark:text-amber-200">
+              El stock ya salió de {movimiento.origen?.nombre || 'la sucursal origen'}.
+              {' '}{movimiento.destino?.nombre || 'La sucursal destino'} todavía no lo ingresó.
+            </p>
+          </div>
+        )}
+
         <div className="text-xs text-gray-500 space-y-0.5">
-          {movimiento.created_at && <p>Creado: {formatDateTime(movimiento.created_at)}{movimiento.creador?.nombre ? ` · ${movimiento.creador.nombre}` : ''}</p>}
-          {movimiento.resuelto_at && <p>Resuelto: {formatDateTime(movimiento.resuelto_at)}</p>}
+          {movimiento.created_at && (
+            <p>Creado: {formatDateTime(movimiento.created_at)}{movimiento.creador?.nombre ? ` · por ${movimiento.creador.nombre}` : ''}</p>
+          )}
+          {movimiento.resuelto_at && (
+            <p>
+              {VERBO_RESOLUCION[movimiento.estado]}: {formatDateTime(movimiento.resuelto_at)}
+              {movimiento.resuelto?.nombre ? ` · por ${movimiento.resuelto.nombre}` : ''}
+            </p>
+          )}
+          {movimiento.editado_at && (
+            <p>Editado: {formatDateTime(movimiento.editado_at)}{movimiento.editor?.nombre ? ` · por ${movimiento.editor.nombre}` : ''}</p>
+          )}
           {movimiento.notas && <p className="italic text-gray-600 dark:text-gray-400">Nota: {movimiento.notas}</p>}
-          {movimiento.estado === 'denegada' && movimiento.motivo_rechazo && (
-            <p className="text-red-500">Motivo del rechazo: {movimiento.motivo_rechazo}</p>
+          {(movimiento.estado === 'denegada' || movimiento.estado === 'cancelada') && movimiento.motivo_rechazo && (
+            <p className="text-red-500">
+              Motivo de la {movimiento.estado === 'cancelada' ? 'cancelación' : 'denegación'}: {movimiento.motivo_rechazo}
+            </p>
           )}
         </div>
 
@@ -116,6 +133,20 @@ const ModalDetalleMovimiento = memo(function ModalDetalleMovimiento({
                       <p className="mt-1.5 text-xs flex items-center gap-1 text-blue-700 dark:text-blue-400">
                         <PlusCircle className="w-3.5 h-3.5" />
                         Producto creado en el destino
+                      </p>
+                    )}
+
+                    {/* Asiento de stock. El del origen se escribe al crear el
+                        envío (mig 139), así que también se ve en los pendientes. */}
+                    {(it.stock_origen_anterior != null || it.stock_destino_anterior != null) && (
+                      <p className="mt-1 text-xs text-gray-400">
+                        {it.stock_origen_anterior != null && (
+                          <span>origen {it.stock_origen_anterior} → {it.stock_origen_nuevo}</span>
+                        )}
+                        {it.stock_origen_anterior != null && it.stock_destino_anterior != null && ' · '}
+                        {it.stock_destino_anterior != null && (
+                          <span>destino {it.stock_destino_anterior} → {it.stock_destino_nuevo}</span>
+                        )}
                       </p>
                     )}
                   </div>

@@ -111,17 +111,20 @@ export interface ModalAceptarMovimientoProps {
   loadingItems: boolean
   productosDestino: ProductoDB[]
   guardando: boolean
+  /** Abre directo en el paso de denegar (botón "Denegar" de la lista). */
+  modoDenegarInicial?: boolean
   onConfirmar: (resoluciones: ResolucionItem[]) => Promise<void>
   onDenegar: (motivo: string) => Promise<void>
   onClose: () => void
 }
 
 const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
-  movimiento, items, loadingItems, productosDestino, guardando, onConfirmar, onDenegar, onClose,
+  movimiento, items, loadingItems, productosDestino, guardando,
+  modoDenegarInicial = false, onConfirmar, onDenegar, onClose,
 }: ModalAceptarMovimientoProps) {
   // item_id -> producto_destino_id (string) | NUEVO
   const [sel, setSel] = useState<Record<number, string>>({})
-  const [modoDenegar, setModoDenegar] = useState(false)
+  const [modoDenegar, setModoDenegar] = useState(modoDenegarInicial)
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState('')
 
@@ -172,7 +175,7 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
   return (
     <ModalBase
       title={`Aceptar movimiento #${movimiento.id}`}
-      description={`Entrante de ${movimiento.origen?.nombre || 'otra sucursal'}. Confirmá el producto de destino para cada item.`}
+      description={`Entrante de ${movimiento.origen?.nombre || 'otra sucursal'}. La mercadería ya salió de ahí: al aceptar ingresa al stock de esta sucursal. Confirmá el producto de destino para cada item.`}
       onClose={onClose}
       maxWidth="max-w-2xl"
     >
@@ -224,6 +227,9 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               placeholder="Ej: no esperábamos este envío"
             />
+            <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">
+              Al denegar, las {movimiento.total_unidades} unidades vuelven al stock de {movimiento.origen?.nombre || 'la sucursal origen'}.
+            </p>
           </div>
         )}
 
@@ -245,7 +251,7 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
               <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">Cancelar</button>
               <button onClick={() => { void handleAceptar() }} disabled={guardando || loadingItems || items.length === 0}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center disabled:opacity-50">
-                {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}<Check className="w-4 h-4 mr-1" /> Aceptar y mover stock
+                {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}<Check className="w-4 h-4 mr-1" /> Aceptar e ingresar stock
               </button>
             </div>
           </>
