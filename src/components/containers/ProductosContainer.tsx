@@ -31,6 +31,7 @@ const ModalProducto = lazy(() => import('../modals/ModalProducto'))
 const ModalMermaStock = lazy(() => import('../modals/ModalMermaStock'))
 const ModalHistorialMermas = lazy(() => import('../modals/ModalHistorialMermas'))
 const ModalActualizacionMasivaPrecios = lazy(() => import('../modals/ModalActualizacionMasivaPrecios'))
+const ModalMinimoVentaMasivo = lazy(() => import('../modals/ModalMinimoVentaMasivo'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
 const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
@@ -83,6 +84,7 @@ export default function ProductosContainer(): React.ReactElement {
   const [modalMermaOpen, setModalMermaOpen] = useState(false)
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
   const [modalActualizacionMasivaOpen, setModalActualizacionMasivaOpen] = useState(false)
+  const [modalMinimoVentaOpen, setModalMinimoVentaOpen] = useState(false)
   const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
   const [modalCambioOpen, setModalCambioOpen] = useState(false)
   const [modalStockBajoOpen, setModalStockBajoOpen] = useState(false)
@@ -103,6 +105,7 @@ export default function ProductosContainer(): React.ReactElement {
     setModalMermaOpen(false)
     setModalHistorialOpen(false)
     setModalActualizacionMasivaOpen(false)
+    setModalMinimoVentaOpen(false)
     setModalCategoriasOpen(false)
     setModalCambioOpen(false)
     setModalStockBajoOpen(false)
@@ -168,6 +171,10 @@ export default function ProductosContainer(): React.ReactElement {
 
   const handleAbrirActualizacionMasiva = useCallback(() => {
     setModalActualizacionMasivaOpen(true)
+  }, [])
+
+  const handleAbrirMinimoVentaMasivo = useCallback(() => {
+    setModalMinimoVentaOpen(true)
   }, [])
 
   const handleGestionarCategorias = useCallback(() => {
@@ -292,6 +299,7 @@ export default function ProductosContainer(): React.ReactElement {
           onBajaStock={handleBajaStock}
           onVerHistorialMermas={handleVerHistorialMermas}
           onActualizacionMasivaPrecios={handleAbrirActualizacionMasiva}
+          onMinimoVentaMasivo={isAdmin ? handleAbrirMinimoVentaMasivo : undefined}
           onGestionarCategorias={handleGestionarCategorias}
           onCambioProducto={puedeCambiarProductos ? handleAbrirCambioProducto : undefined}
           onControlStock={puedeControlarStock ? handleControlStock : undefined}
@@ -351,6 +359,17 @@ export default function ProductosContainer(): React.ReactElement {
             proveedores={proveedores}
             categorias={categorias}
             onClose={() => setModalActualizacionMasivaOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Mínimo de venta por categoría (mig 147) */}
+      {modalMinimoVentaOpen && (
+        <Suspense fallback={null}>
+          <ModalMinimoVentaMasivo
+            productos={productos}
+            categorias={categoriasTabla}
+            onClose={() => setModalMinimoVentaOpen(false)}
           />
         </Suspense>
       )}

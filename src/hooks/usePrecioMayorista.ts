@@ -6,6 +6,7 @@
  */
 import { useMemo } from 'react'
 import { usePricingMapQuery } from './queries/useGruposPrecioQuery'
+import { useMinimosVentaQuery } from './queries/useProductosQuery'
 import {
   resolverPreciosMayorista,
   calcularFaltanteParaTier,
@@ -50,6 +51,9 @@ interface UsePrecioMayoristaReturn {
  */
 export function usePrecioMayorista(items: ItemPedido[]): UsePrecioMayoristaReturn {
   const { data: pricingMap, isLoading } = usePricingMapQuery()
+  // Mínimo de venta propio del producto (mig 147). Es independiente de las
+  // condiciones mayoristas: un producto suelto también puede tener mínimo.
+  const { data: minimosProducto } = useMinimosVentaQuery()
 
   const preciosResueltos = useMemo(() => {
     if (!pricingMap || pricingMap.size === 0 || items.length === 0) {
@@ -92,15 +96,17 @@ export function usePrecioMayorista(items: ItemPedido[]): UsePrecioMayoristaRetur
     return false
   }, [preciosResueltos])
 
+  // Sin cortocircuito por pricingMap vacío: el mínimo del producto vale aunque
+  // no haya ninguna condición mayorista cargada.
   const moqMap = useMemo(() => {
-    if (!pricingMap || pricingMap.size === 0) return new Map<string, number>()
-    return construirMOQMap(items, pricingMap)
-  }, [items, pricingMap])
+    if (items.length === 0) return new Map<string, number>()
+    return construirMOQMap(items, pricingMap ?? new Map(), minimosProducto)
+  }, [items, pricingMap, minimosProducto])
 
   const violacionesMOQ = useMemo(() => {
-    if (!pricingMap || pricingMap.size === 0 || items.length === 0) return []
-    return validarMOQPedido(items, pricingMap)
-  }, [items, pricingMap])
+    if (items.length === 0) return []
+    return validarMOQPedido(items, pricingMap ?? new Map(), minimosProducto)
+  }, [items, pricingMap, minimosProducto])
 
   return {
     preciosResueltos,

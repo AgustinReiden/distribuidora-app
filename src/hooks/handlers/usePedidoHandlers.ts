@@ -7,6 +7,7 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { useLatestRef } from '../useLatestRef'
 import { usePricingMapQuery } from '../queries/useGruposPrecioQuery'
 import { usePromoMapQuery } from '../queries/usePromocionesQuery'
+import { useMinimosVentaQuery } from '../queries/useProductosQuery'
 import { resolverPreciosMayorista, aplicarPreciosMayorista, validarMOQPedido } from '../../utils/precioMayorista'
 import { resolverPromociones } from '../../utils/promociones'
 import { calcularNetoVenta } from '../../utils/calculations'
@@ -302,6 +303,10 @@ export function usePedidoHandlers({
   const { data: promoMap } = usePromoMapQuery()
   const promoMapRef = useLatestRef(promoMap)
 
+  // Mínimo de venta por producto (mig 147)
+  const { data: minimosVenta } = useMinimosVentaQuery()
+  const minimosVentaRef = useLatestRef(minimosVenta)
+
   // ==========================================================================
   // HANDLERS - Usan refs para valores frecuentes, deps estables para funciones
   // ==========================================================================
@@ -409,15 +414,19 @@ export function usePedidoHandlers({
       return
     }
 
-    // Validar cantidades mínimas de pedido
+    // Validar cantidades mínimas de pedido. Se corre siempre, no solo cuando hay
+    // condiciones mayoristas: el mínimo de venta del producto (mig 147) es
+    // independiente de ellas. El trigger de la DB lo revalida igual.
     const currentPricingMap = pricingMapRef.current
-    if (currentPricingMap && currentPricingMap.size > 0) {
-      const violaciones = validarMOQPedido(nuevoPedido.items, currentPricingMap)
-      if (violaciones.length > 0) {
-        const mensajes = violaciones.map(v => `${productosRef.current.find(p => p.id === v.productoId)?.nombre || 'Producto'}: mínimo ${v.cantidadMinima} unidades`)
-        notify.error(`Cantidad mínima no alcanzada:\n${mensajes.join('\n')}`, 5000)
-        return
-      }
+    const violaciones = validarMOQPedido(
+      nuevoPedido.items,
+      currentPricingMap ?? new Map(),
+      minimosVentaRef.current,
+    )
+    if (violaciones.length > 0) {
+      const mensajes = violaciones.map(v => `${productosRef.current.find(p => p.id === v.productoId)?.nombre || 'Producto'}: mínimo ${v.cantidadMinima} unidades`)
+      notify.error(`Cantidad mínima no alcanzada:\n${mensajes.join('\n')}`, 5000)
+      return
     }
 
     // Resolver promociones activas
@@ -551,7 +560,7 @@ export function usePedidoHandlers({
       notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, promoMapRef, productosRef, clientesRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
+  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, promoMapRef, minimosVentaRef, productosRef, clientesRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
   const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {

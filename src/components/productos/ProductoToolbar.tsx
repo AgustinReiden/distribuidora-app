@@ -13,7 +13,7 @@
 import React from 'react';
 import {
   Plus, ChevronDown, Tag, Package2, AlertTriangle,
-  ArrowLeftRight, Percent, ClipboardCheck, TrendingDown, History,
+  ArrowLeftRight, Percent, ClipboardCheck, TrendingDown, History, PackageMinus,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -34,6 +34,8 @@ export interface ProductoToolbarProps {
   onGestionarCategorias?: () => void;
   onCambioProducto?: () => void;
   onActualizacionMasivaPrecios?: () => void;
+  /** Carga masiva del mínimo de venta por categoría (mig 147). */
+  onMinimoVentaMasivo?: () => void;
   onControlStock?: () => void;
   onVerAjustesStock?: () => void;
   onVerHistorialMermas?: () => void;
@@ -159,6 +161,7 @@ export default function ProductoToolbar({
   onGestionarCategorias,
   onCambioProducto,
   onActualizacionMasivaPrecios,
+  onMinimoVentaMasivo,
   onControlStock,
   onVerAjustesStock,
   onVerHistorialMermas,
@@ -166,7 +169,8 @@ export default function ProductoToolbar({
   onNuevoProducto,
 }: ProductoToolbarProps): React.ReactElement | null {
   const hayCatálogo = isAdmin && (
-    Boolean(onGestionarCategorias) || Boolean(onCambioProducto) || Boolean(onActualizacionMasivaPrecios)
+    Boolean(onGestionarCategorias) || Boolean(onCambioProducto) ||
+    Boolean(onActualizacionMasivaPrecios) || Boolean(onMinimoVentaMasivo)
   );
   // Control de stock (Excel) lo ve admin y encargado; el historial de mermas
   // sigue siendo solo admin.
@@ -201,6 +205,17 @@ export default function ProductoToolbar({
         <DropdownMenuItem onSelect={onActualizacionMasivaPrecios}>
           <Percent className="w-4 h-4 text-indigo-600" />
           <span>Actualización masiva de precios</span>
+        </DropdownMenuItem>
+      )}
+      {onMinimoVentaMasivo && (
+        <DropdownMenuItem onSelect={onMinimoVentaMasivo}>
+          <PackageMinus className="w-4 h-4 text-indigo-600" />
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="font-medium">Mínimo de venta por categoría</span>
+            <span className="text-xs text-stone-500 dark:text-gray-400">
+              Compra mínima por sabor, en bloque
+            </span>
+          </div>
         </DropdownMenuItem>
       )}
     </ToolbarDropdown>

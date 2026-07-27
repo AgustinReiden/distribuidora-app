@@ -11,14 +11,21 @@ export {
   useProductosQuery,
   useProductoQuery,
   useProductosStockBajoQuery,
+  useMinimosVentaQuery,
   useCrearProductoMutation,
   useActualizarProductoMutation,
   useEliminarProductoMutation,
   useDescontarStockMutation,
   useRestaurarStockMutation,
   useActualizarPreciosMasivoMutation,
+  useActualizarMinimoVentaMasivoMutation,
 } from './useProductosQuery'
-export type { ActualizarPreciosMasivoItem, ActualizarPreciosMasivoResult } from './useProductosQuery'
+export type {
+  ActualizarPreciosMasivoItem,
+  ActualizarPreciosMasivoResult,
+  ActualizarMinimoVentaMasivoInput,
+  ActualizarMinimoVentaMasivoResult,
+} from './useProductosQuery'
 
 // Categorías
 export {

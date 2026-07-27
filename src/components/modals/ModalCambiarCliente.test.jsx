@@ -2,13 +2,17 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
-// usePromocionPedido depende de estos dos hooks de query. Maps vacíos => sin
-// mayorista ni promos, así el recálculo parte del precio de lista del producto.
+// usePromocionPedido depende de estos hooks de query. Maps vacíos => sin
+// mayorista, promos ni mínimos de venta, así el recálculo parte del precio de
+// lista del producto.
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
   usePricingMapQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
+}))
+vi.mock('../../hooks/queries/useProductosQuery', () => ({
+  useMinimosVentaQuery: () => ({ data: new Map(), isLoading: false }),
 }))
 
 vi.mock('../../utils/formatters', () => ({

@@ -23,7 +23,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadPricingContext } from "../../pricing/index.ts";
 import {
   resolverPreciosMayorista,
+  validarMOQPedido,
   type ItemPedido,
+  type MinimosProducto,
 } from "../../utils/precioMayorista.ts";
 import { resolverPromociones } from "../../utils/promociones.ts";
 
@@ -86,6 +88,8 @@ interface ProductoRow {
   stock: number;
   porcentaje_iva: number | null;
   impuestos_internos: number | null;
+  /** Mínimo de unidades por pedido (mig 147). null = sin mínimo. */
+  cantidad_minima_venta: number | null;
   sucursal_id: number;
 }
 
@@ -212,6 +216,28 @@ export const previsualizarPedidoTool: Tool<
         precioUnitario: Number(p.precio),
       };
     });
+    // ---- Cantidades mínimas de pedido ----
+    // El mínimo propio del producto (mig 147) y el de las condiciones
+    // mayoristas se evalúan juntos, con el mismo util que la app web. El
+    // trigger de la DB rechaza igual, pero acá el preventista recibe el
+    // motivo antes de confirmar, no un error opaco después.
+    const minimosProducto: MinimosProducto = new Map();
+    for (const prod of productosById.values()) {
+      if (prod.cantidad_minima_venta && prod.cantidad_minima_venta > 0) {
+        minimosProducto.set(String(prod.id), prod.cantidad_minima_venta);
+      }
+    }
+    const violacionesMOQ = validarMOQPedido(itemsParaUtils, pricingMap, minimosProducto);
+    if (violacionesMOQ.length > 0) {
+      const detalle = violacionesMOQ
+        .map((v) => {
+          const nombre = productosById.get(Number(v.productoId))?.nombre ?? v.productoId;
+          return `«${nombre}»: mínimo ${v.cantidadMinima} (pediste ${v.cantidadActual})`;
+        })
+        .join("; ");
+      throw new Error(`No se alcanza la compra mínima. ${detalle}`);
+    }
+
     const promoRes = resolverPromociones(itemsParaUtils, promoMap);
 
     // ---- Resolver precios mayoristas ----
@@ -431,7 +457,7 @@ async function loadProductos(
   // "producto no encontrado" y no entendería por qué).
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
     .in("id", uniqIds)
     .eq("sucursal_id", sucursalId);
   if (error) {
@@ -451,7 +477,7 @@ async function loadProducto(
 ): Promise<ProductoRow | null> {
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
     .eq("id", id)
     .eq("sucursal_id", sucursalId)
     .maybeSingle();
