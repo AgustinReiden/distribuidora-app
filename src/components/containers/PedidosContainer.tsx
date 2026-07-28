@@ -12,7 +12,8 @@ import {
   esDescuentoDeCategoria,
   resolverDescuentoPctCliente,
 } from '../../utils/descuentoCliente'
-import { construirOrigenPrecioItems } from '../../utils/origenPrecio'
+import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
+import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
@@ -770,7 +771,7 @@ export default function PedidosContainer(): React.ReactElement {
   // Reenvía el desglose fiscal para que el RPC actualice correctamente
   // total_neto/total_iva (sin esto, los COALESCE(..., precio) del RPC dejaban
   // todo el monto como "neto" ignorando el IVA en facturas FC).
-  const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[]) => {
+  const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[], origenes?: OrigenPrecioItem[]) => {
     if (!pedidoEditando) return
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId,
@@ -792,6 +793,17 @@ export default function PedidosContainer(): React.ReactElement {
     const response = data as { success: boolean; errores?: string[] }
     if (!response.success) {
       throw new Error(response.errores?.join(', ') || 'Error al actualizar items')
+    }
+    // El RPC borro y reinserto los items, asi que el origen del precio que se
+    // habia registrado al crear el pedido ya no existe: hay que reponerlo o esta
+    // venta pasa a comisionarse con la regla generica (mig 148/149).
+    if (origenes && origenes.length > 0) {
+      const { error: errorOrigen } = await supabase.rpc('registrar_origen_precio_items', {
+        p_pedido_id: pedidoEditando.id,
+        p_origenes: origenes,
+      })
+      // No se propaga: los items ya se guardaron bien y el total es correcto.
+      if (errorOrigen) console.warn('No se pudo registrar el origen del precio:', errorOrigen)
     }
     // Invalidar cache de pedidos para refrescar datos. Tambien la familia
     // recorridos* para que la hoja de ruta y las comandas (que se descargan
@@ -1526,6 +1538,12 @@ export default function PedidosContainer(): React.ReactElement {
 
   return (
     <>
+      {/* Los que volvieron sin entregar (mig 144). Van arriba de la lista
+          porque vuelven a 'pendiente' y ahi se confunden con los nuevos. */}
+      <div className="mb-3">
+        <PanelPedidosNoEntregados />
+      </div>
+
       <Suspense fallback={<LoadingState />}>
         <VistaPedidos
           pedidos={pedidos}

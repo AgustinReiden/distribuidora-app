@@ -352,6 +352,14 @@ export const previsualizarPedidoTool: Tool<
         porcentaje_iva: porcentajeIva,
         es_bonificacion: r.es_bonificacion,
         promocion_id: promoId,
+        // Por qué se cobró este precio (mig 148/149). `crear_pedido_completo_bot`
+        // ignora las claves que no conoce, así que viaja de arriba: acá todavía
+        // se sabe si el precio salió de una escala mayorista, y después de
+        // crear el pedido ese contexto ya no existe. Lo lee `crear_pedido`.
+        origen_precio: r.es_bonificacion
+          ? "bonificacion"
+          : (r.regla_precio === "mayorista" ? "mayorista" : "lista"),
+        grupo_precio_escala_id: precios.get(String(r.producto_id))?.escalaId ?? null,
       };
     });
 

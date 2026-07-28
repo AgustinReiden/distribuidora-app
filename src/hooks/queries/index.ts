@@ -149,6 +149,10 @@ export {
 } from './useGruposPrecioQuery'
 export type { ActualizarPrecioEscalaInput } from './useGruposPrecioQuery'
 
+// No entregados por motivo y barrida (migs 142-144)
+export { noEntregadosKeys, useNoEntregadosQuery, usePedidosRebotadosQuery } from './useNoEntregadosQuery'
+export type { NoEntregadosResumen, NoEntregadoFila, PedidoRebotado } from './useNoEntregadosQuery'
+
 // Comisiones variables (migs 148-150)
 export {
   comisionesKeys,

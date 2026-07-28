@@ -83,8 +83,8 @@ export interface GuardarComisionReglaInput {
 
 export const comisionesKeys = {
   all: (sucursalId: number | null) => ['comisiones', sucursalId] as const,
-  calculo: (sucursalId: number | null, desde: string, hasta: string) =>
-    [...comisionesKeys.all(sucursalId), 'calculo', desde, hasta] as const,
+  calculo: (sucursalId: number | null, desde: string, hasta: string, scope?: number[] | null) =>
+    [...comisionesKeys.all(sucursalId), 'calculo', desde, hasta, scope ?? 'asignadas'] as const,
   reglas: (sucursalId: number | null) => [...comisionesKeys.all(sucursalId), 'reglas'] as const,
 }
 
@@ -96,16 +96,29 @@ export const comisionesKeys = {
  * Comisión calculada del período. `enabled` permite no dispararlo hasta que la
  * pantalla tenga rango: el RPC es admin-only y tira 42501 a cualquier otro rol.
  */
-export function useCalcularComisionesQuery(desde: string, hasta: string, enabled = true) {
+export function useCalcularComisionesQuery(
+  desde: string,
+  hasta: string,
+  enabled = true,
+  /**
+   * Sucursales a considerar. `undefined` = la activa. `null` = las asignadas al
+   * admin, que es lo que hace el reporte gerencial en modo "red consolidada".
+   */
+  sucursalIds?: number[] | null,
+) {
   const { currentSucursalId } = useSucursal()
+  const scope = sucursalIds !== undefined
+    ? sucursalIds
+    : (currentSucursalId != null ? [currentSucursalId] : null)
+
   return useQuery({
-    queryKey: comisionesKeys.calculo(currentSucursalId, desde, hasta),
+    queryKey: comisionesKeys.calculo(currentSucursalId, desde, hasta, scope),
     queryFn: async (): Promise<ComisionesResultado> => {
       const { data, error } = await supabase.rpc('calcular_comisiones', {
         p_desde: desde,
         p_hasta: hasta,
         // Sin sucursales explícitas el RPC usa las asignadas al admin.
-        p_sucursal_ids: currentSucursalId != null ? [currentSucursalId] : null,
+        p_sucursal_ids: scope,
       })
       if (error) throw error
       return data as ComisionesResultado

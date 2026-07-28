@@ -53,6 +53,13 @@ export interface VistaReportesGerencialesProps {
   onGuardarMeta: (venta: number | null, margenNeto: number | null) => void
   guardandoMeta: boolean
   analisis: AnalisisMensual | null
+  /**
+   * Comision del periodo segun las reglas vigentes (RPC calcular_comisiones,
+   * mig 150). Es la MISMA cuenta que muestra /comisiones, asi que las dos
+   * pantallas no pueden dar numeros distintos. null = todavia no llego.
+   */
+  comisionCalculada?: number | null
+  comisionCalculadaPrev?: number | null
 }
 
 // ---- helpers de UI -------------------------------------------------------
@@ -129,6 +136,7 @@ export default function VistaReportesGerenciales({
   reporte, loading, error, sucursalSel, periodoSel, opcionesSucursal, opcionesPeriodo,
   onSucursal, onPeriodo, onRango, incluirNoEntregados, onIncluirNoEntregados,
   comparar, onComparar, metas, metasEditable, onGuardarMeta, guardandoMeta, analisis,
+  comisionCalculada, comisionCalculadaPrev,
 }: VistaReportesGerencialesProps): React.ReactElement {
   const [comPct, setComPct] = useState(2)
   const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
@@ -171,13 +179,17 @@ export default function VistaReportesGerenciales({
   }, [reporte?.kpis?.comision_pct_default])
 
   const k = reporte?.kpis
+  // La comision calculada solo aplica sobre la base 'no cancelado', que es la
+  // que usa calcular_comisiones. Con base 'entregado' se sigue estimando con el
+  // % manual, porque son dos universos distintos de pedidos.
+  const usaComisionReglas = comBase === 'nc' && comisionCalculada != null
   const derived = useMemo(() => {
     if (!k) return null
     const comBaseTotal = comBase === 'nc' ? k.base_comision : k.venta
-    const comision = comBaseTotal * comPct / 100
+    const comision = usaComisionReglas ? (comisionCalculada as number) : comBaseTotal * comPct / 100
     const contrib = k.margen_neto - k.mermas - comision
     return { comision, contrib }
-  }, [k, comPct, comBase])
+  }, [k, comPct, comBase, usaComisionReglas, comisionCalculada])
 
   // Período anterior (lo calcula el RPC y viene en reporte.comparativo).
   const kp = comparar ? (reporte?.comparativo ?? null) : null
@@ -185,9 +197,11 @@ export default function VistaReportesGerenciales({
   const derivedPrev = useMemo(() => {
     if (!kp) return null
     const base = comBase === 'nc' ? kp.base_comision : kp.venta
-    const comision = base * comPct / 100
+    const comision = comBase === 'nc' && comisionCalculadaPrev != null
+      ? comisionCalculadaPrev
+      : base * comPct / 100
     return { comision, contrib: kp.margen_neto - kp.mermas - comision }
-  }, [kp, comPct, comBase])
+  }, [kp, comPct, comBase, comisionCalculadaPrev])
 
   // Bonificaciones agrupadas por promoción (subtotales + filas por producto).
   const bonifAgrupado = useMemo(() => {
@@ -337,7 +351,7 @@ export default function VistaReportesGerenciales({
                 {cmp && <Delta cur={k.margen_neto} prev={kp!.margen_neto} />}
                 {metasOn && metas?.margen_neto != null && <Semaforo cur={k.margen_neto} meta={metas.margen_neto} factor={metaFactor} />}
               </div>} />
-            <KpiCard label={`Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={`base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate}
+            <KpiCard label={usaComisionReglas ? 'Comisión (reglas)' : `Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={usaComisionReglas ? 'según reglas vigentes · igual que /comisiones' : `base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate}
               delta={cmp && derivedPrev ? <Delta cur={derived.comision} prev={derivedPrev.comision} invert /> : undefined} />
             <KpiCard label="Mermas" value={moneyC(k.mermas)}
               sub={k.mermas_perdida != null
