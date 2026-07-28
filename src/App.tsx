@@ -34,6 +34,7 @@ import GruposPrecioContainer from './components/containers/GruposPrecioContainer
 import PedidosContainer from './components/containers/PedidosContainer'
 import ProductosContainer from './components/containers/ProductosContainer'
 import ProveedoresContainer from './components/containers/ProveedoresContainer'
+import RevisionHorariosContainer from './components/containers/RevisionHorariosContainer'
 import UsuariosContainer from './components/containers/UsuariosContainer'
 
 // lazyWithReload: si un chunk quedó obsoleto tras un deploy (PWA con SW que
@@ -294,6 +295,13 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/condiciones-mayoristas"
                   element={isAdmin ? <GruposPrecioContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                {/* Horarios en texto libre que el backfill no pudo convertir (mig 141).
+                    Sin horario canonico el cliente cae en la barrida "sin horario". */}
+                <Route
+                  path="/horarios-clientes"
+                  element={isAdmin ? <RevisionHorariosContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
