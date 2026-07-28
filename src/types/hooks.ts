@@ -18,6 +18,8 @@ export interface ClienteDB {
   aclaracion_direccion?: string | null;
   latitud?: number | null;
   longitud?: number | null;
+  /** place_id de Google del lugar elegido en el autocompletado (mig 151). */
+  place_id?: string | null;
   telefono?: string | null;
   email?: string | null;
   contacto?: string | null;

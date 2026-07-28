@@ -31,6 +31,14 @@ export interface AddressSelectResult {
   latitud: number | null;
   longitud: number | null;
   componentes?: AddressComponent[];
+  /** `place_id` de Google, para auditar después qué lugar se eligió (mig 151). */
+  placeId?: string | null;
+  /**
+   * Google devolvió la dirección a nivel calle, sin altura. La altura que se ve
+   * es la que tipeó el usuario, y las coordenadas son del centro de la cuadra o
+   * de la calle entera.
+   */
+  sinAltura?: boolean;
 }
 
 /** Props for AddressAutocomplete component */
@@ -78,6 +86,8 @@ export const AddressAutocomplete = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
+  // La última dirección elegida vino sin altura (Google geocodificó la calle).
+  const [sinAltura, setSinAltura] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Usar hook para cargar Google Maps dinámicamente
@@ -197,8 +207,15 @@ export const AddressAutocomplete = ({
             direccion,
             latitud: place.geometry?.location?.lat() || null,
             longitud: place.geometry?.location?.lng() || null,
-            componentes: components
+            componentes: components,
+            placeId: prediction.place_id,
+            sinAltura: !tieneStreetNumber
           };
+
+          // Hasta ahora esto pasaba en silencio: se preservaba la altura tipeada
+          // y nadie se enteraba de que la coordenada es de la calle, no del
+          // portón. En una ruta optimizada eso son cuadras de diferencia.
+          setSinAltura(!tieneStreetNumber);
 
           // Actualizar el input con la dirección final (incluyendo número si se recuperó)
           onChange(direccion);
@@ -215,7 +232,9 @@ export const AddressAutocomplete = ({
             direccion: direccionFallback,
             latitud: null,
             longitud: null,
-            componentes: []
+            componentes: [],
+            placeId: prediction.place_id,
+            sinAltura: false
           });
         }
       }
@@ -224,9 +243,10 @@ export const AddressAutocomplete = ({
 
   const handleClear = useCallback((): void => {
     onChange('');
-    onSelect({ direccion: '', latitud: null, longitud: null });
+    onSelect({ direccion: '', latitud: null, longitud: null, placeId: null, sinAltura: false });
     setPredictions([]);
     setShowDropdown(false);
+    setSinAltura(false);
     if (inputRef.current) {
       inputRef.current.focus();
     }
@@ -235,6 +255,8 @@ export const AddressAutocomplete = ({
   const handleInputChange = useCallback((e: ChangeEvent<HTMLInputElement>): void => {
     const newValue = e.target.value;
     onChange(newValue);
+    // Al reescribir, el aviso de la selección anterior deja de aplicar.
+    setSinAltura(false);
 
     // Solo buscar predicciones si Google está listo
     if (googleStatus === 'ready') {
@@ -302,6 +324,16 @@ export const AddressAutocomplete = ({
             </button>
           ))}
         </div>
+      )}
+
+      {sinAltura && (
+        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1 flex items-start gap-1">
+          <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" aria-hidden="true" />
+          <span>
+            Google ubicó la calle, no la altura: la coordenada es aproximada. Verificá el número o
+            usá «Usar mi ubicación actual» parado en el local.
+          </span>
+        </p>
       )}
 
       {googleStatus === 'loading' && (

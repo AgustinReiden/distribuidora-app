@@ -7,7 +7,9 @@ import DiasAtencionSelector from '../ui/DiasAtencionSelector';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalClienteSchema } from '../../lib/schemas';
-import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery } from '../../hooks/queries';
+import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery, useClientesQuery } from '../../hooks/queries';
+import { chequearCoordenadaEnZona } from '../../utils/zonaCentroide';
+import { formatDistancia } from '../../utils/geo';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { useReverseGeocoding } from '../../hooks/useReverseGeocoding';
 import {
@@ -38,6 +40,8 @@ export interface ClienteFormData {
   aclaracionDireccion: string;
   latitud: number | null;
   longitud: number | null;
+  /** place_id de Google del lugar elegido en el autocompletado (mig 151). */
+  place_id: string | null;
   telefono: string;
   contacto: string;
   /** @deprecated usar zona_id. Se mantiene para compat de lecturas. */
@@ -73,6 +77,9 @@ export interface AddressSelectResult {
   direccion: string;
   latitud: number;
   longitud: number;
+  placeId?: string | null;
+  /** Google ubico la calle pero no la altura: la coordenada es aproximada. */
+  sinAltura?: boolean;
 }
 
 /** Props del componente ModalCliente */
@@ -120,6 +127,9 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true });
   const { data: categoriasTabla = [] } = useCategoriasQuery();
   const { data: productosParaCategorias = [] } = useProductosQuery();
+  // Para el control de cordura de la dirección contra la zona. Ya está en cache
+  // (la lista de clientes se carga en todas las pantallas que abren este modal).
+  const { data: clientesDeLaSucursal = [] } = useClientesQuery();
   // Opciones de categoría = unión de la tabla `categorias` (gestionada) y las
   // categorías reales usadas por productos. Así el valor elegido siempre matchea
   // algún producto al calcular el descuento (productos.categoria es texto libre).
@@ -151,6 +161,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     aclaracionDireccion: cliente.aclaracion_direccion || '',
     latitud: cliente.latitud || null,
     longitud: cliente.longitud || null,
+    place_id: cliente.place_id ?? null,
     telefono: cliente.telefono || '',
     contacto: cliente.contacto || '',
     zona: cliente.zona || '',
@@ -184,6 +195,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     aclaracionDireccion: '',
     latitud: null,
     longitud: null,
+    place_id: null,
     telefono: '',
     contacto: '',
     zona: '',
@@ -328,12 +340,31 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     setForm(prev => ({ ...prev, dias_atencion: valor }));
   };
 
+  /**
+   * Control de cordura: qué tan lejos cae la coordenada elegida del centroide
+   * de los clientes de su misma zona. No bloquea nada —una zona puede tener
+   * clientes dispersos—, pero es lo único que puede atrapar el caso Chacabuco:
+   * la calle homónima de otra localidad geocodifica perfecto y a 11 km.
+   */
+  const chequeoZona = useMemo(
+    () => chequearCoordenadaEnZona(
+      { latitud: form.latitud, longitud: form.longitud },
+      clientesDeLaSucursal as Parameters<typeof chequearCoordenadaEnZona>[1],
+      form.zona_id,
+      cliente?.id,
+    ),
+    [form.latitud, form.longitud, form.zona_id, clientesDeLaSucursal, cliente?.id],
+  );
+
   const handleAddressSelect = (result: AddressSelectResult): void => {
     setForm(prev => ({
       ...prev,
       direccion: result.direccion,
       latitud: result.latitud,
-      longitud: result.longitud
+      longitud: result.longitud,
+      // Se guarda para poder auditar después qué lugar exacto se eligió cuando
+      // una dirección resulte estar equivocada (mig 151).
+      place_id: result.placeId ?? null
     }));
     // Las coords vienen del autocomplete ahora — descartamos la accuracy GPS
     // previa para no mostrar un dato engañoso en el bloque "Coordenadas".
@@ -562,6 +593,19 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
             <div className="mt-2 flex items-start gap-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <span>{gpsError}</span>
+            </div>
+          )}
+
+          {/* La coordenada cae lejos del resto de su zona. Advertencia, no
+              bloqueo: el chofer prefiere enterarse acá y no en la calle. */}
+          {chequeoZona.lejos && (
+            <div className="mt-2 flex items-start gap-2 text-xs px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                Esta dirección queda a <strong>{formatDistancia(chequeoZona.distanciaMetros)}</strong>{' '}
+                del resto de los clientes de su zona ({chequeoZona.muestra} ubicados). Revisá que sea
+                la calle correcta: puede haber una con el mismo nombre en otra localidad.
+              </span>
             </div>
           )}
 
