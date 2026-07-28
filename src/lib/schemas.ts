@@ -609,6 +609,15 @@ export const modalProductoSchema = z.object({
     .nonnegative()
     .default(10),
 
+  // Mínimo de venta del producto (mig 147). 0 / undefined = sin mínimo; el
+  // modal lo normaliza a null antes de guardar (la columna exige > 0).
+  cantidad_minima_venta: z.coerce
+    .number({ error: 'El mínimo de venta debe ser un número' })
+    .int({ message: 'El mínimo de venta debe ser un número entero' })
+    .nonnegative({ message: 'El mínimo de venta no puede ser negativo' })
+    .optional()
+    .nullable(),
+
   porcentaje_iva: z.coerce.number().min(0).max(100).default(21),
   costo_sin_iva: z.coerce.number().nonnegative().optional(),
   costo_con_iva: z.coerce.number().nonnegative().optional(),

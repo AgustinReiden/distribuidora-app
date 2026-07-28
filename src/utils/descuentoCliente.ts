@@ -59,6 +59,23 @@ export function resolverDescuentoPctCliente(
 }
 
 /**
+ * Si el descuento que le toca a esta categoría salió de una regla POR CATEGORÍA
+ * y no del descuento general del cliente.
+ *
+ * Sirve para etiquetar el origen del precio (`desc_categoria` vs `desc_cliente`,
+ * mig 148): el número resultante es el mismo, pero la decisión comercial no.
+ */
+export function esDescuentoDeCategoria(
+  cliente: ClienteConDescuentos | null | undefined,
+  categoria: string | null | undefined,
+): boolean {
+  const cats = cliente?.descuentos_categoria
+  if (!cats || cats.length === 0 || !categoria) return false
+  const key = norm(categoria)
+  return cats.some(c => norm(c.categoria) === key)
+}
+
+/**
  * Aplica el descuento del cliente a los items ya resueltos (mayorista/promo).
  * No toca bonificaciones, líneas con precioOverride ni precio ≤ 0.
  * Devuelve los items con `precioUnitario` ajustado + total e info de ahorro.

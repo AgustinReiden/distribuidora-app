@@ -7,7 +7,13 @@
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { calcularNetoVenta } from '../../utils/calculations'
-import { aplicarDescuentoClienteItems } from '../../utils/descuentoCliente'
+import {
+  aplicarDescuentoClienteItems,
+  esDescuentoDeCategoria,
+  resolverDescuentoPctCliente,
+} from '../../utils/descuentoCliente'
+import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
+import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
@@ -324,7 +330,10 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Resolve wholesale prices + promos (con override del regalo elegido por admin
   // y las promos que el usuario haya quitado a mano)
-  const { itemsFinales } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet)
+  // `preciosResueltos` se usa además para etiquetar el origen del precio de cada
+  // ítem al guardar (mig 148/149): es lo único que sabe si el precio lo fijó una
+  // escala mayorista y cuál.
+  const { itemsFinales, preciosResueltos } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet)
 
   // =========================================================================
   // VistaPedidos handlers
@@ -762,7 +771,7 @@ export default function PedidosContainer(): React.ReactElement {
   // Reenvía el desglose fiscal para que el RPC actualice correctamente
   // total_neto/total_iva (sin esto, los COALESCE(..., precio) del RPC dejaban
   // todo el monto como "neto" ignorando el IVA en facturas FC).
-  const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[]) => {
+  const handleGuardarItemsEdicion = useCallback(async (items: PedidoEditItem[], origenes?: OrigenPrecioItem[]) => {
     if (!pedidoEditando) return
     const itemsParaRPC = items.map(item => ({
       producto_id: item.productoId,
@@ -784,6 +793,17 @@ export default function PedidosContainer(): React.ReactElement {
     const response = data as { success: boolean; errores?: string[] }
     if (!response.success) {
       throw new Error(response.errores?.join(', ') || 'Error al actualizar items')
+    }
+    // El RPC borro y reinserto los items, asi que el origen del precio que se
+    // habia registrado al crear el pedido ya no existe: hay que reponerlo o esta
+    // venta pasa a comisionarse con la regla generica (mig 148/149).
+    if (origenes && origenes.length > 0) {
+      const { error: errorOrigen } = await supabase.rpc('registrar_origen_precio_items', {
+        p_pedido_id: pedidoEditando.id,
+        p_origenes: origenes,
+      })
+      // No se propaga: los items ya se guardaron bien y el total es correcto.
+      if (errorOrigen) console.warn('No se pudo registrar el origen del precio:', errorOrigen)
     }
     // Invalidar cache de pedidos para refrescar datos. Tambien la familia
     // recorridos* para que la hoja de ruta y las comandas (que se descargan
@@ -1039,9 +1059,40 @@ export default function PedidosContainer(): React.ReactElement {
           porcentaje_iva: pctIva,
         }
       })
+      // Por qué se cobró cada precio (mig 148/149). Se arma ANTES de mandar,
+      // con el mismo `itemsFinales` que produjo los precios: acá todavía se sabe
+      // si el precio vino de una escala mayorista, de un descuento del cliente o
+      // de un override manual. Después de guardar, ese contexto se pierde.
+      const origenes = construirOrigenPrecioItems(
+        itemsFinales.map(item => ({
+          productoId: item.productoId,
+          precioUnitario: item.precioUnitario,
+          esBonificacion: item.esBonificacion,
+          precioOverride: item.precioOverride,
+        })),
+        {
+          preciosResueltos,
+          descuentoClientePct: new Map(
+            itemsFinales.map(item => {
+              const prod = productos.find(p => String(p.id) === String(item.productoId))
+              return [String(item.productoId), resolverDescuentoPctCliente(clienteSel, prod?.categoria)]
+            }),
+          ),
+          descuentoPorCategoria: new Set(
+            itemsFinales
+              .filter(item => {
+                const prod = productos.find(p => String(p.id) === String(item.productoId))
+                return esDescuentoDeCategoria(clienteSel, prod?.categoria)
+              })
+              .map(item => String(item.productoId)),
+          ),
+        },
+      )
+
       const pedidoCreado = await crearPedido.mutateAsync({
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
+        origenes,
         total: totalConDescuento,
         usuarioId: user?.id ?? null,
         notas: nuevoPedido.notas,
@@ -1068,7 +1119,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error('Error al crear pedido: ' + (e as Error).message)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -1487,6 +1538,12 @@ export default function PedidosContainer(): React.ReactElement {
 
   return (
     <>
+      {/* Los que volvieron sin entregar (mig 144). Van arriba de la lista
+          porque vuelven a 'pendiente' y ahi se confunden con los nuevos. */}
+      <div className="mb-3">
+        <PanelPedidosNoEntregados />
+      </div>
+
       <Suspense fallback={<LoadingState />}>
         <VistaPedidos
           pedidos={pedidos}

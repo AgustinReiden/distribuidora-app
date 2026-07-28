@@ -402,7 +402,7 @@ export default function AppModals({
               nuevoPedido={nuevoPedido}
               onClose={() => { modales.pedido.setOpen(false); appState.resetNuevoPedido(); }}
               onClienteChange={handlers.handleClienteChange}
-              onAgregarItem={handlers.agregarItemPedido as any}
+              onAgregarItem={handlers.agregarItemPedido}
               onActualizarCantidad={handlers.actualizarCantidadItem}
               onActualizarPrecio={handlers.actualizarPrecioItem}
               onCrearCliente={handlers.handleCrearClienteEnPedido as any}

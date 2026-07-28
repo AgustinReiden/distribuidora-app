@@ -11,14 +11,21 @@ export {
   useProductosQuery,
   useProductoQuery,
   useProductosStockBajoQuery,
+  useMinimosVentaQuery,
   useCrearProductoMutation,
   useActualizarProductoMutation,
   useEliminarProductoMutation,
   useDescontarStockMutation,
   useRestaurarStockMutation,
   useActualizarPreciosMasivoMutation,
+  useActualizarMinimoVentaMasivoMutation,
 } from './useProductosQuery'
-export type { ActualizarPreciosMasivoItem, ActualizarPreciosMasivoResult } from './useProductosQuery'
+export type {
+  ActualizarPreciosMasivoItem,
+  ActualizarPreciosMasivoResult,
+  ActualizarMinimoVentaMasivoInput,
+  ActualizarMinimoVentaMasivoResult,
+} from './useProductosQuery'
 
 // Categorías
 export {
@@ -137,7 +144,31 @@ export {
   useActualizarGrupoPrecioMutation,
   useEliminarGrupoPrecioMutation,
   useToggleGrupoPrecioActivoMutation,
+  useGruposPrecioPorProductoQuery,
+  useActualizarPrecioEscalaMutation,
 } from './useGruposPrecioQuery'
+export type { ActualizarPrecioEscalaInput } from './useGruposPrecioQuery'
+
+// No entregados por motivo y barrida (migs 142-144)
+export { noEntregadosKeys, useNoEntregadosQuery, usePedidosRebotadosQuery } from './useNoEntregadosQuery'
+export type { NoEntregadosResumen, NoEntregadoFila, PedidoRebotado } from './useNoEntregadosQuery'
+
+// Comisiones variables (migs 148-150)
+export {
+  comisionesKeys,
+  useCalcularComisionesQuery,
+  useComisionReglasQuery,
+  useGuardarComisionReglaMutation,
+  useDesactivarComisionReglaMutation,
+} from './useComisionesQuery'
+export type {
+  ComisionesResultado,
+  ComisionPreventista,
+  ComisionPorOrigen,
+  ComisionRegla,
+  OrigenComision,
+  GuardarComisionReglaInput,
+} from './useComisionesQuery'
 
 // Zonas estandarizadas
 export {

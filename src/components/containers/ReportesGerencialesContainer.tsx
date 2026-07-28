@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useReporteGerencialQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation } from '../../hooks/queries'
+import { useReporteGerencialQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 
@@ -100,6 +100,16 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const { data: metas } = useMetasGerencialQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const guardarMeta = useGuardarMetaMutation()
 
+  // Comision segun las reglas vigentes (mig 150), para no mostrar dos numeros
+  // distintos de comision entre /comisiones y este reporte. Se pide con el mismo
+  // alcance de sucursal que el reporte: null = red consolidada (las asignadas).
+  const scopeComision = sucParam != null ? [sucParam] : null
+  const { data: comisionCalc } = useCalcularComisionesQuery(
+    periodoSel.desde, periodoSel.hasta, ready, scopeComision)
+  const rangoPrev = reporte?.comparativo
+  const { data: comisionCalcPrev } = useCalcularComisionesQuery(
+    rangoPrev?.desde ?? '', rangoPrev?.hasta ?? '', Boolean(comparar && rangoPrev), scopeComision)
+
   const onGuardarMeta = (venta: number | null, margenNeto: number | null): void => {
     if (!periodoSel.periodoMes) return
     if (venta != null) guardarMeta.mutate({ sucursalId: sucParam, periodo: periodoSel.periodoMes, metrica: 'venta', valor: venta })
@@ -128,6 +138,8 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
         onGuardarMeta={onGuardarMeta}
         guardandoMeta={guardarMeta.isPending}
         analisis={analisis ?? null}
+        comisionCalculada={comisionCalc?.totales.comision ?? null}
+        comisionCalculadaPrev={comisionCalcPrev?.totales.comision ?? null}
       />
     </Suspense>
   )
