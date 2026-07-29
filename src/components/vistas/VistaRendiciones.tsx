@@ -20,19 +20,21 @@ import {
   Receipt,
   Download,
   Wallet,
-  Users
+  Users,
+  IdCard
 } from 'lucide-react'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, formatDateTime } from '../../utils/formatters'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
-import { useTransportistasQuery } from '../../hooks/queries'
+import { useTransportistasQuery, useClientesQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
-import { FORMAS_PAGO } from '../../constants/formasPago'
-import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput } from '../../types'
+import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
+import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput, ClienteDB } from '../../types'
 
 const ModalCerrarRendicion = lazy(() => import('../modals/ModalCerrarRendicion'))
 const ModalResolverRendicion = lazy(() => import('../modals/ModalResolverRendicion'))
 const ModalCtaCtePendiente = lazy(() => import('../modals/ModalCtaCtePendiente'))
+const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
 
 function formatMoney(value: number | undefined | null): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)
@@ -87,6 +89,21 @@ interface DetalleRendicionCliente {
   cantidad_pagos: number
 }
 
+/** Un pago individual dentro de la rendición (RPC obtener_pagos_rendicion_cliente, mig 142). */
+interface PagoRendicion {
+  pago_id: number
+  created_at: string
+  monto: number
+  forma_pago: string
+  referencia: string | null
+  notas: string | null
+  pedido_id: number | null
+  pedido_fecha: string | null
+  pedido_estado: string | null
+  cobrado_por: string
+  es_entrega_del_dia: boolean
+}
+
 /** Claves de forma de pago que se pueden usar para filtrar el detalle. */
 type FormaKey = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'vale_blanco' | 'otros'
 
@@ -103,13 +120,22 @@ interface ResumenCardProps {
   resumen: ResumenRendicionDiaria
   onCerrar: (resumen: ResumenRendicionDiaria) => void
   onResolver: (resumen: ResumenRendicionDiaria) => void
+  onVerFicha: (clienteId: number) => void
 }
 
-function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React.ReactElement {
+function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
   const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
+  // Un error del backend tiene que verse. Antes se hacía setDetalle([]) y el
+  // fallo quedaba disfrazado de "no hay datos" (así pasó inadvertido meses que
+  // la RPC fallaba por un tipo mal declarado).
+  const [errorDetalle, setErrorDetalle] = useState<string>('')
   const [exportando, setExportando] = useState(false)
+  // Drill-down al pago: fila abierta (cliente+cobrador) y sus pagos ya traídos.
+  const [filaAbierta, setFilaAbierta] = useState<string | null>(null)
+  const [pagosPorFila, setPagosPorFila] = useState<Record<string, PagoRendicion[]>>({})
+  const [cargandoPagos, setCargandoPagos] = useState<string | null>(null)
   // Drill-down: al clickear una forma de pago del breakdown se filtra el detalle
   // por cliente para ver quien compone ese total.
   const [formaFiltro, setFormaFiltro] = useState<FormaKey | null>(null)
@@ -152,8 +178,10 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
       })
       if (cancelado) return
       if (error) {
+        setErrorDetalle(error.message || 'No se pudo cargar el detalle')
         setDetalle([])
       } else {
+        setErrorDetalle('')
         setDetalle((data || []).map((r: Record<string, unknown>) => ({
           cliente_id: Number(r.cliente_id),
           cliente_nombre: String(r.cliente_nombre ?? 'Cliente'),
@@ -196,6 +224,45 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
     if (!formaFiltro) return detalle
     return detalle.filter(d => (d[formaFiltro] || 0) > 0)
   }, [detalle, formaFiltro])
+
+  const filaKey = (d: DetalleRendicionCliente) => `${d.cliente_id}-${d.cobrado_por_id ?? 'x'}`
+
+  /** Abre/cierra una fila del detalle y trae sus pagos la primera vez. */
+  const toggleFila = useCallback(async (d: DetalleRendicionCliente) => {
+    const key = filaKey(d)
+    if (filaAbierta === key) { setFilaAbierta(null); return }
+    setFilaAbierta(key)
+    if (pagosPorFila[key]) return
+
+    setCargandoPagos(key)
+    const { data, error } = await supabase.rpc('obtener_pagos_rendicion_cliente', {
+      p_fecha: resumen.fecha,
+      p_transportista_id: resumen.transportista_id,
+      p_cliente_id: d.cliente_id
+    })
+    if (error) {
+      setErrorDetalle(error.message || 'No se pudieron cargar los pagos')
+      setPagosPorFila(prev => ({ ...prev, [key]: [] }))
+    } else {
+      setPagosPorFila(prev => ({
+        ...prev,
+        [key]: (data || []).map((r: Record<string, unknown>) => ({
+          pago_id: Number(r.pago_id),
+          created_at: String(r.created_at ?? ''),
+          monto: Number(r.monto) || 0,
+          forma_pago: String(r.forma_pago ?? ''),
+          referencia: (r.referencia as string | null) ?? null,
+          notas: (r.notas as string | null) ?? null,
+          pedido_id: r.pedido_id != null ? Number(r.pedido_id) : null,
+          pedido_fecha: (r.pedido_fecha as string | null) ?? null,
+          pedido_estado: (r.pedido_estado as string | null) ?? null,
+          cobrado_por: String(r.cobrado_por ?? 'Sin usuario'),
+          es_entrega_del_dia: Boolean(r.es_entrega_del_dia)
+        }))
+      }))
+    }
+    setCargandoPagos(null)
+  }, [filaAbierta, pagosPorFila, resumen.fecha, resumen.transportista_id])
 
   const handleExportarExcel = useCallback(async () => {
     if (!detalle || detalle.length === 0) return
@@ -467,6 +534,13 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                 </div>
               )}
 
+              {errorDetalle && (
+                <p className="text-xs text-red-600 dark:text-red-400 py-2 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>No se pudo cargar el detalle: {errorDetalle}</span>
+                </p>
+              )}
+
               {loadingDetalle ? (
                 <p className="text-xs text-gray-400 py-2">Cargando detalle…</p>
               ) : detalleVisible.length > 0 ? (
@@ -483,18 +557,80 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
                       </tr>
                     </thead>
                     <tbody>
-                      {detalleVisible.map(d => (
-                        <tr key={`${d.cliente_id}-${d.cobrado_por_id ?? 'x'}`} className="border-b border-gray-100 dark:border-gray-700/50">
-                          <td className="py-1 pr-2 text-gray-700 dark:text-gray-300">{d.cliente_nombre}</td>
-                          <td className="py-1 px-2 text-gray-500">{d.cobrado_por}</td>
-                          {formaFiltro && (
-                            <td className="py-1 px-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatMoney(d[formaFiltro])}</td>
-                          )}
-                          <td className="py-1 px-2 text-right font-medium text-gray-800 dark:text-gray-200">{formatMoney(d.total)}</td>
-                          <td className="py-1 px-2 text-right text-emerald-600 dark:text-emerald-400">{d.total_entregas > 0 ? formatMoney(d.total_entregas) : '—'}</td>
-                          <td className="py-1 pl-2 text-right text-blue-600 dark:text-blue-400">{d.total_ctascte > 0 ? formatMoney(d.total_ctascte) : '—'}</td>
-                        </tr>
-                      ))}
+                      {detalleVisible.map(d => {
+                        const key = filaKey(d)
+                        const abierta = filaAbierta === key
+                        const pagos = pagosPorFila[key]
+                        const colSpan = formaFiltro ? 6 : 5
+                        return (
+                          <React.Fragment key={key}>
+                            <tr
+                              onClick={() => { void toggleFila(d) }}
+                              className={`border-b border-gray-100 dark:border-gray-700/50 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/40 ${abierta ? 'bg-gray-50 dark:bg-gray-700/40' : ''}`}
+                            >
+                              <td className="py-1 pr-2 text-gray-700 dark:text-gray-300">
+                                <span className="inline-flex items-center gap-1">
+                                  {abierta ? <ChevronUp className="w-3 h-3 text-gray-400" /> : <ChevronDown className="w-3 h-3 text-gray-400" />}
+                                  {d.cliente_nombre}
+                                </span>
+                              </td>
+                              <td className="py-1 px-2 text-gray-500">{d.cobrado_por}</td>
+                              {formaFiltro && (
+                                <td className="py-1 px-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatMoney(d[formaFiltro])}</td>
+                              )}
+                              <td className="py-1 px-2 text-right font-medium text-gray-800 dark:text-gray-200">{formatMoney(d.total)}</td>
+                              <td className="py-1 px-2 text-right text-emerald-600 dark:text-emerald-400">{d.total_entregas > 0 ? formatMoney(d.total_entregas) : '—'}</td>
+                              <td className="py-1 pl-2 text-right text-blue-600 dark:text-blue-400">{d.total_ctascte > 0 ? formatMoney(d.total_ctascte) : '—'}</td>
+                            </tr>
+
+                            {abierta && (
+                              <tr className="border-b border-gray-100 dark:border-gray-700/50">
+                                <td colSpan={colSpan} className="py-2 px-2 bg-gray-50/60 dark:bg-gray-900/30">
+                                  {cargandoPagos === key ? (
+                                    <p className="text-xs text-gray-400">Cargando pagos…</p>
+                                  ) : pagos && pagos.length > 0 ? (
+                                    <div className="space-y-1.5">
+                                      {pagos.map(p => (
+                                        <div key={p.pago_id} className="flex items-start justify-between gap-2 flex-wrap">
+                                          <div className="min-w-0">
+                                            <span className="font-medium text-gray-800 dark:text-gray-200">{formatMoney(p.monto)}</span>
+                                            <span className="text-gray-500"> · {formaPagoLabel(p.forma_pago)}</span>
+                                            <span className="text-gray-400"> · {formatDateTime(p.created_at)}</span>
+                                            {p.pedido_id && (
+                                              <span className="text-gray-500"> · Pedido #{p.pedido_id}
+                                                {p.pedido_fecha ? ` (${formatFechaCorta(p.pedido_fecha)})` : ''}
+                                              </span>
+                                            )}
+                                            {!p.pedido_id && <span className="text-gray-500"> · Pago a cuenta</span>}
+                                            {p.referencia && <span className="text-gray-400"> · Ref: {p.referencia}</span>}
+                                            <span className="text-gray-400"> · cobró {p.cobrado_por}</span>
+                                            {p.notas && <p className="text-gray-400 italic">{p.notas}</p>}
+                                          </div>
+                                          <span className={`px-1.5 py-0.5 rounded shrink-0 ${
+                                            p.es_entrega_del_dia
+                                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                          }`}>
+                                            {p.es_entrega_del_dia ? 'Entrega del día' : 'Ctas Ctes'}
+                                          </span>
+                                        </div>
+                                      ))}
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); onVerFicha(d.cliente_id) }}
+                                        className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                      >
+                                        <IdCard className="w-3 h-3" /> Ver ficha del cliente
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-gray-400">Sin pagos para mostrar.</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
                     </tbody>
                     {formaFiltro && (
                       <tfoot>
@@ -563,6 +699,15 @@ export default function VistaRendiciones(): React.ReactElement {
   const [resolverResumen, setResolverResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [guardando, setGuardando] = useState(false)
   const [verCtaCte, setVerCtaCte] = useState(false)
+  // Ficha del cliente abierta desde el detalle de una rendición. Se resuelve
+  // contra la lista de clientes: ModalFichaCliente es autónomo (solo necesita
+  // el cliente y onClose), igual que en ReportesContainer.
+  const [clienteFichaId, setClienteFichaId] = useState<number | null>(null)
+  const { data: clientes = [] } = useClientesQuery()
+  const clienteFicha = useMemo(
+    () => (clienteFichaId == null ? null : clientes.find(c => Number(c.id) === clienteFichaId) ?? null),
+    [clientes, clienteFichaId]
+  )
 
   const cargar = useCallback(async (): Promise<void> => {
     await fetchResumen(fechaDesde, fechaHasta, transportistaFiltro || null)
@@ -768,6 +913,7 @@ export default function VistaRendiciones(): React.ReactElement {
               resumen={r}
               onCerrar={setCerrarResumen}
               onResolver={setResolverResumen}
+              onVerFicha={setClienteFichaId}
             />
           ))}
         </div>
@@ -811,6 +957,15 @@ export default function VistaRendiciones(): React.ReactElement {
             fechaHasta={fechaHasta}
             transportistaId={transportistaFiltro}
             onClose={() => setVerCtaCte(false)}
+          />
+        </Suspense>
+      )}
+
+      {clienteFicha && (
+        <Suspense fallback={null}>
+          <ModalFichaCliente
+            cliente={clienteFicha as ClienteDB}
+            onClose={() => setClienteFichaId(null)}
           />
         </Suspense>
       )}
