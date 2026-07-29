@@ -10,7 +10,7 @@
  * Datos: RPC `obtener_pedidos_ctacte_pendientes` (mig 138), una fila por pedido.
  */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Download, Loader2, Users, FileText } from 'lucide-react'
+import { Download, Loader2, Users, FileText, Clock } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { supabase } from '../../hooks/supabase/base'
 
@@ -57,6 +57,9 @@ function ModalCtaCtePendiente({
   const [exportando, setExportando] = useState(false)
   /** false = solo el rango de la rendicion · true = toda la deuda viva */
   const [verTodo, setVerTodo] = useState(false)
+  /** Antigüedad mínima en días. 0 = sin filtro. El objetivo del negocio es que
+   *  ninguna cuenta pase de 7 días. */
+  const [diasMin, setDiasMin] = useState(0)
 
   useEffect(() => {
     let cancelado = false
@@ -90,19 +93,26 @@ function ModalCtaCtePendiente({
     return () => { cancelado = true }
   }, [fechaDesde, fechaHasta, transportistaId, verTodo])
 
+  // Filas que se muestran. TODO lo demás (totales, pie de tabla y Excel) se
+  // calcula sobre ESTE array: si no, los totales contradicen a la tabla.
+  const filasVisibles = useMemo(
+    () => (diasMin > 0 ? filas.filter(f => f.dias >= diasMin) : filas),
+    [filas, diasMin]
+  )
+
   const totales = useMemo(() => ({
-    pedidos: filas.length,
-    clientes: new Set(filas.map(f => f.cliente_id)).size,
-    total: filas.reduce((a, f) => a + f.total, 0),
-    cobrado: filas.reduce((a, f) => a + f.cobrado, 0),
-    saldo: filas.reduce((a, f) => a + f.saldo, 0)
-  }), [filas])
+    pedidos: filasVisibles.length,
+    clientes: new Set(filasVisibles.map(f => f.cliente_id)).size,
+    total: filasVisibles.reduce((a, f) => a + f.total, 0),
+    cobrado: filasVisibles.reduce((a, f) => a + f.cobrado, 0),
+    saldo: filasVisibles.reduce((a, f) => a + f.saldo, 0)
+  }), [filasVisibles])
 
   const handleExportar = useCallback(async () => {
-    if (filas.length === 0) return
+    if (filasVisibles.length === 0) return
     setExportando(true)
     try {
-      const data = filas.map(f => ({
+      const data = filasVisibles.map(f => ({
         Cliente: f.cliente_nombre,
         Pedido: f.pedido_id,
         'Fecha pedido': formatFechaCorta(f.fecha_pedido),
@@ -116,14 +126,15 @@ function ModalCtaCtePendiente({
       }))
       const { createMultiSheetExcel } = await import('../../utils/excel')
       const sufijo = verTodo ? 'todo' : `${fechaDesde}_a_${fechaHasta}`
+      const sufijoDias = diasMin > 0 ? `-${diasMin}dias` : ''
       await createMultiSheetExcel(
         [{ name: 'Cta Cte pendiente', data, columnWidths: [28, 9, 13, 13, 7, 20, 14, 14, 14, 11] }],
-        `ctacte-pendiente-${sufijo}`
+        `ctacte-pendiente${sufijoDias}-${sufijo}`
       )
     } finally {
       setExportando(false)
     }
-  }, [filas, verTodo, fechaDesde, fechaHasta])
+  }, [filasVisibles, verTodo, fechaDesde, fechaHasta, diasMin])
 
   return (
     <ModalBase
@@ -151,6 +162,48 @@ function ModalCtaCtePendiente({
           </label>
         </div>
 
+        {/* Antigüedad: el objetivo es que ninguna cuenta pase de 7 días. */}
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-gray-600 dark:text-gray-300 flex items-center gap-1">
+            <Clock className="w-4 h-4" /> Vencidas hace:
+          </span>
+          {[7, 15, 30].map(d => (
+            <button
+              key={d}
+              onClick={() => setDiasMin(diasMin === d ? 0 : d)}
+              className={`px-3 py-1 rounded-lg border transition-colors ${
+                diasMin === d
+                  ? 'bg-blue-600 border-blue-600 text-white'
+                  : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+            >
+              {d}+ días
+            </button>
+          ))}
+          <span className="text-gray-400">o</span>
+          <input
+            type="number"
+            min={0}
+            value={diasMin || ''}
+            onChange={e => setDiasMin(Math.max(0, Number(e.target.value) || 0))}
+            placeholder="días"
+            className="w-20 px-2 py-1 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+          {diasMin > 0 && (
+            <button
+              onClick={() => setDiasMin(0)}
+              className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+            >
+              Quitar filtro
+            </button>
+          )}
+          {diasMin > 0 && (
+            <span className="text-xs text-gray-500">
+              {filasVisibles.length} de {filas.length} pedidos
+            </span>
+          )}
+        </div>
+
         {/* Totales */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
@@ -175,7 +228,7 @@ function ModalCtaCtePendiente({
         <div className="flex justify-end">
           <button
             onClick={() => { void handleExportar() }}
-            disabled={exportando || loading || filas.length === 0}
+            disabled={exportando || loading || filasVisibles.length === 0}
             className="text-sm inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
@@ -189,9 +242,11 @@ function ModalCtaCtePendiente({
             <Loader2 className="w-5 h-5 animate-spin" />
             Cargando…
           </div>
-        ) : filas.length === 0 ? (
+        ) : filasVisibles.length === 0 ? (
           <p className="text-center py-10 text-gray-500">
-            No hay pedidos entregados pendientes de cobro en este período.
+            {diasMin > 0
+              ? `No hay cuentas con ${diasMin} días o más de antigüedad en este período.`
+              : 'No hay pedidos entregados pendientes de cobro en este período.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -208,7 +263,7 @@ function ModalCtaCtePendiente({
                 </tr>
               </thead>
               <tbody>
-                {filas.map(f => (
+                {filasVisibles.map(f => (
                   <tr key={f.pedido_id} className="border-b border-gray-100 dark:border-gray-700/50">
                     <td className="py-2 pr-2 text-gray-800 dark:text-gray-200">
                       {f.cliente_nombre}
