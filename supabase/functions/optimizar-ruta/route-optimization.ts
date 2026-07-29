@@ -101,7 +101,7 @@ export function parseOptimizeTours(data: OptimizeToursResponse, pedidos: PedidoR
 const TZ = "-03:00";
 const SERVICE_SECONDS = 480; // ~8 min por parada: timing realista para las ventanas
 const COST_LATE_PER_HOUR = 1000; // penalización ALTA por llegar tarde → prioriza la ventana
-const COST_EARLY_PER_HOUR = 1; // leve: llegar antes implica esperar, no rompe
+const COST_EARLY_PER_HOUR = 500; // llegar antes de que abra = puerta cerrada, no "esperar"
 
 /** Timestamp RFC3339 en hora de Argentina. "24:00" (cierre a medianoche) → 23:59:59. */
 function isoFecha(fecha: string, hhmm: string): string {
@@ -242,7 +242,7 @@ export async function optimizeTours(
 // Barridas: el orden ENTRE bloques es duro.
 // ============================================================================
 
-export type Barrida = 1 | 2 | 3;
+export type Barrida = 1 | 2 | 3 | 4 | 5;
 
 /** Pedido con la barrida que le asignó el cliente (ver src/utils/barridas.ts). */
 export type PedidoRutaBarrida = PedidoRuta & { barrida?: Barrida };
@@ -255,7 +255,7 @@ export interface RutaBarridas extends RutaUnida {
   composicion: Record<Barrida, number>;
 }
 
-export const ORDEN_BARRIDAS: Barrida[] = [1, 2, 3];
+export const ORDEN_BARRIDAS: Barrida[] = [1, 2, 3, 4, 5];
 
 /**
  * Optimiza en 3 barridas consecutivas, encadenadas.
@@ -282,10 +282,10 @@ export async function optimizeToursPorBarridas(
   destino: LatLng | null = deposito,
   opts: OptimizeToursOpts = {},
 ): Promise<RutaBarridas> {
-  const grupos: Record<Barrida, PedidoRutaBarrida[]> = { 1: [], 2: [], 3: [] };
+  const grupos: Record<Barrida, PedidoRutaBarrida[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
   for (const p of pedidos) {
     // Sin clasificación explícita se asume "sin horario" (barrida 2).
-    grupos[p.barrida ?? 2].push(p);
+    grupos[p.barrida ?? 4].push(p);
   }
 
   const conPedidos = ORDEN_BARRIDAS.filter((b) => grupos[b].length > 0);
@@ -293,6 +293,8 @@ export async function optimizeToursPorBarridas(
     1: grupos[1].length,
     2: grupos[2].length,
     3: grupos[3].length,
+    4: grupos[4].length,
+    5: grupos[5].length,
   };
 
   const ordenOptimizado: OrdenOptimizadoItemBarrida[] = [];
@@ -575,14 +577,16 @@ export async function optimizeToursMultiPorBarridas(
 ): Promise<RutaMultiResultado & { composicion: Record<Barrida, number> }> {
   if (repartidores.length === 0) throw new Error("No hay repartidores para el split");
 
-  const grupos: Record<Barrida, Array<PedidoRutaZona & { barrida?: Barrida }>> = { 1: [], 2: [], 3: [] };
-  for (const p of pedidos) grupos[p.barrida ?? 2].push(p);
+  const grupos: Record<Barrida, Array<PedidoRutaZona & { barrida?: Barrida }>> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+  for (const p of pedidos) grupos[p.barrida ?? 4].push(p);
 
   const conPedidos = ORDEN_BARRIDAS.filter((b) => grupos[b].length > 0);
   const composicion: Record<Barrida, number> = {
     1: grupos[1].length,
     2: grupos[2].length,
     3: grupos[3].length,
+    4: grupos[4].length,
+    5: grupos[5].length,
   };
 
   // Estado de cada chofer entre barridas.

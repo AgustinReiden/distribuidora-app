@@ -161,14 +161,16 @@ async function viaComputeRoutesPorBarridas(
   pedidos: PedidoRutaBarrida[],
   destino: LatLng = deposito,
 ): Promise<ResultadoFallback> {
-  const grupos: Record<Barrida, PedidoRutaBarrida[]> = { 1: [], 2: [], 3: [] };
-  for (const p of pedidos) grupos[p.barrida ?? 2].push(p);
+  const grupos: Record<Barrida, PedidoRutaBarrida[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+  for (const p of pedidos) grupos[p.barrida ?? 4].push(p);
 
   const conPedidos = ORDEN_BARRIDAS.filter((b) => grupos[b].length > 0);
   const composicion: Record<Barrida, number> = {
     1: grupos[1].length,
     2: grupos[2].length,
     3: grupos[3].length,
+    4: grupos[4].length,
+    5: grupos[5].length,
   };
 
   const ordenOptimizado: RutaUnida["ordenOptimizado"] = [];
@@ -312,7 +314,7 @@ serve(async (req: Request) => {
   const usarBarridas = barridaPorPedido.size > 0;
   const conBarrida: PedidoRutaBarrida[] = conCoords.map((p) => ({
     ...p,
-    barrida: barridaPorPedido.get(String(p.pedido_id)) ?? 2,
+    barrida: barridaPorPedido.get(String(p.pedido_id)) ?? 4,
   }));
   let composicion: Record<Barrida, number> | null = null;
 

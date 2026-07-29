@@ -396,7 +396,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
    * También detecta los clientes que ese día no abren.
    */
   const composicionBarridas = useMemo(() => {
-    const conteo = { 1: 0, 2: 0, 3: 0 };
+    const conteo = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     const cerradosEseDia: PedidoDB[] = [];
     for (const p of pedidosSeleccionados) {
       const { barrida } = clasificarBarrida(horarioParaRutear(p.cliente));
@@ -990,8 +990,8 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                       <p className="font-medium text-stone-800 dark:text-white text-sm mb-2">
                         Orden de reparto
                       </p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {([1, 2, 3] as const).map(b => (
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        {([1, 2, 3, 4, 5] as const).map(b => (
                           <div
                             key={b}
                             className={
@@ -1016,7 +1016,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         Primero los que cierran al mediodía, después los que no tienen horario
                         cargado, y al final los de horario corrido.
                       </p>
-                      {composicionBarridas.conteo[2] > pedidosSeleccionados.length / 2 && (
+                      {composicionBarridas.conteo[4] > pedidosSeleccionados.length / 2 && (
                         <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
                           Más de la mitad no tiene horario cargado: el reparto va a ser menos preciso
                           hasta que se completen.
