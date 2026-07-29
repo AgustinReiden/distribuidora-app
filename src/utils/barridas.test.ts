@@ -2,69 +2,119 @@ import { describe, it, expect } from 'vitest';
 import { clasificarBarrida, abreEnDia, UMBRAL_CIERRE_TEMPRANO } from './barridas';
 import { serializarFranjas } from './horariosCliente';
 
-describe('clasificarBarrida — barrida 1 (cierran al mediodía)', () => {
-  it('una sola franja que cierra al mediodía y no reabre: "09:00-14:00"', () => {
-    // El caso más problemático de los datos reales: no es "cortado", pero es
-    // el que más rechaza si se lo deja para el final.
-    expect(clasificarBarrida('09:00-14:00').barrida).toBe(1);
-  });
+/**
+ * El orden de los grupos sale de cómo se aprovecha el día de reparto, no de una
+ * clasificación teórica de horarios. Los casos vienen de una ruta real de 43
+ * paradas donde el camión salía 08:00 y la primera parada abría 09:00.
+ */
 
-  it('horario cortado: "08:00-14:00 y 17:00-23:00"', () => {
-    expect(clasificarBarrida('08:00-14:00 y 17:00-23:00').barrida).toBe(1);
-  });
-
+describe('clasificarBarrida — grupo 1: abren temprano Y cierran al mediodía', () => {
   it.each([
-    '08:30-14:00',
-    '07:30-14:30',
-    '09:00-13:30',
-    '09:30-13:00',
-    '08:30-12:00',
-  ])('cierra temprano: "%s" → barrida 1', (horario) => {
+    ['07:00-11:00'],
+    ['07:30-12:30'],
+    ['08:00-11:00'],
+    ['08:00-14:00'],
+    ['08:30-14:00'],
+  ])('"%s" → grupo 1 (se hace apenas sale el camión)', (horario) => {
     expect(clasificarBarrida(horario).barrida).toBe(1);
   });
 
-  it('el umbral es inclusivo: cerrar exactamente a las 14:30 es barrida 1', () => {
-    expect(clasificarBarrida(`08:00-${UMBRAL_CIERRE_TEMPRANO}`).barrida).toBe(1);
+  it('el horario cortado que abre temprano también entra', () => {
+    expect(clasificarBarrida('08:00-14:00 y 17:00-23:00').barrida).toBe(1);
   });
 
-  it('un minuto después del umbral ya no es barrida 1', () => {
-    expect(clasificarBarrida('08:00-15:00').barrida).toBe(3);
+  it('exige las DOS condiciones: abrir temprano no alcanza si cierra tarde', () => {
+    // Este es el caso que hacía perder la mañana: abre 07:00 pero como cierra
+    // 24:00 se lo puede visitar en cualquier momento, no urge.
+    expect(clasificarBarrida('07:00-24:00').barrida).toBe(5);
+    expect(clasificarBarrida('08:00-17:00').barrida).toBe(5);
+    expect(clasificarBarrida('00:00-24:00').barrida).toBe(5);
   });
 
-  it('devuelve TODAS las franjas como ventanas, no solo la primera', () => {
+  it('exige las DOS condiciones: cerrar temprano no alcanza si abre 09:00', () => {
+    // Abrir 09:00 y cerrar 14:00 es del mediodía, pero no sirve para la primera
+    // hora: a las 08:15 está cerrado.
+    expect(clasificarBarrida('09:00-14:00').barrida).toBe(3);
+  });
+
+  it('el umbral de apertura es estricto: 09:00 en punto NO es madrugador', () => {
+    // Mismo cierre (13:30), sólo cambia la apertura: 08:30 entra al grupo 1 y
+    // 09:00 cae al 3 (13:30 pasa las 13, así que tampoco es del 2).
+    expect(clasificarBarrida('08:30-13:30').barrida).toBe(1);
+    expect(clasificarBarrida('09:00-13:30').barrida).toBe(3);
+  });
+});
+
+describe('clasificarBarrida — grupos 2 y 3: por hora de cierre', () => {
+  it.each([
+    ['09:00-13:00'],
+    ['09:30-13:00'],
+    ['10:00-12:30'],
+  ])('"%s" cierra hasta las 13 → grupo 2', (horario) => {
+    expect(clasificarBarrida(horario).barrida).toBe(2);
+  });
+
+  it.each([
+    ['09:00-14:00'],
+    ['09:00-14:30'],
+    ['10:00-14:00'],
+  ])('"%s" cierra hasta las 14:30 → grupo 3', (horario) => {
+    expect(clasificarBarrida(horario).barrida).toBe(3);
+  });
+
+  it('el corte de las 14:30 es inclusivo', () => {
+    expect(clasificarBarrida(`09:00-${UMBRAL_CIERRE_TEMPRANO}`).barrida).toBe(3);
+  });
+
+  it('un minuto después del corte ya es del último grupo', () => {
+    expect(clasificarBarrida('09:00-15:00').barrida).toBe(5);
+  });
+});
+
+describe('clasificarBarrida — grupo 4: sin horario', () => {
+  it.each([null, undefined, '', '   '])('vacío (%s) → grupo 4 sin ventanas', (v) => {
+    const r = clasificarBarrida(v as string | null | undefined);
+    expect(r.barrida).toBe(4);
+    expect(r.ventanas).toEqual([]);
+  });
+
+  it('texto libre no convertido cae en el grupo 4, no rompe', () => {
+    const r = clasificarBarrida('Lunes a sábado de 9 a 14');
+    expect(r.barrida).toBe(4);
+    expect(r.ventanas).toEqual([]);
+  });
+});
+
+describe('clasificarBarrida — grupo 5: corrido o abren tarde', () => {
+  it.each([
+    ['00:00-24:00'],
+    ['07:00-23:30'],
+    ['08:00-17:00'],
+    ['09:00-20:00'],
+    ['10:00-24:00'],
+    ['11:00-23:30'],
+    ['14:00-24:00'],
+  ])('"%s" → grupo 5', (horario) => {
+    expect(clasificarBarrida(horario).barrida).toBe(5);
+  });
+});
+
+describe('clasificarBarrida — ventanas', () => {
+  it('devuelve TODAS las franjas, no solo la primera', () => {
     const r = clasificarBarrida('08:00-14:00 y 17:00-23:00');
     expect(serializarFranjas(r.ventanas)).toBe('08:00-14:00 y 17:00-23:00');
   });
 });
 
-describe('clasificarBarrida — barrida 2 (sin horario)', () => {
-  it.each([null, undefined, '', '   '])('vacío (%s) → barrida 2 sin ventanas', (v) => {
-    const r = clasificarBarrida(v as string | null | undefined);
-    expect(r.barrida).toBe(2);
-    expect(r.ventanas).toEqual([]);
-  });
-
-  it('texto libre no convertido cae en barrida 2, no rompe', () => {
-    const r = clasificarBarrida('Lunes a sábado de 9 a 14');
-    expect(r.barrida).toBe(2);
-    expect(r.ventanas).toEqual([]);
-  });
-});
-
-describe('clasificarBarrida — barrida 3 (corrido / abren tarde)', () => {
-  it.each([
-    '00:00-24:00',
-    '07:00-23:30',
-    '08:00-17:00',
-    '09:00-20:00',
-    '10:00-24:00',
-    '11:00-23:30',
-  ])('atiende hasta tarde: "%s" → barrida 3', (horario) => {
-    expect(clasificarBarrida(horario).barrida).toBe(3);
-  });
-
-  it('abre tarde: "14:00-24:00" → barrida 3', () => {
-    expect(clasificarBarrida('14:00-24:00').barrida).toBe(3);
+describe('clasificarBarrida — orden relativo de la ruta real', () => {
+  it('los madrugadores van antes que los de las 9 y que los corridos', () => {
+    const g = (h: string) => clasificarBarrida(h).barrida;
+    // Caso exacto del reclamo: el de 09:00 arrancaba la ruta y el de 07:00
+    // quedaba segundo. Ahora el de 07:00 pertenece a un grupo anterior.
+    expect(g('07:00-11:00')).toBeLessThan(g('09:00-14:00'));
+    expect(g('07:30-12:30')).toBeLessThan(g('09:00-14:00'));
+    expect(g('09:00-13:00')).toBeLessThan(g('09:00-14:00'));
+    expect(g('09:00-14:00')).toBeLessThan(g('08:00-17:00'));
   });
 });
 
@@ -107,7 +157,6 @@ describe('abreEnDia', () => {
   });
 
   it('no se corre un día por zona horaria (fecha parseada como local)', () => {
-    // Con new Date('2026-08-02') en UTC-3 daría sábado y no domingo.
     expect(abreEnDia('0000001', DOMINGO)).toBe(true);
     expect(abreEnDia('0000010', DOMINGO)).toBe(false);
   });

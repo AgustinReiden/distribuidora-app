@@ -56,7 +56,7 @@ export interface OrdenOptimizadoItem {
    * 3 = corrido o abre tarde. Se persiste en recorrido_pedidos.barrida para
    * mostrarla en la hoja de ruta y medir rechazos por barrida.
    */
-  barrida?: 1 | 2 | 3;
+  barrida?: 1 | 2 | 3 | 4 | 5;
 }
 
 export interface RutaUnida {
