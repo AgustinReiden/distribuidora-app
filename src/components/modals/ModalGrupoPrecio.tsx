@@ -21,6 +21,12 @@ import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '.
 export interface ModalGrupoPrecioProps {
   grupo: GrupoPrecioConDetalles | null
   productos: ProductoDB[]
+  /**
+   * Productos ya tildados al crear una condición nueva. Lo usa el botón
+   * "Crear condición" de la ficha del producto, para no obligar a buscarlo de
+   * nuevo en la lista. Se ignora al editar (ahí manda el grupo).
+   */
+  productosPreseleccionados?: string[]
   onSave: (data: GrupoPrecioFormInput) => Promise<{ success: boolean; error?: string }>
   onClose: () => void
 }
@@ -83,6 +89,7 @@ function escalaVacia(): EscalaForm {
 export default function ModalGrupoPrecio({
   grupo,
   productos,
+  productosPreseleccionados,
   onSave,
   onClose,
 }: ModalGrupoPrecioProps) {
@@ -91,7 +98,11 @@ export default function ModalGrupoPrecio({
   const [nombre, setNombre] = useState(grupo?.nombre || '')
   const [descripcion, setDescripcion] = useState(grupo?.descripcion || '')
   const [productoIds, setProductoIds] = useState<Set<string>>(
-    new Set(grupo?.productos.map(p => String(p.producto_id)) || [])
+    new Set(
+      grupo
+        ? grupo.productos.map(p => String(p.producto_id))
+        : (productosPreseleccionados || []).map(String)
+    )
   )
   const [escalas, setEscalas] = useState<EscalaForm[]>(() => {
     if (!grupo) return [escalaVacia()]

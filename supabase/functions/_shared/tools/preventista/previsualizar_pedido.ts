@@ -23,7 +23,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadPricingContext } from "../../pricing/index.ts";
 import {
   resolverPreciosMayorista,
+  validarMOQPedido,
   type ItemPedido,
+  type MinimosProducto,
 } from "../../utils/precioMayorista.ts";
 import { resolverPromociones } from "../../utils/promociones.ts";
 
@@ -86,7 +88,8 @@ interface ProductoRow {
   stock: number;
   porcentaje_iva: number | null;
   impuestos_internos: number | null;
-  activo: boolean;
+  /** Mínimo de unidades por pedido (mig 147). null = sin mínimo. */
+  cantidad_minima_venta: number | null;
   sucursal_id: number;
 }
 
@@ -187,8 +190,17 @@ export const previsualizarPedidoTool: Tool<
     const productoIds = items.map((it) => it.producto_id);
     const productosById = await loadProductos(sb, productoIds, sucursalId);
     for (const it of items) {
-      if (!productosById.has(it.producto_id)) {
-        throw new Error(`Producto ${it.producto_id} no encontrado o no activo`);
+      const prod = productosById.get(it.producto_id);
+      if (!prod) {
+        throw new Error(`Producto ${it.producto_id} no encontrado en esta sucursal`);
+      }
+      // Sin precio de venta cargado no se puede vender: el backend lo rechaza
+      // igual (trigger trg_validar_precio_item_pedido, mig 139), pero acá el
+      // preventista recibe el motivo real en vez de un error opaco al confirmar.
+      if (!(Number(prod.precio) > 0)) {
+        throw new Error(
+          `«${prod.nombre}» está pendiente de carga de precio de venta y no se puede vender. Avisá a administración.`,
+        );
       }
     }
 
@@ -204,6 +216,28 @@ export const previsualizarPedidoTool: Tool<
         precioUnitario: Number(p.precio),
       };
     });
+    // ---- Cantidades mínimas de pedido ----
+    // El mínimo propio del producto (mig 147) y el de las condiciones
+    // mayoristas se evalúan juntos, con el mismo util que la app web. El
+    // trigger de la DB rechaza igual, pero acá el preventista recibe el
+    // motivo antes de confirmar, no un error opaco después.
+    const minimosProducto: MinimosProducto = new Map();
+    for (const prod of productosById.values()) {
+      if (prod.cantidad_minima_venta && prod.cantidad_minima_venta > 0) {
+        minimosProducto.set(String(prod.id), prod.cantidad_minima_venta);
+      }
+    }
+    const violacionesMOQ = validarMOQPedido(itemsParaUtils, pricingMap, minimosProducto);
+    if (violacionesMOQ.length > 0) {
+      const detalle = violacionesMOQ
+        .map((v) => {
+          const nombre = productosById.get(Number(v.productoId))?.nombre ?? v.productoId;
+          return `«${nombre}»: mínimo ${v.cantidadMinima} (pediste ${v.cantidadActual})`;
+        })
+        .join("; ");
+      throw new Error(`No se alcanza la compra mínima. ${detalle}`);
+    }
+
     const promoRes = resolverPromociones(itemsParaUtils, promoMap);
 
     // ---- Resolver precios mayoristas ----
@@ -318,6 +352,14 @@ export const previsualizarPedidoTool: Tool<
         porcentaje_iva: porcentajeIva,
         es_bonificacion: r.es_bonificacion,
         promocion_id: promoId,
+        // Por qué se cobró este precio (mig 148/149). `crear_pedido_completo_bot`
+        // ignora las claves que no conoce, así que viaja de arriba: acá todavía
+        // se sabe si el precio salió de una escala mayorista, y después de
+        // crear el pedido ese contexto ya no existe. Lo lee `crear_pedido`.
+        origen_precio: r.es_bonificacion
+          ? "bonificacion"
+          : (r.regla_precio === "mayorista" ? "mayorista" : "lista"),
+        grupo_precio_escala_id: precios.get(String(r.producto_id))?.escalaId ?? null,
       };
     });
 
@@ -415,12 +457,17 @@ async function loadProductos(
   sucursalId: number,
 ): Promise<Map<number, ProductoRow>> {
   const uniqIds = [...new Set(ids)];
+  // NOTA: `productos` NO tiene columna `activo` (a diferencia de `clientes` o
+  // `promociones`). Pedirla y filtrar por ella hacía fallar la query entera con
+  // 42703, así que esta tool nunca pudo tomar un pedido. El equivalente real de
+  // "no vendible" es no tener precio de venta, y eso se valida abajo con un
+  // mensaje explícito en vez de filtrarlo (si se filtrara, el preventista vería
+  // "producto no encontrado" y no entendería por qué).
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, activo, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
     .in("id", uniqIds)
-    .eq("sucursal_id", sucursalId)
-    .eq("activo", true);
+    .eq("sucursal_id", sucursalId);
   if (error) {
     throw new Error(`previsualizar_pedido: productos lookup: ${error.message}`);
   }
@@ -438,10 +485,9 @@ async function loadProducto(
 ): Promise<ProductoRow | null> {
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, activo, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
     .eq("id", id)
     .eq("sucursal_id", sucursalId)
-    .eq("activo", true)
     .maybeSingle();
   if (error) {
     throw new Error(`previsualizar_pedido: producto regalo lookup: ${error.message}`);

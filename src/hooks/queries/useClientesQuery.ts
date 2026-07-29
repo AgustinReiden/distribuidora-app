@@ -159,6 +159,8 @@ interface ClienteCreateInput {
   descuento_porcentaje?: number
   contacto?: string
   horarios_atencion?: string
+  /** Días que abre, bitmask Lunes→Domingo (mig 140). null = abre todos. */
+  dias_atencion?: string | null
   horario_entrega?: string
   rubro?: string
   notas?: string
@@ -167,6 +169,8 @@ interface ClienteCreateInput {
   descuentos_categoria?: { categoria: string; descuento_porcentaje: number }[]
   /** FC/ZZ por defecto al crear pedidos de este cliente (mig 116) */
   tipo_factura_default?: 'ZZ' | 'FC'
+  /** place_id de Google del lugar elegido, para auditar direcciones (mig 151) */
+  place_id?: string | null
 }
 
 // Mutation functions
@@ -219,10 +223,12 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       descuento_porcentaje: clienteFields.descuento_porcentaje ?? 0,
       contacto: clienteFields.contacto || null,
       horarios_atencion: clienteFields.horarios_atencion || null,
+      dias_atencion: clienteFields.dias_atencion || null,
       horario_entrega: clienteFields.horario_entrega || null,
       rubro: clienteFields.rubro || null,
       notas: clienteFields.notas || null,
       tipo_factura_default: clienteFields.tipo_factura_default ?? 'ZZ',
+      place_id: clienteFields.place_id || null,
       sucursal_id: sucursalId,
       ...(clienteFields.preventista_id ? { preventista_id: clienteFields.preventista_id } : {})
     }])

@@ -2,9 +2,11 @@
  * TanStack Query hooks para Grupos de Precio Mayorista
  * Maneja CRUD de grupos con productos y escalas
  */
+import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { condicionesDeProducto } from '../../utils/condicionesMayoristas'
 import type {
   GrupoPrecioDB,
   GrupoPrecioProductoDB,
@@ -121,6 +123,9 @@ async function fetchPricingMap(): Promise<PricingMap> {
           })
         }
         return {
+          // Se arrastra el id para poder registrar en `pedido_items` qué escala
+          // fijó el precio (mig 148/149).
+          escalaId: String(e.id),
           cantidadMinima: e.cantidad_minima,
           precioUnitario: Number(e.precio_unitario),
           etiqueta: e.etiqueta || null,
@@ -507,6 +512,75 @@ export function useToggleGrupoPrecioActivoMutation() {
       }
     },
     onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+// =============================================================================
+// VISTA POR PRODUCTO (ficha de producto)
+// =============================================================================
+
+/**
+ * Condiciones mayoristas que incluyen a un producto, para mostrarlas en su
+ * ficha. Se deriva de `useGruposPrecioQuery` en vez de pedir de nuevo a la DB:
+ * comparte la misma entrada de cache (y su staleTime de 10 min), así abrir la
+ * ficha no dispara ninguna query extra si la lista de grupos ya se cargó.
+ */
+export function useGruposPrecioPorProductoQuery(productoId: string | undefined) {
+  const { data: grupos, isLoading, error } = useGruposPrecioQuery()
+
+  const condiciones = useMemo(
+    () => (productoId && grupos ? condicionesDeProducto(grupos, productoId) : []),
+    [grupos, productoId],
+  )
+
+  return { condiciones, isLoading, error }
+}
+
+/**
+ * Cambia el precio de UNA escala sin pasar por el form completo del grupo.
+ *
+ * `updateGrupoPrecio` borra y reinserta productos y escalas enteras: usarlo para
+ * corregir un precio desde la ficha del producto rotaría los ids de todas las
+ * escalas y exigiría mandar el grupo completo. Este UPDATE es puntual.
+ *
+ * - `alcance: 'override'` toca `grupo_precio_escala_minimos.precio_unitario_override`
+ *   → afecta SOLO a este producto.
+ * - `alcance: 'grupo'` toca `grupo_precio_escalas.precio_unitario`
+ *   → afecta a todos los productos del grupo. La UI lo avisa antes.
+ */
+export interface ActualizarPrecioEscalaInput {
+  escalaId: string
+  productoId: string
+  precio: number
+  alcance: 'grupo' | 'override'
+}
+
+export function useActualizarPrecioEscalaMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ escalaId, productoId, precio, alcance }: ActualizarPrecioEscalaInput) => {
+      if (!(precio > 0)) throw new Error('El precio debe ser mayor a 0')
+
+      if (alcance === 'override') {
+        const { error } = await supabase
+          .from('grupo_precio_escala_minimos')
+          .update({ precio_unitario_override: precio })
+          .eq('escala_id', escalaId)
+          .eq('producto_id', productoId)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('grupo_precio_escalas')
+          .update({ precio_unitario: precio })
+          .eq('id', escalaId)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
   })

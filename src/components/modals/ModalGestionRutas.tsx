@@ -11,6 +11,8 @@ import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioP
 import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery } from '../../hooks/queries';
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
+import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
+import { abreEnDia, clasificarBarrida, ETIQUETA_BARRIDA } from '../../utils/barridas';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 
@@ -386,6 +388,23 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     () => pedidosVisibles.filter(p => seleccionados.has(p.id)),
     [pedidosVisibles, seleccionados],
   );
+
+  /**
+   * Cómo se va a repartir la ruta en barridas, calculado antes de optimizar.
+   * Se muestra para que el encargado vea el impacto de los horarios cargados:
+   * mucha barrida 2 significa que faltan horarios, no que el ruteo falle.
+   * También detecta los clientes que ese día no abren.
+   */
+  const composicionBarridas = useMemo(() => {
+    const conteo = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const cerradosEseDia: PedidoDB[] = [];
+    for (const p of pedidosSeleccionados) {
+      const { barrida } = clasificarBarrida(horarioParaRutear(p.cliente));
+      conteo[barrida] += 1;
+      if (!abreEnDia(p.cliente?.dias_atencion, fechaEntrega)) cerradosEseDia.push(p);
+    }
+    return { conteo, cerradosEseDia };
+  }, [pedidosSeleccionados, fechaEntrega]);
 
   const toggleSeleccion = (id: string): void => {
     setSeleccionados(prev => {
@@ -960,6 +979,75 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         <div className="text-right">
                           <p className="text-2xl font-bold">${totales.total.toLocaleString('es-AR')}</p>
                           <p className="text-blue-100 text-sm">Total a cobrar</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cómo va a quedar repartida la ruta en barridas */}
+                  {pedidosSeleccionados.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-lg p-4">
+                      <p className="font-medium text-stone-800 dark:text-white text-sm mb-2">
+                        Orden de reparto
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        {([1, 2, 3, 4, 5] as const).map(b => (
+                          <div
+                            key={b}
+                            className={
+                              'rounded-lg px-3 py-2 border ' +
+                              (b === 1
+                                ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800/50'
+                                : b === 2
+                                  ? 'bg-stone-50 dark:bg-gray-700/40 border-stone-200 dark:border-gray-600'
+                                  : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50')
+                            }
+                          >
+                            <p className="text-lg font-bold tabular-nums text-stone-800 dark:text-white">
+                              {composicionBarridas.conteo[b]}
+                            </p>
+                            <p className="text-[11px] leading-tight text-stone-600 dark:text-gray-300">
+                              {b}ª · {ETIQUETA_BARRIDA[b]}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-stone-500 dark:text-gray-400 mt-2">
+                        Primero los que cierran al mediodía, después los que no tienen horario
+                        cargado, y al final los de horario corrido.
+                      </p>
+                      {composicionBarridas.conteo[4] > pedidosSeleccionados.length / 2 && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                          Más de la mitad no tiene horario cargado: el reparto va a ser menos preciso
+                          hasta que se completen.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Clientes que ese día no abren */}
+                  {composicionBarridas.cerradosEseDia.length > 0 && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg p-4">
+                      <div className="flex items-start space-x-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="font-medium text-amber-800 dark:text-amber-200">
+                            {composicionBarridas.cerradosEseDia.length === 1
+                              ? '1 cliente no abre ese día'
+                              : `${composicionBarridas.cerradosEseDia.length} clientes no abren ese día`}
+                          </p>
+                          <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                            Según el horario cargado están cerrados. Destildalos si no querés que
+                            entren a la ruta.
+                          </p>
+                          <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 space-y-1">
+                            {composicionBarridas.cerradosEseDia.map(p => (
+                              <li key={p.id} className="flex items-center gap-2">
+                                <Circle className="w-2 h-2" />
+                                #{p.id} - {p.cliente?.nombre_fantasia}
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       </div>
                     </div>

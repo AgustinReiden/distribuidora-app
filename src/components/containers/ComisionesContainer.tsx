@@ -1,10 +1,12 @@
-import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
-import { useReportePreventistasQuery } from '../../hooks/queries'
+import { useCalcularComisionesQuery, usePreventistasQuery } from '../../hooks/queries'
+import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 
 const VistaComisiones = lazy(() => import('../vistas/VistaComisiones'))
+const ModalComisionReglas = lazy(() => import('../modals/ModalComisionReglas'))
 
 function LoadingState(): React.ReactElement {
   return (
@@ -25,14 +27,20 @@ function getHoy(): string {
 
 export default function ComisionesContainer(): React.ReactElement {
   const notify = useNotification()
+  const { isAdmin } = useAuthData()
   const [fechaDesde, setFechaDesde] = useState(getPrimerDiaMes)
   const [fechaHasta, setFechaHasta] = useState(getHoy)
+  const [modalReglasOpen, setModalReglasOpen] = useState(false)
 
-  const {
-    data: reporte = [],
-    isLoading,
-    error,
-  } = useReportePreventistasQuery(fechaDesde, fechaHasta, true)
+  // El cálculo lo resuelve la DB (mig 150): misma base que el reporte gerencial
+  // y % por regla vigente, en vez del `ventas × % tipeado` que había acá.
+  const { data: resultado, isLoading, error } = useCalcularComisionesQuery(fechaDesde, fechaHasta)
+  const { data: preventistasData = [] } = usePreventistasQuery()
+
+  const preventistas = useMemo(
+    () => preventistasData.map(p => ({ id: p.id, nombre: p.nombre || p.email || 'Sin nombre' })),
+    [preventistasData],
+  )
 
   useEffect(() => {
     if (error) {
@@ -46,14 +54,27 @@ export default function ComisionesContainer(): React.ReactElement {
   }, [])
 
   return (
-    <Suspense fallback={<LoadingState />}>
-      <VistaComisiones
-        reporte={reporte}
-        loading={isLoading}
-        fechaDesde={fechaDesde}
-        fechaHasta={fechaHasta}
-        onFiltrar={handleFiltrar}
-      />
-    </Suspense>
+    <>
+      <Suspense fallback={<LoadingState />}>
+        <VistaComisiones
+          resultado={resultado}
+          loading={isLoading}
+          fechaDesde={fechaDesde}
+          fechaHasta={fechaHasta}
+          onFiltrar={handleFiltrar}
+          onAbrirReglas={isAdmin ? () => setModalReglasOpen(true) : undefined}
+        />
+      </Suspense>
+
+      {modalReglasOpen && (
+        <Suspense fallback={null}>
+          <ModalComisionReglas
+            preventistas={preventistas}
+            comisionDefault={resultado?.comision_default ?? 2}
+            onClose={() => setModalReglasOpen(false)}
+          />
+        </Suspense>
+      )}
+    </>
   )
 }

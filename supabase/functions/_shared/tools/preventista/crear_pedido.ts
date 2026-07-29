@@ -57,6 +57,14 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
       throw new Error("Sucursal no asignada — contactá al administrador");
     }
 
+    // El origen del precio (mig 148/149) lo dejó `previsualizar_pedido` dentro
+    // de los items pendientes. Se lee ANTES de crear: el RPC consume la fila.
+    const { data: pendiente } = await ctx.supabase
+      .from("bot_pedidos_pendientes")
+      .select("items")
+      .eq("id", confirmacion_id)
+      .maybeSingle();
+
     const { data, error } = await ctx.supabase.rpc(
       "crear_pedido_completo_bot",
       {
@@ -83,6 +91,42 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
         throw new Error(`Stock insuficiente: ${r.errores.join("; ")}`);
       }
       throw new Error(r.error ?? "No pude crear el pedido");
+    }
+
+    // Registrar por qué se cobró cada precio. Best-effort a propósito: el pedido
+    // ya está creado y cobrado, y perder esta etiqueta sólo baja la resolución
+    // del reporte de comisiones (los ítems quedan 'desconocido' y el RPC los
+    // cuenta como sin desglose). Hacer fallar la toma del pedido por un metadato
+    // sería el peor intercambio posible.
+    const itemsPendientes = (pendiente?.items ?? []) as Array<{
+      producto_id: number;
+      es_bonificacion?: boolean;
+      origen_precio?: string | null;
+      grupo_precio_escala_id?: string | number | null;
+    }>;
+    const origenes = itemsPendientes
+      .filter((it) => it.origen_precio)
+      .map((it) => ({
+        producto_id: it.producto_id,
+        es_bonificacion: Boolean(it.es_bonificacion),
+        origen_precio: it.origen_precio,
+        grupo_precio_escala_id: it.grupo_precio_escala_id ?? null,
+      }));
+
+    if (r.pedido_id && origenes.length > 0) {
+      const { error: errOrigen } = await ctx.supabase.rpc(
+        "registrar_origen_precio_items",
+        {
+          p_pedido_id: r.pedido_id,
+          p_origenes: origenes,
+          // El bot corre con service role: sin sesión, `auth.uid()` es NULL y el
+          // RPC necesita saber de parte de quién viene.
+          p_perfil_id: ctx.perfil_id,
+        },
+      );
+      if (errOrigen) {
+        console.warn("crear_pedido: no se pudo registrar el origen del precio:", errOrigen.message);
+      }
     }
 
     return {

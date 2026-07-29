@@ -5,6 +5,8 @@ import LoadingSpinner from '../layout/LoadingSpinner';
 import { useDepositoCoords } from '../../hooks/queries';
 import { decodePolylines } from '../../utils/polyline';
 
+import PanelNoEntregados from '../recorridos/PanelNoEntregados';
+
 // Lazy: leaflet solo se carga al expandir un recorrido
 const MapaRuta = lazy(() => import('../MapaRuta'));
 import type {
@@ -546,6 +548,11 @@ export default function VistaRecorridos({
                   <p className="text-sm text-gray-600 dark:text-gray-400">Total cobrado</p>
                 </div>
               </div>
+
+              {/* La contracara de las entregas: por que NO se entrego, cruzado
+                  con la barrida. Es la metrica que dice si el ruteo por
+                  horarios funciono (migs 142-144). */}
+              <PanelNoEntregados desde={fechaDesde} hasta={fechaHasta} />
 
               {estadisticas.porTransportista && estadisticas.porTransportista.length > 0 && (
                 <div>

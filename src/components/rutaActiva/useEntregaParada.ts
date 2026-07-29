@@ -22,6 +22,7 @@ import type {
   RegistrarSalvedadResult,
   Pago,
 } from '../../types';
+import type { MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 
 export interface PedidoConCliente extends PedidoDB {
   cliente?: ClienteDB;
@@ -53,6 +54,8 @@ export interface UseEntregaParadaArgs {
   onRegistrarPago?: (data: DatosPago) => Promise<unknown>;
   onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
+  /** Marca la parada como no entregada (RPC marcar_no_entregado, mig 144). */
+  onMarcarNoEntregado?: (pedidoId: string, motivo: MotivoNoEntrega, nota: string) => Promise<void>;
 }
 
 export interface UseEntregaParadaReturn {
@@ -68,6 +71,13 @@ export interface UseEntregaParadaReturn {
   abrirSalvedad: (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }) => void;
   guardarSalvedad: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
   cerrarSalvedad: () => void;
+  /** Pedido con el modal de "no se pudo entregar" abierto (null = cerrado). */
+  pedidoNoEntregado: PedidoConCliente | null;
+  abrirNoEntrega: (pedido: PedidoConCliente) => void;
+  cerrarNoEntrega: () => void;
+  confirmarNoEntrega: (motivo: MotivoNoEntrega, nota: string) => Promise<void>;
+  guardandoNoEntrega: boolean;
+  errorNoEntrega: string | null;
 }
 
 export function useEntregaParada({
@@ -75,12 +85,16 @@ export function useEntregaParada({
   onRegistrarPago,
   onEntregarSinCobrar,
   onRegistrarSalvedad,
+  onMarcarNoEntregado,
 }: UseEntregaParadaArgs): UseEntregaParadaReturn {
   const [pedidoParaCobrar, setPedidoParaCobrar] = useState<PedidoConCliente | null>(null);
   const [salvedadModal, setSalvedadModal] = useState<{
     pedidoId: string;
     item: PedidoItemDB & { producto?: ProductoDB };
   } | null>(null);
+  const [pedidoNoEntregado, setPedidoNoEntregado] = useState<PedidoConCliente | null>(null);
+  const [guardandoNoEntrega, setGuardandoNoEntrega] = useState(false);
+  const [errorNoEntrega, setErrorNoEntrega] = useState<string | null>(null);
   // Si el pago del modal fue exitoso, al cerrarse se marca entregado.
   const pagoExitosoRef = useRef(false);
 
@@ -136,7 +150,42 @@ export function useEntregaParada({
 
   const cerrarSalvedad = (): void => setSalvedadModal(null);
 
+  // --- No entrega ---
+  // El pedido NO se cancela: el RPC lo libera para re-rutearlo y le avisa al
+  // preventista con el motivo.
+  const abrirNoEntrega = (pedido: PedidoConCliente): void => {
+    setErrorNoEntrega(null);
+    setPedidoNoEntregado(pedido);
+  };
+
+  const cerrarNoEntrega = (): void => {
+    setPedidoNoEntregado(null);
+    setErrorNoEntrega(null);
+  };
+
+  const confirmarNoEntrega = async (motivo: MotivoNoEntrega, nota: string): Promise<void> => {
+    const pedido = pedidoNoEntregado;
+    if (!pedido || !onMarcarNoEntregado) return;
+    setGuardandoNoEntrega(true);
+    setErrorNoEntrega(null);
+    try {
+      await onMarcarNoEntregado(String(pedido.id), motivo, nota);
+      setPedidoNoEntregado(null);
+    } catch (e) {
+      // Se deja el modal abierto para poder reintentar sin volver a elegir todo.
+      setErrorNoEntrega((e as Error).message || 'No se pudo registrar la no entrega');
+    } finally {
+      setGuardandoNoEntrega(false);
+    }
+  };
+
   return {
+    pedidoNoEntregado,
+    abrirNoEntrega,
+    cerrarNoEntrega,
+    confirmarNoEntrega,
+    guardandoNoEntrega,
+    errorNoEntrega,
     pedidoParaCobrar,
     salvedadModal,
     marcarEntregado,
