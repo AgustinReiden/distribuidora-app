@@ -6,8 +6,6 @@ import Paginacion from '../layout/Paginacion';
 import ClientesViewHeader from '../clientes/ClientesViewHeader';
 import ClienteStats from '../clientes/ClienteStats';
 import { useZonasEstandarizadasQuery } from '../../hooks/queries';
-import { puedeVerSaldoCliente } from '../../lib/permisos';
-import { useAuthData } from '../../contexts/AuthDataContext';
 import { formatPrecio } from '../../utils/formatters';
 import { cn } from '../../lib/utils';
 import type { ClienteDB } from '../../types';
@@ -55,9 +53,6 @@ export default function VistaClientes({
   onGestionarZonas,
   onVerDeudores
 }: VistaClientesProps) {
-  const { perfil } = useAuthData();
-  const verSaldo = puedeVerSaldoCliente(perfil?.rol);
-
   const [busqueda, setBusqueda] = useState<string>('');
   const [paginaActual, setPaginaActual] = useState(1);
 
@@ -287,7 +282,6 @@ export default function VistaClientes({
               idx={idx}
               isAdmin={isAdmin}
               canEditar={isAdmin || isEncargado || isPreventista}
-              verSaldo={verSaldo}
               onEditar={() => onEditarCliente(cliente)}
               onEliminar={() => onEliminarCliente(cliente.id)}
               onVerFicha={onVerFichaCliente ? () => onVerFichaCliente(cliente) : undefined}
@@ -316,13 +310,12 @@ interface ClienteCardProps {
   idx: number;
   isAdmin: boolean;
   canEditar: boolean;
-  verSaldo: boolean;
   onEditar: () => void;
   onEliminar: () => void;
   onVerFicha?: () => void;
 }
 
-function ClienteCard({ cliente, idx, isAdmin, canEditar, verSaldo, onEditar, onEliminar, onVerFicha }: ClienteCardProps) {
+function ClienteCard({ cliente, idx, isAdmin, canEditar, onEditar, onEliminar, onVerFicha }: ClienteCardProps) {
   const saldo = cliente.saldo_cuenta ?? 0;
   const saldoColor =
     saldo > 0 ? 'text-rose-700 dark:text-rose-300'
@@ -431,22 +424,18 @@ function ClienteCard({ cliente, idx, isAdmin, canEditar, verSaldo, onEditar, onE
 
       {/* Footer con gradient + saldo + botón Ver Ficha */}
       <div className="mt-3 px-4 py-3 bg-gradient-to-br from-stone-50/70 via-stone-50/40 to-blue-50/30 dark:from-gray-900/50 dark:via-gray-900/30 dark:to-blue-900/10 border-t border-stone-200/70 dark:border-gray-700/60 flex items-end justify-between gap-2">
-        {verSaldo ? (
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500 dark:text-stone-400 leading-none">
-              Saldo
-            </p>
-            <p
-              className={`mt-1 text-base tabular-nums leading-none truncate ${saldoColor}`}
-              style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
-              title={saldo > 0 ? 'Cliente con deuda' : saldo < 0 ? 'Saldo a favor del cliente' : 'Sin saldo pendiente'}
-            >
-              {formatPrecio(saldo)}
-            </p>
-          </div>
-        ) : (
-          <div className="flex-1" />
-        )}
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500 dark:text-stone-400 leading-none">
+            Saldo
+          </p>
+          <p
+            className={`mt-1 text-base tabular-nums leading-none truncate ${saldoColor}`}
+            style={{ fontWeight: 800, letterSpacing: '-0.025em' }}
+            title={saldo > 0 ? 'Cliente con deuda' : saldo < 0 ? 'Saldo a favor del cliente' : 'Sin saldo pendiente'}
+          >
+            {formatPrecio(saldo)}
+          </p>
+        </div>
         {onVerFicha && (
           <button
             onClick={onVerFicha}

@@ -127,7 +127,7 @@ export interface PerfilDB {
   id: string;
   nombre: string;
   email: string;
-  rol?: 'admin' | 'preventista' | 'preventista_taco' | 'transportista' | 'deposito' | 'encargado';
+  rol?: 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
   zona?: string;
   activo?: boolean;
 }

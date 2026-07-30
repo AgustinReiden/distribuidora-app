@@ -21,11 +21,11 @@ function LoadingState() {
 }
 
 export default function DashboardContainer(): React.ReactElement {
-  const { user, isAdmin, isPreventista, isPreventistaTaco, isAnyPreventista, isEncargado, authReady } = useAuthData()
+  const { user, isAdmin, isPreventista, isEncargado, authReady } = useAuthData()
 
-  // Determinar si debe filtrar por usuario (preventista y preventista_taco
-  // solo ven sus propios datos)
-  const usuarioFiltro = isAnyPreventista && !isAdmin ? user?.id : null
+  // Determinar si debe filtrar por usuario (el preventista solo ve sus
+  // propios datos)
+  const usuarioFiltro = isPreventista && !isAdmin ? user?.id : null
 
   // Estado local para el filtro de periodo y fechas personalizadas
   const [filtroPeriodo, setFiltroPeriodo] = React.useState('mes')
@@ -78,7 +78,6 @@ export default function DashboardContainer(): React.ReactElement {
         exportando={exportando}
         isAdmin={isAdmin}
         isPreventista={isPreventista}
-        isPreventistaTaco={isPreventistaTaco}
         isEncargado={isEncargado}
         totalClientes={clientes.length}
       />

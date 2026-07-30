@@ -81,7 +81,6 @@ export interface VistaDashboardProps {
   totalClientes?: number;
   isAdmin?: boolean;
   isPreventista?: boolean;
-  isPreventistaTaco?: boolean;
   isEncargado?: boolean;
 }
 
@@ -310,16 +309,13 @@ export default function VistaDashboard({
   totalClientes = 0,
   isAdmin = false,
   isPreventista = false,
-  isPreventistaTaco = false,
   isEncargado = false,
 }: VistaDashboardProps) {
   // Visibilidad por rol:
   //  - admin: ve todo
   //  - encargado: solo "Ventas ultimos 7 dias" + estados de pedido (sin facturacion total ni agregados)
-  //  - preventista_taco: solo items (Top 5 productos) + estados; sin ningun monto
-  //  - preventista regular: ve montos pero filtrados a sus propias ventas
-  const verMontosAgregados = isAdmin || (isPreventista && !isPreventistaTaco)
-  const verVentasSemanales = !isPreventistaTaco // taco no ve ningun monto
+  //  - preventista: ve montos pero filtrados a sus propias ventas
+  const verMontosAgregados = isAdmin || isPreventista
   const verTopProductos = !isEncargado || isAdmin // encargado no ve agregados de productos
   const verEstadoPedidos = true
   const [fechaDesdeLocal, setFechaDesdeLocal] = useState<string>('');
@@ -360,7 +356,7 @@ export default function VistaDashboard({
 
   if (loading) return <LoadingSpinner />;
 
-  const verbo = (isPreventista && !isAdmin && !isPreventistaTaco) ? 'Mis métricas' : 'Resumen';
+  const verbo = (isPreventista && !isAdmin) ? 'Mis métricas' : 'Resumen';
 
   return (
     <div className="space-y-5">
@@ -508,7 +504,6 @@ export default function VistaDashboard({
       {/* Gráficos */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Ventas últimos 7 días */}
-        {verVentasSemanales && (
         <div className="bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-xl shadow-warm p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-stone-900 dark:text-white">Ventas últimos 7 días</h3>
@@ -533,7 +528,6 @@ export default function VistaDashboard({
             })}
           </div>
         </div>
-        )}
 
         {/* Top 5 productos */}
         {verTopProductos && (

@@ -41,7 +41,6 @@ export interface VistaPedidosProps {
   isPreventista: boolean;
   isTransportista: boolean;
   isEncargado?: boolean;
-  isPreventistaTaco?: boolean;
   userId: string;
   clientes: ClienteDB[];
   productos: ProductoDB[];
@@ -115,7 +114,6 @@ export default function VistaPedidos({
   isPreventista,
   isTransportista,
   isEncargado,
-  isPreventistaTaco,
   userId,
   transportistas = [],
   usuarios = [],
@@ -204,7 +202,7 @@ export default function VistaPedidos({
       />
 
       {/* Resumen de estados (totales sobre todos los pedidos filtrados) */}
-      <PedidoStats summary={statsSummary} isEncargado={isEncargado} isPreventistaTaco={isPreventistaTaco} />
+      <PedidoStats summary={statsSummary} isEncargado={isEncargado} />
 
       {/* Lista de pedidos */}
       {loading ? (

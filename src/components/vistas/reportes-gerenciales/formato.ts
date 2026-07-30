@@ -27,7 +27,6 @@ export function moneyC(x: number): string {
 export function rolLabel(rol: string): string {
   switch (rol) {
     case 'preventista':
-    case 'preventista_taco':
       return 'Prev'
     case 'encargado':
       return 'Encarg'
