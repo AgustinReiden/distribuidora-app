@@ -24,6 +24,10 @@ vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromocionesListQuery: () => ({ data: [], isLoading: false }),
   usePedidoSustitucionesQuery: () => ({ data: [], isLoading: false }),
 }))
+// Mínimos de venta por producto (mig 147): vacío => sin MOQ propio.
+vi.mock('../../hooks/queries/useProductosQuery', () => ({
+  useMinimosVentaQuery: () => ({ data: new Map(), isLoading: false }),
+}))
 
 // Mock formatPrecio (preserve fechaLocalISO since usePromocionesQuery uses it indirectly)
 vi.mock('../../utils/formatters', () => ({

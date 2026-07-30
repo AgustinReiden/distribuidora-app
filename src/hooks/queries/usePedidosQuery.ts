@@ -8,6 +8,8 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen } from '../../types'
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
+import { fechaLocalISO } from '../../utils/formatters'
+import type { OrigenPrecioItem } from '../../utils/origenPrecio'
 
 // Query keys
 export const pedidosKeys = {
@@ -61,6 +63,13 @@ interface CrearPedidoInput {
   // el RPC usa auth.uid() (comportamiento histórico). Si difiere, el RPC
   // exige que el actor sea admin (mig 060).
   preventistaId?: string | null
+  /**
+   * Por qué se cobró cada precio (mig 148/149). Se registra en un segundo paso,
+   * después de crear el pedido: es metadato analítico y no justifica tocar
+   * `crear_pedido_completo`. Si falta o falla, los ítems quedan en
+   * 'desconocido' y el reporte de comisiones los cuenta como sin desglose.
+   */
+  origenes?: OrigenPrecioItem[]
 }
 
 interface CambiarClienteInput {
@@ -92,7 +101,7 @@ interface ActualizarPagoInput {
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
 const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
-const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, horario_entrega, zona, zona_id' as const
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
@@ -379,13 +388,52 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     throw new Error(result.errores?.join(', ') || 'Error al crear pedido')
   }
 
+  await registrarOrigenPrecio(result.pedido_id!, input.origenes)
+
   return { id: result.pedido_id! }
 }
 
+/**
+ * Registra por qué se cobró cada precio (mig 149).
+ *
+ * Deliberadamente NO propaga el error: el pedido ya está creado y cobrado. Si
+ * esta llamada falla, lo que se pierde es resolución en el reporte de
+ * comisiones —los ítems quedan 'desconocido' y el RPC los reporta como sin
+ * desglose—, no plata. Hacer fallar la creación del pedido por un metadato
+ * sería el peor intercambio posible.
+ */
+async function registrarOrigenPrecio(
+  pedidoId: string,
+  origenes: OrigenPrecioItem[] | undefined,
+): Promise<void> {
+  if (!pedidoId || !origenes || origenes.length === 0) return
+  try {
+    const { error } = await supabase.rpc('registrar_origen_precio_items', {
+      p_pedido_id: pedidoId,
+      p_origenes: origenes,
+    })
+    if (error) throw error
+  } catch (e) {
+    console.warn('No se pudo registrar el origen del precio de los items:', e)
+  }
+}
+
 async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB> {
+  // Al marcar 'entregado' hay que estampar fecha_entrega (mediodia AR, igual que
+  // las RPC masivas marcar_entregas_masivo / marcar_entrega_y_pago_masivo) para
+  // que las rendiciones clasifiquen el cobro como "Entrega del dia". Sin esto el
+  // pedido queda entregado con fecha_entrega NULL y el cobro cae en "Ctas Ctes"
+  // (bug sistemico: ~38% de las entregas quedaron sin fecha desde abr-2026).
+  // Al pasar a cualquier otro estado (desmarcar/reasignar) se limpia.
+  const updateData: Record<string, unknown> = {
+    estado: input.nuevoEstado,
+    updated_at: new Date().toISOString(),
+    fecha_entrega: input.nuevoEstado === 'entregado' ? `${fechaLocalISO()}T12:00:00-03:00` : null,
+  }
+
   const { data, error } = await supabase
     .from('pedidos')
-    .update({ estado: input.nuevoEstado })
+    .update(updateData)
     .eq('id', input.pedidoId)
     .select()
     .single()
@@ -899,7 +947,12 @@ export function useEntregasMasivasMutation() {
 // Cancelar Pedido
 // =========================================================================
 
-async function cancelarPedido(pedidoId: string, motivo: string, usuarioId?: string): Promise<void> {
+async function cancelarPedido(
+  pedidoId: string,
+  motivo: string,
+  usuarioId?: string,
+  tipo?: string,
+): Promise<void> {
   const { data, error } = await supabase.rpc('cancelar_pedido_con_stock', {
     p_pedido_id: pedidoId,
     p_motivo: motivo,
@@ -912,6 +965,17 @@ async function cancelarPedido(pedidoId: string, motivo: string, usuarioId?: stri
   if (!result.success) {
     throw new Error(result.error || 'Error al cancelar pedido')
   }
+
+  // El motivo tipificado (mig 143) se guarda aparte para no reescribir
+  // `cancelar_pedido_con_stock`, que además restaura stock. Si este update
+  // fallara, el pedido igual queda cancelado con su motivo en texto.
+  if (tipo) {
+    const { error: errTipo } = await supabase
+      .from('pedidos')
+      .update({ motivo_cancelacion_tipo: tipo })
+      .eq('id', pedidoId)
+    if (errTipo) console.error('[pedidos] no se pudo guardar el motivo tipificado:', errTipo)
+  }
 }
 
 /**
@@ -922,8 +986,8 @@ export function useCancelarPedidoMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: ({ pedidoId, motivo, usuarioId }: { pedidoId: string; motivo: string; usuarioId?: string }) =>
-      cancelarPedido(pedidoId, motivo, usuarioId),
+    mutationFn: ({ pedidoId, motivo, usuarioId, tipo }: { pedidoId: string; motivo: string; usuarioId?: string; tipo?: string }) =>
+      cancelarPedido(pedidoId, motivo, usuarioId, tipo),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })

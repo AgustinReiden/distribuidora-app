@@ -1,4 +1,4 @@
-import { useState, memo } from 'react';
+import { useState, memo, lazy, Suspense } from 'react';
 import type { ChangeEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
@@ -15,6 +15,9 @@ import {
 } from '../../utils/calculations';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
 
+// Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
+const ProductoCondicionesMayoristas = lazy(() => import('../productos/ProductoCondicionesMayoristas'));
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -28,6 +31,11 @@ export interface ProductoFormData {
   proveedor_id: string;
   stock: number | string;
   stock_minimo: number;
+  /**
+   * Mínimo de unidades que hay que pedir de este producto (mig 147).
+   * `null`/`undefined` = sin mínimo. No confundir con `stock_minimo`.
+   */
+  cantidad_minima_venta?: number | null;
   porcentaje_iva: number;
   costo_sin_iva: number | string;
   costo_con_iva: number | string;
@@ -75,6 +83,12 @@ export interface ModalProductoProps {
   guardando: boolean;
   /** Habilita corregir a mano el costo promedio (solo admin) */
   esAdmin?: boolean;
+  /**
+   * Abre el modal de condición mayorista con este producto preseleccionado.
+   * Lo resuelve el container: cierra la ficha y abre el otro modal, en vez de
+   * anidar dos modales (el de adentro pelea con el focus trap del de afuera).
+   */
+  onCrearCondicionMayorista?: () => void;
 }
 
 // Opciones de IVA disponibles
@@ -94,7 +108,7 @@ const getCategoryKey = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : (cat.id || cat.nombre);
 };
 
-const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando, esAdmin = false }: ModalProductoProps) {
+const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -112,6 +126,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     proveedor_id: producto.proveedor_id || '',
     stock: producto.stock ?? '',
     stock_minimo: producto.stock_minimo ?? 10,
+    cantidad_minima_venta: producto.cantidad_minima_venta ?? undefined,
     // Atributo fiscal del producto: preservar el real (ej: 10.5) en vez de resetear a 21.
     porcentaje_iva: producto.porcentaje_iva ?? 21,
     costo_sin_iva: producto.costo_sin_iva ?? '',
@@ -129,6 +144,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     proveedor_id: '',
     stock: '',
     stock_minimo: 10,
+    cantidad_minima_venta: undefined,
     porcentaje_iva: 21,
     costo_sin_iva: '',
     costo_con_iva: '',
@@ -284,6 +300,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
       onSave({
         ...formNormalizado,
         categoria: categoriaFinal,
+        // 0 / vacío significan "sin mínimo": la columna es NULL, no 0 (el CHECK
+        // de la mig 147 exige > 0).
+        cantidad_minima_venta: Number(formNormalizado.cantidad_minima_venta) > 0
+          ? Number(formNormalizado.cantidad_minima_venta)
+          : null,
         id: producto?.id,
         costo_real: costoReal > 0 ? costoReal : null,
         ...(cppCorregido !== undefined ? { costo_promedio: cppCorregido } : {}),
@@ -330,22 +351,45 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Stock Minimo de Seguridad</label>
-          <NumberInput
-            integer
-            min={0}
-            emptyValue={0}
-            value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
-            onChange={(n) => handleFieldChange('stock_minimo', n)}
-            commitOnChange
-            className={inputClass('stock_minimo')}
-            placeholder="10"
-          />
-          {errores.stock_minimo && <p className="text-red-500 text-xs mt-1">{errores.stock_minimo}</p>}
-          <p className="text-xs text-gray-500 mt-1">
-            Se mostrara una alerta cuando el stock este por debajo de este valor
-          </p>
+        {/* Los dos mínimos, juntos y con la diferencia explícita: uno mira el
+            depósito (cuándo reponer), el otro mira la venta (cuánto es lo
+            menos que se puede pedir). Se confundían por el nombre parecido. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Stock mínimo de seguridad</label>
+            <NumberInput
+              integer
+              min={0}
+              emptyValue={0}
+              value={form.stock_minimo !== undefined ? form.stock_minimo : 10}
+              onChange={(n) => handleFieldChange('stock_minimo', n)}
+              commitOnChange
+              className={inputClass('stock_minimo')}
+              placeholder="10"
+            />
+            {errores.stock_minimo && <p className="text-red-500 text-xs mt-1">{errores.stock_minimo}</p>}
+            <p className="text-xs text-gray-500 mt-1">
+              Alerta de reposición: avisa cuando el stock baja de este valor. No bloquea ventas.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Mínimo de venta (por pedido)</label>
+            <NumberInput
+              integer
+              min={0}
+              emptyValue={0}
+              value={form.cantidad_minima_venta ?? 0}
+              onChange={(n) => handleFieldChange('cantidad_minima_venta', n > 0 ? n : 0)}
+              commitOnChange
+              className={inputClass('cantidad_minima_venta')}
+              placeholder="0"
+            />
+            {errores.cantidad_minima_venta && <p className="text-red-500 text-xs mt-1">{errores.cantidad_minima_venta}</p>}
+            <p className="text-xs text-gray-500 mt-1">
+              Lo menos que se puede pedir de este sabor. Bloquea el pedido en la app y en el bot. 0 = sin mínimo.
+            </p>
+          </div>
         </div>
 
         <div>
@@ -719,6 +763,23 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             Editá cualquiera de los dos márgenes o el precio final indistintamente.
           </p>
         </div>
+
+        {/* Condiciones mayoristas de ESTE producto, con su margen. Solo en
+            edición: sin id no hay a qué grupo pertenecer todavía. Los costos
+            salen del form, así el margen se mueve mientras editás el costo. */}
+        {producto?.id && (
+          <Suspense fallback={null}>
+            <ProductoCondicionesMayoristas
+              productoId={producto.id}
+              precioLista={parsePrecio(String(form.precio))}
+              costoTotal={costosDesdeForm(form).costoTotal}
+              costoReal={costosDesdeForm(form).costoReal}
+              porcentajeIva={Number(form.porcentaje_iva) || 21}
+              puedeEditar={esAdmin}
+              onCrearCondicion={onCrearCondicionMayorista}
+            />
+          </Suspense>
+        )}
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>

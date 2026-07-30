@@ -6,8 +6,9 @@
  * (admin/encargado). Los salientes son solo lectura (esperan aprobación).
  */
 import { memo } from 'react'
-import { Loader2, ArrowDownLeft, ArrowUpRight, Plus, Check, X, PackageX, Eye } from 'lucide-react'
+import { Loader2, ArrowDownLeft, ArrowUpRight, Plus, Check, X, PackageX, Eye, Pencil, Ban, PackageMinus, Clock } from 'lucide-react'
 import { formatPrecio, formatDateTime } from '../../utils/formatters'
+import { ESTADO_MOVIMIENTO_BADGE, VERBO_RESOLUCION, horasDesde } from '../../constants/movimientos'
 import type { MovimientoSucursalDB, EstadoMovimiento } from '../../hooks/queries'
 
 type TabEstado = EstadoMovimiento | 'todos'
@@ -17,30 +18,32 @@ export interface VistaMovimientosProps {
   loading: boolean
   currentSucursalId: number | null
   canResolver: boolean
+  /** Editar/cancelar un envío propio pendiente: solo admin de la sucursal origen. */
+  canEditar: boolean
   estado: TabEstado
   onEstadoChange: (e: TabEstado) => void
   onNuevaSalida: () => void
   onAceptar: (mov: MovimientoSucursalDB) => void
   onDenegar: (mov: MovimientoSucursalDB) => void
   onVerDetalle: (mov: MovimientoSucursalDB) => void
+  onEditar: (mov: MovimientoSucursalDB) => void
+  onCancelar: (mov: MovimientoSucursalDB) => void
 }
 
 const TABS: Array<{ value: TabEstado; label: string }> = [
   { value: 'pendiente', label: 'Pendientes' },
   { value: 'aceptada', label: 'Aceptadas' },
   { value: 'denegada', label: 'Denegadas' },
+  { value: 'cancelada', label: 'Canceladas' },
   { value: 'todos', label: 'Todas' },
 ]
 
-const ESTADO_BADGE: Record<EstadoMovimiento, string> = {
-  pendiente: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  aceptada: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-  denegada: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-}
+/** Un envío pendiente hace más de esto se resalta: el incidente real fueron 39 h. */
+const HORAS_ALERTA = 24
 
 const VistaMovimientos = memo(function VistaMovimientos({
-  movimientos, loading, currentSucursalId, canResolver, estado, onEstadoChange,
-  onNuevaSalida, onAceptar, onDenegar, onVerDetalle,
+  movimientos, loading, currentSucursalId, canResolver, canEditar, estado, onEstadoChange,
+  onNuevaSalida, onAceptar, onDenegar, onVerDetalle, onEditar, onCancelar,
 }: VistaMovimientosProps) {
   return (
     <div className="space-y-4">
@@ -86,8 +89,17 @@ const VistaMovimientos = memo(function VistaMovimientos({
             const entrante = mov.sucursal_destino_id === currentSucursalId
             const contraparte = entrante ? mov.origen?.nombre : mov.destino?.nombre
             const puedeResolver = entrante && mov.estado === 'pendiente' && canResolver
+            const salientePendiente = !entrante && mov.estado === 'pendiente'
+            const enTransito = mov.estado === 'pendiente' && mov.stock_descontado
+            const horas = mov.estado === 'pendiente' ? horasDesde(mov.created_at) : 0
+            const demorado = horas >= HORAS_ALERTA
             return (
-              <div key={mov.id} className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4">
+              <div
+                key={mov.id}
+                className={`bg-white dark:bg-gray-800 rounded-xl border p-4 ${
+                  demorado ? 'border-red-300 dark:border-red-700' : 'dark:border-gray-700'
+                }`}
+              >
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex items-start gap-3 min-w-0">
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
@@ -102,18 +114,51 @@ const VistaMovimientos = memo(function VistaMovimientos({
                         <span className="font-semibold text-gray-900 dark:text-white">
                           {entrante ? 'Entrante de' : 'Saliente a'} {contraparte || 'otra sucursal'}
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_BADGE[mov.estado]}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ESTADO_MOVIMIENTO_BADGE[mov.estado]}`}>
                           {mov.estado}
                         </span>
                         <span className="text-xs text-gray-400">#{mov.id}</span>
                       </div>
+
+                      {/* Auditoría: quién cargó y quién resolvió, visible para ambas sucursales */}
                       <p className="text-xs text-gray-500 mt-0.5">
-                        {mov.created_at && formatDateTime(mov.created_at)}
-                        {mov.creador?.nombre ? ` · ${mov.creador.nombre}` : ''}
+                        Creado {mov.created_at && formatDateTime(mov.created_at)}
+                        {mov.creador?.nombre ? ` por ${mov.creador.nombre}` : ''}
                       </p>
+                      {mov.resuelto_at && (
+                        <p className="text-xs text-gray-500">
+                          {VERBO_RESOLUCION[mov.estado]} {formatDateTime(mov.resuelto_at)}
+                          {mov.resuelto?.nombre ? ` por ${mov.resuelto.nombre}` : ''}
+                        </p>
+                      )}
+                      {mov.editado_at && (
+                        <p className="text-xs text-gray-500">
+                          Editado {formatDateTime(mov.editado_at)}
+                          {mov.editor?.nombre ? ` por ${mov.editor.nombre}` : ''}
+                        </p>
+                      )}
+
+                      {/* El stock ya salió del origen: lo más importante de la tarjeta */}
+                      {enTransito && (
+                        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                          <PackageMinus className="w-3 h-3" />
+                          {entrante
+                            ? `Ya salió del origen · ${mov.total_unidades} u. pendientes de ingresar`
+                            : `Stock ya descontado · ${mov.total_unidades} u. en tránsito`}
+                        </span>
+                      )}
+                      {demorado && (
+                        <span className="inline-flex items-center gap-1 mt-1.5 ml-1.5 px-2 py-0.5 rounded text-xs bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                          <Clock className="w-3 h-3" />
+                          Sin resolver hace {horas} h
+                        </span>
+                      )}
+
                       {mov.notas && <p className="text-xs text-gray-500 italic mt-1">{mov.notas}</p>}
-                      {mov.estado === 'denegada' && mov.motivo_rechazo && (
-                        <p className="text-xs text-red-500 mt-1">Motivo: {mov.motivo_rechazo}</p>
+                      {(mov.estado === 'denegada' || mov.estado === 'cancelada') && mov.motivo_rechazo && (
+                        <p className="text-xs text-red-500 mt-1">
+                          Motivo de la {mov.estado === 'cancelada' ? 'cancelación' : 'denegación'}: {mov.motivo_rechazo}
+                        </p>
                       )}
                     </div>
                   </div>
@@ -145,10 +190,28 @@ const VistaMovimientos = memo(function VistaMovimientos({
                         <Check className="w-4 h-4" /> Aceptar
                       </button>
                     </div>
-                  ) : (!entrante && mov.estado === 'pendiente') ? (
-                    <span className="text-xs text-amber-600 dark:text-amber-400">
-                      Esperando aprobación de {mov.destino?.nombre || 'la sucursal destino'}.
-                    </span>
+                  ) : salientePendiente ? (
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
+                        Esperando aprobación de {mov.destino?.nombre || 'la sucursal destino'}.
+                      </span>
+                      {canEditar && (
+                        <>
+                          <button
+                            onClick={() => onEditar(mov)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                          >
+                            <Pencil className="w-4 h-4" /> Editar
+                          </button>
+                          <button
+                            onClick={() => onCancelar(mov)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400"
+                          >
+                            <Ban className="w-4 h-4" /> Cancelar
+                          </button>
+                        </>
+                      )}
+                    </div>
                   ) : null}
                 </div>
               </div>

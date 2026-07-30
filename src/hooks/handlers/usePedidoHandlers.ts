@@ -7,6 +7,7 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { useLatestRef } from '../useLatestRef'
 import { usePricingMapQuery } from '../queries/useGruposPrecioQuery'
 import { usePromoMapQuery } from '../queries/usePromocionesQuery'
+import { useMinimosVentaQuery } from '../queries/useProductosQuery'
 import { resolverPreciosMayorista, aplicarPreciosMayorista, validarMOQPedido } from '../../utils/precioMayorista'
 import { resolverPromociones } from '../../utils/promociones'
 import { calcularNetoVenta } from '../../utils/calculations'
@@ -302,16 +303,29 @@ export function usePedidoHandlers({
   const { data: promoMap } = usePromoMapQuery()
   const promoMapRef = useLatestRef(promoMap)
 
+  // Mínimo de venta por producto (mig 147)
+  const { data: minimosVenta } = useMinimosVentaQuery()
+  const minimosVentaRef = useLatestRef(minimosVenta)
+
   // ==========================================================================
   // HANDLERS - Usan refs para valores frecuentes, deps estables para funciones
   // ==========================================================================
 
   // Item management - usa refs para evitar dependencias de valores cambiantes
-  const agregarItemPedido = useCallback((productoId: string): void => {
+  // `cantidad` permite prellenar con el mínimo de venta del producto. El picker
+  // ya lo mandaba (ModalPedido: `onAgregarItem(p.id, moq || 1)`) pero acá se
+  // ignoraba y se hardcodeaba 1, así que el usuario caía directo en la
+  // violación del mínimo que el propio picker le acababa de mostrar.
+  const agregarItemPedido = useCallback((productoId: string, cantidad = 1): void => {
     const nuevoPedido = nuevoPedidoRef.current
     const productos = productosRef.current
     const existe = nuevoPedido.items.find(i => i.productoId === productoId)
     const producto = productos.find(p => p.id === productoId)
+    // Un producto sin precio de venta no puede entrar al pedido: antes caía
+    // en `producto?.precio || 0` y se vendía a $0. El picker ya lo deshabilita
+    // (ModalPedido); esto es la defensa en profundidad del lado del estado.
+    // El backend además lo rechaza (trigger trg_validar_precio_item_pedido, mig 139).
+    if (!existe && !(Number(producto?.precio) > 0)) return
     if (existe) {
       setNuevoPedido(prev => ({
         ...prev,
@@ -320,7 +334,7 @@ export function usePedidoHandlers({
     } else {
       setNuevoPedido(prev => ({
         ...prev,
-        items: [...prev.items, { productoId, cantidad: 1, precioUnitario: producto?.precio || 0 }]
+        items: [...prev.items, { productoId, cantidad: Math.max(1, cantidad), precioUnitario: producto?.precio || 0 }]
       }))
     }
   }, [nuevoPedidoRef, productosRef, setNuevoPedido])
@@ -400,15 +414,19 @@ export function usePedidoHandlers({
       return
     }
 
-    // Validar cantidades mínimas de pedido
+    // Validar cantidades mínimas de pedido. Se corre siempre, no solo cuando hay
+    // condiciones mayoristas: el mínimo de venta del producto (mig 147) es
+    // independiente de ellas. El trigger de la DB lo revalida igual.
     const currentPricingMap = pricingMapRef.current
-    if (currentPricingMap && currentPricingMap.size > 0) {
-      const violaciones = validarMOQPedido(nuevoPedido.items, currentPricingMap)
-      if (violaciones.length > 0) {
-        const mensajes = violaciones.map(v => `${productosRef.current.find(p => p.id === v.productoId)?.nombre || 'Producto'}: mínimo ${v.cantidadMinima} unidades`)
-        notify.error(`Cantidad mínima no alcanzada:\n${mensajes.join('\n')}`, 5000)
-        return
-      }
+    const violaciones = validarMOQPedido(
+      nuevoPedido.items,
+      currentPricingMap ?? new Map(),
+      minimosVentaRef.current,
+    )
+    if (violaciones.length > 0) {
+      const mensajes = violaciones.map(v => `${productosRef.current.find(p => p.id === v.productoId)?.nombre || 'Producto'}: mínimo ${v.cantidadMinima} unidades`)
+      notify.error(`Cantidad mínima no alcanzada:\n${mensajes.join('\n')}`, 5000)
+      return
     }
 
     // Resolver promociones activas
@@ -542,7 +560,7 @@ export function usePedidoHandlers({
       notify.error('Error al crear pedido: ' + error.message)
     }
     setGuardando(false)
-  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, promoMapRef, productosRef, clientesRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
+  }, [nuevoPedidoRef, userRef, isOnlineRef, pricingMapRef, promoMapRef, minimosVentaRef, productosRef, clientesRef, validarStock, guardarPedidoOffline, resetNuevoPedido, modales.pedido, crearPedido, descontarStock, registrarPago, refetchProductos, refetchMetricas, notify, setGuardando])
 
   // State change handlers
   const handleMarcarEntregado = useCallback((pedido: PedidoDB): void => {

@@ -11,6 +11,8 @@ import {
   drawCheckbox
 } from './utils'
 import { formatAclaracionBulto } from './utils/formatBulto'
+import { clasificarBarrida, ETIQUETA_BARRIDA } from '../../utils/barridas'
+import { horarioParaRutear } from '../../hooks/useOptimizarRuta'
 
 // === Layout A4 horizontal ===
 const PAGE_WIDTH = 297
@@ -686,6 +688,23 @@ function drawCierreOps(doc, ops, x, yStart) {
  * @param {Object} infoRuta - Informacion opcional de ruta (duracion, distancia)
  * @returns {void}
  */
+/** Alto que ocupa el separador de barrida, para el calculo de salto de columna. */
+const SEPARADOR_BARRIDA_ALTO = 7
+
+/** Titulo de tanda: linea + etiqueta ('Cierran al mediodia', etc.). */
+function drawSeparadorBarrida(doc, barrida, x, y) {
+  const ancho = COLUMN_WIDTH
+  doc.setDrawColor(120, 120, 120)
+  doc.setLineWidth(0.4)
+  doc.line(x, y + 1.5, x + ancho, y + 1.5)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7.5)
+  doc.setTextColor(90, 90, 90)
+  doc.text(`BARRIDA ${barrida} - ${(ETIQUETA_BARRIDA[barrida] || '').toUpperCase()}`, x, y + 5.5)
+  doc.setTextColor(0, 0, 0)
+  return y + SEPARADOR_BARRIDA_ALTO
+}
+
 export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {}) {
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -715,13 +734,27 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
   const columnX = () =>
     PAGE_MARGIN + currentColumn * (COLUMN_WIDTH + COLUMN_GAP)
 
+  // Separador de barridas: la ruta viene ordenada por barrida (el optimizador
+  // encadena las tres), asi que alcanza con marcar el corte cuando cambia. Sin
+  // esto el chofer ve una lista corrida y no sabe que los primeros son los que
+  // cierran al mediodia. Se recalcula del horario del cliente en vez de leer
+  // recorrido_pedidos.barrida para que valga tambien al exportar antes de armar.
+  let barridaPrevia = null
   pedidos.forEach((pedido, idx) => {
+    const { barrida } = clasificarBarrida(horarioParaRutear(pedido?.cliente))
     const ops = buildCardOps(doc, pedido, idx + 1)
     const height = measureCardHeight(ops)
+    const cambiaBarrida = barrida !== barridaPrevia
+    const altoSeparador = cambiaBarrida ? SEPARADOR_BARRIDA_ALTO : 0
 
     // Si no entra en la columna actual, pasa a la siguiente
-    if (y + height > columnBottom && y > columnTop) {
+    if (y + height + altoSeparador > columnBottom && y > columnTop) {
       advanceColumn()
+    }
+
+    if (cambiaBarrida) {
+      y = drawSeparadorBarrida(doc, barrida, columnX(), y)
+      barridaPrevia = barrida
     }
 
     y = drawCardOps(doc, ops, columnX(), y)

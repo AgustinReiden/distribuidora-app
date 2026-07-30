@@ -15,6 +15,7 @@ export const productosKeys = {
   details: (sucursalId: number | null) => [...productosKeys.all(sucursalId), 'detail'] as const,
   detail: (sucursalId: number | null, id: string) => [...productosKeys.details(sucursalId), id] as const,
   stockBajo: (sucursalId: number | null, umbral: number) => [...productosKeys.all(sucursalId), 'stockBajo', umbral] as const,
+  minimosVenta: (sucursalId: number | null) => [...productosKeys.all(sucursalId), 'minimosVenta'] as const,
 }
 
 // Fetch functions
@@ -37,6 +38,28 @@ async function fetchProductoById(id: string): Promise<ProductoDB | null> {
 
   if (error) throw error
   return data as ProductoDB
+}
+
+/**
+ * Mínimos de venta por producto (mig 147), como mapa productoId → mínimo.
+ *
+ * Query propia y no derivada de `useProductosQuery` porque la consumen los
+ * hooks de precios (`usePrecioMayorista`, `usePromocionPedido`), que corren en
+ * pantallas donde la lista completa de productos puede no estar cargada. Trae
+ * solo las filas que tienen mínimo — en prod son unas decenas.
+ */
+async function fetchMinimosVenta(): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from('productos')
+    .select('id, cantidad_minima_venta')
+    .not('cantidad_minima_venta', 'is', null)
+
+  if (error) throw error
+  const map = new Map<string, number>()
+  for (const row of (data as Array<{ id: string; cantidad_minima_venta: number }> | null) || []) {
+    if (row.cantidad_minima_venta > 0) map.set(String(row.id), row.cantidad_minima_venta)
+  }
+  return map
 }
 
 async function fetchProductosStockBajo(umbral: number): Promise<ProductoDB[]> {
@@ -79,6 +102,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       precio: producto.precio,
       stock: producto.stock,
       stock_minimo: producto.stock_minimo ?? 10,
+      // Mínimo de venta (mig 147): distinto de stock_minimo. null = sin mínimo.
+      cantidad_minima_venta: producto.cantidad_minima_venta ?? null,
       categoria: producto.categoria || null,
       proveedor_id: producto.proveedor_id || null,
       costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
@@ -109,6 +134,7 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.precio !== undefined) updateData.precio = producto.precio
   if (producto.stock !== undefined) updateData.stock = producto.stock
   if (producto.stock_minimo !== undefined) updateData.stock_minimo = producto.stock_minimo
+  if (producto.cantidad_minima_venta !== undefined) updateData.cantidad_minima_venta = producto.cantidad_minima_venta
   if (producto.categoria !== undefined) updateData.categoria = producto.categoria || null
   if (producto.proveedor_id !== undefined) updateData.proveedor_id = producto.proveedor_id || null
   if (producto.costo_sin_iva !== undefined) updateData.costo_sin_iva = producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null
@@ -186,6 +212,21 @@ export function useProductosStockBajoQuery(umbral = 10) {
 }
 
 /**
+ * Hook con los mínimos de venta por producto (mig 147).
+ *
+ * Devuelve el `MinimosProducto` que consumen `obtenerMOQ`/`validarMOQPedido`.
+ * Cambian muy poco, así que comparte el staleTime largo de productos.
+ */
+export function useMinimosVentaQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: productosKeys.minimosVenta(currentSucursalId),
+    queryFn: fetchMinimosVenta,
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+/**
  * Hook para crear un producto
  */
 export function useCrearProductoMutation() {
@@ -202,6 +243,7 @@ export function useCrearProductoMutation() {
       })
       // Invalidar queries relacionadas
       queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.minimosVenta(currentSucursalId) })
     },
   })
 }
@@ -243,6 +285,7 @@ export function useActualizarProductoMutation() {
       // Revalidar para asegurar consistencia
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.minimosVenta(currentSucursalId) })
     },
   })
 }
@@ -380,6 +423,51 @@ export function useActualizarPreciosMasivoMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
+    },
+  })
+}
+
+// ===========================================================================
+// Carga masiva del mínimo de venta por categoría (mig 147)
+// ===========================================================================
+
+export interface ActualizarMinimoVentaMasivoInput {
+  /** Categoría destino (`categorias.id`). */
+  categoriaId: string
+  /** Mínimo a aplicar, o null para quitarlo. */
+  cantidad: number | null
+}
+
+export interface ActualizarMinimoVentaMasivoResult {
+  success: boolean
+  actualizados: number
+}
+
+/**
+ * Aplica un mínimo de venta a todos los productos de una categoría vía el RPC
+ * `actualizar_minimo_venta_masivo` (admin/encargado; la DB revalida el rol y
+ * acota a la sucursal activa).
+ */
+export function useActualizarMinimoVentaMasivoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ categoriaId, cantidad }: ActualizarMinimoVentaMasivoInput): Promise<ActualizarMinimoVentaMasivoResult> => {
+      const { data, error } = await supabase.rpc('actualizar_minimo_venta_masivo', {
+        p_categoria_id: categoriaId,
+        p_cantidad: cantidad,
+      })
+      if (error) throw error
+      const result = data as ActualizarMinimoVentaMasivoResult | null
+      if (!result || result.success === false) {
+        throw new Error('No se pudo aplicar el mínimo de venta')
+      }
+      return result
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.minimosVenta(currentSucursalId) })
     },
   })
 }

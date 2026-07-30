@@ -18,14 +18,25 @@ export interface ClienteDB {
   aclaracion_direccion?: string | null;
   latitud?: number | null;
   longitud?: number | null;
+  /** place_id de Google del lugar elegido en el autocompletado (mig 151). */
+  place_id?: string | null;
   telefono?: string | null;
   email?: string | null;
   contacto?: string | null;
   /** @deprecated usar zona_id (FK a tabla zonas). Se mantiene un release para rollback. */
   zona?: string | null;
   zona_id?: string | null;
+  /** Formato canónico "HH:MM-HH:MM y …" (mig 140). Fuente de las ventanas del ruteo. */
   horarios_atencion?: string | null;
-  // Franja en la que el cliente pide recibir el pedido (se imprime en hoja de ruta)
+  /** Días que abre, bitmask de 7 chars Lunes→Domingo. null = abre todos (mig 140). */
+  dias_atencion?: string | null;
+  /** Texto libre tal como estaba antes del backfill de la mig 141. Solo lectura. */
+  horarios_atencion_original?: string | null;
+  /**
+   * @deprecated (mig 140) Los preventistas nunca tuvieron permiso de escribirla,
+   * por eso quedó vacía en 619/621. El horario canónico es `horarios_atencion`.
+   * Se conserva porque la imprimen los PDFs y porque tiene precedencia si está cargada.
+   */
   horario_entrega?: string | null;
   rubro?: string | null;
   notas?: string | null;
@@ -61,6 +72,13 @@ export interface ProductoDB {
   stock: number;
   stock_minimo?: number;
   categoria?: string | null;
+  /** FK a `categorias`; la sincroniza un trigger desde el texto `categoria` (mig 146) */
+  categoria_id?: string | null;
+  /**
+   * Mínimo de unidades por pedido para este producto (mig 147). NULL = sin
+   * mínimo. Ojo: NO es `stock_minimo`, que es el umbral de alerta de reposición.
+   */
+  cantidad_minima_venta?: number | null;
   proveedor_id?: string | null;
   costo_sin_iva?: number | null;
   costo_con_iva?: number | null;
@@ -270,6 +288,9 @@ export interface ClienteFormInput {
   zona?: string;
   zona_id?: string | null;
   horarios_atencion?: string;
+  /** Días que abre, bitmask Lunes→Domingo (mig 140). */
+  dias_atencion?: string | null;
+  /** @deprecated ver ClienteDB.horario_entrega */
   horario_entrega?: string;
   rubro?: string;
   notas?: string;
@@ -287,6 +308,8 @@ export interface ProductoFormInput {
   stock: number;
   stock_minimo?: number;
   categoria?: string;
+  /** Mínimo de venta del producto (mig 147). null lo quita. */
+  cantidad_minima_venta?: number | null;
   proveedor_id?: string | null;
   costo_sin_iva?: number | string;
   costo_con_iva?: number | string;

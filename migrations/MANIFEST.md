@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-07-10** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-07-28** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -50,6 +50,8 @@ número de archivo repetido en el repo (el orden real lo da `version`).
 | 081 | `081_clientes_horario_entrega.sql`, `081_aplicar_orden_ruta.sql` | `clientes_horario_entrega` (06-12 00:56) → `aplicar_orden_ruta` (06-12 17:50) |
 | 091 | `091_fix_promo_acumuladores_resto_y_clamp.sql`, `091_cambio_motivo_mal_estado.sql` | `fix_promo_acumuladores_resto_y_clamp` (06-23) → `cambio_motivo_mal_estado` (06-24) |
 | 100 | `100_costo_snapshot_y_creado_por_columnas.sql`, `100_marcar_entrega_y_pago_masivo.sql` | `costo_snapshot` (06-29, ver C) → `marcar_entrega_y_pago_masivo` (06-30) |
+| 139 | `139_movimientos_stock_preventivo.sql`, `139_guarda_precio_venta.sql` | `movimientos_stock_preventivo_*` (07-27 15:40, 5 filas, ver D) → `139_guarda_precio_venta` (07-27 17:22) |
+| 140 | `140_clientes_horario_canonico.sql`, `140_detalle_rendicion_cobrado_por.sql` | `140_clientes_horario_canonico` (07-27 18:27) → `detalle_rendicion_cobrado_por` (07-27 19:48, entre `144` y `145`) |
 
 ### B. Offset de numeración (repo va +1 respecto del ledger en 098–100)
 
@@ -88,6 +90,7 @@ desfasan y **se realinean en `101`**:
 | `095_reporte_gerencial.sql` | `reporte_gerencial` + `reporte_gerencial_fix_base_comision` |
 | `105_auditoria_integridad.sql` | `105_…` + `105_…_ventana_2h` + `105_…_fix_cc_saldo_a_favor` |
 | `123_terna_ingresos_pedidos.sql` | `123_…` (DDL+backfill+función) + `123_…_rpcs` (crear/bot) + `123_…_rpcs2` (editar/salvedades/cambiar tipo) — aplicado en 3 tandas por tamaño |
+| `139_movimientos_stock_preventivo.sql` | `movimientos_stock_preventivo_ddl` + `_crear` + `_aceptar` + `_denegar_cancelar` + `_editar` (5 filas, sin prefijo) |
 | (bot 014–020) | hotfix `020_bot_fix_pgcrypto_schema` plegado en la tanda, sin archivo propio |
 
 **Cadena `reporte_gerencial`** (reescrita ~9 veces por `CREATE OR REPLACE`): el repo versiona
@@ -96,6 +99,41 @@ los hitos (`095`, `097` grants, `098`, `103`, `106`, `107`, `110`). Los intermed
 **no tienen archivo dedicado**: su lógica (p.ej. el gate `v_asignadas`) **sobrevive en el body
 vivo**, que equivale al último archivo (`110`: cobranza desde `pagos`, parciales por monto,
 compras sin canceladas, split de mermas, `bonif_promos`).
+
+---
+
+## Numeración: la tanda del 2026-07-27 arranca en 139
+
+Las migraciones de rendiciones ocupan **133–138** en el repo, pero en el ledger quedaron
+**sin prefijo numérico** (`fix_fecha_entrega_desde_historial`, `detalle_rendicion_formas_pago`,
+`pedidos_ctacte_pendientes`). Por eso, al consultar solo el ledger, los números 136–138
+parecían libres y la tanda de ruteo/rechazos/categorías se numeró ahí, colisionando con
+los archivos de rendiciones.
+
+Se corrigió renumerando esa tanda a **139–147** (archivos y ledger), preservando el orden
+cronológico.
+
+**La renumeración dejó una colisión residual.** Al mergear `main` después de renumerar
+entraron dos archivos que ya ocupaban 139 y 140 en otra rama:
+
+| `NN` | de esta tanda | de `main` |
+|------|---------------|-----------|
+| 139 | `139_guarda_precio_venta.sql` | `139_movimientos_stock_preventivo.sql` |
+| 140 | `140_clientes_horario_canonico.sql` | `140_detalle_rendicion_cobrado_por.sql` |
+
+Las cuatro están aplicadas en prod con `name` distinto en el ledger, así que **no hay riesgo
+funcional** y no se renombran los archivos: renombrarlos los desalinearía del ledger. El orden
+real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
+cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
+
+**La próxima migración es la 153** — verificado contra el ledger el 2026-07-28: la última
+numerada es `152_guardar_horario_cliente_masivo`. Las **148–152** (origen del precio, reglas
+de comisión, `place_id` y horarios masivos) están aplicadas y mapean **1:1** con el ledger,
+así que no agregan ninguna excepción a las tablas de arriba.
+
+**Antes de elegir el número de una migración nueva, mirar `ls migrations/` además del
+ledger**: el ledger no siempre lleva el prefijo, así que por sí solo no alcanza. Y si mergeaste
+`main` en el medio, volvé a mirarlo — los números que estaban libres pueden haberse ocupado.
 
 ---
 

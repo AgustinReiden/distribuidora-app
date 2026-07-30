@@ -7,6 +7,7 @@ import { formatPrecio, parseDateSafe, fechaHaceDias } from '../../utils/formatte
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
+import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
@@ -71,7 +72,7 @@ export interface ModalEditarPedidoProps {
   /** Callback al guardar datos */
   onSave: (data: PedidoSaveData) => void | Promise<void>;
   /** Callback al guardar items */
-  onSaveItems?: (items: PedidoEditItem[]) => Promise<void>;
+  onSaveItems?: (items: PedidoEditItem[], origenes?: OrigenPrecioItem[]) => Promise<void>;
   /** Callback al cambiar el preventista asignado al pedido (solo admin) */
   onCambiarPreventista?: (nuevoPreventistaId: string) => Promise<void>;
   /** Callback al cerrar */
@@ -281,6 +282,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     itemsFinales,
     totalFinal,
     moqMap,
+    preciosResueltos,
     isLoading: promosLoading,
   } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, undefined, promosEliminadasSet);
 
@@ -577,7 +579,21 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           porcentaje_iva: 0,
         }));
 
-        await onSaveItems([...itemsNoBonif, ...itemsBonif]);
+        // Por que se cobro cada precio (mig 148/149). Es OBLIGATORIO mandarlo
+        // en la edicion: actualizar_pedido_items borra y reinserta los items, o
+        // sea que sin esto el origen registrado al crear el pedido se pierde y
+        // la venta pasa a comisionarse con la regla generica.
+        const todosLosItems = [...itemsNoBonif, ...itemsBonif];
+        const origenes = construirOrigenPrecioItems(
+          todosLosItems.map(it => ({
+            productoId: it.productoId,
+            precioUnitario: it.precioUnitario,
+            esBonificacion: it.esBonificacion,
+            precioOverride: it.precioOverride,
+          })),
+          { preciosResueltos },
+        );
+        await onSaveItems(todosLosItems, origenes);
       }
       // Guardar el resto de los datos
       const fechaEntregaProgramadaCambio = puedeEditarFechas && !pedidoEntregado && fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;

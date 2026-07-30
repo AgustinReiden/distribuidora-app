@@ -23,6 +23,7 @@ import NumberInput from '../ui/NumberInput'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
+import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import type { PedidoDB, PagoDBWithUsuario } from '../../types'
 
 export interface PagoPedidoPayload {
@@ -86,6 +87,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const saldoPendiente = Math.max(0, total - yaPagado)
 
   const [fechaPago, setFechaPago] = useState<string>(fechaLocalISO())
+  // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
+  const fechaMinima = useFechaMinimaPago()
   const [observaciones, setObservaciones] = useState<string>('')
   const [lineas, setLineas] = useState<LineaPago[]>([
     { formaPago: 'efectivo', monto: saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '' },
@@ -291,6 +294,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
               <input
                 type="date"
                 value={fechaPago}
+                min={fechaMinima}
                 onChange={e => setFechaPago(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               />

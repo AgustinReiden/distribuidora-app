@@ -9,7 +9,7 @@
  */
 import { useState, useEffect } from 'react';
 import {
-  Navigation, Square, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, ChevronUp, ChevronDown, Map as MapIcon, ArrowLeftRight,
+  Navigation, Square, Check, MapPin, Phone, AlertTriangle, Gift, ChevronRight, ChevronUp, ChevronDown, Map as MapIcon, ArrowLeftRight, XCircle,
 } from 'lucide-react';
 import { formatPrecio, getFormaPagoLabel } from '../../utils/formatters';
 import { formatDistancia } from '../../utils/geo';
@@ -32,6 +32,8 @@ export interface SheetParadaProps {
   llegaste: boolean;
   onSeleccionarParada: (pedidoId: string) => void;
   onEntregar: (pedido: PedidoConCliente) => void;
+  /** Abre el flujo de "no se pudo entregar" (motivo tipificado, mig 144). */
+  onNoEntregar?: (pedido: PedidoConCliente) => void;
   onSalvedad?: (pedidoId: string, item: PedidoItemDB & { producto?: ProductoDB }) => void;
   linksRutaMaps: LinkRutaMaps[];
   /** Prende/apaga la guía in-app para la parada activa (toggle). */
@@ -100,6 +102,7 @@ export default function SheetParada({
   llegaste,
   onSeleccionarParada,
   onEntregar,
+  onNoEntregar,
   onSalvedad,
   linksRutaMaps,
   onToggleGuia,
@@ -117,6 +120,7 @@ export default function SheetParada({
   // Acciones que abren un modal (entregar/cobro/salvedad) cierran el panel
   // primero, así el modal queda sobre el mapa sin pelear z-index con el panel.
   const entregar = (p: PedidoConCliente): void => { setAbierto(false); onEntregar(p); };
+  const noEntregar = (p: PedidoConCliente): void => { setAbierto(false); onNoEntregar?.(p); };
   const salvedad = (item: PedidoItemDB & { producto?: ProductoDB }): void => {
     if (!paradaActiva || !onSalvedad) return;
     setAbierto(false);
@@ -253,6 +257,20 @@ export default function SheetParada({
                     {esCambio(paradaActiva) ? 'Completar cambio' : 'Entregar'}
                   </button>
                 </div>
+
+                {/* No se pudo entregar. Antes esto no existía: el chofer solo
+                    podía entregar, y después alguien cancelaba el pedido a mano
+                    con un texto libre. Ahora queda el motivo y el pedido vuelve
+                    al pool para repartirlo otro día. */}
+                {onNoEntregar && !esCambio(paradaActiva) && (
+                  <button
+                    onClick={() => noEntregar(paradaActiva)}
+                    className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 text-sm font-semibold text-rose-700 transition-colors active:bg-rose-50 dark:border-rose-800/50 dark:text-rose-300 dark:active:bg-rose-900/25"
+                  >
+                    <XCircle className="h-4 w-4" />
+                    No se pudo entregar
+                  </button>
+                )}
               </div>
 
               {(paradaActiva.items?.length || 0) > 0 && (

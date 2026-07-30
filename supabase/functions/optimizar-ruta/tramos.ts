@@ -51,6 +51,12 @@ export interface OrdenOptimizadoItem {
   distancia_km?: number;
   duracion_minutos?: number;
   sin_coordenadas?: boolean;
+  /**
+   * Bloque de reparto: 1 = cierra al mediodía, 2 = sin horario cargado,
+   * 3 = corrido o abre tarde. Se persiste en recorrido_pedidos.barrida para
+   * mostrarla en la hoja de ruta y medir rechazos por barrida.
+   */
+  barrida?: 1 | 2 | 3 | 4 | 5;
 }
 
 export interface RutaUnida {

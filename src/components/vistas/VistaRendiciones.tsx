@@ -17,17 +17,24 @@ import {
   ChevronUp,
   AlertTriangle,
   FileText,
-  Receipt
+  Receipt,
+  Download,
+  Wallet,
+  Users,
+  IdCard
 } from 'lucide-react'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, formatDateTime } from '../../utils/formatters'
+import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
-import { useTransportistasQuery } from '../../hooks/queries'
+import { useTransportistasQuery, useClientesQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
-import { FORMAS_PAGO } from '../../constants/formasPago'
-import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput } from '../../types'
+import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
+import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput, ClienteDB } from '../../types'
 
 const ModalCerrarRendicion = lazy(() => import('../modals/ModalCerrarRendicion'))
 const ModalResolverRendicion = lazy(() => import('../modals/ModalResolverRendicion'))
+const ModalCtaCtePendiente = lazy(() => import('../modals/ModalCtaCtePendiente'))
+const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
 
 function formatMoney(value: number | undefined | null): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)
@@ -61,14 +68,77 @@ const ESTADO_STYLES: Record<EstadoRendicion, { label: string; badge: string; bor
   }
 }
 
+/** Fila del detalle de una rendición: cliente + quién cobró (RPC obtener_detalle_rendicion, migs 135/137/140). */
+interface DetalleRendicionCliente {
+  cliente_id: number
+  cliente_nombre: string
+  /** Usuario que registró el pago. Ojo: puede no ser el transportista de la
+   *  rendición — un saldo viejo cobrado en el mostrador figura bajo el
+   *  transportista que repartió ese pedido. */
+  cobrado_por_id: string | null
+  cobrado_por: string
+  total: number
+  total_entregas: number
+  total_ctascte: number
+  efectivo: number
+  transferencia: number
+  cheque: number
+  tarjeta: number
+  vale_blanco: number
+  otros: number
+  cantidad_pagos: number
+}
+
+/** Un pago individual dentro de la rendición (RPC obtener_pagos_rendicion_cliente, mig 142). */
+interface PagoRendicion {
+  pago_id: number
+  created_at: string
+  monto: number
+  forma_pago: string
+  referencia: string | null
+  notas: string | null
+  pedido_id: number | null
+  pedido_fecha: string | null
+  pedido_estado: string | null
+  cobrado_por: string
+  es_entrega_del_dia: boolean
+}
+
+/** Claves de forma de pago que se pueden usar para filtrar el detalle. */
+type FormaKey = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'vale_blanco' | 'otros'
+
+const FORMA_LABELS: Record<FormaKey, string> = {
+  efectivo: 'Efectivo',
+  transferencia: 'Transferencia',
+  cheque: 'Cheque',
+  tarjeta: 'Tarjeta',
+  vale_blanco: 'Vale Blanco',
+  otros: 'Otros'
+}
+
 interface ResumenCardProps {
   resumen: ResumenRendicionDiaria
   onCerrar: (resumen: ResumenRendicionDiaria) => void
   onResolver: (resumen: ResumenRendicionDiaria) => void
+  onVerFicha: (clienteId: number) => void
 }
 
-function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React.ReactElement {
+function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
+  const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
+  const [loadingDetalle, setLoadingDetalle] = useState(false)
+  // Un error del backend tiene que verse. Antes se hacía setDetalle([]) y el
+  // fallo quedaba disfrazado de "no hay datos" (así pasó inadvertido meses que
+  // la RPC fallaba por un tipo mal declarado).
+  const [errorDetalle, setErrorDetalle] = useState<string>('')
+  const [exportando, setExportando] = useState(false)
+  // Drill-down al pago: fila abierta (cliente+cobrador) y sus pagos ya traídos.
+  const [filaAbierta, setFilaAbierta] = useState<string | null>(null)
+  const [pagosPorFila, setPagosPorFila] = useState<Record<string, PagoRendicion[]>>({})
+  const [cargandoPagos, setCargandoPagos] = useState<string | null>(null)
+  // Drill-down: al clickear una forma de pago del breakdown se filtra el detalle
+  // por cliente para ver quien compone ese total.
+  const [formaFiltro, setFormaFiltro] = useState<FormaKey | null>(null)
   const estadoStyle = ESTADO_STYLES[resumen.estado]
 
   const desgloses = useMemo(() => {
@@ -92,6 +162,135 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
     : diferencia > 0
       ? `+${formatMoney(diferencia)} cobrado sobre entregado`
       : `${formatMoney(diferencia)} cobrado menos que entregado`
+
+  // Detalle por cliente: se carga cada vez que se expande la tarjeta.
+  // OJO: las deps NO pueden incluir `detalle`/`loadingDetalle`. Al setear el
+  // loading se re-dispararia el effect, su cleanup cancelaria el fetch en vuelo
+  // y el "Cargando detalle..." quedaba colgado para siempre.
+  useEffect(() => {
+    if (!expandido) return
+    let cancelado = false
+    setLoadingDetalle(true)
+    void (async () => {
+      const { data, error } = await supabase.rpc('obtener_detalle_rendicion', {
+        p_fecha: resumen.fecha,
+        p_transportista_id: resumen.transportista_id
+      })
+      if (cancelado) return
+      if (error) {
+        setErrorDetalle(error.message || 'No se pudo cargar el detalle')
+        setDetalle([])
+      } else {
+        setErrorDetalle('')
+        setDetalle((data || []).map((r: Record<string, unknown>) => ({
+          cliente_id: Number(r.cliente_id),
+          cliente_nombre: String(r.cliente_nombre ?? 'Cliente'),
+          cobrado_por_id: (r.cobrado_por_id as string | null) ?? null,
+          cobrado_por: String(r.cobrado_por ?? 'Sin usuario'),
+          total: Number(r.total) || 0,
+          total_entregas: Number(r.total_entregas) || 0,
+          total_ctascte: Number(r.total_ctascte) || 0,
+          efectivo: Number(r.efectivo) || 0,
+          transferencia: Number(r.transferencia) || 0,
+          cheque: Number(r.cheque) || 0,
+          tarjeta: Number(r.tarjeta) || 0,
+          vale_blanco: Number(r.vale_blanco) || 0,
+          otros: Number(r.otros) || 0,
+          cantidad_pagos: Number(r.cantidad_pagos) || 0
+        })))
+      }
+      setLoadingDetalle(false)
+    })()
+    return () => { cancelado = true }
+  }, [expandido, resumen.fecha, resumen.transportista_id])
+
+  const clientesCtasCtes = useMemo(
+    () => (detalle ?? []).filter(d => d.total_ctascte > 0),
+    [detalle]
+  )
+
+  // Cuánto cobró cada persona dentro de esta rendición. Sirve para el control
+  // de caja: la rendición agrupa por transportista, pero la plata la puede
+  // haber cobrado otro (p. ej. un saldo viejo cobrado en el mostrador).
+  const porCobrador = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of detalle ?? []) m.set(d.cobrado_por, (m.get(d.cobrado_por) ?? 0) + d.total)
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [detalle])
+
+  // Filas visibles: con filtro activo, solo los clientes que aportaron a esa forma.
+  const detalleVisible = useMemo(() => {
+    if (!detalle) return []
+    if (!formaFiltro) return detalle
+    return detalle.filter(d => (d[formaFiltro] || 0) > 0)
+  }, [detalle, formaFiltro])
+
+  const filaKey = (d: DetalleRendicionCliente) => `${d.cliente_id}-${d.cobrado_por_id ?? 'x'}`
+
+  /** Abre/cierra una fila del detalle y trae sus pagos la primera vez. */
+  const toggleFila = useCallback(async (d: DetalleRendicionCliente) => {
+    const key = filaKey(d)
+    if (filaAbierta === key) { setFilaAbierta(null); return }
+    setFilaAbierta(key)
+    if (pagosPorFila[key]) return
+
+    setCargandoPagos(key)
+    const { data, error } = await supabase.rpc('obtener_pagos_rendicion_cliente', {
+      p_fecha: resumen.fecha,
+      p_transportista_id: resumen.transportista_id,
+      p_cliente_id: d.cliente_id
+    })
+    if (error) {
+      setErrorDetalle(error.message || 'No se pudieron cargar los pagos')
+      setPagosPorFila(prev => ({ ...prev, [key]: [] }))
+    } else {
+      setPagosPorFila(prev => ({
+        ...prev,
+        [key]: (data || []).map((r: Record<string, unknown>) => ({
+          pago_id: Number(r.pago_id),
+          created_at: String(r.created_at ?? ''),
+          monto: Number(r.monto) || 0,
+          forma_pago: String(r.forma_pago ?? ''),
+          referencia: (r.referencia as string | null) ?? null,
+          notas: (r.notas as string | null) ?? null,
+          pedido_id: r.pedido_id != null ? Number(r.pedido_id) : null,
+          pedido_fecha: (r.pedido_fecha as string | null) ?? null,
+          pedido_estado: (r.pedido_estado as string | null) ?? null,
+          cobrado_por: String(r.cobrado_por ?? 'Sin usuario'),
+          es_entrega_del_dia: Boolean(r.es_entrega_del_dia)
+        }))
+      }))
+    }
+    setCargandoPagos(null)
+  }, [filaAbierta, pagosPorFila, resumen.fecha, resumen.transportista_id])
+
+  const handleExportarExcel = useCallback(async () => {
+    if (!detalle || detalle.length === 0) return
+    setExportando(true)
+    try {
+      const filas = detalle.map(d => ({
+        Cliente: d.cliente_nombre,
+        Cobró: d.cobrado_por,
+        Total: d.total,
+        'Entregas (dia)': d.total_entregas,
+        'Ctas Ctes': d.total_ctascte,
+        Efectivo: d.efectivo,
+        Transferencia: d.transferencia,
+        Cheque: d.cheque,
+        Tarjeta: d.tarjeta,
+        'Vale Blanco': d.vale_blanco,
+        Otros: d.otros,
+        'Nro pagos': d.cantidad_pagos
+      }))
+      const { createMultiSheetExcel } = await import('../../utils/excel')
+      await createMultiSheetExcel(
+        [{ name: 'Detalle', data: filas, columnWidths: [28, 16, 14, 14, 14, 12, 14, 12, 12, 12, 10, 8] }],
+        `rendicion-${resumen.transportista_nombre}-${resumen.fecha}`.replace(/\s+/g, '_')
+      )
+    } finally {
+      setExportando(false)
+    }
+  }, [detalle, resumen.transportista_nombre, resumen.fecha])
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border-l-4 ${estadoStyle.border} overflow-hidden`}>
@@ -252,21 +451,205 @@ function ResumenCard({ resumen, onCerrar, onResolver }: ResumenCardProps): React
         {expandido && (
           <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 text-sm space-y-3">
             <div>
-              <p className="text-xs text-gray-500 mb-2">Breakdown completo por forma de pago</p>
+              <p className="text-xs text-gray-500 mb-2">
+                Breakdown completo por forma de pago
+                <span className="text-gray-400"> · clickeá una para ver qué clientes la componen</span>
+              </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <div><span className="text-gray-500">Efectivo:</span> <span className="font-medium">{formatMoney(resumen.total_efectivo)}</span></div>
-                <div><span className="text-gray-500">Transferencia:</span> <span className="font-medium">{formatMoney(resumen.total_transferencia)}</span></div>
-                <div><span className="text-gray-500">Cheque:</span> <span className="font-medium">{formatMoney(resumen.total_cheque)}</span></div>
+                {([
+                  ['efectivo', 'Efectivo', resumen.total_efectivo],
+                  ['transferencia', 'Transferencia', resumen.total_transferencia],
+                  ['cheque', 'Cheque', resumen.total_cheque],
+                  ['tarjeta', 'Tarjeta', resumen.total_tarjeta],
+                  ['vale_blanco', 'Vale Blanco', resumen.total_vale_blanco],
+                  ['otros', 'Otros', resumen.total_otros]
+                ] as [FormaKey, string, number][]).map(([key, label, valor]) => (
+                  <button
+                    key={key}
+                    onClick={() => setFormaFiltro(formaFiltro === key ? null : key)}
+                    disabled={valor === 0}
+                    className={`text-left px-1.5 py-1 rounded transition-colors disabled:cursor-default ${
+                      formaFiltro === key
+                        ? 'bg-blue-100 dark:bg-blue-900/30 ring-1 ring-blue-400'
+                        : valor > 0 ? 'hover:bg-gray-100 dark:hover:bg-gray-700' : ''
+                    }`}
+                  >
+                    <span className="text-gray-500">{label}:</span>{' '}
+                    <span className="font-medium">{formatMoney(valor)}</span>
+                  </button>
+                ))}
                 {/* Cuenta corriente como forma de pago está deprecada (ya no se registran pagos así):
                     solo se muestra para datos históricos con monto, evitando un $0 permanente que confunde.
                     La cuenta corriente real (cobro de saldos) se ve arriba en la tarjeta "Ctas Ctes". */}
                 {resumen.total_cuenta_corriente > 0 && (
-                  <div><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
+                  <div className="px-1.5 py-1"><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
                 )}
-                <div><span className="text-gray-500">Tarjeta:</span> <span className="font-medium">{formatMoney(resumen.total_tarjeta)}</span></div>
-                <div><span className="text-gray-500">Vale Blanco:</span> <span className="font-medium">{formatMoney(resumen.total_vale_blanco)}</span></div>
-                <div><span className="text-gray-500">Otros:</span> <span className="font-medium">{formatMoney(resumen.total_otros)}</span></div>
               </div>
+            </div>
+
+            {/* Detalle por cliente (Ítem 4) + export a Excel */}
+            <div>
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <p className="text-xs text-gray-500 flex items-center gap-1 flex-wrap">
+                  <Users className="w-3 h-3" />
+                  Detalle por cliente
+                  {detalle && !formaFiltro && (
+                    <span className="text-gray-400">
+                      · {detalle.length} cliente{detalle.length !== 1 ? 's' : ''}
+                      {clientesCtasCtes.length > 0 && ` · ${clientesCtasCtes.length} con ctas ctes (${formatMoney(resumen.total_ctascte)})`}
+                    </span>
+                  )}
+                  {formaFiltro && (
+                    <button
+                      onClick={() => setFormaFiltro(null)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                    >
+                      {FORMA_LABELS[formaFiltro]}: {detalleVisible.length} cliente{detalleVisible.length !== 1 ? 's' : ''} ✕
+                    </button>
+                  )}
+                </p>
+                <button
+                  onClick={() => { void handleExportarExcel() }}
+                  disabled={exportando || !detalle || detalle.length === 0}
+                  className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                  <Download className="w-3 h-3" />
+                  {exportando ? 'Exportando…' : 'Exportar Excel'}
+                </button>
+              </div>
+
+              {/* Quién cobró: la rendición agrupa por transportista, pero la
+                  plata la puede haber cobrado otro (típico: un saldo viejo
+                  cobrado en el mostrador desde la ficha del cliente). */}
+              {!loadingDetalle && porCobrador.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {porCobrador.map(([nombre, monto]) => (
+                    <span
+                      key={nombre}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                    >
+                      Cobró {nombre}: <strong>{formatMoney(monto)}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {errorDetalle && (
+                <p className="text-xs text-red-600 dark:text-red-400 py-2 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>No se pudo cargar el detalle: {errorDetalle}</span>
+                </p>
+              )}
+
+              {loadingDetalle ? (
+                <p className="text-xs text-gray-400 py-2">Cargando detalle…</p>
+              ) : detalleVisible.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500 dark:text-gray-400 text-left border-b border-gray-200 dark:border-gray-700">
+                        <th className="py-1 pr-2 font-medium">Cliente</th>
+                        <th className="py-1 px-2 font-medium">Cobró</th>
+                        {formaFiltro && <th className="py-1 px-2 font-medium text-right">{FORMA_LABELS[formaFiltro]}</th>}
+                        <th className="py-1 px-2 font-medium text-right">Total</th>
+                        <th className="py-1 px-2 font-medium text-right">Entregas</th>
+                        <th className="py-1 pl-2 font-medium text-right">Ctas Ctes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detalleVisible.map(d => {
+                        const key = filaKey(d)
+                        const abierta = filaAbierta === key
+                        const pagos = pagosPorFila[key]
+                        const colSpan = formaFiltro ? 6 : 5
+                        return (
+                          <React.Fragment key={key}>
+                            <tr
+                              onClick={() => { void toggleFila(d) }}
+                              className={`border-b border-gray-100 dark:border-gray-700/50 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/40 ${abierta ? 'bg-gray-50 dark:bg-gray-700/40' : ''}`}
+                            >
+                              <td className="py-1 pr-2 text-gray-700 dark:text-gray-300">
+                                <span className="inline-flex items-center gap-1">
+                                  {abierta ? <ChevronUp className="w-3 h-3 text-gray-400" /> : <ChevronDown className="w-3 h-3 text-gray-400" />}
+                                  {d.cliente_nombre}
+                                </span>
+                              </td>
+                              <td className="py-1 px-2 text-gray-500">{d.cobrado_por}</td>
+                              {formaFiltro && (
+                                <td className="py-1 px-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatMoney(d[formaFiltro])}</td>
+                              )}
+                              <td className="py-1 px-2 text-right font-medium text-gray-800 dark:text-gray-200">{formatMoney(d.total)}</td>
+                              <td className="py-1 px-2 text-right text-emerald-600 dark:text-emerald-400">{d.total_entregas > 0 ? formatMoney(d.total_entregas) : '—'}</td>
+                              <td className="py-1 pl-2 text-right text-blue-600 dark:text-blue-400">{d.total_ctascte > 0 ? formatMoney(d.total_ctascte) : '—'}</td>
+                            </tr>
+
+                            {abierta && (
+                              <tr className="border-b border-gray-100 dark:border-gray-700/50">
+                                <td colSpan={colSpan} className="py-2 px-2 bg-gray-50/60 dark:bg-gray-900/30">
+                                  {cargandoPagos === key ? (
+                                    <p className="text-xs text-gray-400">Cargando pagos…</p>
+                                  ) : pagos && pagos.length > 0 ? (
+                                    <div className="space-y-1.5">
+                                      {pagos.map(p => (
+                                        <div key={p.pago_id} className="flex items-start justify-between gap-2 flex-wrap">
+                                          <div className="min-w-0">
+                                            <span className="font-medium text-gray-800 dark:text-gray-200">{formatMoney(p.monto)}</span>
+                                            <span className="text-gray-500"> · {formaPagoLabel(p.forma_pago)}</span>
+                                            <span className="text-gray-400"> · {formatDateTime(p.created_at)}</span>
+                                            {p.pedido_id && (
+                                              <span className="text-gray-500"> · Pedido #{p.pedido_id}
+                                                {p.pedido_fecha ? ` (${formatFechaCorta(p.pedido_fecha)})` : ''}
+                                              </span>
+                                            )}
+                                            {!p.pedido_id && <span className="text-gray-500"> · Pago a cuenta</span>}
+                                            {p.referencia && <span className="text-gray-400"> · Ref: {p.referencia}</span>}
+                                            <span className="text-gray-400"> · cobró {p.cobrado_por}</span>
+                                            {p.notas && <p className="text-gray-400 italic">{p.notas}</p>}
+                                          </div>
+                                          <span className={`px-1.5 py-0.5 rounded shrink-0 ${
+                                            p.es_entrega_del_dia
+                                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                          }`}>
+                                            {p.es_entrega_del_dia ? 'Entrega del día' : 'Ctas Ctes'}
+                                          </span>
+                                        </div>
+                                      ))}
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); onVerFicha(d.cliente_id) }}
+                                        className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                      >
+                                        <IdCard className="w-3 h-3" /> Ver ficha del cliente
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-gray-400">Sin pagos para mostrar.</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </tbody>
+                    {formaFiltro && (
+                      <tfoot>
+                        <tr className="border-t border-gray-300 dark:border-gray-600">
+                          <td className="py-1 pr-2 font-medium text-gray-600 dark:text-gray-300" colSpan={2}>Total {FORMA_LABELS[formaFiltro]}</td>
+                          <td className="py-1 px-2 text-right font-bold text-blue-700 dark:text-blue-300">
+                            {formatMoney(detalleVisible.reduce((acc, d) => acc + (d[formaFiltro] || 0), 0))}
+                          </td>
+                          <td colSpan={3} />
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 py-2">
+                  {formaFiltro ? 'Ningún cliente pagó con esa forma ese día.' : 'Sin pagos ese día.'}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -315,6 +698,16 @@ export default function VistaRendiciones(): React.ReactElement {
   const [cerrarResumen, setCerrarResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [resolverResumen, setResolverResumen] = useState<ResumenRendicionDiaria | null>(null)
   const [guardando, setGuardando] = useState(false)
+  const [verCtaCte, setVerCtaCte] = useState(false)
+  // Ficha del cliente abierta desde el detalle de una rendición. Se resuelve
+  // contra la lista de clientes: ModalFichaCliente es autónomo (solo necesita
+  // el cliente y onClose), igual que en ReportesContainer.
+  const [clienteFichaId, setClienteFichaId] = useState<number | null>(null)
+  const { data: clientes = [] } = useClientesQuery()
+  const clienteFicha = useMemo(
+    () => (clienteFichaId == null ? null : clientes.find(c => Number(c.id) === clienteFichaId) ?? null),
+    [clientes, clienteFichaId]
+  )
 
   const cargar = useCallback(async (): Promise<void> => {
     await fetchResumen(fechaDesde, fechaHasta, transportistaFiltro || null)
@@ -397,14 +790,25 @@ export default function VistaRendiciones(): React.ReactElement {
             Resumen auto-calculado por transportista y día (basado en fecha de pago)
           </p>
         </div>
-        <button
-          onClick={cargar}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refrescar
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Deuda del mismo rango que la rendición, para poder cuadrar
+              entregado vs cobrado vs pendiente en un solo lugar. */}
+          <button
+            onClick={() => setVerCtaCte(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <Wallet className="w-4 h-4" />
+            Cta cte pendiente
+          </button>
+          <button
+            onClick={cargar}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refrescar
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -509,6 +913,7 @@ export default function VistaRendiciones(): React.ReactElement {
               resumen={r}
               onCerrar={setCerrarResumen}
               onResolver={setResolverResumen}
+              onVerFicha={setClienteFichaId}
             />
           ))}
         </div>
@@ -541,6 +946,26 @@ export default function VistaRendiciones(): React.ReactElement {
             onResolver={handleResolver}
             onClose={() => setResolverResumen(null)}
             guardando={guardando}
+          />
+        </Suspense>
+      )}
+
+      {verCtaCte && (
+        <Suspense fallback={null}>
+          <ModalCtaCtePendiente
+            fechaDesde={fechaDesde}
+            fechaHasta={fechaHasta}
+            transportistaId={transportistaFiltro}
+            onClose={() => setVerCtaCte(false)}
+          />
+        </Suspense>
+      )}
+
+      {clienteFicha && (
+        <Suspense fallback={null}>
+          <ModalFichaCliente
+            cliente={clienteFicha as ClienteDB}
+            onClose={() => setClienteFichaId(null)}
           />
         </Suspense>
       )}
