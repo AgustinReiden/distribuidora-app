@@ -42,6 +42,16 @@ export interface VistaPedidosProps {
   isTransportista: boolean;
   isEncargado?: boolean;
   isPreventistaTaco?: boolean;
+  /**
+   * Multi-rol (mig 155): el usuario tiene la lista Y el mapa de la ruta, y
+   * alterna con el botón "Mi ruta". El transportista puro no lo usa: para él
+   * el mapa sigue siendo la pantalla única.
+   */
+  modoRuta?: boolean;
+  onVerMiRuta?: () => void;
+  onSalirDeRuta?: () => void;
+  /** Paradas sin entregar de hoy, para el badge del botón "Mi ruta". */
+  paradasPendientes?: number;
   userId: string;
   clientes: ClienteDB[];
   productos: ProductoDB[];
@@ -148,10 +158,23 @@ export default function VistaPedidos({
   onRegistrarPago,
   onAbrirPagoPedido,
   onEntregarSinCobrar,
+  modoRuta,
+  onVerMiRuta,
+  onSalirDeRuta,
+  paradasPendientes,
 }: VistaPedidosProps) {
+  // Transportista puro: el mapa es su pantalla unica, sin toolbar ni lista.
+  // Se mantiene tal cual estaba. El `!isEncargado` es no-op hoy (un encargado
+  // no puede tener el rol extra), pero evita que si algun dia lo tuviera
+  // perdiera toda la pantalla de Pedidos.
+  const esTransportistaPuro = isTransportista && !isAdmin && !isPreventista && !isEncargado;
+
+  // Multi-rol (mig 155): tiene las dos pantallas y alterna con "Mi ruta".
+  const puedeAlternarRuta = isTransportista && !esTransportistaPuro && !!onVerMiRuta;
+
   // Si es transportista, mostrar la pantalla map-first "Ruta Activa"
   // (reemplaza a VistaRutaTransportista; el flujo de entrega es el mismo).
-  if (isTransportista && !isAdmin && !isPreventista) {
+  if (esTransportistaPuro || (puedeAlternarRuta && modoRuta)) {
     return (
       <RutaActivaTransportista
         onMarcarEntregado={onMarcarEntregado}
@@ -159,6 +182,7 @@ export default function VistaPedidos({
         onRegistrarSalvedad={onRegistrarSalvedad}
         onRegistrarPago={onRegistrarPago}
         onEntregarSinCobrar={onEntregarSinCobrar}
+        onVolver={esTransportistaPuro ? undefined : onSalirDeRuta}
       />
     );
   }
@@ -187,6 +211,8 @@ export default function VistaPedidos({
             onEntregaYPagoMasivos={onEntregaYPagoMasivos}
             onMarcarVisita={onMarcarVisita}
             onVerVisitasHoy={onVerVisitasHoy}
+            onVerMiRuta={puedeAlternarRuta ? onVerMiRuta : undefined}
+            paradasPendientes={paradasPendientes}
           />
         }
       />

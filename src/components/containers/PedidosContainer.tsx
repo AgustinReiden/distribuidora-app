@@ -6,6 +6,7 @@
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import {
   aplicarDescuentoClienteItems,
@@ -44,6 +45,7 @@ import {
   useZonasEstandarizadasQuery,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
+import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, type RepartidorParam } from '../../hooks/useOptimizarRuta'
@@ -123,6 +125,40 @@ export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
   const { user, isAdmin, isPreventista, isPreventistaTaco, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
   const notify = useNotification()
+
+  // Multi-rol (mig 155): quien vende Y reparte alterna entre la lista y el
+  // mapa de la ruta. El estado va en la URL (?vista=ruta) y no en useState
+  // porque esto es una PWA que se usa arriba del camión: sobrevive al reload y
+  // el botón "atrás" de Android vuelve a la lista en vez de salir de la app.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const puedeAlternarRuta = isTransportista && !isAdmin && (isPreventista || isEncargado)
+  const modoRuta = puedeAlternarRuta && searchParams.get('vista') === 'ruta'
+
+  const verMiRuta = useCallback(() => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.set('vista', 'ruta')
+      return next
+    })
+  }, [setSearchParams])
+
+  const salirDeRuta = useCallback(() => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('vista')
+      return next
+    })
+  }, [setSearchParams])
+
+  // Badge del botón "Mi ruta". Comparte cache con RutaActivaTransportista
+  // (misma query key), así que no agrega un request.
+  const { data: recorridoParaBadge } = useRecorridoActivoQuery(
+    puedeAlternarRuta ? user?.id : null,
+  )
+  const paradasPendientes = useMemo(
+    () => (recorridoParaBadge?.paradas ?? []).filter(p => p.estado !== 'entregado').length,
+    [recorridoParaBadge],
+  )
 
   // Pagination state
   const [paginaActual, setPaginaActual] = useState(1)
@@ -1558,6 +1594,10 @@ export default function PedidosContainer(): React.ReactElement {
           isTransportista={isTransportista}
           isEncargado={isEncargado}
           isPreventistaTaco={isPreventistaTaco}
+          modoRuta={modoRuta}
+          onVerMiRuta={puedeAlternarRuta ? verMiRuta : undefined}
+          onSalirDeRuta={salirDeRuta}
+          paradasPendientes={paradasPendientes}
           userId={user?.id ?? ''}
           clientes={clientes}
           productos={productos}

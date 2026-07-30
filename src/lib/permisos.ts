@@ -3,6 +3,16 @@
  *
  * Reglas de negocio puras: dado un rol devuelve si la accion esta permitida.
  * No usar hooks ni contexto: se consumen desde containers que ya tienen el rol.
+ *
+ * INVARIANTE (mig 155): estas funciones se evaluan SIEMPRE contra el rol
+ * PRIMARIO (`perfil.rol`), nunca contra los roles efectivos/extra de
+ * `useAuthData().rolesEfectivos`. Los roles extra son capacidades operativas
+ * (llevar la ruta, entregar, cobrar la parada) y solo gatean NAVEGACION.
+ *
+ * El caso que lo obliga: `puedeRegistrarPagoCliente` es el espejo en la UI del
+ * gate de los RPC `registrar_pago_cliente_fifo` / `..._combinado_...`, que leen
+ * `perfiles.rol` crudo y exigen admin|encargado. Si a estas funciones se les
+ * pasara un rol efectivo, la UI mostraria un boton que el servidor rechaza.
  */
 
 import type { RolUsuario } from '@/types'

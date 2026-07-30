@@ -25,6 +25,8 @@ export const usuariosKeys = {
   transportistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'transportistas'] as const,
   preventistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistas'] as const,
   preventistasAsignables: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistasAsignables'] as const,
+  rolesExtra: (sucursalId: number | null, id: string) =>
+    [...usuariosKeys.all(sucursalId), 'rolesExtra', id] as const,
 }
 
 // Types
@@ -79,18 +81,63 @@ async function fetchUsuariosByRol(sucursalId: number | null, rol: string): Promi
   return (data as PerfilDB[]) || []
 }
 
+// Quien puede recibir la ruta del dia: el rol primario `transportista` MAS
+// quien tenga esa capacidad extra en la sucursal (perfil_roles, mig 155) — el
+// preventista que acompaña al camion. Por eso no se puede filtrar con
+// .eq('rol', 'transportista'): traemos los activos de la sucursal (son pocos,
+// menos de 15 por sucursal) y resolvemos el rol efectivo en memoria.
 async function fetchTransportistas(sucursalId: number | null): Promise<PerfilDB[]> {
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
-    .eq('rol', 'transportista')
+    .select('*, usuario_sucursales!inner(sucursal_id), perfil_roles(rol, sucursal_id)')
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
   if (error) throw error
-  return (data as PerfilDB[]) || []
+
+  type ConRolesExtra = PerfilDB & { perfil_roles?: Array<{ rol: string; sucursal_id: number }> }
+  return ((data ?? []) as ConRolesExtra[]).filter(p =>
+    p.rol === 'transportista'
+    || (p.perfil_roles ?? []).some(r => r.rol === 'transportista' && r.sucursal_id === sucursalId)
+  )
+}
+
+// Roles extra de un usuario en la sucursal activa (mig 155).
+async function fetchPerfilRoles(usuarioId: string, sucursalId: number): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('perfil_roles')
+    .select('rol')
+    .eq('usuario_id', usuarioId)
+    .eq('sucursal_id', sucursalId)
+
+  if (error) throw error
+  return ((data ?? []) as Array<{ rol: string }>).map(r => r.rol)
+}
+
+// Reemplaza el set completo de roles extra del usuario EN ESA SUCURSAL.
+// Delete + insert como en asignarZonasPreventista: son 0..1 filas por usuario,
+// no vale la pena diferenciar altas de bajas.
+async function asignarPerfilRoles(
+  usuarioId: string,
+  sucursalId: number,
+  roles: string[],
+): Promise<void> {
+  const { error: errorDelete } = await supabase
+    .from('perfil_roles')
+    .delete()
+    .eq('usuario_id', usuarioId)
+    .eq('sucursal_id', sucursalId)
+
+  if (errorDelete) throw errorDelete
+  if (roles.length === 0) return
+
+  const { error } = await supabase
+    .from('perfil_roles')
+    .insert(roles.map(rol => ({ usuario_id: usuarioId, sucursal_id: sucursalId, rol })))
+
+  if (error) throw error
 }
 
 async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]> {
@@ -199,6 +246,48 @@ export function useTransportistasQuery() {
     queryFn: () => fetchTransportistas(currentSucursalId),
     enabled: !!currentSucursalId,
     staleTime: 10 * 60 * 1000,
+  })
+}
+
+/**
+ * Roles extra del usuario en la sucursal activa (mig 155). Solo admin/encargado
+ * ven los de otros; cualquiera ve los propios.
+ */
+export function usePerfilRolesQuery(usuarioId: string | undefined) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: usuariosKeys.rolesExtra(currentSucursalId, usuarioId || ''),
+    queryFn: () => fetchPerfilRoles(usuarioId!, currentSucursalId!),
+    enabled: !!usuarioId && !!currentSucursalId,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/**
+ * Reemplaza los roles extra del usuario en la sucursal activa. Solo admin
+ * (lo hace cumplir la policy perfil_roles_write_admin).
+ */
+export function useAsignarPerfilRolesMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: ({ usuarioId, roles }: { usuarioId: string; roles: string[] }) => {
+      if (!currentSucursalId) {
+        return Promise.reject(new Error('No hay sucursal activa'))
+      }
+      return asignarPerfilRoles(usuarioId, currentSucursalId, roles)
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: usuariosKeys.rolesExtra(currentSucursalId, variables.usuarioId),
+      })
+      // El picker de "quien lleva la ruta" tiene staleTime de 10 min: sin esta
+      // invalidacion, quien arma la ruta no veria al usuario recien habilitado.
+      queryClient.invalidateQueries({
+        queryKey: usuariosKeys.transportistas(currentSucursalId),
+      })
+    },
   })
 }
 
