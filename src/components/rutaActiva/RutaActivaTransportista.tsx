@@ -12,7 +12,7 @@
  * (useEntregaParada). Diseño: docs/plans/2026-06-12-ruta-activa-design.md
  */
 import React, { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
-import { Crosshair, WifiOff, Truck, Volume2, VolumeX, LocateFixed } from 'lucide-react';
+import { Crosshair, WifiOff, Truck, Volume2, VolumeX, LocateFixed, ArrowLeft } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { haversineMeters } from '../../utils/geo';
 import { useAuthData } from '../../contexts/AuthDataContext';
@@ -50,6 +50,12 @@ export interface RutaActivaTransportistaProps {
   onRegistrarSalvedad?: (data: DatosSalvedad) => Promise<RegistrarSalvedadResult>;
   onRegistrarPago?: (data: DatosPago) => Promise<unknown>;
   onEntregarSinCobrar?: (pedido: PedidoDB) => void | Promise<void>;
+  /**
+   * Multi-rol (mig 155): vuelve a la lista de pedidos. Solo se pasa a quien
+   * tiene las dos pantallas; para el transportista puro el mapa es la única,
+   * así que ahí no hay a dónde volver.
+   */
+  onVolver?: () => void;
 }
 
 export default function RutaActivaTransportista({
@@ -58,6 +64,7 @@ export default function RutaActivaTransportista({
   onRegistrarSalvedad,
   onRegistrarPago,
   onEntregarSinCobrar,
+  onVolver,
 }: RutaActivaTransportistaProps): React.ReactElement {
   const { isOnline } = useAuthData();
   const deposito = useDepositoCoords();
@@ -327,13 +334,25 @@ export default function RutaActivaTransportista({
             />
           </div>
         ) : (
-          <div className="pointer-events-auto rounded-2xl bg-white/95 px-4 py-2.5 shadow-lg backdrop-blur dark:bg-gray-800/95">
-            <p className="text-sm font-bold text-gray-900 dark:text-white">
-              {completadas}/{pedidosOrdenados.length} entregas
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {formatPrecio(porCobrar)} por cobrar
-            </p>
+          <div className="pointer-events-auto flex min-w-0 flex-col items-start gap-2">
+            {/* Solo multi-rol: el que ademas vende vuelve a su lista de pedidos. */}
+            {onVolver && (
+              <button
+                onClick={onVolver}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-sm font-medium text-gray-700 shadow-lg backdrop-blur transition-colors hover:bg-white dark:bg-gray-800/95 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                Lista
+              </button>
+            )}
+            <div className="rounded-2xl bg-white/95 px-4 py-2.5 shadow-lg backdrop-blur dark:bg-gray-800/95">
+              <p className="text-sm font-bold text-gray-900 dark:text-white">
+                {completadas}/{pedidosOrdenados.length} entregas
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {formatPrecio(porCobrar)} por cobrar
+              </p>
+            </div>
           </div>
         )}
         {guiando ? (

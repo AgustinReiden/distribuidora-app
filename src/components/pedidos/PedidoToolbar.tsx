@@ -23,7 +23,8 @@
 import React from 'react';
 import {
   Plus, Route, FileDown, PackageCheck, Banknote, ChevronDown,
-  MapPin, History, Boxes, Download, ArrowLeftRight, HandCoins, type LucideIcon,
+  MapPin, History, Boxes, Download, ArrowLeftRight, HandCoins, Navigation,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
@@ -52,6 +53,13 @@ export interface PedidoToolbarProps {
   onEntregaYPagoMasivos?: () => void;
   onMarcarVisita?: () => void;
   onVerVisitasHoy?: () => void;
+  /**
+   * Multi-rol (mig 155): abre el mapa de la ruta del día. Solo se pasa a quien
+   * vende Y reparte — el transportista puro ya entra directo al mapa.
+   */
+  onVerMiRuta?: () => void;
+  /** Paradas sin entregar, para el badge del botón "Mi ruta". */
+  paradasPendientes?: number;
 }
 
 // =============================================================================
@@ -189,10 +197,35 @@ export default function PedidoToolbar({
   onEntregaYPagoMasivos,
   onMarcarVisita,
   onVerVisitasHoy,
+  onVerMiRuta,
+  paradasPendientes,
 }: PedidoToolbarProps): React.ReactElement {
   const canCreate = isAdmin || isEncargado || isPreventista;
   const showOpsGroups = isAdmin || isEncargado;
   const showPreventistaActions = isPreventista && !isAdmin && !isEncargado;
+
+  // "Mi ruta" — multi-rol. Se usa arriba del camión, así que en mobile va
+  // full-width y primero: cuando está repartiendo es LA acción del día.
+  const miRutaButton = onVerMiRuta && (
+    <button
+      onClick={onVerMiRuta}
+      title="Ver el mapa de la ruta del día para entregar y cobrar"
+      className={cn(
+        BUTTON_BASE,
+        'border-blue-200/80 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30',
+        'text-blue-800 dark:text-blue-200',
+        'hover:bg-blue-100 dark:hover:bg-blue-900/50 hover:border-blue-300 dark:hover:border-blue-700',
+      )}
+    >
+      <Navigation className={cn('text-blue-600 dark:text-blue-300', TOOLBAR_ICON_SIZE)} aria-hidden="true" />
+      <span>Mi ruta</span>
+      {paradasPendientes != null && paradasPendientes > 0 && (
+        <span className="ml-0.5 inline-flex items-center justify-center min-w-[1.375rem] h-[1.375rem] px-1.5 rounded-full bg-blue-600 text-white text-xs font-semibold">
+          {paradasPendientes}
+        </span>
+      )}
+    </button>
+  );
 
   // ¿Hay al menos una acción masiva habilitada? (para mostrar el dropdown)
   const hasMasivas = Boolean(
@@ -273,6 +306,10 @@ export default function PedidoToolbar({
     <>
       {/* ╔══ MOBILE (<sm): grid 3-col arriba + primary full-width abajo ══╗ */}
       <div className="flex flex-col gap-2 sm:hidden">
+        {miRutaButton && (
+          <div className="[&>*]:w-full [&>*]:justify-center">{miRutaButton}</div>
+        )}
+
         {showOpsGroups && (
           <div className="grid grid-cols-3 gap-1.5 [&>*]:w-full [&>*]:justify-center [&>*]:px-2">
             {masivasDropdown}
@@ -337,6 +374,8 @@ export default function PedidoToolbar({
 
       {/* ╔══ DESKTOP (sm+): layout original — fila a la derecha ══╗ */}
       <div className="hidden sm:flex items-center gap-2 justify-end flex-wrap">
+        {miRutaButton}
+
         {showOpsGroups && (
           <>
             {masivasDropdown}
