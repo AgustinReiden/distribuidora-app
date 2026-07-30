@@ -49,6 +49,7 @@ vi.mock('../contexts/SucursalContext', () => ({
     currentSucursalId: 1,
     currentSucursalNombre: 'Test',
     currentSucursalRol: 'admin',
+    currentSucursalRolesExtra: [],
     sucursales: [],
     loading: false,
     hasMultipleSucursales: false,

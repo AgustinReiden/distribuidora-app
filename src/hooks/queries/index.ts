@@ -87,6 +87,8 @@ export {
   useTransportistasQuery,
   usePreventistasQuery,
   usePreventistasAsignablesQuery,
+  usePerfilRolesQuery,
+  useAsignarPerfilRolesMutation,
   useActualizarUsuarioMutation,
   useToggleUsuarioActivoMutation,
 } from './useUsuariosQuery'

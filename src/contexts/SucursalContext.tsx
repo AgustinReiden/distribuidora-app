@@ -10,17 +10,27 @@ export interface SucursalInfo {
   id: number
   nombre: string
   rol: RolUsuario // resolved role for this sucursal
+  /**
+   * Capacidades operativas EXTRA en esta sucursal (tabla perfil_roles, mig 155).
+   * Se SUMAN a `rol`; no lo reemplazan. Caso de uso: el preventista de Taco Pozo
+   * que acompaña al camión y también reparte.
+   */
+  rolesExtra: RolUsuario[]
 }
 
 export interface SucursalContextValue {
   currentSucursalId: number | null
   currentSucursalNombre: string | null
   currentSucursalRol: RolUsuario | null
+  /** Roles extra en la sucursal activa. Ver SucursalInfo.rolesExtra. */
+  currentSucursalRolesExtra: RolUsuario[]
   sucursales: SucursalInfo[]
   loading: boolean
   hasMultipleSucursales: boolean
   switchSucursal: (sucursalId: number) => Promise<void>
 }
+
+const SIN_ROLES_EXTRA: RolUsuario[] = []
 
 const SucursalContext = createContext<SucursalContextValue | null>(null)
 
@@ -51,10 +61,32 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
     const loadSucursales = async () => {
       setLoading(true)
       try {
-        const { data, error } = await supabase
-          .from('usuario_sucursales')
-          .select('id, usuario_id, sucursal_id, rol, es_default, sucursal:sucursales(id, nombre)')
-          .eq('usuario_id', userId)
+        // Los roles extra se piden SIN filtrar por sucursal: la policy
+        // perfil_roles_select_propio no depende del header X-Sucursal-ID, que
+        // en este punto todavia no esta seteado (se setea mas abajo).
+        const [{ data, error }, rolesExtraRes] = await Promise.all([
+          supabase
+            .from('usuario_sucursales')
+            .select('id, usuario_id, sucursal_id, rol, es_default, sucursal:sucursales(id, nombre)')
+            .eq('usuario_id', userId),
+          supabase
+            .from('perfil_roles')
+            .select('sucursal_id, rol')
+            .eq('usuario_id', userId),
+        ])
+
+        // Tolerante a fallo a proposito: este contexto bloquea el arranque de
+        // la app. Sin roles extra el usuario entra con su rol primario, que es
+        // exactamente el comportamiento previo a la mig 155.
+        if (rolesExtraRes.error) {
+          logger.warn('[SucursalContext] No se pudieron cargar los roles extra:', rolesExtraRes.error)
+        }
+        const rolesExtraPorSucursal = new Map<number, RolUsuario[]>()
+        for (const fila of (rolesExtraRes.data ?? []) as Array<{ sucursal_id: number; rol: string }>) {
+          const acumulado = rolesExtraPorSucursal.get(fila.sucursal_id) ?? []
+          acumulado.push(fila.rol as RolUsuario)
+          rolesExtraPorSucursal.set(fila.sucursal_id, acumulado)
+        }
 
         if (error) {
           logger.error('[SucursalContext] Error loading sucursales:', error)
@@ -82,6 +114,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
             id: us.sucursal_id,
             nombre: sucNombre,
             rol: resolvedRol,
+            rolesExtra: rolesExtraPorSucursal.get(us.sucursal_id) ?? SIN_ROLES_EXTRA,
           }
         })
 
@@ -147,6 +180,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
       currentSucursalId,
       currentSucursalNombre: currentSucursal?.nombre ?? null,
       currentSucursalRol: currentSucursal?.rol ?? globalRol,
+      currentSucursalRolesExtra: currentSucursal?.rolesExtra ?? SIN_ROLES_EXTRA,
       sucursales,
       loading,
       hasMultipleSucursales: sucursales.length > 1,

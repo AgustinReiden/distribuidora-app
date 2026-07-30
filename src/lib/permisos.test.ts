@@ -12,6 +12,7 @@ import {
   puedeAccederCondicionesMayoristas,
   puedeAccederTransferencias,
   puedeControlarStock,
+  puedeRegistrarPagoCliente,
   mostrarMontosEnStats,
 } from './permisos'
 import type { RolUsuario } from '@/types'
@@ -90,6 +91,29 @@ describe('permisos por rol', () => {
     it('otros roles ven monto en todas (sin restriccion)', () => {
       expect(mostrarMontosEnStats('preventista', 'pendientes')).toBe(true)
       expect(mostrarMontosEnStats('transportista', 'entregados')).toBe(true)
+    })
+  })
+
+  // Fija el invariante de la mig 155: el multi-rol (roles extra por sucursal)
+  // habilita llevar la ruta, entregar y cobrar LA PARADA, pero NO el pago a
+  // cuenta corriente desde la ficha del cliente. Este gate es el espejo en la
+  // UI de los RPC registrar_pago_cliente_fifo / ..._combinado_..., que leen
+  // perfiles.rol crudo y exigen admin|encargado. Si alguien "arregla" esta
+  // funcion para aceptar roles efectivos, la UI mostraria un boton que el
+  // servidor rechaza.
+  describe('puedeRegistrarPagoCliente (pago a cuenta corriente por ficha)', () => {
+    it('permite solo admin y encargado', () => {
+      expect(puedeRegistrarPagoCliente('admin')).toBe(true)
+      expect(puedeRegistrarPagoCliente('encargado')).toBe(true)
+    })
+
+    it('bloquea al preventista que tambien reparte y al transportista', () => {
+      expect(puedeRegistrarPagoCliente('preventista')).toBe(false)
+      expect(puedeRegistrarPagoCliente('preventista_taco')).toBe(false)
+      expect(puedeRegistrarPagoCliente('transportista')).toBe(false)
+      expect(puedeRegistrarPagoCliente('deposito')).toBe(false)
+      expect(puedeRegistrarPagoCliente(null)).toBe(false)
+      expect(puedeRegistrarPagoCliente(undefined)).toBe(false)
     })
   })
 })
