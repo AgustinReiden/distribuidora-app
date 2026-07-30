@@ -1,9 +1,16 @@
 import { useState, useEffect, memo, useRef } from 'react';
-import { Loader2, MapPin } from 'lucide-react';
+import { Loader2, MapPin, Truck } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usuarioSchema } from '../../lib/schemas';
-import { useZonasEstandarizadasQuery, usePreventistaZonasQuery, useAsignarZonasPrevMutation } from '../../hooks/queries';
+import {
+  useZonasEstandarizadasQuery,
+  usePreventistaZonasQuery,
+  useAsignarZonasPrevMutation,
+  usePerfilRolesQuery,
+  useAsignarPerfilRolesMutation,
+} from '../../hooks/queries';
+import { useSucursal } from '../../contexts/SucursalContext';
 import type { PerfilDB } from '../../types';
 
 /** Roles disponibles para usuarios */
@@ -44,6 +51,11 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
   const { data: prevZonaIds } = usePreventistaZonasQuery(usuario?.id);
   const asignarZonasMut = useAsignarZonasPrevMutation();
 
+  // Capacidades extra en la sucursal activa (mig 155)
+  const { currentSucursalNombre } = useSucursal();
+  const { data: rolesExtraGuardados } = usePerfilRolesQuery(usuario?.id);
+  const asignarRolesMut = useAsignarPerfilRolesMutation();
+
   const [form, setForm] = useState<UsuarioFormData>(usuario ? {
     id: usuario.id,
     nombre: usuario.nombre || '',
@@ -63,8 +75,23 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     }
   }, [prevZonaIds]);
 
+  // Estado local para las capacidades extra (tabla perfil_roles, mig 155)
+  const [puedeLlevarRuta, setPuedeLlevarRuta] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (rolesExtraGuardados) {
+      setPuedeLlevarRuta(rolesExtraGuardados.includes('transportista'));
+    }
+  }, [rolesExtraGuardados]);
+
   // Mostrar campo de zona solo para preventistas
   const mostrarZona = form.rol === 'preventista';
+
+  // El bloque de capacidades extra no aplica a quien ya las tiene por su rol:
+  // el transportista lleva la ruta por definicion y el admin puede todo.
+  const mostrarCapacidadesExtra = !!usuario?.id
+    && form.rol !== 'transportista'
+    && form.rol !== 'admin';
 
   const handleFieldChange = (field: keyof UsuarioFormData, value: string | boolean): void => {
     setForm({ ...form, [field]: value });
@@ -107,6 +134,18 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
         await asignarZonasMut.mutateAsync({ perfilId: usuario.id, zonaIds });
       } catch {
         // Si falla la asignación de zonas, el perfil ya se guardó
+      }
+    }
+
+    // Guardar capacidades extra de la sucursal activa. Si el rol paso a ser
+    // transportista o admin, se limpian: ya las tiene por rol y dejarlas seria
+    // ruido en la tabla.
+    if (usuario?.id) {
+      const roles = mostrarCapacidadesExtra && puedeLlevarRuta ? ['transportista'] : [];
+      try {
+        await asignarRolesMut.mutateAsync({ usuarioId: usuario.id, roles });
+      } catch {
+        // Si falla, el perfil ya se guardó
       }
     }
   };
@@ -196,6 +235,39 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           </div>
         )}
 
+        {/* Capacidades extra en la sucursal activa (mig 155). Se SUMAN al rol,
+            no lo reemplazan: el preventista que acompaña al camion sigue
+            vendiendo y ademas reparte. */}
+        {mostrarCapacidadesExtra && (
+          <div>
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
+              <Truck className="w-4 h-4" />
+              Capacidades extra{currentSucursalNombre ? ` en ${currentSucursalNombre}` : ''}
+            </label>
+            <div className="border dark:border-gray-600 rounded-lg p-3 bg-white dark:bg-gray-700">
+              <label className="flex items-start gap-2 text-sm dark:text-gray-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={puedeLlevarRuta}
+                  onChange={e => setPuedeLlevarRuta(e.target.checked)}
+                  className="w-4 h-4 rounded mt-0.5"
+                />
+                <span>
+                  Puede llevar la ruta (transportista)
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Le permite recibir la ruta del dia, marcar entregado y cobrar los pedidos
+                    de esa ruta. NO le da acceso a cobrar cuenta corriente desde la ficha
+                    del cliente.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Solo aplica a esta sucursal. Debe volver a entrar a la app para que tome efecto.
+            </p>
+          </div>
+        )}
+
         <div className="flex items-center space-x-2">
           <input
             type="checkbox"
@@ -216,10 +288,10 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
         </button>
         <button
           onClick={handleSubmit}
-          disabled={guardando || asignarZonasMut.isPending}
+          disabled={guardando || asignarZonasMut.isPending || asignarRolesMut.isPending}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
-          {(guardando || asignarZonasMut.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          {(guardando || asignarZonasMut.isPending || asignarRolesMut.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           Guardar
         </button>
       </div>

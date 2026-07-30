@@ -155,6 +155,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     currentSucursalId,
     currentSucursalNombre,
     currentSucursalRol,
+    currentSucursalRolesExtra,
     sucursales,
     loading: sucursalLoading,
   } = useSucursal()
@@ -204,9 +205,18 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const effectiveRol = currentSucursalRol ?? perfil?.rol
   const isAdmin = effectiveRol === 'admin'
   const isPreventista = effectiveRol === 'preventista'
+  // Los roles extra (mig 155) SUMAN capacidades al rol primario, no lo
+  // reemplazan: el preventista de Taco Pozo acompaña al camión, así que es
+  // preventista Y transportista a la vez. El rol primario sigue siendo el que
+  // mandan los permisos sensibles (ver src/lib/permisos.ts).
   const isTransportista = effectiveRol === 'transportista'
+    || currentSucursalRolesExtra.includes('transportista')
   const isEncargado = effectiveRol === 'encargado'
   const isAdminOrEncargado = isAdmin || isEncargado
+  const rolesEfectivos = useMemo(
+    () => (effectiveRol ? [effectiveRol, ...currentSucursalRolesExtra] : [...currentSucursalRolesExtra]),
+    [effectiveRol, currentSucursalRolesExtra],
+  )
 
   const defaultRoute = '/pedidos'
 
@@ -219,11 +229,12 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     isTransportista,
     isEncargado,
     isAdminOrEncargado,
+    rolesEfectivos,
     isOnline,
     logout: handleLogout,
     currentSucursalId,
     currentSucursalNombre,
-  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
+  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()

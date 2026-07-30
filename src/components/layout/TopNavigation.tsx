@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useAuthData } from '../../contexts/AuthDataContext';
 import DbNotificationBell from './DbNotificationBell';
 import SucursalSelector from './SucursalSelector';
 import VincularTelegramButton from '../perfil/VincularTelegramButton';
@@ -107,6 +108,7 @@ export default function TopNavigation({
   const navigate = useNavigate();
   const location = useLocation();
   const { darkMode, toggleDarkMode } = useTheme();
+  const { rolesEfectivos } = useAuthData();
   const [menuAbierto, setMenuAbierto] = useState<boolean>(false);
   const [userMenuAbierto, setUserMenuAbierto] = useState<boolean>(false);
   const [dropdownAbierto, setDropdownAbierto] = useState<string | null>(null);
@@ -117,18 +119,23 @@ export default function TopNavigation({
   // Obtener la vista actual desde la ruta
   const vista = location.pathname.replace('/', '') || 'dashboard';
 
-  // Filtrar grupos y items por rol
+  // Filtrar grupos y items por rol.
+  //
+  // Usa los roles EFECTIVOS (rol de la sucursal activa + capacidades extra de
+  // la mig 155), no `perfil.rol`. Dos motivos: el rol global ignoraba el rol
+  // por sucursal (el menu podia mostrar items que el router despues redirigia),
+  // y el multi-rol necesita la union — el preventista que tambien reparte ve
+  // los items de ambos.
   const getMenuFiltrado = (): MenuGroup[] => {
-    const userRol = perfil?.rol;
-    if (!userRol) return [];
+    if (rolesEfectivos.length === 0) return [];
 
     return menuGroups.map(group => ({
       ...group,
-      items: group.items.filter(item => item.roles.includes(userRol) && !item.hidden)
+      items: group.items.filter(item => item.roles.some(r => rolesEfectivos.includes(r)) && !item.hidden)
     })).filter(group => {
       // Filtrar grupos vacios o sin permiso
       if (group.items.length === 0) return false;
-      if (group.roles && !group.roles.some(r => r === userRol)) return false;
+      if (group.roles && !group.roles.some(r => rolesEfectivos.includes(r))) return false;
       return true;
     });
   };

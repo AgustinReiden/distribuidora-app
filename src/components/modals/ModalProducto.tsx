@@ -6,7 +6,7 @@ import NumberInput from '../ui/NumberInput';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalProductoSchema } from '../../lib/schemas';
 import {
-  calcularTotalConIva,
+  calcularCostoFinanciero,
   calcularNetoDesdeTotal,
   calcularMargenPorcentaje,
   calcularPrecioDesdeMargen,
@@ -113,6 +113,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
 
+  // Semántica fiscal del producto: la da la última compra registrada (mig 111).
+  // Sin compras todavía → se asume FC. Manda en TODOS los cálculos de costo:
+  // en ZZ lo pagado es el costo final (ya incluye IVA e II, nada se suma encima).
+  const tipoCompra: 'ZZ' | 'FC' = producto?.ultimo_tipo_compra ?? 'FC';
+
   const [form, setForm] = useState<ProductoFormData>(producto ? {
     id: producto.id,
     nombre: producto.nombre || '',
@@ -164,16 +169,22 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
 
   // ── Márgenes (solo UI, bidireccionales con el precio final) ───────────────
   // Lógica del negocio (mig 123):
-  //   · MARGEN BRUTO = precio final − costo total (neto + IVA + II): la plata
-  //     desembolsada vs la cobrada. % = markup sobre el costo total.
-  //   · MARGEN NETO  = precio neto (precio/1+IVA%) − costo final (neto + II =
-  //     costo real). Es el margen fiscal FC. % = markup sobre el costo real.
+  //   · MARGEN BRUTO = precio final − costo total (desembolso): la plata que
+  //     saliste a pagar vs la cobrada. % = markup sobre el costo total.
+  //   · MARGEN NETO  = precio neto (precio/1+IVA%) − costo real (neto + II).
+  //     Es el margen fiscal FC. % = markup sobre el costo real.
   // Editar cualquiera de los dos % recalcula el precio final (y el otro %).
+  //
+  // El costo total DEBE respetar el tipo de la última compra (mig 111): en ZZ
+  // lo pagado ya es todo (no se le suma IVA ni II encima). Usar la fórmula FC
+  // en un producto ZZ inflaba el denominador 21% → el % de margen bruto salía
+  // negativo aunque el monto fuera positivo, y al guardar persistía un
+  // costo_con_iva inflado.
 
-  /** Costo total con IVA (desembolso) y costo real (neto+II) desde el form. */
+  /** Costo total (desembolso) y costo real (neto+II) desde el form. */
   const costosDesdeForm = (f: ProductoFormData) => ({
-    costoTotal: calcularTotalConIva(f.costo_sin_iva, f.porcentaje_iva, f.impuestos_internos),
-    costoReal: calcularCostoReal(f.costo_sin_iva, f.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC'),
+    costoTotal: calcularCostoFinanciero(f.costo_sin_iva, f.porcentaje_iva, f.impuestos_internos, tipoCompra),
+    costoReal: calcularCostoReal(f.costo_sin_iva, f.impuestos_internos, tipoCompra),
   });
 
   const margenesDesdeForm = (f: ProductoFormData): { bruto: string; neto: string } => {
@@ -193,12 +204,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   const [margenNeto, setMargenNeto] = useState<string>(() => margenesDesdeForm(form).neto);
 
   // Recalcula los campos derivados a partir del form:
-  //  - costo_con_iva (costo total) desde el costo neto + IVA + imp. internos
+  //  - costo_con_iva (costo total): FC = neto + IVA + II · ZZ = lo pagado
+  //    (mismo criterio que el RPC de compras, mig 111). Este valor SE PERSISTE.
   //  - precio_sin_iva (precio neto) HACIA ATRÁS desde el precio final. OJO: la
   //    VENTA no discrimina imp. internos (no somos agente, mig 122): el precio
   //    neto es precio / (1 + IVA%), sin II. El II solo afecta el costo.
   const recalcularTotales = (nuevoForm: ProductoFormData): ProductoFormData => {
-    const costoTotal = calcularTotalConIva(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos);
+    const costoTotal = calcularCostoFinanciero(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos, tipoCompra);
     const precioNeto = calcularNetoDesdeTotal(nuevoForm.precio, nuevoForm.porcentaje_iva, 0);
     return {
       ...nuevoForm,
@@ -279,7 +291,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
       const costoReal = calcularCostoReal(
         formNormalizado.costo_sin_iva,
         formNormalizado.impuestos_internos,
-        producto?.ultimo_tipo_compra ?? 'FC',
+        tipoCompra,
       );
       // CPP: solo se persiste si el admin lo corrigió a mano (undefined = no tocar).
       const cppCorregido = cppEditado && corrigiendoCpp
@@ -568,14 +580,16 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               </label>
               <input
                 type="text"
-                value={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC').toFixed(2)}
+                value={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, tipoCompra).toFixed(2)}
                 readOnly
                 className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-blue-50 font-semibold"
                 title="Costo de REPOSICIÓN (última compra, neto + II si FC): la base para fijar precios"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">Costo total (con IVA)</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">
+                {tipoCompra === 'ZZ' ? 'Costo total (lo pagado)' : 'Costo total (con IVA)'}
+              </label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -588,7 +602,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            {(producto?.ultimo_tipo_compra ?? 'FC') === 'ZZ'
+            {tipoCompra === 'ZZ'
               ? 'Última compra ZZ: el costo de reposición es lo pagado (sin add-on de II).'
               : 'El costo de reposición (neto + imp. internos) refleja la última compra: el IVA es crédito fiscal, no costo.'}
           </p>
@@ -704,7 +718,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 mb-2">
                 Margen NETO
                 {(() => {
-                  const costoReal = calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC');
+                  const costoReal = calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, tipoCompra);
                   const precioNeto = parsePrecio(String(form.precio_sin_iva));
                   return costoReal > 0 && precioNeto > 0 ? (
                     <span className="ml-2">${(precioNeto - costoReal).toFixed(2)}</span>
@@ -717,7 +731,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
                   emptyValue={0}
                   onChange={(n) => handleMargenNetoChange(String(n))}
                   commitOnChange
-                  disabled={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, producto?.ultimo_tipo_compra ?? 'FC') <= 0}
+                  disabled={calcularCostoReal(form.costo_sin_iva, form.impuestos_internos, tipoCompra) <= 0}
                   className="w-full px-3 py-2 pr-7 border rounded-lg disabled:bg-gray-100 disabled:cursor-not-allowed"
                   placeholder="0.0"
                 />

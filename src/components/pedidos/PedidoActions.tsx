@@ -169,9 +169,17 @@ function AccionesDropdown({
     // - Transportista: solo pedidos ruteados (estado 'asignado').
     // - Admin/encargado: cualquier estado activo (no entregado/cancelado), para
     //   poder cerrar entregas sueltas sin tener que armar una ruta.
+    //
+    // El transportista solo puede cerrar SUS paradas. Antes alcanzaba con el
+    // rol, y con el multi-rol (mig 155) eso se volvía peligroso: el preventista
+    // que también reparte ve en la lista todos los pedidos que cargó él, así
+    // que le habrían aparecido botones de entrega sobre pedidos que lleva otro
+    // chofer. Además, "Entrega con Salvedad" habría fallado del lado del
+    // servidor (registrar_salvedad valida la pertenencia) con un error confuso.
+    const esSuParada = !!currentUserId && pedido.transportista_id === currentUserId;
     const puedeEntregarStaff = (isAdmin || isEncargado)
       && pedido.estado !== 'entregado' && pedido.estado !== 'cancelado';
-    const puedeEntregarTransportista = isTransportista && pedido.estado === 'asignado';
+    const puedeEntregarTransportista = isTransportista && esSuParada && pedido.estado === 'asignado';
     if ((puedeEntregarStaff || puedeEntregarTransportista) && onEntregado) {
       items.push({
         label: 'Marcar Entregado',
@@ -181,8 +189,8 @@ function AccionesDropdown({
       });
     }
 
-    // Transportista, admin o encargado pueden marcar entregado con salvedad
-    if ((isTransportista || isAdmin || isEncargado) && pedido.estado === 'asignado' && onEntregadoConSalvedad && pedido.items && pedido.items.length > 0) {
+    // Admin/encargado sobre cualquier parada; el transportista solo sobre la suya.
+    if ((isAdmin || isEncargado || (isTransportista && esSuParada)) && pedido.estado === 'asignado' && onEntregadoConSalvedad && pedido.items && pedido.items.length > 0) {
       items.push({
         label: 'Entrega con Salvedad',
         icon: AlertCircle,
