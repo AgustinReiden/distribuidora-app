@@ -41,7 +41,6 @@ export interface VistaPedidosProps {
   isPreventista: boolean;
   isTransportista: boolean;
   isEncargado?: boolean;
-  isPreventistaTaco?: boolean;
   /**
    * Multi-rol (mig 155): el usuario tiene la lista Y el mapa de la ruta, y
    * alterna con el botón "Mi ruta". El transportista puro no lo usa: para él
@@ -125,7 +124,6 @@ export default function VistaPedidos({
   isPreventista,
   isTransportista,
   isEncargado,
-  isPreventistaTaco,
   userId,
   transportistas = [],
   usuarios = [],
@@ -230,7 +228,7 @@ export default function VistaPedidos({
       />
 
       {/* Resumen de estados (totales sobre todos los pedidos filtrados) */}
-      <PedidoStats summary={statsSummary} isEncargado={isEncargado} isPreventistaTaco={isPreventistaTaco} />
+      <PedidoStats summary={statsSummary} isEncargado={isEncargado} />
 
       {/* Lista de pedidos */}
       {loading ? (

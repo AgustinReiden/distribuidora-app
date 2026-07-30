@@ -123,7 +123,7 @@ interface ConfirmConfig {
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
-  const { user, isAdmin, isPreventista, isPreventistaTaco, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
+  const { user, isAdmin, isPreventista, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
   const notify = useNotification()
 
   // Multi-rol (mig 155): quien vende Y reparte alterna entre la lista y el
@@ -1593,7 +1593,6 @@ export default function PedidosContainer(): React.ReactElement {
           isPreventista={isPreventista}
           isTransportista={isTransportista}
           isEncargado={isEncargado}
-          isPreventistaTaco={isPreventistaTaco}
           modoRuta={modoRuta}
           onVerMiRuta={puedeAlternarRuta ? verMiRuta : undefined}
           onSalirDeRuta={salirDeRuta}

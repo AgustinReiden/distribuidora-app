@@ -109,7 +109,6 @@ describe('permisos por rol', () => {
 
     it('bloquea al preventista que tambien reparte y al transportista', () => {
       expect(puedeRegistrarPagoCliente('preventista')).toBe(false)
-      expect(puedeRegistrarPagoCliente('preventista_taco')).toBe(false)
       expect(puedeRegistrarPagoCliente('transportista')).toBe(false)
       expect(puedeRegistrarPagoCliente('deposito')).toBe(false)
       expect(puedeRegistrarPagoCliente(null)).toBe(false)

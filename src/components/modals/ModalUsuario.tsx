@@ -14,7 +14,7 @@ import { useSucursal } from '../../contexts/SucursalContext';
 import type { PerfilDB } from '../../types';
 
 /** Roles disponibles para usuarios */
-export type RolUsuario = 'admin' | 'preventista' | 'preventista_taco' | 'transportista' | 'deposito' | 'encargado';
+export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
 
 /** Datos del formulario de usuario */
 export interface UsuarioFormData {
@@ -84,8 +84,8 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     }
   }, [rolesExtraGuardados]);
 
-  // Mostrar campo de zona para preventistas (regular y taco)
-  const mostrarZona = form.rol === 'preventista' || form.rol === 'preventista_taco';
+  // Mostrar campo de zona solo para preventistas
+  const mostrarZona = form.rol === 'preventista';
 
   // El bloque de capacidades extra no aplica a quien ya las tiene por su rol:
   // el transportista lleva la ruta por definicion y el admin puede todo.
@@ -129,7 +129,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     await onSave({ ...form, id: usuario?.id });
 
     // Guardar zonas del preventista en tabla pivot
-    if (usuario?.id && (form.rol === 'preventista' || form.rol === 'preventista_taco')) {
+    if (usuario?.id && form.rol === 'preventista') {
       try {
         await asignarZonasMut.mutateAsync({ perfilId: usuario.id, zonaIds });
       } catch {
@@ -184,7 +184,7 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
             value={form.rol}
             onChange={e => {
               const newRol = e.target.value as RolUsuario;
-              const esPreventista = newRol === 'preventista' || newRol === 'preventista_taco';
+              const esPreventista = newRol === 'preventista';
               setForm({ ...form, rol: newRol, zona: esPreventista ? form.zona : '' });
               if (hasAttemptedSubmit && errors.rol) clearFieldError('rol');
             }}
@@ -192,7 +192,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
             {...getAriaProps('rol', true)}
           >
             <option value="preventista">Preventista</option>
-            <option value="preventista_taco">Preventista Taco</option>
             <option value="transportista">Transportista</option>
             <option value="deposito">Deposito</option>
             <option value="encargado">Encargado</option>

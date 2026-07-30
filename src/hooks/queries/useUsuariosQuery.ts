@@ -155,14 +155,14 @@ async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]>
 }
 
 // Lista de usuarios que pueden ser asignados como preventista de un pedido:
-// admin + preventista + preventista_taco. Usada por admin para asignar quien
-// "tomo" el pedido (etiquetas, estadisticas, comisiones).
+// admin + preventista. Usada por admin para asignar quien "tomo" el pedido
+// (etiquetas, estadisticas, comisiones).
 async function fetchPreventistasAsignables(sucursalId: number | null): Promise<PerfilDB[]> {
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
     .select('*, usuario_sucursales!inner(sucursal_id)')
-    .in('rol', ['admin', 'preventista', 'preventista_taco'])
+    .in('rol', ['admin', 'preventista'])
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
@@ -306,7 +306,7 @@ export function usePreventistasQuery() {
 
 /**
  * Hook para obtener todos los usuarios que pueden ser asignados como
- * preventista de un pedido (admin + preventista + preventista_taco activos).
+ * preventista de un pedido (admin + preventista activos).
  */
 export function usePreventistasAsignablesQuery() {
   const { currentSucursalId } = useSucursal()

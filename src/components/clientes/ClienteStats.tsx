@@ -3,16 +3,10 @@
  *
  * Cálculos in-memory sobre el array completo de clientes (no paginado), que
  * ya está cargado en RAM. Diseño editorial cálido — gemelo a PedidoStats.
- *
- * Gating:
- *  - Si el rol no puede ver saldos (preventista_taco), se ocultan las tarjetas
- *    "Con deuda", "Al día" y "Saldo adeudado".
  */
 import React, { memo, useMemo } from 'react';
 import { Users, AlertTriangle, Check, DollarSign, MapPin, Tag, type LucideIcon } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
-import { puedeVerSaldoCliente } from '../../lib/permisos';
-import { useAuthData } from '../../contexts/AuthDataContext';
 import type { ClienteDB } from '../../types';
 
 export interface ClienteStatsProps {
@@ -30,14 +24,9 @@ interface StatItem {
   badgeBg: string;
   badgeIcon: string;
   gradientFrom: string;
-  /** Si true y el rol no ve saldos, se oculta la card. */
-  requiereSaldo?: boolean;
 }
 
 function ClienteStats({ clientes }: ClienteStatsProps): React.ReactElement {
-  const { perfil } = useAuthData();
-  const verSaldo = puedeVerSaldoCliente(perfil?.rol);
-
   const summary = useMemo(() => {
     let conDeuda = 0;
     let alDia = 0;
@@ -89,7 +78,6 @@ function ClienteStats({ clientes }: ClienteStatsProps): React.ReactElement {
       badgeBg: 'bg-rose-100 dark:bg-rose-500/15',
       badgeIcon: 'text-rose-600 dark:text-rose-400',
       gradientFrom: 'before:from-rose-500/[0.07]',
-      requiereSaldo: true,
     },
     {
       key: 'alDia',
@@ -101,7 +89,6 @@ function ClienteStats({ clientes }: ClienteStatsProps): React.ReactElement {
       badgeBg: 'bg-emerald-100 dark:bg-emerald-500/15',
       badgeIcon: 'text-emerald-600 dark:text-emerald-400',
       gradientFrom: 'before:from-emerald-500/[0.07]',
-      requiereSaldo: true,
     },
     {
       key: 'saldoAdeudado',
@@ -114,7 +101,6 @@ function ClienteStats({ clientes }: ClienteStatsProps): React.ReactElement {
       badgeBg: 'bg-amber-100 dark:bg-amber-500/15',
       badgeIcon: 'text-amber-600 dark:text-amber-400',
       gradientFrom: 'before:from-amber-500/[0.07]',
-      requiereSaldo: true,
     },
     {
       key: 'geo',
@@ -140,11 +126,9 @@ function ClienteStats({ clientes }: ClienteStatsProps): React.ReactElement {
     },
   ];
 
-  const visibleItems = items.filter(i => verSaldo || !i.requiereSaldo);
-
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-      {visibleItems.map((item, idx) => {
+      {items.map((item, idx) => {
         const IconComponent = item.icon;
         // Para la card "Saldo adeudado" mostramos el monto como número grande
         // (con peso 800) y el count de clientes como detail.

@@ -288,9 +288,7 @@ function PedidoCard({
 
   // Intentar usar contexto si está disponible (migración gradual)
   const pedidoActions = useContext(PedidoActionsCtx);
-  const { user, isPreventistaTaco } = useAuthData();
-  // preventista_taco no puede ver montos comerciales (P1-5).
-  const verMontos = !isPreventistaTaco;
+  const { user } = useAuthData();
 
   // Usar handlers del contexto si están disponibles, de lo contrario usar props
   const handleVerHistorial = onVerHistorial ?? pedidoActions?.handleVerHistorial;
@@ -498,9 +496,9 @@ function PedidoCard({
             className="mt-1 text-2xl text-blue-700 dark:text-blue-300 tabular-nums leading-none"
             style={{ fontWeight: 800, letterSpacing: '-0.03em' }}
           >
-            {verMontos ? formatPrecio(pedido.total) : '—'}
+            {formatPrecio(pedido.total)}
           </p>
-          {verMontos && pedido.estado_pago === 'parcial' && (
+          {pedido.estado_pago === 'parcial' && (
             <p className="mt-1.5 text-[13px] font-medium text-amber-700 dark:text-amber-400 tabular-nums">
               Pagado: {formatPrecio(pedido.monto_pagado || 0)} de {formatPrecio(pedido.total)}
             </p>
@@ -612,7 +610,7 @@ function PedidoCard({
                         </span>
                       )}
                     </p>
-                    {verMontos && !item.es_bonificacion && <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>}
+                    {!item.es_bonificacion && <p className="text-xs text-gray-500">{formatPrecio(item.precio_unitario)} c/u</p>}
                     {salvedadItem && (
                       <p className="text-xs text-amber-600 dark:text-amber-400">
                         Pedido: {cantidadOriginal} → Entregado: {item.cantidad} ({salvedadItem.cantidad_afectada} no entregadas)
@@ -621,21 +619,19 @@ function PedidoCard({
                   </div>
                   <div className="text-right">
                     <p className="font-semibold text-gray-700 dark:text-gray-300">x{item.cantidad}</p>
-                    {verMontos && !item.es_bonificacion && <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
-                    {verMontos && item.es_bonificacion && <p className="text-sm font-bold text-green-600">$0</p>}
-                    {verMontos && salvedadItem && (
+                    {!item.es_bonificacion && <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
+                    {item.es_bonificacion && <p className="text-sm font-bold text-green-600">$0</p>}
+                    {salvedadItem && (
                       <p className="text-xs text-red-500 dark:text-red-400">-{formatPrecio(salvedadItem.monto_afectado)}</p>
                     )}
                   </div>
                 </div>
                 );
               })}
-              {verMontos && (
-                <div className="flex justify-between items-center pt-2 border-t-2 dark:border-gray-600">
-                  <p className="font-bold text-gray-900 dark:text-white">Total</p>
-                  <p className="text-xl font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
-                </div>
-              )}
+              <div className="flex justify-between items-center pt-2 border-t-2 dark:border-gray-600">
+                <p className="font-bold text-gray-900 dark:text-white">Total</p>
+                <p className="text-xl font-bold text-blue-600">{formatPrecio(pedido.total)}</p>
+              </div>
             </div>
           </div>
 
@@ -667,24 +663,20 @@ function PedidoCard({
                           {salvedad.estado_resolucion === 'pendiente' ? 'Pendiente de resolver' : 'Resuelta'}
                         </span>
                       </div>
-                      {verMontos && (
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-red-600 dark:text-red-400">
-                            -{formatPrecio(salvedad.monto_afectado)}
-                          </p>
-                        </div>
-                      )}
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                          -{formatPrecio(salvedad.monto_afectado)}
+                        </p>
+                      </div>
                     </div>
                   );
                 })}
-                {verMontos && (
-                  <div className="flex justify-between items-center pt-2 border-t border-amber-300 dark:border-amber-600">
-                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Total afectado:</p>
-                    <p className="text-sm font-bold text-red-600 dark:text-red-400">
-                      -{formatPrecio(pedido.salvedades?.reduce((sum, s) => sum + s.monto_afectado, 0) || 0)}
-                    </p>
-                  </div>
-                )}
+                <div className="flex justify-between items-center pt-2 border-t border-amber-300 dark:border-amber-600">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Total afectado:</p>
+                  <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                    -{formatPrecio(pedido.salvedades?.reduce((sum, s) => sum + s.monto_afectado, 0) || 0)}
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -724,7 +716,7 @@ function PedidoCard({
               {(() => {
                 const pagos = pedido.pagos || [];
                 const formas = Array.from(new Set(pagos.map(p => p.forma_pago).filter(Boolean)));
-                if (!verMontos || formas.length < 2) return null;
+                if (formas.length < 2) return null;
                 const desglose = formas.map(f => ({
                   forma: f,
                   monto: pagos.filter(p => p.forma_pago === f).reduce((s, p) => s + (p.monto || 0), 0),

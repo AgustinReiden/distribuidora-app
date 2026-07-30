@@ -17,8 +17,6 @@ export interface AuthDataContextValue {
   authReady: boolean
   isAdmin: boolean
   isPreventista: boolean
-  isPreventistaTaco: boolean
-  isAnyPreventista: boolean
   isTransportista: boolean
   isEncargado: boolean
   isAdminOrEncargado: boolean
@@ -78,8 +76,8 @@ export function useAuthData(): AuthDataContextValue {
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useUserPermissions() {
-  const { user, perfil, isAdmin, isPreventista, isPreventistaTaco, isAnyPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos } = useAuthData()
-  return { user, perfil, isAdmin, isPreventista, isPreventistaTaco, isAnyPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos }
+  const { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos } = useAuthData()
+  return { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos }
 }
 
 export default AuthDataContext

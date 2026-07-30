@@ -205,8 +205,6 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const effectiveRol = currentSucursalRol ?? perfil?.rol
   const isAdmin = effectiveRol === 'admin'
   const isPreventista = effectiveRol === 'preventista'
-  const isPreventistaTaco = effectiveRol === 'preventista_taco'
-  const isAnyPreventista = isPreventista || isPreventistaTaco
   // Los roles extra (mig 155) SUMAN capacidades al rol primario, no lo
   // reemplazan: el preventista de Taco Pozo acompaña al camión, así que es
   // preventista Y transportista a la vez. El rol primario sigue siendo el que
@@ -228,8 +226,6 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     authReady,
     isAdmin,
     isPreventista,
-    isPreventistaTaco,
-    isAnyPreventista,
     isTransportista,
     isEncargado,
     isAdminOrEncargado,
@@ -238,7 +234,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     logout: handleLogout,
     currentSucursalId,
     currentSucursalNombre,
-  }), [user, perfil, authReady, isAdmin, isPreventista, isPreventistaTaco, isAnyPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
+  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()
@@ -266,7 +262,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
 
                 <Route
                   path="/dashboard"
-                  element={(isAdmin || isAnyPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                  element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="/pedidos" element={<PedidosContainer />} />

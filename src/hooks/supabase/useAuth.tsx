@@ -51,8 +51,6 @@ export interface AuthContextValue {
   logout: () => Promise<void>;
   isAdmin: boolean;
   isPreventista: boolean;
-  isPreventistaTaco: boolean;
-  isAnyPreventista: boolean;
   isTransportista: boolean;
   isEncargado: boolean;
   isAdminOrEncargado: boolean;
@@ -479,8 +477,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     logout,
     isAdmin: perfil?.rol === 'admin',
     isPreventista: perfil?.rol === 'preventista',
-    isPreventistaTaco: perfil?.rol === 'preventista_taco',
-    isAnyPreventista: perfil?.rol === 'preventista' || perfil?.rol === 'preventista_taco',
     isTransportista: perfil?.rol === 'transportista',
     isEncargado: perfil?.rol === 'encargado',
     isAdminOrEncargado: perfil?.rol === 'admin' || perfil?.rol === 'encargado',

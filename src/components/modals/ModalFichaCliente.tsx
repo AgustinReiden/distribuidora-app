@@ -6,7 +6,7 @@ import ModalBase from './ModalBase'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { puedeVerSaldoCliente, puedeVerHistorialVentasCliente, puedeRegistrarPagoCliente, puedeAnularPago } from '../../lib/permisos'
+import { puedeRegistrarPagoCliente, puedeAnularPago } from '../../lib/permisos'
 import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
@@ -53,8 +53,6 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
   const notify = useNotification()
   const queryClient = useQueryClient()
   const rol = perfil?.rol
-  const verSaldo = puedeVerSaldoCliente(rol)
-  const verHistorialVentas = puedeVerHistorialVentasCliente(rol)
   const puedeRegistrarPago = puedeRegistrarPagoCliente(rol)
   const puedeAnular = puedeAnularPago(rol)
   const [resumenCuenta, setResumenCuenta] = useState<ResumenCuenta | null>(null)
@@ -174,7 +172,6 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
           </div>
 
           {/* Account Balance Card */}
-          {verSaldo && (
           <div className={`mt-4 p-4 rounded-xl ${excedido ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' : 'bg-blue-50 dark:bg-blue-900/20'}`}>
             <div className="flex items-center justify-between">
               <div>
@@ -234,15 +231,14 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               </div>
             )}
           </div>
-          )}
         </div>
 
-        {/* Tabs (taco no ve la pestaña Pagos) */}
+        {/* Tabs */}
         <div className="flex border-b border-gray-200 dark:border-gray-700 px-5">
           {(([
             { id: 'resumen', label: 'Resumen', icon: TrendingUp },
             { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag },
-            ...(verSaldo ? [{ id: 'pagos' as ActiveTab, label: 'Pagos', icon: DollarSign }] : [])
+            { id: 'pagos', label: 'Pagos', icon: DollarSign }
           ]) as TabItem[]).map(tab => (
             <button
               key={tab.id}
@@ -275,22 +271,18 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   value={estadisticas?.totalPedidos || 0}
                   color="blue"
                 />
-                {verHistorialVentas && (
-                  <>
-                    <StatCard
-                      icon={DollarSign}
-                      label="Total Compras"
-                      value={formatCurrency(estadisticas?.totalCompras || 0)}
-                      color="green"
-                    />
-                    <StatCard
-                      icon={TrendingUp}
-                      label="Ticket Promedio"
-                      value={formatCurrency(estadisticas?.ticketPromedio || 0)}
-                      color="purple"
-                    />
-                  </>
-                )}
+                <StatCard
+                  icon={DollarSign}
+                  label="Total Compras"
+                  value={formatCurrency(estadisticas?.totalCompras || 0)}
+                  color="green"
+                />
+                <StatCard
+                  icon={TrendingUp}
+                  label="Ticket Promedio"
+                  value={formatCurrency(estadisticas?.ticketPromedio || 0)}
+                  color="purple"
+                />
                 <StatCard
                   icon={Clock}
                   label="Días sin Comprar"
@@ -299,8 +291,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 />
               </div>
 
-              {/* Payment Status (oculto para preventista_taco) */}
-              {verSaldo && (
+              {/* Payment Status */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl">
                   <div className="flex items-center gap-2 text-green-600 dark:text-green-400 mb-2">
@@ -323,7 +314,6 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   <p className="text-sm text-yellow-600">{estadisticas?.pedidosPendientes || 0} pedidos</p>
                 </div>
               </div>
-              )}
 
               {/* Favorite Products */}
               {(estadisticas?.productosFavoritos?.length ?? 0) > 0 && estadisticas && (
@@ -346,8 +336,7 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 </div>
               )}
 
-              {/* Credit Info (oculto para preventista_taco) */}
-              {verSaldo && (
+              {/* Credit Info */}
               <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                 <h3 className="font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
                   <CreditCard className="w-5 h-5" />
@@ -374,7 +363,6 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                   </div>
                 </div>
               </div>
-              )}
 
               {/* Notas del cliente */}
               {cliente.notas && (
@@ -419,11 +407,9 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        {verHistorialVentas && (
-                          <p className="text-xl font-bold text-gray-900 dark:text-white">
-                            {formatCurrency(pedido.total)}
-                          </p>
-                        )}
+                        <p className="text-xl font-bold text-gray-900 dark:text-white">
+                          {formatCurrency(pedido.total)}
+                        </p>
                         {expandedPedido === pedido.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                       </div>
                     </div>
@@ -434,8 +420,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                             <tr className="text-gray-500 text-left">
                               <th className="pb-2">Producto</th>
                               <th className="pb-2 text-right">Cant.</th>
-                              {verHistorialVentas && <th className="pb-2 text-right">Precio</th>}
-                              {verHistorialVentas && <th className="pb-2 text-right">Subtotal</th>}
+                              <th className="pb-2 text-right">Precio</th>
+                              <th className="pb-2 text-right">Subtotal</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -443,8 +429,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                               <tr key={item.id} className="border-t border-gray-100 dark:border-gray-700">
                                 <td className="py-2">{item.producto?.nombre || 'Producto'}</td>
                                 <td className="py-2 text-right">{item.cantidad}</td>
-                                {verHistorialVentas && <td className="py-2 text-right">{formatCurrency(item.precio_unitario)}</td>}
-                                {verHistorialVentas && <td className="py-2 text-right font-medium">{formatCurrency(item.subtotal)}</td>}
+                                <td className="py-2 text-right">{formatCurrency(item.precio_unitario)}</td>
+                                <td className="py-2 text-right font-medium">{formatCurrency(item.subtotal)}</td>
                               </tr>
                             ))}
                           </tbody>
