@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta, calcularTotalesCompra } from './calculations'
+import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta, calcularTotalesCompra, calcularMargenPorcentaje } from './calculations'
 
 // Fixture: factura A 0005-00455160 de Refres Now (Manaos) → T.P. Export,
 // 16/06/2026. Tasas efectivas de imp. internos sobre el neto:
@@ -37,6 +37,50 @@ describe('calcularCostoFinanciero (desembolso por unidad, sin percepciones)', ()
 
   it('ZZ: lo pagado', () => {
     expect(calcularCostoFinanciero(1000, 21, 8.6956, 'ZZ')).toBe(1000)
+  })
+})
+
+// Regresión (2026-07-30): ModalProducto calculaba el costo total con la fórmula
+// FC aunque el producto fuera ZZ. Inflaba el denominador 21% → el % de margen
+// bruto salía negativo con monto positivo, y persistía costo_con_iva inflado.
+describe('margen bruto de la ficha según tipo de compra', () => {
+  const margenesFicha = (neto: number, precio: number, ii: number, tipo: 'ZZ' | 'FC') => {
+    const costoTotal = calcularCostoFinanciero(neto, 21, ii, tipo)
+    const costoReal = calcularCostoReal(neto, ii, tipo)
+    return {
+      bruto: calcularMargenPorcentaje(precio, costoTotal),
+      neto: calcularMargenPorcentaje(precio / 1.21, costoReal),
+      costoTotal,
+    }
+  }
+
+  it('ZZ sin II (azúcar 8800 → 10100): lo pagado es el costo total; bruto positivo', () => {
+    const m = margenesFicha(8800, 10100, 0, 'ZZ')
+    expect(m.costoTotal).toBe(8800) // no 10648
+    expect(m.bruto).toBeCloseTo(14.77, 2) // antes daba -5.1
+    expect(10100 - m.costoTotal).toBe(1300) // coincide con el monto que ya se mostraba
+  })
+
+  it('ZZ: el margen neto sigue negativo — es el escenario "compro en negro, facturo"', () => {
+    const m = margenesFicha(8800, 10100, 0, 'ZZ')
+    expect(m.neto).toBeCloseTo(-5.15, 2)
+    // Y ahora bruto y neto NO coinciden: describen escenarios distintos.
+    expect(m.bruto).not.toBeCloseTo(m.neto, 2)
+  })
+
+  it('ZZ con II (Manaos cola): el II tampoco se suma, lo pagado ya lo incluye', () => {
+    expect(margenesFicha(5665.74, 7000, 8.6956, 'ZZ').costoTotal).toBe(5665.74)
+  })
+
+  it('FC sin II: bruto y neto coinciden — correcto, el IVA se cancela de ambos lados', () => {
+    const m = margenesFicha(8800, 10100, 0, 'FC')
+    expect(m.costoTotal).toBe(10648)
+    expect(m.bruto).toBeCloseTo(m.neto, 6)
+  })
+
+  it('FC con II: bruto y neto difieren (denominadores distintos)', () => {
+    const m = margenesFicha(1000, 1800, 8.6956, 'FC')
+    expect(m.bruto).not.toBeCloseTo(m.neto, 2)
   })
 })
 
