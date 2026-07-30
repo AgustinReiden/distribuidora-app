@@ -88,9 +88,13 @@ async function fetchUsuariosByRol(sucursalId: number | null, rol: string): Promi
 // menos de 15 por sucursal) y resolvemos el rol efectivo en memoria.
 async function fetchTransportistas(sucursalId: number | null): Promise<PerfilDB[]> {
   if (!sucursalId) return []
+  // El embed de perfil_roles va desambiguado con el nombre de la FK: la tabla
+  // apunta a `perfiles` DOS veces (usuario_id y created_by), y sin el hint
+  // PostgREST rechaza la consulta entera con PGRST201 -- el picker quedaria
+  // vacio, no incompleto. Mismo patron que pedidos!transportista_id_fkey.
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id), perfil_roles(rol, sucursal_id)')
+    .select('*, usuario_sucursales!inner(sucursal_id), perfil_roles!perfil_roles_usuario_id_fkey(rol, sucursal_id)')
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
