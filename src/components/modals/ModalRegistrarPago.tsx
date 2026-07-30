@@ -72,6 +72,15 @@ export interface ModalRegistrarPagoProps {
    * rechazar (throw) si falla para mantener el modal abierto.
    */
   onEntregarSinCobrar?: () => void | Promise<void>;
+  /**
+   * Cobro de UNA parada concreta (ruta activa): imputa el pago a ese pedido y
+   * oculta el selector "Aplicar a Pedido". Sin esto el selector arranca en
+   * "Pago a cuenta general" y el pago sale con pedido_id NULL, dejando el
+   * pedido entregado e impago (el trigger de monto_pagado necesita el pedido).
+   * Además, la RLS solo deja cobrar al transportista si el pago apunta a un
+   * pedido suyo, así que a cuenta general el INSERT le sería rechazado.
+   */
+  pedidoIdFijo?: string;
 }
 
 export default function ModalRegistrarPago({
@@ -83,7 +92,8 @@ export default function ModalRegistrarPago({
   onConfirmarFIFO,
   onConfirmarCombinadoFIFO,
   onGenerarRecibo,
-  onEntregarSinCobrar
+  onEntregarSinCobrar,
+  pedidoIdFijo
 }: ModalRegistrarPagoProps): React.ReactElement | null {
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
@@ -92,7 +102,7 @@ export default function ModalRegistrarPago({
   const [formaPago, setFormaPago] = useState<string>('efectivo')
   const [referencia, setReferencia] = useState<string>('')
   const [notas, setNotas] = useState<string>('')
-  const [pedidoSeleccionado, setPedidoSeleccionado] = useState<string>('')
+  const [pedidoSeleccionado, setPedidoSeleccionado] = useState<string>(pedidoIdFijo ?? '')
   const [loading, setLoading] = useState<boolean>(false)
   const [pagoRegistrado, setPagoRegistrado] = useState<PagoRegistrado | null>(null)
   const [resultadoFIFO, setResultadoFIFO] = useState<RegistrarPagoFifoResult | null>(null)
@@ -614,8 +624,9 @@ export default function ModalRegistrarPago({
             </>
           )}
 
-          {/* Aplicar a pedido especifico */}
-          {pedidosPendientes.length > 0 && (
+          {/* Aplicar a pedido especifico. Se oculta cuando el cobro es de una
+              parada concreta (pedidoIdFijo): ahi el pedido no es opcional. */}
+          {!pedidoIdFijo && pedidosPendientes.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Aplicar a Pedido (opcional)

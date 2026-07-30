@@ -420,6 +420,7 @@ export default function RutaActivaTransportista({
           cliente={entrega.pedidoParaCobrar.cliente}
           saldoPendiente={(entrega.pedidoParaCobrar.total || 0) - (entrega.pedidoParaCobrar.monto_pagado || 0)}
           pedidos={[entrega.pedidoParaCobrar as unknown as import('../../types').Pedido]}
+          pedidoIdFijo={String(entrega.pedidoParaCobrar.id)}
           onClose={entrega.cerrarModalPago}
           onConfirmar={entrega.confirmarPago}
           onEntregarSinCobrar={onEntregarSinCobrar ? entrega.entregarSinCobrar : undefined}
