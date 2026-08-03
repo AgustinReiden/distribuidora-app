@@ -34,6 +34,7 @@ export interface VistaProductosProps {
   onActualizacionMasivaPrecios?: () => void;
   onMinimoVentaMasivo?: () => void;
   onGestionarCategorias?: () => void;
+  onGestionarMarcas?: () => void;
   onCambioProducto?: () => void;
   onControlStock?: () => void;
   onVerAjustesStock?: () => void;
@@ -55,6 +56,7 @@ export default function VistaProductos({
   onActualizacionMasivaPrecios,
   onMinimoVentaMasivo,
   onGestionarCategorias,
+  onGestionarMarcas,
   onCambioProducto,
   onControlStock,
   onVerAjustesStock,
@@ -139,6 +141,7 @@ export default function VistaProductos({
             puedeControlarStock={puedeControlarStock}
             productosStockBajoCount={productosStockBajo.length}
             onGestionarCategorias={onGestionarCategorias}
+            onGestionarMarcas={onGestionarMarcas}
             onCambioProducto={onCambioProducto}
             onActualizacionMasivaPrecios={onActualizacionMasivaPrecios}
             onMinimoVentaMasivo={onMinimoVentaMasivo}

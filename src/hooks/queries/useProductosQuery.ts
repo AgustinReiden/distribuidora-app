@@ -105,6 +105,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       // Mínimo de venta (mig 147): distinto de stock_minimo. null = sin mínimo.
       cantidad_minima_venta: producto.cantidad_minima_venta ?? null,
       categoria: producto.categoria || null,
+      // Marca (mig 158): FK, '' no es válido.
+      marca_id: producto.marca_id || null,
       proveedor_id: producto.proveedor_id || null,
       costo_sin_iva: producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null,
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
@@ -136,6 +138,7 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.stock_minimo !== undefined) updateData.stock_minimo = producto.stock_minimo
   if (producto.cantidad_minima_venta !== undefined) updateData.cantidad_minima_venta = producto.cantidad_minima_venta
   if (producto.categoria !== undefined) updateData.categoria = producto.categoria || null
+  if (producto.marca_id !== undefined) updateData.marca_id = producto.marca_id || null
   if (producto.proveedor_id !== undefined) updateData.proveedor_id = producto.proveedor_id || null
   if (producto.costo_sin_iva !== undefined) updateData.costo_sin_iva = producto.costo_sin_iva ? parseFloat(String(producto.costo_sin_iva)) : null
   if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null

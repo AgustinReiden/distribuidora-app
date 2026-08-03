@@ -6,7 +6,7 @@
  */
 import React, { lazy, Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useMetricasQuery, useClientesQuery } from '../../hooks/queries'
+import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useBackup } from '../../hooks/supabase'
 
@@ -41,6 +41,15 @@ export default function DashboardContainer(): React.ReactElement {
 
   // Cargar clientes solo para el contador
   const { data: clientes = [] } = useClientesQuery()
+
+  // Objetivos del mes (migs 159-161). Siempre del mes corriente: las metas son
+  // mensuales y NO siguen al chip de período del dashboard. Se pide sin id, así
+  // el RPC devuelve los del usuario logueado.
+  const { data: avanceMetas } = useAvanceMetasQuery(
+    undefined,
+    periodoMensual(),
+    authReady && (isPreventista || isAdmin),
+  )
 
   // Backup
   const { exportando, descargarJSON } = useBackup()
@@ -80,6 +89,7 @@ export default function DashboardContainer(): React.ReactElement {
         isPreventista={isPreventista}
         isEncargado={isEncargado}
         totalClientes={clientes.length}
+        avanceMetas={avanceMetas}
       />
     </Suspense>
   )

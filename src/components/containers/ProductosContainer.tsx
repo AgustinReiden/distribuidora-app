@@ -36,6 +36,7 @@ const ModalMinimoVentaMasivo = lazy(() => import('../modals/ModalMinimoVentaMasi
 const ModalGrupoPrecio = lazy(() => import('../modals/ModalGrupoPrecio'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
+const ModalMarcas = lazy(() => import('../modals/ModalMarcas'))
 const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
 const ModalStockBajo = lazy(() => import('../modals/ModalStockBajo'))
 const ModalControlStock = lazy(() => import('../modals/ModalControlStock'))
@@ -91,6 +92,7 @@ export default function ProductosContainer(): React.ReactElement {
   // Producto para el que se está creando una condición mayorista desde su ficha.
   const [condicionParaProducto, setCondicionParaProducto] = useState<ProductoDB | null>(null)
   const [modalCategoriasOpen, setModalCategoriasOpen] = useState(false)
+  const [modalMarcasOpen, setModalMarcasOpen] = useState(false)
   const [modalCambioOpen, setModalCambioOpen] = useState(false)
   const [modalStockBajoOpen, setModalStockBajoOpen] = useState(false)
   const [modalControlStockOpen, setModalControlStockOpen] = useState(false)
@@ -113,6 +115,7 @@ export default function ProductosContainer(): React.ReactElement {
     setModalMinimoVentaOpen(false)
     setCondicionParaProducto(null)
     setModalCategoriasOpen(false)
+    setModalMarcasOpen(false)
     setModalCambioOpen(false)
     setModalStockBajoOpen(false)
     setModalControlStockOpen(false)
@@ -185,6 +188,10 @@ export default function ProductosContainer(): React.ReactElement {
 
   const handleGestionarCategorias = useCallback(() => {
     setModalCategoriasOpen(true)
+  }, [])
+
+  const handleGestionarMarcas = useCallback(() => {
+    setModalMarcasOpen(true)
   }, [])
 
   const handleAbrirCambioProducto = useCallback(() => {
@@ -332,6 +339,7 @@ export default function ProductosContainer(): React.ReactElement {
           onActualizacionMasivaPrecios={handleAbrirActualizacionMasiva}
           onMinimoVentaMasivo={isAdmin ? handleAbrirMinimoVentaMasivo : undefined}
           onGestionarCategorias={handleGestionarCategorias}
+          onGestionarMarcas={handleGestionarMarcas}
           onCambioProducto={puedeCambiarProductos ? handleAbrirCambioProducto : undefined}
           onControlStock={puedeControlarStock ? handleControlStock : undefined}
           onVerAjustesStock={puedeControlarStock ? handleVerAjustesStock : undefined}
@@ -425,6 +433,16 @@ export default function ProductosContainer(): React.ReactElement {
           <ModalCategorias
             productos={productos}
             onClose={() => setModalCategoriasOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Marcas (mig 158) */}
+      {modalMarcasOpen && (
+        <Suspense fallback={null}>
+          <ModalMarcas
+            productos={productos}
+            onClose={() => setModalMarcasOpen(false)}
           />
         </Suspense>
       )}
