@@ -6,6 +6,7 @@ import {
   serializarFranjas,
   validarFranjas,
   convertirHorarioInicial,
+  clienteSinHorario,
 } from './horariosCliente';
 
 describe('generarOpcionesHora', () => {
@@ -178,5 +179,38 @@ describe('convertirHorarioInicial', () => {
     expect(convertirHorarioInicial(null)).toEqual({ franjas: [], huboLegacy: false, sinReconocer: [] });
     expect(convertirHorarioInicial(undefined)).toEqual({ franjas: [], huboLegacy: false, sinReconocer: [] });
     expect(convertirHorarioInicial('')).toEqual({ franjas: [], huboLegacy: false, sinReconocer: [] });
+  });
+});
+
+describe('clienteSinHorario', () => {
+  it('es true cuando no hay ningún horario cargado', () => {
+    expect(clienteSinHorario({})).toBe(true);
+    expect(clienteSinHorario({ horarios_atencion: null, horario_entrega: null })).toBe(true);
+    expect(clienteSinHorario({ horarios_atencion: '' })).toBe(true);
+  });
+
+  it('es false cuando hay franjas utilizables en horarios_atencion', () => {
+    expect(clienteSinHorario({ horarios_atencion: '08:00-12:00' })).toBe(false);
+    expect(clienteSinHorario({ horarios_atencion: '08:00-12:00 y 16:00-20:00' })).toBe(false);
+  });
+
+  it('es false cuando el horario utilizable está en la columna legacy horario_entrega', () => {
+    // horario_entrega está deprecada pero tiene precedencia si trae valor (mig 140).
+    expect(clienteSinHorario({ horarios_atencion: '', horario_entrega: '09:00-13:00' })).toBe(false);
+  });
+
+  it('es true con texto libre legacy no parseable: el ruteo tampoco lo puede usar', () => {
+    expect(clienteSinHorario({ horarios_atencion: '24 HS' })).toBe(true);
+    expect(clienteSinHorario({ horarios_atencion: 'Lunes a sábado de 9 a 14' })).toBe(true);
+  });
+
+  it('es false si el cliente declaró que no atiende con horario fijo', () => {
+    expect(clienteSinHorario({ sin_horario_fijo: true })).toBe(false);
+    expect(clienteSinHorario({ horarios_atencion: '24 HS', sin_horario_fijo: true })).toBe(false);
+  });
+
+  it('es false sin cliente (nada que pedir)', () => {
+    expect(clienteSinHorario(null)).toBe(false);
+    expect(clienteSinHorario(undefined)).toBe(false);
   });
 });

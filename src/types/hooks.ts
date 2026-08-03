@@ -38,6 +38,12 @@ export interface ClienteDB {
    * Se conserva porque la imprimen los PDFs y porque tiene precedencia si está cargada.
    */
   horario_entrega?: string | null;
+  /**
+   * true = el cliente declaró que no atiende con horario fijo (mig 157).
+   * Distinto de `horarios_atencion` vacío ("todavía no se cargó"): suprime el
+   * pedido de horario al cargar un pedido.
+   */
+  sin_horario_fijo?: boolean | null;
   rubro?: string | null;
   notas?: string | null;
   limite_credito?: number;
@@ -74,6 +80,11 @@ export interface ProductoDB {
   categoria?: string | null;
   /** FK a `categorias`; la sincroniza un trigger desde el texto `categoria` (mig 146) */
   categoria_id?: string | null;
+  /**
+   * FK a `marcas` (mig 158). Ortogonal a la categoría: Manaos (marca) +
+   * gaseosas (categoría). NULL = sin marca asignada.
+   */
+  marca_id?: string | null;
   /**
    * Mínimo de unidades por pedido para este producto (mig 147). NULL = sin
    * mínimo. Ojo: NO es `stock_minimo`, que es el umbral de alerta de reposición.
@@ -308,6 +319,8 @@ export interface ProductoFormInput {
   stock: number;
   stock_minimo?: number;
   categoria?: string;
+  /** FK a `marcas` (mig 158). null / '' = sin marca. */
+  marca_id?: string | null;
   /** Mínimo de venta del producto (mig 147). null lo quita. */
   cantidad_minima_venta?: number | null;
   proveedor_id?: string | null;

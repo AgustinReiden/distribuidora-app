@@ -303,6 +303,10 @@ export default function ClientesContainer(): React.ReactElement {
         telefono: data.telefono || undefined,
         contacto: data.contacto || undefined,
         horarios_atencion: data.horarios_atencion || undefined,
+        // dias_atencion faltaba en el patch: el selector de días de ModalCliente
+        // se editaba pero nunca se persistía (el bitmask lo usa el ruteo).
+        dias_atencion: data.dias_atencion ?? null,
+        sin_horario_fijo: data.sin_horario_fijo,
         horario_entrega: data.horario_entrega || undefined,
         rubro: data.rubro || undefined,
         notas: data.notas || undefined,
@@ -341,6 +345,8 @@ export default function ClientesContainer(): React.ReactElement {
       descuento_porcentaje: data.descuentoPorcentaje,
       contacto: data.contacto || undefined,
       horarios_atencion: data.horarios_atencion || undefined,
+      dias_atencion: data.dias_atencion ?? null,
+      sin_horario_fijo: data.sin_horario_fijo,
       horario_entrega: data.horario_entrega || undefined,
       rubro: data.rubro || undefined,
       notas: data.notas || undefined,

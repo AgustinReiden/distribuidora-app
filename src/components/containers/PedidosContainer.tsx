@@ -38,6 +38,7 @@ import {
   useTransportistasQuery,
   useUsuariosQuery,
   useCrearClienteMutation,
+  useActualizarClienteMutation,
   useDepositoCoords,
   useDestinoCoords,
   useCrearPedidoCambioEnRutaMutation,
@@ -201,6 +202,7 @@ export default function PedidosContainer(): React.ReactElement {
   const pagosMasivos = usePagosMasivosMutation()
   const entregaYPagoMasivos = useEntregaYPagoMasivosMutation()
   const crearClienteMut = useCrearClienteMutation()
+  const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
   const aplicarCambioParadaMut = useAplicarCambioParadaMutation()
 
@@ -1709,6 +1711,17 @@ export default function PedidosContainer(): React.ReactElement {
                 return { id: newCliente.id }
               } catch (e) {
                 notify.error((e as Error).message || 'Error al crear cliente')
+                throw e
+              }
+            }}
+            onGuardarHorarioCliente={async (clienteId, patch) => {
+              // Mutación aparte y previa a la creación del pedido: si falla, el
+              // pedido armado no se pierde y el error se muestra en el bloque.
+              try {
+                await actualizarClienteMut.mutateAsync({ id: clienteId, data: patch })
+              } catch (e) {
+                const msg = (e as Error).message || 'No se pudo guardar el horario'
+                notify.error(msg)
                 throw e
               }
             }}

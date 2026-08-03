@@ -13,7 +13,8 @@ import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
 import DiasAtencionSelector from '../ui/DiasAtencionSelector';
-import { serializarFranjas, validarFranjas } from '../../utils/horariosCliente';
+import BloqueHorarioRequerido, { type PatchHorarioCliente } from '../ui/BloqueHorarioRequerido';
+import { serializarFranjas, validarFranjas, clienteSinHorario } from '../../utils/horariosCliente';
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ProductoDB, ClienteDB } from '../../types';
 
@@ -129,6 +130,12 @@ export interface ModalPedidoProps {
   onEliminarPromoCreacion?: (promoId: string, promoNombre: string) => void;
   /** Callback al restaurar una promo previamente quitada. */
   onRestaurarPromoCreacion?: (promoId: string) => void;
+  /**
+   * Persiste el horario del cliente seleccionado sin salir del modal (mig 157).
+   * Si no se provee, el pedido de horario no bloquea (útil para tests y para
+   * cualquier consumidor que no pueda escribir clientes).
+   */
+  onGuardarHorarioCliente?: (clienteId: string, patch: PatchHorarioCliente) => Promise<void>;
 }
  
 
@@ -161,7 +168,8 @@ const ModalPedido = memo(function ModalPedido({
   onCambiarRegaloCreacion,
   promosEliminadas,
   onEliminarPromoCreacion,
-  onRestaurarPromoCreacion
+  onRestaurarPromoCreacion,
+  onGuardarHorarioCliente
 }: ModalPedidoProps) {
   // Solo admin puede reasignar preventista al pedido. La query se habilita
   // condicionalmente para no traer perfiles para preventistas/encargados.
@@ -232,6 +240,13 @@ const ModalPedido = memo(function ModalPedido({
     // clienteId is a string, compare directly with string id
     return clientes.find(c => String(c.id) === String(nuevoPedido.clienteId)) || null;
   }, [clientes, nuevoPedido.clienteId]);
+
+  // Horario obligatorio (mig 157): si el cliente elegido no tiene un horario
+  // utilizable, se pide acá mismo y no se puede confirmar el pedido hasta
+  // resolverlo. Antes había que salir del pedido, editar el cliente y volver —
+  // con el cliente esperando, nadie lo hacía y el ruteo quedaba sin ventanas.
+  const faltaHorarioCliente =
+    !!onGuardarHorarioCliente && clienteSinHorario(clienteSeleccionado);
 
   const handleCapturarGps = async (): Promise<void> => {
     setGpsCapturando(true);
@@ -492,6 +507,23 @@ const ModalPedido = memo(function ModalPedido({
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Horario faltante del cliente ya seleccionado. Va DENTRO del
+                ModalBase (no como modal hermano): un Radix Dialog deja
+                cualquier overlay hermano detrás y sería inalcanzable.
+                `key` por cliente: al cambiar de cliente el editor se reinicia
+                solo, sin efecto de sincronización. */}
+            {faltaHorarioCliente && clienteSeleccionado && (
+              <div className="mt-3">
+                <BloqueHorarioRequerido
+                  key={clienteSeleccionado.id}
+                  nombreCliente={clienteSeleccionado.nombre_fantasia || clienteSeleccionado.razon_social || 'este cliente'}
+                  horarioActual={clienteSeleccionado.horarios_atencion}
+                  diasActuales={clienteSeleccionado.dias_atencion}
+                  onGuardar={patch => onGuardarHorarioCliente!(String(clienteSeleccionado.id), patch)}
+                />
               </div>
             )}
           </div>
@@ -1054,6 +1086,15 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         </div>
 
+        {/* Aviso del horario faltante en la barra inferior: el bloque para
+            cargarlo está arriba y puede quedar fuera de la vista con el
+            carrito lleno. */}
+        {faltaHorarioCliente && (
+          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
+            Falta cargar el horario del cliente — subí para completarlo.
+          </div>
+        )}
+
         {/* Aviso compacto de violaciones (siempre visible cuando aplican) */}
         {violacionesMOQ.length > 0 && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
@@ -1091,7 +1132,7 @@ const ModalPedido = memo(function ModalPedido({
           <button
             type="button"
             onClick={onGuardar}
-            disabled={guardando || violacionesMOQ.length > 0 || !hayItems || debeElegirPreventista}
+            disabled={guardando || violacionesMOQ.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente}
             className="px-5 bg-green-600 text-white font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 text-sm"
           >
             {guardando && <Loader2 className="w-4 h-4 animate-spin" />}
