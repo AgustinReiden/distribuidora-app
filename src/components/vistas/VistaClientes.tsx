@@ -12,6 +12,12 @@ import type { ClienteDB } from '../../types';
 
 const ITEMS_PER_PAGE = 18;
 
+/**
+ * Valor centinela del filtro de zona para "clientes sin zona asignada".
+ * No puede chocar con un id de zona real (son numéricos).
+ */
+const SIN_ZONA = '__sin_zona__';
+
 /** Normalizar texto: colapsar espacios (incluyendo non-breaking space), trim, lowercase */
 const normalizeSearch = (s: string | null | undefined): string =>
   s?.replace(/\s+/g, ' ').trim().toLowerCase() ?? '';
@@ -69,6 +75,13 @@ export default function VistaClientes({
 
   const { data: zonas = [] } = useZonasEstandarizadasQuery();
 
+  // Cuántos clientes quedaron sin zona. Se muestra en la opción del filtro
+  // porque es justamente el trabajo pendiente que hay que ver de un vistazo.
+  const sinZonaCount = useMemo(
+    () => clientes.filter(c => c.zona_id == null).length,
+    [clientes]
+  );
+
   const clientesFiltrados = useMemo((): ClienteDB[] => {
     const busquedaNorm = normalizeSearch(busqueda);
     return clientes.filter((c: ClienteDB) => {
@@ -82,7 +95,10 @@ export default function VistaClientes({
 
       const matchRubro = filtroRubro === 'todos' || c.rubro === filtroRubro;
 
-      const matchZona = !filtroZonaId || (c.zona_id != null && String(c.zona_id) === filtroZonaId);
+      const matchZona = !filtroZonaId
+        || (filtroZonaId === SIN_ZONA
+          ? c.zona_id == null
+          : (c.zona_id != null && String(c.zona_id) === filtroZonaId));
 
       const saldo = c.saldo_cuenta ?? 0;
       const matchSaldo =
@@ -117,6 +133,7 @@ export default function VistaClientes({
     if (filtroSaldo === 'deben') return 'con deuda';
     if (filtroSaldo === 'no_deben') return 'al día';
     if (filtroRubro !== 'todos') return `del rubro ${filtroRubro}`;
+    if (filtroZonaId === SIN_ZONA) return 'sin zona asignada';
     if (filtroZonaId) {
       const z = zonas.find(z => String(z.id) === filtroZonaId);
       return z ? `de ${z.nombre}` : null;
@@ -239,6 +256,9 @@ export default function VistaClientes({
               {zonas.map(z => (
                 <option key={z.id} value={z.id}>{z.nombre}</option>
               ))}
+              {sinZonaCount > 0 && (
+                <option value={SIN_ZONA}>Sin zona asignada ({sinZonaCount})</option>
+              )}
             </select>
           </div>
         )}
