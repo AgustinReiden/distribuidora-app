@@ -211,6 +211,10 @@ export {
 } from './useRecorridoExistenteQuery'
 export type { RecorridoExistente } from './useRecorridoExistenteQuery'
 
+// Rutas en curso del transportista (para avisar que ya hay una en otra fecha)
+export { rutasEnCursoKeys, useRutasEnCursoQuery } from './useRutasEnCursoQuery'
+export type { RutaEnCurso } from './useRutasEnCursoQuery'
+
 // Recorridos de una fecha con paradas completas (para re-descargar la hoja de ruta)
 export {
   recorridosHojaRutaKeys,

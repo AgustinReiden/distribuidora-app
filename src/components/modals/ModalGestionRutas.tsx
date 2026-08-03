@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioProducto';
-import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery } from '../../hooks/queries';
+import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery, useRutasEnCursoQuery } from '../../hooks/queries';
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
@@ -312,6 +312,18 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   );
   const paradasExistentes = useMemo((): PedidoDB[] => rutaExistente?.paradas ?? [], [rutaExistente]);
   const editando = paradasExistentes.length > 0;
+
+  // Rutas ya armadas de este transportista en OTRAS fechas. Sin esto, abrir el
+  // modal al día siguiente (default: mañana) no muestra la ruta de hoy ni sus
+  // paradas —ya están en estado `asignado`, fuera del pool— y parece que armar
+  // de nuevo estuviera bloqueado.
+  const { data: rutasEnCurso = [] } = useRutasEnCursoQuery(
+    modoDividir ? null : transportistaSeleccionado || null,
+  );
+  const rutasOtraFecha = useMemo(
+    () => rutasEnCurso.filter(r => r.fecha !== fechaEntrega && r.paradas > 0),
+    [rutasEnCurso, fechaEntrega],
+  );
   const idsExistentes = useMemo(() => new Set(paradasExistentes.map(p => p.id)), [paradasExistentes]);
 
   // Disponibles para sumar a la ruta: pendiente/en_preparacion (vienen del
@@ -943,6 +955,33 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         Ya hay una ruta armada para <strong>{transportistaInfo?.nombre}</strong> el {formatFecha(fechaEntrega)}.
                         Se editará esa misma ruta (agregá o quitá paradas y se reoptimiza al armar).
                       </p>
+                    </div>
+                  )}
+
+                  {/* La ruta existe, pero en otra fecha. Es el caso de volver al
+                      día siguiente a agregarle un pedido: sin este aviso la
+                      pantalla se ve vacía y parece que no dejara rearmarla. */}
+                  {!modoDividir && !editando && rutasOtraFecha.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
+                      <CalendarDays className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-blue-900">
+                        <p>
+                          <strong>{transportistaInfo?.nombre}</strong> ya tiene una ruta armada en otra fecha.
+                          Estás por crear una <strong>nueva</strong> para el {formatFecha(fechaEntrega)}.
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {rutasOtraFecha.map(r => (
+                            <button
+                              key={r.recorridoId}
+                              type="button"
+                              onClick={() => setFechaEntrega(r.fecha)}
+                              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-blue-300 text-blue-800 hover:bg-blue-100"
+                            >
+                              Editar la del {formatFecha(r.fecha)} ({r.paradas} parada{r.paradas === 1 ? '' : 's'})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
 
