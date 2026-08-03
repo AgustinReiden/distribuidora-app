@@ -177,3 +177,29 @@ export function convertirHorarioInicial(valor?: string | null): ConversionInicia
 
   return { franjas, huboLegacy, sinReconocer };
 }
+
+/** Lo mínimo que hace falta de un cliente para saber si tiene horario. */
+export interface ClienteConHorario {
+  horarios_atencion?: string | null;
+  horario_entrega?: string | null;
+  sin_horario_fijo?: boolean | null;
+}
+
+/**
+ * true si el cliente no tiene un horario *utilizable* y tampoco declaró que no
+ * atiende con horario fijo. Es la condición que dispara el pedido de horario al
+ * cargar un pedido.
+ *
+ * "Utilizable" = parseable a franjas. Un texto libre legacy ("24 HS", "9 A 14")
+ * cuenta como sin horario a propósito: el ruteo tampoco lo puede usar
+ * (`horarioParaRutear` en useOptimizarRuta aplica el mismo criterio), así que
+ * pedir que se lo traduzca a franjas es exactamente lo que queremos.
+ */
+export function clienteSinHorario(cliente?: ClienteConHorario | null): boolean {
+  if (!cliente) return false;
+  if (cliente.sin_horario_fijo) return false;
+  return (
+    parsearFranjas(cliente.horarios_atencion).length === 0 &&
+    parsearFranjas(cliente.horario_entrega).length === 0
+  );
+}

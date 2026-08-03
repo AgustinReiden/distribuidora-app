@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import NumberInput from '../ui/NumberInput';
 import { useZodValidation } from '../../hooks/useZodValidation';
+import { useMarcasQuery } from '../../hooks/queries';
 import { modalProductoSchema } from '../../lib/schemas';
 import {
   calcularCostoFinanciero,
@@ -28,6 +29,8 @@ export interface ProductoFormData {
   nombre: string;
   codigo: string;
   categoria: string;
+  /** FK a `marcas` (mig 158). '' = sin marca. Ortogonal a la categoría. */
+  marca_id?: string | null;
   proveedor_id: string;
   stock: number | string;
   stock_minimo: number;
@@ -118,11 +121,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   // en ZZ lo pagado es el costo final (ya incluye IVA e II, nada se suma encima).
   const tipoCompra: 'ZZ' | 'FC' = producto?.ultimo_tipo_compra ?? 'FC';
 
+  const { data: marcas = [] } = useMarcasQuery();
+
   const [form, setForm] = useState<ProductoFormData>(producto ? {
     id: producto.id,
     nombre: producto.nombre || '',
     codigo: producto.codigo || '',
     categoria: producto.categoria || '',
+    marca_id: producto.marca_id || '',
     proveedor_id: producto.proveedor_id || '',
     stock: producto.stock ?? '',
     stock_minimo: producto.stock_minimo ?? 10,
@@ -141,6 +147,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     nombre: '',
     codigo: '',
     categoria: '',
+    marca_id: '',
     proveedor_id: '',
     stock: '',
     stock_minimo: 10,
@@ -300,6 +307,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
       onSave({
         ...formNormalizado,
         categoria: categoriaFinal,
+        // '' es la opción "sin marca" del select; la columna es una FK y no
+        // acepta string vacío.
+        marca_id: formNormalizado.marca_id || null,
         // 0 / vacío significan "sin mínimo": la columna es NULL, no 0 (el CHECK
         // de la mig 147 exige > 0).
         cantidad_minima_venta: Number(formNormalizado.cantidad_minima_venta) > 0
@@ -433,6 +443,29 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
                 <option key={getCategoryKey(cat)} value={getCategoryName(cat)}>{getCategoryName(cat)}</option>
               ))}
             </select>
+          )}
+        </div>
+
+        {/* Marca (mig 158). Independiente de la categoría: un producto es
+            Manaos (marca) y gaseosas (categoría). La usan los objetivos por
+            marca, así que un producto nuevo sin marca queda fuera de esa
+            medición. */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Marca</label>
+          <select
+            value={form.marca_id || ''}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, marca_id: e.target.value })}
+            className="w-full px-3 py-2 border rounded-lg"
+          >
+            <option value="">Sin marca</option>
+            {marcas.filter(m => m.activa).map(m => (
+              <option key={m.id} value={m.id}>{m.nombre}</option>
+            ))}
+          </select>
+          {marcas.length === 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              Todavía no hay marcas cargadas. Se crean desde Catálogo → Marcas.
+            </p>
           )}
         </div>
 

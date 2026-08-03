@@ -162,6 +162,8 @@ interface ClienteCreateInput {
   /** Días que abre, bitmask Lunes→Domingo (mig 140). null = abre todos. */
   dias_atencion?: string | null
   horario_entrega?: string
+  /** "No atiende con horario fijo": suprime el pedido de horario al cargar un pedido (mig 157). */
+  sin_horario_fijo?: boolean
   rubro?: string
   notas?: string
   preventista_id?: string | null

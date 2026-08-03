@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-07-28** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-08-03** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -126,10 +126,11 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 156** — verificado contra el ledger el 2026-07-30: la última
-numerada es `155_perfil_roles`. Las **148–155** (origen del precio, reglas de comisión,
-`place_id`, horarios masivos, barridas y roles extra por sucursal) están aplicadas y mapean
-**1:1** con el ledger, así que no agregan ninguna excepción a las tablas de arriba.
+**La próxima migración es la 162** — verificado contra el ledger el 2026-08-03: la última
+numerada es `161_rendimiento_preventistas`. Las **148–161** (origen del precio, reglas de
+comisión, `place_id`, horarios masivos, barridas, roles extra por sucursal, horario obligatorio
+al cargar pedido, marcas y objetivos por preventista) están aplicadas y mapean **1:1** con el
+ledger, así que no agregan ninguna excepción a las tablas de arriba.
 
 **Antes de elegir el número de una migración nueva, mirar `ls migrations/` además del
 ledger**: el ledger no siempre lleva el prefijo, así que por sí solo no alcanza. Y si mergeaste

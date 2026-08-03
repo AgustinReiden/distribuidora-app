@@ -13,7 +13,7 @@
 import React from 'react';
 import {
   Plus, ChevronDown, Tag, Package2, AlertTriangle,
-  ArrowLeftRight, Percent, ClipboardCheck, TrendingDown, History, PackageMinus,
+  ArrowLeftRight, Percent, ClipboardCheck, TrendingDown, History, PackageMinus, Award,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -32,6 +32,8 @@ export interface ProductoToolbarProps {
   puedeControlarStock?: boolean;
   productosStockBajoCount: number;
   onGestionarCategorias?: () => void;
+  /** Abre el ABM de marcas + asignación masiva a productos (mig 158). */
+  onGestionarMarcas?: () => void;
   onCambioProducto?: () => void;
   onActualizacionMasivaPrecios?: () => void;
   /** Carga masiva del mínimo de venta por categoría (mig 147). */
@@ -159,6 +161,7 @@ export default function ProductoToolbar({
   puedeControlarStock = false,
   productosStockBajoCount,
   onGestionarCategorias,
+  onGestionarMarcas,
   onCambioProducto,
   onActualizacionMasivaPrecios,
   onMinimoVentaMasivo,
@@ -169,7 +172,7 @@ export default function ProductoToolbar({
   onNuevoProducto,
 }: ProductoToolbarProps): React.ReactElement | null {
   const hayCatálogo = isAdmin && (
-    Boolean(onGestionarCategorias) || Boolean(onCambioProducto) ||
+    Boolean(onGestionarCategorias) || Boolean(onGestionarMarcas) || Boolean(onCambioProducto) ||
     Boolean(onActualizacionMasivaPrecios) || Boolean(onMinimoVentaMasivo)
   );
   // Control de stock (Excel) lo ve admin y encargado; el historial de mermas
@@ -193,6 +196,12 @@ export default function ProductoToolbar({
         <DropdownMenuItem onSelect={onGestionarCategorias}>
           <Tag className="w-4 h-4 text-purple-600" />
           <span>Categorías</span>
+        </DropdownMenuItem>
+      )}
+      {onGestionarMarcas && (
+        <DropdownMenuItem onSelect={onGestionarMarcas}>
+          <Award className="w-4 h-4 text-amber-600" />
+          <span>Marcas</span>
         </DropdownMenuItem>
       )}
       {onCambioProducto && (

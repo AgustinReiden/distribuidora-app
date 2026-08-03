@@ -38,6 +38,45 @@ export {
 } from './useCategoriasQuery'
 export type { CategoriaDB } from './useCategoriasQuery'
 
+// Marcas (mig 158)
+export {
+  marcasKeys,
+  useMarcasQuery,
+  useCrearMarcaMutation,
+  useRenombrarMarcaMutation,
+  useEliminarMarcaMutation,
+  useToggleMarcaActivaMutation,
+  useAsignarMarcaMasivaMutation,
+} from './useMarcasQuery'
+export type { MarcaDB, AsignarMarcaMasivaArgs } from './useMarcasQuery'
+
+// Metas por preventista (migs 159-161)
+export {
+  metasKeys,
+  periodoMensual,
+  useAvanceMetasQuery,
+  useMetasPreventistaQuery,
+  useRendimientoPreventistasQuery,
+  // Ojo: `useGuardarMetaMutation` (sin sufijo) ya existe y es el de
+  // metas_gerenciales (mig 108). Son cosas distintas.
+  useGuardarMetaPreventistaMutation,
+  useDesactivarMetaPreventistaMutation,
+} from './useMetasPreventistaQuery'
+export type {
+  TipoMeta,
+  EstadoMeta,
+  TipoAlcance,
+  AlcanceMeta,
+  AvanceMeta,
+  AvanceMetasResultado,
+  MetaPreventista,
+  GuardarMetaInput,
+  RendimientoPreventista,
+  RendimientoResultado,
+  RendimientoPorMarca,
+  RendimientoPorCategoria,
+} from './useMetasPreventistaQuery'
+
 // Clientes
 export {
   clientesKeys,

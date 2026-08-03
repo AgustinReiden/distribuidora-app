@@ -53,6 +53,8 @@ export interface ClienteFormData {
   dias_atencion: string | null;
   /** @deprecated (mig 140) ya no se edita; el horario canónico es horarios_atencion. */
   horario_entrega: string;
+  /** "No atiende con horario fijo" (mig 157): silencia el pedido de horario al cargar pedidos. */
+  sin_horario_fijo: boolean;
   rubro: string;
   notas: string;
   limiteCredito: number;
@@ -174,6 +176,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       : (cliente.horarios_atencion || ''),
     dias_atencion: cliente.dias_atencion ?? null,
     horario_entrega: cliente.horario_entrega || '',
+    sin_horario_fijo: cliente.sin_horario_fijo ?? false,
     rubro: cliente.rubro || '',
     notas: cliente.notas || '',
     limiteCredito: cliente.limite_credito || 0,
@@ -203,6 +206,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     horarios_atencion: '',
     dias_atencion: null,
     horario_entrega: '',
+    sin_horario_fijo: false,
     rubro: '',
     notas: '',
     limiteCredito: 0,
@@ -797,6 +801,23 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           </div>
 
           <DiasAtencionSelector valor={diasAtencion} onChange={sincronizarDias} />
+
+          {/* Mig 157: distingue "todavía no lo cargamos" de "no tiene horario
+              fijo". Con el flag puesto, el modal de pedido deja de pedirlo. */}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.sin_horario_fijo}
+              onChange={e => setForm(prev => ({ ...prev, sin_horario_fijo: e.target.checked }))}
+              className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm dark:text-gray-200">
+              No atiende con horario fijo
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                Deja de pedir el horario al cargar un pedido a este cliente.
+              </span>
+            </span>
+          </label>
 
           <p className="text-xs text-gray-500 dark:text-gray-400">
             El reparto usa este horario: los locales que cierran al mediodía se visitan primero.

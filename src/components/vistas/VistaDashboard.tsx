@@ -7,6 +7,8 @@ import {
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import DashboardViewHeader from '../dashboard/DashboardViewHeader';
+import PanelMisMetas from '../dashboard/PanelMisMetas';
+import type { AvanceMetasResultado } from '../../hooks/queries';
 import DashboardToolbar from '../dashboard/DashboardToolbar';
 import { cn } from '../../lib/utils';
 import type {
@@ -79,6 +81,11 @@ export interface VistaDashboardProps {
   exportando: boolean;
   productosStockBajo?: ProductoDB[];
   totalClientes?: number;
+  /**
+   * Avance de los objetivos del mes (migs 159-161). Si no hay metas cargadas,
+   * el dashboard queda exactamente como antes.
+   */
+  avanceMetas?: AvanceMetasResultado;
   isAdmin?: boolean;
   isPreventista?: boolean;
   isEncargado?: boolean;
@@ -307,6 +314,7 @@ export default function VistaDashboard({
   exportando,
   productosStockBajo = [],
   totalClientes = 0,
+  avanceMetas,
   isAdmin = false,
   isPreventista = false,
   isEncargado = false,
@@ -378,6 +386,12 @@ export default function VistaDashboard({
           />
         }
       />
+
+      {/* Objetivos del mes. Va arriba de todo porque es lo que el preventista
+          tiene que mirar primero; si no hay metas cargadas no se renderiza. */}
+      {avanceMetas && avanceMetas.metas.length > 0 && (
+        <PanelMisMetas avance={avanceMetas} />
+      )}
 
       {/* Alerta de stock bajo: chip compacto (no banner) */}
       {productosStockBajo.length > 0 && (
