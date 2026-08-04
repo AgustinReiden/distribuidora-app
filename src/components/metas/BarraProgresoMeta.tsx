@@ -42,9 +42,18 @@ const COLOR_TEXTO: Record<string, string> = {
 const LABEL_ESTADO: Record<string, string> = {
   cumplida: 'Cumplida',
   adelantado: 'Adelantado',
-  en_curso: 'En curso',
+  // "En progreso" y no "Atrasado": arrancando el período el prorrateo es ruido.
+  // El RPC ya sólo marca en_riesgo pasado el 25% del período (mig 164).
+  en_curso: 'En progreso',
   en_riesgo: 'Atrasado',
 };
+
+/** "01/08 al 15/08" para los períodos que no son un mes completo. */
+function rangoCorto(desde?: string, hasta?: string): string | null {
+  if (!desde || !hasta) return null;
+  const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  return `${dm(desde)} al ${dm(hasta)}`;
+}
 
 /**
  * Barra de avance de un objetivo, con el marcador del ritmo esperado.
@@ -73,6 +82,12 @@ const BarraProgresoMeta = memo(function BarraProgresoMeta({ meta, densa = false 
             : undefined}
         >
           {etiquetaMeta(meta)}
+          {/* Sólo cuando NO es el mes completo: si no, es ruido en todas las filas. */}
+          {meta.periodo_personalizado && (
+            <span className="ml-1.5 text-xs font-normal px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">
+              {rangoCorto(meta.desde, meta.hasta)}
+            </span>
+          )}
         </span>
         <span className={`shrink-0 text-sm font-semibold tabular-nums ${COLOR_TEXTO[meta.estado]}`}>
           {Math.round(meta.pct)}%

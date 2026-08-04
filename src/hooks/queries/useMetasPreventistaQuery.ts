@@ -39,12 +39,24 @@ export interface AvanceMeta {
   /** '$' | 'u' | 'clientes' — derivada de tipo_meta en el RPC. */
   unidad: string
   alcance: AlcanceMeta
+  /** Inicio del período de ESTA meta (puede no ser un mes; mig 164). */
+  desde: string
+  /** Fin del período de esta meta, inclusive. */
+  hasta: string
+  dias_periodo: number
+  dias_transcurridos: number
+  /** true si el período no es un mes calendario completo. */
+  periodo_personalizado: boolean
   objetivo: number
   logrado: number
   pct: number
-  /** objetivo × días transcurridos / días del mes. Calculado en SQL. */
+  /** objetivo × días transcurridos / días del período. Calculado en SQL. */
   objetivo_prorrateado: number
   estado: EstadoMeta
+  // Alcance en crudo, para poder cargar la meta en el formulario y editarla.
+  marca_id: string | null
+  categoria_id: string | null
+  producto_ids: number[] | null
 }
 
 export interface AvanceMetasResultado {
@@ -63,7 +75,10 @@ export interface MetaPreventista {
   id: number
   sucursal_id: number
   preventista_id: string
+  /** Inicio del período. */
   periodo: string
+  /** Fin del período, inclusive (mig 164). */
+  periodo_fin: string
   tipo_meta: TipoMeta
   marca_id: string | null
   categoria_id: string | null
@@ -78,8 +93,13 @@ export interface GuardarMetaInput {
   id?: number | null
   sucursalId: number
   preventistaId: string
-  /** 'YYYY-MM-01'. El RPC lo normaliza al primer día del mes igual. */
+  /** Inicio del período. Si no se manda `periodoHasta`, el RPC lo lleva al mes entero. */
   periodo: string
+  /**
+   * Fin del período. Omitirlo = objetivo mensual (el caso normal). Mandarlo
+   * respeta las dos fechas tal cual, para quincenas o campañas (mig 164).
+   */
+  periodoHasta?: string | null
   tipoMeta: TipoMeta
   valorObjetivo: number
   marcaId?: string | null
@@ -111,6 +131,12 @@ export interface RendimientoPreventista {
   clientes_nuevos: number
   ticket: number | null
   metas_cargadas: number
+  /**
+   * Avance de cada objetivo, embebido por el RPC (mig 164). Sale del MISMO
+   * cálculo que ve el preventista en su dashboard, así que no puede discrepar.
+   */
+  metas: AvanceMeta[]
+  resumen_metas: { total: number; cumplidas: number; en_riesgo: number }
   por_marca: RendimientoPorMarca[]
   por_categoria: RendimientoPorCategoria[]
 }
@@ -230,6 +256,7 @@ export function useGuardarMetaPreventistaMutation() {
         p_marca_id: input.marcaId ?? null,
         p_categoria_id: input.categoriaId ?? null,
         p_producto_ids: input.productoIds?.length ? input.productoIds : null,
+        p_periodo_hasta: input.periodoHasta ?? null,
       })
       if (error) throw error
       return data as number
