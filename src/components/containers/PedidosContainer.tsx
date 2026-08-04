@@ -16,6 +16,7 @@ import {
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
+import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
@@ -1154,7 +1155,12 @@ export default function PedidosContainer(): React.ReactElement {
       setModalPedidoOpen(false)
       notify.success('Pedido creado correctamente')
     } catch (e) {
-      notify.error('Error al crear pedido: ' + (e as Error).message)
+      // "No se pudo determinar la sucursal activa" casi siempre es el token, no
+      // la sucursal: se traduce y se renueva la sesión para que el reintento
+      // funcione. Ver src/utils/sesionVencida.ts.
+      const crudo = (e as Error).message
+      const mensaje = await explicarErrorDeSesion(crudo)
+      notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
     }
     setGuardando(false)
   }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
