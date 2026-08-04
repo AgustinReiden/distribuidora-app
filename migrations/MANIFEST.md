@@ -126,8 +126,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 162** — verificado contra el ledger el 2026-08-03: la última
-numerada es `161_rendimiento_preventistas`. Las **148–161** (origen del precio, reglas de
+**La próxima migración es la 163** — verificado contra el ledger el 2026-08-03: la última
+numerada es `162_metas_multi_producto`. Las **148–162** (origen del precio, reglas de
 comisión, `place_id`, horarios masivos, barridas, roles extra por sucursal, horario obligatorio
 al cargar pedido, marcas y objetivos por preventista) están aplicadas y mapean **1:1** con el
 ledger, así que no agregan ninguna excepción a las tablas de arriba.
