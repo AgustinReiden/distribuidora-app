@@ -79,7 +79,12 @@ export interface PedidoMetricaRow {
   estado: string
   total: number | null
   cliente?: { nombre_fantasia?: string } | null
-  items?: Array<{ producto_id: string; cantidad: number; producto?: { nombre?: string } | null }>
+  items?: Array<{
+    producto_id: string
+    cantidad: number
+    es_bonificacion?: boolean | null
+    producto?: { nombre?: string } | null
+  }>
 }
 
 export interface MetricasPeriodo {
@@ -128,6 +133,12 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
     }
 
     p.items?.forEach(i => {
+      // Los regalos de promoción NO son venta, y además vienen en otra unidad:
+      // las líneas de venta cuentan fardos y las de regalo de una promo
+      // Fracción cuentan botellas. Sumarlas daba números sin sentido — un
+      // Lima Limón con 3 fardos vendidos figuraba con "99 vendidas" porque se
+      // le sumaban 96 botellas regaladas.
+      if (i.es_bonificacion) return
       const id = i.producto_id
       if (!productosVendidos[id]) {
         productosVendidos[id] = { id, nombre: i.producto?.nombre || 'N/A', cantidad: 0 }

@@ -151,6 +151,34 @@ describe('agregarMetricasPeriodo', () => {
     ])
   })
 
+  it('excluye los regalos de promoción del top de productos', () => {
+    // Caso real (Lima Limón, agosto 2026): 3 fardos vendidos y 96 botellas
+    // regaladas figuraban como "99 vendidas". Son dos errores a la vez: contar
+    // el regalo como venta y sumar botellas con fardos.
+    const r = agregarMetricasPeriodo([
+      pedido({
+        total: 11100,
+        items: [
+          { producto_id: 'p1', cantidad: 3, producto: { nombre: 'Manaos Lima Limón 3LT x 6' } },
+          { producto_id: 'p1', cantidad: 96, es_bonificacion: true, producto: { nombre: 'Manaos Lima Limón 3LT x 6' } },
+        ],
+      }),
+    ])
+    expect(r.productosMasVendidos).toEqual([
+      { id: 'p1', nombre: 'Manaos Lima Limón 3LT x 6', cantidad: 3 },
+    ])
+  })
+
+  it('no lista un producto que sólo se entregó como regalo', () => {
+    const r = agregarMetricasPeriodo([
+      pedido({
+        total: 0,
+        items: [{ producto_id: 'p9', cantidad: 24, es_bonificacion: true, producto: { nombre: 'Regalo' } }],
+      }),
+    ])
+    expect(r.productosMasVendidos).toEqual([])
+  })
+
   it('devuelve ceros con dataset vacío', () => {
     const r = agregarMetricasPeriodo([])
     expect(r.ventasPeriodo).toBe(0)
