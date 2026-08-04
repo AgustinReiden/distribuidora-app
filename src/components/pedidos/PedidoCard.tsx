@@ -21,6 +21,7 @@ import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQue
 import { PedidoActionsCtx } from '../../contexts/HandlersContext';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo';
+import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
 import type { PedidoDB, MotivoSalvedad } from '../../types';
 
 // =============================================================================
@@ -618,7 +619,12 @@ function PedidoCard({
                     )}
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-gray-700 dark:text-gray-300">x{item.cantidad}</p>
+                    {/* El regalo de una promo Fracción viene en botellas, no en
+                        fardos: sin la etiqueta, "x392" se lee como 392 fardos. */}
+                    <p className="font-semibold text-gray-700 dark:text-gray-300">{formatCantidadItem(item)}</p>
+                    {equivalenteEnUnidades(item) && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{equivalenteEnUnidades(item)}</p>
+                    )}
                     {!item.es_bonificacion && <p className="text-sm font-bold text-blue-600">{formatPrecio(item.subtotal || item.precio_unitario * item.cantidad)}</p>}
                     {item.es_bonificacion && <p className="text-sm font-bold text-green-600">$0</p>}
                     {salvedadItem && (
