@@ -64,7 +64,14 @@ const BarraProgresoMeta = memo(function BarraProgresoMeta({ meta, densa = false 
   return (
     <div className={densa ? 'py-1' : 'py-2'}>
       <div className="flex items-baseline justify-between gap-2 mb-1">
-        <span className={`font-medium truncate dark:text-white ${densa ? 'text-sm' : ''}`}>
+        <span
+          className={`font-medium truncate dark:text-white ${densa ? 'text-sm' : ''}`}
+          // Con varios productos la etiqueta dice "N productos"; el detalle va
+          // en el tooltip, porque la lista entera no entra en una barra.
+          title={meta.alcance.productos?.length
+            ? meta.alcance.productos.map(p => p.nombre).join('\n')
+            : undefined}
+        >
           {etiquetaMeta(meta)}
         </span>
         <span className={`shrink-0 text-sm font-semibold tabular-nums ${COLOR_TEXTO[meta.estado]}`}>

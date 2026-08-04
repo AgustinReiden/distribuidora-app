@@ -22,12 +22,15 @@ import { useSucursal } from '../../contexts/SucursalContext'
 
 export type TipoMeta = 'facturacion' | 'unidades' | 'cobertura' | 'clientes_nuevos'
 export type EstadoMeta = 'cumplida' | 'adelantado' | 'en_curso' | 'en_riesgo'
-export type TipoAlcance = 'marca' | 'categoria' | 'producto' | 'global'
+export type TipoAlcance = 'marca' | 'categoria' | 'productos' | 'global'
 
 export interface AlcanceMeta {
   tipo: TipoAlcance
   id: string | number | null
+  /** Nombre del alcance. Para varios productos: "N productos". */
   nombre: string | null
+  /** Sólo cuando tipo === 'productos': el detalle de cuáles. */
+  productos?: Array<{ id: number; nombre: string }>
 }
 
 export interface AvanceMeta {
@@ -64,7 +67,8 @@ export interface MetaPreventista {
   tipo_meta: TipoMeta
   marca_id: string | null
   categoria_id: string | null
-  producto_id: number | null
+  /** Productos incluidos. null = no acota por producto (mig 162). */
+  producto_ids: number[] | null
   valor_objetivo: number
   activo: boolean
   created_at: string
@@ -80,7 +84,7 @@ export interface GuardarMetaInput {
   valorObjetivo: number
   marcaId?: string | null
   categoriaId?: string | null
-  productoId?: number | null
+  productoIds?: number[] | null
 }
 
 export interface RendimientoPorMarca {
@@ -225,7 +229,7 @@ export function useGuardarMetaPreventistaMutation() {
         p_valor_objetivo: input.valorObjetivo,
         p_marca_id: input.marcaId ?? null,
         p_categoria_id: input.categoriaId ?? null,
-        p_producto_id: input.productoId ?? null,
+        p_producto_ids: input.productoIds?.length ? input.productoIds : null,
       })
       if (error) throw error
       return data as number

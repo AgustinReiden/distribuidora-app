@@ -1,5 +1,5 @@
 /**
- * Alta y baja de objetivos mensuales por preventista (mig 159).
+ * Alta y baja de objetivos mensuales por preventista (migs 159 y 162).
  *
  * Arriba las metas ya cargadas del período, abajo el formulario. El tipo de
  * meta manda sobre el resto: "cobertura" y "clientes nuevos" no admiten
@@ -7,9 +7,16 @@
  * exige (100 unidades sin decir de qué no es una meta). Los CHECK de la base
  * dicen lo mismo; acá se refleja para no ofrecer combinaciones que van a
  * fallar del otro lado.
+ *
+ * Dos multiselecciones, por pedido explícito:
+ *  - Preventistas: el mismo objetivo suele ir para todo el equipo. En la base
+ *    igual se guarda UNA fila por persona (el avance es individual); el modal
+ *    sólo evita cargarlo cinco veces a mano.
+ *  - Productos: "las gaseosas de 3 litros" son varios SKUs y no siempre
+ *    coinciden con una categoría entera (mig 162).
  */
 import { memo, useMemo, useState } from 'react';
-import { Loader2, Plus, Trash2, AlertCircle, Target } from 'lucide-react';
+import { Loader2, Plus, Trash2, AlertCircle, Target, Search } from 'lucide-react';
 import ModalBase from './ModalBase';
 import NumberInput from '../ui/NumberInput';
 import { formatPrecio } from '../../utils/formatters';
@@ -19,6 +26,7 @@ import {
   useDesactivarMetaPreventistaMutation,
   useMarcasQuery,
   useCategoriasQuery,
+  useProductosQuery,
   usePreventistasAsignablesQuery,
 } from '../../hooks/queries';
 import type { TipoMeta, MetaPreventista } from '../../hooks/queries';
@@ -51,15 +59,19 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
   const { data: preventistas = [] } = usePreventistasAsignablesQuery();
   const { data: marcas = [] } = useMarcasQuery();
   const { data: categorias = [] } = useCategoriasQuery();
+  const { data: productos = [] } = useProductosQuery();
   const guardarMut = useGuardarMetaPreventistaMutation();
   const bajaMut = useDesactivarMetaPreventistaMutation();
 
-  const [preventistaId, setPreventistaId] = useState('');
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
   const [tipoMeta, setTipoMeta] = useState<TipoMeta>('facturacion');
-  // 'marca:<uuid>' | 'categoria:<uuid>' | '' (global)
+  // 'marca:<uuid>' | 'categoria:<uuid>' | 'productos' | '' (global)
   const [alcance, setAlcance] = useState('');
+  const [productosSel, setProductosSel] = useState<Set<string>>(new Set());
+  const [busquedaProd, setBusquedaProd] = useState('');
   const [valor, setValor] = useState<number>(0);
   const [error, setError] = useState('');
+  const [okMsg, setOkMsg] = useState('');
 
   const admiteAlcance = ADMITE_ALCANCE.includes(tipoMeta);
   const exigeAlcance = EXIGE_ALCANCE.includes(tipoMeta);
@@ -74,8 +86,12 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
 
   const describirMeta = (meta: MetaPreventista): string => {
     const tipo = TIPOS.find(t => t.valor === meta.tipo_meta)?.label ?? meta.tipo_meta;
+    const n = meta.producto_ids?.length ?? 0;
     const alc = meta.marca_id ? nombrePorId.get(meta.marca_id)
       : meta.categoria_id ? nombrePorId.get(meta.categoria_id)
+      // Con un solo producto vale la pena el nombre; con varios no entra.
+      : n === 1 ? (productos.find(p => String(p.id) === String(meta.producto_ids![0]))?.nombre ?? '1 producto')
+      : n > 1 ? `${n} productos`
       : null;
     return alc ? `${tipo} — ${alc}` : tipo;
   };
@@ -88,13 +104,26 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
   const handleTipoChange = (t: TipoMeta): void => {
     setTipoMeta(t);
     // Cambiar a un tipo sin alcance deja basura seleccionada que la base rechaza.
-    if (!ADMITE_ALCANCE.includes(t)) setAlcance('');
+    if (!ADMITE_ALCANCE.includes(t)) {
+      setAlcance('');
+      setProductosSel(new Set());
+    }
     setError('');
   };
 
+  const productosFiltrados = useMemo(() => {
+    const q = busquedaProd.trim().toLowerCase();
+    return productos
+      .filter(p => !q || p.nombre.toLowerCase().includes(q) || (p.categoria || '').toLowerCase().includes(q))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [productos, busquedaProd]);
+
+  const todosFiltradosSel =
+    productosFiltrados.length > 0 && productosFiltrados.every(p => productosSel.has(p.id));
+
   const handleGuardar = async (): Promise<void> => {
-    if (!preventistaId) {
-      setError('Elegí el preventista');
+    if (seleccionados.size === 0) {
+      setError('Elegí al menos un preventista');
       return;
     }
     if (currentSucursalId == null) {
@@ -107,26 +136,47 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
       return;
     }
     if (exigeAlcance && !alcance) {
-      setError('Elegí de qué marca o categoría son las unidades');
+      setError('Elegí de qué son las unidades (marca, categoría o productos)');
+      return;
+    }
+    if (alcance === 'productos' && productosSel.size === 0) {
+      setError('Elegí al menos un producto');
       return;
     }
 
-    const [tipoAlc, idAlc] = alcance ? alcance.split(':') : [null, null];
+    const [tipoAlc, idAlc] = alcance.includes(':') ? alcance.split(':') : [alcance, null];
     setError('');
-    try {
-      await guardarMut.mutateAsync({
-        sucursalId: currentSucursalId,
-        preventistaId,
-        periodo,
-        tipoMeta,
-        valorObjetivo: objetivo,
-        marcaId: tipoAlc === 'marca' ? idAlc : null,
-        categoriaId: tipoAlc === 'categoria' ? idAlc : null,
-      });
+    setOkMsg('');
+
+    // Una fila por preventista: el avance es individual. El modal sólo evita
+    // cargar el mismo objetivo cinco veces a mano.
+    const fallos: string[] = [];
+    for (const pid of seleccionados) {
+      try {
+        await guardarMut.mutateAsync({
+          sucursalId: currentSucursalId,
+          preventistaId: pid,
+          periodo,
+          tipoMeta,
+          valorObjetivo: objetivo,
+          marcaId: tipoAlc === 'marca' ? idAlc : null,
+          categoriaId: tipoAlc === 'categoria' ? idAlc : null,
+          productoIds: tipoAlc === 'productos' ? [...productosSel].map(Number) : null,
+        });
+      } catch (e) {
+        // Se sigue con el resto: que uno falle (ej. no pertenece a la sucursal)
+        // no tiene por qué tirar abajo la carga de los demás.
+        fallos.push(`${nombrePorId.get(pid) ?? pid}: ${e instanceof Error ? e.message : 'error'}`);
+      }
+    }
+
+    const ok = seleccionados.size - fallos.length;
+    if (fallos.length > 0) setError(fallos.join(' · '));
+    if (ok > 0) {
+      setOkMsg(`Objetivo cargado para ${ok} preventista${ok === 1 ? '' : 's'}.`);
       setValor(0);
       setAlcance('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo guardar el objetivo');
+      setProductosSel(new Set());
     }
   };
 
@@ -199,17 +249,45 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
           <h3 className="text-sm font-medium dark:text-gray-200">Nuevo objetivo</h3>
 
           <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200">Preventista</label>
-            <select
-              value={preventistaId}
-              onChange={e => setPreventistaId(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            >
-              <option value="">Elegí…</option>
+            <div className="flex items-baseline justify-between gap-2 mb-1">
+              <label className="block text-sm font-medium dark:text-gray-200">
+                Preventistas ({seleccionados.size})
+              </label>
+              <button
+                type="button"
+                onClick={() => setSeleccionados(
+                  seleccionados.size === preventistas.length
+                    ? new Set()
+                    : new Set(preventistas.map(p => p.id)),
+                )}
+                className="text-sm font-medium text-blue-600 hover:underline"
+              >
+                {seleccionados.size === preventistas.length ? 'Ninguno' : 'Todos'}
+              </button>
+            </div>
+            <div className="border dark:border-gray-600 rounded-lg divide-y dark:divide-gray-700 max-h-36 overflow-y-auto">
               {preventistas.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre || p.email}</option>
+                <label
+                  key={p.id}
+                  className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={seleccionados.has(p.id)}
+                    onChange={e => setSeleccionados(prev => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(p.id); else next.delete(p.id);
+                      return next;
+                    })}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="dark:text-white truncate">{p.nombre || p.email}</span>
+                </label>
               ))}
-            </select>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Se carga el mismo objetivo para cada uno; el avance se mide por separado.
+            </p>
           </div>
 
           <div>
@@ -237,6 +315,7 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
                 className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               >
                 <option value="">{exigeAlcance ? 'Elegí…' : 'Todo (sin acotar)'}</option>
+                <option value="productos">Productos específicos…</option>
                 {marcas.filter(m => m.activa).length > 0 && (
                   <optgroup label="Marcas">
                     {marcas.filter(m => m.activa).map(m => (
@@ -255,6 +334,72 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Para "2 millones de Manaos y de esos, 100 gaseosas" cargá dos objetivos.
               </p>
+            </div>
+          )}
+
+          {/* Selector de productos: "las gaseosas de 3 litros" son varios SKUs
+              y no siempre coinciden con una categoría entera. */}
+          {admiteAlcance && alcance === 'productos' && (
+            <div>
+              <div className="flex items-baseline justify-between gap-2 mb-1">
+                <label className="block text-sm font-medium dark:text-gray-200">
+                  Productos incluidos ({productosSel.size})
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setProductosSel(prev => {
+                    const next = new Set(prev);
+                    if (todosFiltradosSel) productosFiltrados.forEach(p => next.delete(p.id));
+                    else productosFiltrados.forEach(p => next.add(p.id));
+                    return next;
+                  })}
+                  disabled={productosFiltrados.length === 0}
+                  className="text-sm font-medium text-blue-600 hover:underline disabled:opacity-50 disabled:no-underline"
+                >
+                  {todosFiltradosSel ? 'Quitar' : 'Agregar'} los {productosFiltrados.length} de la lista
+                </button>
+              </div>
+
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+                <input
+                  type="text"
+                  value={busquedaProd}
+                  onChange={e => setBusquedaProd(e.target.value)}
+                  placeholder="Filtrar por nombre o categoría… (ej: 3LT)"
+                  className="w-full pl-9 pr-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                />
+              </div>
+
+              <div className="border dark:border-gray-600 rounded-lg divide-y dark:divide-gray-700 max-h-44 overflow-y-auto">
+                {productosFiltrados.length === 0 ? (
+                  <p className="px-3 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                    No hay productos que coincidan.
+                  </p>
+                ) : productosFiltrados.map(p => (
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={productosSel.has(p.id)}
+                      onChange={e => setProductosSel(prev => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(p.id); else next.delete(p.id);
+                        return next;
+                      })}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block dark:text-white truncate">{p.nombre}</span>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">
+                        {p.categoria || 'sin categoría'}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
 
@@ -277,6 +422,11 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
               <span>{error}</span>
             </div>
           )}
+          {okMsg && (
+            <p className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-sm text-green-700 dark:text-green-300">
+              {okMsg}
+            </p>
+          )}
 
           <button
             type="button"
@@ -285,7 +435,9 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
             className="w-full py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
             {guardarMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Agregar objetivo
+            {seleccionados.size > 1
+              ? `Agregar objetivo a ${seleccionados.size} preventistas`
+              : 'Agregar objetivo'}
           </button>
         </div>
       </div>
