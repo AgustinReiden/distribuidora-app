@@ -295,6 +295,11 @@ export default function ModalRegistrarPago({
             <p className="text-gray-600 dark:text-gray-400 mb-4">
               Total imputado: <span className="font-bold text-green-600">{formatCurrency(resultadoFIFO.montoTotal)}</span> para {cliente.nombre_fantasia}
             </p>
+            {resultadoFIFO.creditoAplicado > 0 && (
+              <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
+                Además se usó {formatCurrency(resultadoFIFO.creditoAplicado)} de saldo a favor que el cliente ya tenía.
+              </p>
+            )}
           </div>
           <div className="mt-2 space-y-2">
             <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Desglose:</p>
