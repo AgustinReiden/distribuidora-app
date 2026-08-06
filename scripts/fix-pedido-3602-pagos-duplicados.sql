@@ -4,8 +4,14 @@
 --
 --   ⚠️  ESTO BORRA PLATA.
 --
---   Agustín confirmó el 2026-08-05 que los pagos 3281 y 3282 fueron un error de
---   carga y que hay que borrarlos. Queda pendiente ejecutarlo contra prod.
+--   ✅ YA EJECUTADO en prod el 2026-08-05, con la confirmación de Agustín de que
+--      los pagos 3281 y 3282 fueron un error de carga. Queda acá como registro
+--      auditable de qué se corrió exactamente. Volver a correrlo es inofensivo:
+--      la guarda 1 no encuentra las filas y aborta sin tocar nada.
+--
+--      Resultado: pedido 3602 monto_pagado 333.840 -> 111.280 (= total, queda
+--      `pagado`), cliente 303 saldo_cuenta -222.560 -> 0,00. Después de esto no
+--      queda ningún pago duplicado ni ningún pedido sobrepagado en toda la base.
 --
 -- Vive en `scripts/` y no en `migrations/` porque es un arreglo puntual de dato:
 -- no tiene que aplicarse solo ni entrar en el ledger junto con el resto.
