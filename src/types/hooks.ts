@@ -805,6 +805,12 @@ export interface RegistrarPagoFifoResult {
   sobrante: number;
   montoTotal: number;
   aplicaciones: PagoFifoAplicacion[];
+  /**
+   * Saldo a favor que el cliente ya tenía y se consumió contra sus boletas antes
+   * de imputar esta plata (mig 165). No sale de este pago: explica por qué se
+   * cancelaron más boletas de las que cubre `montoTotal`.
+   */
+  creditoAplicado: number;
 }
 
 /**

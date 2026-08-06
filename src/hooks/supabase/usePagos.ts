@@ -160,6 +160,7 @@ export function usePagos(): UsePagosReturnExtended {
         sobrante?: number
         monto_total?: number
         aplicaciones?: PagoFifoAplicacion[]
+        credito_aplicado?: number
       }
 
       return {
@@ -167,6 +168,7 @@ export function usePagos(): UsePagosReturnExtended {
         sobrante: Number(raw.sobrante ?? 0),
         montoTotal: Number(raw.monto_total ?? input.monto),
         aplicaciones: raw.aplicaciones ?? [],
+        creditoAplicado: Number(raw.credito_aplicado ?? 0),
       }
     } catch (error) {
       notifyError('Error al registrar pago: ' + (error as Error).message)
@@ -203,6 +205,7 @@ export function usePagos(): UsePagosReturnExtended {
         sobrante?: number
         monto_total?: number
         aplicaciones?: PagoFifoAplicacion[]
+        credito_aplicado?: number
       }
 
       return {
@@ -210,6 +213,7 @@ export function usePagos(): UsePagosReturnExtended {
         sobrante: Number(raw.sobrante ?? 0),
         montoTotal: Number(raw.monto_total ?? 0),
         aplicaciones: raw.aplicaciones ?? [],
+        creditoAplicado: Number(raw.credito_aplicado ?? 0),
       }
     } catch (error) {
       notifyError('Error al registrar pago: ' + (error as Error).message)
