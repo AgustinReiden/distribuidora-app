@@ -22,6 +22,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput } from '../../types'
 
 const VistaGruposPrecio = lazy(() => import('../vistas/VistaGruposPrecio'))
+const AsistenteConsolidacion = lazy(() => import('../productos/AsistenteConsolidacion'))
 const ModalGrupoPrecio = lazy(() => import('../modals/ModalGrupoPrecio'))
 const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
 
@@ -116,7 +117,14 @@ export default function CondicionesMayoristasPanel(): React.ReactElement {
   }, [grupoEditando, actualizarGrupo, crearGrupo, notify])
 
   return (
-    <>
+    <div className="space-y-4">
+      {/* Se muestra solo si hay algo que unir; si no, no renderiza nada. */}
+      {grupos.length > 0 && (
+        <Suspense fallback={null}>
+          <AsistenteConsolidacion grupos={grupos} />
+        </Suspense>
+      )}
+
       <Suspense fallback={<LoadingState />}>
         <VistaGruposPrecio
           grupos={grupos}
@@ -157,6 +165,6 @@ export default function CondicionesMayoristasPanel(): React.ReactElement {
           />
         </Suspense>
       )}
-    </>
+    </div>
   )
 }

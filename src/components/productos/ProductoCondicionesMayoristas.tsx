@@ -1,30 +1,35 @@
 /**
  * ProductoCondicionesMayoristas
  *
- * Sección de la ficha de producto que responde "¿a cuánto termino vendiendo
- * esto por mayor y cuánto gano?". Hasta ahora las condiciones mayoristas solo
- * se veían desde /grupos-precio, agrupadas al revés: por grupo, con N productos
- * adentro. Para saber el margen de UN sabor había que abrir cada grupo.
+ * Sección de la ficha que responde "¿a cuánto termino vendiendo esto por mayor,
+ * cuánto gano, y con qué otros sabores se combina?".
+ *
+ * Las condiciones están modeladas al revés de como las mira el dueño: un grupo
+ * tiene N productos y M escalas, y él quiere ver, para UN sabor, a qué precio
+ * sale en cada escala. Esto invierte la relación sin tocar el modelo.
+ *
+ * El punto importante es el selector "sumar a una condición": el motor ya suma
+ * todo lo que el cliente lleve de los productos de una condición, pero como
+ * cargar un sabor nuevo era más fácil creándole condición propia, terminaron
+ * 82 de 88 condiciones con un solo producto y el fardo surtido nunca se activa.
  *
  * Vive aparte de ModalProducto a propósito: ese archivo ya tiene 754 líneas.
- *
- * Los márgenes usan exactamente las mismas dos definiciones que los inputs de
- * margen de la ficha (mig 123), para que los números sean comparables:
- *   · bruto = precio final vs costo total con IVA
- *   · neto  = precio neto (sin IVA) vs costo real (neto + II)
  */
 import { useMemo, useState } from 'react'
-import { Loader2, Pencil, Plus, Tag } from 'lucide-react'
+import { Loader2, Plus, Tag, X } from 'lucide-react'
 import {
   useProductosQuery,
+  useGruposPrecioQuery,
   useGruposPrecioPorProductoQuery,
-  useActualizarPrecioEscalaMutation,
+  useAgregarProductoACondicionMutation,
+  useQuitarProductoDeCondicionMutation,
+  useCrearEscalaMutation,
 } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
-import { calcularMargenPorcentaje, calcularNetoDesdeTotal, parsePrecio } from '../../utils/calculations'
-import { formatPrecio } from '../../utils/formatters'
-import type { EscalaDeProducto } from '../../utils/condicionesMayoristas'
+import CondicionEscalaFila from './CondicionEscalaFila'
+import FormEscalaMayorista from './FormEscalaMayorista'
+import type { ValoresEscala } from './FormEscalaMayorista'
 
 export interface ProductoCondicionesMayoristasProps {
   /** Producto en edición. Sin id (alta nueva) la sección no se muestra. */
@@ -37,203 +42,10 @@ export interface ProductoCondicionesMayoristasProps {
   costoReal: number
   /** IVA del producto, para bajar el precio mayorista a neto. */
   porcentajeIva: number
-  /** Solo admin edita precios de escala. */
+  /** Solo admin gestiona condiciones. */
   puedeEditar?: boolean
   /** Abre el modal de condición mayorista con este producto preseleccionado. */
   onCrearCondicion?: () => void
-}
-
-/** Margen bruto y neto de un precio final, con las definiciones de la ficha. */
-function margenes(
-  precioFinal: number,
-  costoTotal: number,
-  costoReal: number,
-  porcentajeIva: number,
-): { bruto: number | null; neto: number | null } {
-  const precioNeto = calcularNetoDesdeTotal(precioFinal, porcentajeIva, 0)
-  return {
-    bruto: costoTotal > 0 && precioFinal > 0 ? calcularMargenPorcentaje(precioFinal, costoTotal) : null,
-    neto: costoReal > 0 && precioNeto > 0 ? calcularMargenPorcentaje(precioNeto, costoReal) : null,
-  }
-}
-
-function ChipMargen({ label, valor }: { label: string; valor: number | null }) {
-  if (valor === null) {
-    return <span className="text-xs text-stone-400">{label} —</span>
-  }
-  const negativo = valor < 0
-  return (
-    <span
-      className={`text-xs font-medium tabular-nums ${
-        negativo ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'
-      }`}
-    >
-      {label} {valor.toFixed(1)}%
-    </span>
-  )
-}
-
-interface FilaEscalaProps {
-  escala: EscalaDeProducto
-  regla: string
-  productoId: string
-  precioLista: number
-  costoTotal: number
-  costoReal: number
-  porcentajeIva: number
-  cantidadProductosGrupo: number
-  puedeEditar: boolean
-}
-
-function FilaEscala({
-  escala,
-  regla,
-  productoId,
-  precioLista,
-  costoTotal,
-  costoReal,
-  porcentajeIva,
-  cantidadProductosGrupo,
-  puedeEditar,
-}: FilaEscalaProps) {
-  const notify = useNotification()
-  const mutation = useActualizarPrecioEscalaMutation()
-  const [editando, setEditando] = useState(false)
-  const [draft, setDraft] = useState('')
-
-  // Mientras se edita, el margen se recalcula con lo tipeado — mismo
-  // comportamiento bidireccional que los inputs de margen de la ficha.
-  const precioMostrado = editando ? parsePrecio(draft) : escala.precioEfectivo
-  const { bruto, neto } = margenes(precioMostrado, costoTotal, costoReal, porcentajeIva)
-  const descuento = precioLista > 0 && precioMostrado > 0
-    ? (1 - precioMostrado / precioLista) * 100
-    : null
-
-  // Un override es propio de este producto; el precio de escala lo comparten
-  // todos los del grupo. Decir cuál se está tocando evita el cambio sorpresa.
-  const afectaAlGrupo = !escala.esOverride && cantidadProductosGrupo > 1
-
-  const abrirEdicion = (): void => {
-    setDraft(String(escala.precioEfectivo))
-    setEditando(true)
-  }
-
-  const guardar = async (): Promise<void> => {
-    const precio = parsePrecio(draft)
-    if (!(precio > 0)) {
-      notify.error('El precio mayorista debe ser mayor a 0')
-      return
-    }
-    if (precio === escala.precioEfectivo) {
-      setEditando(false)
-      return
-    }
-    try {
-      await mutation.mutateAsync({
-        escalaId: escala.escalaId,
-        productoId,
-        precio,
-        alcance: escala.esOverride ? 'override' : 'grupo',
-      })
-      notify.success(
-        escala.esOverride
-          ? 'Precio actualizado para este producto'
-          : `Precio de la escala actualizado (${cantidadProductosGrupo} producto${cantidadProductosGrupo === 1 ? '' : 's'})`,
-      )
-      setEditando(false)
-    } catch (e) {
-      notify.error((e as Error).message || 'No se pudo actualizar el precio')
-    }
-  }
-
-  return (
-    <li className={`px-3 py-2.5 ${escala.activo ? '' : 'opacity-60'}`}>
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-        <div className="min-w-0 sm:flex-1">
-          <p className="text-xs text-stone-600 dark:text-gray-300">{regla}</p>
-          <div className="flex items-center gap-2 flex-wrap mt-1">
-            <ChipMargen label="Bruto" valor={bruto} />
-            <span className="text-stone-300">·</span>
-            <ChipMargen label="Neto" valor={neto} />
-            {descuento !== null && (
-              <>
-                <span className="text-stone-300">·</span>
-                <span className="text-xs text-stone-500 dark:text-gray-400 tabular-nums">
-                  {descuento >= 0 ? `${descuento.toFixed(1)}% bajo lista` : `${Math.abs(descuento).toFixed(1)}% sobre lista`}
-                </span>
-              </>
-            )}
-            {!escala.activo && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-stone-100 dark:bg-gray-700 text-stone-500">
-                escala inactiva
-              </span>
-            )}
-            {escala.esOverride && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">
-                precio propio
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="shrink-0 sm:text-right">
-          {editando ? (
-            <div className="flex flex-col items-stretch sm:items-end gap-1">
-              <input
-                type="text"
-                inputMode="decimal"
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void guardar()
-                  if (e.key === 'Escape') setEditando(false)
-                }}
-                className="w-28 px-2 py-1 border rounded text-sm text-right dark:bg-gray-800 dark:border-gray-600"
-              />
-              {afectaAlGrupo && (
-                <p className="text-[11px] text-amber-700 dark:text-amber-400 max-w-[16rem]">
-                  Afecta a los {cantidadProductosGrupo} productos del grupo.
-                </p>
-              )}
-              <div className="flex gap-1 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setEditando(false)}
-                  className="px-2 py-1 text-xs rounded border dark:border-gray-600 dark:text-gray-200"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void guardar()}
-                  disabled={mutation.isPending}
-                  className="px-2 py-1 text-xs rounded bg-indigo-600 text-white disabled:opacity-50"
-                >
-                  {mutation.isPending ? 'Guardando…' : 'Guardar'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={puedeEditar ? abrirEdicion : undefined}
-              disabled={!puedeEditar}
-              className={`inline-flex items-center gap-1.5 text-sm font-semibold tabular-nums ${
-                puedeEditar
-                  ? 'text-blue-600 dark:text-blue-400 hover:underline'
-                  : 'text-stone-700 dark:text-gray-200 cursor-default'
-              }`}
-              title={puedeEditar ? 'Editar el precio de esta escala' : undefined}
-            >
-              {formatPrecio(escala.precioEfectivo)}
-              {puedeEditar && <Pencil className="w-3 h-3" aria-hidden="true" />}
-            </button>
-          )}
-        </div>
-      </div>
-    </li>
-  )
 }
 
 export default function ProductoCondicionesMayoristas({
@@ -245,8 +57,20 @@ export default function ProductoCondicionesMayoristas({
   puedeEditar = false,
   onCrearCondicion,
 }: ProductoCondicionesMayoristasProps) {
+  const notify = useNotification()
   const { condiciones, isLoading } = useGruposPrecioPorProductoQuery(productoId)
+  const { data: grupos = [] } = useGruposPrecioQuery()
   const { data: productos = [] } = useProductosQuery()
+
+  const agregarACondicion = useAgregarProductoACondicionMutation()
+  const quitarDeCondicion = useQuitarProductoDeCondicionMutation()
+  const crearEscala = useCrearEscalaMutation()
+
+  /** grupoId con el form de escala nueva abierto. */
+  const [agregandoEscalaEn, setAgregandoEscalaEn] = useState<string | null>(null)
+  /** grupoId con la confirmación de "quitar de la condición" abierta. */
+  const [quitandoDe, setQuitandoDe] = useState<string | null>(null)
+  const [sumarAbierto, setSumarAbierto] = useState(false)
 
   // `describirReglaEscala` nombra los productos de las escalas combinadas; sin
   // el mapa imprime "#123" y la regla se vuelve ilegible.
@@ -256,6 +80,82 @@ export default function ProductoCondicionesMayoristas({
     return map
   }, [productos])
 
+  const idsConCondicion = useMemo(
+    () => new Set(condiciones.map(c => c.grupoId)),
+    [condiciones],
+  )
+
+  /** Condiciones activas donde este producto todavía no está. */
+  const condicionesDisponibles = useMemo(
+    () => grupos
+      .filter(g => g.activo !== false && !idsConCondicion.has(String(g.id)))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    [grupos, idsConCondicion],
+  )
+
+  const sumarA = async (grupoId: string): Promise<void> => {
+    try {
+      await agregarACondicion.mutateAsync({ grupoId, productoId })
+      const nombre = grupos.find(g => String(g.id) === grupoId)?.nombre ?? 'la condición'
+      notify.success(`Este producto ahora entra en "${nombre}"`)
+      setSumarAbierto(false)
+    } catch (e) {
+      notify.error((e as Error).message || 'No se pudo sumar el producto a la condición')
+    }
+  }
+
+  const quitarDe = async (grupoId: string, nombre: string): Promise<void> => {
+    try {
+      await quitarDeCondicion.mutateAsync({ grupoId, productoId })
+      notify.success(`Este producto salió de "${nombre}"`)
+      setQuitandoDe(null)
+    } catch (e) {
+      notify.error((e as Error).message || 'No se pudo quitar el producto de la condición')
+    }
+  }
+
+  const agregarEscala = async (grupoId: string, valores: ValoresEscala): Promise<void> => {
+    try {
+      await crearEscala.mutateAsync({
+        grupoId,
+        cantidadMinima: valores.cantidadMinima,
+        precioUnitario: valores.precioUnitario,
+        etiqueta: valores.etiqueta,
+      })
+      notify.success('Precio por cantidad agregado')
+      setAgregandoEscalaEn(null)
+    } catch (e) {
+      notify.error((e as Error).message || 'No se pudo agregar la escala')
+    }
+  }
+
+  const selectorSumar = (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="sr-only" htmlFor="sumar-a-condicion">Sumar a una condición</label>
+      <select
+        id="sumar-a-condicion"
+        defaultValue=""
+        onChange={e => { if (e.target.value) void sumarA(e.target.value) }}
+        disabled={agregarACondicion.isPending}
+        className="px-2 py-1 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+      >
+        <option value="">Elegí una condición…</option>
+        {condicionesDisponibles.map(g => (
+          <option key={g.id} value={String(g.id)}>
+            {g.nombre} ({g.productos.length} producto{g.productos.length === 1 ? '' : 's'})
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={() => setSumarAbierto(false)}
+        className="text-xs text-stone-500 hover:text-stone-700 dark:text-gray-400"
+      >
+        Cancelar
+      </button>
+    </div>
+  )
+
   return (
     <section className="border-t dark:border-gray-700 pt-4">
       <div className="flex items-center justify-between gap-2 mb-2">
@@ -263,17 +163,19 @@ export default function ProductoCondicionesMayoristas({
           <Tag className="w-4 h-4 text-indigo-600" aria-hidden="true" />
           Condiciones mayoristas
         </h3>
-        {puedeEditar && onCrearCondicion && (
+        {puedeEditar && condiciones.length > 0 && condicionesDisponibles.length > 0 && !sumarAbierto && (
           <button
             type="button"
-            onClick={onCrearCondicion}
+            onClick={() => setSumarAbierto(true)}
             className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
           >
             <Plus className="w-4 h-4" aria-hidden="true" />
-            Crear condición
+            Sumar a otra condición
           </button>
         )}
       </div>
+
+      {puedeEditar && sumarAbierto && <div className="mb-3">{selectorSumar}</div>}
 
       {isLoading ? (
         <p className="flex items-center gap-2 text-xs text-stone-500">
@@ -281,57 +183,167 @@ export default function ProductoCondicionesMayoristas({
           Cargando condiciones…
         </p>
       ) : condiciones.length === 0 ? (
-        <p className="text-xs text-stone-500 dark:text-gray-400">
-          Este producto no está en ninguna condición mayorista: siempre se vende al precio de lista.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {condiciones.map(cond => (
-            <div
-              key={cond.grupoId}
-              className={`rounded-lg border dark:border-gray-700 ${cond.activo ? '' : 'opacity-60'}`}
-            >
-              <div className="px-3 py-2 border-b dark:border-gray-700 bg-stone-50 dark:bg-gray-900/40 rounded-t-lg">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium dark:text-white">{cond.grupoNombre}</span>
-                  <span className="text-xs text-stone-500 dark:text-gray-400">
-                    {cond.cantidadProductos} producto{cond.cantidadProductos === 1 ? '' : 's'}
-                  </span>
-                  {!cond.activo && (
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-stone-200 dark:bg-gray-700 text-stone-600 dark:text-gray-300">
-                      desactivada
-                    </span>
-                  )}
-                </div>
-                {cond.descripcion && (
-                  <p className="text-xs text-stone-500 dark:text-gray-400 mt-0.5">{cond.descripcion}</p>
+        <div className="space-y-2">
+          <p className="text-xs text-stone-500 dark:text-gray-400">
+            Este producto no está en ninguna condición mayorista: siempre se vende al precio de lista.
+          </p>
+          {puedeEditar && (
+            sumarAbierto ? null : (
+              <div className="flex flex-wrap items-center gap-2">
+                {condicionesDisponibles.length > 0 && (
+                  <>
+                    {/* Sumarlo a una condición existente antes que crearle una
+                        propia: es lo que hace que el fardo surtido funcione. */}
+                    <button
+                      type="button"
+                      onClick={() => setSumarAbierto(true)}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-indigo-600 text-white"
+                    >
+                      <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                      Sumar a una condición
+                    </button>
+                    <span className="text-xs text-stone-400">o</span>
+                  </>
+                )}
+                {onCrearCondicion && (
+                  <button
+                    type="button"
+                    onClick={onCrearCondicion}
+                    className="text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    Crear una condición nueva
+                  </button>
                 )}
               </div>
+            )
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {condiciones.map(cond => {
+            const compartida = cond.cantidadProductos > 1
+            const otros = grupos
+              .find(g => String(g.id) === cond.grupoId)?.productos
+              .map(p => nombresProductos.get(String(p.producto_id)))
+              .filter((n): n is string => !!n && n !== nombresProductos.get(String(productoId))) ?? []
 
-              {cond.escalas.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-stone-500 dark:text-gray-400">
-                  Sin escalas cargadas: la condición no aplica ningún precio.
-                </p>
-              ) : (
-                <ul className="divide-y dark:divide-gray-700">
-                  {cond.escalas.map(escala => (
-                    <FilaEscala
-                      key={escala.escalaId}
-                      escala={escala}
-                      regla={describirReglaEscala(escala.escala, { nombresProductos })}
-                      productoId={productoId}
-                      precioLista={precioLista}
-                      costoTotal={costoTotal}
-                      costoReal={costoReal}
-                      porcentajeIva={porcentajeIva}
-                      cantidadProductosGrupo={cond.cantidadProductos}
-                      puedeEditar={puedeEditar}
-                    />
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
+            return (
+              <div
+                key={cond.grupoId}
+                className={`rounded-lg border dark:border-gray-700 ${cond.activo ? '' : 'opacity-60'}`}
+              >
+                <div className="px-3 py-2 border-b dark:border-gray-700 bg-stone-50 dark:bg-gray-900/40 rounded-t-lg">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium dark:text-white">{cond.grupoNombre}</span>
+                        <span className="text-xs text-stone-500 dark:text-gray-400">
+                          {cond.cantidadProductos} producto{cond.cantidadProductos === 1 ? '' : 's'}
+                        </span>
+                        {!cond.activo && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-stone-200 dark:bg-gray-700 text-stone-600 dark:text-gray-300">
+                            desactivada
+                          </span>
+                        )}
+                      </div>
+                      {/* Con quién se combina: sin esto, el aviso de "afecta a
+                          N productos" al editar el precio llega tarde. */}
+                      {compartida && otros.length > 0 && (
+                        <p className="text-xs text-stone-500 dark:text-gray-400 mt-0.5" title={otros.join(', ')}>
+                          Suma con {otros.slice(0, 3).join(', ')}
+                          {otros.length > 3 ? ` y ${otros.length - 3} más` : ''}
+                        </p>
+                      )}
+                      {cond.descripcion && (
+                        <p className="text-xs text-stone-500 dark:text-gray-400 mt-0.5">{cond.descripcion}</p>
+                      )}
+                    </div>
+
+                    {puedeEditar && (
+                      quitandoDe === cond.grupoId ? (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-xs text-stone-600 dark:text-gray-300">¿Sacarlo?</span>
+                          <button
+                            type="button"
+                            onClick={() => setQuitandoDe(null)}
+                            className="px-2 py-0.5 text-xs rounded border dark:border-gray-600 dark:text-gray-200"
+                          >
+                            No
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void quitarDe(cond.grupoId, cond.grupoNombre)}
+                            disabled={quitarDeCondicion.isPending}
+                            className="px-2 py-0.5 text-xs rounded bg-rose-600 text-white disabled:opacity-50"
+                          >
+                            Sí
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setQuitandoDe(cond.grupoId)}
+                          className="shrink-0 p-1 rounded text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                          aria-label={`Sacar este producto de ${cond.grupoNombre}`}
+                          title="Sacar este producto de la condición"
+                        >
+                          <X className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                {cond.escalas.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-stone-500 dark:text-gray-400">
+                    Sin escalas cargadas: la condición no aplica ningún precio.
+                  </p>
+                ) : (
+                  <ul className="divide-y dark:divide-gray-700">
+                    {cond.escalas.map(escala => (
+                      <CondicionEscalaFila
+                        key={escala.escalaId}
+                        escala={escala}
+                        regla={describirReglaEscala(escala.escala, { nombresProductos })}
+                        precioLista={precioLista}
+                        costoTotal={costoTotal}
+                        costoReal={costoReal}
+                        porcentajeIva={porcentajeIva}
+                        cantidadProductosGrupo={cond.cantidadProductos}
+                        puedeEditar={puedeEditar}
+                      />
+                    ))}
+                  </ul>
+                )}
+
+                {puedeEditar && (
+                  <div className="px-3 py-2 border-t dark:border-gray-700">
+                    {agregandoEscalaEn === cond.grupoId ? (
+                      <FormEscalaMayorista
+                        precioLista={precioLista}
+                        costoTotal={costoTotal}
+                        costoReal={costoReal}
+                        porcentajeIva={porcentajeIva}
+                        guardando={crearEscala.isPending}
+                        textoGuardar="Agregar"
+                        onGuardar={valores => void agregarEscala(cond.grupoId, valores)}
+                        onCancelar={() => setAgregandoEscalaEn(null)}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setAgregandoEscalaEn(cond.grupoId)}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                      >
+                        <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                        Agregar precio por cantidad
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </section>
