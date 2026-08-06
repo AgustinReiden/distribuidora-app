@@ -758,6 +758,12 @@ export interface PagoFormInput {
   usuarioId?: string | null;
   /** Fecha contable del pago (YYYY-MM-DD). Si se omite, usa CURRENT_DATE. */
   fecha?: string | null;
+  /**
+   * UUID de idempotencia (mig 167). Si se manda, un reintento del mismo pago
+   * choca contra `idx_pagos_client_request_id` y devuelve la fila que ya existe
+   * en vez de duplicarla. Generarlo con `useRequestIdEstable`.
+   */
+  clientRequestId?: string | null;
 }
 
 export interface ResumenCuenta {
@@ -779,6 +785,11 @@ export interface RegistrarPagoBatchInput {
   observaciones?: string | null;
   pagos: Array<{ formaPago: string; monto: number }>;
   usuarioId?: string | null;
+  /**
+   * UUID de idempotencia por línea de `pagos`, alineado por posición (mig 167).
+   * Cada fila va con el suyo porque el índice único es por fila.
+   */
+  clientRequestIds?: string[];
 }
 
 export interface PagoFifoAplicacion {
@@ -798,6 +809,8 @@ export interface RegistrarPagoFifoInput {
   fecha?: string;
   referencia?: string;
   notas?: string;
+  /** UUID de idempotencia (mig 167). Ver `useRequestIdEstable`. */
+  clientRequestId?: string;
 }
 
 export interface RegistrarPagoFifoResult {
@@ -811,6 +824,12 @@ export interface RegistrarPagoFifoResult {
    * cancelaron más boletas de las que cubre `montoTotal`.
    */
   creditoAplicado: number;
+  /**
+   * true si el servidor reconoció el `clientRequestId` y devolvió el resultado
+   * de un intento anterior (mig 167). No se registró nada nuevo: el pago ya
+   * estaba. Sirve para avisarle al usuario que su primer intento sí entró.
+   */
+  idempotentReplay?: boolean;
 }
 
 /**
@@ -824,6 +843,8 @@ export interface RegistrarPagoCombinadoFifoInput {
   fecha?: string;
   referencia?: string;
   notas?: string;
+  /** UUID de idempotencia (mig 167). Ver `useRequestIdEstable`. */
+  clientRequestId?: string;
 }
 
 export interface UsePagosReturnExtended {

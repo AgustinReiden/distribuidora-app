@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase, notifyError } from './base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
 import type {
   PagoDBWithUsuario,
   PagoFormInput,
@@ -15,6 +16,27 @@ import type {
   PedidoDB,
   PagoDB
 } from '../../types'
+
+/** Violación de unique constraint: el reintento chocó con la fila que ya existe. */
+const ES_DUPLICADO = (error: unknown): boolean =>
+  (error as { code?: string } | null)?.code === '23505'
+
+/**
+ * Recupera las filas que dejó un intento anterior del mismo pago (mig 167).
+ * Devuelve `null` si no hay UUIDs o si RLS no deja leerlas.
+ */
+async function pagosPorRequestId(ids: string[]): Promise<PagoDBWithUsuario[] | null> {
+  if (ids.length === 0) return null
+  const { data, error } = await supabase
+    .from('pagos')
+    .select('*, usuario:perfiles(id, nombre)')
+    .in('client_request_id', ids)
+  if (error) return null
+  return (data || []) as PagoDBWithUsuario[]
+}
+
+const ERROR_DUPLICADO_SIN_LECTURA =
+  'Este pago ya se había registrado en un intento anterior. Actualizá la pantalla para verlo; no lo cargues de nuevo.'
 
 export function usePagos(): UsePagosReturnExtended {
   const { currentSucursalId } = useSucursal()
@@ -74,11 +96,32 @@ export function usePagos(): UsePagosReturnExtended {
       // fecha (YYYY-MM-DD) se pasa solo si el caller la especificó; si no,
       // la BD usa CURRENT_DATE (default de la columna pagos.fecha).
       if (pago.fecha) insertRow.fecha = pago.fecha
+      const requestId = pago.clientRequestId || null
+      if (requestId) insertRow.client_request_id = requestId
 
-      const { data, error } = await supabase.from('pagos').insert([insertRow])
-        .select('*, usuario:perfiles(id, nombre)').single()
-      if (error) throw error
-      const pagoData = data as PagoDBWithUsuario
+      const insertar = async (): Promise<PagoDBWithUsuario> => {
+        const { data, error } = await supabase.from('pagos').insert([insertRow])
+          .select('*, usuario:perfiles(id, nombre)').single()
+        if (!error) return data as PagoDBWithUsuario
+
+        // 23505 con UUID de idempotencia = este pago ya entró en un intento
+        // anterior cuya respuesta no llegó (mig 167). No es un error: es el
+        // mismo pago. Devolvemos la fila que ya existe.
+        if (requestId && ES_DUPLICADO(error)) {
+          const previos = await pagosPorRequestId([requestId])
+          if (previos && previos.length === 1) return previos[0]
+          throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
+        }
+        throw error
+      }
+
+      // Con UUID el INSERT es idempotente, así que reintentar ante un error de
+      // red es seguro: si la primera request sí llegó, el reintento devuelve
+      // esa misma fila en vez de duplicarla.
+      const pagoData = requestId
+        ? await retryWithBackoff(insertar, { shouldRetry: isTransientNetworkError })
+        : await insertar()
+
       setPagos(prev => [pagoData, ...prev])
       return pagoData
     } catch (error) {
@@ -102,9 +145,13 @@ export function usePagos(): UsePagosReturnExtended {
       if (currentSucursalId == null) {
         throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
       }
+      // El UUID de idempotencia se aparea ANTES de filtrar: `clientRequestIds`
+      // viene alineado por posición con `input.pagos`, y filtrar primero
+      // correría los índices.
       const rows = input.pagos
-        .filter(p => p.monto > 0)
-        .map(p => ({
+        .map((p, i) => ({ p, requestId: input.clientRequestIds?.[i] || null }))
+        .filter(({ p }) => p.monto > 0)
+        .map(({ p, requestId }) => ({
           cliente_id: input.clienteId,
           pedido_id: input.pedidoId,
           monto: p.monto,
@@ -113,16 +160,37 @@ export function usePagos(): UsePagosReturnExtended {
           notas: input.observaciones || null,
           usuario_id: input.usuarioId || null,
           sucursal_id: currentSucursalId,
+          client_request_id: requestId,
         }))
       if (rows.length === 0) {
         throw new Error('No hay pagos validos para registrar')
       }
-      const { data, error } = await supabase
-        .from('pagos')
-        .insert(rows)
-        .select('*, usuario:perfiles(id, nombre)')
-      if (error) throw error
-      const pagosData = (data || []) as PagoDBWithUsuario[]
+      const requestIds = rows
+        .map(r => r.client_request_id)
+        .filter((id): id is string => !!id)
+      const todosConRequestId = requestIds.length === rows.length
+
+      const insertar = async (): Promise<PagoDBWithUsuario[]> => {
+        const { data, error } = await supabase
+          .from('pagos')
+          .insert(rows)
+          .select('*, usuario:perfiles(id, nombre)')
+        if (!error) return (data || []) as PagoDBWithUsuario[]
+
+        // Mismo caso que en registrarPago, pero el INSERT es atómico: o entraron
+        // las N filas o ninguna. Si chocaron, ya están todas de un intento previo.
+        if (todosConRequestId && ES_DUPLICADO(error)) {
+          const previos = await pagosPorRequestId(requestIds)
+          if (previos && previos.length === rows.length) return previos
+          throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
+        }
+        throw error
+      }
+
+      const pagosData = todosConRequestId
+        ? await retryWithBackoff(insertar, { shouldRetry: isTransientNetworkError })
+        : await insertar()
+
       setPagos(prev => [...pagosData, ...prev])
       return pagosData
     } catch (error) {
@@ -145,15 +213,25 @@ export function usePagos(): UsePagosReturnExtended {
       if (currentSucursalId == null) {
         throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
       }
-      const { data, error } = await supabase.rpc('registrar_pago_cliente_fifo', {
-        p_cliente_id: input.clienteId,
-        p_monto: input.monto,
-        p_forma_pago: input.formaPago,
-        p_fecha: input.fecha ?? null,
-        p_referencia: input.referencia ?? null,
-        p_notas: input.notas ?? null,
-      })
-      if (error) throw error
+      const llamar = async () => {
+        const { data, error } = await supabase.rpc('registrar_pago_cliente_fifo', {
+          p_cliente_id: input.clienteId,
+          p_monto: input.monto,
+          p_forma_pago: input.formaPago,
+          p_fecha: input.fecha ?? null,
+          p_referencia: input.referencia ?? null,
+          p_notas: input.notas ?? null,
+          p_client_request_id: input.clientRequestId ?? null,
+        })
+        if (error) throw error
+        return data
+      }
+
+      // La RPC es idempotente con p_client_request_id (mig 167): ante un error
+      // de red se reintenta y el server devuelve la imputación original.
+      const data = input.clientRequestId
+        ? await retryWithBackoff(llamar, { shouldRetry: isTransientNetworkError })
+        : await llamar()
 
       const raw = (data ?? {}) as {
         pago_ids?: number[]
@@ -161,6 +239,7 @@ export function usePagos(): UsePagosReturnExtended {
         monto_total?: number
         aplicaciones?: PagoFifoAplicacion[]
         credito_aplicado?: number
+        idempotent_replay?: boolean
       }
 
       return {
@@ -169,6 +248,7 @@ export function usePagos(): UsePagosReturnExtended {
         montoTotal: Number(raw.monto_total ?? input.monto),
         aplicaciones: raw.aplicaciones ?? [],
         creditoAplicado: Number(raw.credito_aplicado ?? 0),
+        idempotentReplay: raw.idempotent_replay === true,
       }
     } catch (error) {
       notifyError('Error al registrar pago: ' + (error as Error).message)
@@ -191,14 +271,22 @@ export function usePagos(): UsePagosReturnExtended {
       if (currentSucursalId == null) {
         throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
       }
-      const { data, error } = await supabase.rpc('registrar_pago_combinado_cliente_fifo', {
-        p_cliente_id: input.clienteId,
-        p_metodos: input.metodos.map(m => ({ monto: m.monto, forma_pago: m.formaPago })),
-        p_fecha: input.fecha ?? null,
-        p_referencia: input.referencia ?? null,
-        p_notas: input.notas ?? null,
-      })
-      if (error) throw error
+      const llamar = async () => {
+        const { data, error } = await supabase.rpc('registrar_pago_combinado_cliente_fifo', {
+          p_cliente_id: input.clienteId,
+          p_metodos: input.metodos.map(m => ({ monto: m.monto, forma_pago: m.formaPago })),
+          p_fecha: input.fecha ?? null,
+          p_referencia: input.referencia ?? null,
+          p_notas: input.notas ?? null,
+          p_client_request_id: input.clientRequestId ?? null,
+        })
+        if (error) throw error
+        return data
+      }
+
+      const data = input.clientRequestId
+        ? await retryWithBackoff(llamar, { shouldRetry: isTransientNetworkError })
+        : await llamar()
 
       const raw = (data ?? {}) as {
         pago_ids?: number[]
@@ -206,6 +294,7 @@ export function usePagos(): UsePagosReturnExtended {
         monto_total?: number
         aplicaciones?: PagoFifoAplicacion[]
         credito_aplicado?: number
+        idempotent_replay?: boolean
       }
 
       return {
@@ -214,6 +303,7 @@ export function usePagos(): UsePagosReturnExtended {
         montoTotal: Number(raw.monto_total ?? 0),
         aplicaciones: raw.aplicaciones ?? [],
         creditoAplicado: Number(raw.credito_aplicado ?? 0),
+        idempotentReplay: raw.idempotent_replay === true,
       }
     } catch (error) {
       notifyError('Error al registrar pago: ' + (error as Error).message)

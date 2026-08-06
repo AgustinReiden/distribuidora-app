@@ -16,7 +16,7 @@
  * Sobrepago bloqueado en frontend (totalIngresado > saldoPendiente). Anulacion
  * de pagos previos solo si el caller pasa `onAnularPago` (solo admin).
  */
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, DollarSign, Plus, Trash2, AlertCircle, X } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
@@ -24,6 +24,7 @@ import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '
 import { parsePrecio } from '../../utils/calculations'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
+import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import type { PedidoDB, PagoDBWithUsuario } from '../../types'
 
 export interface PagoPedidoPayload {
@@ -32,6 +33,12 @@ export interface PagoPedidoPayload {
   fechaPago: string
   observaciones?: string
   pagos: Array<{ formaPago: string; monto: number }>
+  /**
+   * UUID de idempotencia por línea de `pagos`, alineado por posición (mig 167).
+   * Estable mientras no cambien los montos/formas: un reintento tras un error
+   * de red no duplica el cobro.
+   */
+  clientRequestIds?: string[]
 }
 
 export interface ModalPagoPedidoProps {
@@ -97,6 +104,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
   const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
+  // Idempotencia (mig 167): `enVueloRef` corta el doble toque instantaneo y
+  // `requestId` hace que el reintento tras un error reuse el mismo UUID, para
+  // que el server lo reconozca en vez de volver a cobrar.
+  const enVueloRef = useRef<boolean>(false)
+  const requestId = useRequestIdEstable()
+
   // Si los pagos previos cambian (anulacion), reajustar la linea por default al saldo restante.
   useEffect(() => {
     if (saldoPendiente > 0 && lineas.length === 1 && (!lineas[0].monto || parsePrecio(lineas[0].monto) === 0)) {
@@ -131,6 +144,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   }
 
   const handleSubmit = async (): Promise<void> => {
+    if (enVueloRef.current) return
     setError('')
     if (saldoPendiente <= 0) {
       setError('El pedido ya esta completamente pagado.')
@@ -150,18 +164,31 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       setError('Ingresa la fecha de pago.')
       return
     }
+    const pagos = lineas
+      .filter(l => parsePrecio(l.monto) > 0)
+      .map(l => ({ formaPago: l.formaPago, monto: parsePrecio(l.monto) }))
+
+    // Huella: todo lo que define "este cobro y no otro". Cambiar un monto o una
+    // forma de pago acuña UUIDs nuevos; reintentar lo mismo reusa los de antes.
+    const huella = [
+      pedido.id, fechaPago, observaciones.trim(),
+      pagos.map(p => `${p.monto}@${p.formaPago}`).join(','),
+    ].join('|')
+
+    enVueloRef.current = true
     try {
       await onConfirmar({
         pedidoId: String(pedido.id),
         clienteId: String(pedido.cliente_id),
         fechaPago,
         observaciones: observaciones.trim() || undefined,
-        pagos: lineas
-          .filter(l => parsePrecio(l.monto) > 0)
-          .map(l => ({ formaPago: l.formaPago, monto: parsePrecio(l.monto) })),
+        pagos,
+        clientRequestIds: pagos.map((_, i) => requestId(`${huella}#${i}`)),
       })
     } catch (e) {
       setError((e as Error).message || 'Error al registrar el pago')
+    } finally {
+      enVueloRef.current = false
     }
   }
 

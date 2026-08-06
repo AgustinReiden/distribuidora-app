@@ -52,6 +52,7 @@ temp/
 backups/
 !supabase/migrations/*.sql
 !scripts/verify-multi-tenant.sql
+!scripts/fix-pedido-3602-pagos-duplicados.sql
 !migrations/*.sql
 !migrations/**/*.sql
 

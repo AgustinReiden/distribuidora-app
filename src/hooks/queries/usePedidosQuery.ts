@@ -9,6 +9,7 @@ import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalve
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
+import { nuevoRequestId } from '../../utils/idempotencia'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
 
 // Query keys
@@ -1122,13 +1123,17 @@ export function usePedidosNoPagadosQuery(enabled = false) {
 async function marcarPagosMasivo(
   pedidoIds: string[],
   formaPago: string,
-  fecha?: string | null
+  fecha?: string | null,
+  clientRequestId?: string
 ): Promise<void> {
   const rpcArgs: Record<string, unknown> = {
     p_pedido_ids: pedidoIds.map(id => Number(id)),
     p_forma_pago: formaPago,
   }
   if (fecha) rpcArgs.p_fecha = fecha
+  // Idempotencia (mig 167): un reintento con el mismo UUID devuelve el
+  // resultado de la primera llamada sin volver a cobrar.
+  rpcArgs.p_client_request_id = clientRequestId ?? nuevoRequestId()
 
   const { error } = await supabase.rpc('marcar_pagos_masivo', rpcArgs)
   if (error) throw error
@@ -1142,11 +1147,12 @@ export function usePagosMasivosMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: ({ pedidoIds, formaPago, fecha }: {
+    mutationFn: ({ pedidoIds, formaPago, fecha, clientRequestId }: {
       pedidoIds: string[];
       formaPago: string;
-      fecha?: string | null
-    }) => marcarPagosMasivo(pedidoIds, formaPago, fecha),
+      fecha?: string | null;
+      clientRequestId?: string
+    }) => marcarPagosMasivo(pedidoIds, formaPago, fecha, clientRequestId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
@@ -1161,7 +1167,8 @@ async function marcarEntregaYPagoMasivo(
   pedidoIds: string[],
   transportistaId: string,
   formaPago: string,
-  fecha?: string | null
+  fecha?: string | null,
+  clientRequestId?: string
 ): Promise<void> {
   // RPC combinada: entrega (asigna transportista + fecha) y registra el pago
   // por el saldo pendiente de cada pedido, en una transacción atómica.
@@ -1171,6 +1178,7 @@ async function marcarEntregaYPagoMasivo(
     p_forma_pago: formaPago,
   }
   if (fecha) rpcArgs.p_fecha = fecha
+  rpcArgs.p_client_request_id = clientRequestId ?? nuevoRequestId()
 
   const { error } = await supabase.rpc('marcar_entrega_y_pago_masivo', rpcArgs)
   if (error) throw error
@@ -1197,19 +1205,27 @@ export function useEntregaYPagoMasivosMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: async ({ idsEntregar, idsCobrar, transportistaId, formaPago, fecha }: {
+    mutationFn: async ({
+      idsEntregar, idsCobrar, transportistaId, formaPago, fecha,
+      clientRequestIdCobrar, clientRequestIdEntregar,
+    }: {
       idsEntregar: string[];
       idsCobrar: string[];
       transportistaId: string;
       formaPago: string;
-      fecha?: string | null
+      fecha?: string | null;
+      /** UUIDs de idempotencia (mig 167). Son dos RPCs distintas, un UUID cada una. */
+      clientRequestIdCobrar?: string;
+      clientRequestIdEntregar?: string;
     }) => {
       // Pedidos YA entregados (p.ej. entrega con salvedad impaga): solo se cobran,
       // sin re-entregar. marcar_pagos_masivo registra el pago real en `pagos` y no
       // toca estado / transportista_id / fecha_entrega.
-      if (idsCobrar.length) await marcarPagosMasivo(idsCobrar, formaPago, fecha)
+      if (idsCobrar.length) await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
       // Pedidos NO entregados: entrega + cobro en un solo paso.
-      if (idsEntregar.length) await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha)
+      if (idsEntregar.length) {
+        await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })

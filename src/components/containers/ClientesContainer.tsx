@@ -182,6 +182,7 @@ export default function ClientesContainer(): React.ReactElement {
     referencia: string
     notas: string
     fecha: string
+    clientRequestId?: string
   }) => {
     const pago = await registrarPago({
       clienteId: datosPago.clienteId,
@@ -191,7 +192,8 @@ export default function ClientesContainer(): React.ReactElement {
       referencia: datosPago.referencia,
       notas: datosPago.notas,
       fecha: datosPago.fecha,
-      usuarioId: user?.id ?? ''
+      usuarioId: user?.id ?? '',
+      clientRequestId: datosPago.clientRequestId,
     })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
     queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
@@ -206,6 +208,7 @@ export default function ClientesContainer(): React.ReactElement {
     fecha?: string
     referencia?: string
     notas?: string
+    clientRequestId?: string
   }) => {
     const result = await registrarPagoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
@@ -225,6 +228,7 @@ export default function ClientesContainer(): React.ReactElement {
     fecha?: string
     referencia?: string
     notas?: string
+    clientRequestId?: string
   }) => {
     const result = await registrarPagoCombinadoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
