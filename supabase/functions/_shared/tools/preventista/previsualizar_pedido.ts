@@ -216,18 +216,18 @@ export const previsualizarPedidoTool: Tool<
         precioUnitario: Number(p.precio),
       };
     });
-    // ---- Cantidades mínimas de pedido ----
-    // El mínimo propio del producto (mig 147) y el de las condiciones
-    // mayoristas se evalúan juntos, con el mismo util que la app web. El
-    // trigger de la DB rechaza igual, pero acá el preventista recibe el
-    // motivo antes de confirmar, no un error opaco después.
+    // ---- Mínimo de venta ----
+    // El mínimo es del producto (mig 147/169) y se evalúa con el mismo util
+    // que la app web. El trigger de la DB rechaza igual, pero acá el
+    // preventista recibe el motivo antes de confirmar, no un error opaco
+    // después.
     const minimosProducto: MinimosProducto = new Map();
     for (const prod of productosById.values()) {
       if (prod.cantidad_minima_venta && prod.cantidad_minima_venta > 0) {
         minimosProducto.set(String(prod.id), prod.cantidad_minima_venta);
       }
     }
-    const violacionesMOQ = validarMOQPedido(itemsParaUtils, pricingMap, minimosProducto);
+    const violacionesMOQ = validarMOQPedido(itemsParaUtils, minimosProducto);
     if (violacionesMOQ.length > 0) {
       const detalle = violacionesMOQ
         .map((v) => {

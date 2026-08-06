@@ -67,15 +67,17 @@ describe('condicionesDeProducto', () => {
     expect(cond.escalas[0].precioEfectivo).toBe(800)
   })
 
-  it('expone el MOQ que el grupo le impone al producto', () => {
+  it('expone con cuántos productos se comparte la condición', () => {
+    // Importa para la ficha: editar el precio de una condición compartida
+    // afecta a todos, y cualquier mezcla de ellos suma para llegar al mínimo.
     const g = grupo({
       productos: [
-        { id: 'gp1', grupo_precio_id: 'g1', producto_id: 'p1', cantidad_minima_pedido: 6 },
-        { id: 'gp2', grupo_precio_id: 'g1', producto_id: 'p2', cantidad_minima_pedido: null },
+        { id: 'gp1', grupo_precio_id: 'g1', producto_id: 'p1' },
+        { id: 'gp2', grupo_precio_id: 'g1', producto_id: 'p2' },
       ],
     } as Partial<GrupoPrecioConDetalles>)
-    expect(condicionesDeProducto([g], 'p1')[0].moq).toBe(6)
-    expect(condicionesDeProducto([g], 'p2')[0].moq).toBeNull()
+    expect(condicionesDeProducto([g], 'p1')[0].cantidadProductos).toBe(2)
+    expect(condicionesDeProducto([g], 'p3')).toHaveLength(0)
   })
 
   it('ordena las escalas por cantidad mínima ascendente', () => {

@@ -297,11 +297,6 @@ export default function ProductoCondicionesMayoristas({
                   <span className="text-xs text-stone-500 dark:text-gray-400">
                     {cond.cantidadProductos} producto{cond.cantidadProductos === 1 ? '' : 's'}
                   </span>
-                  {cond.moq && (
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium">
-                      mínimo {cond.moq}
-                    </span>
-                  )}
                   {!cond.activo && (
                     <span className="text-xs px-1.5 py-0.5 rounded bg-stone-200 dark:bg-gray-700 text-stone-600 dark:text-gray-300">
                       desactivada

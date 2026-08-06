@@ -71,7 +71,7 @@ export default function VistaGruposPrecio({
         <div>
           <h1 className="text-2xl font-bold dark:text-white">Condiciones Mayoristas</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Configura precios por volumen y cantidades minimas de pedido
+            Precios por volumen. Cualquier mezcla de los productos de una condicion suma para llegar al minimo
           </p>
         </div>
         <button
@@ -197,11 +197,6 @@ export default function VistaGruposPrecio({
                       className="text-xs px-2.5 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-full"
                     >
                       {getProductoNombre(gpp.producto_id)}
-                      {gpp.cantidad_minima_pedido && gpp.cantidad_minima_pedido > 0 && (
-                        <span className="ml-1 text-amber-600 dark:text-amber-400 font-medium">
-                          (min {gpp.cantidad_minima_pedido})
-                        </span>
-                      )}
                     </span>
                   ))}
                   {grupo.productos.length === 0 && (

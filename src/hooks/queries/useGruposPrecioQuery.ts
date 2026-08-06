@@ -138,19 +138,11 @@ async function fetchPricingMap(): Promise<PricingMap> {
 
     const productoIds = grupo.productos.map(p => String(p.producto_id))
 
-    const moqPorProducto = new Map<string, number>()
-    for (const p of grupo.productos) {
-      if (p.cantidad_minima_pedido && p.cantidad_minima_pedido > 0) {
-        moqPorProducto.set(String(p.producto_id), p.cantidad_minima_pedido)
-      }
-    }
-
     const grupoInfo: GrupoPrecioInfo = {
       grupoId: String(grupo.id),
       grupoNombre: grupo.nombre,
       escalas: escalasActivas,
       productoIds,
-      moqPorProducto,
     }
 
     // Agregar el grupo a cada producto del grupo
@@ -191,7 +183,6 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
       .insert(input.productoIds.map(pid => ({
         grupo_precio_id: parseInt(grupoId),
         producto_id: parseInt(pid),
-        cantidad_minima_pedido: input.cantidadesMinimas?.[pid] || null,
         sucursal_id: sucursalId,
       })))
 
@@ -316,7 +307,6 @@ async function updateGrupoPrecio(
       .insert(input.productoIds.map(pid => ({
         grupo_precio_id: parseInt(id),
         producto_id: parseInt(pid),
-        cantidad_minima_pedido: input.cantidadesMinimas?.[pid] || null,
         sucursal_id: sucursalId,
       })))
 

@@ -28,7 +28,6 @@ interface GrupoPrecioRow {
 interface GrupoPrecioProductoRow {
   grupo_precio_id: number;
   producto_id: number;
-  cantidad_minima_pedido: number | null;
 }
 interface GrupoPrecioEscalaRow {
   id: number;
@@ -131,7 +130,7 @@ async function loadPricingMap(
   // 2) productos de los grupos
   const { data: prodRows, error: errProds } = await supabase
     .from("grupo_precio_productos")
-    .select("grupo_precio_id, producto_id, cantidad_minima_pedido")
+    .select("grupo_precio_id, producto_id")
     .in("grupo_precio_id", grupoIds);
   if (errProds && !errProds.message.includes("does not exist")) {
     throw new Error(`pricing: grupo_precio_productos: ${errProds.message}`);
@@ -191,6 +190,11 @@ async function loadPricingMap(
         });
       }
       return {
+        // Se arrastra el id para poder registrar en `pedido_items` qué escala
+        // fijó el precio (mig 148/149), igual que hace fetchPricingMap en la
+        // app. Sin esto, previsualizar_pedido guarda grupo_precio_escala_id
+        // en NULL y el pedido del bot queda sin trazabilidad del descuento.
+        escalaId: String(e.id),
         cantidadMinima: Number(e.cantidad_minima),
         precioUnitario: Number(e.precio_unitario),
         etiqueta: e.etiqueta || null,
@@ -202,19 +206,11 @@ async function loadPricingMap(
     const productosDelGrupo = productos.filter((p) => p.grupo_precio_id === grupo.id);
     const productoIds = productosDelGrupo.map((p) => String(p.producto_id));
 
-    const moqPorProducto = new Map<string, number>();
-    for (const p of productosDelGrupo) {
-      if (p.cantidad_minima_pedido && p.cantidad_minima_pedido > 0) {
-        moqPorProducto.set(String(p.producto_id), p.cantidad_minima_pedido);
-      }
-    }
-
     const grupoInfo: GrupoPrecioInfo = {
       grupoId: String(grupo.id),
       grupoNombre: grupo.nombre,
       escalas: escalasActivas,
       productoIds,
-      moqPorProducto,
     };
 
     for (const productoId of productoIds) {

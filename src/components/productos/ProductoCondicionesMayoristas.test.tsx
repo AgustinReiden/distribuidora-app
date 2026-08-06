@@ -24,7 +24,6 @@ function condicion(over: Partial<CondicionMayoristaProducto> = {}): CondicionMay
     descripcion: null,
     activo: true,
     cantidadProductos: 3,
-    moq: null,
     escalas: [
       {
         escalaId: 'e1',
