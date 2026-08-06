@@ -12,6 +12,7 @@ const mockDelete = vi.fn().mockReturnThis()
 const mockEq = vi.fn().mockReturnThis()
 const mockOrder = vi.fn().mockReturnThis()
 const mockSingle = vi.fn()
+const mockIn = vi.fn()
 
 vi.mock('./base', () => ({
   supabase: {
@@ -21,7 +22,8 @@ vi.mock('./base', () => ({
       delete: mockDelete,
       eq: mockEq,
       order: mockOrder,
-      single: mockSingle
+      single: mockSingle,
+      in: mockIn
     })),
     rpc: vi.fn()
   },
@@ -119,6 +121,153 @@ describe('usePagos', () => {
       })).rejects.toThrow()
 
       expect(notifyError).toHaveBeenCalledWith(expect.stringContaining('Error al registrar pago'))
+    })
+  })
+
+  // Idempotencia (mig 167). El caso testigo es el pedido 3602: el mismo pago de
+  // $111.280 entro 3 veces en 17 segundos porque el reintento del usuario no
+  // tenia forma de identificarse como reintento.
+  describe('registrarPago — idempotencia', () => {
+    const REQUEST_ID = '11111111-2222-4333-8444-555555555555'
+
+    it('manda client_request_id en el INSERT cuando el caller lo provee', async () => {
+      mockSingle.mockResolvedValueOnce({ data: { id: '1', monto: 111280 }, error: null })
+
+      const { result } = renderHook(() => usePagos())
+      await act(async () => {
+        await result.current.registrarPago({
+          clienteId: 'c1', monto: 111280, formaPago: 'efectivo', clientRequestId: REQUEST_ID,
+        })
+      })
+
+      expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
+        client_request_id: REQUEST_ID,
+      })])
+    })
+
+    it('no manda la columna si el caller no pasa UUID (comportamiento historico)', async () => {
+      mockSingle.mockResolvedValueOnce({ data: { id: '1', monto: 100 }, error: null })
+
+      const { result } = renderHook(() => usePagos())
+      await act(async () => {
+        await result.current.registrarPago({ clienteId: 'c1', monto: 100 })
+      })
+
+      expect(mockInsert).toHaveBeenCalledWith([
+        expect.not.objectContaining({ client_request_id: expect.anything() }),
+      ])
+    })
+
+    it('ante 23505 devuelve la fila que ya existe en vez de duplicar el pago', async () => {
+      const yaRegistrado = { id: '3280', cliente_id: 'c1', monto: 111280, forma_pago: 'efectivo' }
+      mockSingle.mockResolvedValueOnce({
+        data: null,
+        error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_pagos_client_request_id"' },
+      })
+      mockIn.mockResolvedValueOnce({ data: [yaRegistrado], error: null })
+
+      const { result } = renderHook(() => usePagos())
+      let pago: unknown
+      await act(async () => {
+        pago = await result.current.registrarPago({
+          clienteId: 'c1', monto: 111280, formaPago: 'efectivo', clientRequestId: REQUEST_ID,
+        })
+      })
+
+      expect(mockIn).toHaveBeenCalledWith('client_request_id', [REQUEST_ID])
+      expect(pago).toEqual(yaRegistrado)
+      expect(result.current.pagos).toContainEqual(yaRegistrado)
+      expect(notifyError).not.toHaveBeenCalled()
+    })
+
+    it('ante 23505 sin poder releer la fila avisa que ya estaba registrado', async () => {
+      mockSingle.mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key' } })
+      mockIn.mockResolvedValueOnce({ data: [], error: null })
+
+      const { result } = renderHook(() => usePagos())
+      await expect(act(async () => {
+        await result.current.registrarPago({
+          clienteId: 'c1', monto: 100, clientRequestId: REQUEST_ID,
+        })
+      })).rejects.toThrow(/ya se había registrado/i)
+    })
+  })
+
+  describe('registrarPagosBatch — idempotencia', () => {
+    it('aparea cada UUID con su linea aunque haya lineas en cero filtradas', async () => {
+      mockSelect.mockResolvedValueOnce({ data: [{ id: '1', monto: 500 }], error: null })
+
+      const { result } = renderHook(() => usePagos())
+      await act(async () => {
+        await result.current.registrarPagosBatch({
+          clienteId: 'c1',
+          pedidoId: 'p1',
+          fecha: '2026-08-05',
+          pagos: [
+            { formaPago: 'efectivo', monto: 0 },      // se filtra
+            { formaPago: 'transferencia', monto: 500 },
+          ],
+          clientRequestIds: ['uuid-linea-0', 'uuid-linea-1'],
+        })
+      })
+
+      // La linea que sobrevive es la #1: tiene que llevar SU uuid, no el de la #0.
+      expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
+        monto: 500,
+        forma_pago: 'transferencia',
+        client_request_id: 'uuid-linea-1',
+      })])
+    })
+
+    it('ante 23505 devuelve las filas del intento anterior', async () => {
+      const previos = [{ id: '10', monto: 300 }, { id: '11', monto: 200 }]
+      mockSelect.mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key' } })
+      mockIn.mockResolvedValueOnce({ data: previos, error: null })
+
+      const { result } = renderHook(() => usePagos())
+      let pagos: unknown
+      await act(async () => {
+        pagos = await result.current.registrarPagosBatch({
+          clienteId: 'c1',
+          pedidoId: 'p1',
+          fecha: '2026-08-05',
+          pagos: [
+            { formaPago: 'efectivo', monto: 300 },
+            { formaPago: 'transferencia', monto: 200 },
+          ],
+          clientRequestIds: ['uuid-a', 'uuid-b'],
+        })
+      })
+
+      expect(mockIn).toHaveBeenCalledWith('client_request_id', ['uuid-a', 'uuid-b'])
+      expect(pagos).toEqual(previos)
+    })
+  })
+
+  describe('registrarPagoFIFO — idempotencia', () => {
+    it('manda p_client_request_id y expone idempotent_replay', async () => {
+      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: {
+          pago_ids: [3280], sobrante: 0, monto_total: 111280,
+          aplicaciones: [], credito_aplicado: 0, idempotent_replay: true,
+        },
+        error: null,
+      })
+
+      const { result } = renderHook(() => usePagos())
+      let res: { idempotentReplay?: boolean } | undefined
+      await act(async () => {
+        res = await result.current.registrarPagoFIFO({
+          clienteId: 'c1', monto: 111280, formaPago: 'efectivo',
+          clientRequestId: 'uuid-fifo',
+        })
+      })
+
+      expect(supabase.rpc).toHaveBeenCalledWith(
+        'registrar_pago_cliente_fifo',
+        expect.objectContaining({ p_client_request_id: 'uuid-fifo' }),
+      )
+      expect(res!.idempotentReplay).toBe(true)
     })
   })
 

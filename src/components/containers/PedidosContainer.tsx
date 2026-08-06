@@ -18,6 +18,7 @@ import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
+import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
@@ -202,6 +203,8 @@ export default function PedidosContainer(): React.ReactElement {
   const cambiarClientePedidoMut = useCambiarClientePedidoMutation()
   const pagosMasivos = usePagosMasivosMutation()
   const entregaYPagoMasivos = useEntregaYPagoMasivosMutation()
+  // UUIDs de idempotencia de las acciones masivas de cobro (mig 167).
+  const requestIdMasivo = useRequestIdEstable()
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -599,12 +602,17 @@ export default function PedidosContainer(): React.ReactElement {
   const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[], fechaPago: string) => {
     setGuardando(true)
     try {
-      await pagosMasivos.mutateAsync({ pedidoIds, formaPago, fecha: fechaPago })
+      await pagosMasivos.mutateAsync({
+        pedidoIds, formaPago, fecha: fechaPago,
+        // Mismo lote + misma forma + misma fecha = el mismo cobro. Un reintento
+        // tras un error de red no vuelve a cobrarlo (mig 167).
+        clientRequestId: requestIdMasivo(`pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`),
+      })
       setModalPagosMasivosOpen(false)
       notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como pagado${pedidoIds.length !== 1 ? 's' : ''}`)
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
     setGuardando(false)
-  }, [pagosMasivos, notify])
+  }, [pagosMasivos, notify, requestIdMasivo])
 
   const handleEntregaYPagoMasivos = useCallback(async (
     transportistaId: string,
@@ -614,13 +622,19 @@ export default function PedidosContainer(): React.ReactElement {
   ) => {
     setGuardando(true)
     try {
-      await entregaYPagoMasivos.mutateAsync({ ...ids, transportistaId, formaPago, fecha })
+      const huella = `${fecha}|${formaPago}|${transportistaId}`
+      await entregaYPagoMasivos.mutateAsync({
+        ...ids, transportistaId, formaPago, fecha,
+        // Son dos RPCs distintas dentro de la misma mutation: un UUID cada una.
+        clientRequestIdCobrar: requestIdMasivo(`cobrar|${huella}|${[...ids.idsCobrar].sort().join(',')}`),
+        clientRequestIdEntregar: requestIdMasivo(`entregar|${huella}|${[...ids.idsEntregar].sort().join(',')}`),
+      })
       setModalEntregaYPagoMasivosOpen(false)
       const total = ids.idsEntregar.length + ids.idsCobrar.length
       notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
-  }, [entregaYPagoMasivos, notify])
+  }, [entregaYPagoMasivos, notify, requestIdMasivo])
 
   // Fetch todos los pedidos con filtros actuales (sin paginación) para export
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
@@ -918,7 +932,7 @@ export default function PedidosContainer(): React.ReactElement {
 
   // El error ya fue notificado por usePagos.registrarPagosBatch via notifyError;
   // dejamos que se propague para que el modal lo muestre tambien.
-  const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }> }) => {
+  const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[] }) => {
     setGuardando(true)
     try {
       await registrarPagosBatch({
@@ -928,6 +942,7 @@ export default function PedidosContainer(): React.ReactElement {
         observaciones: payload.observaciones || null,
         pagos: payload.pagos,
         usuarioId: user?.id ?? null,
+        clientRequestIds: payload.clientRequestIds,
       })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       setModalPagoPedidoOpen(false)
@@ -972,7 +987,7 @@ export default function PedidosContainer(): React.ReactElement {
   // Modo entrega transportista: "Entregar y registrar pago" → cambia estado y registra pagos.
   // Orden: primero entrega (mas critica), luego pagos. Si falla algun pago, queda
   // entregado y el usuario puede usar "Registrar Pago" desde el dropdown.
-  const handleEntregarConPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }> }) => {
+  const handleEntregarConPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[] }) => {
     const pedido = pedidoEntregaConPago
     if (!pedido) {
       // Fallback: comportamiento normal de registrar pago sin entrega
@@ -990,6 +1005,7 @@ export default function PedidosContainer(): React.ReactElement {
           observaciones: payload.observaciones || null,
           pagos: payload.pagos,
           usuarioId: user?.id ?? null,
+          clientRequestIds: payload.clientRequestIds,
         })
       } catch (pagoErr) {
         notify.error('Pedido entregado pero falló el pago: ' + (pagoErr as Error).message + '. Registralo desde el menú de pago.')
@@ -1546,6 +1562,7 @@ export default function PedidosContainer(): React.ReactElement {
     referencia: string;
     notas: string;
     fecha: string;
+    clientRequestId?: string;
   }) => {
     const pago = await registrarPago({
       clienteId: data.clienteId,
@@ -1556,6 +1573,7 @@ export default function PedidosContainer(): React.ReactElement {
       notas: data.notas,
       fecha: data.fecha,
       usuarioId: user?.id ?? null,
+      clientRequestId: data.clientRequestId,
     })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
     return pago

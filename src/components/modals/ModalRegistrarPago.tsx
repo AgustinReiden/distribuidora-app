@@ -1,9 +1,10 @@
-import React, { useState, FormEvent, ChangeEvent } from 'react'
+import React, { useState, useRef, FormEvent, ChangeEvent } from 'react'
 import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import NumberInput from '../ui/NumberInput'
 import { useZodValidation } from '../../hooks/useZodValidation'
+import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import { modalPagoSchema } from '../../lib/schemas'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
@@ -36,6 +37,11 @@ interface PagoData {
   notas: string;
   /** Fecha contable del pago (YYYY-MM-DD). Default hoy. */
   fecha: string;
+  /**
+   * UUID de idempotencia (mig 167). Estable mientras no cambien los datos del
+   * pago, así un reintento tras un error de red no lo duplica.
+   */
+  clientRequestId?: string;
 }
 
 interface PagoRegistrado extends Pago {
@@ -111,6 +117,15 @@ export default function ModalRegistrarPago({
   // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
   const fechaMinima = useFechaMinimaPago()
 
+  // Idempotencia (mig 167). Dos guardas complementarias:
+  //  - `enVueloRef` corta el doble toque instantaneo, que puede disparar dos
+  //    submits antes de que React re-renderice con loading=true.
+  //  - `requestId` hace que el reintento DESPUES de un error use el mismo UUID,
+  //    asi el server lo reconoce y no vuelve a cobrar. Cambiar el monto o la
+  //    forma de pago cambia la huella y acuña un UUID nuevo: eso si es otro pago.
+  const enVueloRef = useRef<boolean>(false)
+  const requestId = useRequestIdEstable()
+
   // Pago dividido
   const [pagoDividido, setPagoDividido] = useState<boolean>(false)
   const [pagos, setPagos] = useState<PagoDividido[]>([
@@ -140,6 +155,7 @@ export default function ModalRegistrarPago({
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
+    if (enVueloRef.current) return
     setError('')
 
     // FIFO siempre aplica cuando: no es pago dividido, no hay pedido específico
@@ -147,12 +163,17 @@ export default function ModalRegistrarPago({
     // pendientes el sobrante queda como saldo a favor automaticamente.
     const usarFIFO = !pagoDividido && !pedidoSeleccionado && !!onConfirmarFIFO
 
+    // Huella del pago: todo lo que lo hace "este pago y no otro". Mientras no
+    // cambie, los reintentos comparten UUID y el server los deduplica.
+    const huellaBase = [cliente!.id, pedidoSeleccionado || 'general', fecha, notas].join('|')
+
     if (usarFIFO) {
       const montoNumero = parsePrecio(monto)
       if (!montoNumero || montoNumero <= 0) {
         setError('Ingresá un monto válido')
         return
       }
+      enVueloRef.current = true
       setLoading(true)
       try {
         const result = await onConfirmarFIFO!({
@@ -162,6 +183,7 @@ export default function ModalRegistrarPago({
           fecha,
           referencia: referencia || undefined,
           notas: notas || undefined,
+          clientRequestId: requestId(`fifo|${huellaBase}|${montoNumero}|${formaPago}|${referencia}`),
         })
         setResultadoFIFO(result)
       } catch (err) {
@@ -169,6 +191,7 @@ export default function ModalRegistrarPago({
         setError(errorMessage)
       } finally {
         setLoading(false)
+        enVueloRef.current = false
       }
       return
     }
@@ -186,7 +209,10 @@ export default function ModalRegistrarPago({
       // saldo pendiente y el sobrante queda como saldo a favor. Espeja la
       // condición de `usarFIFO` del pago simple: sin esto, las filas se
       // insertarían con pedido_id NULL y no actualizarían el saldo del cliente.
+      const huellaDividido = `${huellaBase}|${pagosValidos.map(p => `${parsePrecio(p.monto)}@${p.formaPago}`).join(',')}`
+
       if (!pedidoSeleccionado && onConfirmarCombinadoFIFO) {
+        enVueloRef.current = true
         setLoading(true)
         try {
           const result = await onConfirmarCombinadoFIFO({
@@ -194,6 +220,7 @@ export default function ModalRegistrarPago({
             metodos: pagosValidos.map(p => ({ monto: parsePrecio(p.monto), formaPago: p.formaPago })),
             fecha,
             notas: notas || undefined,
+            clientRequestId: requestId(`combo|${huellaDividido}`),
           })
           setResultadoFIFO(result)
         } catch (err) {
@@ -201,6 +228,7 @@ export default function ModalRegistrarPago({
           setError(errorMessage)
         } finally {
           setLoading(false)
+          enVueloRef.current = false
         }
         return
       }
@@ -208,10 +236,13 @@ export default function ModalRegistrarPago({
       // Fallback: dividido aplicado a un pedido específico (o sin RPC combinado
       // disponible, ej. flujo del transportista). Cada forma genera una fila con
       // el pedido_id seleccionado, que sí dispara la cascada de triggers.
+      enVueloRef.current = true
       setLoading(true)
       try {
         let ultimoPago: PagoRegistrado | null = null
-        for (const pago of pagosValidos) {
+        // Un UUID por línea: son N filas y el índice único es por fila. Si el
+        // reintento cae en la mitad, las que ya entraron se resuelven solas.
+        for (const [i, pago] of pagosValidos.entries()) {
           ultimoPago = await onConfirmar({
             clienteId: cliente!.id,
             pedidoId: pedidoSeleccionado || null,
@@ -219,7 +250,8 @@ export default function ModalRegistrarPago({
             formaPago: pago.formaPago,
             referencia: '',
             notas: notas ? `${notas} (pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago})` : `Pago dividido - ${FORMAS_PAGO.find(f => f.value === pago.formaPago)?.label || pago.formaPago}`,
-            fecha
+            fecha,
+            clientRequestId: requestId(`divid|${huellaDividido}#${i}`),
           })
         }
         if (ultimoPago) setPagoRegistrado(ultimoPago)
@@ -228,6 +260,7 @@ export default function ModalRegistrarPago({
         setError(errorMessage)
       } finally {
         setLoading(false)
+        enVueloRef.current = false
       }
     } else {
       // Pago simple (a pedido específico o a cuenta general sin FIFO)
@@ -237,6 +270,7 @@ export default function ModalRegistrarPago({
         return
       }
 
+      enVueloRef.current = true
       setLoading(true)
       try {
         const pago = await onConfirmar({
@@ -246,7 +280,8 @@ export default function ModalRegistrarPago({
           formaPago,
           referencia,
           notas,
-          fecha
+          fecha,
+          clientRequestId: requestId(`simple|${huellaBase}|${result.data.monto}|${formaPago}|${referencia}`),
         })
         setPagoRegistrado(pago)
       } catch (err) {
@@ -254,6 +289,7 @@ export default function ModalRegistrarPago({
         setError(errorMessage)
       } finally {
         setLoading(false)
+        enVueloRef.current = false
       }
     }
   }
@@ -298,6 +334,11 @@ export default function ModalRegistrarPago({
             {resultadoFIFO.creditoAplicado > 0 && (
               <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-4 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
                 Además se usó {formatCurrency(resultadoFIFO.creditoAplicado)} de saldo a favor que el cliente ya tenía.
+              </p>
+            )}
+            {resultadoFIFO.idempotentReplay && (
+              <p className="text-sm text-blue-700 dark:text-blue-300 mb-4 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                Este pago ya había entrado en tu intento anterior: no se cobró dos veces. Abajo está el detalle de esa imputación.
               </p>
             )}
           </div>

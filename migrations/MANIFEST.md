@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-08-03** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-08-05** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -127,11 +127,16 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 165** — verificado contra el ledger el 2026-08-04: la última
-numerada es `164_metas_periodo_editable`. Las **148–164** (origen del precio, reglas de
+**La próxima migración es la 168** — la última numerada en el repo es
+`167_pagos_idempotencia_client_request_id`. Las **148–166** (origen del precio, reglas de
 comisión, `place_id`, horarios masivos, barridas, roles extra por sucursal, horario obligatorio
-al cargar pedido, marcas y objetivos por preventista) están aplicadas y mapean **1:1** con el
-ledger, así que no agregan ninguna excepción a las tablas de arriba.
+al cargar pedido, marcas y objetivos por preventista, saldo a favor que no queda atrapado)
+mapean **1:1** con el ledger, así que no agregan ninguna excepción a las tablas de arriba.
+
+La **167** renombra 4 RPCs de pago a `<nombre>_impl` y las deja detrás de un wrapper
+idempotente del mismo nombre. Es a propósito: `migrations/` no es 1:1 con prod y esas RPCs ya
+habían driftado (ver la nota de la 100), así que el cuerpo real no se reescribe, se envuelve.
+Al leer el catálogo, la lógica de negocio de esas 4 vive en la función `_impl`.
 
 **Antes de elegir el número de una migración nueva, mirar `ls migrations/` además del
 ledger**: el ledger no siempre lleva el prefijo, así que por sí solo no alcanza. Y si mergeaste
