@@ -12,7 +12,8 @@
  *   - Preview humano de cada escala.
  */
 import { useMemo, useState, useEffect } from 'react'
-import { X, Plus, Trash2, Search, ChevronDown, ChevronRight, Layers } from 'lucide-react'
+import { Plus, Trash2, Search, ChevronDown, ChevronRight, Layers } from 'lucide-react'
+import ModalBase from './ModalBase'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
@@ -226,7 +227,7 @@ export default function ModalGrupoPrecio({
     setError('')
 
     if (!nombre.trim()) {
-      setError('El nombre del grupo es obligatorio')
+      setError('El nombre de la condición es obligatorio')
       return
     }
     if (productoIds.size === 0) {
@@ -375,24 +376,17 @@ export default function ModalGrupoPrecio({
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex justify-between items-center p-4 border-b dark:border-gray-700">
-          <h2 className="text-xl font-semibold dark:text-white">
-            {isEditing ? 'Editar Condicion Mayorista' : 'Nueva Condicion Mayorista'}
-          </h2>
-          <button onClick={onClose}>
-            <X className="w-6 h-6 text-gray-500 dark:text-gray-400" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-5">
+    <ModalBase
+      title={isEditing ? 'Editar condición mayorista' : 'Nueva condición mayorista'}
+      description="Definí qué productos comparten la condición y a qué precio se venden por cantidad"
+      onClose={onClose}
+      maxWidth="max-w-2xl"
+    >
+      <div className="p-4 space-y-5 max-h-[70vh] overflow-y-auto">
           {/* Nombre y descripcion */}
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Nombre del grupo *</label>
+              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Nombre de la condición *</label>
               <input
                 type="text"
                 value={nombre}
@@ -416,7 +410,7 @@ export default function ModalGrupoPrecio({
           {/* Selector de productos */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">
-              Productos del grupo * ({productoIds.size} seleccionados)
+              Productos de la condición * ({productoIds.size} seleccionados)
             </label>
             <div className="relative mb-2">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -559,28 +553,40 @@ export default function ModalGrupoPrecio({
                       )}
                     </div>
 
-                    {/* Toggle combinacion + panel */}
-                    <div className="flex items-center justify-between gap-2 pl-1">
-                      <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={escala.combinada}
-                          onChange={() => toggleCombinada(index)}
-                          className="rounded"
-                        />
-                        <Layers className="w-3.5 h-3.5" />
-                        Requiere combinacion de productos
-                      </label>
-                      {escala.combinada && (
-                        <button
-                          onClick={() => actualizarEscala(index, { expandido: !escala.expandido })}
-                          className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
-                        >
-                          {escala.expandido ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                          {escala.expandido ? 'Colapsar' : 'Configurar minimos'}
-                        </button>
-                      )}
-                    </div>
+                    {/*
+                      Ojo con el nombre viejo de este toggle ("requiere
+                      combinacion de productos"): sugeria que habia que tildarlo
+                      para que la mezcla entre sabores contara, cuando la mezcla
+                      SIEMPRE suma. Lo que agrega es una restriccion extra —un
+                      piso por sabor— que en prod no se uso nunca (0 escalas).
+                      Por eso queda detras de "Opciones avanzadas".
+                    */}
+                    <details className="pl-1" open={escala.combinada}>
+                      <summary className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300">
+                        Opciones avanzadas
+                      </summary>
+
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={escala.combinada}
+                            onChange={() => toggleCombinada(index)}
+                            className="rounded"
+                          />
+                          <Layers className="w-3.5 h-3.5" />
+                          Exigir además un mínimo por producto
+                        </label>
+                        {escala.combinada && (
+                          <button
+                            onClick={() => actualizarEscala(index, { expandido: !escala.expandido })}
+                            className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
+                          >
+                            {escala.expandido ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                            {escala.expandido ? 'Colapsar' : 'Configurar minimos'}
+                          </button>
+                        )}
+                      </div>
 
                     {escala.combinada && escala.expandido && (
                       <div className="pl-1 pb-2 space-y-2 border-l-2 border-purple-300 dark:border-purple-700 ml-2 pl-3">
@@ -604,7 +610,7 @@ export default function ModalGrupoPrecio({
                             Cantidad mínima y precio mayorista por producto (precio vacío = usa el precio base de la escala):
                           </p>
                           {productosDelGrupo.length === 0 ? (
-                            <p className="text-xs text-gray-400 italic">Primero agregá productos al grupo.</p>
+                            <p className="text-xs text-gray-400 italic">Primero agregá productos a la condición.</p>
                           ) : (
                             <div className="space-y-1 max-h-56 overflow-y-auto border dark:border-gray-600 rounded p-1">
                               <div className="grid grid-cols-[1fr_auto_auto] gap-2 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1 pb-1 border-b dark:border-gray-700">
@@ -656,6 +662,8 @@ export default function ModalGrupoPrecio({
                       </div>
                     )}
 
+                    </details>
+
                     {/* Preview humano por escala */}
                     {escala.cantidadMinima && escala.precioUnitario && (
                       <p className="text-xs text-gray-600 dark:text-gray-400 italic px-1">
@@ -667,33 +675,32 @@ export default function ModalGrupoPrecio({
               })}
             </div>
           </div>
-        </div>
+      </div>
 
-        {/* Footer */}
-        <div className="border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
-          {error && (
-            <p className="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>
-          )}
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={guardando}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 flex items-center gap-2"
-            >
-              {guardando && (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              )}
-              {isEditing ? 'Guardar cambios' : 'Crear condicion'}
-            </button>
-          </div>
+      {/* Footer */}
+      <div className="border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+        {error && (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>
+        )}
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={guardando}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 flex items-center gap-2"
+          >
+            {guardando && (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            )}
+            {isEditing ? 'Guardar cambios' : 'Crear condición'}
+          </button>
         </div>
       </div>
-    </div>
+    </ModalBase>
   )
 }

@@ -1,7 +1,12 @@
 /**
- * GruposPrecioContainer
+ * CondicionesMayoristasPanel
  *
- * Container que gestiona grupos de precio mayorista usando TanStack Query.
+ * Gestiona las condiciones mayoristas (grupos de precio) usando TanStack Query.
+ *
+ * No es un container de ruta: se monta como pestaña dentro de /productos. Las
+ * condiciones son un atributo del catalogo —"este fardo de fideos sale tanto"—
+ * y tenerlas en una seccion aparte del menu obligaba a saltar de pantalla para
+ * algo que se decide mirando el producto.
  */
 import React, { lazy, Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -36,7 +41,7 @@ interface ConfirmConfig {
   onConfirm?: () => void
 }
 
-export default function GruposPrecioContainer(): React.ReactElement {
+export default function CondicionesMayoristasPanel(): React.ReactElement {
   const notify = useNotification()
 
   // Queries

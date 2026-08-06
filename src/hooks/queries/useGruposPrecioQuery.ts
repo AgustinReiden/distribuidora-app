@@ -295,51 +295,111 @@ async function updateGrupoPrecio(
 
   if (errorGrupo) throw errorGrupo
 
-  // Reemplazar productos: borrar existentes e insertar nuevos
-  await supabase
+  // Productos: reconciliar por producto_id en vez de barrer y reinsertar.
+  const { data: productosActuales, error: errorLeerProductos } = await supabase
     .from('grupo_precio_productos')
-    .delete()
+    .select('id, producto_id')
     .eq('grupo_precio_id', id)
+  if (errorLeerProductos) throw errorLeerProductos
 
-  if (input.productoIds.length > 0) {
-    const { error: errorProductos } = await supabase
+  const filasProducto = (productosActuales || []) as Array<{ id: string; producto_id: string }>
+  const productoIdsDeseados = new Set(input.productoIds.map(String))
+  const productoIdsActuales = new Set(filasProducto.map(p => String(p.producto_id)))
+
+  const productosAQuitar = filasProducto.filter(p => !productoIdsDeseados.has(String(p.producto_id)))
+  if (productosAQuitar.length > 0) {
+    const { error } = await supabase
       .from('grupo_precio_productos')
-      .insert(input.productoIds.map(pid => ({
+      .delete()
+      .in('id', productosAQuitar.map(p => p.id))
+    if (error) throw error
+  }
+
+  const productosAAgregar = input.productoIds.filter(pid => !productoIdsActuales.has(String(pid)))
+  if (productosAAgregar.length > 0) {
+    const { error } = await supabase
+      .from('grupo_precio_productos')
+      .insert(productosAAgregar.map(pid => ({
         grupo_precio_id: parseInt(id),
         producto_id: parseInt(pid),
         sucursal_id: sucursalId,
       })))
-
-    if (errorProductos) throw errorProductos
+    if (error) throw error
   }
 
-  // Reemplazar escalas (el ON DELETE CASCADE de grupo_precio_escala_minimos
-  // limpia los minimos automaticamente cuando borramos la escala anterior).
-  await supabase
+  // Escalas: reconciliar por cantidad_minima, que es UNIQUE dentro del grupo.
+  //
+  // Antes se borraban todas y se reinsertaban. Eso rotaba los ids en cada
+  // edición y dejaba huérfano el `grupo_precio_escala_id` que `pedido_items`
+  // guarda para trazar qué escala fijó el precio (mig 148): en prod ya hay 11
+  // de 149 items apuntando a escalas que no existen. Actualizar en el lugar
+  // conserva el id, así el histórico sigue siendo legible.
+  const { data: escalasActuales, error: errorLeerEscalas } = await supabase
     .from('grupo_precio_escalas')
-    .delete()
+    .select('id, cantidad_minima')
     .eq('grupo_precio_id', id)
+  if (errorLeerEscalas) throw errorLeerEscalas
 
-  if (input.escalas.length > 0) {
-    const { data: escalasInsertadas, error: errorEscalas } = await supabase
+  const filasEscala = (escalasActuales || []) as Array<{ id: string; cantidad_minima: number }>
+  const idPorCantidad = new Map<number, string>()
+  for (const e of filasEscala) idPorCantidad.set(Number(e.cantidad_minima), String(e.id))
+
+  // Primero las bajas: si una escala cambia de cantidad a una ya ocupada por
+  // otra que se va, borrar antes evita chocar contra el UNIQUE.
+  const cantidadesDeseadas = new Set(input.escalas.map(e => e.cantidadMinima))
+  const escalasAQuitar = filasEscala.filter(e => !cantidadesDeseadas.has(Number(e.cantidad_minima)))
+  if (escalasAQuitar.length > 0) {
+    const { error } = await supabase
       .from('grupo_precio_escalas')
-      .insert(input.escalas.map(e => ({
-        grupo_precio_id: parseInt(id),
-        cantidad_minima: e.cantidadMinima,
-        precio_unitario: e.precioUnitario,
-        etiqueta: e.etiqueta || null,
-        min_productos_distintos: e.minProductosDistintos ?? 1,
-        sucursal_id: sucursalId,
-      })))
-      .select()
+      .delete()
+      .in('id', escalasAQuitar.map(e => e.id))
+    if (error) throw error
+  }
 
-    if (errorEscalas) throw errorEscalas
+  const escalasFinales: GrupoPrecioEscalaDB[] = []
+  for (const e of input.escalas) {
+    const existenteId = idPorCantidad.get(e.cantidadMinima)
+    const campos = {
+      precio_unitario: e.precioUnitario,
+      etiqueta: e.etiqueta || null,
+      min_productos_distintos: e.minProductosDistintos ?? 1,
+    }
+    if (existenteId) {
+      const { data, error } = await supabase
+        .from('grupo_precio_escalas')
+        .update(campos)
+        .eq('id', existenteId)
+        .select()
+        .single()
+      if (error) throw error
+      escalasFinales.push(data as GrupoPrecioEscalaDB)
+    } else {
+      const { data, error } = await supabase
+        .from('grupo_precio_escalas')
+        .insert({
+          grupo_precio_id: parseInt(id),
+          cantidad_minima: e.cantidadMinima,
+          sucursal_id: sucursalId,
+          ...campos,
+        })
+        .select()
+        .single()
+      if (error) throw error
+      escalasFinales.push(data as GrupoPrecioEscalaDB)
+    }
+  }
 
-    const filasMinimos = buildFilasMinimos(
-      input.escalas,
-      (escalasInsertadas as GrupoPrecioEscalaDB[]) || [],
-      sucursalId
-    )
+  // Los mínimos por producto sí se reemplazan enteros: son configuración de la
+  // escala, no historia. Antes los limpiaba el CASCADE al borrar la escala;
+  // ahora que las escalas sobreviven hay que borrarlos a mano.
+  if (escalasFinales.length > 0) {
+    const { error: errorBorrarMinimos } = await supabase
+      .from('grupo_precio_escala_minimos')
+      .delete()
+      .in('escala_id', escalasFinales.map(e => e.id))
+    if (errorBorrarMinimos) throw errorBorrarMinimos
+
+    const filasMinimos = buildFilasMinimos(input.escalas, escalasFinales, sucursalId)
     if (filasMinimos.length > 0) {
       const { error: errorMinimos } = await supabase
         .from('grupo_precio_escala_minimos')
@@ -395,12 +455,14 @@ async function toggleGrupoPrecioActivo(id: string, activo: boolean): Promise<Gru
 /**
  * Hook para obtener todos los grupos de precio con sus productos y escalas
  */
-export function useGruposPrecioQuery() {
+export function useGruposPrecioQuery(options?: { enabled?: boolean }) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: gruposPrecioKeys.lists(currentSucursalId),
     queryFn: fetchGruposPrecio,
     staleTime: 10 * 60 * 1000,
+    // Solo el admin ve las condiciones: para el resto son 4 queries al pedo.
+    enabled: options?.enabled ?? true,
   })
 }
 

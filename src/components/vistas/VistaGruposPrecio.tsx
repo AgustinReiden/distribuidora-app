@@ -66,20 +66,19 @@ export default function VistaGruposPrecio({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold dark:text-white">Condiciones Mayoristas</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Precios por volumen. Cualquier mezcla de los productos de una condicion suma para llegar al minimo
-          </p>
-        </div>
+      {/* Sin <h1>: la pestaña de Productos ya dice donde estamos. Lo que si
+          hace falta explicar es que la mezcla suma, que es la razon de ser de
+          agrupar productos y no se ve por ningun lado. */}
+      <div className="flex justify-between items-start gap-3">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Precios por volumen. Cualquier mezcla de los productos de una condición suma para llegar al mínimo.
+        </p>
         <button
           onClick={onNuevoGrupo}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="shrink-0 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <Plus className="w-4 h-4" />
-          Nuevo Grupo
+          Nueva condición
         </button>
       </div>
 
@@ -92,7 +91,7 @@ export default function VistaGruposPrecio({
               type="text"
               value={busqueda}
               onChange={e => setBusqueda(e.target.value)}
-              placeholder="Buscar por grupo, descripción o producto..."
+              placeholder="Buscar por condición, descripción o producto..."
               className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
           </div>
@@ -117,20 +116,20 @@ export default function VistaGruposPrecio({
           <Tag className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Sin condiciones mayoristas</h3>
           <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Crea una condicion para definir precios y cantidades minimas
+            Agrupá los productos que se venden juntos y definí el precio por cantidad
           </p>
           <button
             onClick={onNuevoGrupo}
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
           >
-            Crear primer grupo
+            Crear la primera condición
           </button>
         </div>
       ) : (
         <div className="grid gap-4">
           {gruposFiltrados.length === 0 ? (
             <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
-              No hay grupos que coincidan con la búsqueda.
+              No hay condiciones que coincidan con la búsqueda.
             </div>
           ) : null}
           {gruposFiltrados.map(grupo => (
