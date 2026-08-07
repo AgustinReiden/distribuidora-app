@@ -70,19 +70,6 @@ END $$;
 COMMENT ON TABLE public.grupo_precio_productos IS
   'Productos que comparten una condición mayorista. Cualquier mezcla de ellos suma para llegar al mínimo de la escala. El mínimo de venta NO vive acá: vive en productos.cantidad_minima_venta (mig 147/169).';
 
--- -------------------------------------------------------------------------
--- Limpieza: condiciones sin productos (en prod: ids 3, 23 y 24). No aplican
--- precio a nadie —fetchPricingMap las recorre y no agrega nada al mapa— pero
--- ensucian la lista y hacen creer que hay una condición donde no la hay.
---
--- Se DESACTIVAN en vez de borrarse: es reversible y mantiene vivos los ids de
--- grupo_precio_escalas que pedido_items.grupo_precio_escala_id referencia
--- (esa columna va sin FK a propósito, mig 148).
--- -------------------------------------------------------------------------
-UPDATE public.grupos_precio g
-   SET activo = false
- WHERE g.activo
-   AND NOT EXISTS (
-     SELECT 1 FROM public.grupo_precio_productos gpp
-      WHERE gpp.grupo_precio_id = g.id
-   );
+-- Nota: en prod hay 3 condiciones sin productos (ids 3, 23 y 24). No aplican
+-- precio a nadie, pero NO se tocan acá: esta migración solo elimina la columna
+-- duplicada. Desactivarlas es una decisión de negocio y se hace desde la UI.

@@ -820,6 +820,51 @@ export function useEliminarEscalaMutation() {
   })
 }
 
+export interface CrearCondicionParaProductoInput {
+  productoId: string
+  cantidadMinima: number
+  precioUnitario: number
+  etiqueta?: string | null
+  /** Nombre de la condición nueva. Sin esto, la RPC usa el del producto. */
+  nombre?: string | null
+}
+
+/**
+ * Le pone un precio por cantidad a un producto que todavía no está en ninguna
+ * condición, sin salir de su ficha (mig 171).
+ *
+ * Va por RPC porque son tres inserts —grupo, producto y escala— y tienen que
+ * ser atómicos: si falla el segundo queda un grupo huérfano. Eso ya pasó, son
+ * los 3 grupos vacíos que hay en prod.
+ */
+export function useCrearCondicionParaProductoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({
+      productoId,
+      cantidadMinima,
+      precioUnitario,
+      etiqueta,
+      nombre,
+    }: CrearCondicionParaProductoInput) => {
+      const { data, error } = await supabase.rpc('crear_condicion_para_producto', {
+        p_producto_id: parseInt(productoId),
+        p_cantidad_minima: cantidadMinima,
+        p_precio_unitario: precioUnitario,
+        p_etiqueta: etiqueta?.trim() || null,
+        p_nombre: nombre?.trim() || null,
+      })
+      if (error) throw error
+      return data as { grupo_id: number; escala_id: number; grupo_creado: boolean }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
 export interface ConsolidarCondicionesInput {
   grupoDestino: string
   gruposOrigen: string[]

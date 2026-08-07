@@ -24,6 +24,7 @@ import {
   useAgregarProductoACondicionMutation,
   useQuitarProductoDeCondicionMutation,
   useCrearEscalaMutation,
+  useCrearCondicionParaProductoMutation,
 } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
@@ -65,12 +66,15 @@ export default function ProductoCondicionesMayoristas({
   const agregarACondicion = useAgregarProductoACondicionMutation()
   const quitarDeCondicion = useQuitarProductoDeCondicionMutation()
   const crearEscala = useCrearEscalaMutation()
+  const crearCondicionPropia = useCrearCondicionParaProductoMutation()
 
   /** grupoId con el form de escala nueva abierto. */
   const [agregandoEscalaEn, setAgregandoEscalaEn] = useState<string | null>(null)
   /** grupoId con la confirmación de "quitar de la condición" abierta. */
   const [quitandoDe, setQuitandoDe] = useState<string | null>(null)
   const [sumarAbierto, setSumarAbierto] = useState(false)
+  /** Form abierto para darle a este producto su primer precio por cantidad. */
+  const [creandoPropia, setCreandoPropia] = useState(false)
 
   // `describirReglaEscala` nombra los productos de las escalas combinadas; sin
   // el mapa imprime "#123" y la regla se vuelve ilegible.
@@ -111,6 +115,21 @@ export default function ProductoCondicionesMayoristas({
       setQuitandoDe(null)
     } catch (e) {
       notify.error((e as Error).message || 'No se pudo quitar el producto de la condición')
+    }
+  }
+
+  const crearPropia = async (valores: ValoresEscala): Promise<void> => {
+    try {
+      await crearCondicionPropia.mutateAsync({
+        productoId,
+        cantidadMinima: valores.cantidadMinima,
+        precioUnitario: valores.precioUnitario,
+        etiqueta: valores.etiqueta,
+      })
+      notify.success('Precio por cantidad cargado')
+      setCreandoPropia(false)
+    } catch (e) {
+      notify.error((e as Error).message || 'No se pudo cargar el precio')
     }
   }
 
@@ -187,32 +206,58 @@ export default function ProductoCondicionesMayoristas({
           <p className="text-xs text-stone-500 dark:text-gray-400">
             Este producto no está en ninguna condición mayorista: siempre se vende al precio de lista.
           </p>
-          {puedeEditar && (
-            sumarAbierto ? null : (
+          {puedeEditar && !sumarAbierto && (
+            creandoPropia ? (
+              <FormEscalaMayorista
+                precioLista={precioLista}
+                costoTotal={costoTotal}
+                costoReal={costoReal}
+                porcentajeIva={porcentajeIva}
+                guardando={crearCondicionPropia.isPending}
+                textoGuardar="Guardar precio"
+                onGuardar={valores => void crearPropia(valores)}
+                onCancelar={() => setCreandoPropia(false)}
+              />
+            ) : (
               <div className="flex flex-wrap items-center gap-2">
+                {/* El camino directo: "de este sabor, a partir de 12, $850".
+                    La condición se crea por debajo con el nombre del producto;
+                    no hay que decidir nada más. */}
+                <button
+                  type="button"
+                  onClick={() => setCreandoPropia(true)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-indigo-600 text-white"
+                >
+                  <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                  Ponerle precio por cantidad
+                </button>
+
+                {/* Sumarlo a un fardo que ya existe: es lo que hace que la
+                    mezcla entre sabores cuente para el mínimo. */}
                 {condicionesDisponibles.length > 0 && (
                   <>
-                    {/* Sumarlo a una condición existente antes que crearle una
-                        propia: es lo que hace que el fardo surtido funcione. */}
+                    <span className="text-xs text-stone-400">o</span>
                     <button
                       type="button"
                       onClick={() => setSumarAbierto(true)}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-indigo-600 text-white"
+                      className="text-xs text-blue-600 hover:text-blue-700"
                     >
-                      <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                      Sumar a una condición
+                      sumarlo a una condición existente
                     </button>
-                    <span className="text-xs text-stone-400">o</span>
                   </>
                 )}
+
                 {onCrearCondicion && (
-                  <button
-                    type="button"
-                    onClick={onCrearCondicion}
-                    className="text-xs text-blue-600 hover:text-blue-700"
-                  >
-                    Crear una condición nueva
-                  </button>
+                  <>
+                    <span className="text-xs text-stone-400">o</span>
+                    <button
+                      type="button"
+                      onClick={onCrearCondicion}
+                      className="text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      armar una condición con varios productos
+                    </button>
+                  </>
                 )}
               </div>
             )

@@ -9,6 +9,7 @@ const eliminarEscala = vi.fn(() => Promise.resolve())
 const agregarACondicion = vi.fn(() => Promise.resolve())
 const quitarDeCondicion = vi.fn(() => Promise.resolve())
 const crearEscala = vi.fn(() => Promise.resolve())
+const crearCondicionPropia = vi.fn(() => Promise.resolve({ grupo_id: 9, escala_id: 9, grupo_creado: true }))
 
 let condiciones: CondicionMayoristaProducto[] = []
 let grupos: GrupoPrecioConDetalles[] = []
@@ -30,6 +31,7 @@ vi.mock('../../hooks/queries', () => ({
   useAgregarProductoACondicionMutation: () => ({ mutateAsync: agregarACondicion, isPending: false }),
   useQuitarProductoDeCondicionMutation: () => ({ mutateAsync: quitarDeCondicion, isPending: false }),
   useCrearEscalaMutation: () => ({ mutateAsync: crearEscala, isPending: false }),
+  useCrearCondicionParaProductoMutation: () => ({ mutateAsync: crearCondicionPropia, isPending: false }),
 }))
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
@@ -217,17 +219,43 @@ describe('ProductoCondicionesMayoristas', () => {
     })
   })
 
-  it('sin condición propia, ofrece sumarlo a una existente antes que crear una nueva', async () => {
-    // Es el arreglo del fardo surtido: crear condición por sabor es lo que
-    // deja la suma entre productos sin activarse.
+  it('a un producto sin condición se le pone precio por cantidad ahí mismo', async () => {
+    // Sin esto había que salir de la ficha, abrir el modal de condición e
+    // inventarle un nombre. La condición se crea por debajo.
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+
+    await user.click(screen.getByRole('button', { name: /Ponerle precio por cantidad/ }))
+    await user.type(screen.getByLabelText('Cantidad mínima'), '12')
+    await user.type(screen.getByLabelText('Precio mayorista'), '850')
+    await user.type(screen.getByLabelText('Etiqueta'), 'Fardo')
+    await user.click(screen.getByRole('button', { name: /Guardar precio/ }))
+
+    expect(crearCondicionPropia).toHaveBeenCalledWith({
+      productoId: 'p1',
+      cantidadMinima: 12,
+      precioUnitario: 850,
+      etiqueta: 'Fardo',
+    })
+  })
+
+  it('también ofrece sumarlo a una condición existente', async () => {
+    // El camino que hace que la mezcla entre sabores cuente para el mínimo.
     grupos = [grupo({ id: 'g9', nombre: 'Fideos Cotella 500g' })]
     const user = userEvent.setup()
     render(<ProductoCondicionesMayoristas {...props} puedeEditar onCrearCondicion={vi.fn()} />)
 
-    await user.click(screen.getByRole('button', { name: /Sumar a una condición/ }))
+    await user.click(screen.getByRole('button', { name: /sumarlo a una condición existente/ }))
     await user.selectOptions(screen.getByLabelText('Sumar a una condición'), 'g9')
 
     expect(agregarACondicion).toHaveBeenCalledWith({ grupoId: 'g9', productoId: 'p1' })
+  })
+
+  it('sin condiciones cargadas no ofrece sumarlo a ninguna', () => {
+    grupos = []
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+    expect(screen.getByRole('button', { name: /Ponerle precio por cantidad/ })).toBeInTheDocument()
+    expect(screen.queryByText(/sumarlo a una condición existente/)).not.toBeInTheDocument()
   })
 
   it('el selector no ofrece condiciones en las que el producto ya está', async () => {

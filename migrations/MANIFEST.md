@@ -128,8 +128,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 171** — la última numerada en el repo es
-`170_consolidar_condiciones`. Las **148–166** (origen del precio, reglas de
+**La próxima migración es la 172** — la última numerada en el repo es
+`171_condicion_desde_la_ficha`. Las **148–166** (origen del precio, reglas de
 comisión, `place_id`, horarios masivos, barridas, roles extra por sucursal, horario obligatorio
 al cargar pedido, marcas y objetivos por preventista, saldo a favor que no queda atrapado)
 mapean **1:1** con el ledger, así que no agregan ninguna excepción a las tablas de arriba.
@@ -140,6 +140,9 @@ La **169** elimina `grupo_precio_productos.cantidad_minima_pedido`. Tiene una de
 orden que no se ve en el SQL: `supabase/functions/_shared/pricing/index.ts` seleccionaba esa
 columna por nombre, y PostgREST devuelve 400 si no existe. **Desplegar las edge functions
 antes de aplicarla**, o el bot deja de tomar pedidos.
+
+Las **170** y **171** solo agregan funciones: no modifican ni una fila. Todo su SQL corre
+adentro de la RPC, o sea únicamente cuando el usuario dispara la acción desde la UI.
 
 La **170** agrega `consolidar_condiciones()`, que fusiona condiciones mayoristas duplicadas.
 Mueve las escalas conservando su `id` y solo repunta `pedido_items.grupo_precio_escala_id`

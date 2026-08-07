@@ -193,12 +193,14 @@ export {
   useCrearEscalaMutation,
   useActualizarEscalaMutation,
   useEliminarEscalaMutation,
+  useCrearCondicionParaProductoMutation,
   useConsolidarCondicionesMutation,
 } from './useGruposPrecioQuery'
 export type {
   ActualizarPrecioEscalaInput,
   CrearEscalaInput,
   ActualizarEscalaInput,
+  CrearCondicionParaProductoInput,
   ConsolidarCondicionesInput,
 } from './useGruposPrecioQuery'
 
