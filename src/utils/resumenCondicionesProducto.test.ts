@@ -23,12 +23,44 @@ function grupo(over: Partial<GrupoPrecioConDetalles> = {}): GrupoPrecioConDetall
 describe('resumenCondicionesPorProducto', () => {
   it('expone el precio y la cantidad de la escala para cada producto', () => {
     const mapa = resumenCondicionesPorProducto([grupo()])
-    expect(mapa.get('p1')).toEqual({
+    expect(mapa.get('p1')).toMatchObject({
       cantidadCondiciones: 1,
       precioDesde: 850,
       cantidadDesde: 12,
     })
     expect(mapa.get('p2')?.precioDesde).toBe(850)
+  })
+
+  it('dice con qué otros productos suma, sin tener que abrir la ficha', () => {
+    const nombres = new Map([['p1', 'Codito'], ['p2', 'Mostacho']])
+    const resumen = resumenCondicionesPorProducto([grupo()], nombres).get('p1')
+
+    expect(resumen?.condiciones).toEqual([
+      { grupoId: 'g1', nombre: 'Fideos Cotella 500g', combinaCon: ['Mostacho'] },
+    ])
+    expect(resumen?.totalCombinaCon).toBe(1)
+  })
+
+  it('una condición de un solo producto no combina con nadie', () => {
+    const g = grupo({
+      productos: [{ id: 'gp1', grupo_precio_id: 'g1', producto_id: 'p1' }],
+    } as Partial<GrupoPrecioConDetalles>)
+    const resumen = resumenCondicionesPorProducto([g], new Map([['p1', 'Codito']])).get('p1')
+    expect(resumen?.totalCombinaCon).toBe(0)
+    expect(resumen?.condiciones[0].combinaCon).toEqual([])
+  })
+
+  it('no cuenta dos veces al mismo sabor si aparece en varias condiciones', () => {
+    const nombres = new Map([['p1', 'Codito'], ['p2', 'Mostacho']])
+    const otra = grupo({
+      id: 'g2',
+      nombre: 'Otra',
+      escalas: [{ id: 'e2', grupo_precio_id: 'g2', cantidad_minima: 24, precio_unitario: 800 }],
+    } as Partial<GrupoPrecioConDetalles>)
+
+    const resumen = resumenCondicionesPorProducto([grupo(), otra], nombres).get('p1')
+    expect(resumen?.cantidadCondiciones).toBe(2)
+    expect(resumen?.totalCombinaCon).toBe(1) // Mostacho está en las dos
   })
 
   it('no incluye productos que no están en ninguna condición', () => {
@@ -60,7 +92,7 @@ describe('resumenCondicionesPorProducto', () => {
         { id: 'e2', grupo_precio_id: 'g1', cantidad_minima: 12, precio_unitario: 850 },
       ],
     } as Partial<GrupoPrecioConDetalles>)
-    expect(resumenCondicionesPorProducto([g]).get('p1')).toEqual({
+    expect(resumenCondicionesPorProducto([g]).get('p1')).toMatchObject({
       cantidadCondiciones: 1,
       precioDesde: 850,
       cantidadDesde: 12,
@@ -77,7 +109,7 @@ describe('resumenCondicionesPorProducto', () => {
       escalas: [{ id: 'e2', grupo_precio_id: 'g2', cantidad_minima: 24, precio_unitario: 800 }],
     } as Partial<GrupoPrecioConDetalles>)
 
-    expect(resumenCondicionesPorProducto([medio, entero]).get('p1')).toEqual({
+    expect(resumenCondicionesPorProducto([medio, entero]).get('p1')).toMatchObject({
       cantidadCondiciones: 2,
       precioDesde: 800,
       cantidadDesde: 24,

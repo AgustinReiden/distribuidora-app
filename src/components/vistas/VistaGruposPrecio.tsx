@@ -5,10 +5,11 @@
  * Muestra lista de grupos con sus productos y escalas de precio.
  */
 import React, { useMemo, useState } from 'react'
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Tag, Search, Layers } from 'lucide-react'
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Tag, Search, Layers, List, LayoutGrid } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
+import TablaCondiciones from '../productos/TablaCondiciones'
 import type { GrupoPrecioConDetalles, ProductoDB } from '../../types'
 
 export interface VistaGruposPrecioProps {
@@ -43,6 +44,9 @@ export default function VistaGruposPrecio({
 
   const [busqueda, setBusqueda] = useState('')
   const [mostrarInactivos, setMostrarInactivos] = useState(false)
+  // Con 88 condiciones, las tarjetas son scroll infinito. La tabla es para
+  // responder de un vistazo "¿qué tengo configurado y con qué combina cada uno?".
+  const [vistaTabla, setVistaTabla] = useState(false)
 
   const gruposFiltrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
@@ -104,6 +108,15 @@ export default function VistaGruposPrecio({
             />
             Mostrar inactivos
           </label>
+          <button
+            type="button"
+            onClick={() => setVistaTabla(!vistaTabla)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-stone-200 dark:border-gray-600 text-stone-600 dark:text-gray-300 hover:bg-stone-50 dark:hover:bg-gray-700"
+            aria-pressed={vistaTabla}
+          >
+            {vistaTabla ? <LayoutGrid className="w-3.5 h-3.5" /> : <List className="w-3.5 h-3.5" />}
+            {vistaTabla ? 'Ver en tarjetas' : 'Ver todas en una tabla'}
+          </button>
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {gruposFiltrados.length} de {grupos.length}
           </span>
@@ -125,13 +138,20 @@ export default function VistaGruposPrecio({
             Crear la primera condición
           </button>
         </div>
+      ) : gruposFiltrados.length === 0 ? (
+        <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+          No hay condiciones que coincidan con la búsqueda.
+        </div>
+      ) : vistaTabla ? (
+        <TablaCondiciones
+          grupos={gruposFiltrados}
+          nombreProducto={getProductoNombre}
+          onEditarGrupo={onEditarGrupo}
+          onEliminarGrupo={onEliminarGrupo}
+          onToggleActivo={onToggleActivo}
+        />
       ) : (
         <div className="grid gap-4">
-          {gruposFiltrados.length === 0 ? (
-            <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
-              No hay condiciones que coincidan con la búsqueda.
-            </div>
-          ) : null}
           {gruposFiltrados.map(grupo => (
             <div
               key={grupo.id}

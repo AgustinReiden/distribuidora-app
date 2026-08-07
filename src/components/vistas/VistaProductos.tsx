@@ -55,39 +55,66 @@ export interface VistaProductosProps {
   onAbrirStockBajo?: () => void;
 }
 
+/** Detalle completo de las condiciones de un producto, para el `title`. */
+function detalleCondiciones(resumen: ResumenCondicion): string {
+  return resumen.condiciones
+    .map(c => (c.combinaCon.length > 0
+      ? `${c.nombre} — suma con ${c.combinaCon.join(', ')}`
+      : `${c.nombre} — solo este producto`))
+    .join('\n');
+}
+
 /**
- * Chips bajo el precio: el mayorista más barato y el mínimo de venta.
+ * Chips bajo el precio: el mayorista más barato, con qué condición y con
+ * cuántos sabores más suma, y el mínimo de venta.
  *
- * Ninguno de los dos se veía en la lista, así que para saber si un sabor ya
- * estaba configurado había que abrir su ficha.
+ * Nada de esto se veía en la lista: para saber si un sabor estaba configurado
+ * había que abrir su ficha, y para saber con qué se combinaba había que ir
+ * además al panel de condiciones a buscar el grupo.
  */
 function ChipsPrecio({
   producto,
   resumen,
   className,
+  detallado = false,
 }: {
   producto: ProductoDB;
   resumen?: ResumenCondicion;
   className?: string;
+  /** En mobile hay lugar para el nombre completo; en la tabla no. */
+  detallado?: boolean;
 }) {
   const minimo = Number(producto.cantidad_minima_venta) || 0;
   if (!resumen && minimo <= 0) return null;
+
+  const combina = resumen?.totalCombinaCon ?? 0;
+
   return (
-    <div className={cn('flex items-center gap-2 flex-wrap mt-0.5', className)}>
-      {resumen && (
-        <span
-          className="text-[11px] text-indigo-700 dark:text-indigo-300 tabular-nums"
-          title={`Precio mayorista desde ${resumen.cantidadDesde} u.`}
-        >
-          may. {formatPrecio(resumen.precioDesde)}
-        </span>
-      )}
-      {minimo > 0 && (
-        <span
-          className="text-[11px] text-amber-700 dark:text-amber-400 tabular-nums"
-          title="Mínimo de venta por pedido"
-        >
-          mín. {minimo}
+    <div className={cn('flex flex-col gap-0.5 mt-0.5', className)}>
+      <div className={cn('flex items-center gap-2 flex-wrap', className)}>
+        {resumen && (
+          <span
+            className="text-[11px] text-indigo-700 dark:text-indigo-300 tabular-nums"
+            title={detalleCondiciones(resumen)}
+          >
+            may. {formatPrecio(resumen.precioDesde)} desde {resumen.cantidadDesde}u
+            {combina > 0 && ` · +${combina} ${combina === 1 ? 'sabor' : 'sabores'}`}
+          </span>
+        )}
+        {minimo > 0 && (
+          <span
+            className="text-[11px] text-amber-700 dark:text-amber-400 tabular-nums"
+            title="Mínimo de venta por pedido"
+          >
+            mín. {minimo}
+          </span>
+        )}
+      </div>
+
+      {/* Sin hover no hay tooltip: en mobile el nombre de la condición va a la vista. */}
+      {detallado && resumen && (
+        <span className="text-[11px] text-stone-500 dark:text-gray-400">
+          {resumen.condiciones.map(c => c.nombre).join(' · ')}
         </span>
       )}
     </div>
@@ -536,6 +563,7 @@ export default function VistaProductos({
                       <ChipsPrecio
                         producto={producto}
                         resumen={resumenCondiciones?.get(String(producto.id))}
+                        detallado
                       />
                     </div>
                   </div>

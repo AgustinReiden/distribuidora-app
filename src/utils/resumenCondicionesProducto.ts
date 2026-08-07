@@ -10,6 +10,13 @@
  */
 import type { GrupoPrecioConDetalles } from '../types'
 
+export interface CondicionDelProducto {
+  grupoId: string
+  nombre: string
+  /** Los OTROS productos que suman en esta condición (sin el propio). */
+  combinaCon: string[]
+}
+
 export interface ResumenCondicion {
   /** En cuántas condiciones está el producto. */
   cantidadCondiciones: number
@@ -17,6 +24,10 @@ export interface ResumenCondicion {
   precioDesde: number
   /** Cantidad mínima de la escala que da ese precio. */
   cantidadDesde: number
+  /** Con qué condiciones y con qué sabores suma, para verlo sin abrir la ficha. */
+  condiciones: CondicionDelProducto[]
+  /** Cuántos otros productos suman con este, contando todas sus condiciones. */
+  totalCombinaCon: number
 }
 
 /**
@@ -26,10 +37,12 @@ export interface ResumenCondicion {
  */
 export function resumenCondicionesPorProducto(
   grupos: GrupoPrecioConDetalles[],
+  /** productoId → nombre. Sin esto, `combinaCon` viene vacío. */
+  nombresProductos?: Map<string, string>,
 ): Map<string, ResumenCondicion> {
   const acumulador = new Map<
     string,
-    { condiciones: Set<string>; precioDesde: number; cantidadDesde: number }
+    { condiciones: CondicionDelProducto[]; precioDesde: number; cantidadDesde: number }
   >()
 
   for (const grupo of grupos) {
@@ -45,10 +58,21 @@ export function resumenCondicionesPorProducto(
 
       let entrada = acumulador.get(pid)
       if (!entrada) {
-        entrada = { condiciones: new Set<string>(), precioDesde: Infinity, cantidadDesde: 0 }
+        entrada = { condiciones: [], precioDesde: Infinity, cantidadDesde: 0 }
         acumulador.set(pid, entrada)
       }
-      entrada.condiciones.add(String(grupo.id))
+      if (!entrada.condiciones.some(c => c.grupoId === String(grupo.id))) {
+        entrada.condiciones.push({
+          grupoId: String(grupo.id),
+          nombre: grupo.nombre,
+          // Los otros sabores del fardo: es lo que había que ir a buscar al
+          // panel de condiciones para saber con qué suma este producto.
+          combinaCon: grupo.productos
+            .map(p => String(p.producto_id))
+            .filter(otro => otro !== pid)
+            .map(otro => nombresProductos?.get(otro) ?? `#${otro}`),
+        })
+      }
 
       for (const escala of escalasActivas) {
         // El override de la escala manda sobre el precio del grupo: es lo que
@@ -70,10 +94,16 @@ export function resumenCondicionesPorProducto(
   for (const [pid, entrada] of acumulador) {
     // Sin ninguna escala con precio usable no hay nada que mostrar.
     if (!Number.isFinite(entrada.precioDesde)) continue
+
+    // Un sabor puede repetirse entre condiciones; se cuenta una sola vez.
+    const otros = new Set(entrada.condiciones.flatMap(c => c.combinaCon))
+
     salida.set(pid, {
-      cantidadCondiciones: entrada.condiciones.size,
+      cantidadCondiciones: entrada.condiciones.length,
       precioDesde: entrada.precioDesde,
       cantidadDesde: entrada.cantidadDesde,
+      condiciones: entrada.condiciones,
+      totalCombinaCon: otros.size,
     })
   }
   return salida

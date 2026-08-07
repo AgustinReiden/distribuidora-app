@@ -267,9 +267,16 @@ export default function ProductosContainer(): React.ReactElement {
   // Mismo query key que usa el panel de condiciones (staleTime 10 min), así
   // el chip de la lista no agrega ni una consulta extra.
   const { data: gruposPrecio = [] } = useGruposPrecioQuery({ enabled: puedeVerCondiciones })
+  const nombresProductos = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const p of productos) map.set(String(p.id), p.nombre)
+    return map
+  }, [productos])
   const resumenCondiciones = useMemo(
-    () => (puedeVerCondiciones ? resumenCondicionesPorProducto(gruposPrecio) : undefined),
-    [gruposPrecio, puedeVerCondiciones],
+    () => (puedeVerCondiciones
+      ? resumenCondicionesPorProducto(gruposPrecio, nombresProductos)
+      : undefined),
+    [gruposPrecio, nombresProductos, puedeVerCondiciones],
   )
 
   // Handler de "Editar" desde el modal de stock bajo: cierra el modal
