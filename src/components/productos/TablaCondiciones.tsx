@@ -67,7 +67,9 @@ export default function TablaCondiciones({
                         desactivada
                       </span>
                     )}
-                    {grupo.descripcion && (
+                    {/* En prod varias condiciones repiten el nombre en la
+                        descripción; mostrarlo dos veces no aporta. */}
+                    {grupo.descripcion && grupo.descripcion.trim() !== grupo.nombre.trim() && (
                       <p className="text-xs text-stone-500 dark:text-gray-400 mt-0.5">{grupo.descripcion}</p>
                     )}
                   </td>

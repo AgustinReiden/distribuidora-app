@@ -299,7 +299,9 @@ export default function ProductoCondicionesMayoristas({
                           {otros.length > 3 ? ` y ${otros.length - 3} más` : ''}
                         </p>
                       )}
-                      {cond.descripcion && (
+                      {/* Varias condiciones tienen la descripción igual al
+                          nombre; repetirla no aporta y ensucia la ficha. */}
+                      {cond.descripcion && cond.descripcion.trim() !== cond.grupoNombre.trim() && (
                         <p className="text-xs text-stone-500 dark:text-gray-400 mt-0.5">{cond.descripcion}</p>
                       )}
                     </div>
