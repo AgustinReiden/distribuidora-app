@@ -268,6 +268,10 @@ export type { RecorridoExistente } from './useRecorridoExistenteQuery'
 export { rutasEnCursoKeys, useRutasEnCursoQuery } from './useRutasEnCursoQuery'
 export type { RutaEnCurso } from './useRutasEnCursoQuery'
 
+// Reasignar una ruta ya armada a otro transportista (mig 172)
+export { useCambiarTransportistaRutaMutation } from './useCambiarTransportistaRutaMutation'
+export type { CambiarTransportistaRutaInput } from './useCambiarTransportistaRutaMutation'
+
 // Recorridos de una fecha con paradas completas (para re-descargar la hoja de ruta)
 export {
   recorridosHojaRutaKeys,
