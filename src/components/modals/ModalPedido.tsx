@@ -705,7 +705,7 @@ const ModalPedido = memo(function ModalPedido({
                       const nombre = producto?.nombre || v.productoId;
                       return (
                         <li key={v.productoId}>
-                          {nombre}: mínimo {v.cantidadMinima} ({v.grupoNombre}), cargaste {v.cantidadActual}
+                          {nombre}: mínimo {v.cantidadMinima}, cargaste {v.cantidadActual}
                         </li>
                       );
                     })}

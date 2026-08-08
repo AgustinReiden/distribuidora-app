@@ -138,19 +138,11 @@ async function fetchPricingMap(): Promise<PricingMap> {
 
     const productoIds = grupo.productos.map(p => String(p.producto_id))
 
-    const moqPorProducto = new Map<string, number>()
-    for (const p of grupo.productos) {
-      if (p.cantidad_minima_pedido && p.cantidad_minima_pedido > 0) {
-        moqPorProducto.set(String(p.producto_id), p.cantidad_minima_pedido)
-      }
-    }
-
     const grupoInfo: GrupoPrecioInfo = {
       grupoId: String(grupo.id),
       grupoNombre: grupo.nombre,
       escalas: escalasActivas,
       productoIds,
-      moqPorProducto,
     }
 
     // Agregar el grupo a cada producto del grupo
@@ -191,7 +183,6 @@ async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number
       .insert(input.productoIds.map(pid => ({
         grupo_precio_id: parseInt(grupoId),
         producto_id: parseInt(pid),
-        cantidad_minima_pedido: input.cantidadesMinimas?.[pid] || null,
         sucursal_id: sucursalId,
       })))
 
@@ -304,52 +295,111 @@ async function updateGrupoPrecio(
 
   if (errorGrupo) throw errorGrupo
 
-  // Reemplazar productos: borrar existentes e insertar nuevos
-  await supabase
+  // Productos: reconciliar por producto_id en vez de barrer y reinsertar.
+  const { data: productosActuales, error: errorLeerProductos } = await supabase
     .from('grupo_precio_productos')
-    .delete()
+    .select('id, producto_id')
     .eq('grupo_precio_id', id)
+  if (errorLeerProductos) throw errorLeerProductos
 
-  if (input.productoIds.length > 0) {
-    const { error: errorProductos } = await supabase
+  const filasProducto = (productosActuales || []) as Array<{ id: string; producto_id: string }>
+  const productoIdsDeseados = new Set(input.productoIds.map(String))
+  const productoIdsActuales = new Set(filasProducto.map(p => String(p.producto_id)))
+
+  const productosAQuitar = filasProducto.filter(p => !productoIdsDeseados.has(String(p.producto_id)))
+  if (productosAQuitar.length > 0) {
+    const { error } = await supabase
       .from('grupo_precio_productos')
-      .insert(input.productoIds.map(pid => ({
-        grupo_precio_id: parseInt(id),
-        producto_id: parseInt(pid),
-        cantidad_minima_pedido: input.cantidadesMinimas?.[pid] || null,
-        sucursal_id: sucursalId,
-      })))
-
-    if (errorProductos) throw errorProductos
+      .delete()
+      .in('id', productosAQuitar.map(p => p.id))
+    if (error) throw error
   }
 
-  // Reemplazar escalas (el ON DELETE CASCADE de grupo_precio_escala_minimos
-  // limpia los minimos automaticamente cuando borramos la escala anterior).
-  await supabase
-    .from('grupo_precio_escalas')
-    .delete()
-    .eq('grupo_precio_id', id)
-
-  if (input.escalas.length > 0) {
-    const { data: escalasInsertadas, error: errorEscalas } = await supabase
-      .from('grupo_precio_escalas')
-      .insert(input.escalas.map(e => ({
+  const productosAAgregar = input.productoIds.filter(pid => !productoIdsActuales.has(String(pid)))
+  if (productosAAgregar.length > 0) {
+    const { error } = await supabase
+      .from('grupo_precio_productos')
+      .insert(productosAAgregar.map(pid => ({
         grupo_precio_id: parseInt(id),
-        cantidad_minima: e.cantidadMinima,
-        precio_unitario: e.precioUnitario,
-        etiqueta: e.etiqueta || null,
-        min_productos_distintos: e.minProductosDistintos ?? 1,
+        producto_id: parseInt(pid),
         sucursal_id: sucursalId,
       })))
-      .select()
+    if (error) throw error
+  }
 
-    if (errorEscalas) throw errorEscalas
+  // Escalas: reconciliar por cantidad_minima, que es UNIQUE dentro del grupo.
+  //
+  // Antes se borraban todas y se reinsertaban. Eso rotaba los ids en cada
+  // edición y dejaba huérfano el `grupo_precio_escala_id` que `pedido_items`
+  // guarda para trazar qué escala fijó el precio (mig 148): en prod ya hay 11
+  // de 149 items apuntando a escalas que no existen. Actualizar en el lugar
+  // conserva el id, así el histórico sigue siendo legible.
+  const { data: escalasActuales, error: errorLeerEscalas } = await supabase
+    .from('grupo_precio_escalas')
+    .select('id, cantidad_minima')
+    .eq('grupo_precio_id', id)
+  if (errorLeerEscalas) throw errorLeerEscalas
 
-    const filasMinimos = buildFilasMinimos(
-      input.escalas,
-      (escalasInsertadas as GrupoPrecioEscalaDB[]) || [],
-      sucursalId
-    )
+  const filasEscala = (escalasActuales || []) as Array<{ id: string; cantidad_minima: number }>
+  const idPorCantidad = new Map<number, string>()
+  for (const e of filasEscala) idPorCantidad.set(Number(e.cantidad_minima), String(e.id))
+
+  // Primero las bajas: si una escala cambia de cantidad a una ya ocupada por
+  // otra que se va, borrar antes evita chocar contra el UNIQUE.
+  const cantidadesDeseadas = new Set(input.escalas.map(e => e.cantidadMinima))
+  const escalasAQuitar = filasEscala.filter(e => !cantidadesDeseadas.has(Number(e.cantidad_minima)))
+  if (escalasAQuitar.length > 0) {
+    const { error } = await supabase
+      .from('grupo_precio_escalas')
+      .delete()
+      .in('id', escalasAQuitar.map(e => e.id))
+    if (error) throw error
+  }
+
+  const escalasFinales: GrupoPrecioEscalaDB[] = []
+  for (const e of input.escalas) {
+    const existenteId = idPorCantidad.get(e.cantidadMinima)
+    const campos = {
+      precio_unitario: e.precioUnitario,
+      etiqueta: e.etiqueta || null,
+      min_productos_distintos: e.minProductosDistintos ?? 1,
+    }
+    if (existenteId) {
+      const { data, error } = await supabase
+        .from('grupo_precio_escalas')
+        .update(campos)
+        .eq('id', existenteId)
+        .select()
+        .single()
+      if (error) throw error
+      escalasFinales.push(data as GrupoPrecioEscalaDB)
+    } else {
+      const { data, error } = await supabase
+        .from('grupo_precio_escalas')
+        .insert({
+          grupo_precio_id: parseInt(id),
+          cantidad_minima: e.cantidadMinima,
+          sucursal_id: sucursalId,
+          ...campos,
+        })
+        .select()
+        .single()
+      if (error) throw error
+      escalasFinales.push(data as GrupoPrecioEscalaDB)
+    }
+  }
+
+  // Los mínimos por producto sí se reemplazan enteros: son configuración de la
+  // escala, no historia. Antes los limpiaba el CASCADE al borrar la escala;
+  // ahora que las escalas sobreviven hay que borrarlos a mano.
+  if (escalasFinales.length > 0) {
+    const { error: errorBorrarMinimos } = await supabase
+      .from('grupo_precio_escala_minimos')
+      .delete()
+      .in('escala_id', escalasFinales.map(e => e.id))
+    if (errorBorrarMinimos) throw errorBorrarMinimos
+
+    const filasMinimos = buildFilasMinimos(input.escalas, escalasFinales, sucursalId)
     if (filasMinimos.length > 0) {
       const { error: errorMinimos } = await supabase
         .from('grupo_precio_escala_minimos')
@@ -405,12 +455,14 @@ async function toggleGrupoPrecioActivo(id: string, activo: boolean): Promise<Gru
 /**
  * Hook para obtener todos los grupos de precio con sus productos y escalas
  */
-export function useGruposPrecioQuery() {
+export function useGruposPrecioQuery(options?: { enabled?: boolean }) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: gruposPrecioKeys.lists(currentSucursalId),
     queryFn: fetchGruposPrecio,
     staleTime: 10 * 60 * 1000,
+    // Solo el admin ve las condiciones: para el resto son 4 queries al pedo.
+    enabled: options?.enabled ?? true,
   })
 }
 
@@ -579,6 +631,265 @@ export function useActualizarPrecioEscalaMutation() {
           .eq('id', escalaId)
         if (error) throw error
       }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+// =============================================================================
+// GESTIÓN DESDE LA FICHA DEL PRODUCTO
+// =============================================================================
+//
+// Todas operan por id sobre una sola tabla, nunca por `updateGrupoPrecio`: ese
+// reemplaza la condición entera y desde la ficha solo se toca una parte. La RLS
+// ya exige es_admin() + sucursal, así que no hacen falta RPCs.
+
+/** `unique_violation`: la condición ya tiene una escala con esa cantidad. */
+function esCantidadDuplicada(error: unknown): boolean {
+  return (error as { code?: string })?.code === '23505'
+}
+
+function errorCantidadDuplicada(cantidad: number): Error {
+  return new Error(`Ya hay un precio para ${cantidad} unidades en esta condición`)
+}
+
+/**
+ * Suma un producto a una condición que ya existe.
+ *
+ * Es el flujo que arregla el fardo surtido: al cargar un sabor nuevo entra al
+ * fardo que ya está armado, en vez de nacer con una condición propia. Con una
+ * condición por sabor, la suma entre productos —que es lo que hace
+ * `escalaAplica`— nunca llega a activarse.
+ */
+export function useAgregarProductoACondicionMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ grupoId, productoId }: { grupoId: string; productoId: string }) => {
+      if (currentSucursalId == null) {
+        throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+      }
+      const { error } = await supabase
+        .from('grupo_precio_productos')
+        .upsert(
+          {
+            grupo_precio_id: parseInt(grupoId),
+            producto_id: parseInt(productoId),
+            sucursal_id: currentSucursalId,
+          },
+          { onConflict: 'grupo_precio_id,producto_id', ignoreDuplicates: true },
+        )
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/** Saca un producto de una condición sin tocar al resto de los que la comparten. */
+export function useQuitarProductoDeCondicionMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ grupoId, productoId }: { grupoId: string; productoId: string }) => {
+      const { error } = await supabase
+        .from('grupo_precio_productos')
+        .delete()
+        .eq('grupo_precio_id', grupoId)
+        .eq('producto_id', productoId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+export interface CrearEscalaInput {
+  grupoId: string
+  cantidadMinima: number
+  precioUnitario: number
+  etiqueta?: string | null
+}
+
+/** Agrega un precio por cantidad a una condición existente. */
+export function useCrearEscalaMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ grupoId, cantidadMinima, precioUnitario, etiqueta }: CrearEscalaInput) => {
+      if (currentSucursalId == null) {
+        throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+      }
+      if (!(cantidadMinima > 0)) throw new Error('La cantidad mínima debe ser mayor a 0')
+      if (!(precioUnitario > 0)) throw new Error('El precio mayorista debe ser mayor a 0')
+
+      const { data, error } = await supabase
+        .from('grupo_precio_escalas')
+        .insert({
+          grupo_precio_id: parseInt(grupoId),
+          cantidad_minima: cantidadMinima,
+          precio_unitario: precioUnitario,
+          etiqueta: etiqueta?.trim() || null,
+          min_productos_distintos: 1,
+          sucursal_id: currentSucursalId,
+        })
+        .select()
+        .single()
+      if (error) throw esCantidadDuplicada(error) ? errorCantidadDuplicada(cantidadMinima) : error
+      return data as GrupoPrecioEscalaDB
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+export interface ActualizarEscalaInput {
+  escalaId: string
+  cantidadMinima?: number
+  precioUnitario?: number
+  etiqueta?: string | null
+}
+
+/**
+ * Edita una escala en el lugar. Conserva el id, que es lo que `pedido_items`
+ * guarda para trazar qué escala fijó el precio (mig 148).
+ */
+export function useActualizarEscalaMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ escalaId, cantidadMinima, precioUnitario, etiqueta }: ActualizarEscalaInput) => {
+      const campos: Record<string, unknown> = {}
+      if (cantidadMinima !== undefined) {
+        if (!(cantidadMinima > 0)) throw new Error('La cantidad mínima debe ser mayor a 0')
+        campos.cantidad_minima = cantidadMinima
+      }
+      if (precioUnitario !== undefined) {
+        if (!(precioUnitario > 0)) throw new Error('El precio mayorista debe ser mayor a 0')
+        campos.precio_unitario = precioUnitario
+      }
+      if (etiqueta !== undefined) campos.etiqueta = etiqueta?.trim() || null
+      if (Object.keys(campos).length === 0) return
+
+      const { error } = await supabase
+        .from('grupo_precio_escalas')
+        .update(campos)
+        .eq('id', escalaId)
+      if (error) {
+        throw esCantidadDuplicada(error) && cantidadMinima !== undefined
+          ? errorCantidadDuplicada(cantidadMinima)
+          : error
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Borra una escala. Los `pedido_items` viejos que la referencian quedan
+ * apuntando a un id inexistente, igual que al borrar la condición entera: la
+ * columna va sin FK a propósito (mig 148) y el dato que importa para el
+ * histórico —precio cobrado y origen— vive en la fila del item.
+ */
+export function useEliminarEscalaMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ escalaId }: { escalaId: string }) => {
+      const { error } = await supabase
+        .from('grupo_precio_escalas')
+        .delete()
+        .eq('id', escalaId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+export interface CrearCondicionParaProductoInput {
+  productoId: string
+  cantidadMinima: number
+  precioUnitario: number
+  etiqueta?: string | null
+  /** Nombre de la condición nueva. Sin esto, la RPC usa el del producto. */
+  nombre?: string | null
+}
+
+/**
+ * Le pone un precio por cantidad a un producto que todavía no está en ninguna
+ * condición, sin salir de su ficha (mig 171).
+ *
+ * Va por RPC porque son tres inserts —grupo, producto y escala— y tienen que
+ * ser atómicos: si falla el segundo queda un grupo huérfano. Eso ya pasó, son
+ * los 3 grupos vacíos que hay en prod.
+ */
+export function useCrearCondicionParaProductoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({
+      productoId,
+      cantidadMinima,
+      precioUnitario,
+      etiqueta,
+      nombre,
+    }: CrearCondicionParaProductoInput) => {
+      const { data, error } = await supabase.rpc('crear_condicion_para_producto', {
+        p_producto_id: parseInt(productoId),
+        p_cantidad_minima: cantidadMinima,
+        p_precio_unitario: precioUnitario,
+        p_etiqueta: etiqueta?.trim() || null,
+        p_nombre: nombre?.trim() || null,
+      })
+      if (error) throw error
+      return data as { grupo_id: number; escala_id: number; grupo_creado: boolean }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+export interface ConsolidarCondicionesInput {
+  grupoDestino: string
+  gruposOrigen: string[]
+  nombre?: string | null
+}
+
+/**
+ * Fusiona varias condiciones en una sola (mig 170), para que la mezcla entre
+ * sus productos sume. Va por RPC: mueve productos y escalas, repunta los
+ * `pedido_items` que apuntaban a escalas duplicadas y borra los orígenes, todo
+ * en una transacción. La RPC rechaza la fusión si cambiaría algún precio.
+ */
+export function useConsolidarCondicionesMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async ({ grupoDestino, gruposOrigen, nombre }: ConsolidarCondicionesInput) => {
+      const { data, error } = await supabase.rpc('consolidar_condiciones', {
+        p_grupo_destino: parseInt(grupoDestino),
+        p_grupos_origen: gruposOrigen.map(id => parseInt(id)),
+        p_nombre: nombre?.trim() || null,
+      })
+      if (error) throw error
+      return data as { grupos_borrados: number; items_repuntados: number }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })

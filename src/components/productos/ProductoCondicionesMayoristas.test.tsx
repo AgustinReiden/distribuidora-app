@@ -1,15 +1,37 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CondicionMayoristaProducto } from '../../utils/condicionesMayoristas'
+import type { GrupoPrecioConDetalles } from '../../types'
 
-const mutateAsync = vi.fn(() => Promise.resolve())
+const actualizarEscala = vi.fn(() => Promise.resolve())
+const eliminarEscala = vi.fn(() => Promise.resolve())
+const agregarACondicion = vi.fn(() => Promise.resolve())
+const quitarDeCondicion = vi.fn(() => Promise.resolve())
+const crearEscala = vi.fn(() => Promise.resolve())
+const crearCondicionPropia = vi.fn(() => Promise.resolve({ grupo_id: 9, escala_id: 9, grupo_creado: true }))
+
 let condiciones: CondicionMayoristaProducto[] = []
+let grupos: GrupoPrecioConDetalles[] = []
 
 vi.mock('../../hooks/queries', () => ({
-  useProductosQuery: () => ({ data: [{ id: 'p1', nombre: 'Fideo Mostachol' }], isLoading: false }),
+  useProductosQuery: () => ({
+    data: [
+      { id: 'p1', nombre: 'Fideo Mostachol' },
+      { id: 'p2', nombre: 'Fideo Codito' },
+      { id: 'p3', nombre: 'Fideo Tirabuzón' },
+    ],
+    isLoading: false,
+  }),
+  useGruposPrecioQuery: () => ({ data: grupos, isLoading: false }),
   useGruposPrecioPorProductoQuery: () => ({ condiciones, isLoading: false, error: null }),
-  useActualizarPrecioEscalaMutation: () => ({ mutateAsync, isPending: false }),
+  useActualizarPrecioEscalaMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useActualizarEscalaMutation: () => ({ mutateAsync: actualizarEscala, isPending: false }),
+  useEliminarEscalaMutation: () => ({ mutateAsync: eliminarEscala, isPending: false }),
+  useAgregarProductoACondicionMutation: () => ({ mutateAsync: agregarACondicion, isPending: false }),
+  useQuitarProductoDeCondicionMutation: () => ({ mutateAsync: quitarDeCondicion, isPending: false }),
+  useCrearEscalaMutation: () => ({ mutateAsync: crearEscala, isPending: false }),
+  useCrearCondicionParaProductoMutation: () => ({ mutateAsync: crearCondicionPropia, isPending: false }),
 }))
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
@@ -24,7 +46,6 @@ function condicion(over: Partial<CondicionMayoristaProducto> = {}): CondicionMay
     descripcion: null,
     activo: true,
     cantidadProductos: 3,
-    moq: null,
     escalas: [
       {
         escalaId: 'e1',
@@ -47,6 +68,22 @@ function condicion(over: Partial<CondicionMayoristaProducto> = {}): CondicionMay
   }
 }
 
+/** Condición del catálogo, para el selector de "sumar a una condición". */
+function grupo(over: Partial<GrupoPrecioConDetalles> = {}): GrupoPrecioConDetalles {
+  return {
+    id: 'g1',
+    nombre: 'Fideos por bulto',
+    activo: true,
+    productos: [
+      { id: 'gp1', grupo_precio_id: 'g1', producto_id: 'p1' },
+      { id: 'gp2', grupo_precio_id: 'g1', producto_id: 'p2' },
+      { id: 'gp3', grupo_precio_id: 'g1', producto_id: 'p3' },
+    ],
+    escalas: [],
+    ...over,
+  } as GrupoPrecioConDetalles
+}
+
 // Producto de $1000 final, IVA 21, costo total $600, costo real $500.
 const props = {
   productoId: 'p1',
@@ -56,9 +93,14 @@ const props = {
   porcentajeIva: 21,
 }
 
+beforeEach(() => {
+  vi.clearAllMocks()
+  condiciones = []
+  grupos = []
+})
+
 describe('ProductoCondicionesMayoristas', () => {
   it('avisa cuando el producto no está en ninguna condición', () => {
-    condiciones = []
     render(<ProductoCondicionesMayoristas {...props} />)
     expect(screen.getByText(/no está en ninguna condición mayorista/i)).toBeInTheDocument()
   })
@@ -77,31 +119,39 @@ describe('ProductoCondicionesMayoristas', () => {
     expect(screen.getByText(/20\.0% bajo lista/)).toBeInTheDocument()
   })
 
-  it('sin permiso de edición el precio no es editable', () => {
+  it('sin permiso de edición no ofrece editar ni borrar', () => {
     condiciones = [condicion()]
     render(<ProductoCondicionesMayoristas {...props} puedeEditar={false} />)
-    expect(screen.getByRole('button', { name: /\$/ })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /Editar la escala/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Eliminar la escala/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Agregar precio por cantidad/)).not.toBeInTheDocument()
   })
 
-  it('al editar un precio de escala compartida avisa que afecta a todo el grupo', async () => {
+  it('dice con qué otros sabores se combina la condición', () => {
+    condiciones = [condicion()]
+    grupos = [grupo()]
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+    // El aviso "afecta a N productos" al editar llega tarde si no se sabe
+    // de antemano que la condición es compartida.
+    expect(screen.getByText(/Suma con Fideo Codito, Fideo Tirabuzón/)).toBeInTheDocument()
+  })
+
+  it('al editar una escala compartida avisa que alcanza a todos', async () => {
     condiciones = [condicion()]
     const user = userEvent.setup()
     render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
 
-    await user.click(screen.getByRole('button', { name: /\$/ }))
-    expect(screen.getByText(/Afecta a los 3 productos del grupo/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Editar la escala/ }))
+    expect(screen.getByText(/la comparten 3 productos/i)).toBeInTheDocument()
   })
 
-  it('un precio propio del producto no muestra la advertencia de grupo', async () => {
-    condiciones = [condicion({
-      escalas: [{ ...condicion().escalas[0], precioOverride: 750, precioEfectivo: 750, esOverride: true }],
-    })]
+  it('una condición de un solo producto no muestra el aviso de alcance', async () => {
+    condiciones = [condicion({ cantidadProductos: 1 })]
     const user = userEvent.setup()
     render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
 
-    expect(screen.getByText('precio propio')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /\$/ }))
-    expect(screen.queryByText(/Afecta a los/i)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Editar la escala/ }))
+    expect(screen.queryByText(/la comparten/i)).not.toBeInTheDocument()
   })
 
   it('el margen se recalcula con lo tipeado, antes de guardar', async () => {
@@ -109,13 +159,126 @@ describe('ProductoCondicionesMayoristas', () => {
     const user = userEvent.setup()
     render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
 
-    await user.click(screen.getByRole('button', { name: /\$/ }))
-    const input = screen.getByRole('textbox')
-    await user.clear(input)
-    await user.type(input, '900')
+    await user.click(screen.getByRole('button', { name: /Editar la escala/ }))
+    const precio = screen.getByLabelText('Precio mayorista')
+    await user.clear(precio)
+    await user.type(precio, '900')
 
     // 900 vs costo total 600 → 50%
     expect(screen.getByText(/Bruto 50\.0%/)).toBeInTheDocument()
     expect(screen.getByText(/10\.0% bajo lista/)).toBeInTheDocument()
+  })
+
+  it('guarda la escala editada con cantidad, precio y etiqueta', async () => {
+    condiciones = [condicion()]
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+
+    await user.click(screen.getByRole('button', { name: /Editar la escala/ }))
+    const cantidad = screen.getByLabelText('Cantidad mínima')
+    await user.clear(cantidad)
+    await user.type(cantidad, '24')
+    await user.type(screen.getByLabelText('Etiqueta'), 'Fardo')
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(actualizarEscala).toHaveBeenCalledWith({
+      escalaId: 'e1',
+      cantidadMinima: 24,
+      precioUnitario: 800,
+      etiqueta: 'Fardo',
+    })
+  })
+
+  it('borrar una escala pide confirmación en la misma fila', async () => {
+    condiciones = [condicion()]
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+
+    await user.click(screen.getByRole('button', { name: /Eliminar la escala/ }))
+    expect(eliminarEscala).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: /Sí, borrar/ }))
+    expect(eliminarEscala).toHaveBeenCalledWith({ escalaId: 'e1' })
+  })
+
+  it('agrega un precio por cantidad a la condición', async () => {
+    condiciones = [condicion()]
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+
+    await user.click(screen.getByRole('button', { name: /Agregar precio por cantidad/ }))
+    await user.type(screen.getByLabelText('Cantidad mínima'), '24')
+    await user.type(screen.getByLabelText('Precio mayorista'), '750')
+    await user.click(screen.getByRole('button', { name: 'Agregar' }))
+
+    expect(crearEscala).toHaveBeenCalledWith({
+      grupoId: 'g1',
+      cantidadMinima: 24,
+      precioUnitario: 750,
+      etiqueta: null,
+    })
+  })
+
+  it('a un producto sin condición se le pone precio por cantidad ahí mismo', async () => {
+    // Sin esto había que salir de la ficha, abrir el modal de condición e
+    // inventarle un nombre. La condición se crea por debajo.
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+
+    await user.click(screen.getByRole('button', { name: /Ponerle precio por cantidad/ }))
+    await user.type(screen.getByLabelText('Cantidad mínima'), '12')
+    await user.type(screen.getByLabelText('Precio mayorista'), '850')
+    await user.type(screen.getByLabelText('Etiqueta'), 'Fardo')
+    await user.click(screen.getByRole('button', { name: /Guardar precio/ }))
+
+    expect(crearCondicionPropia).toHaveBeenCalledWith({
+      productoId: 'p1',
+      cantidadMinima: 12,
+      precioUnitario: 850,
+      etiqueta: 'Fardo',
+    })
+  })
+
+  it('también ofrece sumarlo a una condición existente', async () => {
+    // El camino que hace que la mezcla entre sabores cuente para el mínimo.
+    grupos = [grupo({ id: 'g9', nombre: 'Fideos Cotella 500g' })]
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar onCrearCondicion={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /sumarlo a una condición existente/ }))
+    await user.selectOptions(screen.getByLabelText('Sumar a una condición'), 'g9')
+
+    expect(agregarACondicion).toHaveBeenCalledWith({ grupoId: 'g9', productoId: 'p1' })
+  })
+
+  it('sin condiciones cargadas no ofrece sumarlo a ninguna', () => {
+    grupos = []
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+    expect(screen.getByRole('button', { name: /Ponerle precio por cantidad/ })).toBeInTheDocument()
+    expect(screen.queryByText(/sumarlo a una condición existente/)).not.toBeInTheDocument()
+  })
+
+  it('el selector no ofrece condiciones en las que el producto ya está', async () => {
+    condiciones = [condicion()]
+    grupos = [grupo(), grupo({ id: 'g9', nombre: 'Otra condición' })]
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+
+    await user.click(screen.getByRole('button', { name: /Sumar a otra condición/ }))
+    const opciones = screen.getByLabelText('Sumar a una condición')
+    expect(opciones).not.toHaveTextContent('Fideos por bulto')
+    expect(opciones).toHaveTextContent('Otra condición')
+  })
+
+  it('sacar el producto de una condición pide confirmación', async () => {
+    condiciones = [condicion()]
+    const user = userEvent.setup()
+    render(<ProductoCondicionesMayoristas {...props} puedeEditar />)
+
+    await user.click(screen.getByRole('button', { name: /Sacar este producto de/ }))
+    expect(quitarDeCondicion).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Sí' }))
+    expect(quitarDeCondicion).toHaveBeenCalledWith({ grupoId: 'g1', productoId: 'p1' })
   })
 })

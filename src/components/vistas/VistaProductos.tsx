@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
 import {
   Package, Edit2, Trash2, Search, Minus,
   ChevronLeft, ChevronRight, AlertTriangle,
@@ -9,6 +9,9 @@ import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import ProductosViewHeader from '../productos/ProductosViewHeader';
 import ProductoToolbar from '../productos/ProductoToolbar';
+import ProductosTabs, { PANEL_PRODUCTOS_ID } from '../productos/ProductosTabs';
+import type { TabProductos } from '../productos/ProductosTabs';
+import type { ResumenCondicion } from '../../utils/resumenCondicionesProducto';
 import { cn } from '../../lib/utils';
 import type { ProductoDB, ProveedorDBExtended } from '../../types';
 
@@ -26,6 +29,17 @@ export interface VistaProductosProps {
   isAdmin: boolean;
   /** admin o encargado: habilita stock bajo + control de stock (Excel). */
   puedeControlarStock?: boolean;
+  /** Pestaña activa. Vive en la URL para que el link viejo pueda apuntar acá. */
+  vista?: TabProductos;
+  onVistaChange?: (vista: TabProductos) => void;
+  /** Panel de condiciones mayoristas; lo monta el container (lazy). */
+  panelCondiciones?: ReactNode;
+  /** Solo admin ve las condiciones (puedeAccederCondicionesMayoristas). */
+  puedeVerCondiciones?: boolean;
+  /** productoId → mejor precio mayorista, para el chip de la lista. */
+  resumenCondiciones?: Map<string, ResumenCondicion>;
+  /** Condiciones cargadas, para el contador de la pestaña. */
+  contadorCondiciones?: number;
   onNuevoProducto: () => void;
   onEditarProducto: (producto: ProductoDB) => void;
   onEliminarProducto: (id: string) => void;
@@ -41,6 +55,72 @@ export interface VistaProductosProps {
   onAbrirStockBajo?: () => void;
 }
 
+/** Detalle completo de las condiciones de un producto, para el `title`. */
+function detalleCondiciones(resumen: ResumenCondicion): string {
+  return resumen.condiciones
+    .map(c => (c.combinaCon.length > 0
+      ? `${c.nombre} — suma con ${c.combinaCon.join(', ')}`
+      : `${c.nombre} — solo este producto`))
+    .join('\n');
+}
+
+/**
+ * Chips bajo el precio: el mayorista más barato, con qué condición y con
+ * cuántos sabores más suma, y el mínimo de venta.
+ *
+ * Nada de esto se veía en la lista: para saber si un sabor estaba configurado
+ * había que abrir su ficha, y para saber con qué se combinaba había que ir
+ * además al panel de condiciones a buscar el grupo.
+ */
+function ChipsPrecio({
+  producto,
+  resumen,
+  className,
+  detallado = false,
+}: {
+  producto: ProductoDB;
+  resumen?: ResumenCondicion;
+  className?: string;
+  /** En mobile hay lugar para el nombre completo; en la tabla no. */
+  detallado?: boolean;
+}) {
+  const minimo = Number(producto.cantidad_minima_venta) || 0;
+  if (!resumen && minimo <= 0) return null;
+
+  const combina = resumen?.totalCombinaCon ?? 0;
+
+  return (
+    <div className={cn('flex flex-col gap-0.5 mt-0.5', className)}>
+      <div className={cn('flex items-center gap-2 flex-wrap', className)}>
+        {resumen && (
+          <span
+            className="text-[11px] text-indigo-700 dark:text-indigo-300 tabular-nums"
+            title={detalleCondiciones(resumen)}
+          >
+            may. {formatPrecio(resumen.precioDesde)} desde {resumen.cantidadDesde}u
+            {combina > 0 && ` · +${combina} ${combina === 1 ? 'sabor' : 'sabores'}`}
+          </span>
+        )}
+        {minimo > 0 && (
+          <span
+            className="text-[11px] text-amber-700 dark:text-amber-400 tabular-nums"
+            title="Mínimo de venta por pedido"
+          >
+            mín. {minimo}
+          </span>
+        )}
+      </div>
+
+      {/* Sin hover no hay tooltip: en mobile el nombre de la condición va a la vista. */}
+      {detallado && resumen && (
+        <span className="text-[11px] text-stone-500 dark:text-gray-400">
+          {resumen.condiciones.map(c => c.nombre).join(' · ')}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function VistaProductos({
   productos,
   productosStockBajo,
@@ -48,6 +128,12 @@ export default function VistaProductos({
   loading,
   isAdmin,
   puedeControlarStock = false,
+  vista = 'productos',
+  onVistaChange,
+  panelCondiciones,
+  puedeVerCondiciones = false,
+  resumenCondiciones,
+  contadorCondiciones,
   onNuevoProducto,
   onEditarProducto,
   onEliminarProducto,
@@ -66,6 +152,7 @@ export default function VistaProductos({
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
   const [mostrarSoloStockBajo, setMostrarSoloStockBajo] = useState<boolean>(false);
   const [mostrarSoloSinPrecio, setMostrarSoloSinPrecio] = useState<boolean>(false);
+  const [mostrarSoloConCondicion, setMostrarSoloConCondicion] = useState<boolean>(false);
   const [paginaActual, setPaginaActual] = useState(1);
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
 
@@ -97,9 +184,11 @@ export default function VistaProductos({
 
       const matchSinPrecio = !mostrarSoloSinPrecio || !(Number(p.precio) > 0);
 
-      return matchBusqueda && matchCategoria && matchStockBajo && matchSinPrecio;
+      const matchCondicion = !mostrarSoloConCondicion || !!resumenCondiciones?.has(String(p.id));
+
+      return matchBusqueda && matchCategoria && matchStockBajo && matchSinPrecio && matchCondicion;
     });
-  }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo, mostrarSoloSinPrecio]);
+  }, [productos, busqueda, filtroCategoria, mostrarSoloStockBajo, mostrarSoloSinPrecio, mostrarSoloConCondicion, resumenCondiciones]);
 
   // Pagination
   const totalPaginas = Math.ceil(productosFiltrados.length / ITEMS_PER_PAGE);
@@ -112,6 +201,7 @@ export default function VistaProductos({
   const handleCategoria = (cat: string) => { setFiltroCategoria(cat); setPaginaActual(1); };
   const handleStockBajoToggle = () => { setMostrarSoloStockBajo(!mostrarSoloStockBajo); setPaginaActual(1); };
   const handleSinPrecioToggle = () => { setMostrarSoloSinPrecio(!mostrarSoloSinPrecio); setPaginaActual(1); };
+  const handleCondicionToggle = () => { setMostrarSoloConCondicion(!mostrarSoloConCondicion); setPaginaActual(1); };
 
   const proveedoresMap = useMemo(() => {
     return new Map(proveedores.map(p => [p.id, p.nombre]));
@@ -126,8 +216,29 @@ export default function VistaProductos({
     return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
   };
 
+  const tabs = puedeVerCondiciones && onVistaChange ? (
+    <ProductosTabs
+      value={vista}
+      onChange={onVistaChange}
+      contadorCondiciones={contadorCondiciones}
+    />
+  ) : null;
+
+  // Las condiciones reemplazan al catálogo entero: comparten el selector de
+  // arriba, pero el buscador y los filtros de producto no aplican ahí.
+  if (vista === 'condiciones' && puedeVerCondiciones) {
+    return (
+      <div className="space-y-4">
+        {tabs}
+        <div id={PANEL_PRODUCTOS_ID}>{panelCondiciones}</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" id={PANEL_PRODUCTOS_ID}>
+      {tabs}
+
       {/* Header con título dinámico + toolbar */}
       <ProductosViewHeader
         busqueda={busqueda}
@@ -234,29 +345,53 @@ export default function VistaProductos({
         </div>
       )}
 
-      {/* Toggle "Ver solo stock bajo" — chip discreto */}
-      {productosStockBajo.length > 0 && (
-        <div className="flex items-center justify-end">
-          <button
-            type="button"
-            onClick={handleStockBajoToggle}
-            className={cn(
-              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
-              mostrarSoloStockBajo
-                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50'
-                : 'bg-white dark:bg-gray-800 text-stone-600 dark:text-gray-300 border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700/50',
-            )}
-            aria-pressed={mostrarSoloStockBajo}
-          >
-            <span
+      {/* Toggles de filtro — chips discretos */}
+      {(productosStockBajo.length > 0 || !!resumenCondiciones?.size) && (
+        <div className="flex items-center justify-end gap-2 flex-wrap">
+          {!!resumenCondiciones?.size && (
+            <button
+              type="button"
+              onClick={handleCondicionToggle}
               className={cn(
-                'inline-block w-1.5 h-1.5 rounded-full',
-                mostrarSoloStockBajo ? 'bg-amber-500' : 'bg-stone-300 dark:bg-gray-600',
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+                mostrarSoloConCondicion
+                  ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-700/50'
+                  : 'bg-white dark:bg-gray-800 text-stone-600 dark:text-gray-300 border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700/50',
               )}
-              aria-hidden="true"
-            />
-            {mostrarSoloStockBajo ? 'Mostrando solo stock bajo' : 'Ver solo stock bajo'}
-          </button>
+              aria-pressed={mostrarSoloConCondicion}
+            >
+              <span
+                className={cn(
+                  'inline-block w-1.5 h-1.5 rounded-full',
+                  mostrarSoloConCondicion ? 'bg-indigo-500' : 'bg-stone-300 dark:bg-gray-600',
+                )}
+                aria-hidden="true"
+              />
+              {mostrarSoloConCondicion ? 'Mostrando solo con condición mayorista' : 'Ver solo con condición mayorista'}
+            </button>
+          )}
+          {productosStockBajo.length > 0 && (
+            <button
+              type="button"
+              onClick={handleStockBajoToggle}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+                mostrarSoloStockBajo
+                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50'
+                  : 'bg-white dark:bg-gray-800 text-stone-600 dark:text-gray-300 border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700/50',
+              )}
+              aria-pressed={mostrarSoloStockBajo}
+            >
+              <span
+                className={cn(
+                  'inline-block w-1.5 h-1.5 rounded-full',
+                  mostrarSoloStockBajo ? 'bg-amber-500' : 'bg-stone-300 dark:bg-gray-600',
+                )}
+                aria-hidden="true"
+              />
+              {mostrarSoloStockBajo ? 'Mostrando solo stock bajo' : 'Ver solo stock bajo'}
+            </button>
+          )}
         </div>
       )}
 
@@ -314,6 +449,11 @@ export default function VistaProductos({
                             Sin precio
                           </span>
                         )}
+                        <ChipsPrecio
+                          producto={producto}
+                          resumen={resumenCondiciones?.get(String(producto.id))}
+                          className="justify-end"
+                        />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-sm font-semibold tabular-nums ${getStockColor(producto)}`}>
@@ -420,6 +560,11 @@ export default function VistaProductos({
                           <span className="text-stone-500 dark:text-gray-400">Stock:</span> {producto.stock}
                         </span>
                       </div>
+                      <ChipsPrecio
+                        producto={producto}
+                        resumen={resumenCondiciones?.get(String(producto.id))}
+                        detallado
+                      />
                     </div>
                   </div>
                   {isAdmin && (

@@ -187,8 +187,22 @@ export {
   useToggleGrupoPrecioActivoMutation,
   useGruposPrecioPorProductoQuery,
   useActualizarPrecioEscalaMutation,
+  // Gestión desde la ficha del producto
+  useAgregarProductoACondicionMutation,
+  useQuitarProductoDeCondicionMutation,
+  useCrearEscalaMutation,
+  useActualizarEscalaMutation,
+  useEliminarEscalaMutation,
+  useCrearCondicionParaProductoMutation,
+  useConsolidarCondicionesMutation,
 } from './useGruposPrecioQuery'
-export type { ActualizarPrecioEscalaInput } from './useGruposPrecioQuery'
+export type {
+  ActualizarPrecioEscalaInput,
+  CrearEscalaInput,
+  ActualizarEscalaInput,
+  CrearCondicionParaProductoInput,
+  ConsolidarCondicionesInput,
+} from './useGruposPrecioQuery'
 
 // No entregados por motivo y barrida (migs 142-144)
 export { noEntregadosKeys, useNoEntregadosQuery, usePedidosRebotadosQuery } from './useNoEntregadosQuery'

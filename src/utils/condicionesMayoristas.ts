@@ -37,8 +37,6 @@ export interface CondicionMayoristaProducto {
   activo: boolean
   /** Cuántos productos comparten esta condición (incluye al actual). */
   cantidadProductos: number
-  /** Mínimo de pedido que el grupo le impone a este producto, si hay. */
-  moq: number | null
   escalas: EscalaDeProducto[]
 }
 
@@ -71,8 +69,7 @@ export function condicionesDeProducto(
   const salida: CondicionMayoristaProducto[] = []
 
   for (const grupo of grupos) {
-    const fila = grupo.productos.find(p => String(p.producto_id) === pid)
-    if (!fila) continue
+    if (!grupo.productos.some(p => String(p.producto_id) === pid)) continue
 
     const escalas: EscalaDeProducto[] = grupo.escalas
       .slice()
@@ -108,9 +105,6 @@ export function condicionesDeProducto(
       descripcion: grupo.descripcion ?? null,
       activo: grupo.activo !== false,
       cantidadProductos: grupo.productos.length,
-      moq: fila.cantidad_minima_pedido && fila.cantidad_minima_pedido > 0
-        ? fila.cantidad_minima_pedido
-        : null,
       escalas,
     })
   }

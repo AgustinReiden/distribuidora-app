@@ -414,13 +414,10 @@ export function usePedidoHandlers({
       return
     }
 
-    // Validar cantidades mínimas de pedido. Se corre siempre, no solo cuando hay
-    // condiciones mayoristas: el mínimo de venta del producto (mig 147) es
-    // independiente de ellas. El trigger de la DB lo revalida igual.
-    const currentPricingMap = pricingMapRef.current
+    // Validar mínimos de venta. El mínimo es del producto (mig 147/169) y vale
+    // exista o no una condición mayorista. El trigger de la DB lo revalida igual.
     const violaciones = validarMOQPedido(
       nuevoPedido.items,
-      currentPricingMap ?? new Map(),
       minimosVentaRef.current,
     )
     if (violaciones.length > 0) {
@@ -437,6 +434,7 @@ export function usePedidoHandlers({
     }
 
     // Aplicar precios mayoristas (excluyendo productos con promo)
+    const currentPricingMap = pricingMapRef.current
     let itemsFinales = nuevoPedido.items
     if (currentPricingMap && currentPricingMap.size > 0) {
       const itemsSinPromo = nuevoPedido.items.filter(i => !promoResolucion.productosConPromo.has(String(i.productoId)))

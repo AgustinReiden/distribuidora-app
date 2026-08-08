@@ -73,8 +73,7 @@ function grupo(
     grupoId: id,
     grupoNombre: nombre,
     escalas,
-    productoIds,
-    moqPorProducto: new Map()
+    productoIds
   }
 }
 
@@ -398,62 +397,61 @@ describe('resolverPreciosMayorista - edge cases', () => {
 })
 
 /**
- * MOQ: el mínimo de venta.
+ * El mínimo de venta.
  *
- * Antes no había ningún test de esta parte, y el mínimo solo podía existir
- * dentro de una condición mayorista. Desde la mig 147 el producto tiene su
- * propio `cantidad_minima_venta`, que es el que resuelve el pedido del dueño
- * ("mínimo 3 unidades de cada sabor de fideos").
+ * Vive en el producto (`productos.cantidad_minima_venta`, mig 147) y es el
+ * único: la mig 169 eliminó el MOQ por condición mayorista, que nunca se usó
+ * en producción y hacía que la ficha del producto mostrara dos mínimos.
+ *
+ * La distinción que estos tests fijan: la cantidad mínima de una escala es el
+ * umbral a partir del cual MEJORA el precio, no un piso para poder comprar.
  */
-describe('MOQ — mínimo de venta', () => {
-  const sinGrupos: PricingMap = new Map()
-
+describe('mínimo de venta', () => {
   it('sin ningún mínimo configurado devuelve 1', () => {
-    expect(obtenerMOQ('p1', sinGrupos)).toBe(1)
+    expect(obtenerMOQ('p1')).toBe(1)
   })
 
-  it('toma el mínimo propio del producto aunque no esté en ninguna condición mayorista', () => {
-    // Este es el caso que antes era imposible: producto suelto con mínimo.
-    const minimos = new Map([['p1', 3]])
-    expect(obtenerMOQ('p1', sinGrupos, minimos)).toBe(3)
+  it('toma el mínimo del producto, esté o no en una condición mayorista', () => {
+    expect(obtenerMOQ('p1', new Map([['p1', 3]]))).toBe(3)
   })
 
-  it('entre el mínimo del producto y el de la condición gana el más restrictivo', () => {
-    const g = grupo('g1', 'Mayorista', ['p1'], [escalaClasica(10, 900)])
-    g.moqPorProducto = new Map([['p1', 6]])
+  it('una condición mayorista NO impone mínimo de compra', () => {
+    // El caso del fardo surtido: la escala de 12u mejora el precio a partir de
+    // 12, pero el cliente puede comprar 1 sola unidad al precio de lista.
+    const g = grupo('g1', 'Fideos por bulto', ['p1'], [escalaClasica(12, 850)])
     const map = pricingMap([g])
-    expect(obtenerMOQ('p1', map, new Map([['p1', 3]]))).toBe(6)
-    expect(obtenerMOQ('p1', map, new Map([['p1', 12]]))).toBe(12)
+    expect(map.get('p1')).toHaveLength(1) // el producto está en la condición
+    expect(obtenerMOQ('p1')).toBe(1)
+    expect(validarMOQPedido([item('p1', 1)])).toHaveLength(0)
   })
 
   it('construirMOQMap solo incluye los productos que realmente tienen mínimo', () => {
     const items = [item('p1', 1), item('p2', 1)]
-    const map = construirMOQMap(items, sinGrupos, new Map([['p1', 3]]))
+    const map = construirMOQMap(items, new Map([['p1', 3]]))
     expect(map.get('p1')).toBe(3)
     expect(map.has('p2')).toBe(false)
   })
 
   it('validarMOQPedido detecta el incumplimiento del mínimo del producto', () => {
-    const violaciones = validarMOQPedido([item('p1', 2)], sinGrupos, new Map([['p1', 3]]))
+    const violaciones = validarMOQPedido([item('p1', 2)], new Map([['p1', 3]]))
     expect(violaciones).toHaveLength(1)
     expect(violaciones[0]).toMatchObject({ productoId: 'p1', cantidadActual: 2, cantidadMinima: 3 })
   })
 
   it('no marca violación cuando se cumple el mínimo', () => {
-    expect(validarMOQPedido([item('p1', 3)], sinGrupos, new Map([['p1', 3]]))).toHaveLength(0)
+    expect(validarMOQPedido([item('p1', 3)], new Map([['p1', 3]]))).toHaveLength(0)
   })
 
-  it('reporta una sola violación por producto, no una por grupo', () => {
-    const g = grupo('g1', 'Mayorista', ['p1'], [escalaClasica(10, 900)])
-    g.moqPorProducto = new Map([['p1', 6]])
-    const violaciones = validarMOQPedido([item('p1', 1)], pricingMap([g]), new Map([['p1', 3]]))
-    expect(violaciones).toHaveLength(1)
+  it('reporta una sola violación por producto', () => {
+    const violaciones = validarMOQPedido(
+      [item('p1', 1), item('p2', 1)],
+      new Map([['p1', 3], ['p2', 5]]),
+    )
+    expect(violaciones).toHaveLength(2)
+    expect(violaciones.filter(v => v.productoId === 'p1')).toHaveLength(1)
   })
 
-  it('sigue funcionando sin el parámetro nuevo (retrocompatible)', () => {
-    const g = grupo('g1', 'Mayorista', ['p1'], [escalaClasica(10, 900)])
-    g.moqPorProducto = new Map([['p1', 4]])
-    expect(obtenerMOQ('p1', pricingMap([g]))).toBe(4)
-    expect(validarMOQPedido([item('p1', 2)], pricingMap([g]))).toHaveLength(1)
+  it('sin el mapa de mínimos no hay violaciones', () => {
+    expect(validarMOQPedido([item('p1', 2)])).toHaveLength(0)
   })
 })

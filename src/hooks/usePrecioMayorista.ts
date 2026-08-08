@@ -96,17 +96,17 @@ export function usePrecioMayorista(items: ItemPedido[]): UsePrecioMayoristaRetur
     return false
   }, [preciosResueltos])
 
-  // Sin cortocircuito por pricingMap vacío: el mínimo del producto vale aunque
-  // no haya ninguna condición mayorista cargada.
+  // El mínimo de venta es del producto (mig 147/169), independiente de que
+  // tenga o no una condición mayorista.
   const moqMap = useMemo(() => {
     if (items.length === 0) return new Map<string, number>()
-    return construirMOQMap(items, pricingMap ?? new Map(), minimosProducto)
-  }, [items, pricingMap, minimosProducto])
+    return construirMOQMap(items, minimosProducto)
+  }, [items, minimosProducto])
 
   const violacionesMOQ = useMemo(() => {
     if (items.length === 0) return []
-    return validarMOQPedido(items, pricingMap ?? new Map(), minimosProducto)
-  }, [items, pricingMap, minimosProducto])
+    return validarMOQPedido(items, minimosProducto)
+  }, [items, minimosProducto])
 
   return {
     preciosResueltos,

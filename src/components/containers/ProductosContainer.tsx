@@ -5,6 +5,7 @@
  * Maneja estado de modales y operaciones CRUD.
  */
 import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import {
   useProductosQuery,
@@ -17,11 +18,17 @@ import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
 import { useCategoriasQuery } from '../../hooks/queries'
-import { useCrearGrupoPrecioMutation } from '../../hooks/queries'
+import { useCrearGrupoPrecioMutation, useGruposPrecioQuery } from '../../hooks/queries'
+import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
+import type { TabProductos } from '../productos/ProductosTabs'
 import { useAplicarControlStockMutation } from '../../hooks/queries/useControlStockQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { puedeControlarStock as puedeControlarStockRol, puedeCargarControlStock as puedeCargarControlStockRol } from '../../lib/permisos'
+import {
+  puedeControlarStock as puedeControlarStockRol,
+  puedeCargarControlStock as puedeCargarControlStockRol,
+  puedeAccederCondicionesMayoristas,
+} from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
@@ -41,6 +48,7 @@ const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
 const ModalStockBajo = lazy(() => import('../modals/ModalStockBajo'))
 const ModalControlStock = lazy(() => import('../modals/ModalControlStock'))
 const ModalAjustesStockHistorial = lazy(() => import('../modals/ModalAjustesStockHistorial'))
+const CondicionesMayoristasPanel = lazy(() => import('./CondicionesMayoristasPanel'))
 
 function LoadingState() {
   return (
@@ -65,7 +73,23 @@ export default function ProductosContainer(): React.ReactElement {
   const puedeControlarStock = puedeControlarStockRol(perfil?.rol)
   // Cargar la planilla (aplicar ajustes que modifican stock): solo admin.
   const puedeCargarControlStock = puedeCargarControlStockRol(perfil?.rol)
+  const puedeVerCondiciones = puedeAccederCondicionesMayoristas(perfil?.rol)
   const notify = useNotification()
+
+  // La pestaña activa vive en la URL: así /condiciones-mayoristas (la ruta
+  // vieja, que ahora redirige) puede apuntar directo a las condiciones sin
+  // perder el destino, y el link sigue siendo compartible.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const vista: TabProductos =
+    puedeVerCondiciones && searchParams.get('vista') === 'condiciones' ? 'condiciones' : 'productos'
+  const handleVistaChange = useCallback((siguiente: TabProductos) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev)
+      if (siguiente === 'condiciones') params.set('vista', 'condiciones')
+      else params.delete('vista')
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
 
   // Queries
   const { data: productos = [], isLoading } = useProductosQuery()
@@ -123,6 +147,9 @@ export default function ProductosContainer(): React.ReactElement {
     setProductoEditando(null)
     setProductoMerma(null)
     setConfirmConfig({ visible: false })
+    // Las condiciones son por sucursal: quedarse en esa pestaña al cambiar
+    // mostraría las de la sucursal anterior hasta que refresque la query.
+    handleVistaChange('productos')
   })
 
   // Categorías para el selector del modal: une la tabla `categorias` (solo
@@ -237,6 +264,21 @@ export default function ProductosContainer(): React.ReactElement {
     return productos.filter(p => p.stock < (p.stock_minimo || 10))
   }, [productos])
 
+  // Mismo query key que usa el panel de condiciones (staleTime 10 min), así
+  // el chip de la lista no agrega ni una consulta extra.
+  const { data: gruposPrecio = [] } = useGruposPrecioQuery({ enabled: puedeVerCondiciones })
+  const nombresProductos = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const p of productos) map.set(String(p.id), p.nombre)
+    return map
+  }, [productos])
+  const resumenCondiciones = useMemo(
+    () => (puedeVerCondiciones
+      ? resumenCondicionesPorProducto(gruposPrecio, nombresProductos)
+      : undefined),
+    [gruposPrecio, nombresProductos, puedeVerCondiciones],
+  )
+
   // Handler de "Editar" desde el modal de stock bajo: cierra el modal
   // y abre el modal de edición del producto.
   const handleEditarDesdeStockBajo = useCallback((producto: ProductoDB) => {
@@ -331,6 +373,16 @@ export default function ProductosContainer(): React.ReactElement {
           loading={isLoading}
           isAdmin={isAdmin}
           puedeControlarStock={puedeControlarStock}
+          vista={vista}
+          onVistaChange={handleVistaChange}
+          puedeVerCondiciones={puedeVerCondiciones}
+          resumenCondiciones={resumenCondiciones}
+          contadorCondiciones={gruposPrecio.filter(g => g.activo !== false).length}
+          panelCondiciones={
+            <Suspense fallback={<LoadingState />}>
+              <CondicionesMayoristasPanel />
+            </Suspense>
+          }
           onNuevoProducto={handleNuevoProducto}
           onEditarProducto={handleEditarProducto}
           onEliminarProducto={handleEliminarProducto}
