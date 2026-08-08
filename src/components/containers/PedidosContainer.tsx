@@ -974,10 +974,15 @@ export default function PedidosContainer(): React.ReactElement {
   // pendiente = deuda del cliente). Repropaga el error para que el modal del
   // transportista quede abierto y permita reintentar (importante sin red).
   const handleEntregarSinCobrar = useCallback(async (pedido: PedidoDB) => {
+    // El botón que dispara esto cierra las dos situaciones (ver ModalPagoPedido):
+    // entregar fiado, o confirmar la entrega de un pedido que ya quedó cobrado.
+    // Solo cambia el aviso: decirle "a cuenta corriente" sobre un pedido saldado
+    // hace dudar al chofer de si cobró bien.
+    const saldado = (pedido.monto_pagado || 0) >= (pedido.total || 0) - 0.01
     try {
       await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      notify.success('Entregado a cuenta corriente (sin cobrar)')
+      notify.success(saldado ? 'Pedido entregado' : 'Entregado a cuenta corriente (sin cobrar)')
     } catch (e) {
       notify.error((e as Error).message)
       throw e
@@ -1554,6 +1559,10 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Handler de registrar pago desde la vista transportista. Usa usePagos +
   // invalida cache de pedidos para refrescar monto_pagado / estado_pago.
+  // OJO con `['recorrido-activo']`: la pantalla del chofer NO lee de
+  // `['pedidos']`, lee de esa query (useRecorridoActivoQuery). Sin invalidarla,
+  // el cobro entraba en la base pero la ruta seguía mostrando la parada como
+  // impaga y el header con el total por cobrar viejo.
   const handleRegistrarPagoTransportista = useCallback(async (data: {
     clienteId: string;
     pedidoId: string | null;
@@ -1576,6 +1585,9 @@ export default function PedidosContainer(): React.ReactElement {
       clientRequestId: data.clientRequestId,
     })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // Se espera el refetch: al cerrarse el modal se marca entregado, y esa rama
+    // depende de que la ruta ya esté al día.
+    await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     return pago
   }, [registrarPago, queryClient, user?.id])
 

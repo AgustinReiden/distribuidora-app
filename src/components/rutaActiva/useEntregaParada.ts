@@ -97,10 +97,20 @@ export function useEntregaParada({
   const [errorNoEntrega, setErrorNoEntrega] = useState<string | null>(null);
   // Si el pago del modal fue exitoso, al cerrarse se marca entregado.
   const pagoExitosoRef = useRef(false);
+  // Cuánto se cobró en ESTA pasada del modal. `pedidoParaCobrar` es una foto
+  // sacada al abrirlo: su `monto_pagado` sigue siendo el de antes del cobro,
+  // y refrescar la query no la actualiza. Sin este acumulado, al cerrar se
+  // marcaba entregado con el pedido "sin pagar" y el contenedor reabría el
+  // modal de cobranza en vez de confirmar la entrega — el chofer cobraba,
+  // veía "Pago registrado" y la parada le quedaba pendiente igual.
+  // Es un acumulado y no un valor suelto porque el pago dividido llama a
+  // `confirmarPago` una vez por forma de pago.
+  const montoCobradoRef = useRef(0);
 
   const marcarEntregado = (pedido: PedidoConCliente): void => {
     if (onRegistrarPago && pedido.estado_pago !== 'pagado' && pedido.cliente) {
       pagoExitosoRef.current = false;
+      montoCobradoRef.current = 0;
       setPedidoParaCobrar(pedido);
       return;
     }
@@ -111,6 +121,7 @@ export function useEntregaParada({
     if (!onRegistrarPago) throw new Error('Handler de pago no disponible');
     const pago = await onRegistrarPago(data);
     pagoExitosoRef.current = true;
+    montoCobradoRef.current += Number(data.monto) || 0;
     return pago as Pago & { monto: number };
   };
 
@@ -118,9 +129,18 @@ export function useEntregaParada({
     const pedido = pedidoParaCobrar;
     setPedidoParaCobrar(null);
     if (pagoExitosoRef.current && pedido) {
-      onMarcarEntregado(pedido as PedidoDB);
+      // Se le suma lo cobrado recién a la foto, para que el contenedor vea el
+      // pedido como quedó y siga por la rama de confirmar entrega.
+      const pagado = (Number(pedido.monto_pagado) || 0) + montoCobradoRef.current;
+      const total = Number(pedido.total) || 0;
+      // Epsilon de un centavo: los montos son DECIMAL y el redondeo no debería
+      // dejar una parada "parcial" por dos centavos.
+      const estadoPago: PedidoDB['estado_pago'] =
+        pagado >= total - 0.01 ? 'pagado' : pagado > 0 ? 'parcial' : 'pendiente';
+      onMarcarEntregado({ ...pedido, monto_pagado: pagado, estado_pago: estadoPago } as PedidoDB);
     }
     pagoExitosoRef.current = false;
+    montoCobradoRef.current = 0;
   };
 
   // Entregar a cuenta corriente (sin cobrar). Si falla, propaga para que el
