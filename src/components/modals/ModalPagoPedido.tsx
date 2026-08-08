@@ -423,14 +423,23 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         >
           Cancelar
         </button>
+        {/* Mismo botón, dos situaciones. Con saldo es entregar fiado, y va en
+            ámbar porque deja plata en la calle. Sin saldo el pedido ya está
+            cobrado y esto sólo confirma la entrega: ofrecerle "cuenta corriente
+            (sin cobrar)" al chofer que acaba de recibir la plata en la mano lo
+            hace cancelar, y la parada le queda sin entregar. */}
         {modoEntregaTransportista && onEntregarSinPago && (
           <button
             onClick={() => { void handleEntregarSinPago() }}
             disabled={guardando}
-            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center disabled:opacity-50"
+            className={`px-4 py-2 text-white rounded-lg flex items-center disabled:opacity-50 ${
+              saldoPendiente > 0
+                ? 'bg-amber-600 hover:bg-amber-700'
+                : 'bg-green-600 hover:bg-green-700'
+            }`}
           >
             {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Entregar a cuenta corriente (sin cobrar)
+            {saldoPendiente > 0 ? 'Entregar a cuenta corriente (sin cobrar)' : 'Confirmar entrega'}
           </button>
         )}
         {saldoPendiente > 0 && (

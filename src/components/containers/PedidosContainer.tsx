@@ -974,10 +974,15 @@ export default function PedidosContainer(): React.ReactElement {
   // pendiente = deuda del cliente). Repropaga el error para que el modal del
   // transportista quede abierto y permita reintentar (importante sin red).
   const handleEntregarSinCobrar = useCallback(async (pedido: PedidoDB) => {
+    // El botón que dispara esto cierra las dos situaciones (ver ModalPagoPedido):
+    // entregar fiado, o confirmar la entrega de un pedido que ya quedó cobrado.
+    // Solo cambia el aviso: decirle "a cuenta corriente" sobre un pedido saldado
+    // hace dudar al chofer de si cobró bien.
+    const saldado = (pedido.monto_pagado || 0) >= (pedido.total || 0) - 0.01
     try {
       await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      notify.success('Entregado a cuenta corriente (sin cobrar)')
+      notify.success(saldado ? 'Pedido entregado' : 'Entregado a cuenta corriente (sin cobrar)')
     } catch (e) {
       notify.error((e as Error).message)
       throw e
