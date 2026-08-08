@@ -128,8 +128,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 173** — la última numerada en el repo es
-`172_cambiar_transportista_de_una_ruta`. Las **148–166** (origen del precio, reglas de
+**La próxima migración es la 174** — la última numerada en el repo es
+`173_entrega_del_chofer_actualiza_la_parada`. Las **148–166** (origen del precio, reglas de
 comisión, `place_id`, horarios masivos, barridas, roles extra por sucursal, horario obligatorio
 al cargar pedido, marcas y objetivos por preventista, saldo a favor que no queda atrapado)
 mapean **1:1** con el ledger, así que no agregan ninguna excepción a las tablas de arriba.
@@ -156,6 +156,16 @@ Mueve las escalas conservando su `id` y solo repunta `pedido_items.grupo_precio_
 cuando hay dos escalas equivalentes, para no perder el rastro del descuento por volumen.
 Rechaza la fusión si algún precio cambiaría. La dispara el usuario desde la pestaña de
 condiciones, caso por caso; no corre sola.
+
+La **173** es la primera de esta tanda que **sí toca filas**: arregla
+`actualizar_recorrido_entrega()` y repara la ruta 82. El trigger no era `SECURITY DEFINER`,
+así que sus UPDATE pasaban por la RLS del chofer y `mt_recorrido_pedidos_update` es admin-only:
+el UPDATE de `recorrido_pedidos` se descartaba **en silencio** (RLS filtra, no falla) mientras
+el de `recorridos` sí entraba. Resultado: contador de la ruta avanzando y paradas en
+'pendiente', para todo chofer no admin desde siempre (1.331 paradas históricas). Además los
+contadores pasan de sumar deltas a recalcularse desde las paradas, y el trigger ahora escucha
+`monto_pagado`: antes `total_cobrado` se congelaba en el valor del instante en que se marcaba
+entregado, que casi siempre era 0 porque el cobro entra después.
 
 La **167** renombra 4 RPCs de pago a `<nombre>_impl` y las deja detrás de un wrapper
 idempotente del mismo nombre. Es a propósito: `migrations/` no es 1:1 con prod y esas RPCs ya
