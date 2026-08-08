@@ -4,11 +4,11 @@ import {
   Loader2, AlertTriangle, Check, Truck, MapPin, Route, Clock, Navigation,
   Settings, Save, FileText, ChevronDown, ChevronUp, Phone,
   DollarSign, Package, CheckCircle, Circle, Printer, ArrowRight, CalendarDays, Pencil,
-  ArrowLeftRight, Search
+  ArrowLeftRight, Search, UserCog
 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioProducto';
-import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery, useRutasEnCursoQuery } from '../../hooks/queries';
+import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery, useRutasEnCursoQuery, useCambiarTransportistaRutaMutation } from '../../hooks/queries';
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
@@ -325,6 +325,42 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     [rutasEnCurso, fechaEntrega],
   );
   const idsExistentes = useMemo(() => new Set(paradasExistentes.map(p => p.id)), [paradasExistentes]);
+
+  // === Reasignar la ruta ya armada a otro chofer (mig 172) ===
+  // El transportista es parte de la identidad de la ruta (aplicar_orden_ruta la
+  // busca por transportista+fecha), así que elegir otro en el selector de arriba
+  // NO la mueve: arma una segunda y deja la original viva. Este panel es el
+  // único camino para corregir una ruta armada a nombre equivocado.
+  const [reasignando, setReasignando] = useState<boolean>(false);
+  const [choferDestino, setChoferDestino] = useState<string>('');
+  const [errorReasignar, setErrorReasignar] = useState<string | null>(null);
+  const cambiarChofer = useCambiarTransportistaRutaMutation();
+
+  // Cerrar el panel al cambiar de ruta: si no, queda abierto con el destino
+  // elegido para OTRA ruta.
+  useEffect(() => {
+    setReasignando(false);
+    setChoferDestino('');
+    setErrorReasignar(null);
+  }, [transportistaSeleccionado, fechaEntrega]);
+
+  const handleReasignar = async (): Promise<void> => {
+    if (!rutaExistente?.recorridoId || !choferDestino) return;
+    setErrorReasignar(null);
+    try {
+      await cambiarChofer.mutateAsync({
+        recorridoId: rutaExistente.recorridoId,
+        transportistaId: choferDestino,
+      });
+      // Seguir parado sobre la MISMA ruta, ahora bajo su nuevo dueño: el
+      // selector de arriba es lo que decide qué ruta se está editando.
+      setTransportistaSeleccionado(choferDestino);
+      setReasignando(false);
+      setChoferDestino('');
+    } catch (e) {
+      setErrorReasignar(e instanceof Error ? e.message : 'No se pudo cambiar el transportista');
+    }
+  };
 
   // Disponibles para sumar a la ruta: pendiente/en_preparacion (vienen del
   // container) filtrados por fecha de pedido o de entrega (según filtroTipoFecha).
@@ -949,12 +985,76 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 <>
                   {/* Edición de ruta existente (solo modo 1 chofer) */}
                   {!modoDividir && editando && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
-                      <Pencil className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                      <p className="text-sm text-amber-800">
-                        Ya hay una ruta armada para <strong>{transportistaInfo?.nombre}</strong> el {formatFecha(fechaEntrega)}.
-                        Se editará esa misma ruta (agregá o quitá paradas y se reoptimiza al armar).
-                      </p>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <div className="flex items-start gap-2">
+                        <Pencil className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-amber-800">
+                          Ya hay una ruta armada para <strong>{transportistaInfo?.nombre}</strong> el {formatFecha(fechaEntrega)}.
+                          Se editará esa misma ruta (agregá o quitá paradas y se reoptimiza al armar).
+                        </p>
+                      </div>
+
+                      {/* Cambiar quién la entrega, sin rearmarla: conserva las
+                          paradas, el orden y la optimización. */}
+                      {!reasignando ? (
+                        <button
+                          type="button"
+                          onClick={() => { setReasignando(true); setChoferDestino(''); }}
+                          className="mt-2 ml-7 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-amber-300 text-amber-800 hover:bg-amber-100"
+                        >
+                          <UserCog className="w-3.5 h-3.5" />
+                          Cambiar transportista
+                        </button>
+                      ) : (
+                        <div className="mt-3 ml-7 space-y-2">
+                          <label className="block text-xs font-medium text-amber-900">
+                            Pasar esta ruta a:
+                          </label>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={choferDestino}
+                              onChange={(e: ChangeEvent<HTMLSelectElement>) => setChoferDestino(e.target.value)}
+                              disabled={cambiarChofer.isPending}
+                              className="px-3 py-2 border border-amber-300 rounded-lg text-sm bg-white min-w-52"
+                            >
+                              <option value="">Elegir transportista...</option>
+                              {transportistas
+                                .filter(t => t.id !== transportistaSeleccionado)
+                                .map(t => (
+                                  <option key={t.id} value={t.id}>{t.nombre}</option>
+                                ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={handleReasignar}
+                              disabled={!choferDestino || cambiarChofer.isPending}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {cambiarChofer.isPending
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <Check className="w-4 h-4" />}
+                              {cambiarChofer.isPending ? 'Cambiando…' : 'Confirmar'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setReasignando(false); setErrorReasignar(null); }}
+                              disabled={cambiarChofer.isPending}
+                              className="px-3 py-2 text-sm text-amber-800 hover:bg-amber-100 rounded-lg disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                          <p className="text-xs text-amber-700">
+                            Se mantienen las {paradasExistentes.length} paradas y su orden. No se puede
+                            si la ruta ya tiene entregas hechas, o si el otro chofer ya tiene ruta armada ese día.
+                          </p>
+                          {errorReasignar && (
+                            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
+                              {errorReasignar}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 

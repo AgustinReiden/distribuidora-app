@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-08-06** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-08-08** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -128,8 +128,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 172** — la última numerada en el repo es
-`171_condicion_desde_la_ficha`. Las **148–166** (origen del precio, reglas de
+**La próxima migración es la 173** — la última numerada en el repo es
+`172_cambiar_transportista_de_una_ruta`. Las **148–166** (origen del precio, reglas de
 comisión, `place_id`, horarios masivos, barridas, roles extra por sucursal, horario obligatorio
 al cargar pedido, marcas y objetivos por preventista, saldo a favor que no queda atrapado)
 mapean **1:1** con el ledger, así que no agregan ninguna excepción a las tablas de arriba.
@@ -141,8 +141,15 @@ orden que no se ve en el SQL: `supabase/functions/_shared/pricing/index.ts` sele
 columna por nombre, y PostgREST devuelve 400 si no existe. **Desplegar las edge functions
 antes de aplicarla**, o el bot deja de tomar pedidos.
 
-Las **170** y **171** solo agregan funciones: no modifican ni una fila. Todo su SQL corre
-adentro de la RPC, o sea únicamente cuando el usuario dispara la acción desde la UI.
+Las **170**, **171** y **172** solo agregan funciones: no modifican ni una fila. Todo su SQL
+corre adentro de la RPC, o sea únicamente cuando el usuario dispara la acción desde la UI.
+
+La **172** agrega `cambiar_transportista_recorrido()`, que reasigna una ruta ya armada a otro
+chofer sin rearmarla. Hace falta porque para `aplicar_orden_ruta` el transportista es parte de
+la **identidad** de la ruta (la busca por `transportista_id + fecha + estado + sucursal_id`),
+así que elegir otro chofer y volver a armar no la mueve: crea una segunda y deja la original
+viva con sus pedidos en `asignado`. Rechaza si la ruta ya tiene entregas hechas (partiría la
+rendición entre dos personas) o si el destino ya tiene ruta ese día (`uq_recorrido_vigente`).
 
 La **170** agrega `consolidar_condiciones()`, que fusiona condiciones mayoristas duplicadas.
 Mueve las escalas conservando su `id` y solo repunta `pedido_items.grupo_precio_escala_id`
