@@ -1526,6 +1526,7 @@ export default function PedidosContainer(): React.ReactElement {
           results.push({
             success: !!result?.success,
             error: result?.success ? undefined : String(result?.error || 'Error desconocido'),
+            codigo: result?.codigo ? String(result.codigo) : undefined,
           })
         }
       } catch (err) {

@@ -175,7 +175,7 @@ export function useSalvedades(): UseSalvedadesReturn {
 
       if (!result?.success) {
         notifyError(result?.error || 'Error al registrar salvedad')
-        return { success: false, error: result?.error }
+        return { success: false, error: result?.error, codigo: result?.codigo }
       }
 
       return {
