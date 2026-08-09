@@ -3,9 +3,10 @@
  * Permite seleccionar items con problemas antes de marcar el pedido como entregado
  * Validación con Zod
  */
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
+import { useSimularSalvedadesPromoImpactoQuery } from '../../hooks/queries'
 import NumberInput from '../ui/NumberInput'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
@@ -24,6 +25,14 @@ const MOTIVOS_SALVEDAD: MotivoOption[] = [
   { value: 'diferencia_precio', label: MOTIVOS_SALVEDAD_LABELS.diferencia_precio, devuelveStock: true },
   { value: 'otro', label: MOTIVOS_SALVEDAD_LABELS.otro, devuelveStock: false }
 ]
+
+// Un regalo va a $0: "diferencia de precio" no aplica.
+const MOTIVOS_REGALO: MotivoOption[] = MOTIVOS_SALVEDAD.filter(m => m.value !== 'diferencia_precio')
+
+const esRegaloItem = (item: PedidoItemDB): boolean => item.es_bonificacion === true
+
+const nombreItem = (item: PedidoItemDB): string =>
+  (esRegaloItem(item) && item.descripcion_regalo) || item.producto?.nombre || 'Producto'
 
 interface ItemSalvedad {
   item: PedidoItemDB;
@@ -62,15 +71,27 @@ export default function ModalEntregaConSalvedad({
 
   const itemsConSalvedad = itemsSalvedad.filter(i => i.seleccionado)
   const itemsSinProblemas = itemsSalvedad.filter(i => !i.seleccionado)
+  // Los regalos tienen su propia seccion en el resumen: lo que pasa con ellos
+  // no lo decide solo el checkbox, tambien la promo que los origina.
+  const entregadosCobrables = itemsSinProblemas.filter(i => !esRegaloItem(i.item))
+
+  // Dry-run del lote completo: en que queda cada regalo si se confirma esto.
+  const salvedadesParaSimular = useMemo(
+    () => itemsConSalvedad.map(i => ({
+      pedidoItemId: i.item.id,
+      cantidadAfectada: i.cantidadAfectada,
+    })),
+    [itemsConSalvedad],
+  )
+  const { data: regalosSimulados = [], isLoading: simulando } =
+    useSimularSalvedadesPromoImpactoQuery(pedido.id, salvedadesParaSimular, {
+      enabled: paso === 'confirmacion',
+    })
 
   const toggleItem = useCallback((itemId: string) => {
-    setItemsSalvedad(prev => {
-      const target = prev.find(i => i.item.id === itemId)
-      if (target?.item.es_bonificacion) return prev
-      return prev.map(i =>
-        i.item.id === itemId ? { ...i, seleccionado: !i.seleccionado } : i
-      )
-    })
+    setItemsSalvedad(prev => prev.map(i =>
+      i.item.id === itemId ? { ...i, seleccionado: !i.seleccionado } : i
+    ))
     setExpandido(prev => prev === itemId ? null : itemId)
   }, [])
 
@@ -82,7 +103,7 @@ export default function ModalEntregaConSalvedad({
 
   const validarDatos = (): boolean => {
     for (const itemSalv of itemsConSalvedad) {
-      const productoNombre = itemSalv.item.producto?.nombre || 'Producto'
+      const productoNombre = nombreItem(itemSalv.item)
 
       // Validaciones explícitas antes de Zod (Zod 4 da mensajes genéricos para enum/undefined)
       if (!itemSalv.motivo) {
@@ -119,10 +140,17 @@ export default function ModalEntregaConSalvedad({
     setGuardando(true)
 
     try {
-      // Registrar todas las salvedades
+      // Registrar todas las salvedades. Los regalos van primero: si despues se
+      // registra la salvedad del producto que dispara la promo, la resync del
+      // servidor termina de bajar el regalo. Al reves la linea del regalo ya no
+      // existiria cuando le toca el turno.
       if (itemsConSalvedad.length > 0) {
-        const salvedades: RegistrarSalvedadInput[] = itemsConSalvedad.map(itemSalv => {
-          const motivoConfig = MOTIVOS_SALVEDAD.find(m => m.value === itemSalv.motivo)
+        const ordenadas = [...itemsConSalvedad].sort(
+          (a, b) => Number(esRegaloItem(b.item)) - Number(esRegaloItem(a.item))
+        )
+        const salvedades: RegistrarSalvedadInput[] = ordenadas.map(itemSalv => {
+          const motivos = esRegaloItem(itemSalv.item) ? MOTIVOS_REGALO : MOTIVOS_SALVEDAD
+          const motivoConfig = motivos.find(m => m.value === itemSalv.motivo)
           return {
             pedidoId: pedido.id,
             pedidoItemId: itemSalv.item.id,
@@ -134,7 +162,11 @@ export default function ModalEntregaConSalvedad({
         })
 
         const results = await onSave(salvedades)
-        const errores = results.filter(r => !r.success)
+        // Un regalo que la promo ya saco del pedido no es un error: el
+        // resultado buscado (no se entrega) ya esta.
+        const errores = results.filter((r, idx) => !r.success && !(
+          r.codigo === 'item_no_encontrado' && esRegaloItem(ordenadas[idx].item)
+        ))
         if (errores.length > 0) {
           setError(`Error al registrar ${errores.length} salvedad(es): ${errores[0].error}`)
           return
@@ -192,33 +224,8 @@ export default function ModalEntregaConSalvedad({
               <div className="space-y-2">
                 {itemsSalvedad.map(itemSalv => {
                   const isExpanded = expandido === itemSalv.item.id
-                  const esRegalo = itemSalv.item.es_bonificacion === true
-
-                  if (esRegalo) {
-                    return (
-                      <div
-                        key={itemSalv.item.id}
-                        className="border rounded-lg overflow-hidden border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 opacity-75"
-                      >
-                        <div className="flex items-center gap-3 p-3">
-                          <Gift className="w-5 h-5 text-emerald-500 shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-gray-700 dark:text-gray-200 truncate">
-                              {itemSalv.item.producto?.nombre || 'Producto'}
-                            </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              Regalo por promocion - se ajusta automaticamente
-                            </p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-sm text-gray-500">
-                              {itemSalv.item.cantidad} ud.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  }
+                  const esRegalo = esRegaloItem(itemSalv.item)
+                  const motivosDisponibles = esRegalo ? MOTIVOS_REGALO : MOTIVOS_SALVEDAD
 
                   return (
                     <div
@@ -226,7 +233,9 @@ export default function ModalEntregaConSalvedad({
                       className={`border rounded-lg overflow-hidden transition-colors ${
                         itemSalv.seleccionado
                           ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
-                          : 'border-gray-200 dark:border-gray-700'
+                          : esRegalo
+                            ? 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-900/10'
+                            : 'border-gray-200 dark:border-gray-700'
                       }`}
                     >
                       {/* Item header */}
@@ -241,19 +250,29 @@ export default function ModalEntregaConSalvedad({
                         }`}>
                           {itemSalv.seleccionado && <Check className="w-3 h-3 text-white" />}
                         </div>
-                        <Package className="w-5 h-5 text-gray-400" />
-                        <div className="flex-1">
+                        {esRegalo
+                          ? <Gift className="w-5 h-5 text-emerald-500 shrink-0" />
+                          : <Package className="w-5 h-5 text-gray-400" />}
+                        <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-800 dark:text-white">
-                            {itemSalv.item.producto?.nombre || 'Producto'}
+                            {nombreItem(itemSalv.item)}
                           </p>
                           <p className="text-sm text-gray-500">
-                            {itemSalv.item.cantidad} x {formatMoney(itemSalv.item.precio_unitario)}
+                            {esRegalo
+                              ? `${itemSalv.item.cantidad} ud. de regalo - si cae la promo se ajusta solo`
+                              : `${itemSalv.item.cantidad} x ${formatMoney(itemSalv.item.precio_unitario)}`}
                           </p>
                         </div>
-                        <div className="text-right">
-                          <p className="font-bold text-gray-800 dark:text-white">
-                            {formatMoney(itemSalv.item.cantidad * itemSalv.item.precio_unitario)}
-                          </p>
+                        <div className="text-right shrink-0">
+                          {esRegalo ? (
+                            <span className="text-xs bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-medium">
+                              REGALO
+                            </span>
+                          ) : (
+                            <p className="font-bold text-gray-800 dark:text-white">
+                              {formatMoney(itemSalv.item.cantidad * itemSalv.item.precio_unitario)}
+                            </p>
+                          )}
                         </div>
                         {itemSalv.seleccionado && (
                           isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />
@@ -296,7 +315,7 @@ export default function ModalEntregaConSalvedad({
                               className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 dark:bg-gray-700 dark:text-white"
                             >
                               <option value="">Seleccionar motivo...</option>
-                              {MOTIVOS_SALVEDAD.map(m => (
+                              {motivosDisponibles.map(m => (
                                 <option key={m.value} value={m.value}>{m.label}</option>
                               ))}
                             </select>
@@ -329,14 +348,14 @@ export default function ModalEntregaConSalvedad({
               <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
                 <h3 className="font-semibold text-blue-800 dark:text-blue-400 mb-2">Resumen de la entrega</h3>
 
-                {/* Items entregados correctamente */}
-                {itemsSinProblemas.length > 0 && (
+                {/* Items entregados correctamente (los regalos van aparte) */}
+                {entregadosCobrables.length > 0 && (
                   <div className="mb-3">
                     <p className="text-sm font-medium text-green-700 dark:text-green-400 flex items-center gap-1 mb-1">
                       <Check className="w-4 h-4" /> Productos entregados correctamente:
                     </p>
                     <ul className="text-sm text-gray-600 dark:text-gray-300 ml-5 space-y-1">
-                      {itemsSinProblemas.map(i => (
+                      {entregadosCobrables.map(i => (
                         <li key={i.item.id}>
                           {i.item.cantidad}x {i.item.producto?.nombre} - {formatMoney(i.item.cantidad * i.item.precio_unitario)}
                         </li>
@@ -353,12 +372,53 @@ export default function ModalEntregaConSalvedad({
                     </p>
                     <ul className="text-sm text-gray-600 dark:text-gray-300 ml-5 space-y-1">
                       {itemsConSalvedad.map(i => {
-                        const motivoLabel = MOTIVOS_SALVEDAD.find(m => m.value === i.motivo)?.label || i.motivo
+                        const motivos = esRegaloItem(i.item) ? MOTIVOS_REGALO : MOTIVOS_SALVEDAD
+                        const motivoLabel = motivos.find(m => m.value === i.motivo)?.label || i.motivo
                         const entregados = i.item.cantidad - i.cantidadAfectada
                         return (
                           <li key={i.item.id}>
-                            {i.item.producto?.nombre}: {i.cantidadAfectada} ud. con problema ({motivoLabel})
+                            {nombreItem(i.item)}: {i.cantidadAfectada} ud. con problema ({motivoLabel})
                             {entregados > 0 && ` - Se entregan ${entregados} ud.`}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Regalos: lo que realmente queda despues de recalcular las promos */}
+                {simulando && (
+                  <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
+                    Recalculando los regalos por promocion...
+                  </p>
+                )}
+                {!simulando && regalosSimulados.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-1 mb-1">
+                      <Gift className="w-4 h-4" /> Regalos por promocion:
+                    </p>
+                    <ul className="text-sm text-gray-600 dark:text-gray-300 ml-5 space-y-1">
+                      {regalosSimulados.map(r => {
+                        const nombre = r.descripcion_regalo || r.producto_nombre || 'Regalo'
+                        if (r.sera_eliminada) {
+                          return (
+                            <li key={r.pedido_item_id} className="text-red-600 dark:text-red-400">
+                              {nombre}: no se entrega
+                              {r.promo_nombre && ` - se cae la promo "${r.promo_nombre}"`}
+                            </li>
+                          )
+                        }
+                        if (r.delta > 0) {
+                          return (
+                            <li key={r.pedido_item_id} className="text-amber-700 dark:text-amber-400">
+                              {nombre}: baja de {r.cantidad_actual} a {r.cantidad_final} ud.
+                              {r.promo_nombre && ` (${r.promo_nombre})`}
+                            </li>
+                          )
+                        }
+                        return (
+                          <li key={r.pedido_item_id}>
+                            {r.cantidad_final}x {nombre} - se entrega
                           </li>
                         )
                       })}

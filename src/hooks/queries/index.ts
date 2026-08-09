@@ -390,6 +390,8 @@ export {
 } from './usePromocionesQuery'
 export { useSimularSalvedadPromoImpactoQuery } from './useSimularSalvedadQuery'
 export type { PromoImpactoSalvedad } from './useSimularSalvedadQuery'
+export { useSimularSalvedadesPromoImpactoQuery } from './useSimularSalvedadesQuery'
+export type { RegaloSimulado, SalvedadSimulada } from './useSimularSalvedadesQuery'
 export type { PromocionConDetalles, PromocionFormInput } from './usePromocionesQuery'
 
 // Notas de Crédito
