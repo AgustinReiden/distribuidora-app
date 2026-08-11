@@ -305,7 +305,7 @@ export function construirModeloSingle(
  *
  * Si `opts.fecha` + `opts.horaInicio` están presentes, agrega el ancla temporal
  * (globalStartTime + arranque del vehículo) y, por cada pedido con ventana, una
- * timeWindow BLANDA con penalización alta por llegar tarde: el optimizador
+ * timeWindow con apertura DURA y cierre blando penalizado: el optimizador
  * adelanta esas paradas por sobre el ahorro de distancia, pero nunca las saltea.
  */
 export async function optimizeTours(
