@@ -8,6 +8,7 @@
 import { assertEquals, assertExists } from "std/assert/mod.ts";
 import {
   construirModeloSingle,
+  finDeJornada,
   hhmmDesdeIso,
   parseOptimizeTours,
 } from "../optimizar-ruta/route-optimization.ts";
@@ -56,20 +57,105 @@ Deno.test("el horario cortado manda LAS DOS franjas como timeWindows", () => {
   });
   const tw = shipments(m)[0].deliveries[0].timeWindows;
   assertEquals(tw.length, 2);
-  assertEquals(tw[0].softStartTime, `${FECHA}T08:00:00-03:00`);
-  assertEquals(tw[0].softEndTime, `${FECHA}T14:00:00-03:00`);
-  assertEquals(tw[1].softStartTime, `${FECHA}T17:00:00-03:00`);
-  assertEquals(tw[1].softEndTime, `${FECHA}T23:00:00-03:00`);
+  assertEquals(tw[0].startTime, `${FECHA}T08:00:00-03:00`);
+  assertEquals(tw[1].startTime, `${FECHA}T17:00:00-03:00`);
 });
 
-Deno.test("llegar tarde cuesta mucho más que llegar temprano", () => {
+Deno.test("la apertura es DURA: no se puede entregar con el local cerrado", () => {
+  // El caso reclamado: la parada 1 abría 07:30 y la 2 a las 08:30. Con la
+  // apertura blanda el modelo podía "entregar" a las 07:45 en la que abre 08:30
+  // pagando una multa chica, y el chofer quedaba una hora esperando.
   const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
     fecha: FECHA,
     horaInicio: "08:00",
     ventanas: [{ pedido_id: "1", franjas: [{ inicio: "09:00", fin: "14:00" }] }],
   });
   const tw = shipments(m)[0].deliveries[0].timeWindows[0];
-  assertEquals(tw.costPerHourAfterSoftEndTime > tw.costPerHourBeforeSoftStartTime, true);
+  assertEquals(tw.startTime, `${FECHA}T09:00:00-03:00`);
+  assertEquals(tw.softStartTime, undefined);
+  assertEquals(tw.costPerHourBeforeSoftStartTime, undefined);
+});
+
+Deno.test("el cierre es BLANDO: llegar tarde penaliza, no vuelve infactible el modelo", () => {
+  // Si el cierre fuera duro y una parada no entrara antes de que cierre, se
+  // caería la ruta entera en vez de una sola entrega.
+  const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
+    fecha: FECHA,
+    horaInicio: "08:00",
+    ventanas: [{ pedido_id: "1", franjas: [{ inicio: "09:00", fin: "14:00" }] }],
+  });
+  const tw = shipments(m)[0].deliveries[0].timeWindows[0];
+  assertEquals(tw.softEndTime, `${FECHA}T14:00:00-03:00`);
+  assertEquals(tw.endTime, undefined);
+  assertEquals(tw.costPerHourAfterSoftEndTime > 0, true);
+});
+
+Deno.test("con varias franjas solo la última afloja el cierre (deben ser disjuntas)", () => {
+  // Una `endTime` sin especificar toma globalEndTime: si todas las franjas
+  // quedaran blandas se solaparían todas a las 23:59 y la API las rechaza.
+  const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
+    fecha: FECHA,
+    horaInicio: "08:00",
+    ventanas: [{
+      pedido_id: "1",
+      franjas: [{ inicio: "08:00", fin: "14:00" }, { inicio: "17:00", fin: "23:00" }],
+    }],
+  });
+  const tw = shipments(m)[0].deliveries[0].timeWindows;
+  assertEquals(tw[0].endTime, `${FECHA}T14:00:00-03:00`);
+  assertEquals(tw[0].softEndTime, undefined);
+  assertEquals(tw[1].softEndTime, `${FECHA}T23:00:00-03:00`);
+  assertEquals(tw[1].endTime, undefined);
+});
+
+Deno.test("la franja que arranca después del reparto no es una entrega posible", () => {
+  // 09-13 y 18-22 saliendo 08:00: el reparto termina 18:00, así que la ventana
+  // de la noche no puede usarse como salida de emergencia para dar la parada
+  // por resuelta — en la calle esa entrega no se hace.
+  const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
+    fecha: FECHA,
+    horaInicio: "08:00",
+    ventanas: [{
+      pedido_id: "1",
+      franjas: [{ inicio: "09:00", fin: "13:00" }, { inicio: "18:00", fin: "22:00" }],
+    }],
+  });
+  const tw = shipments(m)[0].deliveries[0].timeWindows;
+  assertEquals(tw.length, 1);
+  assertEquals(tw[0].startTime, `${FECHA}T09:00:00-03:00`);
+  assertEquals(tw[0].softEndTime, `${FECHA}T13:00:00-03:00`);
+});
+
+Deno.test("el cliente que solo atiende de noche conserva su ventana", () => {
+  // Sin franjas útiles se deja la primera: una ventana imposible la penaliza y
+  // la manda al final, pero una parada SIN ventana caería en cualquier lado.
+  const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
+    fecha: FECHA,
+    horaInicio: "08:00",
+    ventanas: [{ pedido_id: "1", franjas: [{ inicio: "20:00", fin: "23:00" }] }],
+  });
+  const tw = shipments(m)[0].deliveries[0].timeWindows;
+  assertEquals(tw.length, 1);
+  assertEquals(tw[0].startTime, `${FECHA}T20:00:00-03:00`);
+});
+
+Deno.test("finDeJornada: salida + 10 h, con tope a las 23:30", () => {
+  assertEquals(finDeJornada("08:00"), "18:00");
+  assertEquals(finDeJornada("07:30"), "17:30");
+  assertEquals(finDeJornada("15:00"), "23:30");
+  assertEquals(finDeJornada(undefined), null);
+  assertEquals(finDeJornada("no-es-hora"), null);
+});
+
+Deno.test("el vehículo lleva costos: sin ellos el modelo no tiene qué minimizar", () => {
+  // Con todos los costos en cero cualquier orden factible le da lo mismo al
+  // solver, y las penalizaciones de ventana quedan como único criterio.
+  const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
+    fecha: FECHA,
+    horaInicio: "08:00",
+  });
+  assertEquals(vehiculo(m).costPerKilometer > 0, true);
+  assertEquals(vehiculo(m).costPerHour > 0, true);
 });
 
 Deno.test("el cierre a las 24:00 se traduce a 23:59:59 del mismo día", () => {
@@ -159,6 +245,30 @@ Deno.test("parseOptimizeTours devuelve la última parada y la hora de fin", () =
   assertEquals(ruta.ordenOptimizado.length, 2);
   assertEquals(ruta.ultimaParada, { latitude: -26.82, longitude: -65.22 });
   assertEquals(ruta.horaFin, "12:45");
+});
+
+Deno.test("cada parada devuelve su hora estimada de llegada", () => {
+  // Es lo que permite contrastar el plan contra el horario del cliente ANTES de
+  // mandar el camión, en vez de enterarse con la puerta cerrada.
+  const ruta = parseOptimizeTours({
+    routes: [{
+      visits: [
+        { shipmentLabel: "1", startTime: "2026-07-28T08:12:00-03:00" },
+        { shipmentLabel: "2", startTime: "2026-07-28T08:35:00-03:00" },
+      ],
+      metrics: {},
+    }],
+  }, [pedido(1), pedido(2)]);
+
+  assertEquals(ruta.ordenOptimizado[0].hora_estimada, "08:12");
+  assertEquals(ruta.ordenOptimizado[1].hora_estimada, "08:35");
+});
+
+Deno.test("sin startTime la parada no inventa hora estimada", () => {
+  const ruta = parseOptimizeTours({
+    routes: [{ visits: [{ shipmentLabel: "1" }], metrics: {} }],
+  }, [pedido(1)]);
+  assertEquals(ruta.ordenOptimizado[0].hora_estimada, undefined);
 });
 
 Deno.test("sin vehicleEndTime la hora de fin es null (se mantiene la previa)", () => {

@@ -30,6 +30,10 @@ export interface OrdenOptimizadoItem {
   direccion?: string;
   latitud?: number;
   longitud?: number;
+  /** Bloque horario que le tocó (solo si se optimizó por barridas). */
+  barrida?: Barrida;
+  /** "HH:MM" estimado de llegada según el plan del optimizador. */
+  hora_estimada?: string;
 }
 
 export interface RutaOptimizadaResponse {

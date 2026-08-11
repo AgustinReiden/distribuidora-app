@@ -51,7 +51,8 @@ import {
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
-import { useOptimizarRuta, type RepartidorParam } from '../../hooks/useOptimizarRuta'
+import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
+import { clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
@@ -1325,18 +1326,23 @@ export default function PedidosContainer(): React.ReactElement {
     // optimizarRuta ya mostró el mensaje y no armamos nada.
     if (!ruta) return
 
-    const optimizados = (ruta.orden_optimizado ?? []) as Array<{ pedido_id: string; orden: number; barrida?: 1 | 2 | 3 }>
-    // Los pedidos sin coordenadas NO los devuelve el optimizador, pero igual deben
-    // formar parte de la ruta (son entregables). Se anexan al final, después de las
-    // paradas optimizadas, con orden_entrega secuencial. Antes se perdían y la ruta
-    // quedaba solo con los pedidos geolocalizados.
+    type ParadaPlan = { pedido_id: string; barrida?: Barrida; hora_estimada?: string }
+    const optimizados = (ruta.orden_optimizado ?? []) as Array<ParadaPlan & { orden: number }>
+    // Los pedidos sin coordenadas NO los devuelve el optimizador (Google necesita
+    // el punto), pero igual son entregables y deben formar parte de la ruta. Van
+    // al final de SU barrida, no al final de la ruta: sin coordenadas no se sabe
+    // por dónde queda la parada, pero sí a qué hora abre y cierra el cliente.
     const idsOptimizados = new Set(optimizados.map(o => String(o.pedido_id)))
-    const maxOrden = optimizados.reduce((m, o) => Math.max(m, o.orden), 0)
     const sinCoordenadas = pedidosSeleccionados
       .filter(p => !idsOptimizados.has(String(p.id)))
-      .map((p, i) => ({ pedido_id: p.id, orden: maxOrden + 1 + i }))
+      .map((p): ParadaPlan & { barrida: Barrida } => ({
+        pedido_id: p.id,
+        barrida: clasificarBarrida(horarioParaRutear(p.cliente)).barrida,
+        // Sin coordenadas el optimizador no las planifica: no hay hora estimada.
+        hora_estimada: undefined,
+      }))
 
-    const ordenFinal = [...optimizados, ...sinCoordenadas]
+    const ordenFinal = intercalarSinCoordenadas(optimizados, sinCoordenadas)
     if (ordenFinal.length === 0) return
 
     const armado = await handleAplicarOrden({
@@ -1351,7 +1357,9 @@ export default function PedidosContainer(): React.ReactElement {
     // Marcar la barrida de cada parada. Va aparte de aplicar_orden_ruta a
     // propósito (ver mig 142): es un dato informativo y de medición, así que si
     // falla no se rompe la ruta ya armada — solo se pierden las etiquetas.
-    const conBarrida = optimizados
+    // Incluye las paradas sin coordenadas: la hoja de ruta separa por barrida y
+    // sin este dato la despensa que cierra a las 14 salía sin etiqueta de bloque.
+    const conBarrida = ordenFinal
       .filter(o => o.barrida != null)
       .map(o => ({ pedido_id: o.pedido_id, barrida: o.barrida }))
     if (conBarrida.length > 0) {
@@ -1371,7 +1379,13 @@ export default function PedidosContainer(): React.ReactElement {
         ...(prev ?? {}),
         success: true,
         total_pedidos: ordenFinal.length,
-        orden_optimizado: ordenFinal.map(o => ({ pedido_id: o.pedido_id, orden: o.orden })),
+        orden_optimizado: ordenFinal.map(o => ({
+          pedido_id: o.pedido_id,
+          orden: o.orden,
+          // El horario que planificó el optimizador: el modal lo contrasta contra
+          // el del cliente para avisar qué paradas caen fuera de hora.
+          hora_estimada: o.hora_estimada,
+        })),
       }))
     }
   }, [optimizarRutaConDeposito, handleAplicarOrden, setRutaOptimizada])
@@ -1388,21 +1402,27 @@ export default function PedidosContainer(): React.ReactElement {
     const byId = new Map(pedidosSeleccionados.map(p => [String(p.id), p]))
 
     // Orden por repartidor desde el resultado del optimizador (geocodificados).
-    const ordenPorRep = new Map<string, Array<{ pedido_id: string; orden: number }>>()
-    for (const rep of repartidores) ordenPorRep.set(rep.transportista_id, [])
+    const ruteadasPorRep = new Map<string, Array<{ pedido_id: string; barrida?: Barrida }>>()
+    for (const rep of repartidores) ruteadasPorRep.set(rep.transportista_id, [])
     for (const r of resp.recorridos) {
-      ordenPorRep.set(
+      ruteadasPorRep.set(
         r.transportista_id,
-        (r.orden_optimizado ?? []).map(o => ({ pedido_id: String(o.pedido_id), orden: o.orden })),
+        (r.orden_optimizado ?? [])
+          .slice()
+          .sort((a, b) => a.orden - b.orden)
+          .map(o => ({ pedido_id: String(o.pedido_id), barrida: o.barrida })),
       )
     }
 
     // Pedidos sin coordenadas: el optimizador no los devuelve → repartir por
-    // zona preferida (si el cliente tiene zona) o round-robin, y anexar al final.
+    // zona preferida (si el cliente tiene zona) o round-robin. Se intercalan en
+    // el bloque horario que les toca, no al final del recorrido del chofer.
     const sinCoordsIds = resp.pedidos_sin_coordenadas_ids
       ?? pedidosSeleccionados
         .filter(p => p.cliente?.latitud == null || p.cliente?.longitud == null)
         .map(p => String(p.id))
+    const sinCoordsPorRep = new Map<string, Array<{ pedido_id: string; barrida: Barrida }>>()
+    for (const rep of repartidores) sinCoordsPorRep.set(rep.transportista_id, [])
     let rr = 0
     for (const pid of sinCoordsIds) {
       const pedido = byId.get(String(pid))
@@ -1411,9 +1431,21 @@ export default function PedidosContainer(): React.ReactElement {
         ? repartidores.find(r => Array.isArray(r.zonas_preferidas) && r.zonas_preferidas.includes(zonaId))?.transportista_id
         : undefined
       if (!target) { target = repartidores[rr % repartidores.length].transportista_id; rr++ }
-      const lista = ordenPorRep.get(target)!
-      const maxOrden = lista.reduce((m, o) => Math.max(m, o.orden), 0)
-      lista.push({ pedido_id: String(pid), orden: maxOrden + 1 })
+      sinCoordsPorRep.get(target)!.push({
+        pedido_id: String(pid),
+        barrida: clasificarBarrida(horarioParaRutear(pedido?.cliente)).barrida,
+      })
+    }
+
+    const ordenPorRep = new Map<string, Array<{ pedido_id: string; orden: number; barrida: Barrida | null }>>()
+    for (const rep of repartidores) {
+      ordenPorRep.set(
+        rep.transportista_id,
+        intercalarSinCoordenadas(
+          ruteadasPorRep.get(rep.transportista_id) ?? [],
+          sinCoordsPorRep.get(rep.transportista_id) ?? [],
+        ),
+      )
     }
 
     // Métricas (distancia/duración/polylines) por chofer desde el optimizador.
@@ -1443,6 +1475,19 @@ export default function PedidosContainer(): React.ReactElement {
           duracion_formato: m?.duracion_formato,
           pedido_ids: lista.slice().sort((a, b) => a.orden - b.orden).map(o => o.pedido_id),
         })
+      }
+
+      // Barridas de todos los choferes en una sola llamada. Igual que en el modo
+      // de un chofer: informativo, si falla no se rompe la ruta ya guardada.
+      const conBarrida = [...ordenPorRep.values()]
+        .flat()
+        .filter(o => o.barrida != null)
+        .map(o => ({ pedido_id: o.pedido_id, barrida: o.barrida }))
+      if (conBarrida.length > 0) {
+        const { error: errBarridas } = await supabase.rpc('actualizar_barridas_recorrido', {
+          p_items: conBarrida,
+        })
+        if (errBarridas) console.error('[rutas] no se pudieron marcar las barridas:', errBarridas)
       }
 
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
