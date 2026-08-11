@@ -12,6 +12,7 @@ import { useAuthData } from '../../contexts/AuthDataContext';
 import DbNotificationBell from './DbNotificationBell';
 import SucursalSelector from './SucursalSelector';
 import VincularTelegramButton from '../perfil/VincularTelegramButton';
+import { BUILD_ACTUAL } from '../../hooks/useActualizacionDisponible';
 import type { PerfilDB, RolUsuario } from '../../types';
 
 // =============================================================================
@@ -352,6 +353,11 @@ export default function TopNavigation({
                     <LogOut className="w-5 h-5" />
                     <span>Cerrar sesion</span>
                   </button>
+                  {/* Sin esto, cuando alguien reporta "me sale distinto" no hay
+                      forma de saber que build esta corriendo. */}
+                  <p className="px-4 pt-2 border-t dark:border-gray-700 text-[11px] text-gray-400 dark:text-gray-500">
+                    Version {BUILD_ACTUAL}
+                  </p>
                 </div>
               )}
             </div>

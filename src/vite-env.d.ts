@@ -17,6 +17,12 @@ interface ImportMeta {
   readonly env: ImportMetaEnv
 }
 
+/**
+ * Identidad del build, inyectada por vite (`define`). Se compara contra
+ * `/version.json` para detectar que hay un deploy nuevo. Ver vite.config.js.
+ */
+declare const __APP_BUILD_ID__: string
+
 // =============================================================================
 // GOOGLE MAPS TYPES
 // =============================================================================
