@@ -128,8 +128,10 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 174** — la última numerada en el repo es
-`173_entrega_del_chofer_actualiza_la_parada`. Las **148–166** (origen del precio, reglas de
+**La próxima migración es la 176** — la última numerada en el repo es
+`175_motivo_de_cancelacion_siempre_tipificado` (aplicada). La **174**
+(`174_salvedad_regalos_y_minimo_de_venta`) y la **175** mapean 1:1 con el ledger.
+Las **148–166** (origen del precio, reglas de
 comisión, `place_id`, horarios masivos, barridas, roles extra por sucursal, horario obligatorio
 al cargar pedido, marcas y objetivos por preventista, saldo a favor que no queda atrapado)
 mapean **1:1** con el ledger, así que no agregan ninguna excepción a las tablas de arriba.
