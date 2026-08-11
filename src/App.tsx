@@ -26,6 +26,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import TopNavigation from './components/layout/TopNavigation'
 import OfflineIndicator from './components/layout/OfflineIndicator'
 import SyncStatusBanner from './components/SyncStatusBanner'
+import BannerActualizacion from './components/BannerActualizacion'
 import SkipLinks from './components/a11y/SkipLinks'
 import ClientesContainer from './components/containers/ClientesContainer'
 import ComprasContainer from './components/containers/ComprasContainer'
@@ -386,6 +387,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
         )}
 
         <SyncStatusBanner onRetrySync={handleRetrySync} />
+        <BannerActualizacion />
       </div>
     </AuthDataProvider>
   )

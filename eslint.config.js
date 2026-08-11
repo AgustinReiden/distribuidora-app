@@ -47,7 +47,11 @@ export default defineConfig([
     ],
     languageOptions: {
       ecmaVersion: 2020,
-      globals: globals.browser,
+      globals: {
+        ...globals.browser,
+        // Lo inyecta vite via `define` (ver vite.config.js).
+        __APP_BUILD_ID__: 'readonly',
+      },
       parser: tsparser,
       parserOptions: {
         ecmaVersion: 'latest',
