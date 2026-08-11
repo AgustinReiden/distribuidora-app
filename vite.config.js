@@ -4,11 +4,52 @@ import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 import os from 'os'
 import process from 'node:process'
+import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const cpuCount = os.availableParallelism?.() ?? os.cpus().length
+
+// Identidad del build. Desde el 20/03 la app no registra service worker (ver
+// pwaAuthHotfix.ts), así que una pestaña abierta se queda con el bundle que
+// cargó ese día para siempre: es lo que dejó a la usuaria cancelando pedidos
+// con el modal de julio en agosto. Con esto la app puede darse cuenta sola de
+// que hay un deploy nuevo, sin resucitar el SW.
+function resolverBuildId() {
+  const desdeCI = process.env.VITE_BUILD_ID
+    || process.env.VERCEL_GIT_COMMIT_SHA
+    || process.env.CF_PAGES_COMMIT_SHA
+    || process.env.GITHUB_SHA
+  if (desdeCI) return desdeCI.slice(0, 12)
+
+  try {
+    return execSync('git rev-parse --short=12 HEAD', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim()
+  } catch {
+    // Build fuera de un repo (tarball, contenedor sin .git): la marca de
+    // tiempo alcanza, solo tiene que cambiar cuando cambia el bundle.
+    return `t${Date.now().toString(36)}`
+  }
+}
+
+const BUILD_ID = resolverBuildId()
+
+// Se sirve desde la raíz y lo consulta useActualizacionDisponible.
+function versionJsonPlugin() {
+  return {
+    name: 'emit-version-json',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify({ buildId: BUILD_ID }),
+      })
+    },
+  }
+}
 
 function cspConnectSrcPlugin() {
   let resolvedEnv = {}
@@ -46,8 +87,13 @@ function cspConnectSrcPlugin() {
 }
 
 export default defineConfig({
+  define: {
+    __APP_BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
+
   plugins: [
     cspConnectSrcPlugin(),
+    versionJsonPlugin(),
     react(),
     VitePWA({
       injectRegister: false,
