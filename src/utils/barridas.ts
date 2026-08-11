@@ -51,6 +51,9 @@ export const UMBRAL_CIERRE_MUY_TEMPRANO = '13:00';
  */
 export const UMBRAL_CIERRE_TEMPRANO = '14:30';
 
+/** Orden en que se recorren los bloques. Espeja ORDEN_BARRIDAS del optimizador. */
+export const ORDEN_BARRIDAS: Barrida[] = [1, 2, 3, 4, 5];
+
 export const ETIQUETA_BARRIDA: Record<Barrida, string> = {
   1: 'Abren temprano y cierran al mediodía',
   2: 'Cierran hasta las 13',
@@ -111,6 +114,132 @@ export function clasificarBarrida(horario?: string | null): ClasificacionBarrida
 
   // 5. Corrido, cierra tarde o abre tarde: tolera la visita al final del día.
   return { barrida: 5, ventanas: franjas };
+}
+
+/** Parada ya ruteada por el optimizador (trae la barrida que le tocó). */
+export interface ParadaRuteada {
+  pedido_id: string;
+  barrida?: Barrida | null;
+}
+
+/** Parada que el optimizador no ordenó (cliente sin coordenadas). */
+export interface ParadaSinCoordenadas {
+  pedido_id: string;
+  barrida: Barrida;
+}
+
+/** La parada de entrada, ya ubicada. Conserva lo demás que traiga (hora estimada, etc.). */
+export type ParadaFinal<T> = T & { orden: number; barrida: Barrida | null };
+
+/**
+ * Intercala las paradas SIN COORDENADAS en el bloque horario que les toca.
+ *
+ * Los clientes sin latitud/longitud no entran al optimizador (Google necesita el
+ * punto), así que antes se anexaban todos al final de la ruta. El resultado era
+ * el peor posible: una despensa de 09:00-14:00 quedaba de última parada, después
+ * de todos los kioscos que cierran a medianoche, y llegaba cerrada. Con ~1 de
+ * cada 5 clientes sin geocodificar, no es un caso de borde.
+ *
+ * No se puede saber DÓNDE va la parada (no hay coordenadas), pero sí CUÁNDO: la
+ * barrida se calcula del horario del cliente igual que para el resto. Así que se
+ * la ubica al final de su propio bloque — el chofer la resuelve por dirección
+ * dentro de la tanda correcta, en vez de a las 5 de la tarde.
+ *
+ * El orden que devolvió el optimizador se respeta tal cual: esto solo inserta.
+ *
+ * @param optimizadas orden devuelto por el optimizador, ya ordenado por barrida.
+ * @param sinCoordenadas paradas a insertar, con su barrida ya clasificada.
+ */
+export function intercalarSinCoordenadas<R extends ParadaRuteada, S extends ParadaSinCoordenadas>(
+  optimizadas: R[],
+  sinCoordenadas: S[],
+): Array<ParadaFinal<R | S>> {
+  const numerar = (items: Array<R | S>): Array<ParadaFinal<R | S>> =>
+    items.map((p, i) => ({ ...p, orden: i + 1, barrida: p.barrida ?? null }));
+
+  // Entre sí siempre van ordenadas por bloque, aunque no haya dónde intercalarlas:
+  // en Taco Pozo hay rutas enteras sin un solo cliente geocodificado.
+  const porBloque = sinCoordenadas
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => a.p.barrida - b.p.barrida || a.i - b.i)
+    .map(({ p }) => p);
+
+  // Sin clasificación por barrida en las ruteadas no hay bloque donde insertar
+  // (p.ej. el fallback sin ventanas horarias): quedan al final, como antes.
+  if (porBloque.length === 0 || !optimizadas.some(o => o.barrida != null)) {
+    return numerar([...optimizadas, ...porBloque]);
+  }
+
+  const pendientes = new Map<Barrida, S[]>();
+  for (const p of porBloque) {
+    const lista = pendientes.get(p.barrida);
+    if (lista) lista.push(p);
+    else pendientes.set(p.barrida, [p]);
+  }
+
+  const salida: Array<R | S> = [];
+  /** Vuelca las pendientes de las barridas ya cerradas (las < `limite`). */
+  const volcarAnteriores = (limite: Barrida | null): void => {
+    for (const b of ORDEN_BARRIDAS) {
+      if (limite != null && b >= limite) break;
+      const lista = pendientes.get(b);
+      if (lista) {
+        salida.push(...lista);
+        pendientes.delete(b);
+      }
+    }
+  };
+
+  let barridaActual: Barrida | null = null;
+  for (const parada of optimizadas) {
+    const b = parada.barrida ?? null;
+    if (b != null && b !== barridaActual) {
+      volcarAnteriores(b);
+      barridaActual = b;
+    }
+    salida.push(parada);
+  }
+  // Lo que quede: la barrida en curso y las posteriores sin ninguna parada ruteada.
+  volcarAnteriores(null);
+
+  return numerar(salida);
+}
+
+/** Cómo cae la hora planificada contra el horario del cliente. */
+export type EncajeHorario = 'ok' | 'temprano' | 'tarde' | 'desconocido';
+
+/**
+ * Contrasta la hora que planificó el optimizador contra el horario del cliente.
+ *
+ * Es el control que faltaba: hasta ahora la ruta se armaba y recién en la calle
+ * se veía que una parada caía con el local cerrado. Con esto el aviso llega
+ * cuando todavía se puede reordenar.
+ *
+ * @param horaEstimada "HH:MM" de llegada según el plan.
+ * @param horario horario del cliente ("HH:MM-HH:MM y …"). Sin franjas → 'desconocido'.
+ */
+export function encajeEnHorario(
+  horaEstimada: string | null | undefined,
+  horario: string | null | undefined,
+): EncajeHorario {
+  const franjas = parsearFranjas(horario);
+  if (!horaEstimada || franjas.length === 0) return 'desconocido';
+
+  // `horaAMinutos` solo admite :00 y :30 (las franjas se cargan en esa grilla);
+  // la hora estimada viene del optimizador con el minuto exacto.
+  const m = /^(\d{1,2}):(\d{2})$/.exec(horaEstimada);
+  if (!m) return 'desconocido';
+  const llegada = Number(m[1]) * 60 + Number(m[2]);
+
+  let antesDeAlguna = false;
+  for (const f of franjas) {
+    const apertura = horaAMinutos(f.apertura);
+    const cierre = horaAMinutos(f.cierre);
+    if (llegada >= apertura && llegada <= cierre) return 'ok';
+    if (llegada < apertura) antesDeAlguna = true;
+  }
+  // Antes de alguna franja todavía se puede esperar; después de todas, ya cerró.
+  return antesDeAlguna ? 'temprano' : 'tarde';
 }
 
 /**

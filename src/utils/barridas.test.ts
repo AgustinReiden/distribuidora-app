@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { clasificarBarrida, abreEnDia, UMBRAL_CIERRE_TEMPRANO } from './barridas';
+import {
+  clasificarBarrida,
+  abreEnDia,
+  encajeEnHorario,
+  intercalarSinCoordenadas,
+  UMBRAL_CIERRE_TEMPRANO,
+  type Barrida,
+} from './barridas';
 import { serializarFranjas } from './horariosCliente';
 
 /**
@@ -159,5 +166,116 @@ describe('abreEnDia', () => {
   it('no se corre un día por zona horaria (fecha parseada como local)', () => {
     expect(abreEnDia('0000001', DOMINGO)).toBe(true);
     expect(abreEnDia('0000010', DOMINGO)).toBe(false);
+  });
+});
+
+/**
+ * El caso que motivó esto: una ruta real de 28 paradas donde la última era una
+ * despensa de 09:00-14:00 — no porque quedara lejos, sino porque el cliente no
+ * tiene coordenadas cargadas y todas esas paradas se anexaban al final.
+ */
+describe('intercalarSinCoordenadas', () => {
+  const ruteadas = (...bs: Barrida[]) =>
+    bs.map((barrida, i) => ({ pedido_id: `opt${i + 1}`, barrida }));
+
+  it('la parada sin coordenadas va al final de SU barrida, no de la ruta', () => {
+    const salida = intercalarSinCoordenadas(
+      ruteadas(1, 3, 3, 5, 5),
+      [{ pedido_id: 'sin1', barrida: 3 }],
+    );
+    expect(salida.map(p => p.pedido_id)).toEqual(['opt1', 'opt2', 'opt3', 'sin1', 'opt4', 'opt5']);
+    expect(salida.map(p => p.orden)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('conserva la barrida de la parada insertada (para la hoja de ruta)', () => {
+    const salida = intercalarSinCoordenadas(ruteadas(1, 5), [{ pedido_id: 'sin1', barrida: 3 }]);
+    expect(salida.find(p => p.pedido_id === 'sin1')?.barrida).toBe(3);
+  });
+
+  it('una barrida sin ninguna parada ruteada igual se ubica en su lugar', () => {
+    // Nadie geocodificado cierra al mediodía, pero la que no tiene coordenadas sí:
+    // tiene que entrar ANTES del bloque de los que cierran tarde.
+    const salida = intercalarSinCoordenadas(ruteadas(1, 5, 5), [{ pedido_id: 'sin1', barrida: 3 }]);
+    expect(salida.map(p => p.pedido_id)).toEqual(['opt1', 'sin1', 'opt2', 'opt3']);
+  });
+
+  it('respeta el orden entre barridas al insertar varias', () => {
+    const salida = intercalarSinCoordenadas(
+      ruteadas(1, 5),
+      [{ pedido_id: 'sinB', barrida: 4 }, { pedido_id: 'sinA', barrida: 2 }],
+    );
+    expect(salida.map(p => p.pedido_id)).toEqual(['opt1', 'sinA', 'sinB', 'opt2']);
+  });
+
+  it('las de la última barrida quedan al final (no hay bloque posterior)', () => {
+    const salida = intercalarSinCoordenadas(ruteadas(1, 3), [{ pedido_id: 'sin1', barrida: 5 }]);
+    expect(salida.map(p => p.pedido_id)).toEqual(['opt1', 'opt2', 'sin1']);
+  });
+
+  it('varias en la misma barrida mantienen su orden relativo', () => {
+    const salida = intercalarSinCoordenadas(
+      ruteadas(3, 5),
+      [{ pedido_id: 'sinA', barrida: 3 }, { pedido_id: 'sinB', barrida: 3 }],
+    );
+    expect(salida.map(p => p.pedido_id)).toEqual(['opt1', 'sinA', 'sinB', 'opt2']);
+  });
+
+  it('sin barridas (fallback sin ventanas) se mantiene el comportamiento previo', () => {
+    const salida = intercalarSinCoordenadas(
+      [{ pedido_id: 'opt1' }, { pedido_id: 'opt2' }],
+      [{ pedido_id: 'sin1', barrida: 1 }],
+    );
+    expect(salida.map(p => p.pedido_id)).toEqual(['opt1', 'opt2', 'sin1']);
+  });
+
+  it('sin paradas para insertar devuelve el orden del optimizador tal cual', () => {
+    const salida = intercalarSinCoordenadas(ruteadas(1, 3, 5), []);
+    expect(salida.map(p => p.pedido_id)).toEqual(['opt1', 'opt2', 'opt3']);
+  });
+
+  it('ruta entera sin coordenadas: igual se ordena por barrida', () => {
+    // Taco Pozo: ninguno de los 13 clientes de la ruta tiene lat/lng cargada.
+    const salida = intercalarSinCoordenadas([], [
+      { pedido_id: 'sinC', barrida: 5 },
+      { pedido_id: 'sinA', barrida: 1 },
+      { pedido_id: 'sinB', barrida: 3 },
+    ]);
+    expect(salida.map(p => p.pedido_id)).toEqual(['sinA', 'sinB', 'sinC']);
+  });
+});
+
+describe('encajeEnHorario', () => {
+  it('dentro de la franja está OK', () => {
+    expect(encajeEnHorario('10:15', '09:00-14:00')).toBe('ok');
+    expect(encajeEnHorario('09:00', '09:00-14:00')).toBe('ok');
+    expect(encajeEnHorario('14:00', '09:00-14:00')).toBe('ok');
+  });
+
+  it('después de que cerró es tarde: la entrega se pierde', () => {
+    expect(encajeEnHorario('15:40', '09:00-14:00')).toBe('tarde');
+  });
+
+  it('antes de que abra es temprano: se puede esperar, pero conviene avisar', () => {
+    expect(encajeEnHorario('07:45', '08:30-14:30')).toBe('temprano');
+  });
+
+  it('el horario cortado vale por cualquiera de sus franjas', () => {
+    expect(encajeEnHorario('12:00', '09:00-13:00 y 18:00-22:00')).toBe('ok');
+    expect(encajeEnHorario('19:00', '09:00-13:00 y 18:00-22:00')).toBe('ok');
+    // En el hueco del mediodía todavía puede esperar a la franja de la tarde.
+    expect(encajeEnHorario('15:00', '09:00-13:00 y 18:00-22:00')).toBe('temprano');
+    expect(encajeEnHorario('23:00', '09:00-13:00 y 18:00-22:00')).toBe('tarde');
+  });
+
+  it('acepta el minuto exacto del optimizador, no solo :00 y :30', () => {
+    expect(encajeEnHorario('08:12', '08:00-14:00')).toBe('ok');
+    expect(encajeEnHorario('14:07', '08:00-14:00')).toBe('tarde');
+  });
+
+  it('sin horario utilizable o sin estimación no opina', () => {
+    expect(encajeEnHorario('10:00', null)).toBe('desconocido');
+    expect(encajeEnHorario('10:00', 'de 9 a 14')).toBe('desconocido');
+    expect(encajeEnHorario(null, '09:00-14:00')).toBe('desconocido');
+    expect(encajeEnHorario('no-es-hora', '09:00-14:00')).toBe('desconocido');
   });
 });

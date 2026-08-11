@@ -12,6 +12,8 @@ interface OptimizeToursVisit {
   shipmentLabel?: string;
   shipmentIndex?: number;
   isPickup?: boolean;
+  /** RFC3339. Cuándo el plan llega a esta parada (incluye la espera si abre después). */
+  startTime?: string;
 }
 interface OptimizeToursRoute {
   vehicleIndex?: number;
@@ -77,6 +79,7 @@ export function parseOptimizeTours(data: OptimizeToursResponse, pedidos: PedidoR
       orden: ordenOptimizado.length + 1,
       cliente: p.cliente_nombre ?? p.nombre_fantasia ?? "Sin nombre",
       direccion: p.direccion ?? "",
+      hora_estimada: hhmmDesdeIso(v.startTime) ?? undefined,
     });
     ultimaParada = { latitude: p.latitud, longitude: p.longitud };
   }
@@ -101,12 +104,67 @@ export function parseOptimizeTours(data: OptimizeToursResponse, pedidos: PedidoR
 const TZ = "-03:00";
 const SERVICE_SECONDS = 480; // ~8 min por parada: timing realista para las ventanas
 const COST_LATE_PER_HOUR = 1000; // penalización ALTA por llegar tarde → prioriza la ventana
-const COST_EARLY_PER_HOUR = 500; // llegar antes de que abra = puerta cerrada, no "esperar"
+
+// Costos del vehículo. Sin ninguno, el modelo no tiene función objetivo propia:
+// cualquier orden factible le da lo mismo y las penalizaciones de ventana son lo
+// único que pesa. Fijarlos hace explícito el canje "km de más vs. llegar fuera
+// de hora": 1 km = 1, 1 hora de camión = 25 km. Contra COST_LATE_PER_HOUR = 1000
+// el optimizador acepta un desvío grande antes que llegar con el local cerrado,
+// que es exactamente el criterio de la operación (una entrega perdida vuelve a
+// costar el viaje entero).
+const COST_PER_KM = 1;
+const COST_PER_HOUR = 25;
 
 /** Timestamp RFC3339 en hora de Argentina. "24:00" (cierre a medianoche) → 23:59:59. */
 function isoFecha(fecha: string, hhmm: string): string {
   const t = hhmm === "24:00" ? "23:59:59" : `${hhmm}:00`;
   return `${fecha}T${t}${TZ}`;
+}
+
+/** Duración del reparto desde que sale el camión. */
+const JORNADA_HORAS = 10;
+
+/**
+ * Fin de la jornada de reparto: "HH:MM" de salida + JORNADA_HORAS (tope 23:30).
+ *
+ * Acota qué franjas del cliente son entregas posibles de verdad. Sin esto, la
+ * ventana de la tarde de un local cortado (09:00-13:00 y 18:00-22:00) es una
+ * salida de emergencia para el optimizador: si no llega antes de las 13 puede
+ * planificar esperar hasta las 18 y dar por resuelta la parada, cuando en la
+ * calle esa entrega simplemente no se hace.
+ */
+export function finDeJornada(horaInicio: string | undefined): string | null {
+  if (!horaInicio) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(horaInicio);
+  if (!m) return null;
+  const minutos = Number(m[1]) * 60 + Number(m[2]) + JORNADA_HORAS * 60;
+  if (!Number.isFinite(minutos)) return null;
+  const tope = 23 * 60 + 30;
+  const fin = Math.min(minutos, tope);
+  return `${String(Math.floor(fin / 60)).padStart(2, "0")}:${String(fin % 60).padStart(2, "0")}`;
+}
+
+/** "HH:MM" → minutos desde medianoche. NaN si no parsea. */
+function hhmmAMinutos(hhmm: string): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+}
+
+/**
+ * Descarta las franjas que arrancan después de que termina el reparto.
+ * Si no queda ninguna (el cliente solo atiende de noche) se conserva la primera:
+ * es preferible una ventana imposible —que el optimizador penaliza y deja para
+ * el final— a una parada sin restricción horaria, que caería en cualquier lado.
+ */
+function franjasDeLaJornada(
+  franjas: Array<{ inicio: string; fin: string }>,
+  horaFinJornada: string | null,
+): Array<{ inicio: string; fin: string }> {
+  if (!horaFinJornada) return franjas;
+  const tope = hhmmAMinutos(horaFinJornada);
+  if (!Number.isFinite(tope)) return franjas;
+  const utiles = franjas.filter((f) => hhmmAMinutos(f.inicio) < tope);
+  return utiles.length > 0 ? utiles : franjas.slice(0, 1);
 }
 
 export interface OptimizeToursOpts {
@@ -124,19 +182,52 @@ export interface OptimizeToursOpts {
     pedido_id: string | number;
     franjas: Array<{ inicio: string; fin: string }>;
   }>;
+  /**
+   * "HH:MM" en que termina el reparto. Lo calculan las funciones por barridas a
+   * partir de la salida del camión y se mantiene fijo entre bloques (si se
+   * recalculara por barrida, cada una correría el fin de jornada más tarde).
+   */
+  horaFinJornada?: string | null;
 }
 
-/** Convierte las franjas de un pedido a timeWindows blandas de la API. */
+/**
+ * Convierte las franjas de un pedido a timeWindows de la API.
+ *
+ * La APERTURA es dura (`startTime`) y el CIERRE blando (`softEndTime` + costo por
+ * hora de atraso). No es simetría rota, es cómo funciona el negocio:
+ *
+ * - Antes de que abra no hay entrega posible, no hay "llegar un poco temprano".
+ *   Con la apertura blanda el modelo creía que podía descargar a las 07:45 en un
+ *   local que abre 08:30 pagando una multa chica, y armaba la ruta con esa
+ *   ficción: mandaba dos aperturas 07:30 y 08:30 seguidas y el chofer quedaba una
+ *   hora parado. Con `startTime` duro el vehículo ESPERA, esa espera cuesta
+ *   (COST_PER_HOUR) y el optimizador prefiere reordenar antes que hacer tiempo.
+ * - El cierre, en cambio, no puede ser duro: si una parada no entra antes de que
+ *   cierre, el modelo se volvería infactible y se caería la ruta entera. Blando
+ *   la deja adentro, tarde y con una penalización alta que la empuja a tiempo.
+ *
+ * Con varias franjas (horario cortado) la API exige ventanas disjuntas, y una
+ * `endTime` sin especificar toma `globalEndTime` — dos ventanas terminarían las
+ * dos a las 23:59 y se solaparían. Por eso todas cierran duro salvo la última,
+ * que es la que conserva la salida blanda.
+ */
 function timeWindowsDe(
   franjas: Array<{ inicio: string; fin: string }>,
   fecha: string,
 ): Array<Record<string, unknown>> {
-  return franjas.map((f) => ({
-    softStartTime: isoFecha(fecha, f.inicio),
-    softEndTime: isoFecha(fecha, f.fin),
-    costPerHourBeforeSoftStartTime: COST_EARLY_PER_HOUR,
-    costPerHourAfterSoftEndTime: COST_LATE_PER_HOUR,
-  }));
+  return franjas.map((f, i) => {
+    const esUltima = i === franjas.length - 1;
+    return esUltima
+      ? {
+        startTime: isoFecha(fecha, f.inicio),
+        softEndTime: isoFecha(fecha, f.fin),
+        costPerHourAfterSoftEndTime: COST_LATE_PER_HOUR,
+      }
+      : {
+        startTime: isoFecha(fecha, f.inicio),
+        endTime: isoFecha(fecha, f.fin),
+      };
+  });
 }
 
 /**
@@ -162,8 +253,12 @@ export function construirModeloSingle(
     if (v.franjas?.length) ventanasMap.set(String(v.pedido_id), v.franjas);
   }
 
+  const finJornada = opts.horaFinJornada ?? finDeJornada(opts.horaInicio);
+
   const vehicle: Record<string, unknown> = {
     startLocation: { latitude: deposito.latitude, longitude: deposito.longitude },
+    costPerKilometer: COST_PER_KM,
+    costPerHour: COST_PER_HOUR,
   };
   if (destino) {
     vehicle.endLocation = { latitude: destino.latitude, longitude: destino.longitude };
@@ -183,7 +278,12 @@ export function construirModeloSingle(
       if (usarTiempos) {
         delivery.duration = `${SERVICE_SECONDS}s`;
         const franjas = ventanasMap.get(String(p.pedido_id));
-        if (franjas) delivery.timeWindows = timeWindowsDe(franjas, opts.fecha!);
+        if (franjas) {
+          delivery.timeWindows = timeWindowsDe(
+            franjasDeLaJornada(franjas, finJornada),
+            opts.fecha!,
+          );
+        }
       }
       return { label: String(p.pedido_id), deliveries: [delivery] };
     }),
@@ -205,7 +305,7 @@ export function construirModeloSingle(
  *
  * Si `opts.fecha` + `opts.horaInicio` están presentes, agrega el ancla temporal
  * (globalStartTime + arranque del vehículo) y, por cada pedido con ventana, una
- * timeWindow BLANDA con penalización alta por llegar tarde: el optimizador
+ * timeWindow con apertura DURA y cierre blando penalizado: el optimizador
  * adelanta esas paradas por sobre el ahorro de distancia, pero nunca las saltea.
  */
 export async function optimizeTours(
@@ -304,6 +404,9 @@ export async function optimizeToursPorBarridas(
 
   let origen = deposito;
   let horaInicio = opts.horaInicio;
+  // Fijo para toda la ruta: se calcula de la salida del camión, no del arranque
+  // de cada bloque (si no, cada barrida correría el fin de jornada más tarde).
+  const horaFinJornada = opts.horaFinJornada ?? finDeJornada(opts.horaInicio);
 
   for (let i = 0; i < conPedidos.length; i++) {
     const barrida = conPedidos[i];
@@ -315,7 +418,7 @@ export async function optimizeToursPorBarridas(
       grupos[barrida],
       // Solo la última barrida termina en el punto de llegada configurado.
       esUltima ? destino : null,
-      { ...opts, horaInicio },
+      { ...opts, horaInicio, horaFinJornada },
     );
 
     for (const item of tramo.ordenOptimizado) {
@@ -396,6 +499,7 @@ function parseRutaVehiculo(route: OptimizeToursRoute, byLabel: Map<string, Pedid
       orden: ordenOptimizado.length + 1,
       cliente: p.cliente_nombre ?? p.nombre_fantasia ?? "Sin nombre",
       direccion: p.direccion ?? "",
+      hora_estimada: hhmmDesdeIso(v.startTime) ?? undefined,
     });
     ultimaParada = { latitude: p.latitud, longitude: p.longitud };
   }
@@ -464,6 +568,7 @@ export async function optimizeToursMulti(
   const token = await getAccessToken(sa);
 
   const usarTiempos = !!(opts.fecha && opts.horaInicio);
+  const finJornada = opts.horaFinJornada ?? finDeJornada(opts.horaInicio);
   const ventanasMap = new Map<string, Array<{ inicio: string; fin: string }>>();
   for (const v of opts.ventanas ?? []) {
     if (v.franjas?.length) ventanasMap.set(String(v.pedido_id), v.franjas);
@@ -490,7 +595,12 @@ export async function optimizeToursMulti(
       if (usarTiempos) {
         delivery.duration = `${SERVICE_SECONDS}s`;
         const franjas = ventanasMap.get(String(p.pedido_id));
-        if (franjas) delivery.timeWindows = timeWindowsDe(franjas, opts.fecha!);
+        if (franjas) {
+          delivery.timeWindows = timeWindowsDe(
+            franjasDeLaJornada(franjas, finJornada),
+            opts.fecha!,
+          );
+        }
       }
       const shipment: Record<string, unknown> = {
         label: String(p.pedido_id),
@@ -514,6 +624,8 @@ export async function optimizeToursMulti(
       const vehicle: Record<string, unknown> = {
         label: r.transportista_id,
         startLocation: { latitude: origen.latitude, longitude: origen.longitude },
+        costPerKilometer: COST_PER_KM,
+        costPerHour: COST_PER_HOUR,
       };
       // destino null = ruta abierta (barrida intermedia): termina en la última parada.
       if (destino) {
@@ -589,6 +701,9 @@ export async function optimizeToursMultiPorBarridas(
     5: grupos[5].length,
   };
 
+  // Fijo para toda la ruta (ver optimizeToursPorBarridas).
+  const horaFinJornada = opts.horaFinJornada ?? finDeJornada(opts.horaInicio);
+
   // Estado de cada chofer entre barridas.
   const estado = new Map<string, { origen: LatLng; horaInicio: string | null; usadas: number }>();
   for (const r of repartidores) {
@@ -629,7 +744,7 @@ export async function optimizeToursMultiPorBarridas(
       deposito,
       grupos[barrida],
       esUltima ? destino : null,
-      opts,
+      { ...opts, horaFinJornada },
       vehiculos,
     );
     skipped.push(...res.skipped);
