@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta, calcularTotalesCompra, calcularMargenPorcentaje } from './calculations'
+import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta, calcularTotalesCompra, calcularMargenPorcentaje, calcularNetoDesdeTotal } from './calculations'
 
 // Fixture: factura A 0005-00455160 de Refres Now (Manaos) → T.P. Export,
 // 16/06/2026. Tasas efectivas de imp. internos sobre el neto:
@@ -84,6 +84,30 @@ describe('margen bruto de la ficha según tipo de compra', () => {
   })
 })
 
+// Regresión (mig 177): ModalProducto pasaba `Number(porcentaje_iva) || 21` a
+// ProductoCondicionesMayoristas. En un producto exento (alícuota 0) el `||`
+// caía a 21 y el margen mayorista se calculaba dividiendo el precio por 1,21.
+describe('margen mayorista de un producto sin IVA', () => {
+  const margenNetoEscala = (precio: number, costoReal: number, porcentajeIva: number) =>
+    calcularMargenPorcentaje(calcularNetoDesdeTotal(precio, porcentajeIva, 0), costoReal)
+
+  it('exento: el precio final ES el neto, no se divide por 1,21', () => {
+    expect(calcularNetoDesdeTotal(1000, 0, 0)).toBe(1000)
+    expect(margenNetoEscala(1000, 700, 0)).toBeCloseTo(42.86, 2)
+  })
+
+  it('el bug viejo daba ~21 puntos de menos', () => {
+    const real = margenNetoEscala(1000, 700, 0)
+    const conElBug = margenNetoEscala(1000, 700, 21) // lo que hacía `|| 21`
+    expect(conElBug).toBeCloseTo(18.06, 2)
+    expect(real - conElBug).toBeGreaterThan(20)
+  })
+
+  it('gravado al 21%: sigue igual que siempre', () => {
+    expect(margenNetoEscala(1210, 700, 21)).toBeCloseTo(42.86, 2)
+  })
+})
+
 describe('calcularNetoVenta (mig 123: terna neto / iva / ingreso real)', () => {
   it('FC: neto = precio/(1+IVA%); ingreso real = neto; el II se ignora (no somos agente)', () => {
     // Venta FC de una cola a $10.000 final: aunque el producto tenga II 8,6956%,
@@ -135,5 +159,72 @@ describe('calcularTotalesCompra (estructura de la factura A)', () => {
     expect(t.percepcionIva).toBe(0)
     expect(t.noGravado).toBe(0)
     expect(t.total).toBeCloseTo(t.subtotal, 2)
+  })
+
+  it('sin condicionIva se comporta como antes: todo gravado', () => {
+    const t = calcularTotalesCompra(items, 'FC')
+    expect(t.netoGravado).toBeCloseTo(t.subtotal, 6)
+    expect(t.netoExento).toBe(0)
+    expect(t.netoNoGravado).toBe(0)
+  })
+})
+
+// mig 177: una misma factura puede mezclar condiciones. El IVA sale sólo de las
+// líneas gravadas; exento y no gravado suman al total pero no generan crédito.
+describe('calcularTotalesCompra con condiciones mezcladas', () => {
+  const mixta = [
+    { cantidad: 10, costoUnitario: 1000, porcentajeIva: 21 },
+    { cantidad: 10, costoUnitario: 500, porcentajeIva: 10.5 },
+    { cantidad: 4, costoUnitario: 250, porcentajeIva: 0, condicionIva: 'exento' as const },
+    { cantidad: 2, costoUnitario: 300, porcentajeIva: 0, condicionIva: 'no_gravado' as const },
+  ]
+
+  it('separa el neto por condición y el subtotal sigue siendo la suma de las tres', () => {
+    const t = calcularTotalesCompra(mixta, 'FC')
+    expect(t.netoGravado).toBeCloseTo(15000, 2) // 10000 + 5000
+    expect(t.netoExento).toBeCloseTo(1000, 2)
+    expect(t.netoNoGravado).toBeCloseTo(600, 2)
+    expect(t.subtotal).toBeCloseTo(16600, 2)
+    expect(t.subtotal).toBeCloseTo(t.netoGravado + t.netoExento + t.netoNoGravado, 6)
+  })
+
+  it('el IVA se liquida por alícuota y sólo sobre lo gravado', () => {
+    const t = calcularTotalesCompra(mixta, 'FC')
+    expect(t.netoPorAlicuota).toEqual({ '21': 10000, '10.5': 5000 })
+    expect(t.iva).toBeCloseTo(10000 * 0.21 + 5000 * 0.105, 2) // 2625
+    // Lo exento y lo no gravado no aportan nada de crédito fiscal
+    expect(t.iva).toBeCloseTo(2625, 2)
+  })
+
+  it('el total reconstruye la factura entera', () => {
+    const t = calcularTotalesCompra(mixta, 'FC', { percepcionIva: 300, percepcionIibb: 150, noGravado: 800 })
+    expect(t.total).toBeCloseTo(16600 + 2625 + 300 + 150 + 800, 2)
+    // El "no gravado" de cabecera (pallets) es independiente de las líneas no gravadas
+    expect(t.noGravado).toBe(800)
+    expect(t.netoNoGravado).toBeCloseTo(600, 2)
+  })
+
+  it('una línea no gravada nunca aporta IVA, aunque traiga una alícuota cargada', () => {
+    const t = calcularTotalesCompra(
+      [{ cantidad: 1, costoUnitario: 1000, porcentajeIva: 21, condicionIva: 'no_gravado' as const }], 'FC')
+    expect(t.iva).toBe(0)
+    expect(t.netoPorAlicuota).toEqual({})
+    expect(t.netoNoGravado).toBeCloseTo(1000, 2)
+  })
+
+  it('la bonificación se aplica antes de clasificar el neto', () => {
+    const t = calcularTotalesCompra(
+      [{ cantidad: 10, costoUnitario: 1000, bonificacion: 10, condicionIva: 'exento' as const }], 'FC')
+    expect(t.netoExento).toBeCloseTo(9000, 2)
+    expect(t.bonificacionTotal).toBeCloseTo(1000, 2)
+  })
+
+  it('ZZ ignora la condición: sin factura no hay clasificación (espejo del RPC)', () => {
+    const t = calcularTotalesCompra(mixta, 'ZZ')
+    expect(t.netoGravado).toBeCloseTo(t.subtotal, 6)
+    expect(t.netoExento).toBe(0)
+    expect(t.netoNoGravado).toBe(0)
+    expect(t.netoPorAlicuota).toEqual({})
+    expect(t.iva).toBe(0)
   })
 })

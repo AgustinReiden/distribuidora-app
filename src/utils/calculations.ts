@@ -205,6 +205,13 @@ export function calcularCostoPromedioPonderado(
 // CÁLCULOS DE COMPRAS (desglose fiscal completo)
 // ============================================
 
+/**
+ * Condición frente al IVA de una línea o de un producto (mig 177).
+ * `exento` y `no_gravado` no generan crédito fiscal; la diferencia importa para
+ * el libro IVA (columnas distintas), no para el total.
+ */
+export type CondicionIva = 'gravado' | 'exento' | 'no_gravado';
+
 export interface CompraItemCalculo {
   cantidad: number;
   costoUnitario: number;
@@ -212,6 +219,8 @@ export interface CompraItemCalculo {
   porcentajeIva?: number;
   /** Tasa efectiva de imp. internos (%) */
   impuestosInternos?: number;
+  /** Default: 'gravado' (así se comporta una línea que no lo trae). */
+  condicionIva?: CondicionIva;
 }
 
 export interface CompraExtras {
@@ -224,12 +233,24 @@ export interface CompraExtras {
 export interface TotalesCompra {
   subtotalBruto: number;
   bonificacionTotal: number;
-  /** Neto gravado (bruto − bonif) */
+  /**
+   * Neto de TODAS las líneas (bruto − bonif) = netoGravado + netoExento +
+   * netoNoGravado. Es lo que se manda como p_subtotal y lo que valida el check
+   * COMPRA-A2 contra SUM(compra_items.subtotal): no estrecharlo a "sólo
+   * gravado" o toda factura mixta quedaría en rojo.
+   */
   subtotal: number;
+  netoGravado: number;
+  netoExento: number;
+  /** Líneas de producto no gravadas. NO es `noGravado` (cabecera, sin línea). */
+  netoNoGravado: number;
+  /** Neto gravado abierto por alícuota: { '21': 10000, '10.5': 5000 } */
+  netoPorAlicuota: Record<string, number>;
   iva: number;
   impuestosInternos: number;
   percepcionIva: number;
   percepcionIibb: number;
+  /** Conceptos de cabecera fuera del IVA (pallets, envases): sin línea de producto. */
   noGravado: number;
   otrosImpuestos: number;
   total: number;
@@ -237,21 +258,30 @@ export interface TotalesCompra {
 
 /**
  * Totales de una compra según tipo de comprobante (fuente única del modal de
- * compras; estructura = factura A real: total = gravado + IVA + II +
- * percepciones + no gravado + otros).
+ * compras; estructura = factura A real: total = neto de líneas + IVA + II +
+ * percepciones + no gravado de cabecera + otros).
+ *
+ * Una misma factura puede mezclar condiciones (mig 177): sólo las líneas
+ * gravadas generan IVA, y el crédito se liquida una vez por alícuota, igual que
+ * lo imprime el proveedor.
  *
  * ZZ (sin factura): lo pagado es todo — sin IVA, sin II, sin percepciones ni
- * no gravado. total = subtotal.
+ * no gravado, y sin clasificación (espejo del RPC, que fuerza 'gravado').
+ * total = subtotal.
  */
 export function calcularTotalesCompra(
   items: CompraItemCalculo[],
   tipoFactura: 'ZZ' | 'FC' = 'FC',
   extras: CompraExtras = {}
 ): TotalesCompra {
+  const esFC = tipoFactura === 'FC';
   let subtotalBruto = 0;
   let bonificacionTotal = 0;
-  let iva = 0;
   let impuestosInternos = 0;
+  let netoGravado = 0;
+  let netoExento = 0;
+  let netoNoGravado = 0;
+  const netoPorAlicuota: Record<string, number> = {};
 
   for (const item of items) {
     const bruto = (item.cantidad || 0) * (item.costoUnitario || 0);
@@ -259,14 +289,28 @@ export function calcularTotalesCompra(
     const neto = bruto - bonif;
     subtotalBruto += bruto;
     bonificacionTotal += bonif;
-    if (tipoFactura === 'FC') {
-      iva += neto * ((item.porcentajeIva ?? 21) / 100);
+
+    // En ZZ no hay comprobante que clasificar: todo entra como gravado.
+    const condicion: CondicionIva = esFC ? (item.condicionIva ?? 'gravado') : 'gravado';
+    if (condicion === 'exento') netoExento += neto;
+    else if (condicion === 'no_gravado') netoNoGravado += neto;
+    else netoGravado += neto;
+
+    if (esFC) {
+      // Los imp. internos son un impuesto propio: no dependen de la condición
+      // frente al IVA.
       impuestosInternos += neto * ((item.impuestosInternos || 0) / 100);
+      if (condicion === 'gravado') {
+        const alicuota = String(item.porcentajeIva ?? 21);
+        netoPorAlicuota[alicuota] = (netoPorAlicuota[alicuota] || 0) + neto;
+      }
     }
   }
 
+  const iva = Object.entries(netoPorAlicuota)
+    .reduce((acc, [alicuota, neto]) => acc + neto * (parseFloat(alicuota) / 100), 0);
+
   const subtotal = subtotalBruto - bonificacionTotal;
-  const esFC = tipoFactura === 'FC';
   const percepcionIva = esFC ? (extras.percepcionIva || 0) : 0;
   const percepcionIibb = esFC ? (extras.percepcionIibb || 0) : 0;
   const noGravado = esFC ? (extras.noGravado || 0) : 0;
@@ -274,7 +318,9 @@ export function calcularTotalesCompra(
   const total = subtotal + iva + impuestosInternos + percepcionIva + percepcionIibb + noGravado + otrosImpuestos;
 
   return {
-    subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos,
+    subtotalBruto, bonificacionTotal, subtotal,
+    netoGravado, netoExento, netoNoGravado, netoPorAlicuota,
+    iva, impuestosInternos,
     percepcionIva, percepcionIibb, noGravado, otrosImpuestos, total,
   };
 }

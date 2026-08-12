@@ -1,7 +1,7 @@
 import React from 'react'
 import { X, ShoppingCart, Package, Building2, Calendar, CreditCard, FileText, TrendingUp, Hash } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
-import type { Producto, Proveedor, Usuario } from '../../types'
+import type { CondicionIva, Producto, Proveedor, Usuario } from '../../types'
 
 type EstadoCompra = 'pendiente' | 'recibida' | 'parcial' | 'cancelada';
 type FormaPagoCompra = 'efectivo' | 'transferencia' | 'cheque' | 'cuenta_corriente' | 'tarjeta';
@@ -35,6 +35,20 @@ interface CompraItem {
   subtotal?: number;
   stock_anterior?: number;
   stock_nuevo?: number;
+  /** Snapshots fiscales de la línea (mig 113/177); NULL en líneas viejas. */
+  porcentaje_iva?: number | null;
+  condicion_iva?: CondicionIva | null;
+}
+
+/**
+ * Etiqueta fiscal de la línea. Con una factura mixta el detalle es ilegible sin
+ * esto: no se entiende por qué el total no es subtotal × 1,21.
+ */
+function etiquetaFiscalLinea(item: CompraItem): string {
+  const condicion = item.condicion_iva ?? 'gravado';
+  if (condicion === 'exento') return 'Exento';
+  if (condicion === 'no_gravado') return 'No gravado';
+  return item.porcentaje_iva == null ? 'IVA s/d' : `IVA ${item.porcentaje_iva}%`;
 }
 
 interface CompraDetalle {
@@ -94,6 +108,8 @@ export default function ModalDetalleCompra({
 
   const estado = ESTADOS_COMPRA[compra.estado] || ESTADOS_COMPRA.pendiente
   const totalUnidades = (compra.items || []).reduce((sum, i) => sum + i.cantidad + (i.bonificacion || 0), 0)
+  // En ZZ no hay comprobante que clasificar: la etiqueta fiscal sobra.
+  const esFC = (compra.tipo_factura ?? 'FC') === 'FC'
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -219,6 +235,9 @@ export default function ModalDetalleCompra({
                         <p className="text-xs text-gray-500">
                           Stock: {item.stock_anterior} -&gt; {item.stock_nuevo}
                           <TrendingUp className="inline w-3 h-3 ml-1 text-green-500" />
+                          {/* Con alícuotas mezcladas, sin esto no se entiende
+                              por qué el total no es subtotal × 1,21. */}
+                          {esFC && <span className="ml-2">· {etiquetaFiscalLinea(item)}</span>}
                         </p>
                       </td>
                       <td className="px-4 py-3 text-center text-gray-800 dark:text-white">
@@ -271,7 +290,7 @@ export default function ModalDetalleCompra({
               )}
               {(compra.no_gravado ?? 0) > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-400">No gravado:</span>
+                  <span className="text-gray-600 dark:text-gray-400">No gravado (cabecera):</span>
                   <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.no_gravado!)}</span>
                 </div>
               )}

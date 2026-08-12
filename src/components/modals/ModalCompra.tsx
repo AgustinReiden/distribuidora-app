@@ -10,10 +10,11 @@ import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { calcularTotalesCompra } from '../../utils/calculations'
 import type { TotalesCompra } from '../../utils/calculations'
+import { OPCIONES_CONDICION_IVA, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
 import NumberInput from '../ui/NumberInput'
 import { supabase } from '../../lib/supabase'
 import { CompactErrorBoundary } from '../ErrorBoundary'
-import type { ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
+import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
 
 const ModalProveedor = lazy(() => import('./ModalProveedor'))
 const ModalImportarCompra = lazy(() => import('./ModalImportarCompra'))
@@ -32,8 +33,14 @@ export interface CompraItemForm {
   costoUnitario: number;
   impuestosInternos: number;
   porcentajeIva: number;
+  /** Condición de la línea (mig 177). Se siembra del producto y se puede pisar acá. */
+  condicionIva: CondicionIva;
   stockActual: number;
 }
+
+/** Clave del selector fiscal para el par que tenga la línea. */
+const claveCondicionLinea = (item: CompraItemForm): string =>
+  claveCondicionIva(item.condicionIva, item.porcentajeIva)
 
 /** Resultado del escaneo de factura via n8n */
 export interface FacturaEscaneada {
@@ -102,7 +109,9 @@ function construirCompraItemDesdeScan(
     bonificacion: scanItem.bonificacion || 0,
     costoUnitario: scanItem.costoUnitario || 0,
     impuestosInternos: 0,
-    porcentajeIva: scanItem.iva || 21,
+    // `??`, no `||`: un 0 legítimo del escaneo (línea exenta) se convertía en 21.
+    porcentajeIva: scanItem.iva ?? producto.porcentaje_iva ?? 21,
+    condicionIva: producto.condicion_iva ?? 'gravado',
     stockActual: producto.stock || 0
   }
 }
@@ -163,6 +172,8 @@ type CompraActionType =
   | { type: 'SET_ERROR'; payload: string }
   | { type: 'AGREGAR_ITEM'; payload: ProductoDB }
   | { type: 'ACTUALIZAR_ITEM'; payload: { index: number; campo: keyof CompraItemForm; valor: number | string } }
+  // Condición y alícuota se setean juntas: la condición manda sobre la tasa.
+  | { type: 'SET_CONDICION_ITEM'; payload: { index: number; clave: string } }
   | { type: 'ELIMINAR_ITEM'; payload: number }
   | { type: 'LIMPIAR_BUSQUEDA' }
   | { type: 'SET_MODO_ITEM_RAPIDO'; payload: boolean }
@@ -210,8 +221,10 @@ interface ProductosSectionProps {
   dispatch: React.Dispatch<CompraActionType>;
   productosFiltrados: ProductoDB[];
   iiMaster: Record<string, number>;
+  condicionMaster: Record<string, string>;
   onAgregarItem: (producto: ProductoDB) => void;
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
+  onCondicionItem: (index: number, clave: string) => void;
   onEliminarItem: (index: number) => void;
   onCrearProductoRapido?: (data: { nombre: string; codigo: string; costoSinIva: number }) => Promise<ProductoDB>;
   onImportarExcel?: () => void;
@@ -221,9 +234,12 @@ interface ProductosSectionProps {
 interface ItemsListProps {
   items: CompraItemForm[];
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
+  onCondicionItem: (index: number, clave: string) => void;
   onEliminarItem: (index: number) => void;
   /** Tasa de II vigente del producto (para avisar si la línea difiere) */
   iiMaster: Record<string, number>;
+  /** Clave de condición vigente en la ficha del producto (mig 177) */
+  condicionMaster: Record<string, string>;
 }
 
 /** Props de ItemRow */
@@ -231,9 +247,12 @@ interface ItemRowProps {
   item: CompraItemForm;
   index: number;
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
+  onCondicionItem: (index: number, clave: string) => void;
   onEliminarItem: (index: number) => void;
   /** Tasa de II vigente en el maestro del producto (undefined = desconocida) */
   iiDelProducto?: number;
+  /** Clave de condición de la ficha (undefined = desconocida) */
+  condicionDelProducto?: string;
 }
 
 /** Props de ResumenSection */
@@ -342,6 +361,7 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
           costoUnitario: producto.costo_sin_iva || 0,
           impuestosInternos: producto.impuestos_internos || 0,
           porcentajeIva: producto.porcentaje_iva ?? 21,
+          condicionIva: producto.condicion_iva ?? 'gravado',
           stockActual: producto.stock
         }],
         busquedaProducto: '',
@@ -358,6 +378,19 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
             : item
         )
       }
+
+    case 'SET_CONDICION_ITEM': {
+      const opcion = OPCIONES_CONDICION_IVA.find(o => o.clave === action.payload.clave)
+      if (!opcion) return state
+      return {
+        ...state,
+        items: state.items.map((item, i) =>
+          i === action.payload.index
+            ? { ...item, condicionIva: opcion.condicion, porcentajeIva: opcion.porcentaje }
+            : item
+        )
+      }
+    }
 
     case 'ELIMINAR_ITEM':
       return {
@@ -384,6 +417,7 @@ function compraReducer(state: CompraState, action: CompraActionType): CompraStat
           costoUnitario,
           impuestosInternos: 0,
           porcentajeIva: 21,
+          condicionIva: 'gravado',
           stockActual: 0
         }],
         modoItemRapido: false,
@@ -506,6 +540,19 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
     () => Object.fromEntries(productos.map(p => [String(p.id), Number(p.impuestos_internos ?? 0)])),
     [productos]
   )
+
+  // Condición fiscal vigente por producto. A diferencia del II, una condición
+  // distinta en la línea NO se propaga al maestro: la venta hereda del producto
+  // y un typo acá cambiaría el IVA de todas las ventas futuras. Solo se avisa.
+  const condicionMaster = useMemo<Record<string, string>>(
+    () => Object.fromEntries(productos.map(p => [
+      String(p.id),
+      (p.condicion_iva ?? 'gravado') === 'gravado'
+        ? `gravado:${p.porcentaje_iva ?? 21}`
+        : (p.condicion_iva ?? 'gravado'),
+    ])),
+    [productos]
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Productos filtrados
@@ -525,6 +572,10 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
   const handleActualizarItem = useCallback((index: number, campo: keyof CompraItemForm, valor: number | string) => {
     dispatch({ type: 'ACTUALIZAR_ITEM', payload: { index, campo, valor } })
+  }, [])
+
+  const handleCondicionItem = useCallback((index: number, clave: string) => {
+    dispatch({ type: 'SET_CONDICION_ITEM', payload: { index, clave } })
   }, [])
 
   const handleEliminarItem = useCallback((index: number) => {
@@ -702,6 +753,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             subtotal: item.cantidad * costoConBonif,
             bonificacion: item.bonificacion || 0,
             porcentajeIva: item.porcentajeIva ?? 21,
+            condicionIva: item.condicionIva ?? 'gravado',
             impuestosInternos: item.impuestosInternos ?? 0
           }
         })
@@ -828,8 +880,10 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
               dispatch={dispatch}
               productosFiltrados={productosFiltrados}
               iiMaster={iiMaster}
+              condicionMaster={condicionMaster}
               onAgregarItem={handleAgregarItem}
               onActualizarItem={handleActualizarItem}
+              onCondicionItem={handleCondicionItem}
               onEliminarItem={handleEliminarItem}
               onCrearProductoRapido={onCrearProductoRapido}
               onImportarExcel={() => setModalImportarOpen(true)}
@@ -1054,7 +1108,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, onAgregarItem, onActualizarItem, onEliminarItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
+function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
   const [creandoItem, setCreandoItem] = useState(false)
   const buscadorRef = useRef<HTMLDivElement>(null)
@@ -1250,7 +1304,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, onAgr
 
       {/* Lista de items */}
       {state.items.length > 0 ? (
-        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onEliminarItem={onEliminarItem} iiMaster={iiMaster} />
+        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} iiMaster={iiMaster} condicionMaster={condicionMaster} />
       ) : (
         <div className="text-center py-8 text-gray-500">
           <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -1262,16 +1316,17 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, onAgr
   )
 }
 
-function ItemsList({ items, onActualizarItem, onEliminarItem, iiMaster }: ItemsListProps) {
+function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, iiMaster, condicionMaster }: ItemsListProps) {
   return (
     <div className="space-y-2">
       {/* Header solo en desktop */}
       <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
         <div className="col-span-3">Producto</div>
-        <div className="col-span-2 text-center">Cant.</div>
+        <div className="col-span-1 text-center">Cant.</div>
         <div className="col-span-1 text-center">Bonif.%</div>
         <div className="col-span-2 text-center">Neto</div>
-        <div className="col-span-2 text-center">Imp.Int.%</div>
+        <div className="col-span-2 text-center">IVA</div>
+        <div className="col-span-1 text-center">Imp.Int.%</div>
         <div className="col-span-1 text-right">Subtot.</div>
         <div className="col-span-1"></div>
       </div>
@@ -1281,8 +1336,10 @@ function ItemsList({ items, onActualizarItem, onEliminarItem, iiMaster }: ItemsL
           item={item}
           index={index}
           onActualizarItem={onActualizarItem}
+          onCondicionItem={onCondicionItem}
           onEliminarItem={onEliminarItem}
           iiDelProducto={iiMaster[String(item.productoId)]}
+          condicionDelProducto={condicionMaster[String(item.productoId)]}
         />
       ))}
     </div>
@@ -1295,16 +1352,42 @@ function difiereII(item: CompraItemForm, iiDelProducto?: number): boolean {
   return Math.abs((item.impuestosInternos || 0) - iiDelProducto) > 0.0001
 }
 
-function ItemRow({ item, index, onActualizarItem, onEliminarItem, iiDelProducto }: ItemRowProps) {
+/**
+ * ¿La condición de la línea difiere de la de la ficha? A diferencia del II,
+ * esto NO se propaga al producto: sólo se avisa (la venta hereda de la ficha).
+ */
+function difiereCondicion(item: CompraItemForm, condicionDelProducto?: string): boolean {
+  if (condicionDelProducto === undefined) return false
+  return claveCondicionLinea(item) !== condicionDelProducto
+}
+
+function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, iiDelProducto, condicionDelProducto }: ItemRowProps) {
   const iiDifiere = difiereII(item, iiDelProducto)
+  const condDifiere = difiereCondicion(item, condicionDelProducto)
+  const selectCondicion = (extraClass = '') => (
+    <select
+      value={claveCondicionLinea(item)}
+      onChange={(e) => onCondicionItem(index, e.target.value)}
+      title={condDifiere
+        ? `La ficha dice ${labelCondicionIva(condicionDelProducto!)}: el cambio aplica sólo a esta compra`
+        : 'Condición frente al IVA de esta línea (autocompletada del producto)'}
+      className={`w-full px-2 py-1 text-center border rounded text-sm dark:bg-gray-700 dark:text-white ${
+        condDifiere ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'dark:border-gray-600'
+      } ${extraClass}`}
+    >
+      {OPCIONES_CONDICION_IVA.map(o => (
+        <option key={o.clave} value={o.clave}>{o.labelCorto}</option>
+      ))}
+    </select>
+  )
   return (
-    <div className={`bg-white dark:bg-gray-800 p-3 rounded-lg border ${iiDifiere ? 'border-amber-400 dark:border-amber-600' : 'dark:border-gray-600'}`}>
+    <div className={`bg-white dark:bg-gray-800 p-3 rounded-lg border ${iiDifiere || condDifiere ? 'border-amber-400 dark:border-amber-600' : 'dark:border-gray-600'}`}>
       {/* Mobile: Layout en cards */}
       <div className="md:hidden space-y-3">
         <div className="flex justify-between items-start">
           <div className="flex-1">
             <p className="font-medium text-gray-800 dark:text-white">{item.productoNombre}</p>
-            <p className="text-xs text-gray-500">Stock: {item.stockActual} | IVA: {item.porcentajeIva}%</p>
+            <p className="text-xs text-gray-500">Stock: {item.stockActual}</p>
           </div>
           <button
             type="button"
@@ -1351,6 +1434,10 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem, iiDelProducto 
             />
           </div>
           <div>
+            <label className="block text-xs text-gray-500 mb-1">IVA</label>
+            {selectCondicion()}
+          </div>
+          <div>
             <label className="block text-xs text-gray-500 mb-1">II%</label>
             <NumberInput
               min={0}
@@ -1369,6 +1456,11 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem, iiDelProducto 
             ⚠ II difiere del producto ({iiDelProducto}% → {item.impuestosInternos}%): al registrar se actualiza la alícuota del producto.
           </p>
         )}
+        {condDifiere && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            ⚠ La ficha dice {labelCondicionIva(condicionDelProducto!)}: el cambio aplica sólo a esta compra, el producto no se toca.
+          </p>
+        )}
         <div className="flex justify-between items-center pt-2 border-t dark:border-gray-600">
           <span className="text-sm text-gray-500">Subtotal:</span>
           <span className="font-semibold text-gray-800 dark:text-white">{formatPrecio(item.cantidad * item.costoUnitario * (1 - (item.bonificacion || 0) / 100))}</span>
@@ -1379,9 +1471,9 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem, iiDelProducto 
       <div className="hidden md:grid grid-cols-12 gap-2 items-center">
         <div className="col-span-3">
           <p className="font-medium text-gray-800 dark:text-white text-sm">{item.productoNombre}</p>
-          <p className="text-xs text-gray-500">Stock: {item.stockActual} | IVA: {item.porcentajeIva}%</p>
+          <p className="text-xs text-gray-500">Stock: {item.stockActual}</p>
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1">
           <NumberInput
             integer
             min={1}
@@ -1414,6 +1506,9 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem, iiDelProducto 
           />
         </div>
         <div className="col-span-2">
+          {selectCondicion()}
+        </div>
+        <div className="col-span-1">
           <NumberInput
             min={0}
             emptyValue={0}
@@ -1442,6 +1537,11 @@ function ItemRow({ item, index, onActualizarItem, onEliminarItem, iiDelProducto 
       {iiDifiere && (
         <p className="hidden md:block text-xs text-amber-700 dark:text-amber-300 mt-1">
           ⚠ II difiere del producto ({iiDelProducto}% → {item.impuestosInternos}%): al registrar se actualiza la alícuota del producto.
+        </p>
+      )}
+      {condDifiere && (
+        <p className="hidden md:block text-xs text-amber-700 dark:text-amber-300 mt-1">
+          ⚠ La ficha dice {labelCondicionIva(condicionDelProducto!)}: el cambio aplica sólo a esta compra, el producto no se toca.
         </p>
       )}
     </div>
@@ -1848,7 +1948,8 @@ function ControlRow({ label, calculado, impreso, onChange }: {
 }
 
 function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
-  const { subtotalBruto, bonificacionTotal, subtotal, iva, impuestosInternos, percepcionIva, percepcionIibb, noGravado, total } = totales
+  const { subtotalBruto, bonificacionTotal, subtotal, netoGravado, netoExento, netoNoGravado,
+          netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb, noGravado, total } = totales
   const esFC = state.tipoFactura === 'FC'
   const [bonifGlobal, setBonifGlobal] = useState(0)
   const [mostrarControl, setMostrarControl] = useState(false)
@@ -1949,11 +2050,28 @@ function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
         )}
         <div className="flex justify-between text-sm">
           <span className="text-gray-600 dark:text-gray-400">{esFC ? 'Gravado (neto):' : 'Subtotal Neto:'}</span>
-          <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(subtotal)}</span>
+          <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(esFC ? netoGravado : subtotal)}</span>
         </div>
+        {/* Con condiciones mezcladas el "gravado" solo ya no explica el total */}
+        {esFC && netoExento > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600 dark:text-gray-400">Exento (neto):</span>
+            <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(netoExento)}</span>
+          </div>
+        )}
+        {esFC && netoNoGravado > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600 dark:text-gray-400">No gravado (líneas):</span>
+            <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(netoNoGravado)}</span>
+          </div>
+        )}
         {esFC && (
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600 dark:text-gray-400">IVA (sobre neto):</span>
+            <span className="text-gray-600 dark:text-gray-400">
+              IVA (sobre neto{Object.keys(netoPorAlicuota).length > 1
+                ? `, ${Object.keys(netoPorAlicuota).join('% + ')}%`
+                : ''}):
+            </span>
             <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(iva)}</span>
           </div>
         )}
@@ -1971,7 +2089,7 @@ function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
         )}
         {noGravado > 0 && (
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600 dark:text-gray-400">No gravado:</span>
+            <span className="text-gray-600 dark:text-gray-400">No gravado (cabecera):</span>
             <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(noGravado)}</span>
           </div>
         )}
@@ -1999,8 +2117,33 @@ function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
                 <span className="col-span-3 text-right">Factura dice</span>
                 <span className="col-span-2 text-right">Dif.</span>
               </div>
-              <ControlRow label="Gravado" calculado={subtotal} impreso={ctrl.gravado}
+              <ControlRow label="Gravado" calculado={netoGravado} impreso={ctrl.gravado}
                 onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { gravado: n } })} />
+              {/* Solo informativos: la factura los imprime abiertos y sin esto
+                  no se puede cuadrar una mixta contra el papel. */}
+              {Object.entries(netoPorAlicuota)
+                .filter(() => Object.keys(netoPorAlicuota).length > 1)
+                .map(([alicuota, neto]) => (
+                  <div key={alicuota} className="grid grid-cols-12 gap-2 text-xs text-gray-500 pl-3">
+                    <span className="col-span-4">└ neto al {alicuota}%</span>
+                    <span className="col-span-3 text-right">{formatPrecio(neto)}</span>
+                    <span className="col-span-5 text-right">IVA {formatPrecio(neto * parseFloat(alicuota) / 100)}</span>
+                  </div>
+                ))}
+              {netoExento > 0 && (
+                <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 pl-3">
+                  <span className="col-span-4">└ exento</span>
+                  <span className="col-span-3 text-right">{formatPrecio(netoExento)}</span>
+                  <span className="col-span-5"></span>
+                </div>
+              )}
+              {netoNoGravado > 0 && (
+                <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 pl-3">
+                  <span className="col-span-4">└ no gravado (líneas)</span>
+                  <span className="col-span-3 text-right">{formatPrecio(netoNoGravado)}</span>
+                  <span className="col-span-5"></span>
+                </div>
+              )}
               <ControlRow label="IVA" calculado={iva} impreso={ctrl.iva}
                 onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { iva: n } })} />
               <ControlRow label="Imp. internos" calculado={impuestosInternos} impreso={ctrl.impuestosInternos}

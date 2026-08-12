@@ -3,6 +3,9 @@
  */
 
 import type { Dispatch, SetStateAction } from 'react'
+import type { CondicionIva } from '../utils/calculations'
+
+export type { CondicionIva }
 
 // =============================================================================
 // ENTIDADES DE BASE DE DATOS (formato real)
@@ -96,6 +99,11 @@ export interface ProductoDB {
   impuestos_internos?: number | null;
   precio_sin_iva?: number | null;
   porcentaje_iva?: number | null;
+  /**
+   * Condición frente al IVA (mig 177). La venta la hereda vía porcentaje_iva:
+   * un producto exento o no gravado tiene la alícuota en 0 (CHECK en la BD).
+   */
+  condicion_iva?: CondicionIva;
   /** Costo real canónico: FC = neto×(1+II/100); ZZ = pagado (mig 111) */
   costo_real?: number | null;
   /** Costo promedio ponderado: valuación de stock y CMV (mig 127) */
@@ -329,6 +337,11 @@ export interface ProductoFormInput {
   impuestos_internos?: number | string;
   precio_sin_iva?: number | string;
   porcentaje_iva?: number;
+  /**
+   * Condición de IVA (mig 177). Va SIEMPRE junto a `porcentaje_iva`: la BD
+   * tiene un CHECK cruzado y mandar uno solo la haría fallar.
+   */
+  condicion_iva?: CondicionIva;
   /** Costo real canónico calculado en el modal (mig 111) */
   costo_real?: number | null;
   /** Costo promedio ponderado; solo se envía si el admin lo corrige a mano (mig 127) */
@@ -946,6 +959,8 @@ export interface CompraItemDBExtended {
   impuestos_internos?: number | null;
   costo_neto_unitario?: number | null;
   costo_real_unitario?: number | null;
+  /** Condición frente al IVA de la línea (mig 177). Default 'gravado' en la BD. */
+  condicion_iva?: CondicionIva;
 }
 
 export interface CompraDBExtended {
@@ -999,6 +1014,7 @@ export interface CompraFormInputExtended {
     subtotal?: number;
     bonificacion?: number;
     porcentajeIva?: number;
+    condicionIva?: CondicionIva;
     impuestosInternos?: number;
   }>;
   /** Líneas cuya tasa de II fue editada a mano: se propaga al producto tras registrar (mig 123 UI). */
