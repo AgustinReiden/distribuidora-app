@@ -57,7 +57,8 @@ describe('ModalEditarCompra · botón "Cambiar proveedor"', () => {
     render(<ModalEditarCompra {...adminProps} />)
     expect(screen.getByRole('button', { name: /Cambiar proveedor/i })).toBeEnabled()
     // marcar el item para eliminar => hay cambios sin guardar
-    await user.click(screen.getByTitle('Eliminar item'))
+    // Hay uno por layout (tarjeta mobile + tabla desktop); da igual cuál.
+    await user.click(screen.getAllByTitle('Eliminar item')[0])
     expect(screen.getByRole('button', { name: /Cambiar proveedor/i })).toBeDisabled()
   })
 })
