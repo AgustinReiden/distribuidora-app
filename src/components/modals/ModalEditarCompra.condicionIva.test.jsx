@@ -42,15 +42,44 @@ const props = (compra, onGuardar = vi.fn()) => ({
   compra, usuarioId: 'u1', onGuardar, onClose: vi.fn(), guardando: false,
 })
 
-/** El <select> de condición de la única línea. */
-const selectorIva = () => screen.getByRole('combobox')
+/**
+ * El <select> de condición de la única línea.
+ * Hay DOS en el DOM — tarjeta (mobile) y tabla (desktop) — y CSS decide cuál se
+ * ve. En jsdom no hay media queries, así que se toma el primero: alcanza para
+ * verificar comportamiento, y `ambosLayouts` cubre que estén los dos.
+ */
+const selectorIva = () => screen.getAllByRole('combobox')[0]
+const ambosLayouts = () => screen.getAllByRole('combobox')
 
 describe('ModalEditarCompra · condición de IVA por línea', () => {
   it('ofrece las cuatro condiciones y arranca en la de la línea', () => {
     render(<ModalEditarCompra {...props(compraBase())} />)
     expect(selectorIva()).toHaveValue('gravado:21')
-    const labels = screen.getAllByRole('option').map(o => o.textContent)
+    const labels = [...selectorIva().options].map(o => o.textContent)
     expect(labels).toEqual(['21%', '10,5%', 'Exento', 'No gravado'])
+  })
+
+  // La tabla tiene 600px de columnas fijas dentro de un overflow-x-auto: en un
+  // teléfono el IVA quedaba fuera de pantalla y parecía que no existía.
+  it('el selector está en los dos layouts, tarjeta y tabla', () => {
+    render(<ModalEditarCompra {...props(compraBase())} />)
+    const [tarjeta, tabla] = ambosLayouts()
+    expect(ambosLayouts()).toHaveLength(2)
+    // `closest` en vez de querySelector sobre el container: el modal va en un
+    // portal, así que no cuelga del nodo que devuelve render().
+    expect(tarjeta.closest('.md\\:hidden')).not.toBeNull()
+    expect(tabla.closest('.md\\:block')).not.toBeNull()
+  })
+
+  it('editar en un layout se refleja en el otro: es el mismo estado', async () => {
+    const user = userEvent.setup()
+    render(<ModalEditarCompra {...props(compraBase())} />)
+    const [tarjeta, tabla] = ambosLayouts()
+
+    await user.selectOptions(tarjeta, 'exento')
+
+    expect(tarjeta).toHaveValue('exento')
+    expect(tabla).toHaveValue('exento')
   })
 
   it('cambiar a 10,5% recalcula el IVA del resumen', async () => {

@@ -170,6 +170,31 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
     )
   }
 
+  /** Selector de condición de la línea; se usa igual en la tarjeta y en la tabla. */
+  function selectorCondicion(it: ItemEdit) {
+    const clave = claveCondicion(it)
+    return (
+      <select
+        value={clave}
+        onChange={(e) => updateCondicion(it.productoId, e.target.value)}
+        disabled={it.marcadoParaEliminar}
+        aria-label={`Condición de IVA de ${it.nombre}`}
+        className="w-full px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
+      >
+        {/* Un par legacy fuera de la lista se muestra tal cual en vez de dejar
+            el select mintiendo sobre el valor guardado. */}
+        {!OPCIONES_CONDICION_IVA.some((o) => o.clave === clave) && (
+          <option value={clave}>{it.porcentajeIva}%</option>
+        )}
+        {OPCIONES_CONDICION_IVA.map((o) => (
+          <option key={o.clave} value={o.clave}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
   function toggleEliminar(productoId: string) {
     setItems((prev) =>
       prev.map((it) =>
@@ -293,8 +318,95 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
           </div>
         )}
 
-        {/* Tabla de items */}
-        <div className="overflow-x-auto">
+        {/* Items · MOBILE: tarjetas.
+            La tabla de abajo tiene 600px de columnas fijas dentro de un
+            overflow-x-auto, así que en un teléfono las últimas (IVA, subtotal,
+            borrar) quedan fuera de pantalla detrás de un scroll horizontal que
+            nadie descubre. Es el mismo patrón de tarjetas que usa ModalCompra. */}
+        <div className="md:hidden space-y-3">
+          {items.map((it) => {
+            const neto = it.costoUnitario * (1 - it.bonificacion / 100)
+            const subtotalItem = it.cantidad * neto
+            return (
+              <div
+                key={it.productoId}
+                className={`rounded-lg border p-3 dark:border-gray-600 ${
+                  it.marcadoParaEliminar ? 'opacity-40 line-through' : ''
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium dark:text-gray-200">{it.nombre}</p>
+                  {/* min-h-11/min-w-11: mismo target táctil que los botones de
+                      VistaCompras en mobile (con p-1 quedaba en ~24px). */}
+                  <button
+                    type="button"
+                    onClick={() => toggleEliminar(it.productoId)}
+                    title={it.marcadoParaEliminar ? 'Restaurar item' : 'Eliminar item'}
+                    aria-label={it.marcadoParaEliminar ? 'Restaurar item' : 'Eliminar item'}
+                    className="shrink-0 min-h-11 min-w-11 flex items-center justify-center text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Cantidad</label>
+                    <NumberInput
+                      integer
+                      min={1}
+                      emptyValue={1}
+                      value={it.cantidad}
+                      onChange={(n) => updateItem(it.productoId, 'cantidad', n)}
+                      commitOnChange
+                      disabled={it.marcadoParaEliminar}
+                      className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Costo unit.</label>
+                    <NumberInput
+                      min={0}
+                      emptyValue={0}
+                      value={it.costoUnitario}
+                      onChange={(n) => updateItem(it.productoId, 'costoUnitario', n)}
+                      commitOnChange
+                      disabled={it.marcadoParaEliminar}
+                      className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Bonif. %</label>
+                    <NumberInput
+                      min={0}
+                      max={99.99}
+                      emptyValue={0}
+                      value={it.bonificacion}
+                      onChange={(n) => updateItem(it.productoId, 'bonificacion', n)}
+                      commitOnChange
+                      disabled={it.marcadoParaEliminar}
+                      className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
+                    />
+                  </div>
+                  {!esZZ && (
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">IVA</label>
+                      {selectorCondicion(it)}
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 flex justify-between border-t pt-2 text-sm dark:border-gray-600">
+                  <span className="text-gray-500">Subtotal:</span>
+                  <span className="font-semibold tabular-nums dark:text-gray-200">
+                    {formatPrecio(subtotalItem)}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Items · DESKTOP: tabla */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
@@ -352,25 +464,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                         className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
                       />
                     </td>
-                    {!esZZ && (
-                      <td className="py-2 px-2">
-                        <select
-                          value={claveCondicion(it)}
-                          onChange={(e) => updateCondicion(it.productoId, e.target.value)}
-                          disabled={it.marcadoParaEliminar}
-                          className="w-full px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
-                        >
-                          {/* Un par legacy fuera de la lista se muestra tal cual
-                              en vez de dejar el select mintiendo. */}
-                          {!OPCIONES_CONDICION_IVA.some(o => o.clave === claveCondicion(it)) && (
-                            <option value={claveCondicion(it)}>{it.porcentajeIva}%</option>
-                          )}
-                          {OPCIONES_CONDICION_IVA.map(o => (
-                            <option key={o.clave} value={o.clave}>{o.label}</option>
-                          ))}
-                        </select>
-                      </td>
-                    )}
+                    {!esZZ && <td className="py-2 px-2">{selectorCondicion(it)}</td>}
                     <td className="py-2 px-2 text-right tabular-nums dark:text-gray-200">
                       {formatPrecio(subtotalItem)}
                     </td>

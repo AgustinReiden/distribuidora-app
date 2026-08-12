@@ -37,7 +37,11 @@ function recargarUnaVezPorChunk(): boolean {
   return false
 }
 
-export function lazyWithReload<T extends ComponentType<unknown>>(
+// El genérico espeja el de React.lazy (`ComponentType<any>`): con
+// `ComponentType<unknown>` no entran los componentes con props requeridas, que
+// es la mayoría de los modales. Es un ensanchamiento puro, ningún call site
+// existente cambia de tipo.
+export function lazyWithReload<T extends ComponentType<any>>(
   factory: () => Promise<{ default: T }>,
 ): LazyExoticComponent<T> {
   return lazy(async () => {
