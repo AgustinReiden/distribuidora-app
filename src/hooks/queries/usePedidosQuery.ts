@@ -954,10 +954,16 @@ async function cancelarPedido(
   usuarioId?: string,
   tipo?: string,
 ): Promise<void> {
+  // El motivo tipificado (mig 143) viaja dentro del RPC desde la mig 175.
+  // Antes se guardaba con un UPDATE aparte, despues de cancelar: iba por
+  // PostgREST sobre un pedido que ya estaba cancelado y su unico manejo de
+  // error era un console.error, asi que cuando fallaba el pedido quedaba sin
+  // motivo y nadie se enteraba.
   const { data, error } = await supabase.rpc('cancelar_pedido_con_stock', {
     p_pedido_id: pedidoId,
     p_motivo: motivo,
     p_usuario_id: usuarioId || null,
+    p_tipo: tipo || null,
   })
 
   if (error) throw error
@@ -965,17 +971,6 @@ async function cancelarPedido(
   const result = data as { success: boolean; error?: string }
   if (!result.success) {
     throw new Error(result.error || 'Error al cancelar pedido')
-  }
-
-  // El motivo tipificado (mig 143) se guarda aparte para no reescribir
-  // `cancelar_pedido_con_stock`, que además restaura stock. Si este update
-  // fallara, el pedido igual queda cancelado con su motivo en texto.
-  if (tipo) {
-    const { error: errTipo } = await supabase
-      .from('pedidos')
-      .update({ motivo_cancelacion_tipo: tipo })
-      .eq('id', pedidoId)
-    if (errTipo) console.error('[pedidos] no se pudo guardar el motivo tipificado:', errTipo)
   }
 }
 
