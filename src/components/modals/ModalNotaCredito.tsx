@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react'
 import { X, FileText, AlertTriangle } from 'lucide-react'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
-import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
+import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../types'
+import { calcularTotalesNotaCredito } from '../../utils/notaCredito'
 
 interface CompraItem {
   producto_id: string
@@ -10,6 +11,9 @@ interface CompraItem {
   cantidad: number
   costo_unitario: number
   bonificacion?: number
+  /** Snapshots fiscales de la línea original (mig 113/177) */
+  porcentaje_iva?: number | null
+  condicion_iva?: CondicionIva | null
 }
 
 export interface ModalNotaCreditoProps {
@@ -63,37 +67,10 @@ export default function ModalNotaCredito({
   }, [compra.items, yaAcreditado])
 
   // Calculate subtotal from credited items
-  const { subtotal, iva, total, itemsConCantidad } = useMemo(() => {
-    let sub = 0
-    const itemsList: Array<{
-      productoId: string
-      cantidad: number
-      costoUnitario: number
-      subtotal: number
-    }> = []
-
-    for (const item of compra.items) {
-      const cant = cantidades[item.producto_id] || 0
-      if (cant > 0) {
-        const itemSub = cant * item.costo_unitario
-        sub += itemSub
-        itemsList.push({
-          productoId: item.producto_id,
-          cantidad: cant,
-          costoUnitario: item.costo_unitario,
-          subtotal: itemSub,
-        })
-      }
-    }
-
-    const ivaCalc = sub * 0.21
-    return {
-      subtotal: sub,
-      iva: ivaCalc,
-      total: sub + ivaCalc,
-      itemsConCantidad: itemsList,
-    }
-  }, [cantidades, compra.items])
+  const { subtotal, iva, total, itemsConCantidad } = useMemo(
+    () => calcularTotalesNotaCredito(compra.items, cantidades),
+    [cantidades, compra.items],
+  )
 
   const handleCantidadChange = (productoId: string, value: string) => {
     const num = parseInt(value, 10)
@@ -265,7 +242,8 @@ export default function ModalNotaCredito({
                 <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-400">IVA (21%):</span>
+                {/* Ya no es un 21% fijo: sale de la alícuota de cada línea. */}
+                <span className="text-gray-600 dark:text-gray-400">IVA:</span>
                 <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(iva)}</span>
               </div>
               <div className="flex justify-between text-lg font-bold pt-2 border-t border-blue-200 dark:border-blue-800">

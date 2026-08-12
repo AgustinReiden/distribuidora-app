@@ -430,12 +430,16 @@ describe('analyticsExport', () => {
               cantidad: 10,
               costo_unitario: 200,
               subtotal: 2000,
+              porcentaje_iva: 10.5,
+              condicion_iva: 'gravado',
               producto: { nombre: 'Producto X', codigo: 'PX001', categoria: 'Cat1' },
             },
             {
               cantidad: 5,
               costo_unitario: 300,
               subtotal: 1500,
+              porcentaje_iva: 0,
+              condicion_iva: 'no_gravado',
               producto: { nombre: 'Producto Y', codigo: 'PY002', categoria: 'Cat2' },
             },
           ],
@@ -458,6 +462,35 @@ describe('analyticsExport', () => {
         subtotal: 2000,
         estado: 'recibida',
       })
+    })
+
+    // mig 177: el export es el único lugar fuera del modal donde se ve el
+    // detalle fiscal por línea — hace falta para armar el libro IVA a mano.
+    it('exporta la condición y la alícuota de cada línea', async () => {
+      const mockCompras = [
+        {
+          id: 'comp1',
+          created_at: '2026-01-15T10:00:00',
+          total: 3610,
+          estado: 'recibida',
+          proveedor: { nombre: 'Proveedor A', cuit: '30-12345678-9' },
+          items: [
+            { cantidad: 10, costo_unitario: 200, subtotal: 2000, porcentaje_iva: 10.5, condicion_iva: 'gravado', producto: { nombre: 'X' } },
+            { cantidad: 5, costo_unitario: 300, subtotal: 1500, porcentaje_iva: 0, condicion_iva: 'no_gravado', producto: { nombre: 'Y' } },
+            // Línea anterior a la mig 113: sin snapshot fiscal
+            { cantidad: 1, costo_unitario: 110, subtotal: 110, producto: { nombre: 'Z' } },
+          ],
+        },
+      ]
+      const chain = createChainableMock({ data: mockCompras, error: null })
+      vi.mocked(supabase.from).mockReturnValue(chain as never)
+
+      const result = await fetchComprasFact('2026-01-01', '2026-01-31')
+
+      expect(result[0]).toMatchObject({ condicion_iva: 'gravado', porcentaje_iva: 10.5 })
+      expect(result[1]).toMatchObject({ condicion_iva: 'no_gravado', porcentaje_iva: 0 })
+      // Sin snapshot: la condición cae a gravado y la alícuota queda vacía
+      expect(result[2]).toMatchObject({ condicion_iva: 'gravado', porcentaje_iva: '' })
     })
 
     it('should throw error on Supabase error', async () => {

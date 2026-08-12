@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { useSucursal } from '../../contexts/SucursalContext'
+import type { CondicionIva } from '../../types'
 
 export const MOVIMIENTOS_PAGE_SIZE = 50
 
@@ -58,6 +59,8 @@ export interface MovimientoItemDB {
   origen_costo_con_iva: number | null
   origen_impuestos_internos: number | null
   origen_porcentaje_iva: number | null
+  /** Condición de IVA del origen (mig 177). NULL = movimiento anterior. */
+  origen_condicion_iva: CondicionIva | null
   producto_destino_id: number | null
   resolucion: 'match_existente' | 'creado_nuevo' | null
   costo_aplicado_destino: number | null
