@@ -3,7 +3,7 @@
  *
  * Container que carga compras y proveedores bajo demanda usando TanStack Query.
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useComprasQuery,
@@ -25,16 +25,21 @@ import type { CambiarProveedorPayload } from '../modals/ModalCambiarProveedor'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
 
-// Lazy load de componentes
-const VistaCompras = lazy(() => import('../vistas/VistaCompras'))
-const ModalCompra = lazy(() => import('../modals/ModalCompra'))
-const ModalDetalleCompra = lazy(() => import('../modals/ModalDetalleCompra'))
-const ModalNotaCredito = lazy(() => import('../modals/ModalNotaCredito'))
-const ModalEditarCompra = lazy(() => import('../modals/ModalEditarCompra'))
-const ModalCambiarProveedor = lazy(() => import('../modals/ModalCambiarProveedor'))
-const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
+// Lazy load de componentes.
+// lazyWithReload y no lazy pelado (igual que App y PedidosContainer): el SW usa
+// skipWaiting + clientsClaim, así que tras un deploy una pestaña abierta sigue
+// pidiendo chunks con el hash viejo. Cada modal es su propio chunk, de modo que
+// se puede quedar con uno viejo (ej. el de editar) mientras otro ya es nuevo.
+const VistaCompras = lazyWithReload(() => import('../vistas/VistaCompras'))
+const ModalCompra = lazyWithReload(() => import('../modals/ModalCompra'))
+const ModalDetalleCompra = lazyWithReload(() => import('../modals/ModalDetalleCompra'))
+const ModalNotaCredito = lazyWithReload(() => import('../modals/ModalNotaCredito'))
+const ModalEditarCompra = lazyWithReload(() => import('../modals/ModalEditarCompra'))
+const ModalCambiarProveedor = lazyWithReload(() => import('../modals/ModalCambiarProveedor'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (
