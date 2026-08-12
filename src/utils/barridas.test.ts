@@ -3,6 +3,7 @@ import {
   clasificarBarrida,
   abreEnDia,
   encajeEnHorario,
+  finJornadaSugerida,
   intercalarSinCoordenadas,
   UMBRAL_CIERRE_TEMPRANO,
   type Barrida,
@@ -277,5 +278,23 @@ describe('encajeEnHorario', () => {
     expect(encajeEnHorario('10:00', 'de 9 a 14')).toBe('desconocido');
     expect(encajeEnHorario(null, '09:00-14:00')).toBe('desconocido');
     expect(encajeEnHorario('no-es-hora', '09:00-14:00')).toBe('desconocido');
+  });
+});
+
+describe('finJornadaSugerida', () => {
+  it('sugiere la jornada tipica desde la hora de salida', () => {
+    expect(finJornadaSugerida('08:00')).toBe('18:00');
+    expect(finJornadaSugerida('07:30')).toBe('17:30');
+    expect(finJornadaSugerida('06:15')).toBe('16:15');
+  });
+
+  it('no se pasa de las 23:30 aunque salga tarde', () => {
+    expect(finJornadaSugerida('15:00')).toBe('23:30');
+    expect(finJornadaSugerida('22:00')).toBe('23:30');
+  });
+
+  it('hora vacia o mal formada cae en un default usable', () => {
+    expect(finJornadaSugerida('')).toBe('18:00');
+    expect(finJornadaSugerida('no-es-hora')).toBe('18:00');
   });
 });

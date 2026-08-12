@@ -219,13 +219,13 @@ export default function PedidosContainer(): React.ReactElement {
   // sucursal en la optimización, así el lado que optimiza y el mapa usan la
   // MISMA ubicación. destino null = la ruta termina en el depósito.
   const optimizarRutaConDeposito = useCallback(
-    (transportistaId: string, pedidosData?: PedidoDB[], fecha?: string, horaInicio?: string) =>
-      optimizarRuta(transportistaId, pedidosData, deposito, destinoRuta, { fecha, horaInicio }),
+    (transportistaId: string, pedidosData?: PedidoDB[], fecha?: string, horaInicio?: string, horaFin?: string) =>
+      optimizarRuta(transportistaId, pedidosData, deposito, destinoRuta, { fecha, horaInicio, horaFin }),
     [optimizarRuta, deposito, destinoRuta],
   )
   const optimizarRutaMultiConDeposito = useCallback(
-    (repartidores: RepartidorParam[], pedidosData?: PedidoDB[], fecha?: string, horaInicio?: string) =>
-      optimizarRutaMulti(repartidores, pedidosData, deposito, destinoRuta, { fecha, horaInicio }),
+    (repartidores: RepartidorParam[], pedidosData?: PedidoDB[], fecha?: string, horaInicio?: string, horaFin?: string) =>
+      optimizarRutaMulti(repartidores, pedidosData, deposito, destinoRuta, { fecha, horaInicio, horaFin }),
     [optimizarRutaMulti, deposito, destinoRuta],
   )
 
@@ -1319,9 +1319,9 @@ export default function PedidosContainer(): React.ReactElement {
   // solo paso (sin botón "optimizar" separado). Las polylines del resultado se
   // pasan explícitamente a aplicar (no se leen del estado, que aún no se
   // actualizó en este tick).
-  const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[], fecha: string, horaInicio: string) => {
+  const handleArmarRutaDelDia = useCallback(async (transportistaId: string, pedidosSeleccionados: PedidoDB[], fecha: string, horaInicio: string, horaFin: string) => {
     if (!transportistaId || pedidosSeleccionados.length === 0) return
-    const ruta = await optimizarRutaConDeposito(transportistaId, pedidosSeleccionados, fecha, horaInicio)
+    const ruta = await optimizarRutaConDeposito(transportistaId, pedidosSeleccionados, fecha, horaInicio, horaFin)
     // ruta es null solo si la optimización falló de verdad (error de red/servicio):
     // optimizarRuta ya mostró el mensaje y no armamos nada.
     if (!ruta) return
@@ -1394,9 +1394,9 @@ export default function PedidosContainer(): React.ReactElement {
   // persiste un recorrido por chofer (aplicar_orden_ruta una vez por cada uno).
   // Los pedidos sin coordenadas (que el optimizador no rutea) se reparten por
   // zona preferida o round-robin antes de persistir.
-  const handleArmarRutaMulti = useCallback(async (repartidores: RepartidorParam[], pedidosSeleccionados: PedidoDB[], fecha: string, horaInicio: string) => {
+  const handleArmarRutaMulti = useCallback(async (repartidores: RepartidorParam[], pedidosSeleccionados: PedidoDB[], fecha: string, horaInicio: string, horaFin: string) => {
     if (!repartidores.length || pedidosSeleccionados.length === 0) return
-    const resp = await optimizarRutaMultiConDeposito(repartidores, pedidosSeleccionados, fecha, horaInicio)
+    const resp = await optimizarRutaMultiConDeposito(repartidores, pedidosSeleccionados, fecha, horaInicio, horaFin)
     if (!resp) return // error ya notificado por el hook
 
     const byId = new Map(pedidosSeleccionados.map(p => [String(p.id), p]))

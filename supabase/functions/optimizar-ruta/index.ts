@@ -61,6 +61,13 @@ interface RequestBody {
   fecha?: string; // "YYYY-MM-DD"
   hora_inicio?: string; // "HH:MM"
   /**
+   * "HH:MM" en que termina el reparto (lo elige el admin al armar la ruta).
+   * Descarta las franjas del cliente que arrancan después: la ventana de la
+   * noche de un local cortado no es una entrega que se vaya a hacer. Si no
+   * viene, la función la deriva de hora_inicio (compat con clientes viejos).
+   */
+  hora_fin?: string;
+  /**
    * Ventanas de entrega por pedido, derivadas del horario del cliente. Cada
    * pedido puede traer más de una franja (horario cortado).
    */
@@ -335,6 +342,7 @@ serve(async (req: Request) => {
       const optsMulti = {
         fecha: body.fecha,
         horaInicio: body.hora_inicio,
+        horaFinJornada: body.hora_fin,
         ventanas: body.ventanas,
       };
       let result: RutaMultiResultado;
@@ -412,6 +420,7 @@ serve(async (req: Request) => {
           const r = await optimizeToursPorBarridas(saKey, deposito, conBarrida, destino, {
             fecha: body.fecha,
             horaInicio: body.hora_inicio,
+            horaFinJornada: body.hora_fin,
             ventanas: body.ventanas,
           });
           ruta = r;
@@ -421,6 +430,7 @@ serve(async (req: Request) => {
           ruta = await optimizeTours(saKey, deposito, conCoords, destino, {
             fecha: body.fecha,
             horaInicio: body.hora_inicio,
+            horaFinJornada: body.hora_fin,
             ventanas: body.ventanas,
           });
           optimizadoPor = "Google Route Optimization";

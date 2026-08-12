@@ -142,6 +142,13 @@ export interface RutaMultiVehiculoResponse {
   mensaje?: string;
 }
 
+/** Ancla temporal de la ruta: cuándo sale el camión y cuándo termina el reparto. */
+export interface OptsTiempo {
+  fecha?: string;
+  horaInicio?: string;
+  horaFin?: string;
+}
+
 export interface OptimizarRutaRequestBody {
   transportista_id: string;
   deposito_lat: number;
@@ -154,6 +161,9 @@ export interface OptimizarRutaRequestBody {
    *  respetar ventanas horarias (solo optimizeTours; el fallback las ignora). */
   fecha?: string;
   hora_inicio?: string;
+  /** "HH:MM" en que termina el reparto: descarta las franjas del cliente que
+   *  arrancan después. Sin esto la edge lo deriva de hora_inicio. */
+  hora_fin?: string;
   /** Ventanas por pedido (del horario del cliente). Solo se respetan con optimizeTours. */
   ventanas?: VentanaPedido[];
   /** Barrida por pedido: hace que el orden entre bloques sea duro. */
@@ -165,9 +175,9 @@ export interface UseOptimizarRutaReturn {
   loading: boolean;
   rutaOptimizada: RutaOptimizadaResponse | null;
   error: string | null;
-  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: { fecha?: string; horaInicio?: string }) => Promise<RutaOptimizadaResponse | null>;
+  optimizarRuta: (transportistaId: string, pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: OptsTiempo) => Promise<RutaOptimizadaResponse | null>;
   /** Split multi-repartidor: divide los pedidos en N recorridos optimizados. */
-  optimizarRutaMulti: (repartidores: RepartidorParam[], pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: { fecha?: string; horaInicio?: string }) => Promise<RutaMultiVehiculoResponse | null>;
+  optimizarRutaMulti: (repartidores: RepartidorParam[], pedidos?: PedidoDB[], deposito?: DepositoCoords, destino?: DepositoCoords | null, opts?: OptsTiempo) => Promise<RutaMultiVehiculoResponse | null>;
   /** Permite al caller reflejar la ruta realmente armada (p.ej. agregando las
    *  paradas sin coordenadas que el optimizador no devuelve) para que el modal
    *  muestre el resultado y los botones de hoja de ruta / comandas. */
@@ -256,7 +266,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
     pedidos: PedidoDB[] = [],
     deposito?: DepositoCoords,
     destino?: DepositoCoords | null,
-    opts?: { fecha?: string; horaInicio?: string }
+    opts?: OptsTiempo
   ): Promise<RutaOptimizadaResponse | null> => {
     if (!transportistaId) {
       setError('Debes seleccionar un transportista');
@@ -314,6 +324,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       pedidos: pedidosConCoordenadas,
       fecha: opts?.fecha,
       hora_inicio: opts?.horaInicio,
+      hora_fin: opts?.horaFin,
       ventanas: ventanas.length > 0 ? ventanas : undefined,
       barridas: barridas.length > 0 ? barridas : undefined
     };
@@ -416,7 +427,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
     pedidos: PedidoDB[] = [],
     deposito?: DepositoCoords,
     destino?: DepositoCoords | null,
-    opts?: { fecha?: string; horaInicio?: string }
+    opts?: OptsTiempo
   ): Promise<RutaMultiVehiculoResponse | null> => {
     if (!repartidores.length) {
       setError('Elegí al menos un repartidor');
@@ -461,6 +472,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       pedidos: pedidosConCoordenadas,
       fecha: opts?.fecha,
       hora_inicio: opts?.horaInicio,
+      hora_fin: opts?.horaFin,
       ventanas: ventanas.length > 0 ? ventanas : undefined,
       barridas: barridas.length > 0 ? barridas : undefined,
       repartidores,
