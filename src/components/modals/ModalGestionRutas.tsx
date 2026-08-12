@@ -15,6 +15,7 @@ import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
 import { abreEnDia, clasificarBarrida, encajeEnHorario, ETIQUETA_BARRIDA } from '../../utils/barridas';
 import type { EncajeHorario } from '../../utils/barridas';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
+import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
@@ -407,15 +408,9 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const disponiblesFiltrados = useMemo((): PedidoDB[] => {
     return pedidos.filter(p => {
       if (!filtroActivo) return true;
-      // Columna según el modo: 'entrega' usa fecha_entrega_programada con fallback
-      // a la fecha de pedido; 'pedido' usa fecha.
-      const f = filtroTipoFecha === 'entrega'
-        ? (p.fecha_entrega_programada || p.fecha || null)
-        : (p.fecha || null);
-      if (!f) return true; // sin fecha conocida: incluir antes que ocultar
-      if (filtroDesde && f < filtroDesde) return false;
-      if (filtroHasta && f > filtroHasta) return false;
-      return true;
+      // Misma regla que usa el resaltado de cada fila, para que no puedan
+      // contradecirse (ver utils/filtroFechaPedidos).
+      return pedidoEnRangoDeFechas(p, filtroTipoFecha, filtroDesde, filtroHasta);
     });
   }, [pedidos, filtroActivo, filtroDesde, filtroHasta, filtroTipoFecha]);
 
@@ -1286,9 +1281,22 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   {pedidosVisibles.length > 0 ? (
                     <div className="bg-white border rounded-lg">
                       <div className="p-3 border-b bg-gray-50 flex items-center justify-between">
-                        <h3 className="font-medium text-gray-700">
-                          Pedidos del día ({pedidosSeleccionados.length}/{pedidosVisibles.length})
-                        </h3>
+                        <div>
+                          <h3 className="font-medium text-gray-700">
+                            Pedidos del día ({pedidosSeleccionados.length}/{pedidosVisibles.length})
+                          </h3>
+                          {/* El filtro está arriba de todo; al mirar la lista ya
+                              no se ve por cuál de las dos fechas se filtró. */}
+                          {filtroActivo && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Filtrando por{' '}
+                              <span className="font-semibold text-blue-600">
+                                {filtroTipoFecha === 'entrega' ? 'fecha de entrega' : 'fecha de pedido'}
+                              </span>
+                              , resaltada en cada pedido
+                            </p>
+                          )}
+                        </div>
                         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                           <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} className="rounded" />
                           Seleccionar todos
@@ -1312,6 +1320,13 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         ) : pedidosVisiblesFiltrados.map((pedido) => {
                           const checked = seleccionados.has(pedido.id);
                           const enRuta = idsExistentes.has(pedido.id);
+                          // Con filtro puesto, se marca cuál de las dos fechas
+                          // lo trajo. Sin esto la fila muestra las dos iguales y
+                          // un pedido de ayer entregable hoy parece un error.
+                          const columnaFiltrada = filtroActivo
+                            ? fechaQueFiltra(pedido, filtroTipoFecha).columna
+                            : null;
+                          const resaltar = 'font-semibold text-blue-600';
                           return (
                             <label
                               key={pedido.id}
@@ -1333,7 +1348,21 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                   )}
                                 </p>
                                 <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
-                                <p className="text-xs text-gray-400">Pedido: {pedido.fecha || '—'} · Entrega: {pedido.fecha_entrega_programada || '—'}</p>
+                                <p className="text-xs text-gray-400">
+                                  <span
+                                    className={columnaFiltrada === 'pedido' ? resaltar : undefined}
+                                    title={columnaFiltrada === 'pedido' ? 'Aparece por esta fecha' : undefined}
+                                  >
+                                    Pedido: {pedido.fecha || '—'}
+                                  </span>
+                                  {' · '}
+                                  <span
+                                    className={columnaFiltrada === 'entrega' ? resaltar : undefined}
+                                    title={columnaFiltrada === 'entrega' ? 'Aparece por esta fecha' : undefined}
+                                  >
+                                    Entrega: {pedido.fecha_entrega_programada || '—'}
+                                  </span>
+                                </p>
                               </div>
                               <div className="text-right ml-2">
                                 <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>
