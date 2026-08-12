@@ -1,12 +1,13 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import { useCalcularComisionesQuery, usePreventistasQuery } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaComisiones = lazy(() => import('../vistas/VistaComisiones'))
-const ModalComisionReglas = lazy(() => import('../modals/ModalComisionReglas'))
+const VistaComisiones = lazyWithReload(() => import('../vistas/VistaComisiones'))
+const ModalComisionReglas = lazyWithReload(() => import('../modals/ModalComisionReglas'))
 
 function LoadingState(): React.ReactElement {
   return (

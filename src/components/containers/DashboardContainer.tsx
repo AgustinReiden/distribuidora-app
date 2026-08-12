@@ -4,13 +4,14 @@
  * Container que carga datos del dashboard bajo demanda usando TanStack Query.
  * Solo carga métricas cuando el usuario navega a esta vista.
  */
-import React, { lazy, Suspense } from 'react'
+import React, { Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useBackup } from '../../hooks/supabase'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaDashboard = lazy(() => import('../vistas/VistaDashboard'))
+const VistaDashboard = lazyWithReload(() => import('../vistas/VistaDashboard'))
 
 function LoadingState() {
   return (

@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useState } from 'react'
+import React, { Suspense, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useRendimientoPreventistasQuery,
@@ -9,9 +9,10 @@ import type { AvanceMeta } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaMetasPreventistas = lazy(() => import('../vistas/VistaMetasPreventistas'))
-const ModalMetasPreventista = lazy(() => import('../modals/ModalMetasPreventista'))
+const VistaMetasPreventistas = lazyWithReload(() => import('../vistas/VistaMetasPreventistas'))
+const ModalMetasPreventista = lazyWithReload(() => import('../modals/ModalMetasPreventista'))
 
 function LoadingState(): React.ReactElement {
   return (

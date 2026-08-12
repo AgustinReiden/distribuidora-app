@@ -3,7 +3,7 @@
  *
  * Container que carga proveedores bajo demanda usando TanStack Query.
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useProveedoresQuery,
@@ -17,11 +17,12 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import type { ProveedorDBExtended, ProveedorFormInputExtended } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
 // Lazy load de componentes
-const VistaProveedores = lazy(() => import('../vistas/VistaProveedores'))
-const ModalProveedor = lazy(() => import('../modals/ModalProveedor'))
-const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
+const VistaProveedores = lazyWithReload(() => import('../vistas/VistaProveedores'))
+const ModalProveedor = lazyWithReload(() => import('../modals/ModalProveedor'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (

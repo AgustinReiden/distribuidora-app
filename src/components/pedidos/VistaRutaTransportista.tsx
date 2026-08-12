@@ -1,7 +1,7 @@
 /**
  * Vista de ruta para transportista
  */
-import React, { useState, useMemo, useRef, memo, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useRef, memo, Suspense } from 'react';
 import { Route, Truck, Check, MapPin, Phone, ChevronDown, ChevronUp, Navigation, AlertTriangle, Gift, WifiOff, X } from 'lucide-react';
 import { formatPrecio, formatFecha, getFormaPagoLabel } from '../../utils/formatters';
 import { googleMapsNavUrl, wazeNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
@@ -10,9 +10,10 @@ import { useAuthData } from '../../contexts/AuthDataContext';
 import ModalSalvedadItem from '../modals/ModalSalvedadItem';
 import ModalRegistrarPago from '../modals/ModalRegistrarPago';
 import { getDepositoCoords } from '../../hooks/useOptimizarRuta';
+import { lazyWithReload } from '../../utils/lazyWithReload';
 
 // Lazy: leaflet solo se carga al entrar a esta vista
-const MapaRuta = lazy(() => import('../MapaRuta'));
+const MapaRuta = lazyWithReload(() => import('../MapaRuta'));
 
 // =============================================================================
 // INTERFACES DE PROPS Y TIPOS

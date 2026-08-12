@@ -1,4 +1,5 @@
-import React, { useState, useMemo, lazy, Suspense, ChangeEvent } from 'react';
+import React, { useState, useMemo, Suspense, ChangeEvent } from 'react';
+import { lazyWithReload } from '../../utils/lazyWithReload';
 import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
 import { formatPrecio, formatFecha, fechaLocalISO, fechaHaceDias, parseDateSafe } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
@@ -8,7 +9,7 @@ import { decodePolylines } from '../../utils/polyline';
 import PanelNoEntregados from '../recorridos/PanelNoEntregados';
 
 // Lazy: leaflet solo se carga al expandir un recorrido
-const MapaRuta = lazy(() => import('../MapaRuta'));
+const MapaRuta = lazyWithReload(() => import('../MapaRuta'));
 import type {
   RecorridoDBExtended,
   PedidoDB,

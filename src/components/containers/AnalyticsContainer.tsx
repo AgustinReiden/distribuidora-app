@@ -4,11 +4,12 @@
  * Container para el Centro de Análisis.
  * Maneja el estado de exportación y delega la UI a VistaAnalytics.
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import { exportarBI } from '../../services/analyticsExport'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaAnalytics = lazy(() => import('../vistas/VistaAnalytics'))
+const VistaAnalytics = lazyWithReload(() => import('../vistas/VistaAnalytics'))
 
 function LoadingState() {
   return (

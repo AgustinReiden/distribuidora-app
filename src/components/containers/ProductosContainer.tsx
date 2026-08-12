@@ -4,7 +4,7 @@
  * Container que carga productos bajo demanda usando TanStack Query.
  * Maneja estado de modales y operaciones CRUD.
  */
-import React, { lazy, Suspense, useState, useCallback, useMemo } from 'react'
+import React, { Suspense, useState, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import {
@@ -32,23 +32,24 @@ import {
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
 // Lazy load de componentes
-const VistaProductos = lazy(() => import('../vistas/VistaProductos'))
-const ModalProducto = lazy(() => import('../modals/ModalProducto'))
-const ModalMermaStock = lazy(() => import('../modals/ModalMermaStock'))
-const ModalHistorialMermas = lazy(() => import('../modals/ModalHistorialMermas'))
-const ModalActualizacionMasivaPrecios = lazy(() => import('../modals/ModalActualizacionMasivaPrecios'))
-const ModalMinimoVentaMasivo = lazy(() => import('../modals/ModalMinimoVentaMasivo'))
-const ModalGrupoPrecio = lazy(() => import('../modals/ModalGrupoPrecio'))
-const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
-const ModalCategorias = lazy(() => import('../modals/ModalCategorias'))
-const ModalMarcas = lazy(() => import('../modals/ModalMarcas'))
-const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
-const ModalStockBajo = lazy(() => import('../modals/ModalStockBajo'))
-const ModalControlStock = lazy(() => import('../modals/ModalControlStock'))
-const ModalAjustesStockHistorial = lazy(() => import('../modals/ModalAjustesStockHistorial'))
-const CondicionesMayoristasPanel = lazy(() => import('./CondicionesMayoristasPanel'))
+const VistaProductos = lazyWithReload(() => import('../vistas/VistaProductos'))
+const ModalProducto = lazyWithReload(() => import('../modals/ModalProducto'))
+const ModalMermaStock = lazyWithReload(() => import('../modals/ModalMermaStock'))
+const ModalHistorialMermas = lazyWithReload(() => import('../modals/ModalHistorialMermas'))
+const ModalActualizacionMasivaPrecios = lazyWithReload(() => import('../modals/ModalActualizacionMasivaPrecios'))
+const ModalMinimoVentaMasivo = lazyWithReload(() => import('../modals/ModalMinimoVentaMasivo'))
+const ModalGrupoPrecio = lazyWithReload(() => import('../modals/ModalGrupoPrecio'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
+const ModalCategorias = lazyWithReload(() => import('../modals/ModalCategorias'))
+const ModalMarcas = lazyWithReload(() => import('../modals/ModalMarcas'))
+const ModalCambioProducto = lazyWithReload(() => import('../modals/ModalCambioProducto'))
+const ModalStockBajo = lazyWithReload(() => import('../modals/ModalStockBajo'))
+const ModalControlStock = lazyWithReload(() => import('../modals/ModalControlStock'))
+const ModalAjustesStockHistorial = lazyWithReload(() => import('../modals/ModalAjustesStockHistorial'))
+const CondicionesMayoristasPanel = lazyWithReload(() => import('./CondicionesMayoristasPanel'))
 
 function LoadingState() {
   return (

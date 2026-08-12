@@ -1,13 +1,14 @@
-import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useActualizarUsuarioMutation, useUsuariosQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import type { PerfilDB } from '../../types'
 import type { UsuarioFormData } from '../modals/ModalUsuario'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaUsuarios = lazy(() => import('../vistas/VistaUsuarios'))
-const ModalUsuario = lazy(() => import('../modals/ModalUsuario'))
+const VistaUsuarios = lazyWithReload(() => import('../vistas/VistaUsuarios'))
+const ModalUsuario = lazyWithReload(() => import('../modals/ModalUsuario'))
 
 function LoadingState(): React.ReactElement {
   return (

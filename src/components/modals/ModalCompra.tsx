@@ -4,7 +4,7 @@
  * Refactorizado con useReducer para mejor gestión de estado
  * Validación con Zod
  */
-import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, lazy, Suspense } from 'react'
+import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle } from 'lucide-react'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
@@ -15,9 +15,10 @@ import NumberInput from '../ui/NumberInput'
 import { supabase } from '../../lib/supabase'
 import { CompactErrorBoundary } from '../ErrorBoundary'
 import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload';
 
-const ModalProveedor = lazy(() => import('./ModalProveedor'))
-const ModalImportarCompra = lazy(() => import('./ModalImportarCompra'))
+const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
+const ModalImportarCompra = lazyWithReload(() => import('./ModalImportarCompra'))
 
 // =============================================================================
 // TIPOS

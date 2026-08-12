@@ -8,7 +8,7 @@
  * y tenerlas en una seccion aparte del menu obligaba a saltar de pantalla para
  * algo que se decide mirando el producto.
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useGruposPrecioQuery,
@@ -20,11 +20,12 @@ import {
 } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaGruposPrecio = lazy(() => import('../vistas/VistaGruposPrecio'))
-const AsistenteConsolidacion = lazy(() => import('../productos/AsistenteConsolidacion'))
-const ModalGrupoPrecio = lazy(() => import('../modals/ModalGrupoPrecio'))
-const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
+const VistaGruposPrecio = lazyWithReload(() => import('../vistas/VistaGruposPrecio'))
+const AsistenteConsolidacion = lazyWithReload(() => import('../productos/AsistenteConsolidacion'))
+const ModalGrupoPrecio = lazyWithReload(() => import('../modals/ModalGrupoPrecio'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (

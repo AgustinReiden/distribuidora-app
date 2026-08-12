@@ -2,7 +2,7 @@
  * MovimientosContainer — panel de movimientos entre sucursales (con aprobación).
  * Reemplaza el flujo viejo de transferencias (un solo lado, inmediato).
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useMovimientosQuery,
@@ -20,12 +20,13 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaMovimientos = lazy(() => import('../vistas/VistaMovimientos'))
-const ModalCrearMovimiento = lazy(() => import('../modals/ModalCrearMovimiento'))
-const ModalAceptarMovimiento = lazy(() => import('../modals/ModalAceptarMovimiento'))
-const ModalDetalleMovimiento = lazy(() => import('../modals/ModalDetalleMovimiento'))
-const ModalCancelarMovimiento = lazy(() => import('../modals/ModalCancelarMovimiento'))
+const VistaMovimientos = lazyWithReload(() => import('../vistas/VistaMovimientos'))
+const ModalCrearMovimiento = lazyWithReload(() => import('../modals/ModalCrearMovimiento'))
+const ModalAceptarMovimiento = lazyWithReload(() => import('../modals/ModalAceptarMovimiento'))
+const ModalDetalleMovimiento = lazyWithReload(() => import('../modals/ModalDetalleMovimiento'))
+const ModalCancelarMovimiento = lazyWithReload(() => import('../modals/ModalCancelarMovimiento'))
 
 type TabEstado = EstadoMovimiento | 'todos'
 

@@ -4,7 +4,7 @@
  * Container que carga clientes bajo demanda usando TanStack Query.
  * Maneja estado de modales y operaciones CRUD.
  */
-import React, { lazy, Suspense, useState, useCallback } from 'react'
+import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useClientesQuery,
@@ -25,16 +25,17 @@ import { useQueryClient } from '@tanstack/react-query'
 import { puedeRegistrarPagoCliente } from '../../lib/permisos'
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
 // Lazy load de componentes
-const VistaClientes = lazy(() => import('../vistas/VistaClientes'))
-const ModalCliente = lazy(() => import('../modals/ModalCliente'))
-const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
-const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
-const ModalZonas = lazy(() => import('../modals/ModalZonas'))
-const ModalRegistrarPago = lazy(() => import('../modals/ModalRegistrarPago'))
-const ModalDeudoresMora = lazy(() => import('../modals/ModalDeudoresMora'))
-const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
+const VistaClientes = lazyWithReload(() => import('../vistas/VistaClientes'))
+const ModalCliente = lazyWithReload(() => import('../modals/ModalCliente'))
+const ModalFichaCliente = lazyWithReload(() => import('../modals/ModalFichaCliente'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
+const ModalZonas = lazyWithReload(() => import('../modals/ModalZonas'))
+const ModalRegistrarPago = lazyWithReload(() => import('../modals/ModalRegistrarPago'))
+const ModalDeudoresMora = lazyWithReload(() => import('../modals/ModalDeudoresMora'))
+const ModalCambioProducto = lazyWithReload(() => import('../modals/ModalCambioProducto'))
 
 function LoadingState() {
   return (
