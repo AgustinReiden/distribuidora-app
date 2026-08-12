@@ -121,17 +121,21 @@ function isoFecha(fecha: string, hhmm: string): string {
   return `${fecha}T${t}${TZ}`;
 }
 
-/** Duración del reparto desde que sale el camión. */
+/** Duración del reparto cuando el request no trae la hora de fin. */
 const JORNADA_HORAS = 10;
 
 /**
  * Fin de la jornada de reparto: "HH:MM" de salida + JORNADA_HORAS (tope 23:30).
  *
- * Acota qué franjas del cliente son entregas posibles de verdad. Sin esto, la
- * ventana de la tarde de un local cortado (09:00-13:00 y 18:00-22:00) es una
- * salida de emergencia para el optimizador: si no llega antes de las 13 puede
- * planificar esperar hasta las 18 y dar por resuelta la parada, cuando en la
- * calle esa entrega simplemente no se hace.
+ * Es el FALLBACK: la hora de fin la elige el admin al armar la ruta (viaja como
+ * `hora_fin`), porque un sábado no dura lo mismo que un martes. Esto cubre a los
+ * clientes que no la mandan.
+ *
+ * Sirve para acotar qué franjas del cliente son entregas posibles de verdad. Sin
+ * ese corte, la ventana de la tarde de un local cortado (09:00-13:00 y
+ * 18:00-22:00) es una salida de emergencia para el optimizador: si no llega
+ * antes de las 13 puede planificar esperar hasta las 18 y dar por resuelta la
+ * parada, cuando en la calle esa entrega simplemente no se hace.
  */
 export function finDeJornada(horaInicio: string | undefined): string | null {
   if (!horaInicio) return null;
@@ -183,9 +187,9 @@ export interface OptimizeToursOpts {
     franjas: Array<{ inicio: string; fin: string }>;
   }>;
   /**
-   * "HH:MM" en que termina el reparto. Lo calculan las funciones por barridas a
-   * partir de la salida del camión y se mantiene fijo entre bloques (si se
-   * recalculara por barrida, cada una correría el fin de jornada más tarde).
+   * "HH:MM" en que termina el reparto. Lo elige el admin al armar la ruta; si no
+   * viene se deriva de la salida con `finDeJornada`. Se mantiene fijo entre
+   * barridas: si se recalculara por bloque, cada uno correría el fin más tarde.
    */
   horaFinJornada?: string | null;
 }

@@ -12,7 +12,7 @@ import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDest
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
-import { abreEnDia, clasificarBarrida, encajeEnHorario, ETIQUETA_BARRIDA } from '../../utils/barridas';
+import { abreEnDia, clasificarBarrida, encajeEnHorario, ETIQUETA_BARRIDA, finJornadaSugerida } from '../../utils/barridas';
 import type { EncajeHorario } from '../../utils/barridas';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
@@ -21,6 +21,12 @@ import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
 const normTexto = (s?: string | null): string =>
   (s || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+
+/** "HH:MM" del input type="time" a minutos. NaN si está vacío o mal formado. */
+const minutosDeHora = (hhmm: string): number => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+};
 
 // =============================================================================
 // TIPOS
@@ -102,12 +108,12 @@ export interface ModalGestionRutasProps {
    * Arma la ruta del día: optimiza los pedidos seleccionados y la guarda en
    * un solo paso (el container encadena optimizar + aplicar_orden_ruta).
    */
-  onArmarRuta: (transportistaId: string, pedidos: PedidoDB[], fecha: string, horaInicio: string) => void;
+  onArmarRuta: (transportistaId: string, pedidos: PedidoDB[], fecha: string, horaInicio: string, horaFin: string) => void;
   /**
    * Divide los pedidos seleccionados entre varios repartidores (N recorridos).
    * Cada repartidor puede traer máx paradas y zonas preferidas.
    */
-  onArmarRutaMulti?: (repartidores: RepartidorParam[], pedidos: PedidoDB[], fecha: string, horaInicio: string) => void;
+  onArmarRutaMulti?: (repartidores: RepartidorParam[], pedidos: PedidoDB[], fecha: string, horaInicio: string, horaFin: string) => void;
   onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
   /** Imprime las comandas (duplicado por pedido) de la ruta recién armada. */
   onImprimirComandas?: (pedidos: PedidoOrdenado[]) => void;
@@ -292,6 +298,18 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // Hora a la que arranca el recorrido (sale del depósito). Ancla las ventanas
   // horarias en la optimización para priorizar los horarios de entrega.
   const [horaInicio, setHoraInicio] = useState<string>('08:00');
+  // Hora a la que termina el reparto. Acota qué franjas del cliente son entregas
+  // posibles de verdad: la ventana de la noche de un local cortado no lo es, y
+  // sin este corte el optimizador la usaba para dar la parada por resuelta.
+  // Sigue a la hora de salida hasta que el admin la toca a mano.
+  const [horaFin, setHoraFin] = useState<string>(() => finJornadaSugerida('08:00'));
+  const horaFinEditada = useRef<boolean>(false);
+  useEffect(() => {
+    if (!horaFinEditada.current) setHoraFin(finJornadaSugerida(horaInicio));
+  }, [horaInicio]);
+  // Negado a propósito: si alguna hora quedó vacía el input da NaN, y NaN en una
+  // comparación normal daría "válido" y armaría la ruta sin ancla temporal.
+  const jornadaInvalida = !(minutosDeHora(horaFin) > minutosDeHora(horaInicio));
   // Filtro de fecha para acotar el pool de disponibles (suelen acumularse
   // pendientes/en preparación de varios días). Se puede filtrar por fecha de
   // pedido o por fecha de entrega programada (ver filtroTipoFecha).
@@ -582,7 +600,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const handleArmar = (): void => {
     if (transportistaSeleccionado && pedidosSeleccionados.length > 0) {
       // Optimiza + guarda en un paso, solo con los pedidos seleccionados.
-      onArmarRuta(transportistaSeleccionado, pedidosSeleccionados, fechaEntrega, horaInicio);
+      onArmarRuta(transportistaSeleccionado, pedidosSeleccionados, fechaEntrega, horaInicio, horaFin);
     }
   };
 
@@ -621,7 +639,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   const handleDividir = (): void => {
     if (onArmarRutaMulti && repartidoresParam.length > 0 && pedidosSeleccionados.length > 0) {
-      onArmarRutaMulti(repartidoresParam, pedidosSeleccionados, fechaEntrega, horaInicio);
+      onArmarRutaMulti(repartidoresParam, pedidosSeleccionados, fechaEntrega, horaInicio, horaFin);
     }
   };
 
@@ -766,9 +784,25 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setHoraInicio(e.target.value)}
                     className="px-3 py-2 border rounded-lg text-sm"
                   />
+                  <label className="text-sm font-medium text-blue-900">y termina</label>
+                  <input
+                    type="time"
+                    value={horaFin}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                      horaFinEditada.current = true;
+                      setHoraFin(e.target.value);
+                    }}
+                    className={`px-3 py-2 border rounded-lg text-sm ${jornadaInvalida ? 'border-red-400 bg-red-50' : ''}`}
+                  />
                   <span className="text-xs text-blue-700">
-                    Hora a la que sale del depósito. Prioriza los horarios de entrega de los clientes.
+                    Sale del depósito y vuelve. Prioriza los horarios de entrega de los clientes:
+                    lo que abre después de que termina el reparto no se toma como entregable.
                   </span>
+                  {jornadaInvalida && (
+                    <span className="w-full text-xs text-red-700">
+                      El reparto tiene que terminar después de la hora de salida.
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1597,7 +1631,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
               modoDividir ? (
                 <button
                   onClick={handleDividir}
-                  disabled={repartidoresSel.size === 0 || loading || guardando || pedidosSeleccionados.length === 0}
+                  disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0}
                   className="flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {(loading || guardando) ? <Loader2 className="w-5 h-5 animate-spin" /> : <Route className="w-5 h-5" />}
@@ -1608,7 +1642,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
               ) : (
                 <button
                   onClick={handleArmar}
-                  disabled={!transportistaSeleccionado || loading || guardando || pedidosSeleccionados.length === 0}
+                  disabled={!transportistaSeleccionado || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0}
                   className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {(loading || guardando) ? (
