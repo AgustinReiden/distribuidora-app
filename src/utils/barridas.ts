@@ -205,6 +205,26 @@ export function intercalarSinCoordenadas<R extends ParadaRuteada, S extends Para
   return numerar(salida);
 }
 
+/** Duración típica del reparto. Solo sugiere el default del modal: la hora de
+ *  fin la elige el admin al armar la ruta, igual que la de salida. */
+export const JORNADA_HORAS = 10;
+
+/**
+ * Fin de jornada sugerido a partir de la hora de salida (tope 23:30).
+ *
+ * Es un default, no una regla: un sábado no dura lo mismo que un martes, así
+ * que el modal deja cambiarlo. Lo que el optimizador hace con ese horario es
+ * descartar las franjas del cliente que arrancan después (la ventana de la
+ * noche de un local cortado no es una entrega que se vaya a hacer).
+ */
+export function finJornadaSugerida(horaInicio: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(horaInicio);
+  if (!m) return '18:00';
+  const tope = 23 * 60 + 30;
+  const fin = Math.min(Number(m[1]) * 60 + Number(m[2]) + JORNADA_HORAS * 60, tope);
+  return `${String(Math.floor(fin / 60)).padStart(2, '0')}:${String(fin % 60).padStart(2, '0')}`;
+}
+
 /** Cómo cae la hora planificada contra el horario del cliente. */
 export type EncajeHorario = 'ok' | 'temprano' | 'tarde' | 'desconocido';
 

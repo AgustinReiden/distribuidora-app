@@ -278,3 +278,34 @@ Deno.test("sin vehicleEndTime la hora de fin es null (se mantiene la previa)", (
   assertEquals(ruta.horaFin, null);
   assertExists(ruta.ultimaParada);
 });
+
+Deno.test("la hora de fin del request manda sobre la derivada de la salida", () => {
+  // El admin la elige en el modal: un sábado corto no tiene por qué tolerar la
+  // franja de las 17, aunque salir 08:00 la habilitaría por default.
+  const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
+    fecha: FECHA,
+    horaInicio: "08:00",
+    horaFinJornada: "13:00",
+    ventanas: [{
+      pedido_id: "1",
+      franjas: [{ inicio: "09:00", fin: "12:00" }, { inicio: "17:00", fin: "22:00" }],
+    }],
+  });
+  const tw = shipments(m)[0].deliveries[0].timeWindows;
+  assertEquals(tw.length, 1);
+  assertEquals(tw[0].softEndTime, `${FECHA}T12:00:00-03:00`);
+});
+
+Deno.test("sin hora de fin en el request se deriva de la salida (compat)", () => {
+  // Saliendo 08:00 la jornada llega hasta las 18:00, así que la franja de las
+  // 17 sigue siendo una entrega posible.
+  const m = construirModeloSingle(DEPOSITO, [pedido(1)], DESTINO, {
+    fecha: FECHA,
+    horaInicio: "08:00",
+    ventanas: [{
+      pedido_id: "1",
+      franjas: [{ inicio: "09:00", fin: "12:00" }, { inicio: "17:00", fin: "22:00" }],
+    }],
+  });
+  assertEquals(shipments(m)[0].deliveries[0].timeWindows.length, 2);
+});
