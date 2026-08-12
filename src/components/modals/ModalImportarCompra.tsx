@@ -192,7 +192,10 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         bonificacion: item.bonificacion,
         costoUnitario: item.costoUnitario || producto?.costo_sin_iva || 0,
         impuestosInternos: producto?.impuestos_internos || 0,
-        porcentajeIva: 21,
+        // Los atributos fiscales salen de la ficha, no de un 21% fijo: el Excel
+        // no los trae y hardcodearlos gravaba productos exentos.
+        porcentajeIva: producto?.porcentaje_iva ?? 21,
+        condicionIva: producto?.condicion_iva ?? 'gravado',
         stockActual: producto?.stock || 0
       };
     });

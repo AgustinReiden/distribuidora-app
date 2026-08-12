@@ -29,6 +29,7 @@ describe('ModalEditarCompra · botón "Cambiar proveedor"', () => {
         costo_unitario: 100,
         bonificacion: 0,
         porcentaje_iva: 21,
+        condicion_iva: 'gravado',
         impuestos_internos: 0,
         producto: { nombre: 'Prod 1' },
       },

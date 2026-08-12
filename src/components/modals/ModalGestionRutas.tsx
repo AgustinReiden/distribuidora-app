@@ -12,8 +12,10 @@ import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDest
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
-import { abreEnDia, clasificarBarrida, ETIQUETA_BARRIDA } from '../../utils/barridas';
+import { abreEnDia, clasificarBarrida, encajeEnHorario, ETIQUETA_BARRIDA } from '../../utils/barridas';
+import type { EncajeHorario } from '../../utils/barridas';
 import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
+import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
@@ -30,6 +32,8 @@ export interface OrdenOptimizado {
   orden: number;
   cliente?: string;
   direccion?: string;
+  /** "HH:MM" de llegada según el plan del optimizador (solo con ancla temporal). */
+  hora_estimada?: string;
 }
 
 /** Resultado de la optimizacion de ruta */
@@ -70,11 +74,13 @@ export interface RutaMultiResultadoUI {
 /** Pedido con orden optimizado extendido */
 interface PedidoOrdenado extends PedidoDB {
   orden_optimizado?: number;
+  /** "HH:MM" que planificó el optimizador para llegar a esta parada. */
+  hora_estimada?: string;
 }
 
 /** Props del componente PedidoRutaCard */
 interface PedidoRutaCardProps {
-  pedido: PedidoDB;
+  pedido: PedidoOrdenado;
   orden: number;
   isFirst: boolean;
   isLast: boolean;
@@ -132,6 +138,38 @@ interface Totales {
 }
 
 // Componente para mostrar cada pedido en la lista de ruta
+/**
+ * Chip con la hora a la que el plan llega a la parada, contrastada contra el
+ * horario del cliente. Es el control que faltaba: hasta ahora la ruta se armaba
+ * y recién en la calle se veía que una parada caía con el local cerrado.
+ */
+const HoraEstimada = memo(function HoraEstimada({ pedido }: { pedido: PedidoOrdenado }) {
+  if (!pedido.hora_estimada) return null;
+  const horario = horarioParaRutear(pedido.cliente);
+  const encaje = encajeEnHorario(pedido.hora_estimada, horario);
+  const estilo: Record<EncajeHorario, string> = {
+    ok: 'bg-green-50 text-green-700 border-green-200',
+    temprano: 'bg-amber-50 text-amber-700 border-amber-200',
+    tarde: 'bg-red-50 text-red-700 border-red-200',
+    desconocido: 'bg-gray-50 text-gray-600 border-gray-200',
+  };
+  const detalle: Record<EncajeHorario, string> = {
+    ok: '',
+    temprano: ` · abre ${horario}`,
+    tarde: ` · cierra ${horario}`,
+    desconocido: '',
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${estilo[encaje]}`}
+      title={horario ? `Horario del cliente: ${horario}` : 'El cliente no tiene horario cargado'}
+    >
+      <Clock className="w-3 h-3" />
+      Llega ~{pedido.hora_estimada}{detalle[encaje]}
+    </span>
+  );
+});
+
 const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, isLast }: PedidoRutaCardProps) {
   const estadoPagoColors: EstadoPagoColors = {
     pagado: 'bg-green-100 text-green-700 border-green-200',
@@ -201,8 +239,11 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
               </div>
             </div>
 
-            <div className="text-xs text-gray-500">
-              {formaPagoLabels[pedido.forma_pago || 'efectivo'] || 'Efectivo'}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-500">
+                {formaPagoLabels[pedido.forma_pago || 'efectivo'] || 'Efectivo'}
+              </span>
+              <HoraEstimada pedido={pedido} />
             </div>
           </div>
 
@@ -367,15 +408,9 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const disponiblesFiltrados = useMemo((): PedidoDB[] => {
     return pedidos.filter(p => {
       if (!filtroActivo) return true;
-      // Columna según el modo: 'entrega' usa fecha_entrega_programada con fallback
-      // a la fecha de pedido; 'pedido' usa fecha.
-      const f = filtroTipoFecha === 'entrega'
-        ? (p.fecha_entrega_programada || p.fecha || null)
-        : (p.fecha || null);
-      if (!f) return true; // sin fecha conocida: incluir antes que ocultar
-      if (filtroDesde && f < filtroDesde) return false;
-      if (filtroHasta && f > filtroHasta) return false;
-      return true;
+      // Misma regla que usa el resaltado de cada fila, para que no puedan
+      // contradecirse (ver utils/filtroFechaPedidos).
+      return pedidoEnRangoDeFechas(p, filtroTipoFecha, filtroDesde, filtroHasta);
     });
   }, [pedidos, filtroActivo, filtroDesde, filtroHasta, filtroTipoFecha]);
 
@@ -477,7 +512,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     const incluidos = new Set<string>();
     for (const item of rutaOptimizada.orden_optimizado) {
       const pedido = map.get(item.pedido_id);
-      if (pedido) { result.push({ ...pedido, orden_optimizado: item.orden }); incluidos.add(pedido.id); }
+      if (pedido) {
+        result.push({ ...pedido, orden_optimizado: item.orden, hora_estimada: item.hora_estimada });
+        incluidos.add(pedido.id);
+      }
     }
     // Pedidos seleccionados sin coordenadas: el optimizador no los ordena, pero
     // forman parte de la ruta armada. Se muestran al final, sin orden geográfico,
@@ -493,6 +531,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const pedidosSinCoordenadas = useMemo((): PedidoDB[] => {
     return pedidosSeleccionados.filter(p => !p.cliente?.latitud || !p.cliente?.longitud);
   }, [pedidosSeleccionados]);
+
+  // Paradas que, según el plan del optimizador, caen fuera del horario del
+  // cliente. Se avisa acá porque es el único momento en que todavía se puede
+  // sacar una parada o correr la hora de salida.
+  const paradasFueraDeHorario = useMemo((): PedidoOrdenado[] => {
+    return pedidosOrdenados.filter(
+      p => encajeEnHorario(p.hora_estimada, horarioParaRutear(p.cliente)) === 'tarde',
+    );
+  }, [pedidosOrdenados]);
 
   // Links a Google Maps con la ruta armada. Maps acepta máximo 9 waypoints
   // por link (+ origen + destino = 10 paradas nuevas por link), así que rutas
@@ -1234,9 +1281,22 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   {pedidosVisibles.length > 0 ? (
                     <div className="bg-white border rounded-lg">
                       <div className="p-3 border-b bg-gray-50 flex items-center justify-between">
-                        <h3 className="font-medium text-gray-700">
-                          Pedidos del día ({pedidosSeleccionados.length}/{pedidosVisibles.length})
-                        </h3>
+                        <div>
+                          <h3 className="font-medium text-gray-700">
+                            Pedidos del día ({pedidosSeleccionados.length}/{pedidosVisibles.length})
+                          </h3>
+                          {/* El filtro está arriba de todo; al mirar la lista ya
+                              no se ve por cuál de las dos fechas se filtró. */}
+                          {filtroActivo && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Filtrando por{' '}
+                              <span className="font-semibold text-blue-600">
+                                {filtroTipoFecha === 'entrega' ? 'fecha de entrega' : 'fecha de pedido'}
+                              </span>
+                              , resaltada en cada pedido
+                            </p>
+                          )}
+                        </div>
                         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                           <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} className="rounded" />
                           Seleccionar todos
@@ -1260,6 +1320,13 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         ) : pedidosVisiblesFiltrados.map((pedido) => {
                           const checked = seleccionados.has(pedido.id);
                           const enRuta = idsExistentes.has(pedido.id);
+                          // Con filtro puesto, se marca cuál de las dos fechas
+                          // lo trajo. Sin esto la fila muestra las dos iguales y
+                          // un pedido de ayer entregable hoy parece un error.
+                          const columnaFiltrada = filtroActivo
+                            ? fechaQueFiltra(pedido, filtroTipoFecha).columna
+                            : null;
+                          const resaltar = 'font-semibold text-blue-600';
                           return (
                             <label
                               key={pedido.id}
@@ -1281,7 +1348,21 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                   )}
                                 </p>
                                 <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
-                                <p className="text-xs text-gray-400">Pedido: {pedido.fecha || '—'} · Entrega: {pedido.fecha_entrega_programada || '—'}</p>
+                                <p className="text-xs text-gray-400">
+                                  <span
+                                    className={columnaFiltrada === 'pedido' ? resaltar : undefined}
+                                    title={columnaFiltrada === 'pedido' ? 'Aparece por esta fecha' : undefined}
+                                  >
+                                    Pedido: {pedido.fecha || '—'}
+                                  </span>
+                                  {' · '}
+                                  <span
+                                    className={columnaFiltrada === 'entrega' ? resaltar : undefined}
+                                    title={columnaFiltrada === 'entrega' ? 'Aparece por esta fecha' : undefined}
+                                  >
+                                    Entrega: {pedido.fecha_entrega_programada || '—'}
+                                  </span>
+                                </p>
                               </div>
                               <div className="text-right ml-2">
                                 <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>
@@ -1452,6 +1533,31 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                       </a>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Paradas que el plan no alcanza a hacer dentro del horario */}
+              {paradasFueraDeHorario.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <h3 className="font-medium text-red-800 mb-1 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5" />
+                    {paradasFueraDeHorario.length === 1
+                      ? '1 parada llega con el local cerrado'
+                      : `${paradasFueraDeHorario.length} paradas llegan con el local cerrado`}
+                  </h3>
+                  <p className="text-xs text-red-700 mb-2">
+                    El recorrido no alcanza a llegar antes de que cierren. Sacalas de la
+                    ruta, adelantá la hora de salida o dividí entre más choferes.
+                  </p>
+                  <ul className="text-sm text-red-800 space-y-0.5">
+                    {paradasFueraDeHorario.map(p => (
+                      <li key={p.id}>
+                        <span className="font-medium">#{p.orden_optimizado}</span>{' '}
+                        {p.cliente?.nombre_fantasia || 'Cliente'} — llega ~{p.hora_estimada},
+                        cierra {horarioParaRutear(p.cliente)}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
 

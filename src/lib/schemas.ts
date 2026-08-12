@@ -52,6 +52,15 @@ export const telefonoSchema = z
   .optional()
 
 /**
+ * Condición frente al IVA (mig 177). Distingue "no gravado" de "0% gravado",
+ * que hasta ahora eran indistinguibles. La BD tiene un CHECK de coherencia: si
+ * no es `gravado`, la alícuota tiene que ser 0.
+ */
+export const condicionIvaSchema = z
+  .enum(['gravado', 'exento', 'no_gravado'], { error: 'Condición de IVA inválida' })
+  .default('gravado')
+
+/**
  * Monto positivo
  */
 export const montoPositivoSchema = z
@@ -180,6 +189,10 @@ export const productoSchema = z.object({
     .max(100, { message: 'El IVA no puede ser mayor a 100%' })
     .default(21),
 
+  // mig 177: distingue "no gravado" de "0% gravado". La BD tiene un CHECK de
+  // coherencia (si no es gravado, la alícuota debe ser 0).
+  condicion_iva: condicionIvaSchema,
+
   impuestos_internos: montoNoNegativoSchema.default(0),
 
   stock: stockSchema.default(0),
@@ -302,7 +315,8 @@ export const itemCompraSchema = z.object({
   cantidad: cantidadSchema,
   costo_unitario: montoNoNegativoSchema,
   impuestos_internos: montoNoNegativoSchema.default(0),
-  porcentaje_iva: z.number().min(0).max(100).default(21)
+  porcentaje_iva: z.number().min(0).max(100).default(21),
+  condicion_iva: condicionIvaSchema
 })
 
 /** Inferred type for ItemCompra schema */
@@ -619,6 +633,7 @@ export const modalProductoSchema = z.object({
     .nullable(),
 
   porcentaje_iva: z.coerce.number().min(0).max(100).default(21),
+  condicion_iva: condicionIvaSchema,
   costo_sin_iva: z.coerce.number().nonnegative().optional(),
   costo_con_iva: z.coerce.number().nonnegative().optional(),
   impuestos_internos: z.coerce.number().nonnegative().optional(),

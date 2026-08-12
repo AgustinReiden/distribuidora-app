@@ -112,7 +112,11 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       costo_con_iva: producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null,
       impuestos_internos: producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null,
       precio_sin_iva: producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null,
-      porcentaje_iva: producto.porcentaje_iva ?? 21,
+      // mig 177: condición y alícuota viajan juntas (CHECK cruzado en la BD).
+      condicion_iva: producto.condicion_iva ?? 'gravado',
+      porcentaje_iva: (producto.condicion_iva ?? 'gravado') === 'gravado'
+        ? (producto.porcentaje_iva ?? 21)
+        : 0,
       costo_real: producto.costo_real ?? null,
       // CPP (mig 127): un producto creado a mano arranca con CPP = costo real;
       // las compras posteriores lo van ponderando.
@@ -144,7 +148,16 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
   if (producto.costo_con_iva !== undefined) updateData.costo_con_iva = producto.costo_con_iva ? parseFloat(String(producto.costo_con_iva)) : null
   if (producto.impuestos_internos !== undefined) updateData.impuestos_internos = producto.impuestos_internos ? parseFloat(String(producto.impuestos_internos)) : null
   if (producto.precio_sin_iva !== undefined) updateData.precio_sin_iva = producto.precio_sin_iva ? parseFloat(String(producto.precio_sin_iva)) : null
-  if (producto.porcentaje_iva !== undefined) updateData.porcentaje_iva = producto.porcentaje_iva
+  // mig 177: la condición y la alícuota tienen que llegar coherentes o el CHECK
+  // cruzado rechaza el update. Si la condición viene, ella manda.
+  if (producto.condicion_iva !== undefined) {
+    updateData.condicion_iva = producto.condicion_iva
+    updateData.porcentaje_iva = producto.condicion_iva === 'gravado'
+      ? (producto.porcentaje_iva ?? 21)
+      : 0
+  } else if (producto.porcentaje_iva !== undefined) {
+    updateData.porcentaje_iva = producto.porcentaje_iva
+  }
   if (producto.costo_real !== undefined) updateData.costo_real = producto.costo_real
   // CPP (mig 127): solo llega definido cuando el admin lo corrige a mano en la ficha
   if (producto.costo_promedio !== undefined) updateData.costo_promedio = producto.costo_promedio

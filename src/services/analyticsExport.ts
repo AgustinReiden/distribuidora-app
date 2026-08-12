@@ -302,6 +302,8 @@ export async function fetchComprasFact(
         costo_unitario,
         bonificacion,
         subtotal,
+        porcentaje_iva,
+        condicion_iva,
         costo_neto_unitario,
         costo_real_unitario,
         producto:productos(nombre, codigo, categoria)
@@ -332,6 +334,10 @@ export async function fetchComprasFact(
         cantidad: item.cantidad,
         costo_unitario: item.costo_unitario,
         bonificacion: item.bonificacion ?? 0,
+        // Único lugar fuera del modal donde se ve el detalle fiscal por línea:
+        // con facturas mixtas hace falta para poder armar el libro IVA a mano.
+        condicion_iva: safe(item.condicion_iva) || 'gravado',
+        porcentaje_iva: item.porcentaje_iva ?? '',
         costo_neto_unitario: item.costo_neto_unitario ?? '',
         costo_real_unitario: item.costo_real_unitario ?? '',
         subtotal: item.subtotal,

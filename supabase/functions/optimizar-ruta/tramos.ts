@@ -57,6 +57,13 @@ export interface OrdenOptimizadoItem {
    * mostrarla en la hoja de ruta y medir rechazos por barrida.
    */
   barrida?: 1 | 2 | 3 | 4 | 5;
+  /**
+   * "HH:MM" en que el plan del optimizador llega a esta parada. Es el horario que
+   * el modelo usó para decidir el orden, así que sirve para contrastarlo contra
+   * el horario del cliente y ver, antes de mandar el camión, qué paradas caen
+   * fuera de hora. Solo lo devuelve optimizeTours (con ancla temporal).
+   */
+  hora_estimada?: string;
 }
 
 export interface RutaUnida {

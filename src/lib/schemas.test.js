@@ -179,6 +179,31 @@ describe('Schemas de Validación', () => {
       const result = validateForm(productoSchema, producto)
       expect(result.success).toBe(false)
     })
+
+    // mig 177: condición frente al IVA (distingue no gravado de 0% gravado)
+    it('acepta las tres condiciones de IVA', () => {
+      for (const condicion of ['gravado', 'exento', 'no_gravado']) {
+        const result = validateForm(productoSchema, {
+          nombre: 'Test', precio: 100, unidad: 'unidad', condicion_iva: condicion
+        })
+        expect(result.success).toBe(true)
+      }
+    })
+
+    it('rechaza una condición de IVA inventada', () => {
+      const result = validateForm(productoSchema, {
+        nombre: 'Test', precio: 100, unidad: 'unidad', condicion_iva: 'medio_gravado'
+      })
+      expect(result.success).toBe(false)
+    })
+
+    it('sin condición explícita queda gravado', () => {
+      const result = validateForm(productoSchema, {
+        nombre: 'Test', precio: 100, unidad: 'unidad'
+      })
+      expect(result.success).toBe(true)
+      expect(result.data.condicion_iva).toBe('gravado')
+    })
   })
 
   describe('pagoSchema', () => {

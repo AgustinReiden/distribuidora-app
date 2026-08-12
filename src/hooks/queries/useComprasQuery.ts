@@ -9,6 +9,7 @@ import { fechaLocalISO } from '../../utils/formatters'
 import type {
   CompraDBExtended,
   CompraFormInputExtended,
+  CondicionIva,
   RegistrarCompraResult
 } from '../../types'
 
@@ -30,6 +31,8 @@ interface CompraItemRPC {
   subtotal: number
   bonificacion: number
   porcentaje_iva: number
+  /** mig 177: el RPC normaliza lo que no reconozca a 'gravado' */
+  condicion_iva: CondicionIva
   impuestos_internos: number
 }
 
@@ -98,6 +101,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     subtotal: item.subtotal || (item.cantidad * (item.costoUnitario || 0)),
     bonificacion: item.bonificacion || 0,
     porcentaje_iva: item.porcentajeIva ?? 21,
+    condicion_iva: item.condicionIva ?? 'gravado',
     impuestos_internos: item.impuestosInternos ?? 0
   }))
 
@@ -231,6 +235,7 @@ export interface ActualizarCompraItemsInput {
     subtotal: number
     bonificacion?: number
     porcentajeIva?: number
+    condicionIva?: CondicionIva
     impuestosInternos?: number
   }>
 }
@@ -252,6 +257,7 @@ async function actualizarCompraItems(
     subtotal: item.subtotal,
     bonificacion: item.bonificacion ?? 0,
     porcentaje_iva: item.porcentajeIva ?? 21,
+    condicion_iva: item.condicionIva ?? 'gravado',
     impuestos_internos: item.impuestosInternos ?? 0,
   }))
 

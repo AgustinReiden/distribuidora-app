@@ -25,6 +25,7 @@ import type {
   ResumenCompras,
   ResumenComprasPorProveedor,
   UseComprasReturnExtended,
+  CondicionIva,
   ProductoDB
 } from '../../types'
 
@@ -35,6 +36,7 @@ interface CompraItemRPC {
   subtotal: number;
   bonificacion: number;
   porcentaje_iva: number;
+  condicion_iva: CondicionIva;
   impuestos_internos: number;
 }
 
@@ -120,6 +122,7 @@ export function useCompras(): UseComprasReturnExtended {
       subtotal: item.subtotal || (item.cantidad * (item.costoUnitario || 0)),
       bonificacion: item.bonificacion || 0,
       porcentaje_iva: item.porcentajeIva ?? 21,
+      condicion_iva: item.condicionIva ?? 'gravado',
       impuestos_internos: item.impuestosInternos ?? 0
     }))
 

@@ -14,7 +14,8 @@ import {
   calcularCostoReal,
   parsePrecio,
 } from '../../utils/calculations';
-import type { ProductoDB, ProveedorDBExtended } from '../../types';
+import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
+import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
 const ProductoCondicionesMayoristas = lazy(() => import('../productos/ProductoCondicionesMayoristas'));
@@ -40,6 +41,8 @@ export interface ProductoFormData {
    */
   cantidad_minima_venta?: number | null;
   porcentaje_iva: number;
+  /** Condición frente al IVA (mig 177). Va siempre en par con porcentaje_iva. */
+  condicion_iva: CondicionIva;
   costo_sin_iva: number | string;
   costo_con_iva: number | string;
   impuestos_internos: number | string;
@@ -53,12 +56,6 @@ export interface ProductoFormData {
   unidades_de_venta_por_fardo?: number;
   /** Etiqueta del bulto: FARDO, CAJA, PACK, BULTO... */
   etiqueta_bulto?: string;
-}
-
-/** Opción de IVA */
-interface OpcionIVA {
-  valor: number;
-  label: string;
 }
 
 /** Validation errors map */
@@ -94,13 +91,6 @@ export interface ModalProductoProps {
   onCrearCondicionMayorista?: () => void;
 }
 
-// Opciones de IVA disponibles
-const OPCIONES_IVA: OpcionIVA[] = [
-  { valor: 21, label: '21%' },
-  { valor: 10.5, label: '10.5%' },
-  { valor: 0, label: '0% (Exento)' }
-];
-
 /** Helper to get category name */
 const getCategoryName = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : cat.nombre;
@@ -135,6 +125,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     cantidad_minima_venta: producto.cantidad_minima_venta ?? undefined,
     // Atributo fiscal del producto: preservar el real (ej: 10.5) en vez de resetear a 21.
     porcentaje_iva: producto.porcentaje_iva ?? 21,
+    condicion_iva: producto.condicion_iva ?? 'gravado',
     costo_sin_iva: producto.costo_sin_iva ?? '',
     costo_con_iva: producto.costo_con_iva ?? '',
     impuestos_internos: producto.impuestos_internos ?? '',
@@ -153,6 +144,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     stock_minimo: 10,
     cantidad_minima_venta: undefined,
     porcentaje_iva: 21,
+    condicion_iva: 'gravado',
     costo_sin_iva: '',
     costo_con_iva: '',
     impuestos_internos: '',
@@ -238,7 +230,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   // recalculan derivados y ambos márgenes.
   const handleCostoSinIvaChange = (valor: string): void => aplicarForm({ ...form, costo_sin_iva: valor });
   const handleImpuestosInternosChange = (valor: string): void => aplicarForm({ ...form, impuestos_internos: valor });
-  const handlePorcentajeIvaChange = (valor: string): void => aplicarForm({ ...form, porcentaje_iva: parseFloat(valor) });
+  // La condición y la alícuota se eligen juntas: cambiar a exento/no gravado
+  // pone la tasa en 0, que es lo que después hereda la venta.
+  const handleCondicionIvaChange = (clave: string): void => {
+    const opcion = OPCIONES_CONDICION_IVA.find(o => o.clave === clave);
+    if (!opcion) return;
+    aplicarForm({ ...form, condicion_iva: opcion.condicion, porcentaje_iva: opcion.porcentaje });
+  };
 
   // Cambio de PRECIO FINAL (lo edita el usuario) → recalcula neto + márgenes.
   const handlePrecioChange = (valor: string): void => {
@@ -330,6 +328,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
   };
 
   const inputClass = (field: string): string => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
+
+  const claveActualIva = claveCondicionIva(form.condicion_iva, form.porcentaje_iva);
 
   return (
     <ModalBase title={producto ? 'Editar Producto' : 'Nuevo Producto'} onClose={onClose} maxWidth="max-w-lg">
@@ -553,17 +553,26 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Configuracion Impositiva</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium mb-1 text-gray-600">% IVA</label>
+              <label className="block text-xs font-medium mb-1 text-gray-600">Condición IVA</label>
               <select
-                value={form.porcentaje_iva ?? 21}
-                onChange={(e: ChangeEvent<HTMLSelectElement>) => handlePorcentajeIvaChange(e.target.value)}
+                value={claveActualIva}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => handleCondicionIvaChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
               >
-                {OPCIONES_IVA.map(opt => (
-                  <option key={opt.valor} value={opt.valor}>{opt.label}</option>
+                {/* Un par legacy que no esté en la lista se muestra tal cual en
+                    vez de dejar el select en blanco mintiendo sobre el valor. */}
+                {!OPCIONES_CONDICION_IVA.some(o => o.clave === claveActualIva) && (
+                  <option value={claveActualIva}>{form.porcentaje_iva}% (sin clasificar)</option>
+                )}
+                {OPCIONES_CONDICION_IVA.map(opt => (
+                  <option key={opt.clave} value={opt.clave}>{opt.label}</option>
                 ))}
               </select>
-              <p className="text-xs text-gray-500 mt-1">Se aplica solo sobre el neto</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {form.condicion_iva === 'gravado'
+                  ? 'Se aplica solo sobre el neto'
+                  : 'Sin IVA: la venta de este producto no lo discrimina'}
+              </p>
             </div>
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos (%)</label>
@@ -791,8 +800,12 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           })()}
 
           <p className="text-xs text-gray-500 mt-2">
-            * El precio final incluye IVA ({form.porcentaje_iva || 21}%). El neto se calcula hacia atrás.
-            La venta no discrimina imp. internos (no somos agente): el II solo integra el costo.
+            {/* `?? 21`, no `|| 21`: con la alícuota en 0 (exento / no gravado) el
+                precio final NO lleva IVA y decir "21%" acá era mentira. */}
+            * {form.condicion_iva === 'gravado'
+              ? `El precio final incluye IVA (${form.porcentaje_iva ?? 21}%). El neto se calcula hacia atrás.`
+              : 'Producto sin IVA: el precio final es el neto.'}
+            {' '}La venta no discrimina imp. internos (no somos agente): el II solo integra el costo.
             Editá cualquiera de los dos márgenes o el precio final indistintamente.
           </p>
         </div>
@@ -800,6 +813,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         {/* Condiciones mayoristas de ESTE producto, con su margen. Solo en
             edición: sin id no hay a qué grupo pertenecer todavía. Los costos
             salen del form, así el margen se mueve mientras editás el costo. */}
+        {/* porcentajeIva con `?? 21`, no `|| 21`: con la alícuota en 0 (exento /
+            no gravado) el margen mayorista se calculaba dividiendo el precio por
+            1,21 y salía ~21 puntos peor que el real. */}
         {producto?.id && (
           <Suspense fallback={null}>
             <ProductoCondicionesMayoristas
@@ -807,7 +823,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               precioLista={parsePrecio(String(form.precio))}
               costoTotal={costosDesdeForm(form).costoTotal}
               costoReal={costosDesdeForm(form).costoReal}
-              porcentajeIva={Number(form.porcentaje_iva) || 21}
+              porcentajeIva={Number(form.porcentaje_iva ?? 21)}
               puedeEditar={esAdmin}
               onCrearCondicion={onCrearCondicionMayorista}
             />

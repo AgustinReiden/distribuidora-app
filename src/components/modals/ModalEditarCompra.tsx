@@ -1,8 +1,9 @@
 /**
  * ModalEditarCompra
  *
- * Permite al admin editar los items (cantidad, costo, bonificacion y % IVA) de
- * una compra existente, dentro de la ventana de 7 dias desde su creacion.
+ * Permite al admin editar los items (cantidad, costo, bonificacion y condicion
+ * de IVA) de una compra existente, dentro de la ventana de 7 dias desde su
+ * creacion.
  *
  * Limitaciones v1 (intencionales):
  *   - La cabecera (proveedor, fecha, factura, tipo_factura, forma_pago, notas)
@@ -21,8 +22,9 @@ import { Loader2, Trash2, AlertCircle, Building2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
-import type { CompraDBExtended } from '../../types'
+import type { CompraDBExtended, CondicionIva } from '../../types'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
+import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva'
 
 /** Item editable dentro del modal. */
 interface ItemEdit {
@@ -32,9 +34,14 @@ interface ItemEdit {
   costoUnitario: number
   bonificacion: number
   porcentajeIva: number
+  condicionIva: CondicionIva
   impuestosInternos: number
   marcadoParaEliminar: boolean
 }
+
+/** Clave del selector para el par (condición, alícuota) de la línea. */
+const claveCondicion = (it: { condicionIva: CondicionIva; porcentajeIva: number }): string =>
+  claveCondicionIva(it.condicionIva, it.porcentajeIva)
 
 export interface ModalEditarCompraProps {
   compra: CompraDBExtended
@@ -73,6 +80,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
       // Snapshot de la línea (mig 113); líneas viejas caen a los atributos
       // fiscales actuales del producto y por último a defaults.
       porcentajeIva: esZZ ? 0 : (it.porcentaje_iva ?? it.producto?.porcentaje_iva ?? 21),
+      condicionIva: esZZ ? 'gravado' : (it.condicion_iva ?? it.producto?.condicion_iva ?? 'gravado'),
       impuestosInternos: esZZ ? 0 : (it.impuestos_internos ?? it.producto?.impuestos_internos ?? 0),
       marcadoParaEliminar: false,
     })),
@@ -95,6 +103,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         costoUnitario: it.costo_unitario ?? 0,
         bonificacion: it.bonificacion ?? 0,
         porcentajeIva: esZZ ? 0 : (it.porcentaje_iva ?? it.producto?.porcentaje_iva ?? 21),
+        condicionIva: esZZ ? 'gravado' : (it.condicion_iva ?? it.producto?.condicion_iva ?? 'gravado'),
         impuestosInternos: esZZ ? 0 : (it.impuestos_internos ?? it.producto?.impuestos_internos ?? 0),
       })),
     [compra.items, esZZ],
@@ -111,6 +120,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         orig.costoUnitario !== it.costoUnitario ||
         orig.bonificacion !== it.bonificacion ||
         orig.porcentajeIva !== it.porcentajeIva ||
+        orig.condicionIva !== it.condicionIva ||
         orig.impuestosInternos !== it.impuestosInternos
       )
     })
@@ -131,7 +141,9 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
       const subtotalItem = it.cantidad * netoUnitario
       subtotal += subtotalItem
       if (!esZZ) {
-        iva += subtotalItem * (it.porcentajeIva / 100)
+        // Solo las líneas gravadas generan IVA (mig 177); exento y no gravado
+        // suman al subtotal pero no al crédito fiscal.
+        if (it.condicionIva === 'gravado') iva += subtotalItem * (it.porcentajeIva / 100)
         impuestosInternos += subtotalItem * ((it.impuestosInternos || 0) / 100)
       }
     }
@@ -142,6 +154,19 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
   function updateItem<K extends keyof ItemEdit>(productoId: string, field: K, value: ItemEdit[K]) {
     setItems((prev) =>
       prev.map((it) => (it.productoId === productoId ? { ...it, [field]: value } : it)),
+    )
+  }
+
+  /** Condición y alícuota se setean juntas: la condición manda sobre la tasa. */
+  function updateCondicion(productoId: string, clave: string) {
+    const opcion = OPCIONES_CONDICION_IVA.find((o) => o.clave === clave)
+    if (!opcion) return
+    setItems((prev) =>
+      prev.map((it) =>
+        it.productoId === productoId
+          ? { ...it, condicionIva: opcion.condicion, porcentajeIva: opcion.porcentaje }
+          : it,
+      ),
     )
   }
 
@@ -192,6 +217,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         subtotal: subtotalItem,
         bonificacion: it.bonificacion,
         porcentajeIva: esZZ ? 0 : it.porcentajeIva,
+        condicionIva: esZZ ? 'gravado' as const : it.condicionIva,
         impuestosInternos: it.impuestosInternos,
       }
     })
@@ -276,7 +302,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                 <th className="text-right py-2 px-2 w-24">Cantidad</th>
                 <th className="text-right py-2 px-2 w-32">Costo unit.</th>
                 <th className="text-right py-2 px-2 w-24">Bonif. %</th>
-                {!esZZ && <th className="text-right py-2 px-2 w-20">IVA %</th>}
+                {!esZZ && <th className="text-left py-2 px-2 w-28">IVA</th>}
                 <th className="text-right py-2 px-2 w-32">Subtotal</th>
                 <th className="py-2 pl-2 w-12"></th>
               </tr>
@@ -328,16 +354,21 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                     </td>
                     {!esZZ && (
                       <td className="py-2 px-2">
-                        <NumberInput
-                          min={0}
-                          max={100}
-                          emptyValue={0}
-                          value={it.porcentajeIva}
-                          onChange={(n) => updateItem(it.productoId, 'porcentajeIva', n)}
-                          commitOnChange
+                        <select
+                          value={claveCondicion(it)}
+                          onChange={(e) => updateCondicion(it.productoId, e.target.value)}
                           disabled={it.marcadoParaEliminar}
-                          className="w-full px-2 py-1 text-right border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
-                        />
+                          className="w-full px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
+                        >
+                          {/* Un par legacy fuera de la lista se muestra tal cual
+                              en vez de dejar el select mintiendo. */}
+                          {!OPCIONES_CONDICION_IVA.some(o => o.clave === claveCondicion(it)) && (
+                            <option value={claveCondicion(it)}>{it.porcentajeIva}%</option>
+                          )}
+                          {OPCIONES_CONDICION_IVA.map(o => (
+                            <option key={o.clave} value={o.clave}>{o.label}</option>
+                          ))}
+                        </select>
                       </td>
                     )}
                     <td className="py-2 px-2 text-right tabular-nums dark:text-gray-200">
