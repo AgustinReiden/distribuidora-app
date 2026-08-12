@@ -31,10 +31,21 @@ export const MOTIVOS_CANCELACION_ADMIN = [
   { valor: 'prueba', label: 'Pedido de prueba' },
 ] as const;
 
+/**
+ * Motivos que estampa el sistema y nadie elige a mano. No van en el
+ * desplegable, pero necesitan etiqueta para los listados y el reporte: sin
+ * esto, cada cambio de cliente quedaba como cancelación sin clasificar y le
+ * hacía un agujero a la medición (mig 175).
+ */
+export const MOTIVOS_CANCELACION_SISTEMA = [
+  { valor: 'cambio_de_cliente', label: 'Cambio de cliente' },
+] as const;
+
 /** Etiqueta legible de cualquier motivo, para mostrar en listados y reportes. */
 export const LABEL_MOTIVO: Record<string, string> = {
   ...Object.fromEntries(MOTIVOS_NO_ENTREGA.map(m => [m.valor, m.label])),
   ...Object.fromEntries(MOTIVOS_CANCELACION_ADMIN.map(m => [m.valor, m.label])),
+  ...Object.fromEntries(MOTIVOS_CANCELACION_SISTEMA.map(m => [m.valor, m.label])),
 };
 
 /** Texto para el preventista, en tercera persona. */
