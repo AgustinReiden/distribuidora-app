@@ -128,9 +128,20 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 177** — la última numerada en el repo es
-`176_sobrecargas_ambiguas` (aplicada). Las **174**
-(`174_salvedad_regalos_y_minimo_de_venta`), **175** y **176** mapean 1:1 con el ledger.
+**La próxima migración es la 180** — la última numerada en el repo es
+`179_jornadas_del_preventista` (aplicada). Las **174**
+(`174_salvedad_regalos_y_minimo_de_venta`), **175**, **176**, **177**, **178** y **179**
+mapean 1:1 con el ledger.
+
+La **179** agrega dos funciones de lectura para el panel "Mis entregas" del preventista
+(`jornadas_preventista` y `jornada_preventista_detalle`). No toca ninguna fila. Deja escrita
+una decisión de negocio que conviene no invertir: **la lista de motivos de cancelación
+administrativos es NEGRA, no blanca**, así que un motivo nuevo cuenta como rechazo y se ve.
+Al revés se escondería solo, que es exactamente la falla que el panel vino a arreglar.
+De paso documenta que `marcar_no_entregado` (mig 144) está prácticamente sin uso —2 filas en
+toda la base—: el pedido que no se entrega se cancela con motivo tipificado o se queda
+colgado en `asignado`, así que **`recorrido_pedidos` no sirve como fuente del "no entregado"**
+(y encima su RLS es admin-o-chofer, invisible para el preventista).
 
 La **176** deja una regla que conviene no volver a romper: **dos sobrecargas cuyas aridades
 se superponen por defaults hacen que PostgREST no pueda elegir** y devuelva HTTP 300

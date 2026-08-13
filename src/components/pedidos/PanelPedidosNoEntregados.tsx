@@ -1,24 +1,29 @@
 /**
  * PanelPedidosNoEntregados
  *
- * Qué pedidos volvieron sin entregar y por qué. Va arriba de /pedidos porque el
- * pedido no entregado vuelve al estado 'pendiente' (mig 144): en la lista se ve
- * idéntico a uno recién cargado, así que sin esto el motivo se pierde apenas la
- * notificación de la campanita queda atrás.
+ * Qué pedidos del preventista quedaron colgados: siguen vivos, sin entregar y
+ * sin cancelar, así que en la lista de /pedidos se ven idénticos a uno recién
+ * cargado y nadie los mira. Va arriba de /pedidos porque es el lugar donde el
+ * preventista ya está parado.
  *
- * Es el lado del preventista de la misma historia que el panel de Recorridos le
- * muestra al admin. La RLS ya acota: cada uno ve los suyos.
+ * Antes esto salía de `recorrido_pedidos` y no devolvía nada para un
+ * preventista: la RLS de esa tabla es admin-o-chofer, así que la query volvía
+ * vacía sin error y el panel no se renderizaba nunca (ver el comentario de
+ * useNoEntregadosQuery). Ahora sale del RPC de la mig 179.
+ *
+ * El detalle completo —con motivo, salvedades y el día de reparto— vive en
+ * /mis-entregas; esto es el empujón para ir hasta ahí.
  */
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { PackageX, ChevronDown, ChevronUp } from 'lucide-react'
-import { usePedidosRebotadosQuery } from '../../hooks/queries'
-import { MOTIVO_EXPLICACION, LABEL_MOTIVO } from '../../constants/motivosNoEntrega'
-import { formatPrecio } from '../../utils/formatters'
+import { usePedidosSinResolverQuery } from '../../hooks/queries'
+import { formatPrecio, formatFecha } from '../../utils/formatters'
 
 const VISIBLES_POR_DEFECTO = 3
 
 export default function PanelPedidosNoEntregados() {
-  const { data: pedidos = [], isLoading } = usePedidosRebotadosQuery()
+  const { data: pedidos = [], isLoading } = usePedidosSinResolverQuery()
   const [expandido, setExpandido] = useState(false)
 
   if (isLoading || pedidos.length === 0) return null
@@ -33,11 +38,11 @@ export default function PanelPedidosNoEntregados() {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
             {pedidos.length === 1
-              ? '1 pedido volvió sin entregar'
-              : `${pedidos.length} pedidos volvieron sin entregar`}
+              ? '1 pedido tuyo sigue sin resolver'
+              : `${pedidos.length} pedidos tuyos siguen sin resolver`}
           </p>
           <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-            Siguen vivos y volvieron al pool para re-repartir. Revisá el motivo antes de reprogramar.
+            No se entregaron ni se cancelaron. Revisalos antes de que envejezcan más.
           </p>
 
           <ul className="mt-2 space-y-1">
@@ -48,31 +53,39 @@ export default function PanelPedidosNoEntregados() {
               >
                 <span className="font-medium">#{p.pedidoId}</span>
                 <span className="truncate max-w-[14rem]">{p.clienteNombre}</span>
-                <span className="text-amber-700 dark:text-amber-300">
-                  · {p.motivo === 'sin_motivo'
-                      ? 'sin motivo cargado'
-                      : (MOTIVO_EXPLICACION[p.motivo] ?? LABEL_MOTIVO[p.motivo] ?? p.motivo)}
+                {p.fecha && (
+                  <span className="text-amber-600 dark:text-amber-400">
+                    · del {formatFecha(p.fecha)}
+                  </span>
+                )}
+                <span className="tabular-nums text-amber-700 dark:text-amber-300">
+                  {formatPrecio(p.total)}
                 </span>
-                {p.nota && <span className="italic text-amber-700 dark:text-amber-300">«{p.nota}»</span>}
-                {p.fecha && <span className="text-amber-600 dark:text-amber-400">· {p.fecha}</span>}
-                <span className="tabular-nums text-amber-700 dark:text-amber-300">{formatPrecio(p.total)}</span>
               </li>
             ))}
           </ul>
 
-          {(ocultos > 0 || expandido) && (
-            <button
-              type="button"
-              onClick={() => setExpandido(!expandido)}
-              className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-200 hover:underline"
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3">
+            {(ocultos > 0 || expandido) && (
+              <button
+                type="button"
+                onClick={() => setExpandido(!expandido)}
+                className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-200 hover:underline"
+              >
+                {expandido ? (
+                  <>Ver menos <ChevronUp className="w-3 h-3" aria-hidden="true" /></>
+                ) : (
+                  <>Ver {ocultos} más <ChevronDown className="w-3 h-3" aria-hidden="true" /></>
+                )}
+              </button>
+            )}
+            <Link
+              to="/mis-entregas"
+              className="text-xs font-medium text-amber-800 dark:text-amber-200 hover:underline"
             >
-              {expandido ? (
-                <>Ver menos <ChevronUp className="w-3 h-3" aria-hidden="true" /></>
-              ) : (
-                <>Ver {ocultos} más <ChevronDown className="w-3 h-3" aria-hidden="true" /></>
-              )}
-            </button>
-          )}
+              Ver mis entregas
+            </Link>
+          </div>
         </div>
       </div>
     </div>

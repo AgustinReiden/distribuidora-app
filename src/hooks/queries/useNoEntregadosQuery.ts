@@ -81,93 +81,60 @@ async function fetchNoEntregados(desde: string, hasta: string): Promise<NoEntreg
 }
 
 // ---------------------------------------------------------------------------
-// Vista del preventista: qué pedidos MÍOS volvieron sin entregar y por qué.
+// Vista del preventista: qué pedidos MÍOS quedaron sin resolver.
 //
-// El pedido no entregado vuelve a 'pendiente' sin transportista (mig 144), así
-// que en la lista de /pedidos se ve igual que uno recién cargado. Sin esto, el
-// preventista se entera por la campanita y después el motivo se pierde.
+// Esto consultaba `recorrido_pedidos` y NO FUNCIONABA para un preventista. La
+// policy `mt_recorrido_pedidos_select` es `es_admin() OR (chofer dueño del
+// recorrido)`: el preventista no entra por ninguna rama, la query volvía
+// vacía SIN error (la RLS filtra, no falla) y el panel hacía `return null`.
+// Era invisible justo para el rol al que apuntaba.
 //
-// La RLS de `pedidos` ya acota: un preventista ve los suyos, un admin todos.
+// Y encima la fuente estaba mal elegida: `marcar_no_entregado` (mig 144), que
+// es lo que escribe en `recorrido_pedidos`, casi no se usa — 2 filas en toda
+// la base. En la práctica el pedido que no se entrega se CANCELA con motivo
+// tipificado, o se queda colgado en 'asignado'.
+//
+// Ahora sale del RPC `jornada_preventista_detalle(NULL)` (mig 179), que
+// devuelve los pedidos del preventista todavía sin desenlace y ya resuelve el
+// nombre del cliente (la RLS de `clientes` también lo escondía).
 // ---------------------------------------------------------------------------
 
-export interface PedidoRebotado {
+export interface PedidoSinResolver {
   pedidoId: string
   clienteNombre: string
-  motivo: string
-  nota: string | null
+  /** Día en que el preventista lo cargó: cuánto hace que está trabado. */
   fecha: string | null
   total: number
 }
 
-interface FilaPedidoCruda {
-  pedido_id: string
-  motivo_no_entrega: string | null
-  nota_no_entrega: string | null
-  recorridos: { fecha: string } | { fecha: string }[] | null
-  pedidos: {
-    id: string
-    total: number | null
-    estado: string
-    clientes: { nombre_fantasia: string | null; razon_social: string | null }
-      | { nombre_fantasia: string | null; razon_social: string | null }[] | null
-  } | null
+interface FilaPendiente {
+  pedido_id: number
+  cliente: string
+  monto: number | null
+  fecha_pedido: string | null
 }
 
-/** PostgREST devuelve objeto o array según la cardinalidad que infiere. */
-function primero<T>(v: T | T[] | null | undefined): T | null {
-  if (!v) return null
-  return Array.isArray(v) ? (v[0] ?? null) : v
-}
-
-async function fetchPedidosRebotados(dias: number): Promise<PedidoRebotado[]> {
-  const desde = new Date()
-  desde.setDate(desde.getDate() - dias)
-  const desdeISO = desde.toISOString().slice(0, 10)
-
-  const { data, error } = await supabase
-    .from('recorrido_pedidos')
-    .select(`
-      pedido_id, motivo_no_entrega, nota_no_entrega,
-      recorridos!inner(fecha),
-      pedidos!inner(id, total, estado, clientes(nombre_fantasia, razon_social))
-    `)
-    .eq('estado_entrega', 'no_entregado')
-    .gte('recorridos.fecha', desdeISO)
-    .order('id', { ascending: false })
+async function fetchPedidosSinResolver(): Promise<PedidoSinResolver[]> {
+  const { data, error } = await supabase.rpc('jornada_preventista_detalle', {
+    p_dia: null,
+    p_preventista_id: null,
+  })
 
   if (error) throw error
 
-  const filas = (data as unknown as FilaPedidoCruda[]) || []
-  const vistos = new Set<string>()
-  const out: PedidoRebotado[] = []
-
-  for (const f of filas) {
-    const pedido = primero(f.pedidos)
-    // Ya entregado o cancelado = el problema se resolvió; no ensucia la lista.
-    if (!pedido || pedido.estado === 'entregado' || pedido.estado === 'cancelado') continue
-    // Un pedido puede haber rebotado más de una vez: vale el rebote más reciente.
-    if (vistos.has(String(f.pedido_id))) continue
-    vistos.add(String(f.pedido_id))
-
-    const cliente = primero(pedido.clientes)
-    out.push({
-      pedidoId: String(f.pedido_id),
-      clienteNombre: cliente?.nombre_fantasia || cliente?.razon_social || 'Cliente',
-      motivo: f.motivo_no_entrega || 'sin_motivo',
-      nota: f.nota_no_entrega,
-      fecha: primero(f.recorridos)?.fecha ?? null,
-      total: Number(pedido.total ?? 0),
-    })
-  }
-
-  return out
+  return ((data as FilaPendiente[]) ?? []).map(f => ({
+    pedidoId: String(f.pedido_id),
+    clienteNombre: f.cliente,
+    fecha: f.fecha_pedido,
+    total: Number(f.monto ?? 0),
+  }))
 }
 
-export function usePedidosRebotadosQuery(dias = 30, enabled = true) {
+export function usePedidosSinResolverQuery(enabled = true) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: [...noEntregadosKeys.all(currentSucursalId), 'pedidos', dias] as const,
-    queryFn: () => fetchPedidosRebotados(dias),
+    queryKey: [...noEntregadosKeys.all(currentSucursalId), 'sin-resolver'] as const,
+    queryFn: fetchPedidosSinResolver,
     enabled,
     staleTime: 2 * 60 * 1000,
   })

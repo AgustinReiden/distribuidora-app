@@ -205,8 +205,22 @@ export type {
 } from './useGruposPrecioQuery'
 
 // No entregados por motivo y barrida (migs 142-144)
-export { noEntregadosKeys, useNoEntregadosQuery, usePedidosRebotadosQuery } from './useNoEntregadosQuery'
-export type { NoEntregadosResumen, NoEntregadoFila, PedidoRebotado } from './useNoEntregadosQuery'
+export { noEntregadosKeys, useNoEntregadosQuery, usePedidosSinResolverQuery } from './useNoEntregadosQuery'
+export type { NoEntregadosResumen, NoEntregadoFila, PedidoSinResolver } from './useNoEntregadosQuery'
+
+// Panel "Mis entregas": el día a día del preventista (mig 179)
+export {
+  jornadasKeys,
+  useJornadasPreventistaQuery,
+  useJornadaDetalleQuery,
+} from './useJornadasPreventistaQuery'
+export type {
+  JornadasResultado,
+  ResumenDia,
+  PedidoDelDia,
+  SalvedadResumen,
+  PendientesResumen,
+} from './useJornadasPreventistaQuery'
 
 // Comisiones variables (migs 148-150)
 export {
