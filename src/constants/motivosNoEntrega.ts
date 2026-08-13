@@ -6,7 +6,9 @@
  * decenas de variantes más, así que no se podía medir nada ni mostrarle al
  * preventista un motivo confiable.
  *
- * Los valores deben coincidir con los CHECK de la migración 140.
+ * Los valores deben coincidir con los CHECK de las migraciones 143
+ * (`recorrido_pedidos_motivo_no_entrega_check`, que los creó) y 175
+ * (`pedidos_motivo_cancelacion_tipo_check`, que agregó `cambio_de_cliente`).
  */
 
 /** Motivos que puede elegir el chofer cuando no pudo entregar. */

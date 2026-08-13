@@ -40,6 +40,7 @@ import UsuariosContainer from './components/containers/UsuariosContainer'
 // lazyWithReload: si un chunk quedó obsoleto tras un deploy (PWA con SW que
 // tomó control a mitad de sesión), recarga una vez en vez de colgar el Suspense.
 const VistaRendiciones = lazyWithReload(() => import('./components/vistas/VistaRendiciones'))
+const VistaMisEntregas = lazyWithReload(() => import('./components/vistas/VistaMisEntregas'))
 const VistaSalvedades = lazyWithReload(() => import('./components/vistas/VistaSalvedades'))
 const VistaGeolocalizacion = lazyWithReload(() => import('./components/vistas/VistaGeolocalizacion'))
 const AnalyticsContainer = lazyWithReload(() => import('./components/containers/AnalyticsContainer'))
@@ -264,6 +265,13 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/dashboard"
                   element={(isAdmin || isPreventista) ? <DashboardContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                <Route
+                  path="/mis-entregas"
+                  element={(isPreventista || isAdminOrEncargado)
+                    ? <VistaMisEntregas />
+                    : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route path="/pedidos" element={<PedidosContainer />} />
