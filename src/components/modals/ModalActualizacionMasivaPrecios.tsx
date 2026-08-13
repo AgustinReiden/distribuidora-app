@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, lazy, Suspense } from 'react'
+import { useState, useMemo, useCallback, Suspense } from 'react'
 import type { ChangeEvent } from 'react'
 import { Percent, Search, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react'
 import ModalBase from './ModalBase'
@@ -7,8 +7,9 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { calcularNuevosPrecios } from '../../utils/precios'
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const ModalConfirmacion = lazy(() => import('./ModalConfirmacion'))
+const ModalConfirmacion = lazyWithReload(() => import('./ModalConfirmacion'))
 
 export interface ModalActualizacionMasivaPreciosProps {
   productos: ProductoDB[]

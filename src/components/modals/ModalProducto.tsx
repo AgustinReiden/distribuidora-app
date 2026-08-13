@@ -1,4 +1,4 @@
-import { useState, memo, lazy, Suspense } from 'react';
+import { useState, memo, Suspense } from 'react';
 import type { ChangeEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
@@ -16,9 +16,10 @@ import {
 } from '../../utils/calculations';
 import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
+import { lazyWithReload } from '../../utils/lazyWithReload';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
-const ProductoCondicionesMayoristas = lazy(() => import('../productos/ProductoCondicionesMayoristas'));
+const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/ProductoCondicionesMayoristas'));
 
 // =============================================================================
 // TYPES

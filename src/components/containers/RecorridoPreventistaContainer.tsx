@@ -4,13 +4,14 @@
  * Container para la optimización de recorridos de preventistas.
  * Usa el mismo webhook n8n que el recorrido de transportistas.
  */
-import React, { lazy, Suspense, useCallback } from 'react'
+import React, { Suspense, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useClientesQuery, usePreventistasQuery } from '../../hooks/queries'
 import { useOptimizarRutaPreventista } from '../../hooks/useOptimizarRutaPreventista'
 import type { ClienteDB } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const ModalOptimizarRutaPreventista = lazy(() => import('../modals/ModalOptimizarRutaPreventista'))
+const ModalOptimizarRutaPreventista = lazyWithReload(() => import('../modals/ModalOptimizarRutaPreventista'))
 
 function LoadingState() {
   return (

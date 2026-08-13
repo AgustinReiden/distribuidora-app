@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, memo, useEffect, useMemo } from 'react';
+import { Suspense, useState, memo, useEffect, useMemo } from 'react';
 import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck, Check } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
@@ -14,9 +14,10 @@ import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQ
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
+import { lazyWithReload } from '../../utils/lazyWithReload';
 
-const ModalSustituirRegalo = lazy(() => import('./ModalSustituirRegalo'));
-const ModalCambiarCliente = lazy(() => import('./ModalCambiarCliente'));
+const ModalSustituirRegalo = lazyWithReload(() => import('./ModalSustituirRegalo'));
+const ModalCambiarCliente = lazyWithReload(() => import('./ModalCambiarCliente'));
 
 /** Item del pedido para edición. Incluye fiscales opcionales que se pueblan al guardar. */
 export interface PedidoEditItem {

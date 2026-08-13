@@ -5,7 +5,7 @@
  * Maneja estado de paginación, filtros, búsqueda y modales.
  * Reemplaza el flujo legacy de App.tsx → VistaPedidos con prop drilling.
  */
-import React, { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react'
+import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import {
@@ -61,32 +61,32 @@ import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { supabase } from '../../hooks/supabase/base'
 import { usePagos } from '../../hooks/supabase/usePagos'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
-import { importConRecarga } from '../../utils/lazyWithReload'
+import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 import type { CambiarClientePayload } from '../modals/ModalCambiarCliente'
 import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
 
 // Lazy load de componentes
-const VistaPedidos = lazy(() => import('../vistas/VistaPedidos'))
-const ModalPedido = lazy(() => import('../modals/ModalPedido'))
-const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
-const ModalHistorialPedido = lazy(() => import('../modals/ModalHistorialPedido'))
-const ModalEditarPedido = lazy(() => import('../modals/ModalEditarPedido'))
-const ModalPagoPedido = lazy(() => import('../modals/ModalPagoPedido'))
-const ModalEditarNotas = lazy(() => import('../modals/ModalEditarNotas'))
-const ModalFiltroFecha = lazy(() => import('../modals/ModalFiltroFecha'))
-const ModalExportarPDF = lazy(() => import('../modals/ModalExportarPDF'))
-const ModalGestionRutas = lazy(() => import('../modals/ModalGestionRutas'))
-const ModalCambioProducto = lazy(() => import('../modals/ModalCambioProducto'))
-const ModalEntregaConSalvedad = lazy(() => import('../modals/ModalEntregaConSalvedad'))
-const ModalEntregasMasivas = lazy(() => import('../modals/ModalEntregasMasivas'))
-const ModalCancelarPedido = lazy(() => import('../modals/ModalCancelarPedido'))
-const ModalPagosMasivos = lazy(() => import('../modals/ModalPagosMasivos'))
-const ModalEntregaYPagoMasivos = lazy(() => import('../modals/ModalEntregaYPagoMasivos'))
-const ModalMarcarVisita = lazy(() => import('../modals/ModalMarcarVisita'))
-const ModalVisitasHoy = lazy(() => import('../modals/ModalVisitasHoy'))
-const ModalMotivoSinGps = lazy(() => import('../modals/ModalMotivoSinGps'))
+const VistaPedidos = lazyWithReload(() => import('../vistas/VistaPedidos'))
+const ModalPedido = lazyWithReload(() => import('../modals/ModalPedido'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
+const ModalHistorialPedido = lazyWithReload(() => import('../modals/ModalHistorialPedido'))
+const ModalEditarPedido = lazyWithReload(() => import('../modals/ModalEditarPedido'))
+const ModalPagoPedido = lazyWithReload(() => import('../modals/ModalPagoPedido'))
+const ModalEditarNotas = lazyWithReload(() => import('../modals/ModalEditarNotas'))
+const ModalFiltroFecha = lazyWithReload(() => import('../modals/ModalFiltroFecha'))
+const ModalExportarPDF = lazyWithReload(() => import('../modals/ModalExportarPDF'))
+const ModalGestionRutas = lazyWithReload(() => import('../modals/ModalGestionRutas'))
+const ModalCambioProducto = lazyWithReload(() => import('../modals/ModalCambioProducto'))
+const ModalEntregaConSalvedad = lazyWithReload(() => import('../modals/ModalEntregaConSalvedad'))
+const ModalEntregasMasivas = lazyWithReload(() => import('../modals/ModalEntregasMasivas'))
+const ModalCancelarPedido = lazyWithReload(() => import('../modals/ModalCancelarPedido'))
+const ModalPagosMasivos = lazyWithReload(() => import('../modals/ModalPagosMasivos'))
+const ModalEntregaYPagoMasivos = lazyWithReload(() => import('../modals/ModalEntregaYPagoMasivos'))
+const ModalMarcarVisita = lazyWithReload(() => import('../modals/ModalMarcarVisita'))
+const ModalVisitasHoy = lazyWithReload(() => import('../modals/ModalVisitasHoy'))
+const ModalMotivoSinGps = lazyWithReload(() => import('../modals/ModalMotivoSinGps'))
 
 const ITEMS_PER_PAGE = 15
 

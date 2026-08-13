@@ -3,7 +3,7 @@
  *
  * Container que gestiona promociones usando TanStack Query.
  */
-import React, { lazy, Suspense, useMemo, useState, useCallback } from 'react'
+import React, { Suspense, useMemo, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   usePromocionesListQuery,
@@ -17,10 +17,11 @@ import {
 } from '../../hooks/queries'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaPromociones = lazy(() => import('../vistas/VistaPromociones'))
-const ModalPromocion = lazy(() => import('../modals/ModalPromocion'))
-const ModalConfirmacion = lazy(() => import('../modals/ModalConfirmacion'))
+const VistaPromociones = lazyWithReload(() => import('../vistas/VistaPromociones'))
+const ModalPromocion = lazyWithReload(() => import('../modals/ModalPromocion'))
+const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
 function LoadingState() {
   return (

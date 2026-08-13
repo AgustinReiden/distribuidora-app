@@ -1,11 +1,12 @@
-import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useClientesQuery, useReportePreventistasQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { ClienteDB } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaReportes = lazy(() => import('../vistas/VistaReportes'))
-const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
+const VistaReportes = lazyWithReload(() => import('../vistas/VistaReportes'))
+const ModalFichaCliente = lazyWithReload(() => import('../modals/ModalFichaCliente'))
 
 function LoadingState(): React.ReactElement {
   return (

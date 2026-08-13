@@ -1,10 +1,11 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import React, { Suspense, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useReporteGerencialQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaReportesGerenciales = lazy(() => import('../vistas/VistaReportesGerenciales'))
+const VistaReportesGerenciales = lazyWithReload(() => import('../vistas/VistaReportesGerenciales'))
 
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 

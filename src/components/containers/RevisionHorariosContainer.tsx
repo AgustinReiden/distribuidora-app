@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback } from 'react'
+import React, { Suspense, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useRevisionHorariosQuery,
@@ -6,8 +6,9 @@ import {
   type HorarioMasivoItem,
 } from '../../hooks/queries/useRevisionHorariosQuery'
 import { useNotification } from '../../contexts/NotificationContext'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaRevisionHorarios = lazy(() => import('../vistas/VistaRevisionHorarios'))
+const VistaRevisionHorarios = lazyWithReload(() => import('../vistas/VistaRevisionHorarios'))
 
 function LoadingState(): React.ReactElement {
   return (

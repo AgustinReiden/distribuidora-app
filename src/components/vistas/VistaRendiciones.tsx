@@ -4,7 +4,7 @@
  * pago, total entregado ese dia (comparador secundario), gastos del dia y
  * estado (pendiente/confirmada/disconformidad/resuelta).
  */
-import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react'
+import React, { Suspense, useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Banknote,
   Calendar,
@@ -30,11 +30,12 @@ import { useTransportistasQuery, useClientesQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { FORMAS_PAGO, formaPagoLabel } from '../../constants/formasPago'
 import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, RendicionGastoInput, ClienteDB } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const ModalCerrarRendicion = lazy(() => import('../modals/ModalCerrarRendicion'))
-const ModalResolverRendicion = lazy(() => import('../modals/ModalResolverRendicion'))
-const ModalCtaCtePendiente = lazy(() => import('../modals/ModalCtaCtePendiente'))
-const ModalFichaCliente = lazy(() => import('../modals/ModalFichaCliente'))
+const ModalCerrarRendicion = lazyWithReload(() => import('../modals/ModalCerrarRendicion'))
+const ModalResolverRendicion = lazyWithReload(() => import('../modals/ModalResolverRendicion'))
+const ModalCtaCtePendiente = lazyWithReload(() => import('../modals/ModalCtaCtePendiente'))
+const ModalFichaCliente = lazyWithReload(() => import('../modals/ModalFichaCliente'))
 
 function formatMoney(value: number | undefined | null): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)

@@ -11,7 +11,7 @@
  * transportista en /pedidos. La lógica de entrega/cobro/salvedad es la misma
  * (useEntregaParada). Diseño: docs/plans/2026-06-12-ruta-activa-design.md
  */
-import React, { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, Suspense } from 'react';
 import { Crosshair, WifiOff, Truck, Volume2, VolumeX, LocateFixed, ArrowLeft } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { haversineMeters } from '../../utils/geo';
@@ -33,9 +33,10 @@ import { supabase } from '../../hooks/supabase/base';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
+import { lazyWithReload } from '../../utils/lazyWithReload';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
-const MapaRuta = lazy(() => import('./MapaRutaGoogle'));
+const MapaRuta = lazyWithReload(() => import('./MapaRutaGoogle'));
 
 /** Radio del geofence de llegada, en metros */
 const RADIO_LLEGADA_M = 100;

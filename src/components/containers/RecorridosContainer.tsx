@@ -1,10 +1,11 @@
-import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import { useRecorridos } from '../../hooks/supabase'
 import type { EstadisticasRecorridos } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const VistaRecorridos = lazy(() => import('../vistas/VistaRecorridos'))
+const VistaRecorridos = lazyWithReload(() => import('../vistas/VistaRecorridos'))
 
 function LoadingState(): React.ReactElement {
   return (

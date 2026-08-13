@@ -11,7 +11,7 @@
  * costos vienen de la factura, no de un motor de precios, así que no hay
  * recálculo de promos/mayorista/descuento.
  */
-import { useState, memo, lazy, Suspense } from 'react'
+import { useState, memo, Suspense } from 'react'
 import { Loader2, Building2, Plus, AlertTriangle, ArrowRight } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { formatPrecio } from '../../utils/formatters'
@@ -21,8 +21,9 @@ import type {
   ProveedorFormInputExtended,
   CompraItemDBExtended,
 } from '../../types'
+import { lazyWithReload } from '../../utils/lazyWithReload'
 
-const ModalProveedor = lazy(() => import('./ModalProveedor'))
+const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
 
 export type CambiarProveedorPayload = {
   nuevoProveedorId: string | null

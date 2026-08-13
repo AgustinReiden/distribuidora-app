@@ -5,7 +5,7 @@
  * Mantiene el estado de filtros del audit log + páginas locales y orquesta
  * los 4 query hooks + 1 mutation. La vista es presentational.
  */
-import { lazy, Suspense, useCallback, useMemo, useState, type ReactElement } from 'react';
+import { Suspense, useCallback, useMemo, useState, type ReactElement } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -22,8 +22,9 @@ import type {
   BotToggleUsuarioInput,
   BotToggleUsuarioResult,
 } from '../../hooks/queries/useBotAdmin';
+import { lazyWithReload } from '../../utils/lazyWithReload';
 
-const VistaBotTelegram = lazy(() => import('../vistas/VistaBotTelegram'));
+const VistaBotTelegram = lazyWithReload(() => import('../vistas/VistaBotTelegram'));
 
 function LoadingState(): ReactElement {
   return (
