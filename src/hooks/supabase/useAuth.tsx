@@ -6,7 +6,24 @@ import { logger } from '../../utils/logger'
 import { beginAuthTrace, logAuthEvent, logAuthTiming, resetAuthTrace } from '../../utils/authPerformance'
 import type { RolUsuario } from '../../types'
 
+/**
+ * Cuanto aguanta la sesion sin uso. Se cuenta USO REAL: el tiempo que la app
+ * paso suspendida o en segundo plano no suma.
+ *
+ * El bug que arregla: el timer era un unico setTimeout de 8 h. En el iPhone,
+ * con la app agregada al inicio, iOS la suspende al cerrarla y el timeout
+ * queda pendiente; al volver a abrirla a la manana siguiente el temporizador
+ * ya estaba vencido y disparaba el logout en el acto. La usuaria lo vivia como
+ * "cada cierto tiempo se me cierra la sesion sola".
+ */
 const INACTIVITY_TIMEOUT_MS = 8 * 60 * 60 * 1000
+/** Cada cuanto se suma inactividad. Fino para no pasarse del plazo por mucho. */
+const INACTIVITY_TICK_MS = 60 * 1000
+/**
+ * Un salto mayor a esto entre dos ticks significa que el navegador congelo los
+ * timers (app suspendida, pestania dormida): ese tiempo no es uso, no cuenta.
+ */
+const INACTIVITY_SALTO_MAX_MS = INACTIVITY_TICK_MS * 3
 const AUTH_REQUEST_TIMEOUT_MS = 15000
 const AUTH_BOOTSTRAP_FAILSAFE_TIMEOUT_MS = AUTH_REQUEST_TIMEOUT_MS + 3000
 
@@ -436,9 +453,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     if (!user) return
 
-    let timeoutId: ReturnType<typeof setTimeout>
+    // Inactividad acumulada de uso real. Ver INACTIVITY_TIMEOUT_MS.
+    let inactividadMs = 0
+    let ultimoTick = Date.now()
 
-    const handleInactivityLogout = () => {
+    const cerrarPorInactividad = () => {
       logger.info('[useAuth] Session closed due to inactivity')
       void logout()
       window.dispatchEvent(new CustomEvent('session-timeout', {
@@ -446,22 +465,40 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }))
     }
 
-    const resetInactivityTimer = () => {
-      clearTimeout(timeoutId)
-      timeoutId = setTimeout(handleInactivityLogout, INACTIVITY_TIMEOUT_MS)
+    const registrarActividad = () => {
+      inactividadMs = 0
+      ultimoTick = Date.now()
     }
 
-    resetInactivityTimer()
+    const intervalId = setInterval(() => {
+      const ahora = Date.now()
+      const salto = ahora - ultimoTick
+      ultimoTick = ahora
+
+      // Timers congelados (app suspendida) o app en segundo plano: no es uso.
+      if (salto > INACTIVITY_SALTO_MAX_MS) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+
+      inactividadMs += salto
+      if (inactividadMs >= INACTIVITY_TIMEOUT_MS) {
+        cerrarPorInactividad()
+      }
+    }, INACTIVITY_TICK_MS)
 
     ACTIVITY_EVENTS.forEach(event => {
-      window.addEventListener(event, resetInactivityTimer, { passive: true })
+      window.addEventListener(event, registrarActividad, { passive: true })
     })
+    // Volver a la app no es actividad por si sola, pero si marca el arranque
+    // del proximo tramo: sin esto el primer tick post-suspension mediria el
+    // salto entero contra el reloj viejo.
+    document.addEventListener('visibilitychange', registrarActividad)
 
     return () => {
-      clearTimeout(timeoutId)
+      clearInterval(intervalId)
       ACTIVITY_EVENTS.forEach(event => {
-        window.removeEventListener(event, resetInactivityTimer)
+        window.removeEventListener(event, registrarActividad)
       })
+      document.removeEventListener('visibilitychange', registrarActividad)
     }
   }, [user, logout])
 
