@@ -11,11 +11,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const cpuCount = os.availableParallelism?.() ?? os.cpus().length
 
-// Identidad del build. Desde el 20/03 la app no registra service worker (ver
-// pwaAuthHotfix.ts), así que una pestaña abierta se queda con el bundle que
-// cargó ese día para siempre: es lo que dejó a la usuaria cancelando pedidos
-// con el modal de julio en agosto. Con esto la app puede darse cuenta sola de
-// que hay un deploy nuevo, sin resucitar el SW.
+// Identidad del build. Una pestaña abierta se queda con el bundle que cargó
+// el día que se abrió: es lo que dejó a la usuaria cancelando pedidos con el
+// modal de julio en agosto. Con esto la app se da cuenta de que hay un deploy
+// nuevo aunque el navegador todavía no haya revisado el service worker
+// (ver useActualizacionDisponible.ts).
 function resolverBuildId() {
   const desdeCI = process.env.VITE_BUILD_ID
     || process.env.VERCEL_GIT_COMMIT_SHA
@@ -96,14 +96,14 @@ export default defineConfig({
     versionJsonPlugin(),
     react(),
     VitePWA({
+      // El registro lo hace la app a mano, en `src/utils/serviceWorker.ts`:
+      // el modo inline del plugin inyecta un <script> inline y el CSP de
+      // index.html no permite scripts inline.
       injectRegister: false,
-      // autoUpdate: el SW nuevo se descarga en segundo plano y la página se
-      // recarga sola cuando está listo. Sin cartel manual "Actualizar ahora".
-      // Trade-off conocido: si el preventista está cargando un pedido cuando
-      // baja el update, el reload pierde lo tipeado. En esta app ese caso es
-      // raro (sesiones cortas, pedidos rápidos) y vale la pena para evitar
-      // que se queden con bundles viejos por días.
-      registerType: 'autoUpdate',
+      // 'prompt', NO 'autoUpdate': la recarga la decide la usuaria con el
+      // cartel (BannerActualizacion). Un reload sorpresa mientras carga un
+      // pedido le borra lo tipeado.
+      registerType: 'prompt',
       // selfDestroying debe estar en false para que el SW persista y la PWA
       // funcione offline (Workbox precache + Dexie). El deploy previo con
       // selfDestroying:true ya desregistró SW corruptos; ahora los usuarios
@@ -217,11 +217,19 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         globIgnores: ['**/*.map'],
         cleanupOutdatedCaches: true,
-        // Pareja con registerType:'autoUpdate'. El SW nuevo activa de inmediato
-        // (skipWaiting) y toma control de las pestañas existentes (clientsClaim)
-        // sin esperar a que se cierren. El reload lo dispara el plugin.
-        skipWaiting: true,
-        clientsClaim: true
+        // Cualquier ruta se resuelve con el index.html precacheado: es lo que
+        // hace que la app abra sin señal en vez de quedar en blanco. El proxy
+        // de n8n queda afuera, va siempre a la red.
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api\//],
+        // Los dos en false a propósito, y es el corazón del arreglo de marzo:
+        // el SW nuevo se queda ESPERANDO en vez de tomar control de la pestaña
+        // abierta. Así la sesión en curso sigue sirviéndose del precache viejo
+        // —completo y consistente— y los import() lazy del bundle viejo no se
+        // van a 404. El salto al build nuevo lo dispara el botón "Actualizar"
+        // del cartel, vía aplicarActualizacionSW().
+        skipWaiting: false,
+        clientsClaim: false
       },
       devOptions: {
         enabled: false,
@@ -314,6 +322,11 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.js',
+    // `virtual:pwa-register` lo genera el plugin durante el build; bajo vitest
+    // el id virtual no resuelve y rompe la carga del archivo que lo importe.
+    alias: {
+      'virtual:pwa-register': path.resolve(__dirname, 'src/test/stubs/pwaRegister.ts')
+    },
     include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
     // El default (5s) produce timeouts aleatorios en tests jsdom pesados
     // cuando la máquina está cargada (p. ej. la suite completa en el hook

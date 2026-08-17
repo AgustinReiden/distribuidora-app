@@ -1,5 +1,4 @@
 import { logger } from './logger'
-import { AUTH_RUNTIME_HOTFIX_VERSION } from './pwaAuthHotfix'
 
 interface AuthTrace {
   source: string;
@@ -15,8 +14,10 @@ function emitAuthPerfLog(message: string, context: Record<string, unknown> = {})
   logger.info(message, context)
 
   if (typeof console !== 'undefined' && typeof console.info === 'function') {
+    // El build que corre esta pestaña. Es el dato que sirve para soporte:
+    // dice contra que version se saco la traza.
     console.info(message, {
-      recoveryVersion: AUTH_RUNTIME_HOTFIX_VERSION,
+      build: typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : 'dev',
       ...context
     })
   }
