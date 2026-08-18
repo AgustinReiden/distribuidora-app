@@ -111,7 +111,12 @@ describe('usePagos', () => {
       expect(result.current.pagos).toContainEqual(mockPago)
     })
 
-    it('debe lanzar error si falla el registro', async () => {
+    // El contrato es propagar SIN notificar: notifica quien tiene contexto. Con
+    // el `notifyError` que estaba acá, el alta de pedido mostraba dos toasts a
+    // la vez y el generico le tapaba al bueno —el que avisa que el pedido SI se
+    // creo y no hay que recargarlo—. Si alguien vuelve a agregar el notify, este
+    // test tiene que ponerse en rojo.
+    it('debe lanzar error si falla el registro, sin notificar', async () => {
       mockSingle.mockResolvedValueOnce({ data: null, error: new Error('Insert failed') })
 
       const { result } = renderHook(() => usePagos())
@@ -120,7 +125,7 @@ describe('usePagos', () => {
         await result.current.registrarPago({ clienteId: 'c1', monto: 100 })
       })).rejects.toThrow()
 
-      expect(notifyError).toHaveBeenCalledWith(expect.stringContaining('Error al registrar pago'))
+      expect(notifyError).not.toHaveBeenCalled()
     })
   })
 

@@ -53,3 +53,15 @@ export interface NotifyService {
   warning: (message: string) => void;
   info: (message: string) => void;
 }
+
+/**
+ * Variante de `NotifyService` en la que `warning`/`info` también aceptan
+ * opciones. Vivía en `useAppHandlers.ts`; se mudó acá al borrar esa capa
+ * (era su único consumidor vivo, vía `useSyncManager`).
+ */
+export interface NotifyApi {
+  success: (message: string, options?: NotifyOptions) => void;
+  error: (message: string, duration?: number) => void;
+  warning: (message: string, options?: NotifyOptions) => void;
+  info: (message: string, options?: NotifyOptions) => void;
+}

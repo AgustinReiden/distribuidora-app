@@ -8,7 +8,7 @@
  * - Notificaciones de resultado
  */
 import { useCallback, useEffect, useRef } from 'react'
-import type { NotifyApi } from './useAppHandlers'
+import type { NotifyApi } from './handlers/types'
 import type { ProductoDB } from '../types/hooks'
 import type { StockConflict } from './useOfflineSync'
 

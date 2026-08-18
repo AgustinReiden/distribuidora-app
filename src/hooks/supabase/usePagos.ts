@@ -78,56 +78,66 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  /**
+   * Registra un pago. **Propaga el error sin notificarlo**: notifica quien
+   * tiene contexto.
+   *
+   * Antes esta función hacía las dos cosas —`notifyError` y `throw`— y eso
+   * obligaba a cada caller a elegir entre duplicar el toast o tragarse el
+   * error. En el alta de pedido salían dos toasts contradictorios a la vez: el
+   * genérico de acá y el del container, que es el único que dice lo que
+   * importa (que el pedido SÍ se creó y no hay que recargarlo).
+   *
+   * Cobertura de los callers vivos: `ejecutarCreacionPedido` notifica con su
+   * mensaje contextual; `ClientesContainer.handleConfirmarPago` y
+   * `handleRegistrarPagoTransportista` no atrapan y el error llega al
+   * `setError` de ModalRegistrarPago, que lo muestra inline en el formulario.
+   */
   const registrarPago = async (pago: PagoFormInput): Promise<PagoDBWithUsuario> => {
-    try {
-      if (currentSucursalId == null) {
-        throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+    if (currentSucursalId == null) {
+      throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
+    }
+    const insertRow: Record<string, unknown> = {
+      cliente_id: pago.clienteId,
+      pedido_id: pago.pedidoId || null,
+      monto: parseFloat(String(pago.monto)),
+      forma_pago: pago.formaPago || 'efectivo',
+      referencia: pago.referencia || null,
+      notas: pago.notas || null,
+      usuario_id: pago.usuarioId || null,
+      sucursal_id: currentSucursalId
+    }
+    // fecha (YYYY-MM-DD) se pasa solo si el caller la especificó; si no,
+    // la BD usa CURRENT_DATE (default de la columna pagos.fecha).
+    if (pago.fecha) insertRow.fecha = pago.fecha
+    const requestId = pago.clientRequestId || null
+    if (requestId) insertRow.client_request_id = requestId
+
+    const insertar = async (): Promise<PagoDBWithUsuario> => {
+      const { data, error } = await supabase.from('pagos').insert([insertRow])
+        .select('*, usuario:perfiles(id, nombre)').single()
+      if (!error) return data as PagoDBWithUsuario
+
+      // 23505 con UUID de idempotencia = este pago ya entró en un intento
+      // anterior cuya respuesta no llegó (mig 167). No es un error: es el
+      // mismo pago. Devolvemos la fila que ya existe.
+      if (requestId && ES_DUPLICADO(error)) {
+        const previos = await pagosPorRequestId([requestId])
+        if (previos && previos.length === 1) return previos[0]
+        throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
       }
-      const insertRow: Record<string, unknown> = {
-        cliente_id: pago.clienteId,
-        pedido_id: pago.pedidoId || null,
-        monto: parseFloat(String(pago.monto)),
-        forma_pago: pago.formaPago || 'efectivo',
-        referencia: pago.referencia || null,
-        notas: pago.notas || null,
-        usuario_id: pago.usuarioId || null,
-        sucursal_id: currentSucursalId
-      }
-      // fecha (YYYY-MM-DD) se pasa solo si el caller la especificó; si no,
-      // la BD usa CURRENT_DATE (default de la columna pagos.fecha).
-      if (pago.fecha) insertRow.fecha = pago.fecha
-      const requestId = pago.clientRequestId || null
-      if (requestId) insertRow.client_request_id = requestId
-
-      const insertar = async (): Promise<PagoDBWithUsuario> => {
-        const { data, error } = await supabase.from('pagos').insert([insertRow])
-          .select('*, usuario:perfiles(id, nombre)').single()
-        if (!error) return data as PagoDBWithUsuario
-
-        // 23505 con UUID de idempotencia = este pago ya entró en un intento
-        // anterior cuya respuesta no llegó (mig 167). No es un error: es el
-        // mismo pago. Devolvemos la fila que ya existe.
-        if (requestId && ES_DUPLICADO(error)) {
-          const previos = await pagosPorRequestId([requestId])
-          if (previos && previos.length === 1) return previos[0]
-          throw new Error(ERROR_DUPLICADO_SIN_LECTURA)
-        }
-        throw error
-      }
-
-      // Con UUID el INSERT es idempotente, así que reintentar ante un error de
-      // red es seguro: si la primera request sí llegó, el reintento devuelve
-      // esa misma fila en vez de duplicarla.
-      const pagoData = requestId
-        ? await retryWithBackoff(insertar, { shouldRetry: isTransientNetworkError })
-        : await insertar()
-
-      setPagos(prev => [pagoData, ...prev])
-      return pagoData
-    } catch (error) {
-      notifyError('Error al registrar pago: ' + (error as Error).message)
       throw error
     }
+
+    // Con UUID el INSERT es idempotente, así que reintentar ante un error de
+    // red es seguro: si la primera request sí llegó, el reintento devuelve
+    // esa misma fila en vez de duplicarla.
+    const pagoData = requestId
+      ? await retryWithBackoff(insertar, { shouldRetry: isTransientNetworkError })
+      : await insertar()
+
+    setPagos(prev => [pagoData, ...prev])
+    return pagoData
   }
 
   /**
