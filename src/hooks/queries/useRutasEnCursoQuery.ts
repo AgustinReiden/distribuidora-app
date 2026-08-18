@@ -23,11 +23,15 @@ export interface RutaEnCurso {
   recorridoId: string
   fecha: string
   paradas: number
+  /** Sólo lo puebla la variante multi; en la de un chofer es redundante. */
+  transportistaId?: string
 }
 
 export const rutasEnCursoKeys = {
   all: (sucursalId: number | null, transportistaId: string | null) =>
     ['rutas-en-curso', sucursalId, transportistaId] as const,
+  multi: (sucursalId: number | null, transportistaIds: string[]) =>
+    ['rutas-en-curso', 'multi', sucursalId, [...transportistaIds].sort().join(',')] as const,
 }
 
 interface RutaEnCursoRaw {
@@ -68,6 +72,50 @@ export function useRutasEnCursoQuery(transportistaId: string | null | undefined)
     queryKey: rutasEnCursoKeys.all(currentSucursalId, transportistaId ?? null),
     queryFn: () => fetchRutasEnCurso(currentSucursalId, transportistaId as string),
     enabled: !!transportistaId,
+    staleTime: 30 * 1000,
+  })
+}
+
+async function fetchRutasEnCursoMulti(
+  sucursalId: number | null,
+  transportistaIds: string[],
+): Promise<RutaEnCurso[]> {
+  let query = supabase
+    .from('recorridos')
+    .select('id, fecha, transportista_id, recorrido_pedidos(count)')
+    .in('transportista_id', transportistaIds)
+    .eq('estado', 'en_curso')
+    .gte('fecha', fechaLocalISO())
+    .order('fecha', { ascending: true })
+
+  if (sucursalId != null) query = query.eq('sucursal_id', sucursalId)
+
+  const { data, error } = await query
+  if (error) throw error
+
+  return ((data as unknown as Array<RutaEnCursoRaw & { transportista_id: string }>) || []).map(r => ({
+    recorridoId: String(r.id),
+    fecha: r.fecha,
+    paradas: r.recorrido_pedidos?.[0]?.count ?? 0,
+    transportistaId: String(r.transportista_id),
+  }))
+}
+
+/**
+ * Igual que la anterior pero para VARIOS choferes a la vez.
+ *
+ * La necesita el modo "Dividir" de armar ruta, que hasta ahora pasaba `null` a
+ * la query de un chofer —o sea, la tenía apagada— y por lo tanto era ciego a las
+ * rutas ya armadas. Como `aplicar_orden_ruta` reemplaza las paradas pendientes
+ * del recorrido de ese día, dividir sobre un chofer que está repartiendo le
+ * vacía las paradas del celular en plena calle, sin que nadie lo vea venir.
+ */
+export function useRutasEnCursoMultiQuery(transportistaIds: string[]) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: rutasEnCursoKeys.multi(currentSucursalId, transportistaIds),
+    queryFn: () => fetchRutasEnCursoMulti(currentSucursalId, transportistaIds),
+    enabled: transportistaIds.length > 0,
     staleTime: 30 * 1000,
   })
 }

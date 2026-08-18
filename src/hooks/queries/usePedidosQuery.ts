@@ -65,6 +65,20 @@ interface CrearPedidoInput {
   // exige que el actor sea admin (mig 060).
   preventistaId?: string | null
   /**
+   * Clave de idempotencia del alta (mig 071, columna `pedidos.offline_id` con
+   * índice único parcial). Sin esto, el alta NO es idempotente: las mutations de
+   * react-query reintentan ante error de red, y si la RPC commiteó pero la
+   * respuesta se perdió —señal débil, no caída: con 3G malo `navigator.onLine`
+   * sigue en true— el pedido se crea dos o tres veces, descontando stock cada
+   * vez. Los pagos tienen `client_request_id` desde la mig 167; el alta se había
+   * quedado atrás, con la protección existiendo y sin usarse en el camino online.
+   *
+   * Tiene que ser estable por INTENCIÓN de alta: el mismo valor en todo reintento
+   * del mismo pedido, y distinto para un pedido nuevo aunque tenga el mismo
+   * contenido (un cliente puede repetir el pedido en el día).
+   */
+  offlineId?: string
+  /**
    * Por qué se cobró cada precio (mig 148/149). Se registra en un segundo paso,
    * después de crear el pedido: es metadato analítico y no justifica tocar
    * `crear_pedido_completo`. Si falta o falla, los ítems quedan en
@@ -371,7 +385,13 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
     ...(item.porcentaje_iva != null ? { porcentaje_iva: item.porcentaje_iva } : {}),
   }))
 
-  const { data, error } = await supabase.rpc('crear_pedido_completo', {
+  // `crear_pedido_idempotente` (mig 071) envuelve a `crear_pedido_completo`: si
+  // ya vio ese `p_offline_id` devuelve el pedido que creó la primera vez en vez
+  // de crear otro. Existía desde abril y sólo la usaba el replay offline; el
+  // camino online llamaba a la RPC cruda y quedaba expuesto al reintento
+  // automático de react-query. Sin `offlineId` se comporta igual que antes.
+  const { data, error } = await supabase.rpc('crear_pedido_idempotente', {
+    p_offline_id: input.offlineId ?? null,
     p_cliente_id: input.clienteId,
     p_total: input.total,
     p_usuario_id: input.usuarioId,
