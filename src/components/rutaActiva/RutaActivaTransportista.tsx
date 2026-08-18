@@ -83,7 +83,15 @@ export default function RutaActivaTransportista({
   // Ruta del día: el transportista lee del recorrido en_curso (las paradas que
   // armó el admin), NO de "todos sus pedidos asignados". Trae también la ruta
   // real (polylines) para dibujarla.
-  const { data: recorridoActivo, isLoading: cargandoRuta } = useRecorridoActivoQuery(userId);
+  // `isError`/`refetch` no son opcionales de estilo: sin ellos, un fallo de red
+  // deja `data` en undefined y la pantalla lo lee como "el admin no armó la
+  // ruta". Ver el early return de abajo.
+  const {
+    data: recorridoActivo,
+    isLoading: cargandoRuta,
+    isError: rutaFallo,
+    refetch: reintentarRuta,
+  } = useRecorridoActivoQuery(userId);
   const rutaReal = useMemo(
     () => decodePolylines(recorridoActivo?.polylines),
     [recorridoActivo?.polylines],
@@ -267,6 +275,31 @@ export default function RutaActivaTransportista({
   }, [guiando, paradaActiva, pararGuia]);
 
   if (pedidosOrdenados.length === 0) {
+    // Tres estados distintos, no dos. El que faltaba era el error: la query
+    // falla (timeout, JWT vencido, un PGRST201 por embed ambiguo — ya pasó en
+    // prod), `data` queda undefined, y el chofer leía "el administrador todavía
+    // no armó tu ruta del día" con el camión cargado. Llamaba a la oficina o
+    // directamente no salía, y nadie podía saber que el problema era de red.
+    if (rutaFallo) {
+      return (
+        <div className="text-center py-12 px-4">
+          <WifiOff className="w-16 h-16 mx-auto text-orange-300 dark:text-orange-700 mb-4" />
+          <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            No pudimos cargar tu ruta
+          </h3>
+          <p className="text-gray-500 dark:text-gray-500 mb-6">
+            Puede ser la conexión. Tu ruta no se perdió: probá de nuevo.
+          </p>
+          <button
+            type="button"
+            onClick={() => void reintentarRuta()}
+            className="min-h-[52px] px-8 rounded-xl bg-blue-600 text-white font-semibold active:bg-blue-700"
+          >
+            Reintentar
+          </button>
+        </div>
+      );
+    }
     // Distinguir "todavía no hay ruta armada" de "ruta cargando".
     const sinRuta = !cargandoRuta && recorridoActivo == null;
     return (

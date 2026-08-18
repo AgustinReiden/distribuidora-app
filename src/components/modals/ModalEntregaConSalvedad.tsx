@@ -7,6 +7,7 @@ import React, { useState, useCallback, useMemo } from 'react'
 import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { useSimularSalvedadesPromoImpactoQuery } from '../../hooks/queries'
+import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import NumberInput from '../ui/NumberInput'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
@@ -68,6 +69,10 @@ export default function ModalEntregaConSalvedad({
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
   const [paso, setPaso] = useState<'seleccion' | 'confirmacion'>('seleccion')
+  // Idempotencia del lote (mig 049). La cache del hook vive lo que vive el
+  // modal, que es exactamente un intento de entrega: reintentar reusa los
+  // mismos UUIDs, y una entrega distinta más tarde arranca con otros.
+  const requestId = useRequestIdEstable()
 
   const itemsConSalvedad = itemsSalvedad.filter(i => i.seleccionado)
   const itemsSinProblemas = itemsSalvedad.filter(i => !i.seleccionado)
@@ -157,7 +162,15 @@ export default function ModalEntregaConSalvedad({
             cantidadAfectada: itemSalv.cantidadAfectada,
             motivo: itemSalv.motivo as MotivoSalvedad,
             descripcion: itemSalv.descripcion.trim() || undefined,
-            devolverStock: motivoConfig?.devuelveStock ?? true
+            devolverStock: motivoConfig?.devuelveStock ?? true,
+            // El UUID se deriva del contenido de la salvedad, así que volver a
+            // tocar "Confirmar" tras un fallo parcial reenvía EL MISMO id y el
+            // servidor lo reconoce. Antes se acuñaba uno nuevo en cada intento:
+            // las salvedades que sí habían entrado se aplicaban de nuevo, el
+            // total bajaba dos veces y el stock volvía dos veces.
+            clientRequestId: requestId(
+              `salvedad|${pedido.id}|${itemSalv.item.id}|${itemSalv.cantidadAfectada}|${itemSalv.motivo}`,
+            ),
           }
         })
 
