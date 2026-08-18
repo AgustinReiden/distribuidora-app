@@ -17,6 +17,7 @@ import {
   construirMOQMap,
   validarMOQPedido,
   type ItemPedido,
+  type MinimosProducto,
   type PrecioResuelto,
   type FaltanteParaTier,
   type ViolacionMOQ,
@@ -57,8 +58,19 @@ interface UsePromocionPedidoReturn {
   hayDescuento: boolean
   /** Loading */
   isLoading: boolean
-  /** Mapa MOQ */
+  /**
+   * Mapa MOQ de los items QUE YA ESTÁN EN EL CARRITO (`construirMOQMap` itera
+   * `items`). Para un producto del catálogo todavía no agregado da `undefined`;
+   * para eso está `minimosProducto`.
+   */
   moqMap: Map<string, number>
+  /**
+   * Mínimo de venta de TODOS los productos (mig 147). Es lo que hay que
+   * consultar en el listado del catálogo, con `obtenerMOQ(id, minimosProducto)`:
+   * usar `moqMap` ahí devolvía undefined y el producto entraba al carrito con
+   * cantidad 1, en violación de su propio mínimo y con el confirmar bloqueado.
+   */
+  minimosProducto?: MinimosProducto
   /** Violaciones MOQ */
   violacionesMOQ: ViolacionMOQ[]
 }
@@ -221,6 +233,7 @@ export function usePromocionPedido(
     hayDescuento,
     isLoading: loadingPricing || loadingPromos,
     moqMap,
+    minimosProducto,
     violacionesMOQ,
   }
 }

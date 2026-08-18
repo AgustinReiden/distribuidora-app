@@ -6,7 +6,7 @@ import NumberInput from '../ui/NumberInput';
 import { formatPrecio, parseDateSafe, fechaHaceDias } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { modalEditarPedidoSchema } from '../../lib/schemas';
-import { usePromocionPedido } from '../../hooks/usePromocionPedido';
+import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
@@ -279,13 +279,34 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     () => new Set(promosEliminadas.map(p => p.promoId)),
     [promosEliminadas],
   );
+  // El regalo que el pedido YA tiene manda sobre el default vigente de la promo.
+  //
+  // Al crear el pedido el admin puede elegir el producto del regalo, y eso se
+  // persiste sólo como el `producto_id` de la fila de bonificación — no queda
+  // fila en `pedido_sustituciones_regalo`. Al reabrir para editar, este hook
+  // recalculaba desde la promo y devolvía el default de HOY: el regalo pactado
+  // cambiaba de sabor. Peor, `bonifDifierenDeDB` detectaba la diferencia y
+  // prendía el guardado solo, así que alcanzaba con tocar una observación para
+  // persistir el cambio — con el camión ya cargado con el otro producto.
+  const overridesRegaloDelPedido = useMemo(() => {
+    const overrides: Record<string, RegaloOverride> = {};
+    for (const item of pedido?.items || []) {
+      if (!item.es_bonificacion || item.promocion_id == null) continue;
+      overrides[String(item.promocion_id)] = {
+        productoId: String(item.producto_id),
+        descripcionRegalo: item.descripcion_regalo ?? undefined,
+      };
+    }
+    return overrides;
+  }, [pedido]);
+
   const {
     itemsFinales,
     totalFinal,
     moqMap,
     preciosResueltos,
     isLoading: promosLoading,
-  } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, undefined, promosEliminadasSet);
+  } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, overridesRegaloDelPedido, promosEliminadasSet);
 
   const hayPromosQuitadas = promosEliminadas.length > 0;
 

@@ -999,6 +999,15 @@ export function useCancelarPedidoMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      // La pantalla del chofer NO lee de ['pedidos'], lee de ['recorrido-activo']
+      // (useRecorridoActivoQuery), y las familias de recorridos son
+      // independientes. Sin esto, cancelar un pedido ya ruteado le dejaba la
+      // parada en el mapa: manejaba hasta la puerta de un cliente sin pedido.
+      // Mismo conjunto que invalidan handleGuardarItemsEdicion y aplicarOrden.
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+      queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
     },
   })
 }

@@ -1496,13 +1496,26 @@ export default function PedidosContainer(): React.ReactElement {
       )
     }
 
-    // Pedidos sin coordenadas: el optimizador no los devuelve → repartir por
-    // zona preferida (si el cliente tiene zona) o round-robin. Se intercalan en
-    // el bloque horario que les toca, no al final del recorrido del chofer.
-    const sinCoordsIds = resp.pedidos_sin_coordenadas_ids
-      ?? pedidosSeleccionados
-        .filter(p => p.cliente?.latitud == null || p.cliente?.longitud == null)
-        .map(p => String(p.id))
+    // Pedidos que el optimizador NO ruteó → repartir por zona preferida (si el
+    // cliente tiene zona) o round-robin. Se intercalan en el bloque horario que
+    // les toca, no al final del recorrido del chofer.
+    //
+    // Se derivan de lo que volvió, no del campo `pedidos_sin_coordenadas_ids`.
+    // Con `resp.x ?? fallback` el fallback NUNCA disparaba: la edge devuelve un
+    // array VACÍO, no null, y `??` sólo cae ante null/undefined. En Taco Pozo
+    // —129 de 134 clientes sin coordenadas— eso significaba armar dos rutas de
+    // una parada y perder las otras 38 sin ningún aviso.
+    //
+    // Además esto cubre cualquier otro motivo por el que el optimizador deje un
+    // pedido afuera, no sólo la falta de coordenadas: la invariante es que todo
+    // pedido seleccionado termine en la ruta de alguien.
+    const ruteadosIds = new Set<string>()
+    for (const lista of ruteadasPorRep.values()) {
+      for (const o of lista) ruteadosIds.add(String(o.pedido_id))
+    }
+    const sinCoordsIds = pedidosSeleccionados
+      .map(p => String(p.id))
+      .filter(id => !ruteadosIds.has(id))
     const sinCoordsPorRep = new Map<string, Array<{ pedido_id: string; barrida: Barrida }>>()
     for (const rep of repartidores) sinCoordsPorRep.set(rep.transportista_id, [])
     let rr = 0
@@ -1532,6 +1545,15 @@ export default function PedidosContainer(): React.ReactElement {
 
     // Métricas (distancia/duración/polylines) por chofer desde el optimizador.
     const metricsByRep = new Map(resp.recorridos.map(r => [r.transportista_id, r]))
+
+    // Que no sea silencioso: el encargado tiene que saber que esas paradas
+    // entraron sin orden geográfico y por qué, para poder acomodarlas a mano.
+    if (sinCoordsIds.length > 0) {
+      notify.warning(
+        `${sinCoordsIds.length} ${sinCoordsIds.length === 1 ? 'pedido se repartió' : 'pedidos se repartieron'} ` +
+          'sin optimizar por falta de coordenadas del cliente. Revisá su lugar en la ruta.',
+      )
+    }
 
     setGuardando(true)
     const recorridosUI: RutaMultiResultadoUI['recorridos'] = []
@@ -1834,14 +1856,23 @@ export default function PedidosContainer(): React.ReactElement {
               // Preseleccionar FC/ZZ según el default del cliente (mig 116); pisable por pedido.
               tipoFactura: ((clientes.find(c => String(c.id) === String(id)) as { tipo_factura_default?: 'ZZ' | 'FC' } | undefined)?.tipo_factura_default ?? 'ZZ'),
             }))}
-            onAgregarItem={(productoId: string) => {
+            // `cantidad` la manda el modal con el mínimo de venta del producto
+            // (mig 147). Antes este handler declaraba sólo `productoId` y
+            // hardcodeaba 1 en las dos ramas: tocar un fardo de mínimo 3 lo
+            // cargaba con 1, aparecía el cartel ámbar de violación de mínimo y
+            // el confirmar quedaba en gris. El sistema conocía el mínimo y
+            // obligaba a tipearlo a mano, con el cliente esperando.
+            onAgregarItem={(productoId: string, cantidad = 1, precio?: number) => {
               setNuevoPedido(prev => {
                 const existe = prev.items.find(i => i.productoId === productoId)
                 const producto = productos.find(p => p.id === productoId)
+                // El mínimo es un piso, no un múltiplo: sólo manda al agregar el
+                // producto por primera vez. Si ya está en el carrito el piso ya
+                // se cumplió y cada toque suma de a uno, como siempre.
                 if (existe) {
                   return { ...prev, items: prev.items.map(i => i.productoId === productoId ? { ...i, cantidad: i.cantidad + 1 } : i) }
                 }
-                return { ...prev, items: [...prev.items, { productoId, cantidad: 1, precioUnitario: producto?.precio || 0 }] }
+                return { ...prev, items: [...prev.items, { productoId, cantidad, precioUnitario: precio ?? producto?.precio ?? 0 }] }
               })
             }}
             onActualizarCantidad={(productoId: string, cantidad: number) => {
