@@ -22,19 +22,37 @@ export function esErrorDeChunk(err: unknown): boolean {
   return /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|ChunkLoadError/i.test(msg)
 }
 
+/** Cuántas recargas se permiten por sesión antes de dejar de insistir. */
+const RELOAD_MAX_INTENTOS = 2
+
 /**
- * Recarga la página UNA vez (con cooldown por sessionStorage) para traer
- * index.html + chunks frescos. Devuelve true si disparó la recarga; false si
- * está en cooldown (ya recargó hace poco y sigue fallando → no insistir).
+ * Recarga la página para traer index.html + chunks frescos. Devuelve true si
+ * disparó la recarga; false si no corresponde recargar.
+ *
+ * NO recarga en dos casos, y los dos son el mismo usuario: el chofer en la calle.
+ *
+ * 1. Sin conexión. La app NO registra service worker (`injectRegister: false` en
+ *    vite.config, y PWAPrompt quedó sin montar), así que no hay app shell
+ *    precacheado: recargar sin red deja la pantalla en blanco y el chofer sin
+ *    app en medio del reparto. Con red, recargar es lo correcto — el chunk viejo
+ *    no existe más en el server.
+ * 2. Ya se recargó `RELOAD_MAX_INTENTOS` veces. El cooldown viejo era temporal,
+ *    no un tope: pasados 15 s volvía a recargar, y si el chunk seguía sin estar
+ *    la pestaña entraba en loop de recargas.
  */
 function recargarUnaVezPorChunk(): boolean {
-  const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0)
-  if (Date.now() - last > RELOAD_COOLDOWN_MS) {
-    sessionStorage.setItem(RELOAD_KEY, String(Date.now()))
-    window.location.reload()
-    return true
-  }
-  return false
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+
+  const [intentosRaw, lastRaw] = (sessionStorage.getItem(RELOAD_KEY) || '0|0').split('|')
+  const intentos = Number(intentosRaw) || 0
+  const last = Number(lastRaw) || 0
+
+  if (intentos >= RELOAD_MAX_INTENTOS) return false
+  if (Date.now() - last <= RELOAD_COOLDOWN_MS) return false
+
+  sessionStorage.setItem(RELOAD_KEY, `${intentos + 1}|${Date.now()}`)
+  window.location.reload()
+  return true
 }
 
 // El genérico espeja el de React.lazy (`ComponentType<any>`): con
@@ -72,9 +90,13 @@ export async function importConRecarga<T>(factory: () => Promise<T>): Promise<T>
   } catch (err) {
     if (esErrorDeChunk(err)) {
       const recargo = recargarUnaVezPorChunk()
+      if (recargo) throw new Error('Hay una versión nueva de la app. Recargando…')
+      // Sin conexión NO hay que decirle "recargá": no hay service worker, así
+      // que recargar deja la pantalla en blanco. Es el chofer en la calle.
+      const sinRed = typeof navigator !== 'undefined' && navigator.onLine === false
       throw new Error(
-        recargo
-          ? 'Hay una versión nueva de la app. Recargando…'
+        sinRed
+          ? 'No hay conexión. Volvé a intentar cuando tengas señal — no recargues la app.'
           : 'No se pudo cargar el módulo. Recargá la página e intentá de nuevo.',
       )
     }

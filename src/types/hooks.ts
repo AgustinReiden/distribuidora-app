@@ -1603,6 +1603,14 @@ export interface RegistrarSalvedadInput {
   descripcion?: string | null;
   fotoUrl?: string | null;
   devolverStock?: boolean;
+  /**
+   * UUID de idempotencia (mig 049). Lo genera QUIEN arma el lote, no el handler:
+   * tiene que sobrevivir a que el usuario vuelva a tocar "Confirmar" tras un
+   * fallo parcial. Generarlo con `useRequestIdEstable`, cuya cache vive lo que
+   * vive el modal — o sea, exactamente un intento de entrega.
+   * Si se omite, el handler acuña uno nuevo (camino de salvedad suelta).
+   */
+  clientRequestId?: string;
 }
 
 export interface RegistrarSalvedadResult {

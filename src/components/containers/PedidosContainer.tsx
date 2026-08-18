@@ -19,6 +19,7 @@ import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from 
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { nuevoRequestId } from '../../utils/idempotencia'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import {
@@ -1611,16 +1612,20 @@ export default function PedidosContainer(): React.ReactElement {
   }, [notify])
 
   // ModalEntregaConSalvedad handlers
-  // Idempotente via client_request_id (mig 049): un UUID por salvedad persiste
-  // entre reintentos. El RPC short-circuit si ya creo la salvedad con ese UUID.
-  // Retry automatico con backoff cubre "TypeError: Load failed" (iOS Safari /
-  // PWA) y otros errores transient de red sin riesgo de duplicar.
+  // Idempotente via client_request_id (mig 049): el RPC hace short-circuit si ya
+  // creo la salvedad con ese UUID.
+  //
+  // El UUID lo trae el caller (`salvedad.clientRequestId`), y eso es lo que hace
+  // que sirva: antes se acuñaba uno nuevo ACA, dentro del loop, en cada
+  // invocacion. Asi solo cubria el retry interno de retryWithBackoff —que
+  // ademas nunca disparaba, ver retryWithBackoff.ts— y no el reintento del
+  // usuario: si el lote fallaba a la mitad y volvia a tocar "Confirmar", las
+  // salvedades que si habian entrado se aplicaban de nuevo, el total bajaba dos
+  // veces y el stock volvia dos veces.
   const handleSaveSalvedades = useCallback(async (salvedades: RegistrarSalvedadInput[]): Promise<RegistrarSalvedadResult[]> => {
     const results: RegistrarSalvedadResult[] = []
     for (const salvedad of salvedades) {
-      const clientRequestId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const clientRequestId = salvedad.clientRequestId || nuevoRequestId()
       try {
         const { data, error } = await retryWithBackoff(
           async () => {

@@ -59,4 +59,59 @@ describe('importConRecarga', () => {
     await expect(importConRecarga(() => Promise.reject(err))).rejects.toThrow('boom de negocio')
     expect(reloadMock).not.toHaveBeenCalled()
   })
+
+  /**
+   * El chofer en la calle. La app NO registra service worker, así que no hay app
+   * shell precacheado: recargar sin red deja la pantalla en blanco y lo deja sin
+   * app en medio del reparto. Antes se recargaba igual.
+   */
+  describe('sin conexión', () => {
+    const setOnline = (v: boolean) =>
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: v })
+
+    afterEach(() => setOnline(true))
+
+    it('NO recarga y avisa que no recargue', async () => {
+      setOnline(false)
+      const factory = () => Promise.reject(new Error('Failed to fetch dynamically imported module: /assets/x.js'))
+
+      await expect(importConRecarga(factory)).rejects.toThrow(/no hay conexión/i)
+      await expect(importConRecarga(factory)).rejects.toThrow(/no recargues/i)
+      expect(reloadMock).not.toHaveBeenCalled()
+    })
+
+    it('con la red de vuelta sí recarga', async () => {
+      setOnline(false)
+      const factory = () => Promise.reject(new Error('Failed to fetch dynamically imported module: /assets/x.js'))
+      await expect(importConRecarga(factory)).rejects.toThrow(/no hay conexión/i)
+      expect(reloadMock).not.toHaveBeenCalled()
+
+      setOnline(true)
+      await expect(importConRecarga(factory)).rejects.toThrow(/versión nueva/i)
+      expect(reloadMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  /**
+   * El cooldown viejo era temporal, no un tope: pasados 15 s volvía a recargar,
+   * y si el chunk seguía sin estar la pestaña entraba en loop de recargas.
+   */
+  it('deja de insistir tras 2 recargas, aunque pase el cooldown', async () => {
+    const factory = () => Promise.reject(new Error('Failed to fetch dynamically imported module: /assets/x.js'))
+
+    await expect(importConRecarga(factory)).rejects.toThrow(/versión nueva/i)
+    expect(reloadMock).toHaveBeenCalledTimes(1)
+
+    // Se simula que pasó el cooldown conservando el contador de intentos.
+    const [intentos] = (sessionStorage.getItem('chunk-reload-at') || '0|0').split('|')
+    sessionStorage.setItem('chunk-reload-at', `${intentos}|0`)
+    await expect(importConRecarga(factory)).rejects.toThrow(/versión nueva/i)
+    expect(reloadMock).toHaveBeenCalledTimes(2)
+
+    // Tercera: el tope corta, no importa el cooldown.
+    const [intentos2] = (sessionStorage.getItem('chunk-reload-at') || '0|0').split('|')
+    sessionStorage.setItem('chunk-reload-at', `${intentos2}|0`)
+    await expect(importConRecarga(factory)).rejects.toThrow(/Recargá la página/i)
+    expect(reloadMock).toHaveBeenCalledTimes(2)
+  })
 })
