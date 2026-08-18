@@ -122,8 +122,23 @@ interface ConfirmConfig {
   tipo?: 'danger' | 'warning' | 'success'
   titulo?: string
   mensaje?: string
-  onConfirm?: () => void
+  /** Campo de fecha opcional; su valor llega como argumento de onConfirm. */
+  campoFecha?: { label: string; valorInicial: string; max?: string; ayuda?: string }
+  onConfirm?: (fecha?: string) => void
 }
+
+/**
+ * Campo de fecha para el "marcar entregado" individual.
+ *
+ * Se arma en cada apertura y no como constante de módulo porque `fechaLocalISO()`
+ * cambia a medianoche y esta app vive en pestañas abiertas por días.
+ */
+const campoFechaEntrega = (): NonNullable<ConfirmConfig['campoFecha']> => ({
+  label: 'Fecha de entrega',
+  valorInicial: fechaLocalISO(),
+  max: fechaLocalISO(),
+  ayuda: 'Si estás cargando la entrega de un día anterior, cambiala: define en qué día se contabiliza.',
+})
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
@@ -424,10 +439,11 @@ export default function PedidosContainer(): React.ReactElement {
         visible: true, titulo: 'Confirmar cambio/devolución',
         mensaje: `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock y la cuenta del cliente.`,
         tipo: 'success',
-        onConfirm: async () => {
+        campoFecha: campoFechaEntrega(),
+        onConfirm: async (fechaEntrega?: string) => {
           try {
             await aplicarCambioParadaMut.mutateAsync(String(pedido.id))
-            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega })
             notify.success('Cambio/devolución completado')
           } catch (e) { notify.error((e as Error).message) }
           setConfirmConfig({ visible: false })
@@ -439,9 +455,13 @@ export default function PedidosContainer(): React.ReactElement {
       setConfirmConfig({
         visible: true, titulo: 'Confirmar entrega',
         mensaje: `¿Confirmar entrega del pedido #${pedido.id}?`, tipo: 'success',
-        onConfirm: async () => {
+        // La fecha es editable porque lo habitual es marcar hoy las entregas de
+        // ayer: con la fecha fija en hoy, la rendición del día del reparto
+        // quedaba vacía y la del día que se cargó, inflada.
+        campoFecha: campoFechaEntrega(),
+        onConfirm: async (fechaEntrega?: string) => {
           try {
-            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+            await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega })
             notify.success('Pedido entregado')
           } catch (e) { notify.error((e as Error).message) }
           setConfirmConfig({ visible: false })
@@ -1002,7 +1022,12 @@ export default function PedidosContainer(): React.ReactElement {
     }
     setGuardando(true)
     try {
-      await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado' })
+      // La entrega pertenece al día que el usuario eligió para el cobro, no a hoy.
+      await cambiarEstado.mutateAsync({
+        pedidoId: pedido.id,
+        nuevoEstado: 'entregado',
+        fechaEntrega: payload.fechaPago,
+      })
       try {
         await registrarPagosBatch({
           clienteId: payload.clienteId,

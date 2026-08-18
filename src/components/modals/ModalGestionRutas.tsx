@@ -384,6 +384,15 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     [rutasEnCurso, fechaEntrega],
   );
   const idsExistentes = useMemo(() => new Set(paradasExistentes.map(p => p.id)), [paradasExistentes]);
+  // Paradas que el chofer YA entregó. No se pueden seleccionar: mandarlas en el
+  // payload de aplicar_orden_ruta las devolvía a 'asignado' — el 15/08 revivieron
+  // 19 entregas porque el encargado reabrió el modal para meter un pedido que
+  // entró tarde. Siguen figurando en la ruta: la RPC solo borra paradas de
+  // pedidos no entregados.
+  const idsEntregados = useMemo(
+    () => new Set(paradasExistentes.filter(p => p.estado === 'entregado').map(p => p.id)),
+    [paradasExistentes],
+  );
 
   // === Reasignar la ruta ya armada a otro chofer (mig 172) ===
   // El transportista es parte de la identidad de la ruta (aplicar_orden_ruta la
@@ -482,7 +491,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     if (rutaExistente === undefined) return; // aún cargando la ruta existente
     if (seededKeyRef.current === rutaKey) return;
     seededKeyRef.current = rutaKey;
-    setSeleccionados(new Set(paradasExistentes.map(p => p.id)));
+    setSeleccionados(new Set(paradasExistentes.filter(p => p.estado !== 'entregado').map(p => p.id)));
   }, [modoDividir, transportistaSeleccionado, rutaKey, rutaExistente, paradasExistentes, disponiblesFiltrados, pedidos.length]);
 
   const pedidosSeleccionados = useMemo(
@@ -508,15 +517,21 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   }, [pedidosSeleccionados, fechaEntrega]);
 
   const toggleSeleccion = (id: string): void => {
+    if (idsEntregados.has(id)) return;
     setSeleccionados(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
-  const todosSeleccionados = pedidosVisibles.length > 0 && seleccionados.size === pedidosVisibles.length;
+  // "Todos" es todos los que se pueden tocar: lo ya entregado queda afuera.
+  const seleccionables = useMemo(
+    () => pedidosVisibles.filter(p => !idsEntregados.has(p.id)),
+    [pedidosVisibles, idsEntregados],
+  );
+  const todosSeleccionados = seleccionables.length > 0 && seleccionados.size === seleccionables.length;
   const toggleTodos = (): void => {
-    setSeleccionados(todosSeleccionados ? new Set() : new Set(pedidosVisibles.map(p => p.id)));
+    setSeleccionados(todosSeleccionados ? new Set() : new Set(seleccionables.map(p => p.id)));
   };
 
   // Pedidos ordenados segun la optimizacion (resuelve desde paradas existentes +
@@ -1354,6 +1369,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                         ) : pedidosVisiblesFiltrados.map((pedido) => {
                           const checked = seleccionados.has(pedido.id);
                           const enRuta = idsExistentes.has(pedido.id);
+                          const yaEntregado = idsEntregados.has(pedido.id);
                           // Con filtro puesto, se marca cuál de las dos fechas
                           // lo trajo. Sin esto la fila muestra las dos iguales y
                           // un pedido de ayer entregable hoy parece un error.
@@ -1364,18 +1380,28 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           return (
                             <label
                               key={pedido.id}
-                              className={`flex items-center p-3 cursor-pointer ${checked ? 'hover:bg-gray-50' : 'bg-gray-50/60 opacity-60 hover:opacity-100'}`}
+                              className={`flex items-center p-3 ${
+                                yaEntregado
+                                  ? 'cursor-not-allowed bg-green-50/60'
+                                  : `cursor-pointer ${checked ? 'hover:bg-gray-50' : 'bg-gray-50/60 opacity-60 hover:opacity-100'}`
+                              }`}
                             >
                               <input
                                 type="checkbox"
                                 checked={checked}
+                                disabled={yaEntregado}
                                 onChange={() => toggleSeleccion(pedido.id)}
-                                className="rounded mr-3"
+                                className="rounded mr-3 disabled:cursor-not-allowed"
+                                title={yaEntregado ? 'Ya entregado: no se puede volver a rutear' : undefined}
                               />
                               <div className="flex-1 min-w-0">
                                 <p className="font-medium text-gray-900 truncate flex items-center gap-2">
                                   #{pedido.id} - {pedido.cliente?.nombre_fantasia}
-                                  {enRuta && (
+                                  {yaEntregado ? (
+                                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-600 text-white border border-green-700">
+                                      ya entregado
+                                    </span>
+                                  ) : enRuta && (
                                     <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-100 text-green-700 border border-green-200">
                                       en la ruta
                                     </span>

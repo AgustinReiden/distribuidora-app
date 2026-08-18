@@ -128,10 +128,25 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 180** — la última numerada en el repo es
-`179_jornadas_del_preventista` (aplicada). Las **174**
-(`174_salvedad_regalos_y_minimo_de_venta`), **175**, **176**, **177**, **178** y **179**
-mapean 1:1 con el ledger.
+**La próxima migración es la 181** — la última numerada en el repo es
+`180_la_entrega_encuentra_su_parada` (aplicada). Las **174**
+(`174_salvedad_regalos_y_minimo_de_venta`), **175**, **176**, **177**, **178**, **179** y
+**180** mapean 1:1 con el ledger.
+
+La **180** es de la tanda de la auditoría adversarial de pedidos/entregas/pagos. Saca el
+filtro `r.fecha = CURRENT_DATE` de `actualizar_recorrido_entrega()` —que la 173 había dejado
+a propósito y resultó ser el 79% del volumen—, agrega `recalcular_recorrido(id)` (idempotente,
+invocable: **no existía ninguna forma de reparar un contador desalineado**), impide que
+`aplicar_orden_ruta` devuelva a `'asignado'` un pedido ya entregado o cancelado, y hace que
+`cancelar_pedido_con_stock` baje la parada del camión. **Sí toca filas**: realineó 1.455
+paradas, borró 118 de pedidos cancelados y recalculó los 86 recorridos. Deja los checks
+`RUTA-A/B/C` en `auditoria_integridad()`.
+
+Ojo con dos cosas que se descubrieron al aplicarla: `CURRENT_DATE` se evalúa en **UTC**
+(`TimeZone = 'UTC'`), así que cualquier comparación de fecha en la base se corre 3 horas y
+después de las 21:00 ART ya es "mañana"; y el gate diario de integridad **ya venía en rojo**
+por `CC-PAGOS-CANCEL` (pago 2944 sobre el pedido cancelado 3262, del 05/07), así que no estaba
+protegiendo nada. Eso se aborda en el PR de guards de estado, no acá.
 
 La **179** agrega dos funciones de lectura para el panel "Mis entregas" del preventista
 (`jornadas_preventista` y `jornada_preventista_detalle`). No toca ninguna fila. Deja escrita
