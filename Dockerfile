@@ -12,14 +12,24 @@ RUN npm ci --ignore-scripts
 # Copy source and build
 COPY . .
 
-# Build args for Vite env vars (baked at compile time)
+# Build args for Vite env vars (baked at compile time).
+# Tienen que estar TODAS las que usa el código: una que falte no rompe el
+# build, se compila con `undefined` y la feature muere en silencio en prod.
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 ARG VITE_GOOGLE_API_KEY
+# Map ID del vector map (cámara heading-up de navegación). Sin esto el mapa
+# cae al raster y se pierde la rotación.
+ARG VITE_GOOGLE_MAP_ID
 ARG VITE_SENTRY_DSN
 ARG VITE_APP_VERSION
+ARG VITE_TELEGRAM_BOT_USERNAME
 ARG VITE_N8N_WEBHOOK_URL
 ARG VITE_N8N_FACTURA_WEBHOOK_URL
+# Identidad del build para /version.json. Sin esto el build cae al fallback por
+# timestamp (`t<base36>`), que sirve para detectar deploys nuevos pero no dice
+# qué commit corre: pasarle el SHA hace que el dato sirva para soporte.
+ARG VITE_BUILD_ID
 
 RUN npm run build
 

@@ -180,6 +180,39 @@ export default defineConfig({
       },
       workbox: {
         runtimeCaching: [
+          // PRIMERA a proposito: el router de workbox se queda con la primera
+          // ruta que matchea. Las navegaciones van a la RED primero y solo
+          // caen al cache si la red falla.
+          //
+          // El porque, que es el motivo de existir de esta entrada: si la
+          // navegacion se sirve del cache y WebKit no puede leer el cuerpo
+          // guardado (purga sus archivos y deja el indice: pasa en iOS), la
+          // pagina muere con "WebKitBlobResource error 1" y no hay JS que lo
+          // pueda atajar, porque el fallo ocurre al streamear la respuesta.
+          // Yendo a la red primero, un telefono con senal nunca toca esa
+          // bomba. Sin senal cae al cache, que es para lo que esta.
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'html-cache',
+              // Con senal mala no la hacemos esperar: a los 3 s sirve el shell.
+              networkTimeoutSeconds: 3,
+              plugins: [{
+                // Todas las navegaciones comparten UNA entrada. La app es una
+                // SPA: el HTML es el mismo para cualquier ruta. Asi una ruta
+                // que nunca abrio online (iOS restaura la ultima URL al
+                // reabrir la app) tambien levanta sin senal.
+                cacheKeyWillBeUsed: async () => '/index.html',
+                // Tercer nivel: sin red y con html-cache todavia vacio (recien
+                // instalado y se quedo sin senal antes de la primera
+                // navegacion), cae al precache. ignoreSearch porque workbox le
+                // cuelga ?__WB_REVISION__ a sus entradas.
+                handlerDidError: async () =>
+                  (await caches.match('/index.html', { ignoreSearch: true })) || undefined,
+              }],
+            },
+          },
           {
             urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/i,
             handler: 'CacheFirst',
@@ -217,11 +250,15 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         globIgnores: ['**/*.map'],
         cleanupOutdatedCaches: true,
-        // Cualquier ruta se resuelve con el index.html precacheado: es lo que
-        // hace que la app abra sin señal en vez de quedar en blanco. El proxy
-        // de n8n queda afuera, va siempre a la red.
-        navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // Sin navigateFallback a propósito: workbox lo registra ANTES que
+        // runtimeCaching y se comería la ruta network-first de arriba, que es
+        // la que evita el "WebKitBlobResource error 1". El fallback offline
+        // ahora lo da esa misma ruta (html-cache con clave única).
+        navigateFallback: undefined,
+        // Por el mismo motivo. Con el default ('index.html') la ruta de
+        // precache resuelve "/" contra el index.html precacheado y se queda
+        // ella con la navegación, antes de que la vea el network-first.
+        directoryIndex: null,
         // Los dos en false a propósito, y es el corazón del arreglo de marzo:
         // el SW nuevo se queda ESPERANDO en vez de tomar control de la pestaña
         // abierta. Así la sesión en curso sigue sirviéndose del precache viejo
