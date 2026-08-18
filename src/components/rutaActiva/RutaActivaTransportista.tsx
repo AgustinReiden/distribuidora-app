@@ -12,7 +12,7 @@
  * (useEntregaParada). Diseño: docs/plans/2026-06-12-ruta-activa-design.md
  */
 import React, { useState, useMemo, useEffect, useCallback, Suspense } from 'react';
-import { Crosshair, WifiOff, Truck, Volume2, VolumeX, LocateFixed, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, Crosshair, WifiOff, Truck, Volume2, VolumeX, LocateFixed, ArrowLeft } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { haversineMeters } from '../../utils/geo';
 import { useAuthData } from '../../contexts/AuthDataContext';
@@ -350,6 +350,26 @@ export default function RutaActivaTransportista({
           onArrastreUsuario={handleArrastreMapa}
         />
       </Suspense>
+
+      {/* Parada bloqueada (p. ej. pedido sin datos de cliente: no se puede
+          cobrar). Va por encima de todo y no se va solo: el chofer tiene que
+          leerlo y decidir, porque el camino alternativo es entregar sin cobrar. */}
+      {entrega.errorCobranza && (
+        <div
+          role="alert"
+          className="absolute inset-x-3 top-3 z-50 flex items-start gap-3 rounded-2xl bg-red-600 px-4 py-3 text-white shadow-xl"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" aria-hidden="true" />
+          <p className="min-w-0 flex-1 text-sm font-medium">{entrega.errorCobranza}</p>
+          <button
+            type="button"
+            onClick={entrega.limpiarErrorCobranza}
+            className="flex-shrink-0 rounded-lg px-2 py-1 text-sm font-semibold underline underline-offset-2"
+          >
+            Entendido
+          </button>
+        </div>
+      )}
 
       {/* Overlay superior: al guiar muestra el banner de maniobra + toggle de
           voz; si no, el progreso del día + seguir-posición. El sheet (z-40)

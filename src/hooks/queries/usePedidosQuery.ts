@@ -945,16 +945,15 @@ async function entregarPedidosMasivo(
   const { error } = await supabase.rpc('marcar_entregas_masivo', rpcArgs)
   if (error) throw error
 
-  // Historial best-effort (no bloquea)
-  const fechaHistorial = fecha ? `${fecha}T12:00:00-03:00` : new Date().toISOString()
-  const historialEntries = pedidoIds.map(pedidoId => ({
-    pedido_id: pedidoId,
-    accion: 'entregado',
-    descripcion: `Entrega masiva - Transportista: ${transportistaId}`,
-    fecha: fechaHistorial,
-  }))
-
-  await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
+  // El historial NO se escribe desde acá. Había un insert manual a
+  // `pedido_historial` cerrado con `.then(() => {})`, y ese insert nunca
+  // funcionó: mandaba `accion`, `descripcion` y `fecha`, tres columnas que la
+  // tabla no tiene, y omitía `campo_modificado` y `sucursal_id`, que son NOT
+  // NULL. Fallaba el 100% de las veces y el `.then` vacío se comía el error.
+  //
+  // No hace falta reemplazarlo: el trigger `registrar_cambio_pedido` ya
+  // registra el cambio de `estado` con su `usuario_id` (auth.uid()), y es de
+  // ahí que salen las 9.757 filas reales de historial de estado.
 }
 
 /**

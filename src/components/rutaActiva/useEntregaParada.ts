@@ -65,6 +65,9 @@ export interface UseEntregaParadaReturn {
   salvedadModal: { pedidoId: string; item: PedidoItemDB & { producto?: ProductoDB } } | null;
   /** Punto de entrada: decide entre cobrar primero o marcar directo */
   marcarEntregado: (pedido: PedidoConCliente) => void;
+  /** Por qué se bloqueó la parada (p. ej. pedido sin datos de cliente). */
+  errorCobranza: string | null;
+  limpiarErrorCobranza: () => void;
   confirmarPago: (data: DatosPago) => Promise<Pago & { monto: number }>;
   cerrarModalPago: () => void;
   entregarSinCobrar: () => Promise<void>;
@@ -94,6 +97,9 @@ export function useEntregaParada({
   } | null>(null);
   const [pedidoNoEntregado, setPedidoNoEntregado] = useState<PedidoConCliente | null>(null);
   const [guardandoNoEntrega, setGuardandoNoEntrega] = useState(false);
+  // Motivo por el que una parada no se pudo ni cobrar ni entregar. La
+  // pantalla lo muestra; sin esto el bloqueo sería mudo.
+  const [errorCobranza, setErrorCobranza] = useState<string | null>(null);
   const [errorNoEntrega, setErrorNoEntrega] = useState<string | null>(null);
   // Si el pago del modal fue exitoso, al cerrarse se marca entregado.
   const pagoExitosoRef = useRef(false);
@@ -108,7 +114,21 @@ export function useEntregaParada({
   const montoCobradoRef = useRef(0);
 
   const marcarEntregado = (pedido: PedidoConCliente): void => {
-    if (onRegistrarPago && pedido.estado_pago !== 'pagado' && pedido.cliente) {
+    if (onRegistrarPago && pedido.estado_pago !== 'pagado') {
+      // Sin datos del cliente no se puede abrir la cobranza (ModalRegistrarPago
+      // los necesita). Antes `&& pedido.cliente` estaba en esta condición y el
+      // caso caía por abajo: la parada se marcaba entregada SIN pasar por el
+      // cobro y sin registrar un peso — el chofer la veía en verde y seguía
+      // viaje. Pasa de verdad: hay pedidos con `cliente_id` NULL, y el embed
+      // `cliente:clientes(...)` también vuelve null si RLS tapa la fila.
+      // Una boleta impaga que no se puede cobrar se frena, no se entrega.
+      if (!pedido.cliente) {
+        setErrorCobranza(
+          `El pedido #${pedido.id} no tiene datos del cliente, así que no se puede cobrar. ` +
+            'Avisá a la oficina antes de entregarlo.',
+        );
+        return;
+      }
       pagoExitosoRef.current = false;
       montoCobradoRef.current = 0;
       setPedidoParaCobrar(pedido);
@@ -170,6 +190,8 @@ export function useEntregaParada({
 
   const cerrarSalvedad = (): void => setSalvedadModal(null);
 
+  const limpiarErrorCobranza = (): void => setErrorCobranza(null);
+
   // --- No entrega ---
   // El pedido NO se cancela: el RPC lo libera para re-rutearlo y le avisa al
   // preventista con el motivo.
@@ -209,6 +231,8 @@ export function useEntregaParada({
     pedidoParaCobrar,
     salvedadModal,
     marcarEntregado,
+    errorCobranza,
+    limpiarErrorCobranza,
     confirmarPago,
     cerrarModalPago,
     entregarSinCobrar,

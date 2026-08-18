@@ -206,12 +206,15 @@ const ModalPedido = memo(function ModalPedido({
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
 
+  // El producto agotado SÍ se lista (deshabilitado y con el motivo), igual que
+  // el producto sin precio. Antes se filtraba por `p.stock > 0` y desaparecía
+  // del buscador: el vendedor no podía distinguir "no existe" de "lo escribí
+  // mal" de "está agotado", con el cliente esperando.
   const productosFiltrados = useMemo(() => {
     return productos.filter(p => {
       const matchNombre = p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase());
       const matchCategoria = !categoriaSeleccionada || p.categoria === categoriaSeleccionada;
-      const tieneStock = p.stock > 0;
-      return matchNombre && matchCategoria && tieneStock;
+      return matchNombre && matchCategoria;
     });
   }, [productos, busquedaProducto, categoriaSeleccionada]);
 
@@ -322,6 +325,23 @@ const ModalPedido = memo(function ModalPedido({
     if (stockDisponible < stockMinimo) return { tipo: 'warning', mensaje: `Stock bajo: quedaran ${stockDisponible}` };
     return null;
   };
+
+  // Faltantes de stock del carrito. Es la misma cuenta que `getStockWarning` ya
+  // mostraba en rojo, pero ahora además BLOQUEA el confirmar: antes el cartel
+  // era decorativo, el vendedor apretaba igual y el rechazo llegaba del servidor
+  // con el cliente delante y el carrito entero cargado. El mínimo de venta ya se
+  // comportaba así; el stock no, y eso enseñaba que "el rojo no importa".
+  const violacionesStock = useMemo(() => {
+    return nuevoPedido.items
+      .map(item => {
+        const producto = productos.find(p => p.id === item.productoId);
+        if (!producto) return null;
+        const disponible = Number(producto.stock) || 0;
+        if (item.cantidad <= disponible) return null;
+        return { productoId: item.productoId, nombre: producto.nombre, solicitado: item.cantidad, disponible };
+      })
+      .filter((v): v is { productoId: string; nombre: string; solicitado: number; disponible: number } => v !== null);
+  }, [nuevoPedido.items, productos]);
 
   const calcularTotal = (): number => nuevoPedido.items.reduce((t, i) => t + (i.precioUnitario * i.cantidad), 0);
 
@@ -648,19 +668,29 @@ const ModalPedido = memo(function ModalPedido({
                 // motivo— para que el preventista sepa que el producto existe y
                 // pueda pedir que le carguen el precio.
                 const sinPrecio = !(Number(p.precio) > 0);
+                // Agotado: mismo tratamiento que "sin precio". Se ve, se sabe
+                // por qué, y no se puede agregar.
+                const sinStock = !sinPrecio && !(Number(p.stock) > 0);
+                const noDisponible = sinPrecio || sinStock;
                 return (
                   <div
                     key={p.id}
                     className={`flex justify-between items-center px-3 py-2.5 border-b dark:border-gray-600 transition-colors ${
-                      sinPrecio
+                      noDisponible
                         ? 'opacity-60 cursor-not-allowed bg-stone-50 dark:bg-gray-900/40'
                         : yaAgregado
                           ? 'bg-blue-50 dark:bg-blue-900/20 cursor-pointer'
                           : 'hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer'
                     }`}
-                    onClick={sinPrecio ? undefined : () => onAgregarItem(p.id, moq || 1)}
-                    aria-disabled={sinPrecio}
-                    title={sinPrecio ? 'Pendiente de carga de precio de venta: no se puede vender' : undefined}
+                    onClick={noDisponible ? undefined : () => onAgregarItem(p.id, moq || 1)}
+                    aria-disabled={noDisponible}
+                    title={
+                      sinPrecio
+                        ? 'Pendiente de carga de precio de venta: no se puede vender'
+                        : sinStock
+                          ? 'Sin stock disponible: no se puede vender'
+                          : undefined
+                    }
                   >
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-sm dark:text-white truncate">{p.nombre}</p>
@@ -674,6 +704,11 @@ const ModalPedido = memo(function ModalPedido({
                       {sinPrecio ? (
                         <>
                           <p className="font-semibold text-xs text-rose-600 dark:text-rose-400">Sin precio</p>
+                          <span className="text-xs text-stone-500 dark:text-gray-400">No disponible</span>
+                        </>
+                      ) : sinStock ? (
+                        <>
+                          <p className="font-semibold text-xs text-rose-600 dark:text-rose-400">Sin stock</p>
                           <span className="text-xs text-stone-500 dark:text-gray-400">No disponible</span>
                         </>
                       ) : (
@@ -714,6 +749,20 @@ const ModalPedido = memo(function ModalPedido({
                         </li>
                       );
                     })}
+                  </ul>
+                </div>
+              )}
+
+              {/* Faltantes de stock (bloquean confirmar) */}
+              {violacionesStock.length > 0 && (
+                <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-sm text-rose-900 dark:bg-rose-900/30 dark:border-rose-600 dark:text-rose-200">
+                  <strong>No se puede confirmar:</strong> no hay stock suficiente para:
+                  <ul className="list-disc ml-5 mt-1">
+                    {violacionesStock.map(v => (
+                      <li key={v.productoId}>
+                        {v.nombre}: disponible {v.disponible}, cargaste {v.solicitado}
+                      </li>
+                    ))}
                   </ul>
                 </div>
               )}
@@ -1100,6 +1149,13 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
+        {/* Aviso compacto de faltantes de stock (siempre visible cuando aplican) */}
+        {violacionesStock.length > 0 && (
+          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-rose-100 dark:bg-rose-900/40 border-t border-rose-300 dark:border-rose-700 text-xs text-rose-900 dark:text-rose-200">
+            {violacionesStock.length} producto{violacionesStock.length > 1 ? 's sin' : ' sin'} stock suficiente — revisá el carrito.
+          </div>
+        )}
+
         {/* Aviso compacto de violaciones (siempre visible cuando aplican) */}
         {violacionesMOQ.length > 0 && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
@@ -1137,7 +1193,7 @@ const ModalPedido = memo(function ModalPedido({
           <button
             type="button"
             onClick={onGuardar}
-            disabled={guardando || violacionesMOQ.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente}
+            disabled={guardando || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente}
             className="px-5 bg-green-600 text-white font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 text-sm"
           >
             {guardando && <Loader2 className="w-4 h-4 animate-spin" />}
