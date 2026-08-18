@@ -279,7 +279,7 @@ export {
 export type { RecorridoExistente } from './useRecorridoExistenteQuery'
 
 // Rutas en curso del transportista (para avisar que ya hay una en otra fecha)
-export { rutasEnCursoKeys, useRutasEnCursoQuery } from './useRutasEnCursoQuery'
+export { rutasEnCursoKeys, useRutasEnCursoQuery, useRutasEnCursoMultiQuery } from './useRutasEnCursoQuery'
 export type { RutaEnCurso } from './useRutasEnCursoQuery'
 
 // Reasignar una ruta ya armada a otro transportista (mig 172)

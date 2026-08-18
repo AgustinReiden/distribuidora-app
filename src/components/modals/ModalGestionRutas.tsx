@@ -7,8 +7,11 @@ import {
   ArrowLeftRight, Search, UserCog
 } from 'lucide-react';
 import ModalBase from './ModalBase';
+// DENTRO del ModalBase: es un Radix Dialog portaleado con z-50 y un hermano
+// `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioProducto';
-import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery, useRutasEnCursoQuery, useCambiarTransportistaRutaMutation } from '../../hooks/queries';
+import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery, useRutasEnCursoQuery, useRutasEnCursoMultiQuery, useCambiarTransportistaRutaMutation } from '../../hooks/queries';
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
@@ -286,6 +289,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const [cambioOpen, setCambioOpen] = useState<boolean>(false);
   // Modo de armado: un solo chofer (con edición in-place) o dividir entre varios.
   const [modoDividir, setModoDividir] = useState<boolean>(false);
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
   // Modo dividir: repartidores elegidos + sus parámetros (máx paradas, zonas).
   const [repartidoresSel, setRepartidoresSel] = useState<Set<string>>(new Set());
   const [paramsPorChofer, setParamsPorChofer] = useState<Record<string, { maxParadas: string; zonas: string[] }>>({});
@@ -379,9 +383,30 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const { data: rutasEnCurso = [] } = useRutasEnCursoQuery(
     modoDividir ? null : transportistaSeleccionado || null,
   );
+  // En modo dividir esta query estaba apagada (`modoDividir ? null : ...`), o
+  // sea que el modal era ciego a las rutas ya armadas. Y `aplicar_orden_ruta`
+  // reemplaza las paradas PENDIENTES del recorrido de ese día: dividir sobre un
+  // chofer que ya está repartiendo le vacía las paradas del celular en plena
+  // calle. Ahora se le avisa antes.
+  const { data: rutasDeLosRepartidores = [] } = useRutasEnCursoMultiQuery(
+    modoDividir ? Array.from(repartidoresSel) : [],
+  );
   const rutasOtraFecha = useMemo(
     () => rutasEnCurso.filter(r => r.fecha !== fechaEntrega && r.paradas > 0),
     [rutasEnCurso, fechaEntrega],
+  );
+  /** Repartidores elegidos que YA tienen ruta armada para esta misma fecha. */
+  const repartidoresConRutaEsteDia = useMemo(
+    () =>
+      rutasDeLosRepartidores
+        .filter(r => r.fecha === fechaEntrega && r.paradas > 0)
+        .map(r => ({
+          paradas: r.paradas,
+          nombre:
+            transportistas.find(t => String(t.id) === String(r.transportistaId))?.nombre ??
+            'Transportista',
+        })),
+    [rutasDeLosRepartidores, fechaEntrega, transportistas],
   );
   const idsExistentes = useMemo(() => new Set(paradasExistentes.map(p => p.id)), [paradasExistentes]);
   // Paradas que el chofer YA entregó. No se pueden seleccionar: mandarlas en el
@@ -652,10 +677,36 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     });
   }, [repartidoresSel, paramsPorChofer]);
 
-  const handleDividir = (): void => {
+  const ejecutarDividir = (): void => {
     if (onArmarRutaMulti && repartidoresParam.length > 0 && pedidosSeleccionados.length > 0) {
       onArmarRutaMulti(repartidoresParam, pedidosSeleccionados, fechaEntrega, horaInicio, horaFin);
     }
+  };
+
+  const handleDividir = (): void => {
+    // Dividir REEMPLAZA la ruta del día de cada chofer elegido: sus paradas
+    // pendientes se sacan del recorrido. Si alguno ya está repartiendo, eso le
+    // vacía el celular en la calle. Antes pasaba sin ningún aviso.
+    if (repartidoresConRutaEsteDia.length > 0) {
+      const detalle = repartidoresConRutaEsteDia
+        .map(r => `${r.nombre} (${r.paradas} paradas)`)
+        .join(', ');
+      setConfirmConfig({
+        visible: true,
+        tipo: 'warning',
+        titulo: 'Ya hay ruta armada para esta fecha',
+        mensaje:
+          `${detalle} ya tiene ruta del ${fechaEntrega}. Dividir la reemplaza: las paradas ` +
+          'pendientes salen del recorrido y, si ya está repartiendo, le desaparecen del celular. ' +
+          'Lo ya entregado no se toca.',
+        onConfirm: () => {
+          setConfirmConfig(null);
+          ejecutarDividir();
+        },
+      });
+      return;
+    }
+    ejecutarDividir();
   };
 
   // Crea la parada de cambio y la agrega (pre-tildada) a la selección de la
@@ -1198,6 +1249,18 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           <p className="text-indigo-100 text-sm">Total a cobrar</p>
                         </div>
                       </div>
+                      {repartidoresConRutaEsteDia.length > 0 && (
+                        <div className="mt-3 rounded-lg bg-white/15 p-3 text-sm">
+                          <p className="font-semibold">Ojo: ya hay ruta armada para el {fechaEntrega}</p>
+                          <p className="text-indigo-100">
+                            {repartidoresConRutaEsteDia
+                              .map(r => `${r.nombre} (${r.paradas} paradas)`)
+                              .join(', ')}
+                            . Dividir la reemplaza: las paradas pendientes salen del recorrido.
+                            Lo ya entregado no se toca.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-4 text-white">
@@ -1704,6 +1767,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
           </div>
         </div>
       </div>
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
 
     {/* Cambio/devolución como parada: se renderiza por encima del modal de ruta. */}

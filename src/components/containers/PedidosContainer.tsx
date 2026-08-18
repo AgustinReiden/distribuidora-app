@@ -224,6 +224,18 @@ export default function PedidosContainer(): React.ReactElement {
   const requestIdMasivo = useRequestIdEstable()
   // UUID de idempotencia del cobro que se declara al CREAR el pedido (mig 167).
   const requestIdAlta = useRequestIdEstable()
+  /**
+   * Clave de idempotencia del ALTA en sí (mig 071, `pedidos.offline_id`).
+   *
+   * No se deriva del contenido del pedido a propósito: un cliente puede repetir
+   * el mismo pedido en el día, y una huella por contenido lo haría desaparecer
+   * como si fuera un duplicado. La unidad correcta es la INTENCIÓN de alta: se
+   * acuña al primer intento de guardar y se descarta cuando el formulario se
+   * limpia (`resetNuevoPedido`), así que todo reintento del mismo pedido —el
+   * automático de react-query incluido— reusa el mismo id y el servidor lo
+   * reconoce, mientras que un pedido nuevo arranca con otro.
+   */
+  const altaIdRef = useRef<string | null>(null)
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -362,6 +374,8 @@ export default function PedidosContainer(): React.ReactElement {
     })
     setRegalosOverride({})
     setPromosEliminadas([])
+    // Formulario limpio = próxima alta es otra intención. Ver `altaIdRef`.
+    altaIdRef.current = null
   }, [])
 
   // Admin elige/cambia el producto del regalo de una promo al crear el pedido.
@@ -1178,7 +1192,12 @@ export default function PedidosContainer(): React.ReactElement {
         },
       )
 
+      // Se acuña en el primer intento y sobrevive a los reintentos: es lo que
+      // impide que un corte de señal después del COMMIT cree el pedido dos veces.
+      altaIdRef.current ??= nuevoRequestId()
+
       const pedidoCreado = await crearPedido.mutateAsync({
+        offlineId: altaIdRef.current,
         clienteId: nuevoPedido.clienteId,
         items: itemsParaCrear,
         origenes,
