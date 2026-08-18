@@ -7,6 +7,14 @@
  * Despues del corte, solo admin/encargado pueden editar.
  *
  * No permite editar precios — eso se hace cumplir tambien en el RPC SQL.
+ *
+ * `asignado` se permite a proposito (ver el test): que haya transportista no
+ * implica que la ruta haya salido. Lo que NO se puede es editar un pedido que ya
+ * esta en un recorrido en curso —los fardos estan arriba del camion y editarlo
+ * deja stock fantasma, paso 86 veces— y eso lo rechaza `actualizar_pedido_items`
+ * (mig 181), que es el unico lugar donde se sabe si hay recorrido. Desde aca no
+ * se puede distinguir sin pedir ese dato, y un proxy por `estado` bloquearia de
+ * mas.
  */
 
 import { fechaLocalISO } from './formatters'

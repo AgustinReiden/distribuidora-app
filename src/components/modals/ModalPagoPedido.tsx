@@ -308,18 +308,29 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                       </p>
                       {p.notas && <p className="text-xs text-gray-400 italic">{p.notas}</p>}
                     </div>
-                    {onAnularPago && (
-                      <button
-                        type="button"
-                        onClick={() => { void onAnularPago(p.id) }}
-                        disabled={guardando}
-                        className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
-                        aria-label="Anular pago"
-                        title="Anular pago"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
+                    {onAnularPago && (() => {
+                      // Un pago de una caja ya cerrada no se anula: se pudo
+                      // vaciar plata de rendiciones confirmadas 15 veces, por
+                      // $936.100. La mig 181 lo rechaza en la base; acá el botón
+                      // se apaga y dice por qué, para no llegar al error crudo.
+                      const cajaCerrada = !!fechaMinima && !!p.fecha && p.fecha < fechaMinima
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => { if (!cajaCerrada) void onAnularPago(p.id) }}
+                          disabled={guardando || cajaCerrada}
+                          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label="Anular pago"
+                          title={
+                            cajaCerrada
+                              ? 'La caja de ese día ya está cerrada. Reabrí la rendición para poder anularlo.'
+                              : 'Anular pago'
+                          }
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )
+                    })()}
                   </div>
                 )
               })}
