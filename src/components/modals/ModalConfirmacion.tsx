@@ -1,8 +1,27 @@
-import { memo, useId } from 'react';
+import { memo, useEffect, useId, useState } from 'react';
 import { Trash2, AlertTriangle, Check } from 'lucide-react';
 
 /** Tipos de modal de confirmación */
 export type ModalConfirmacionTipo = 'danger' | 'warning' | 'success';
+
+/**
+ * Campo de fecha opcional dentro de la confirmación.
+ *
+ * Existe para el "marcar entregado" individual: sin esto la entrega se estampaba
+ * SIEMPRE con la fecha de hoy, así que marcar el martes las entregas del lunes
+ * dejaba la rendición del lunes vacía y la del martes inflada con mercadería que
+ * no salió ese día. Las entregas masivas ya tenían su selector; la individual no.
+ */
+export interface ModalConfirmacionCampoFecha {
+  /** Etiqueta visible del campo. */
+  label: string;
+  /** Valor inicial, `YYYY-MM-DD`. */
+  valorInicial: string;
+  /** Fecha máxima seleccionable, `YYYY-MM-DD`. */
+  max?: string;
+  /** Texto de ayuda debajo del input. */
+  ayuda?: string;
+}
 
 /** Configuración del modal de confirmación */
 export interface ModalConfirmacionConfig {
@@ -14,8 +33,10 @@ export interface ModalConfirmacionConfig {
   titulo: string;
   /** Mensaje descriptivo */
   mensaje: string;
-  /** Callback ejecutado al confirmar */
-  onConfirm: () => void;
+  /** Campo de fecha opcional. Su valor llega como argumento de `onConfirm`. */
+  campoFecha?: ModalConfirmacionCampoFecha;
+  /** Callback ejecutado al confirmar. Recibe la fecha si hay `campoFecha`. */
+  onConfirm: (fecha?: string) => void;
 }
 
 /** Props del componente ModalConfirmacion */
@@ -33,6 +54,15 @@ export interface ModalConfirmacionProps {
 const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: ModalConfirmacionProps) {
   const titleId = useId();
   const descId = useId();
+  const fechaId = useId();
+  const [fecha, setFecha] = useState<string>(config?.campoFecha?.valorInicial ?? '');
+
+  // Cada apertura arranca con su propio valor inicial: el modal se reusa entre
+  // confirmaciones distintas y sin esto la fecha de la anterior quedaba pegada.
+  const valorInicial = config?.campoFecha?.valorInicial;
+  useEffect(() => {
+    if (valorInicial !== undefined) setFecha(valorInicial);
+  }, [valorInicial, config?.visible]);
 
   if (!config?.visible) return null;
 
@@ -74,6 +104,24 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
           <p id={descId} className="text-center text-gray-600">
             {config.mensaje}
           </p>
+          {config.campoFecha && (
+            <div className="mt-4">
+              <label htmlFor={fechaId} className="block text-sm font-medium text-gray-700 mb-1">
+                {config.campoFecha.label}
+              </label>
+              <input
+                id={fechaId}
+                type="date"
+                value={fecha}
+                max={config.campoFecha.max}
+                onChange={e => setFecha(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              />
+              {config.campoFecha.ayuda && (
+                <p className="mt-1 text-xs text-gray-500">{config.campoFecha.ayuda}</p>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex border-t">
           <button
@@ -85,8 +133,9 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
           </button>
           <button
             type="button"
-            onClick={config.onConfirm}
-            className={`flex-1 px-4 py-3 border-l rounded-br-xl transition-colors ${btn}`}
+            onClick={() => config.onConfirm(config.campoFecha ? fecha : undefined)}
+            disabled={!!config.campoFecha && !fecha}
+            className={`flex-1 px-4 py-3 border-l rounded-br-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btn}`}
           >
             Confirmar
           </button>

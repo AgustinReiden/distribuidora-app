@@ -89,6 +89,13 @@ interface CambiarClienteInput {
 interface ActualizarEstadoInput {
   pedidoId: string
   nuevoEstado: string
+  /**
+   * Fecha (YYYY-MM-DD) a la que pertenece la entrega. Sin esto se estampa HOY,
+   * que es incorrecto cuando la entrega se marca al día siguiente: la rendición
+   * del día del reparto queda vacía y la del día que se cargó, inflada. Cuando
+   * la entrega sale de una ruta, la fecha correcta es la del recorrido.
+   */
+  fechaEntrega?: string
 }
 
 interface ActualizarPagoInput {
@@ -426,10 +433,15 @@ async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB>
   // pedido queda entregado con fecha_entrega NULL y el cobro cae en "Ctas Ctes"
   // (bug sistemico: ~38% de las entregas quedaron sin fecha desde abr-2026).
   // Al pasar a cualquier otro estado (desmarcar/reasignar) se limpia.
+  //
+  // `input.fechaEntrega` manda cuando el caller sabe a qué día pertenece la
+  // entrega (la fecha del recorrido). Sin eso se cae en hoy, que es lo que hacía
+  // siempre: marcar el martes las entregas del lunes las contabilizaba el martes.
+  const fechaDeEntrega = input.fechaEntrega || fechaLocalISO()
   const updateData: Record<string, unknown> = {
     estado: input.nuevoEstado,
     updated_at: new Date().toISOString(),
-    fecha_entrega: input.nuevoEstado === 'entregado' ? `${fechaLocalISO()}T12:00:00-03:00` : null,
+    fecha_entrega: input.nuevoEstado === 'entregado' ? `${fechaDeEntrega}T12:00:00-03:00` : null,
   }
 
   const { data, error } = await supabase
