@@ -129,3 +129,45 @@ describe('useEntregaParada — cierre del modal de cobranza', () => {
     expect(onMarcarEntregado).toHaveBeenCalledTimes(1)
   })
 })
+
+/**
+ * Una boleta impaga que no se puede cobrar se FRENA, no se entrega.
+ *
+ * `marcarEntregado` pedia `&& pedido.cliente` para abrir la cobranza, y cuando
+ * faltaba el caso caia por abajo: la parada se marcaba entregada sin pasar por
+ * el cobro y sin registrar un peso. El chofer la veia en verde y seguia viaje.
+ * No es hipotetico: hay pedidos con `cliente_id` NULL, y el embed
+ * `cliente:clientes(...)` tambien vuelve null si RLS tapa la fila.
+ */
+describe('useEntregaParada — parada sin datos de cliente', () => {
+  it('NO entrega una boleta impaga si no puede abrir la cobranza', () => {
+    const { onMarcarEntregado, result } = setup()
+
+    act(() => result.current.marcarEntregado(pedido({ cliente: undefined })))
+
+    expect(onMarcarEntregado).not.toHaveBeenCalled()
+    expect(result.current.pedidoParaCobrar).toBeNull()
+    expect(result.current.errorCobranza).toContain('4625')
+  })
+
+  it('si YA esta pagada, la falta de cliente no bloquea la entrega', () => {
+    const { onMarcarEntregado, result } = setup()
+
+    act(() => result.current.marcarEntregado(
+      pedido({ cliente: undefined, estado_pago: 'pagado', monto_pagado: 21600 }),
+    ))
+
+    expect(onMarcarEntregado).toHaveBeenCalledTimes(1)
+    expect(result.current.errorCobranza).toBeNull()
+  })
+
+  it('el error se puede limpiar para reintentar', () => {
+    const { result } = setup()
+
+    act(() => result.current.marcarEntregado(pedido({ cliente: undefined })))
+    expect(result.current.errorCobranza).not.toBeNull()
+
+    act(() => result.current.limpiarErrorCobranza())
+    expect(result.current.errorCobranza).toBeNull()
+  })
+})
