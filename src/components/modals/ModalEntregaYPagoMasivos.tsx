@@ -1,6 +1,9 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar, AlertTriangle, Truck } from 'lucide-react'
 import ModalBase from './ModalBase'
+// DENTRO del ModalBase: es un Radix Dialog portaleado con z-50 y un hermano
+// `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import { usePedidosParaEntregaYPagoQuery, useRendicionCerradaQuery } from '../../hooks/queries'
 import {
   getEstadoColor, getEstadoLabel,
@@ -50,6 +53,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
   const [fecha, setFecha] = useState<string>(hoy)
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
   // Universo: pedidos que aún requieren acción = NO cancelados y NO (entregado Y pagado).
   // Incluye entregados-con-salvedad impagos (solo se cobran, sin re-entregar).
@@ -116,6 +120,30 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
       .filter(p => selectedIds.has(p.id))
       .reduce((sum, p) => sum + Math.max(0, (p.total || 0) - (p.monto_pagado ?? 0)), 0)
   }, [pedidos, selectedIds])
+
+  // Entrega + cobro en un solo paso: mueve stock, fecha contable y plata. Se
+  // confirma diciendo el desglose exacto. Antes iba de un solo toque.
+  const pedirConfirmacion = (): void => {
+    const partes: string[] = []
+    if (idsEntregar.length > 0) {
+      const chofer = transportistas.find(t => String(t.id) === String(selectedTransportista))?.nombre
+      partes.push(
+        `entregar ${idsEntregar.length} ${idsEntregar.length === 1 ? 'pedido' : 'pedidos'}` +
+          `${chofer ? ` por ${chofer}` : ''}`,
+      )
+    }
+    partes.push(`cobrar ${formatPrecio(totalACobrar)}`)
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: `Confirmar ${selectedIds.size} ${selectedIds.size === 1 ? 'boleta' : 'boletas'}`,
+      mensaje: `Se va a ${partes.join(' y ')}, con fecha ${fecha}. Esta acción no se puede deshacer en bloque.`,
+      onConfirm: () => {
+        setConfirmConfig(null)
+        void onConfirm(selectedTransportista, selectedFormaPago, { idsEntregar, idsCobrar }, fecha)
+      },
+    })
+  }
 
   return (
     <ModalBase title="Entrega y Pago Masivos" onClose={onClose} maxWidth="max-w-3xl">
@@ -312,7 +340,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
             Cancelar
           </button>
           <button
-            onClick={() => canConfirm && onConfirm(selectedTransportista, selectedFormaPago, { idsEntregar, idsCobrar }, fecha)}
+            onClick={() => canConfirm && pedirConfirmacion()}
             disabled={!canConfirm}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
@@ -321,6 +349,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
           </button>
         </div>
       </div>
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
   )
 })

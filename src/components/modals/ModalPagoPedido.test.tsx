@@ -11,7 +11,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,
@@ -25,11 +25,12 @@ const pedido = { id: '4625', cliente_id: '1', total: 21600 } as unknown as Pedid
 const pagoDe = (monto: number): PagoDBWithUsuario =>
   ({ id: '1', monto, forma_pago: 'efectivo', fecha: '2026-08-08' }) as unknown as PagoDBWithUsuario
 
-function renderModal(pagosPrevios: PagoDBWithUsuario[]) {
+function renderModal(pagosPrevios: PagoDBWithUsuario[], loadingPagosPrevios?: boolean) {
   return render(
     <ModalPagoPedido
       pedido={pedido}
       pagosPrevios={pagosPrevios}
+      loadingPagosPrevios={loadingPagosPrevios}
       onConfirmar={vi.fn()}
       modoEntregaTransportista
       onEntregarSinPago={vi.fn()}
@@ -38,6 +39,16 @@ function renderModal(pagosPrevios: PagoDBWithUsuario[]) {
     />,
   )
 }
+
+/**
+ * El input de monto de la primera línea de cobro.
+ *
+ * Es un `NumberInput` que renderiza `Number(monto) || 0`, así que el valor que
+ * se lee del DOM viene normalizado: `''` se ve como `"0"` y `"11600.00"` como
+ * `"11600"`.
+ */
+const inputMonto = (): HTMLInputElement =>
+  screen.getAllByPlaceholderText(/0[.,]00/i)[0] as HTMLInputElement
 
 describe('ModalPagoPedido — botón de entrega del chofer', () => {
   it('con saldo pendiente ofrece la cuenta corriente', () => {
@@ -65,5 +76,60 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
     renderModal([pagoDe(25000)])
 
     expect(screen.getByRole('button', { name: /^confirmar entrega$/i })).toBeTruthy()
+  })
+})
+
+/**
+ * El monto prellenado y la carrera de montaje.
+ *
+ * EL INCIDENTE
+ * ------------
+ * En un pedido con pago parcial el modal se abría pidiendo el TOTAL, en rojo
+ * ("Excede el saldo pendiente") y con el botón muerto: había que borrar y
+ * retipear el saldo a mano. En el mostrador se lee como "la app no me deja
+ * cobrar".
+ *
+ * La causa no era el cálculo del saldo —que está bien— sino el orden: el
+ * container hace `setPagosPreviosPedido([])` y recién DESPUÉS `await
+ * refreshPagosPedido(...)`, así que el modal monta con `pagosPrevios = []` y en
+ * ese instante `saldoPendiente === total`. El initializer de `useState` congela
+ * ese valor, y el efecto que lo corrige sólo pisa montos vacíos o en 0 — el
+ * total no lo está.
+ */
+describe('ModalPagoPedido — monto sugerido', () => {
+  it('mientras cargan los pagos previos NO prellena el total', () => {
+    // Lo que ve el modal en el primer render: sin pagos y cargando. Antes acá
+    // quedaba clavado el total ($21.600).
+    renderModal([], true)
+
+    expect(inputMonto().value).toBe('0')
+  })
+
+  it('con los pagos resueltos sugiere el SALDO, no el total — el caso del incidente', async () => {
+    const { rerender } = renderModal([], true)
+
+    // Llegan los pagos previos: $10.000 de $21.600.
+    rerender(
+      <ModalPagoPedido
+        pedido={pedido}
+        pagosPrevios={[pagoDe(10000)]}
+        loadingPagosPrevios={false}
+        onConfirmar={vi.fn()}
+        modoEntregaTransportista
+        onEntregarSinPago={vi.fn()}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+
+    // El saldo (21.600 - 10.000), no el total. Ese era el bug.
+    await waitFor(() => expect(inputMonto().value).toBe('11600'))
+    // Y por lo tanto el botón de cobrar queda usable, sin retipear nada.
+    expect(screen.queryByText(/excede el saldo pendiente/i)).toBeNull()
+  })
+
+  it('sin pagos previos sugiere el total entero', async () => {
+    renderModal([], false)
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
   })
 })

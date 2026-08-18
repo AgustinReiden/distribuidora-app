@@ -1,6 +1,11 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
+// La confirmación se renderiza DENTRO del ModalBase: ModalBase es un Radix
+// Dialog que portalea su contenido con z-50, así que un hermano `fixed inset-0
+// z-50` pierde el empate de z-index y queda inalcanzable. Misma convención que
+// ModalPedido/ModalEditarPedido.
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import { usePedidosNoPagadosQuery, useRendicionCerradaQuery } from '../../hooks/queries'
 import { getEstadoPagoColor, getEstadoPagoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
@@ -32,9 +37,14 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   const [selectedFormaPago, setSelectedFormaPago] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busqueda, setBusqueda] = useState('')
-  const [fechaDesde, setFechaDesde] = useState('')
+  // Arranca acotado al mes en curso. La query no filtra por fecha y trae TODO
+  // el backlog de impagos de la sucursal (116 boletas / $6,6M al 18/08, la más
+  // vieja del 25/03). Con el filtro vacío, "Seleccionar todos" abarcaba cinco
+  // meses de deuda y se cobraba de un saque.
+  const [fechaDesde, setFechaDesde] = useState(`${hoy.slice(0, 7)}-01`)
   const [fechaHasta, setFechaHasta] = useState('')
   const [fechaPago, setFechaPago] = useState<string>(hoy)
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
   const { data: pedidos = [], isLoading } = usePedidosNoPagadosQuery(true)
   const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fechaPago, fechaBloqueada)
@@ -80,12 +90,47 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
     !!fechaPago &&
     !bloqueadoPorRendicion
 
-  // Calculate total of selected orders
+  // Lo que se va a cobrar es el SALDO, no el total: un pedido con pago parcial
+  // sólo aporta lo que le falta. Antes sumaba `p.total` e inflaba el número que
+  // el encargado usa para decidir (mismo criterio que ModalEntregaYPagoMasivos).
   const totalSeleccionado = useMemo(() => {
     return pedidos
       .filter(p => selectedIds.has(p.id))
-      .reduce((sum, p) => sum + (p.total || 0), 0)
+      .reduce((sum, p) => sum + Math.max(0, (p.total || 0) - (p.monto_pagado || 0)), 0)
   }, [pedidos, selectedIds])
+
+  /** Rango de fechas de lo seleccionado, para que la confirmación no mienta. */
+  const rangoSeleccionado = useMemo(() => {
+    const fechas = pedidos
+      .filter(p => selectedIds.has(p.id))
+      .map(p => p.fecha || p.created_at?.split('T')[0] || '')
+      .filter(Boolean)
+      .sort()
+    if (fechas.length === 0) return null
+    return { desde: fechas[0], hasta: fechas[fechas.length - 1] }
+  }, [pedidos, selectedIds])
+
+  const pedirConfirmacion = (): void => {
+    const n = selectedIds.size
+    const rango =
+      rangoSeleccionado && rangoSeleccionado.desde !== rangoSeleccionado.hasta
+        ? ` con fecha entre ${rangoSeleccionado.desde} y ${rangoSeleccionado.hasta}`
+        : rangoSeleccionado
+          ? ` del ${rangoSeleccionado.desde}`
+          : ''
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: `Cobrar ${n} ${n === 1 ? 'boleta' : 'boletas'}`,
+      mensaje:
+        `Se van a registrar ${n} ${n === 1 ? 'pago' : 'pagos'} por ${formatPrecio(totalSeleccionado)}` +
+        `${rango}, con fecha ${fechaPago}. Esta acción no se puede deshacer en bloque.`,
+      onConfirm: () => {
+        setConfirmConfig(null)
+        void onConfirm(selectedFormaPago, Array.from(selectedIds), fechaPago)
+      },
+    })
+  }
 
   return (
     <ModalBase title="Pagos Masivos" onClose={onClose} maxWidth="max-w-3xl">
@@ -251,7 +296,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
             Cancelar
           </button>
           <button
-            onClick={() => canConfirm && onConfirm(selectedFormaPago, Array.from(selectedIds), fechaPago)}
+            onClick={() => canConfirm && pedirConfirmacion()}
             disabled={!canConfirm}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
@@ -260,6 +305,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
           </button>
         </div>
       </div>
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
   )
 })

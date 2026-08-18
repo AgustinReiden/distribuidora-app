@@ -97,8 +97,14 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
   const fechaMinima = useFechaMinimaPago()
   const [observaciones, setObservaciones] = useState<string>('')
+  // Arranca VACIO a proposito. El container abre el modal y recien despues
+  // resuelve los pagos previos (setPagosPreviosPedido([]) + await refresh...),
+  // asi que en el primer render `saldoPendiente` vale el total entero. Con el
+  // valor prellenado ahi, un pedido a medias cobrar se abria pidiendo el total,
+  // en rojo y con el boton muerto: habia que borrar y retipear a mano. El
+  // efecto de abajo lo completa cuando los pagos previos ya estan.
   const [lineas, setLineas] = useState<LineaPago[]>([
-    { formaPago: 'efectivo', monto: saldoPendiente > 0 ? saldoPendiente.toFixed(2) : '' },
+    { formaPago: 'efectivo', monto: '' },
   ])
   const [error, setError] = useState<string>('')
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
@@ -110,13 +116,21 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const enVueloRef = useRef<boolean>(false)
   const requestId = useRequestIdEstable()
 
-  // Si los pagos previos cambian (anulacion), reajustar la linea por default al saldo restante.
+  // Sugiere el saldo cuando ya se sabe cual es, y lo reajusta si los pagos
+  // previos cambian (anulacion). Solo pisa una linea vacia: lo que el usuario
+  // haya tipeado no se toca.
+  //
+  // El gate de `loadingPagosPrevios` es la mitad del fix: sin el, este efecto
+  // corria en el primer render —cuando pagosPrevios todavia es []— y dejaba
+  // prellenado el total, que ya no volvia a corregirse porque la linea dejaba
+  // de estar vacia.
   useEffect(() => {
+    if (loadingPagosPrevios) return
     if (saldoPendiente > 0 && lineas.length === 1 && (!lineas[0].monto || parsePrecio(lineas[0].monto) === 0)) {
       setLineas([{ formaPago: lineas[0].formaPago, monto: saldoPendiente.toFixed(2) }])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saldoPendiente])
+  }, [saldoPendiente, loadingPagosPrevios])
 
   const totalIngresado = useMemo(
     () => lineas.reduce((s, l) => s + parsePrecio(l.monto), 0),
