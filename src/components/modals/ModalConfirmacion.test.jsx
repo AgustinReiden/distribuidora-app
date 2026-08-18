@@ -213,4 +213,84 @@ describe('ModalConfirmacion', () => {
       expect(btnConfirmar).not.toBeDisabled()
     })
   })
+
+  /**
+   * Campo de fecha opcional.
+   *
+   * EL INCIDENTE: "marcar entregado" individual estampaba `fecha_entrega`
+   * SIEMPRE con la fecha de hoy. El uso real es al revés — el chofer sale el
+   * lunes y el encargado marca las entregas el martes a la mañana— así que la
+   * rendición del lunes quedaba vacía y la del martes inflada con mercadería que
+   * no salió ese día. Las entregas MASIVAS ya tenían su selector de fecha; la
+   * individual no, y el bug no rompe nada visible: sólo mueve la plata de día.
+   */
+  describe('Campo de fecha', () => {
+    const campoFecha = {
+      label: 'Fecha de entrega',
+      valorInicial: '2026-08-18',
+      max: '2026-08-18',
+      ayuda: 'Si estás cargando la entrega de un día anterior, cambiala.',
+    }
+
+    const renderConFecha = (onConfirm = vi.fn()) => {
+      render(
+        <ModalConfirmacion
+          config={{ ...defaultConfig, tipo: 'success', campoFecha, onConfirm }}
+          onClose={vi.fn()}
+        />,
+      )
+      return onConfirm
+    }
+
+    it('sin campoFecha no muestra input y confirma sin argumento', () => {
+      const onConfirm = vi.fn()
+      render(<ModalConfirmacion config={{ ...defaultConfig, onConfirm }} onClose={vi.fn()} />)
+
+      expect(screen.queryByLabelText(/fecha de entrega/i)).toBeNull()
+      screen.getByRole('button', { name: 'Confirmar' }).click()
+      expect(onConfirm).toHaveBeenCalledWith(undefined)
+    })
+
+    it('arranca en el valor inicial y lo devuelve al confirmar', () => {
+      const onConfirm = renderConFecha()
+
+      expect(screen.getByLabelText(/fecha de entrega/i).value).toBe('2026-08-18')
+      screen.getByRole('button', { name: 'Confirmar' }).click()
+      expect(onConfirm).toHaveBeenCalledWith('2026-08-18')
+    })
+
+    it('devuelve la fecha elegida, no la de hoy — el caso del incidente', async () => {
+      const user = userEvent.setup()
+      const onConfirm = renderConFecha()
+
+      // El encargado marca el martes las entregas que el chofer hizo el lunes.
+      const input = screen.getByLabelText(/fecha de entrega/i)
+      await user.clear(input)
+      await user.type(input, '2026-08-17')
+      await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+      expect(onConfirm).toHaveBeenCalledWith('2026-08-17')
+    })
+
+    it('no deja confirmar con la fecha vacía', async () => {
+      const user = userEvent.setup()
+      const onConfirm = renderConFecha()
+
+      await user.clear(screen.getByLabelText(/fecha de entrega/i))
+
+      const boton = screen.getByRole('button', { name: 'Confirmar' })
+      expect(boton).toBeDisabled()
+      expect(onConfirm).not.toHaveBeenCalled()
+    })
+
+    it('no permite elegir una fecha futura', () => {
+      renderConFecha()
+      expect(screen.getByLabelText(/fecha de entrega/i)).toHaveAttribute('max', '2026-08-18')
+    })
+
+    it('muestra el texto de ayuda', () => {
+      renderConFecha()
+      expect(screen.getByText(/cargando la entrega de un día anterior/i)).toBeInTheDocument()
+    })
+  })
 })

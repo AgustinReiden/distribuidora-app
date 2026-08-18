@@ -9,6 +9,7 @@ import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
+import { obtenerMOQ } from '../../utils/precioMayorista';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
@@ -337,7 +338,7 @@ const ModalPedido = memo(function ModalPedido({
   );
 
   // Precios mayoristas, promociones y cantidades mínimas
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, violacionesMOQ } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet);
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, minimosProducto, violacionesMOQ } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet);
 
   // Descuento del cliente (general + por categoría) aplicado en vivo sobre los
   // items ya resueltos (mayorista/promo). La categoría prevalece sobre el general.
@@ -636,7 +637,11 @@ const ModalPedido = memo(function ModalPedido({
               <p className="p-4 text-center text-gray-500 dark:text-gray-400">No se encontraron productos</p>
             ) : (
               productosFiltrados.map(p => {
-                const moq = moqMap.get(String(p.id))
+                // Del catálogo completo, NO de `moqMap`: ese sólo cubre lo que
+                // ya está en el carrito, así que un producto todavía no
+                // agregado daba undefined — entraba con cantidad 1 violando su
+                // propio mínimo y sin mostrar el badge "Min: N".
+                const moq = obtenerMOQ(String(p.id), minimosProducto)
                 const yaAgregado = nuevoPedido.items.some(i => i.productoId === p.id);
                 // Sin precio de venta cargado no se puede vender (el backend lo
                 // rechaza, mig 139). Se muestra igual —deshabilitado y con el

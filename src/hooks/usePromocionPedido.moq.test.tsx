@@ -23,6 +23,7 @@ vi.mock('./queries/useProductosQuery', () => ({
 }))
 
 import { usePromocionPedido } from './usePromocionPedido'
+import { obtenerMOQ } from '../utils/precioMayorista'
 
 const item = (productoId: string, cantidad: number) => ({
   productoId,
@@ -55,5 +56,29 @@ describe('usePromocionPedido — mínimo de venta del producto', () => {
     const { result } = renderHook(() => usePromocionPedido([item('p2', 1)]))
     expect(result.current.moqMap.size).toBe(0)
     expect(result.current.violacionesMOQ).toHaveLength(0)
+  })
+
+  /**
+   * `moqMap` se construye iterando los items DEL CARRITO, así que para un
+   * producto que todavía no se agregó devuelve undefined. El listado del
+   * catálogo lo consultaba igual, con dos consecuencias: el badge "Min: N" no
+   * aparecía, y al tocar el producto se lo agregaba con cantidad 1 — en
+   * violación de su propio mínimo, con el cartel ámbar y el confirmar en gris.
+   * El preventista tenía que abrir el carrito y tipear la cantidad a mano, con
+   * el cliente esperando, para un dato que el sistema ya conocía.
+   *
+   * Por eso el hook expone además `minimosProducto`, que es el catálogo entero.
+   */
+  it('moqMap NO cubre lo que todavía no está en el carrito', () => {
+    // p1 tiene mínimo 3, pero el carrito está vacío.
+    const { result } = renderHook(() => usePromocionPedido([]))
+    expect(result.current.moqMap.get('p1')).toBeUndefined()
+  })
+
+  it('minimosProducto sí lo cubre, que es lo que mira el catálogo', () => {
+    const { result } = renderHook(() => usePromocionPedido([]))
+    expect(obtenerMOQ('p1', result.current.minimosProducto)).toBe(3)
+    // Y un producto sin mínimo sigue siendo 1, no undefined.
+    expect(obtenerMOQ('p2', result.current.minimosProducto)).toBe(1)
   })
 })
