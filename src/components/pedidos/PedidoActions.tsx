@@ -100,8 +100,11 @@ function AccionesDropdown({
       });
     }
 
-    // Admin o encargado pueden editar completamente
-    if ((isAdmin || isEncargado) && onEditar) {
+    // Admin o encargado pueden editar completamente. Un pedido cancelado no:
+    // ya tiene el stock devuelto y el total en 0, y editarlo lo devolvía por
+    // segunda vez (la mig 181 lo rechaza en la RPC; acá se saca el botón).
+    const cancelado = pedido.estado === 'cancelado';
+    if ((isAdmin || isEncargado) && onEditar && !cancelado) {
       items.push({
         label: 'Editar',
         icon: Edit2,

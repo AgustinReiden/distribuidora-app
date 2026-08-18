@@ -286,6 +286,13 @@ export interface PagoDB {
   notas?: string | null;
   usuario_id?: string;
   created_at?: string;
+  /**
+   * Fecha contable del pago (YYYY-MM-DD). Es la que define en qué rendición
+   * entra, y no siempre coincide con `created_at`: un cobro se puede registrar
+   * al día siguiente. La columna existe desde el baseline; el tipo no la
+   * declaraba.
+   */
+  fecha?: string | null;
 }
 
 // =============================================================================

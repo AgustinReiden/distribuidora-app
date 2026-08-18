@@ -128,8 +128,27 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 181** — la última numerada en el repo es
-`180_la_entrega_encuentra_su_parada` (aplicada). Las **174**
+**La próxima migración es la 182** — la última numerada en el repo es
+`181_guards_de_estado_y_permisos` (aplicada).
+
+La **181** cierra la otra mitad de la auditoría adversarial: las invariantes que
+vivían en el front. Trigger `pedidos_proteger_columnas` (el chofer sólo escribe
+`estado`/`fecha_entrega`/`updated_at`; el resto de los no-admin no toca plata ni
+identidad), guards de estado en las tres RPCs masivas, `FOR UPDATE` en el cobro
+masivo, guards de cancelado y de ruta-en-curso en `actualizar_pedido_items`, y
+trigger `trg_pagos_guard_anulacion` para el DELETE de pagos sobre caja cerrada.
+No toca filas.
+
+**Los dos triggers nuevos NO son `SECURITY DEFINER`, y es a propósito.** Un
+trigger dispara aunque la función que escribe sea SECURITY DEFINER —eso saltea
+RLS, no triggers— así que la exención se hace con `current_user <> 'authenticated'`,
+que dentro de una SECURITY DEFINER es el dueño. Si alguien los redefine con
+SECURITY DEFINER, `current_user` pasa a ser siempre el dueño y **el guard deja de
+filtrar sin fallar**. Mismo patrón que `clientes_proteger_columnas_preventista`
+(mig 080). El orden alfabético también importa: `pedidos_proteger_columnas` tiene
+que correr antes que `trigger_actualizar_estado_pago`.
+
+Las **174**
 (`174_salvedad_regalos_y_minimo_de_venta`), **175**, **176**, **177**, **178**, **179** y
 **180** mapean 1:1 con el ledger.
 
