@@ -295,6 +295,95 @@ describe('useAuth', () => {
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
   })
 
+  /**
+   * El cierre por inactividad cuenta USO REAL. Antes era un unico setTimeout
+   * de 8 h: en el iPhone, con la app agregada al inicio, iOS la suspende al
+   * cerrarla y el timeout queda pendiente; al abrirla a la manana siguiente
+   * estaba vencido y deslogueaba en el acto. La usuaria lo reportaba como
+   * "cada cierto tiempo se me cierra la sesion sola".
+   */
+  describe('cierre por inactividad', () => {
+    const OCHO_HORAS = 8 * 60 * 60 * 1000
+    const UN_MINUTO = 60 * 1000
+
+    async function montarConSesion() {
+      supabase.auth.getSession.mockResolvedValue({ data: { session: { user: mockUser } } })
+      maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+
+      const utils = renderHook(() => useAuth(), { wrapper: Wrapper })
+      await waitFor(() => {
+        expect(utils.result.current.user?.id).toBe(mockUser.id)
+      })
+      return utils
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible'
+      })
+    })
+
+    it('cierra la sesion tras 8 h de uso real sin actividad', async () => {
+      const { result } = await montarConSesion()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OCHO_HORAS)
+      })
+
+      expect(result.current.user).toBeNull()
+    })
+
+    it('no cierra la sesion por las horas que el telefono tuvo la app suspendida', async () => {
+      const { result } = await montarConSesion()
+
+      // iOS congela los timers: el reloj de pared salta 9 h y recien ahi corre
+      // el primer tick. Ese salto no es uso, no tiene que contar.
+      await act(async () => {
+        vi.setSystemTime(Date.now() + 9 * 60 * 60 * 1000)
+        await vi.advanceTimersByTimeAsync(UN_MINUTO)
+      })
+
+      expect(result.current.user?.id).toBe(mockUser.id)
+    })
+
+    it('no acumula inactividad con la app en segundo plano', async () => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden'
+      })
+
+      const { result } = await montarConSesion()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OCHO_HORAS)
+      })
+
+      expect(result.current.user?.id).toBe(mockUser.id)
+    })
+
+    it('usar la app reinicia el contador', async () => {
+      const { result } = await montarConSesion()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OCHO_HORAS - UN_MINUTO * 2)
+      })
+      expect(result.current.user?.id).toBe(mockUser.id)
+
+      act(() => {
+        window.dispatchEvent(new Event('click'))
+      })
+
+      // Sin el reinicio, estos minutos alcanzaban para pasar las 8 h.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(UN_MINUTO * 5)
+      })
+
+      expect(result.current.user?.id).toBe(mockUser.id)
+    })
+  })
+
   it('libera la suscripcion al desmontar', () => {
     const { unmount } = renderHook(() => useAuth(), { wrapper: Wrapper })
 

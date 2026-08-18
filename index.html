@@ -65,7 +65,32 @@
       Ir al contenido principal
     </a>
 
-    <div id="root"></div>
+    <!--
+      Arranque a prueba de pantalla en blanco.
+
+      Este bloque vive en el HTML, no en el bundle, para que se vea aunque el
+      JS no llegue a ejecutarse nunca. Es para la app agregada al inicio en
+      iOS: ahi no hay barra de direcciones ni boton de recargar, asi que una
+      pantalla blanca deja a la usuaria sin salida y termina borrando el icono
+      y agregandolo de nuevo.
+
+      No lleva JS: el CSP no permite scripts inline. El cartel de rescate
+      aparece solo (animation-delay) recien a los 10s, y `createRoot()` vacia
+      el contenedor al montar, asi que si la app arranca nadie lo ve.
+    -->
+    <div id="root">
+      <div class="arranque">
+        <div class="arranque__spinner" aria-hidden="true"></div>
+        <div class="arranque__rescate" role="status">
+          <p class="arranque__titulo">No se pudo abrir la app</p>
+          <p class="arranque__texto">
+            Suele ser la conexion. Tocá Reintentar; si sigue igual, probá con datos
+            o wifi.
+          </p>
+          <a class="arranque__boton" href="/?reintento=1">Reintentar</a>
+        </div>
+      </div>
+    </div>
 
     <!-- Noscript fallback -->
     <noscript>
@@ -79,6 +104,86 @@
     <script type="module" src="/src/main.tsx"></script>
 
     <style>
+      /* ---------------------------------------------------------------
+         Pantalla de arranque + rescate. Ver el comentario del #root.
+         Todo con CSS puro: sin JS no hay forma de que falle junto al bundle.
+         --------------------------------------------------------------- */
+      .arranque {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        padding: 24px;
+        text-align: center;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #f3f4f6;
+        color: #1f2937;
+      }
+
+      .arranque__spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid #d1d5db;
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: arranque-girar 0.9s linear infinite;
+      }
+
+      /* Oculto hasta los 10s: antes de eso "no cargo todavia" es lo normal. */
+      .arranque__rescate {
+        max-width: 320px;
+        opacity: 0;
+        visibility: hidden;
+        animation: arranque-aparecer 0.4s ease-out 10s forwards;
+      }
+
+      .arranque__titulo {
+        font-size: 17px;
+        font-weight: 600;
+        margin: 0 0 8px;
+      }
+
+      .arranque__texto {
+        font-size: 15px;
+        line-height: 1.45;
+        margin: 0 0 20px;
+        color: #4b5563;
+      }
+
+      .arranque__boton {
+        display: inline-block;
+        padding: 12px 28px;
+        border-radius: 8px;
+        background: #2563eb;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      @keyframes arranque-girar {
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes arranque-aparecer {
+        from { opacity: 0; visibility: visible; }
+        to { opacity: 1; visibility: visible; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .arranque__spinner { animation: none; }
+        .arranque__rescate { animation-duration: 0.01s; }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .arranque { background: #111827; color: #f9fafb; }
+        .arranque__texto { color: #9ca3af; }
+        .arranque__spinner { border-color: #374151; border-top-color: #60a5fa; }
+      }
+
       /* Screen reader only utility - available before CSS loads */
       .sr-only {
         position: absolute;
