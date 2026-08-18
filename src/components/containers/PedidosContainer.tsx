@@ -15,7 +15,7 @@ import {
 } from '../../utils/descuentoCliente'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
-import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay } from '../../utils/formatters'
+import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
@@ -221,6 +221,8 @@ export default function PedidosContainer(): React.ReactElement {
   const entregaYPagoMasivos = useEntregaYPagoMasivosMutation()
   // UUIDs de idempotencia de las acciones masivas de cobro (mig 167).
   const requestIdMasivo = useRequestIdEstable()
+  // UUID de idempotencia del cobro que se declara al CREAR el pedido (mig 167).
+  const requestIdAlta = useRequestIdEstable()
   const crearClienteMut = useCrearClienteMutation()
   const actualizarClienteMut = useActualizarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -1198,6 +1200,54 @@ export default function PedidosContainer(): React.ReactElement {
         const pedidoId = pedidoCreado.id
         void registrarGpsPedido(pedidoId, gps, motivoOmision)
       }
+
+      // El selector "Estado de Pago" del alta declaraba un cobro que NUNCA se
+      // registraba: `montoPagado` llegaba hasta la capa de la query y ahí se
+      // descartaba (`crear_pedido_completo` no tiene `p_monto_pagado`), así que
+      // el trigger dejaba el pedido en 'pendiente' con monto_pagado 0. El
+      // preventista cobraba $50.000 en el mostrador, veía "Pedido creado
+      // correctamente", y al día siguiente el chofer llegaba con la boleta
+      // marcada impaga y se lo cobraba de nuevo al cliente.
+      //
+      // El pago va DESPUÉS del alta a propósito: necesita el id del pedido, y su
+      // fallo no puede invalidar un pedido que ya existe. Insertar en `pagos`
+      // alcanza — `recalcular_monto_pagado_pedido` (mig 035) recalcula
+      // monto_pagado y estado_pago en cascada.
+      const montoDelAlta =
+        nuevoPedido.estadoPago === 'pagado'
+          ? totalConDescuento
+          : nuevoPedido.estadoPago === 'parcial'
+            ? Number(nuevoPedido.montoPagado) || 0
+            : 0
+
+      if (montoDelAlta > 0 && pedidoCreado?.id) {
+        try {
+          await registrarPago({
+            clienteId: nuevoPedido.clienteId,
+            pedidoId: String(pedidoCreado.id),
+            monto: montoDelAlta,
+            formaPago: nuevoPedido.formaPago,
+            notas:
+              nuevoPedido.estadoPago === 'parcial'
+                ? 'Pago parcial al crear el pedido'
+                : 'Pago al crear el pedido',
+            fecha: nuevoPedido.fecha,
+            usuarioId: user?.id ?? null,
+            clientRequestId: requestIdAlta(
+              `alta|${pedidoCreado.id}|${montoDelAlta}|${nuevoPedido.formaPago}`,
+            ),
+          })
+        } catch (pagoErr) {
+          // El pedido ya existe: el mensaje tiene que decir exactamente eso y
+          // qué hacer, no un "error al crear pedido" que invita a recargarlo.
+          notify.error(
+            `El pedido #${pedidoCreado.id} se creó, pero no se pudo registrar el cobro de ` +
+              `${formatPrecio(montoDelAlta)}: ${(pagoErr as Error).message}. ` +
+              'Registralo desde la ficha del pedido.',
+          )
+        }
+      }
+
       resetNuevoPedido()
       setModalPedidoOpen(false)
       notify.success('Pedido creado correctamente')
@@ -1210,13 +1260,19 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido, registrarPago, requestIdAlta])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
   const handleGuardarPedido = useCallback(async () => {
     if (!nuevoPedido.clienteId || nuevoPedido.items.length === 0) {
       notify.warning('Seleccioná cliente y productos')
+      return
+    }
+    // Un "parcial" sin monto es un pedido que dice estar cobrado a medias y no
+    // tiene ningún pago detrás. Se corta acá y no después de crearlo.
+    if (nuevoPedido.estadoPago === 'parcial' && !(Number(nuevoPedido.montoPagado) > 0)) {
+      notify.warning('Ingresá el monto del pago parcial')
       return
     }
     setGuardando(true)
@@ -1839,7 +1895,13 @@ export default function PedidosContainer(): React.ReactElement {
             isEncargado={isEncargado}
             onNotasChange={(notas: string) => setNuevoPedido(prev => ({ ...prev, notas }))}
             onFormaPagoChange={(fp: string) => setNuevoPedido(prev => ({ ...prev, formaPago: fp }))}
-            onEstadoPagoChange={(ep: string) => setNuevoPedido(prev => ({ ...prev, estadoPago: ep }))}
+            onEstadoPagoChange={(ep: string) => setNuevoPedido(prev => ({
+              ...prev,
+              estadoPago: ep,
+              // Al salir de "parcial" el monto tipeado deja de tener sentido:
+              // si queda, se cobraría de más al confirmar.
+              montoPagado: ep === 'parcial' ? prev.montoPagado : 0,
+            }))}
             onMontoPagadoChange={(m: number) => setNuevoPedido(prev => ({ ...prev, montoPagado: m }))}
             onFechaChange={(fecha: string) => setNuevoPedido(prev => ({ ...prev, fecha }))}
             onTipoFacturaChange={(tipo: 'ZZ' | 'FC') => setNuevoPedido(prev => ({ ...prev, tipoFactura: tipo }))}

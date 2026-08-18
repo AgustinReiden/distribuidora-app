@@ -1,6 +1,9 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar } from 'lucide-react'
 import ModalBase from './ModalBase'
+// DENTRO del ModalBase: es un Radix Dialog portaleado con z-50 y un hermano
+// `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import { usePedidosNoEntregadosQuery } from '../../hooks/queries'
 import { getEstadoColor, getEstadoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import type { PerfilDB } from '../../types'
@@ -30,6 +33,7 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
   const [fechaEntrega, setFechaEntrega] = useState<string>(fechaLocalISO())
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
   const { data: pedidos = [], isLoading } = usePedidosNoEntregadosQuery(true)
 
@@ -67,6 +71,25 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
 
   const allSelected = pedidosFiltrados.length > 0 && selectedIds.size === pedidosFiltrados.length
   const canConfirm = selectedTransportista && selectedIds.size > 0 && !guardando && !!fechaEntrega
+
+  // Marcar entregas en masa mueve stock y fecha contable de golpe: se confirma
+  // diciendo cuántas, con qué chofer y con qué fecha. Antes iba de un solo toque.
+  const pedirConfirmacion = (): void => {
+    const n = selectedIds.size
+    const chofer = transportistas.find(t => String(t.id) === String(selectedTransportista))?.nombre
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: `Marcar ${n} ${n === 1 ? 'entrega' : 'entregas'}`,
+      mensaje:
+        `Se van a marcar ${n} ${n === 1 ? 'pedido' : 'pedidos'} como entregados` +
+        `${chofer ? ` por ${chofer}` : ''}, con fecha ${fechaEntrega}.`,
+      onConfirm: () => {
+        setConfirmConfig(null)
+        void onConfirm(selectedTransportista, Array.from(selectedIds), fechaEntrega)
+      },
+    })
+  }
 
   return (
     <ModalBase title="Entregas Masivas" onClose={onClose} maxWidth="max-w-3xl">
@@ -212,7 +235,7 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
             Cancelar
           </button>
           <button
-            onClick={() => canConfirm && onConfirm(selectedTransportista, Array.from(selectedIds), fechaEntrega)}
+            onClick={() => canConfirm && pedirConfirmacion()}
             disabled={!canConfirm}
             className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
@@ -221,6 +244,7 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
           </button>
         </div>
       </div>
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
   )
 })
