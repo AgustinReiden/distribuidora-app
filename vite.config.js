@@ -11,11 +11,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const cpuCount = os.availableParallelism?.() ?? os.cpus().length
 
-// Identidad del build. Desde el 20/03 la app no registra service worker (ver
-// pwaAuthHotfix.ts), así que una pestaña abierta se queda con el bundle que
-// cargó ese día para siempre: es lo que dejó a la usuaria cancelando pedidos
-// con el modal de julio en agosto. Con esto la app puede darse cuenta sola de
-// que hay un deploy nuevo, sin resucitar el SW.
+// Identidad del build. Una pestaña abierta se queda con el bundle que cargó
+// el día que se abrió: es lo que dejó a la usuaria cancelando pedidos con el
+// modal de julio en agosto. Con esto la app se da cuenta de que hay un deploy
+// nuevo aunque el navegador todavía no haya revisado el service worker
+// (ver useActualizacionDisponible.ts).
 function resolverBuildId() {
   const desdeCI = process.env.VITE_BUILD_ID
     || process.env.VERCEL_GIT_COMMIT_SHA
@@ -96,14 +96,14 @@ export default defineConfig({
     versionJsonPlugin(),
     react(),
     VitePWA({
+      // El registro lo hace la app a mano, en `src/utils/serviceWorker.ts`:
+      // el modo inline del plugin inyecta un <script> inline y el CSP de
+      // index.html no permite scripts inline.
       injectRegister: false,
-      // autoUpdate: el SW nuevo se descarga en segundo plano y la página se
-      // recarga sola cuando está listo. Sin cartel manual "Actualizar ahora".
-      // Trade-off conocido: si el preventista está cargando un pedido cuando
-      // baja el update, el reload pierde lo tipeado. En esta app ese caso es
-      // raro (sesiones cortas, pedidos rápidos) y vale la pena para evitar
-      // que se queden con bundles viejos por días.
-      registerType: 'autoUpdate',
+      // 'prompt', NO 'autoUpdate': la recarga la decide la usuaria con el
+      // cartel (BannerActualizacion). Un reload sorpresa mientras carga un
+      // pedido le borra lo tipeado.
+      registerType: 'prompt',
       // selfDestroying debe estar en false para que el SW persista y la PWA
       // funcione offline (Workbox precache + Dexie). El deploy previo con
       // selfDestroying:true ya desregistró SW corruptos; ahora los usuarios
@@ -180,6 +180,39 @@ export default defineConfig({
       },
       workbox: {
         runtimeCaching: [
+          // PRIMERA a proposito: el router de workbox se queda con la primera
+          // ruta que matchea. Las navegaciones van a la RED primero y solo
+          // caen al cache si la red falla.
+          //
+          // El porque, que es el motivo de existir de esta entrada: si la
+          // navegacion se sirve del cache y WebKit no puede leer el cuerpo
+          // guardado (purga sus archivos y deja el indice: pasa en iOS), la
+          // pagina muere con "WebKitBlobResource error 1" y no hay JS que lo
+          // pueda atajar, porque el fallo ocurre al streamear la respuesta.
+          // Yendo a la red primero, un telefono con senal nunca toca esa
+          // bomba. Sin senal cae al cache, que es para lo que esta.
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'html-cache',
+              // Con senal mala no la hacemos esperar: a los 3 s sirve el shell.
+              networkTimeoutSeconds: 3,
+              plugins: [{
+                // Todas las navegaciones comparten UNA entrada. La app es una
+                // SPA: el HTML es el mismo para cualquier ruta. Asi una ruta
+                // que nunca abrio online (iOS restaura la ultima URL al
+                // reabrir la app) tambien levanta sin senal.
+                cacheKeyWillBeUsed: async () => '/index.html',
+                // Tercer nivel: sin red y con html-cache todavia vacio (recien
+                // instalado y se quedo sin senal antes de la primera
+                // navegacion), cae al precache. ignoreSearch porque workbox le
+                // cuelga ?__WB_REVISION__ a sus entradas.
+                handlerDidError: async () =>
+                  (await caches.match('/index.html', { ignoreSearch: true })) || undefined,
+              }],
+            },
+          },
           {
             urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/i,
             handler: 'CacheFirst',
@@ -217,11 +250,23 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         globIgnores: ['**/*.map'],
         cleanupOutdatedCaches: true,
-        // Pareja con registerType:'autoUpdate'. El SW nuevo activa de inmediato
-        // (skipWaiting) y toma control de las pestañas existentes (clientsClaim)
-        // sin esperar a que se cierren. El reload lo dispara el plugin.
-        skipWaiting: true,
-        clientsClaim: true
+        // Sin navigateFallback a propósito: workbox lo registra ANTES que
+        // runtimeCaching y se comería la ruta network-first de arriba, que es
+        // la que evita el "WebKitBlobResource error 1". El fallback offline
+        // ahora lo da esa misma ruta (html-cache con clave única).
+        navigateFallback: undefined,
+        // Por el mismo motivo. Con el default ('index.html') la ruta de
+        // precache resuelve "/" contra el index.html precacheado y se queda
+        // ella con la navegación, antes de que la vea el network-first.
+        directoryIndex: null,
+        // Los dos en false a propósito, y es el corazón del arreglo de marzo:
+        // el SW nuevo se queda ESPERANDO en vez de tomar control de la pestaña
+        // abierta. Así la sesión en curso sigue sirviéndose del precache viejo
+        // —completo y consistente— y los import() lazy del bundle viejo no se
+        // van a 404. El salto al build nuevo lo dispara el botón "Actualizar"
+        // del cartel, vía aplicarActualizacionSW().
+        skipWaiting: false,
+        clientsClaim: false
       },
       devOptions: {
         enabled: false,
@@ -314,6 +359,11 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.js',
+    // `virtual:pwa-register` lo genera el plugin durante el build; bajo vitest
+    // el id virtual no resuelve y rompe la carga del archivo que lo importe.
+    alias: {
+      'virtual:pwa-register': path.resolve(__dirname, 'src/test/stubs/pwaRegister.ts')
+    },
     include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
     // El default (5s) produce timeouts aleatorios en tests jsdom pesados
     // cuando la máquina está cargada (p. ej. la suite completa en el hook
