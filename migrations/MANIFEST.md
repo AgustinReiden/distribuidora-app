@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-08-08** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-08-19** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -128,8 +128,64 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 182** — la última numerada en el repo es
-`181_guards_de_estado_y_permisos` (aplicada).
+**La próxima migración es la 188.** Al 2026-08-19 el rango 182–187 está tomado y
+sólo la **182** llegó a `main`:
+
+| NN | dónde vive | estado |
+|----|------------|--------|
+| 182 | `main` | `182_pagos_fecha_en_hora_argentina`, aplicada |
+| 183 | rama de cargos de compra (abierta) | `183_compra_cargos_prorrateo` |
+| 184 | rama de cargos de compra (abierta) | `184_compra_cargos_funciones` |
+| 185 | rama de cargos de compra (abierta) | reservada en el encabezado de la 183 (RPCs + check de integridad); todavía sin archivo |
+| 186 | rama de aislamiento por sucursal (abierta) | `186_quien_cruza_de_sucursal` |
+| 187 | rama de aislamiento por sucursal (abierta) | `187_la_hija_no_cruza_de_sucursal` |
+
+O sea que **`ls migrations/` sobre `main` te dice 183 y se equivoca por cinco**.
+Al elegir número hay que mirar las tres cosas: el ledger, `origin/main` y las
+ramas abiertas. La 183 ya se comió esta trampa una vez (nació 182 y tuvo que
+renumerarse porque la 182 se mergeó mientras su rama estaba abierta).
+
+Las **186** y **187** cierran un agujero de RLS preexistente, encontrado de paso
+al revisar la 183. Las policies de las tablas hijas validan `sucursal_id =
+current_sucursal_id()` sobre la propia fila y **nadie valida que el padre
+referenciado sea de esa misma sucursal**; las FK no pasan por RLS, así que una
+línea podía colgarse de la compra de la otra sucursal, quedar invisible para su
+dueña —la policy de SELECT filtra por el `sucursal_id` de la línea— y moverle el
+costo igual. Al 2026-08-19 había **0 filas cruzadas**: era latente, no un
+incidente.
+
+La **186** es sólo lectura: `auditoria_sucursal_cruzada()` y su helper
+`_pares_sucursal_cruzada()`, que descubren los pares hija→padre **del catálogo**,
+no de una lista. La **187** convierte cada FK de una columna en compuesta
+`(columna, sucursal_id) → padre(id, sucursal_id)`, el mismo patrón estructural
+que la 183 estrenó para `compra_cargos`. No toca ni una fila y aborta con la
+lista completa si encuentra alguna cruzada.
+
+Cuatro cosas que conviene no volver a descubrir:
+
+- **Se eligió FK y no un `EXISTS` en las policies** porque casi toda la escritura
+  de esta base entra por RPCs `SECURITY DEFINER`, que saltean RLS por definición:
+  una policy no las ve pasar. La FK sí.
+- **`ON DELETE SET NULL` sobre una FK compuesta anula TODAS las columnas
+  referenciantes**, `sucursal_id` incluida, que es NOT NULL en los 60 pares ⇒ el
+  borrado del padre pasaría a fallar con un 23502. Hay que escribirlo
+  `ON DELETE SET NULL (columna)`, que existe recién en **PostgreSQL 15**. La 187
+  tiene un guard de versión.
+- **Que `sucursal_id` sea NOT NULL en los dos lados no es un detalle**: la FK es
+  MATCH SIMPLE y se da por satisfecha si CUALQUIERA de las columnas
+  referenciantes es NULL. Aflojar ese NOT NULL apaga la protección en silencio.
+- **El reporte cuenta los pares protegidos, no sólo los rotos.** La primera
+  versión sólo miraba FK de una columna y después de la 187 el tablero quedaba
+  vacío: un gate que se apaga solo justo cuando empieza a tener algo que vigilar.
+
+El gate permanente es `scripts/check-sucursal-cruzada.mjs`, un paso más del
+workflow `integridad.yml`: una tabla nueva con `sucursal_id` y FK simple sale en
+rojo al día siguiente. Ése es el punto — el hallazgo no fue "compra_items está
+mal", fue "hay una clase de tabla que está mal y nadie la miraba".
+
+`movimiento_sucursal_items` **no** está en la lista y no es un olvido: no tiene
+`sucursal_id` propio, la resuelve por join con el movimiento. Lo que no se copia
+no puede contradecirse. Igual `compra_cargo_repartos` (183).
 
 La **181** cierra la otra mitad de la auditoría adversarial: las invariantes que
 vivían en el front. Trigger `pedidos_proteger_columnas` (el chofer sólo escribe
@@ -227,9 +283,28 @@ idempotente del mismo nombre. Es a propósito: `migrations/` no es 1:1 con prod 
 habían driftado (ver la nota de la 100), así que el cuerpo real no se reescribe, se envuelve.
 Al leer el catálogo, la lógica de negocio de esas 4 vive en la función `_impl`.
 
-**Antes de elegir el número de una migración nueva, mirar `ls migrations/` además del
-ledger**: el ledger no siempre lleva el prefijo, así que por sí solo no alcanza. Y si mergeaste
-`main` en el medio, volvé a mirarlo — los números que estaban libres pueden haberse ocupado.
+**Antes de elegir el número de una migración nueva hay que mirar TRES cosas**, y ninguna
+alcanza sola:
+
+1. **el ledger** — es la fuente de verdad de lo aplicado, pero no siempre lleva el prefijo
+   `NNN_`, así que por sí solo no dice qué números están gastados;
+2. **`ls migrations/` sobre `origin/main`** — tapa el agujero anterior, pero sólo ve lo
+   mergeado;
+3. **las ramas abiertas** — que es donde la numeración choca de verdad, porque dos ramas
+   paralelas eligen el mismo número el mismo día y ninguna se entera hasta el merge. Ya pasó
+   con el `167` duplicado (sección A) y volvió a pasar con la 183.
+
+Barrido rápido de lo que se están comiendo las ramas abiertas:
+
+```bash
+for b in $(git branch -a --format='%(refname:short)'); do
+  git ls-tree --name-only "$b" migrations/ | grep -oE '^migrations/[0-9]+' | sort -u |
+    tail -3 | sed "s|^|$b :: |"
+done | sort -u
+```
+
+Y si mergeaste `main` en el medio, volvé a mirar las tres — los números que estaban libres
+pueden haberse ocupado.
 
 ---
 
