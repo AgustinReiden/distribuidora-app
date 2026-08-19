@@ -25,7 +25,6 @@ export interface SyncDependencies {
   // Funciones de sincronización
   sincronizarPedidos: (
     crearPedidoFn: (...args: unknown[]) => Promise<unknown>,
-    descontarStockFn: (...args: unknown[]) => Promise<void>,
     productosActuales?: ProductoDB[]
   ) => Promise<{ sincronizados: number; errores: Array<{ error: string }>; conflictos?: StockConflict[] }>
   sincronizarMermas: (
@@ -34,7 +33,6 @@ export interface SyncDependencies {
 
   // Funciones de API
   crearPedido: (...args: unknown[]) => Promise<unknown>
-  descontarStock: (...args: unknown[]) => Promise<void>
   registrarMerma: (...args: unknown[]) => Promise<unknown>
 
   // Funciones de refresh
@@ -62,7 +60,6 @@ export function useSyncManager({
   sincronizarPedidos,
   sincronizarMermas,
   crearPedido,
-  descontarStock,
   registrarMerma,
   refetchPedidos,
   refetchProductos,
@@ -86,7 +83,6 @@ export function useSyncManager({
       if (pedidosPendientes.length > 0) {
         const resultadoPedidos = await sincronizarPedidos(
           crearPedido as (...args: unknown[]) => Promise<unknown>,
-          descontarStock as (...args: unknown[]) => Promise<void>,
           productos // Pasar productos actuales para validación
         )
 
@@ -139,7 +135,6 @@ export function useSyncManager({
     sincronizarPedidos,
     sincronizarMermas,
     crearPedido,
-    descontarStock,
     registrarMerma,
     refetchPedidos,
     refetchProductos,

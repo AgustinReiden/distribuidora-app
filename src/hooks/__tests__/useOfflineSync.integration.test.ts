@@ -63,7 +63,6 @@ describe('useOfflineSync Integration Tests', () => {
 
   // Mock de funciones de API
   const mockCrearPedido = vi.fn()
-  const mockDescontarStock = vi.fn()
   const mockRegistrarMerma = vi.fn()
 
   beforeEach(() => {
@@ -85,7 +84,6 @@ describe('useOfflineSync Integration Tests', () => {
 
     // Reset mocks de API
     mockCrearPedido.mockResolvedValue({ id: 1, success: true })
-    mockDescontarStock.mockResolvedValue(undefined)
     mockRegistrarMerma.mockResolvedValue({ id: 1, success: true })
   })
 
@@ -160,7 +158,7 @@ describe('useOfflineSync Integration Tests', () => {
       // Sincronizar
       let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
       await act(async () => {
-        syncResult = await result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock)
+        syncResult = await result.current.sincronizarPedidos(mockCrearPedido)
       })
 
       expect(syncResult!.success).toBe(true)
@@ -342,7 +340,7 @@ describe('useOfflineSync Integration Tests', () => {
 
       let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
       await act(async () => {
-        syncResult = await result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock)
+        syncResult = await result.current.sincronizarPedidos(mockCrearPedido)
       })
 
       expect(syncResult!.success).toBe(false)
@@ -381,7 +379,7 @@ describe('useOfflineSync Integration Tests', () => {
 
       let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
       await act(async () => {
-        syncResult = await result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock)
+        syncResult = await result.current.sincronizarPedidos(mockCrearPedido)
       })
 
       expect(syncResult!.success).toBe(false)
@@ -421,8 +419,8 @@ describe('useOfflineSync Integration Tests', () => {
       let results: Array<Awaited<ReturnType<typeof result.current.sincronizarPedidos>>>
       await act(async () => {
         results = await Promise.all([
-          result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock),
-          result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock)
+          result.current.sincronizarPedidos(mockCrearPedido),
+          result.current.sincronizarPedidos(mockCrearPedido)
         ])
       })
 
@@ -454,7 +452,7 @@ describe('useOfflineSync Integration Tests', () => {
 
       // Primera sincronización
       await act(async () => {
-        await result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock)
+        await result.current.sincronizarPedidos(mockCrearPedido)
       })
 
       expect(result.current.pedidosPendientes).toHaveLength(0)
@@ -474,7 +472,7 @@ describe('useOfflineSync Integration Tests', () => {
 
       // Segunda sincronización (debe funcionar)
       await act(async () => {
-        await result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock)
+        await result.current.sincronizarPedidos(mockCrearPedido)
       })
 
       expect(result.current.pedidosPendientes).toHaveLength(0)
@@ -720,7 +718,7 @@ describe('useOfflineSync Integration Tests', () => {
       // Intentar sincronizar (debe retornar sin hacer nada)
       let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
       await act(async () => {
-        syncResult = await result.current.sincronizarPedidos(mockCrearPedido, mockDescontarStock)
+        syncResult = await result.current.sincronizarPedidos(mockCrearPedido)
       })
 
       expect(syncResult!.sincronizados).toBe(0)
@@ -787,6 +785,99 @@ describe('useOfflineSync Integration Tests', () => {
 
       expect(result.current.pedidosPendientes).toHaveLength(1)
       expect(result.current.pedidosPendientes[0].offlineId).toBe(pedido2!.offlineId)
+    })
+  })
+
+  /**
+   * El replay pasaba `undefined` en cuatro posiciones seguidas para llegar al
+   * offlineId, y ahi se perdian el tipo de factura, el desglose fiscal y el
+   * preventista. Un pedido cargado sin señal entraba DISTINTO al mismo pedido
+   * cargado con señal: fechado el dia del replay, en ZZ, sin neto/IVA y
+   * acreditado a quien sincronizara.
+   */
+  describe('El pedido encolado entra igual que uno online', () => {
+    const pedidoCompleto = {
+      clienteId: '123',
+      items: [
+        { productoId: 'p1', cantidad: 2, precioUnitario: 100, neto_unitario: 82.6, iva_unitario: 17.4, porcentaje_iva: 21 },
+        { productoId: 'p2', cantidad: 1, precioUnitario: 0, esBonificacion: true, promocionId: 'promo-9' },
+      ],
+      total: 200,
+      usuarioId: 'user1',
+      fecha: '2026-08-18',
+      fechaEntregaProgramada: '2026-08-19',
+      tipoFactura: 'FC' as const,
+      totalNeto: 165.2,
+      totalIva: 34.8,
+      preventistaId: 'preventista-7',
+      origenes: [{ producto_id: 'p1', origen: 'mayorista' }],
+    }
+
+    const opConPedidoCompleto = {
+      id: 42,
+      type: 'CREATE_PEDIDO',
+      status: 'pending',
+      sucursalId: 1,
+      payload: pedidoCompleto,
+      createdAt: new Date(),
+    }
+
+    it('no pierde factura, desglose fiscal, fechas ni preventista', async () => {
+      mockGetPendingOperations.mockResolvedValue([opConPedidoCompleto])
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockCrearPedido).toHaveBeenCalledTimes(1)
+      expect(mockCrearPedido.mock.calls[0][0]).toMatchObject({
+        clienteId: '123',
+        total: 200,
+        fecha: '2026-08-18',
+        fechaEntregaProgramada: '2026-08-19',
+        tipoFactura: 'FC',
+        totalNeto: 165.2,
+        totalIva: 34.8,
+        preventistaId: 'preventista-7',
+        origenes: [{ producto_id: 'p1', origen: 'mayorista' }],
+      })
+    })
+
+    it('conserva la bonificacion como bonificacion, no como item cobrado', async () => {
+      mockGetPendingOperations.mockResolvedValue([opConPedidoCompleto])
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      const items = mockCrearPedido.mock.calls[0][0].items
+      expect(items[1]).toMatchObject({ productoId: 'p2', esBonificacion: true, promocionId: 'promo-9' })
+      expect(items[0]).toMatchObject({ neto_unitario: 82.6, iva_unitario: 17.4, porcentaje_iva: 21 })
+    })
+
+    it('usa un offlineId estable para que el reintento no duplique', async () => {
+      mockGetPendingOperations.mockResolvedValue([opConPedidoCompleto])
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockCrearPedido.mock.calls[0][0].offlineId).toBe('op_42')
+    })
+
+    // Sin red no se registra el cobro: el replay no inserta en `pagos`, asi que
+    // un 'pagado' encolado entraria impago y el chofer se lo cobraria de nuevo
+    // al cliente. Se fuerza el unico estado que no miente.
+    it('fuerza estadoPago pendiente aunque la cola traiga otra cosa', async () => {
+      mockGetPendingOperations.mockResolvedValue([
+        { ...opConPedidoCompleto, payload: { ...pedidoCompleto, estadoPago: 'pagado', montoPagado: 200 } },
+      ])
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockCrearPedido.mock.calls[0][0].estadoPago).toBe('pendiente')
     })
   })
 })

@@ -165,6 +165,7 @@ const ModalPedido = memo(function ModalPedido({
   onActualizarPrecio,
   onPreventistaChange,
   currentUserId,
+  isOffline,
   regalosOverride,
   onCambiarRegaloCreacion,
   promosEliminadas,
@@ -704,12 +705,12 @@ const ModalPedido = memo(function ModalPedido({
                       {sinPrecio ? (
                         <>
                           <p className="font-semibold text-xs text-rose-600 dark:text-rose-400">Sin precio</p>
-                          <span className="text-xs text-stone-500 dark:text-gray-400">No disponible</span>
+                          <span className="text-xs text-stone-600 dark:text-gray-400">No disponible</span>
                         </>
                       ) : sinStock ? (
                         <>
                           <p className="font-semibold text-xs text-rose-600 dark:text-rose-400">Sin stock</p>
-                          <span className="text-xs text-stone-500 dark:text-gray-400">No disponible</span>
+                          <span className="text-xs text-stone-600 dark:text-gray-400">No disponible</span>
                         </>
                       ) : (
                         <>
@@ -1041,15 +1042,26 @@ const ModalPedido = memo(function ModalPedido({
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1 dark:text-gray-200">Estado de Pago</label>
+                      {/* Sin red el cobro NO se puede declarar: el pedido se
+                          encola y el replay no registra pagos, así que un
+                          "pagado" offline entraría impago igual y el chofer se lo
+                          cobraría de nuevo al cliente. Se fuerza 'pendiente' y se
+                          dice por qué, en vez de aceptar algo que no se cumple. */}
                       <select
-                        value={nuevoPedido.estadoPago || 'pendiente'}
+                        value={isOffline ? 'pendiente' : (nuevoPedido.estadoPago || 'pendiente')}
                         onChange={e => onEstadoPagoChange && onEstadoPagoChange(e.target.value)}
-                        className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                        disabled={isOffline}
+                        className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed dark:disabled:bg-gray-800"
                       >
                         <option value="pendiente">Pendiente</option>
                         <option value="pagado">Pagado</option>
                         <option value="parcial">Parcial</option>
                       </select>
+                      {isOffline && (
+                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                          Sin conexión el cobro se registra después, desde la ficha del pedido.
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1146,6 +1158,14 @@ const ModalPedido = memo(function ModalPedido({
         {faltaHorarioCliente && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
             Falta cargar el horario del cliente — subí para completarlo.
+          </div>
+        )}
+
+        {/* Sin conexión: se dice antes de cargar, no al confirmar. El pedido NO
+            se pierde — se guarda en el teléfono y sincroniza solo. */}
+        {isOffline && (
+          <div role="status" className="flex-shrink-0 px-4 py-1.5 bg-orange-100 dark:bg-orange-900/40 border-t border-orange-300 dark:border-orange-700 text-xs text-orange-900 dark:text-orange-200">
+            Sin conexión — el pedido se guarda en el teléfono y se sincroniza solo cuando vuelva la señal.
           </div>
         )}
 

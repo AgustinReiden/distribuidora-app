@@ -10,8 +10,20 @@ import {
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
 import type { MermaFormInput, ProductoDB } from '../types'
+import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
+
+/**
+ * La cola vive en IndexedDB, pero `pedidosPendientes` es estado de React por
+ * instancia del hook. Quien encola (PedidosContainer) y quien muestra el badge
+ * de pendientes (App.tsx) son instancias distintas, asi que sin este evento el
+ * pedido entraba a la cola y el contador seguia en cero hasta recargar.
+ */
+export const OFFLINE_QUEUE_CHANGED = 'offline-queue-changed'
+
+/** Identifica a la instancia que emitio el evento, para que no se reprocese. */
+interface OfflineQueueChangedDetail { origen: string }
 
 // ============================================================================
 // TYPES
@@ -22,6 +34,21 @@ export interface PedidoOfflineItem {
   cantidad: number;
   precioUnitario: number;
   nombre?: string;
+  /**
+   * Bonificacion de promo. Sin esto el replay mandaba el regalo como un item
+   * comprado mas: se le cobraba al cliente y el stock se movia distinto.
+   */
+  esBonificacion?: boolean;
+  promocionId?: string;
+  /**
+   * Desglose fiscal por unidad (mig 111-121). Lo calcula el front con el tipo
+   * de factura y el IVA/II del producto; si no viaja, el pedido sincronizado
+   * queda sin neto/IVA y descuadra la posicion fiscal.
+   */
+  neto_unitario?: number;
+  iva_unitario?: number;
+  impuestos_internos_unitario?: number;
+  porcentaje_iva?: number;
 }
 
 export interface StockSnapshot {
@@ -41,10 +68,28 @@ export interface PedidoOffline {
   notas?: string;
   formaPago?: string;
   estadoPago?: string;
+  /**
+   * @deprecated Sin red NO se declara cobro: el replay no registra pagos, asi
+   * que un pedido encolado como 'pagado' entraba impago y el chofer se lo
+   * cobraba de nuevo al cliente. `ModalPedido` fuerza 'pendiente' offline.
+   * Se conserva el campo para no romper operaciones ya encoladas en IndexedDB.
+   */
   montoPagado?: number;
   creadoOffline: string;
   sincronizado: boolean;
   stockSnapshot?: StockSnapshot;
+  // --- Lo que el alta online SI manda y la cola perdia en silencio ---
+  /** Fecha del pedido. Sin esto el pedido se fecha el dia que sincroniza. */
+  fecha?: string;
+  fechaEntregaProgramada?: string;
+  /** ZZ/FC. Sin esto el replay caia siempre en ZZ y cambiaba el desglose. */
+  tipoFactura?: 'ZZ' | 'FC';
+  /** A quien se le acredita la venta. Sin esto la cobraba quien sincroniza. */
+  preventistaId?: string | null;
+  totalNeto?: number;
+  totalIva?: number;
+  /** Por que se cobro cada precio (mig 148/149). Metadato analitico. */
+  origenes?: OrigenPrecioItem[];
 }
 
 export interface MermaOffline extends MermaFormInput {
@@ -90,22 +135,32 @@ export interface SyncResult {
   conflictos?: StockConflict[];
 }
 
+/**
+ * Alta de pedido usada por el replay. Toma un objeto y no 13 parametros
+ * posicionales: la firma vieja ya obligaba a escribir `undefined, undefined,
+ * undefined, undefined` en el medio para llegar al `offlineId`, y ahi fue
+ * justamente donde se perdieron el tipo de factura, el desglose y el
+ * preventista. Con nombres, olvidarse un campo se ve.
+ */
 export interface CrearPedidoFunction {
-  (
-    clienteId: string | number,
-    items: PedidoOfflineItem[],
-    total: number,
-    usuarioId?: string,
-    descontarStockFn?: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
-    notas?: string,
-    formaPago?: string,
-    estadoPago?: string,
-    tipoFactura?: string,
-    totalNeto?: number,
-    totalIva?: number,
-    preventistaId?: string | null,
-    offlineId?: string | null
-  ): Promise<unknown>;
+  (input: {
+    clienteId: string | number;
+    items: PedidoOfflineItem[];
+    total: number;
+    usuarioId?: string | null;
+    notas?: string;
+    formaPago?: string;
+    estadoPago?: string;
+    fecha?: string;
+    fechaEntregaProgramada?: string;
+    tipoFactura?: 'ZZ' | 'FC';
+    totalNeto?: number;
+    totalIva?: number;
+    preventistaId?: string | null;
+    origenes?: OrigenPrecioItem[];
+    /** Idempotencia del alta (mig 071): el mismo valor en cada reintento. */
+    offlineId?: string | null;
+  }): Promise<unknown>;
 }
 
 export interface RegistrarMermaFunction {
@@ -126,7 +181,6 @@ export interface UseOfflineSyncReturn {
   eliminarMermaOffline: (offlineId: string) => void;
   sincronizarPedidos: (
     crearPedidoFn: CrearPedidoFunction,
-    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
     productosActuales?: ProductoDB[]
   ) => Promise<SyncResult>;
   sincronizarMermas: (registrarMermaFn: RegistrarMermaFunction) => Promise<SyncResult>;
@@ -156,7 +210,14 @@ function operationToPedidoOffline(op: PendingOperation): PedidoOffline {
     montoPagado: payload.montoPagado as number | undefined,
     creadoOffline: op.createdAt.toISOString(),
     sincronizado: op.status === 'completed',
-    stockSnapshot: payload.stockSnapshot as StockSnapshot | undefined
+    stockSnapshot: payload.stockSnapshot as StockSnapshot | undefined,
+    fecha: payload.fecha as string | undefined,
+    fechaEntregaProgramada: payload.fechaEntregaProgramada as string | undefined,
+    tipoFactura: payload.tipoFactura as 'ZZ' | 'FC' | undefined,
+    preventistaId: payload.preventistaId as string | null | undefined,
+    totalNeto: payload.totalNeto as number | undefined,
+    totalIva: payload.totalIva as number | undefined,
+    origenes: payload.origenes as OrigenPrecioItem[] | undefined
   }
 }
 
@@ -202,6 +263,10 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   const pedidosPendientesRef = useRef<PedidoOffline[]>(pedidosPendientes)
 
   // Ref para controlar si el componente está montado
+  // Id de esta instancia del hook. Sirve para ignorar el propio evento: la
+  // instancia que encola ya actualizo su estado optimista, y releer IndexedDB
+  // ahi mismo se lo pisa con lo que haya alcanzado a commitear.
+  const instanciaIdRef = useRef<string>(`ofs_${Math.random().toString(36).slice(2)}`)
   const isMountedRef = useRef<boolean>(true)
 
   // Mantener ref sincronizado con el estado
@@ -259,14 +324,23 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       setIsOnline(false)
     }
 
+    const handleQueueChanged = (e: Event): void => {
+      const detalle = (e as CustomEvent<OfflineQueueChangedDetail>).detail
+      // Solo las OTRAS instancias releen; la emisora ya se actualizo sola.
+      if (detalle?.origen === instanciaIdRef.current) return
+      void loadPendingOperations()
+    }
+
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    window.addEventListener(OFFLINE_QUEUE_CHANGED, handleQueueChanged)
 
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      window.removeEventListener(OFFLINE_QUEUE_CHANGED, handleQueueChanged)
     }
-  }, [])
+  }, [loadPendingOperations])
 
   /**
    * Guarda un pedido en modo offline con validación de stock
@@ -369,6 +443,13 @@ export function useOfflineSync(): UseOfflineSyncReturn {
 
     // Actualizar estado local after confirmed IndexedDB write
     setPedidosPendientes(prev => [...prev, nuevoPedido])
+    // Avisarle a las demas instancias del hook (el badge de pendientes vive en
+    // App.tsx, no aca) para que relean IndexedDB.
+    window.dispatchEvent(
+      new CustomEvent<OfflineQueueChangedDetail>(OFFLINE_QUEUE_CHANGED, {
+        detail: { origen: instanciaIdRef.current },
+      }),
+    )
 
     return { success: true, pedido: nuevoPedido }
   }, []) // pedidosPendientes removido, usamos ref
@@ -507,9 +588,11 @@ export function useOfflineSync(): UseOfflineSyncReturn {
    * Sincroniza todos los pedidos pendientes con el servidor
    * Valida stock actual antes de sincronizar para evitar overselling
    */
+  // `descontarStockFn` ya no es parametro: la RPC `crear_pedido_completo`
+  // descuenta el stock dentro de la misma transaccion. El caller lo pasaba y
+  // `usePedidos.crearPedido` lo recibia como `_descontarStockFn` sin usarlo.
   const sincronizarPedidos = useCallback(async (
     crearPedidoFn: CrearPedidoFunction,
-    descontarStockFn: (items: Array<{ productoId?: string; producto_id?: string; cantidad: number }>) => Promise<void>,
     productosActuales?: ProductoDB[]
   ): Promise<SyncResult> => {
     if (!isOnline) {
@@ -577,22 +660,30 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         }
 
         try {
-          await crearPedidoFn(
-            payload.clienteId as string | number,
-            payload.items as PedidoOfflineItem[],
-            payload.total as number,
-            payload.usuarioId as string | undefined,
-            descontarStockFn,
-            payload.notas as string | undefined,
-            payload.formaPago as string | undefined,
-            payload.estadoPago as string | undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
+          await crearPedidoFn({
+            clienteId: payload.clienteId as string | number,
+            items: payload.items as PedidoOfflineItem[],
+            total: payload.total as number,
+            usuarioId: payload.usuarioId as string | undefined,
+            notas: payload.notas as string | undefined,
+            formaPago: payload.formaPago as string | undefined,
+            // Un pedido encolado nunca declara cobro (ver PedidoOffline.montoPagado):
+            // el replay no registra pagos, asi que 'pagado'/'parcial' entraria
+            // impago igual. Se fuerza el unico estado que no miente.
+            estadoPago: 'pendiente',
+            // Estos cuatro iban en `undefined` y por eso el pedido sincronizado
+            // se fechaba el dia del replay, caia siempre en ZZ, perdia el
+            // desglose fiscal y se le acreditaba a quien sincronizara.
+            fecha: payload.fecha as string | undefined,
+            fechaEntregaProgramada: payload.fechaEntregaProgramada as string | undefined,
+            tipoFactura: payload.tipoFactura as 'ZZ' | 'FC' | undefined,
+            totalNeto: payload.totalNeto as number | undefined,
+            totalIva: payload.totalIva as number | undefined,
+            preventistaId: payload.preventistaId as string | null | undefined,
+            origenes: payload.origenes as OrigenPrecioItem[] | undefined,
             // Clave de idempotencia estable por operación encolada (P1-2)
-            `op_${op.id}`
-          )
+            offlineId: `op_${op.id}`,
+          })
           await markAsCompleted(op.id!)
           sincronizados++
         } catch (error) {

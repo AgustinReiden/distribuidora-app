@@ -51,6 +51,7 @@ import {
 } from '../../hooks/queries'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useOfflineSync } from '../../hooks/useOfflineSync'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
 import { clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
@@ -144,6 +145,10 @@ const campoFechaEntrega = (): NonNullable<ConfirmConfig['campoFecha']> => ({
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
   const { user, isAdmin, isPreventista, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
+  // Cola offline del alta. La cola real vive en IndexedDB, asi que esta
+  // instancia del hook convive sin problema con la de App.tsx (se avisan por
+  // el evento OFFLINE_QUEUE_CHANGED).
+  const { guardarPedidoOffline } = useOfflineSync()
   const notify = useNotification()
 
   // Multi-rol (mig 155): quien vende Y reparte alterna entre la lista y el
@@ -1196,6 +1201,78 @@ export default function PedidosContainer(): React.ReactElement {
       // impide que un corte de señal después del COMMIT cree el pedido dos veces.
       altaIdRef.current ??= nuevoRequestId()
 
+      // SIN RED: el pedido se encola en vez de perderse.
+      //
+      // Hasta acá la app tenía toda la maquinaria offline construida
+      // —`offlineDb`, `useOfflineSync`, el panel "N pendientes" del
+      // OfflineIndicator— y nada la alimentaba: el único `guardarPedidoOffline`
+      // vivía en un handler que no se renderiza desde hace meses. El preventista
+      // en una zona sin señal cargaba el pedido delante del cliente, tocaba
+      // Confirmar y le salía "Error al crear pedido". El pedido se perdía entero.
+      //
+      // Se encola DESPUÉS de resolver precios, promos y desglose fiscal, para que
+      // el pedido entre exactamente igual que uno online. La idempotencia del
+      // replay NO usa `altaIdRef`: usa `op_<id de la operación en IndexedDB>`,
+      // que es estable por entrada encolada, y pasa por
+      // `crear_pedido_idempotente` (mig 071). Un reintento no duplica.
+      if (!isOnline) {
+        const resultado = await guardarPedidoOffline({
+          clienteId: nuevoPedido.clienteId,
+          items: itemsParaCrear.map(item => ({
+            productoId: String(item.productoId),
+            cantidad: item.cantidad,
+            precioUnitario: item.precioUnitario,
+            nombre: productos.find(p => String(p.id) === String(item.productoId))?.nombre,
+            ...('esBonificacion' in item && item.esBonificacion ? { esBonificacion: true } : {}),
+            ...(item.promocionId ? { promocionId: item.promocionId } : {}),
+            neto_unitario: item.neto_unitario,
+            iva_unitario: item.iva_unitario,
+            impuestos_internos_unitario: item.impuestos_internos_unitario,
+            porcentaje_iva: item.porcentaje_iva,
+          })),
+          total: totalConDescuento,
+          usuarioId: user?.id ?? undefined,
+          notas: nuevoPedido.notas,
+          formaPago: nuevoPedido.formaPago,
+          // Sin red NO se declara cobro. El replay no registra pagos, así que un
+          // pedido encolado como 'pagado' entraría impago y el chofer se lo
+          // cobraría de nuevo al cliente — el mismo bug que se arregló en el
+          // camino online. `ModalPedido` ya fuerza 'pendiente' offline; esto es
+          // la defensa en profundidad.
+          estadoPago: 'pendiente',
+          fecha: nuevoPedido.fecha,
+          fechaEntregaProgramada: nuevoPedido.fechaEntregaProgramada,
+          tipoFactura,
+          totalNeto,
+          totalIva,
+          preventistaId: nuevoPedido.preventistaId ?? null,
+          origenes,
+        }, { productos, validarStock: true })
+
+        if (!resultado.success) {
+          // El motivo más común es stock: el hook reserva contra los pedidos
+          // offline que ya están en la cola, así que dice exactamente qué falta.
+          const detalle = resultado.itemsSinStock?.length
+            ? resultado.itemsSinStock
+                .map(i => `${i.nombre}: pediste ${i.solicitado}, quedan ${i.disponible}`)
+                .join('\n')
+            : resultado.error || 'No se pudo guardar el pedido sin conexión.'
+          notify.error(`No se pudo guardar el pedido:\n${detalle}`)
+          setGuardando(false)
+          return
+        }
+
+        resetNuevoPedido()
+        setModalPedidoOpen(false)
+        notify.warning(
+          'Sin conexión: el pedido quedó guardado en el teléfono y se va a sincronizar solo ' +
+            'cuando vuelva la señal. El cobro se registra después.',
+          { persist: true },
+        )
+        setGuardando(false)
+        return
+      }
+
       const pedidoCreado = await crearPedido.mutateAsync({
         offlineId: altaIdRef.current,
         clienteId: nuevoPedido.clienteId,
@@ -1280,7 +1357,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido, registrarPago, requestIdAlta])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
