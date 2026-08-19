@@ -34,6 +34,17 @@ jobs:
           fi
           node scripts/check-integridad.mjs
 
+      - name: Aislamiento por sucursal (FK compuestas)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::warning::Faltan secrets — gate de sucursal omitido."
+            exit 0
+          fi
+          node scripts/check-sucursal-cruzada.mjs
+
       - name: Drift-check de migraciones (repo vs prod)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
