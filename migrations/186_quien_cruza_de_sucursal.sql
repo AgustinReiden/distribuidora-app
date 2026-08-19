@@ -18,6 +18,15 @@
 --   "Nada ata todavía compra_items.sucursal_id a compras.sucursal_id".
 -- Éste es ese otro trabajo, generalizado a todo el esquema.
 --
+-- QUIÉN LLEGA. Todos. El baseline deja
+-- `ALTER DEFAULT PRIVILEGES ... IN SCHEMA public GRANT ALL ON TABLES TO
+-- authenticated`, así que toda tabla que cree `postgres` en `public` nace con
+-- INSERT/UPDATE/DELETE para cualquier usuario logueado, la haya pedido alguien o
+-- no. Buscar `GRANT` explícitos en las migraciones subestima el alcance: varias
+-- de estas tablas no tienen ninguno y son escribibles igual. Lo único que las
+-- separa de un `INSERT` directo por PostgREST es la policy, que es justamente lo
+-- que no mira al padre.
+--
 -- POR QUÉ FK Y NO RLS. Un EXISTS sobre el padre en las policies taparía sólo el
 -- camino de PostgREST. En esta base casi toda la escritura entra por RPCs
 -- SECURITY DEFINER, que saltean RLS por definición: la policy no las ve pasar.
