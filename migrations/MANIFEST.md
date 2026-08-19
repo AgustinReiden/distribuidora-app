@@ -98,6 +98,12 @@ desfasan y **se realinean en `101`**:
 | `165_saldo_a_favor_no_queda_atrapado.sql` | `165_…` (guard + helpers + trigger) + `165_…_rpcs_fifo` (las 2 RPCs FIFO) — aplicado en 2 tandas por tamaño |
 | (bot 014–020) | hotfix `020_bot_fix_pgcrypto_schema` plegado en la tanda, sin archivo propio |
 
+> Las tres consolidaciones que están **por encima del snapshot** (`123`, `139`, `165`) viven
+> además declaradas en `CONSOLIDACIONES`, adentro de `scripts/check-migrations.mjs`. Si tocás
+> una, tocá las dos. El script exime esas filas del ledger; sin la declaración el drift-check
+> queda **rojo para siempre** por migraciones perfectamente sanas — que fue exactamente lo que
+> pasó en su primera corrida real (9 de 10 hallazgos eran esto).
+
 **Cadena `reporte_gerencial`** (reescrita ~9 veces por `CREATE OR REPLACE`): el repo versiona
 los hitos (`095`, `097` grants, `098`, `103`, `106`, `107`, `110`). Los intermedios del ledger
 `reporte_gerencial_restringir_por_sucursal_asignada` y `reporte_gerencial_desglose_bonif_mermas`
@@ -131,22 +137,32 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 188.** Al 2026-08-19 el rango 182–187 está tomado y
-sólo la **182** llegó a `main`:
+**La próxima migración es la 192.** Estado al 2026-08-19 (todo lo de abajo está
+aplicado, salvo donde se aclara):
 
-| NN | dónde vive | estado |
-|----|------------|--------|
-| 182 | `main` | `182_pagos_fecha_en_hora_argentina`, aplicada — **es la última del ledger**, verificado el 2026-08-19 |
-| 183 | rama de cargos de compra (abierta) | `183_compra_cargos_prorrateo` |
-| 184 | rama de cargos de compra (abierta) | `184_compra_cargos_funciones` |
-| 185 | rama de cargos de compra (abierta) | reservada en el encabezado de la 183 (RPCs + check de integridad); todavía sin archivo |
-| 186 | rama de aislamiento por sucursal | `186_quien_cruza_de_sucursal`, **aplicada 2026-08-19** |
-| 187 | rama de aislamiento por sucursal | `187_la_hija_no_cruza_de_sucursal`, **aplicada 2026-08-19** |
+| NN | estado |
+|----|--------|
+| 182 | `182_pagos_fecha_en_hora_argentina` |
+| 183 | `183_cerrar_recorridos_terminados` |
+| 184–185 | **libres en `main`, pero reservadas** por la rama de cargos de compra (ver abajo) |
+| 186 | `186_quien_cruza_de_sucursal` |
+| 187 | `187_la_hija_no_cruza_de_sucursal` |
+| 188 | `188_anon_deja_de_ejecutar_rpcs` |
+| 189 | `189_auditoria_de_permisos_execute` |
+| 190 | `190_guards_de_estado_y_cobranza` |
+| 190b | `190b_pagos_forzar_usuario_no_definer` — aplicada sin archivo; el archivo se escribió después, leyendo el catálogo |
+| 191 | `191_pagos_forzar_usuario_sin_public` |
 
-O sea que **`ls migrations/` sobre `main` te dice 183 y se equivoca por cinco**.
+> ⚠️ **La rama de cargos de compra (`claude/invoice-cost-calculation-370b62`)
+> tiene `183_compra_cargos_prorrateo.sql` y `184_compra_cargos_funciones.sql`, y
+> la 183 ya la ocupó `183_cerrar_recorridos_terminados` en `main`.** Esa rama hay
+> que renumerarla a 192+ antes de mergear. Es la tercera vez que pasa lo mismo
+> (el `167` duplicado, la 183 que nació 182, y ahora ésta): **el número no se
+> reserva escribiendo el archivo, se reserva aplicando la migración.** Mientras
+> la rama esté abierta el número no es de nadie.
+
 Al elegir número hay que mirar las tres cosas: el ledger, `origin/main` y las
-ramas abiertas. La 183 ya se comió esta trampa una vez (nació 182 y tuvo que
-renumerarse porque la 182 se mergeó mientras su rama estaba abierta).
+ramas abiertas.
 
 Las **186** y **187** cierran un agujero de RLS preexistente, encontrado de paso
 al revisar la 183. Las policies de las tablas hijas validan `sucursal_id =
