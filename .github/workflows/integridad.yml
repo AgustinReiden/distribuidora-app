@@ -23,38 +23,64 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Correr batería de invariantes
+      # Un solo lugar donde se verifica que los secrets estén, y FALLA si no.
+      #
+      # Antes cada paso traía su propio `if [ -z ... ]; then warning; exit 0; fi`.
+      # Los secrets nunca existieron —el repo tiene SUPABASE_DB_URL y
+      # SUPABASE_ACCESS_TOKEN, no estos dos— así que las 52 corridas entre el
+      # 2026-06-30 y el 2026-08-19 salieron VERDES sin chequear una sola cosa, en
+      # 15 segundos: checkout, setup y cuatro warnings que nadie mira. Un gate que
+      # da luz verde cuando no puede mirar es peor que no tener gate, porque el
+      # tilde verde se lee como "verificado".
+      #
+      # Este paso convierte "no puedo chequear" en rojo, que es lo que es. Y al
+      # estar una sola vez, el paso que agregue el próximo no puede nacer con el
+      # bug de vuelta.
+      #
+      # No hay caso legítimo de correr esto sin secrets: el workflow sólo dispara
+      # por `schedule` y `workflow_dispatch` sobre el repo de origen. No corre en
+      # forks ni en PRs.
+      - name: Verificar que los secrets estén configurados
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::warning::Faltan secrets SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY — gate omitido."
-            exit 0
+          faltan=""
+          [ -z "$SUPABASE_URL" ] && faltan="$faltan SUPABASE_URL"
+          [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && faltan="$faltan SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$faltan" ]; then
+            echo "::error::Faltan los secrets:$faltan — el gate NO puede correr y por eso falla."
+            echo "Cargalos en Settings > Secrets and variables > Actions."
+            echo "SUPABASE_SERVICE_ROLE_KEY es la service_role key (Settings > API en Supabase), NO la anon."
+            exit 1
           fi
-          node scripts/check-integridad.mjs
+          echo "Secrets presentes. Corriendo los cuatro chequeos contra prod."
+
+      # Los cuatro van con `if: always()` para que una corrida diga TODO lo que
+      # está mal de una vez, en vez de esconder los tres siguientes detrás del
+      # primero que falle. Si el paso de arriba falló, igual corren y mueren solos
+      # con "Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY" (exit 2): ruidoso a
+      # propósito, que es lo contrario de lo que hacían antes.
+      - name: Correr batería de invariantes
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-integridad.mjs
 
       - name: Aislamiento por sucursal (FK compuestas)
+        if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::warning::Faltan secrets — gate de sucursal omitido."
-            exit 0
-          fi
-          node scripts/check-sucursal-cruzada.mjs
+        run: node scripts/check-sucursal-cruzada.mjs
 
       - name: Drift-check de migraciones (repo vs prod)
+        if: always()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::warning::Faltan secrets — drift-check omitido."
-            exit 0
-          fi
-          node scripts/check-migrations.mjs
+        run: node scripts/check-migrations.mjs
 
       # Falla si alguna función de public volvió a quedar ejecutable con la anon
       # key. Ver migrations/188 y migrations/README.md § Permisos.
@@ -63,9 +89,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::warning::Faltan secrets — chequeo de permisos omitido."
-            exit 0
-          fi
-          node scripts/check-permisos.mjs
+        run: node scripts/check-permisos.mjs
