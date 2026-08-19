@@ -24,6 +24,9 @@ prefijo `NNN_`, es normal: guarda el `name` que se pasó al `apply_migration`).
 - **CI / humano:** `node scripts/check-migrations.mjs` (env `SUPABASE_URL` +
   `SUPABASE_SERVICE_ROLE_KEY`). Lee el ledger vía el RPC `public.migraciones_aplicadas()`
   (creado en `109`) porque el schema `supabase_migrations` no está expuesto por PostgREST.
+- **Permisos:** `node scripts/check-permisos.mjs` (mismos env). Falla si alguna función de
+  `public` quedó ejecutable con la anon key. No es drift de migraciones, pero corre en el mismo
+  workflow y detecta lo mismo que la `188` cerró. Ver `README.md § Permisos`.
 
 ## Cómo se aplican las migraciones
 
@@ -339,6 +342,29 @@ done | sort -u
 
 Y si mergeaste `main` en el medio, volvé a mirar las tres — los números que estaban libres
 pueden haberse ocupado.
+
+### E. La 188/189 quedó intercalada con la 186/187 (2026-08-19)
+
+El ledger tiene, por `version`, este orden:
+
+| hora (UTC) | ledger | rama |
+| --- | --- | --- |
+| 16:56:50 | `186_quien_cruza_de_sucursal` | aislamiento por sucursal |
+| 16:57:07 | `188_anon_deja_de_ejecutar_rpcs` | permisos EXECUTE |
+| 16:58:04 | `189_auditoria_de_permisos_execute` | permisos EXECUTE |
+| 16:58:07 | `187_la_hija_no_cruza_de_sucursal` | aislamiento por sucursal |
+
+O sea que **el número de archivo no refleja el orden de aplicación**: dos ramas aplicaron a
+prod con minutos de diferencia. No rompe nada (el ledger ordena por `version`, y ninguna de
+las cuatro depende de otra), pero si mirás sólo los números vas a suponer un orden que no fue.
+
+Vale la pena por lo que dejó demostrado: la **187 se aplicó después del barrido de la 188** y
+aun así no quedó nada abierto a `anon`, porque no creó funciones. Si hubiera creado una, habría
+nacido con `=X/postgres` (PUBLIC) y el gate `scripts/check-permisos.mjs` la habría marcado al
+día siguiente. Ese es exactamente el escenario para el que existe el gate: el paso 0 de la 188
+saca a `anon` del default privilege, pero **a PUBLIC no lo puede sacar** (medido, ver la
+migración), así que toda función nueva sigue naciendo con PUBLIC y **cada migración tiene que
+revocarlo**. Ver `README.md § Permisos`.
 
 ---
 

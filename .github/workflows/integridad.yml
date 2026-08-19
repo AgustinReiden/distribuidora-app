@@ -55,3 +55,17 @@ jobs:
             exit 0
           fi
           node scripts/check-migrations.mjs
+
+      # Falla si alguna función de public volvió a quedar ejecutable con la anon
+      # key. Ver migrations/188 y migrations/README.md § Permisos.
+      - name: Permisos EXECUTE (nada abierto a anon)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::warning::Faltan secrets — chequeo de permisos omitido."
+            exit 0
+          fi
+          node scripts/check-permisos.mjs
