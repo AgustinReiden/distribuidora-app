@@ -137,8 +137,8 @@ sólo la **182** llegó a `main`:
 | 183 | rama de cargos de compra (abierta) | `183_compra_cargos_prorrateo` |
 | 184 | rama de cargos de compra (abierta) | `184_compra_cargos_funciones` |
 | 185 | rama de cargos de compra (abierta) | reservada en el encabezado de la 183 (RPCs + check de integridad); todavía sin archivo |
-| 186 | rama de aislamiento por sucursal (abierta) | `186_quien_cruza_de_sucursal` |
-| 187 | rama de aislamiento por sucursal (abierta) | `187_la_hija_no_cruza_de_sucursal` |
+| 186 | rama de aislamiento por sucursal | `186_quien_cruza_de_sucursal`, **aplicada 2026-08-19** |
+| 187 | rama de aislamiento por sucursal | `187_la_hija_no_cruza_de_sucursal`, **aplicada 2026-08-19** |
 
 O sea que **`ls migrations/` sobre `main` te dice 183 y se equivoca por cinco**.
 Al elegir número hay que mirar las tres cosas: el ledger, `origin/main` y las
@@ -194,6 +194,14 @@ Seis cosas que conviene no volver a descubrir:
 - **El reporte cuenta los pares protegidos, no sólo los rotos.** La primera
   versión sólo miraba FK de una columna y después de la 187 el tablero quedaba
   vacío: un gate que se apaga solo justo cuando empieza a tener algo que vigilar.
+
+**Resultado de aplicarlas (2026-08-19):** 69 pares, **69 protegidos**, 0 sin
+proteger, 0 filas cruzadas, 2 parciales (`comision_reglas`). 69 FK compuestas y
+19 UNIQUE nuevas; ningún `SET NULL` quedó sin su lista de columnas.
+`auditoria_integridad()` siguió en `overall_ok = true` con 0 critical/high, y los
+advisors de Supabase no sumaron ningún ERROR. Verificado además en vivo, dentro de
+un bloque que se revierte: el INSERT cruzado y el item de traslado mal etiquetado
+se rechazan con 23503, y el INSERT coherente sigue entrando.
 
 Y la razón de fondo para que todo salga del catálogo: **el repo predecía 60 pares
 y prod tiene 69.** Los 9 que faltaban (`comision_reglas`,
