@@ -53,6 +53,7 @@ backups/
 !supabase/migrations/*.sql
 !scripts/verify-multi-tenant.sql
 !scripts/fix-pedido-3602-pagos-duplicados.sql
+!scripts/auditoria-permisos.sql
 !migrations/*.sql
 !migrations/**/*.sql
 
