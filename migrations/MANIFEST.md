@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-08-08** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-08-19** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -24,6 +24,9 @@ prefijo `NNN_`, es normal: guarda el `name` que se pasó al `apply_migration`).
 - **CI / humano:** `node scripts/check-migrations.mjs` (env `SUPABASE_URL` +
   `SUPABASE_SERVICE_ROLE_KEY`). Lee el ledger vía el RPC `public.migraciones_aplicadas()`
   (creado en `109`) porque el schema `supabase_migrations` no está expuesto por PostgREST.
+- **Permisos:** `node scripts/check-permisos.mjs` (mismos env). Falla si alguna función de
+  `public` quedó ejecutable con la anon key. No es drift de migraciones, pero corre en el mismo
+  workflow y detecta lo mismo que la `188` cerró. Ver `README.md § Permisos`.
 
 ## Cómo se aplican las migraciones
 
@@ -128,8 +131,98 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 182** — la última numerada en el repo es
-`181_guards_de_estado_y_permisos` (aplicada).
+**La próxima migración es la 188.** Al 2026-08-19 el rango 182–187 está tomado y
+sólo la **182** llegó a `main`:
+
+| NN | dónde vive | estado |
+|----|------------|--------|
+| 182 | `main` | `182_pagos_fecha_en_hora_argentina`, aplicada — **es la última del ledger**, verificado el 2026-08-19 |
+| 183 | rama de cargos de compra (abierta) | `183_compra_cargos_prorrateo` |
+| 184 | rama de cargos de compra (abierta) | `184_compra_cargos_funciones` |
+| 185 | rama de cargos de compra (abierta) | reservada en el encabezado de la 183 (RPCs + check de integridad); todavía sin archivo |
+| 186 | rama de aislamiento por sucursal | `186_quien_cruza_de_sucursal`, **aplicada 2026-08-19** |
+| 187 | rama de aislamiento por sucursal | `187_la_hija_no_cruza_de_sucursal`, **aplicada 2026-08-19** |
+
+O sea que **`ls migrations/` sobre `main` te dice 183 y se equivoca por cinco**.
+Al elegir número hay que mirar las tres cosas: el ledger, `origin/main` y las
+ramas abiertas. La 183 ya se comió esta trampa una vez (nació 182 y tuvo que
+renumerarse porque la 182 se mergeó mientras su rama estaba abierta).
+
+Las **186** y **187** cierran un agujero de RLS preexistente, encontrado de paso
+al revisar la 183. Las policies de las tablas hijas validan `sucursal_id =
+current_sucursal_id()` sobre la propia fila y **nadie valida que el padre
+referenciado sea de esa misma sucursal**; las FK no pasan por RLS, así que una
+línea podía colgarse de la compra de la otra sucursal, quedar invisible para su
+dueña —la policy de SELECT filtra por el `sucursal_id` de la línea— y moverle el
+costo igual. **Medido contra prod el 2026-08-19: 69 pares y 0 filas cruzadas.**
+Era latente, no un incidente.
+
+La **186** es sólo lectura: `auditoria_sucursal_cruzada()` y sus helpers
+`_pares_sucursal_cruzada()` y `_tenant_col_por_tabla()`, que descubren los pares
+hija→padre **del catálogo**, no de una lista. La **187** convierte cada FK de una
+columna en compuesta `(columna, tenant) → padre(id, tenant)`, el mismo patrón
+estructural que la 183 estrena para `compra_cargos`. No toca ni una fila y aborta
+con la lista completa si encuentra alguna cruzada.
+
+Seis cosas que conviene no volver a descubrir:
+
+- **Se eligió FK y no un `EXISTS` en las policies** porque casi toda la escritura
+  de esta base entra por RPCs `SECURITY DEFINER`, que saltean RLS por definición:
+  una policy no las ve pasar. La FK sí. Refuerza el argumento que cinco de estas
+  hijas (`recorrido_cambios`, `promo_acumuladores`, `pedido_item_sustituciones`,
+  `comision_reglas`, `metas_preventista`) tengan **sólo policies de SELECT**: el
+  default-deny de RLS ya les cierra PostgREST, así que su único camino de
+  escritura es justo el que ninguna policy vigila.
+- **El tenant no siempre se llama `sucursal_id`.** `transferencias_stock` tiene
+  las dos columnas: `tenant_sucursal_id` es el tenant (es la que usa su policy de
+  escritura) y `sucursal_id` es **la otra punta del traslado**. Comparar contra la
+  segunda daba 4 de 13 filas "cruzadas" que son historia correcta —un traslado
+  tiene las dos puntas distintas por definición—; contra la primera dan 0. Si
+  alguien las "arreglaba", rompía datos buenos. De ahí `_tenant_col_por_tabla()`.
+- **`ON DELETE SET NULL` sobre una FK compuesta anula TODAS las columnas
+  referenciantes**, el tenant incluido, que es NOT NULL en 68 de los 69 pares ⇒ el
+  borrado del padre pasaría a fallar con un 23502. Hay que escribirlo
+  `ON DELETE SET NULL (columna)`, que existe recién en **PostgreSQL 15**. Prod
+  corre 17.6, así que el guard de versión de la 187 no va a saltar; queda igual.
+- **Que el tenant sea NOT NULL no es un detalle**: la FK es MATCH SIMPLE y se da
+  por satisfecha si CUALQUIERA de las columnas referenciantes es NULL. Aflojar ese
+  NOT NULL apaga media protección en silencio. El único caso hoy es
+  `comision_reglas.sucursal_id`, nullable a propósito (una regla sin sucursal es
+  global): el reporte lo marca `parcial` en vez de contarlo como cubierto.
+- **Un tenant NULL es "global", no "cruzada".** La primera versión contaba la
+  divergencia con `IS DISTINCT FROM` y una regla de comisión global —tenant NULL
+  contra un producto de otra sucursal— salía como violación, dejando el preflight
+  de la 187 abortando para siempre por una fila legal. El reporte tiene que contar
+  **exactamente** lo que la FK rechaza, o los dos dejan de decir lo mismo.
+- **El reporte cuenta los pares protegidos, no sólo los rotos.** La primera
+  versión sólo miraba FK de una columna y después de la 187 el tablero quedaba
+  vacío: un gate que se apaga solo justo cuando empieza a tener algo que vigilar.
+
+**Resultado de aplicarlas (2026-08-19):** 69 pares, **69 protegidos**, 0 sin
+proteger, 0 filas cruzadas, 2 parciales (`comision_reglas`). 69 FK compuestas y
+19 UNIQUE nuevas; ningún `SET NULL` quedó sin su lista de columnas.
+`auditoria_integridad()` siguió en `overall_ok = true` con 0 critical/high, y los
+advisors de Supabase no sumaron ningún ERROR. Verificado además en vivo, dentro de
+un bloque que se revierte: el INSERT cruzado y el item de traslado mal etiquetado
+se rechazan con 23503, y el INSERT coherente sigue entrando.
+
+Y la razón de fondo para que todo salga del catálogo: **el repo predecía 60 pares
+y prod tiene 69.** Los 9 que faltaban (`comision_reglas`,
+`grupo_precio_escala_minimos`, `metas_preventista`, `productos.categoria_id`,
+`productos.marca_id`, `pedido_item_sustituciones.ajuste_producto_id_nuevo`) los
+encuentra `pg_constraint` y los habría perdido una lista escrita leyendo
+`migrations/`. Es la regla de oro de este archivo, cobrándose una más.
+
+El gate permanente es `scripts/check-sucursal-cruzada.mjs`, un paso más del
+workflow `integridad.yml`: una tabla nueva con `sucursal_id` y FK simple sale en
+rojo al día siguiente. Ése es el punto — el hallazgo no fue "compra_items está
+mal", fue "hay una clase de tabla que está mal y nadie la miraba".
+
+`movimiento_sucursal_items` **no** está en la lista y no es un olvido: no tiene
+columna de tenant propia, la resuelve por join con el movimiento. Lo que no se
+copia no puede contradecirse. Igual `compra_cargo_repartos` (183), y por eso
+`movimientos_sucursal` —que sólo tiene `sucursal_origen_id` y
+`sucursal_destino_id`— ni siquiera entra al análisis.
 
 La **181** cierra la otra mitad de la auditoría adversarial: las invariantes que
 vivían en el front. Trigger `pedidos_proteger_columnas` (el chofer sólo escribe
@@ -227,9 +320,51 @@ idempotente del mismo nombre. Es a propósito: `migrations/` no es 1:1 con prod 
 habían driftado (ver la nota de la 100), así que el cuerpo real no se reescribe, se envuelve.
 Al leer el catálogo, la lógica de negocio de esas 4 vive en la función `_impl`.
 
-**Antes de elegir el número de una migración nueva, mirar `ls migrations/` además del
-ledger**: el ledger no siempre lleva el prefijo, así que por sí solo no alcanza. Y si mergeaste
-`main` en el medio, volvé a mirarlo — los números que estaban libres pueden haberse ocupado.
+**Antes de elegir el número de una migración nueva hay que mirar TRES cosas**, y ninguna
+alcanza sola:
+
+1. **el ledger** — es la fuente de verdad de lo aplicado, pero no siempre lleva el prefijo
+   `NNN_`, así que por sí solo no dice qué números están gastados;
+2. **`ls migrations/` sobre `origin/main`** — tapa el agujero anterior, pero sólo ve lo
+   mergeado;
+3. **las ramas abiertas** — que es donde la numeración choca de verdad, porque dos ramas
+   paralelas eligen el mismo número el mismo día y ninguna se entera hasta el merge. Ya pasó
+   con el `167` duplicado (sección A) y volvió a pasar con la 183.
+
+Barrido rápido de lo que se están comiendo las ramas abiertas:
+
+```bash
+for b in $(git branch -a --format='%(refname:short)'); do
+  git ls-tree --name-only "$b" migrations/ | grep -oE '^migrations/[0-9]+' | sort -u |
+    tail -3 | sed "s|^|$b :: |"
+done | sort -u
+```
+
+Y si mergeaste `main` en el medio, volvé a mirar las tres — los números que estaban libres
+pueden haberse ocupado.
+
+### E. La 188/189 quedó intercalada con la 186/187 (2026-08-19)
+
+El ledger tiene, por `version`, este orden:
+
+| hora (UTC) | ledger | rama |
+| --- | --- | --- |
+| 16:56:50 | `186_quien_cruza_de_sucursal` | aislamiento por sucursal |
+| 16:57:07 | `188_anon_deja_de_ejecutar_rpcs` | permisos EXECUTE |
+| 16:58:04 | `189_auditoria_de_permisos_execute` | permisos EXECUTE |
+| 16:58:07 | `187_la_hija_no_cruza_de_sucursal` | aislamiento por sucursal |
+
+O sea que **el número de archivo no refleja el orden de aplicación**: dos ramas aplicaron a
+prod con minutos de diferencia. No rompe nada (el ledger ordena por `version`, y ninguna de
+las cuatro depende de otra), pero si mirás sólo los números vas a suponer un orden que no fue.
+
+Vale la pena por lo que dejó demostrado: la **187 se aplicó después del barrido de la 188** y
+aun así no quedó nada abierto a `anon`, porque no creó funciones. Si hubiera creado una, habría
+nacido con `=X/postgres` (PUBLIC) y el gate `scripts/check-permisos.mjs` la habría marcado al
+día siguiente. Ese es exactamente el escenario para el que existe el gate: el paso 0 de la 188
+saca a `anon` del default privilege, pero **a PUBLIC no lo puede sacar** (medido, ver la
+migración), así que toda función nueva sigue naciendo con PUBLIC y **cada migración tiene que
+revocarlo**. Ver `README.md § Permisos`.
 
 ---
 
