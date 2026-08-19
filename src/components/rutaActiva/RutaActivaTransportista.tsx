@@ -45,6 +45,16 @@ const ACCURACY_MAX_M = 1000;
 /** Más lejos que esto de la parada activa = el chofer no está en zona */
 const DISTANCIA_ABSURDA_M = 50_000;
 
+/** "hace 5 min" / "hace 2 h" / "ayer". Para rotular datos que no son de ahora. */
+function describirAntiguedad(epochMs: number): string {
+  const min = Math.floor((Date.now() - epochMs) / 60000);
+  if (min < 1) return 'recién actualizada';
+  if (min < 60) return `actualizada hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `actualizada hace ${h} h`;
+  return 'actualizada ayer';
+}
+
 export interface RutaActivaTransportistaProps {
   onMarcarEntregado: (pedido: PedidoDB) => void;
   userId: string;
@@ -91,6 +101,8 @@ export default function RutaActivaTransportista({
     isLoading: cargandoRuta,
     isError: rutaFallo,
     refetch: reintentarRuta,
+    desdeCache,
+    datosDe,
   } = useRecorridoActivoQuery(userId);
   const rutaReal = useMemo(
     () => decodePolylines(recorridoActivo?.polylines),
@@ -432,11 +444,23 @@ export default function RutaActivaTransportista({
         )}
       </div>
 
-      {/* Banner offline */}
-      {!isOnline && (
-        <div role="alert" className="absolute inset-x-3 top-20 z-20 flex items-center gap-2 rounded-xl bg-orange-500 px-3 py-2 text-white shadow-lg">
-          <WifiOff className="h-4 w-4 flex-shrink-0" aria-hidden />
-          <p className="text-sm font-medium">Sin conexión — las entregas no se están guardando</p>
+      {/* Banner offline. Dos mensajes distintos a propósito: "no hay red" y "lo
+          que estás viendo salió del teléfono, no del servidor" no son lo mismo,
+          y el segundo es el que evita que el chofer confíe en una ruta vieja. */}
+      {(!isOnline || desdeCache) && (
+        <div role="alert" className="absolute inset-x-3 top-20 z-20 flex items-start gap-2 rounded-xl bg-orange-500 px-3 py-2 text-white shadow-lg">
+          <WifiOff className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">
+              {desdeCache ? 'Ruta guardada en el teléfono' : 'Sin conexión'}
+              {datosDe ? ` — ${describirAntiguedad(datosDe)}` : ''}
+            </p>
+            <p className="text-xs text-orange-100">
+              {desdeCache
+                ? 'Puede haber cambiado. Las entregas y cobros no se guardan hasta que vuelva la señal.'
+                : 'Las entregas y cobros no se están guardando.'}
+            </p>
+          </div>
         </div>
       )}
 
