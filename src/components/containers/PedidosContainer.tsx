@@ -15,6 +15,7 @@ import {
 } from '../../utils/descuentoCliente'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
+import PanelPedidosTrabados from '../pedidos/PanelPedidosTrabados'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
@@ -1866,6 +1867,17 @@ export default function PedidosContainer(): React.ReactElement {
           porque vuelven a 'pendiente' y ahi se confunden con los nuevos. */}
       <div className="mb-3">
         <PanelPedidosNoEntregados />
+      </div>
+
+      {/* Los que quedaron trabados en 'asignado': no los ve el pool de "Armar
+          ruta", asi que sin este panel no aparecen en ninguna pantalla. Dispara
+          el MISMO handler que la fila del pedido — el boton ya existia, lo que
+          faltaba era enterarse de que habia que usarlo. */}
+      <div className="mb-3">
+        <PanelPedidosTrabados
+          enabled={isAdmin || isEncargado}
+          onVolverAPendiente={p => handleVolverAPendiente(p as unknown as PedidoDB)}
+        />
       </div>
 
       <Suspense fallback={<LoadingState />}>
