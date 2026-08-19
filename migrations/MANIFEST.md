@@ -133,7 +133,7 @@ sólo la **182** llegó a `main`:
 
 | NN | dónde vive | estado |
 |----|------------|--------|
-| 182 | `main` | `182_pagos_fecha_en_hora_argentina`, aplicada |
+| 182 | `main` | `182_pagos_fecha_en_hora_argentina`, aplicada — **es la última del ledger**, verificado el 2026-08-19 |
 | 183 | rama de cargos de compra (abierta) | `183_compra_cargos_prorrateo` |
 | 184 | rama de cargos de compra (abierta) | `184_compra_cargos_funciones` |
 | 185 | rama de cargos de compra (abierta) | reservada en el encabezado de la 183 (RPCs + check de integridad); todavía sin archivo |
@@ -151,32 +151,56 @@ current_sucursal_id()` sobre la propia fila y **nadie valida que el padre
 referenciado sea de esa misma sucursal**; las FK no pasan por RLS, así que una
 línea podía colgarse de la compra de la otra sucursal, quedar invisible para su
 dueña —la policy de SELECT filtra por el `sucursal_id` de la línea— y moverle el
-costo igual. Al 2026-08-19 había **0 filas cruzadas**: era latente, no un
-incidente.
+costo igual. **Medido contra prod el 2026-08-19: 69 pares y 0 filas cruzadas.**
+Era latente, no un incidente.
 
-La **186** es sólo lectura: `auditoria_sucursal_cruzada()` y su helper
-`_pares_sucursal_cruzada()`, que descubren los pares hija→padre **del catálogo**,
-no de una lista. La **187** convierte cada FK de una columna en compuesta
-`(columna, sucursal_id) → padre(id, sucursal_id)`, el mismo patrón estructural
-que la 183 estrenó para `compra_cargos`. No toca ni una fila y aborta con la
-lista completa si encuentra alguna cruzada.
+La **186** es sólo lectura: `auditoria_sucursal_cruzada()` y sus helpers
+`_pares_sucursal_cruzada()` y `_tenant_col_por_tabla()`, que descubren los pares
+hija→padre **del catálogo**, no de una lista. La **187** convierte cada FK de una
+columna en compuesta `(columna, tenant) → padre(id, tenant)`, el mismo patrón
+estructural que la 183 estrena para `compra_cargos`. No toca ni una fila y aborta
+con la lista completa si encuentra alguna cruzada.
 
-Cuatro cosas que conviene no volver a descubrir:
+Seis cosas que conviene no volver a descubrir:
 
 - **Se eligió FK y no un `EXISTS` en las policies** porque casi toda la escritura
   de esta base entra por RPCs `SECURITY DEFINER`, que saltean RLS por definición:
-  una policy no las ve pasar. La FK sí.
+  una policy no las ve pasar. La FK sí. Refuerza el argumento que cinco de estas
+  hijas (`recorrido_cambios`, `promo_acumuladores`, `pedido_item_sustituciones`,
+  `comision_reglas`, `metas_preventista`) tengan **sólo policies de SELECT**: el
+  default-deny de RLS ya les cierra PostgREST, así que su único camino de
+  escritura es justo el que ninguna policy vigila.
+- **El tenant no siempre se llama `sucursal_id`.** `transferencias_stock` tiene
+  las dos columnas: `tenant_sucursal_id` es el tenant (es la que usa su policy de
+  escritura) y `sucursal_id` es **la otra punta del traslado**. Comparar contra la
+  segunda daba 4 de 13 filas "cruzadas" que son historia correcta —un traslado
+  tiene las dos puntas distintas por definición—; contra la primera dan 0. Si
+  alguien las "arreglaba", rompía datos buenos. De ahí `_tenant_col_por_tabla()`.
 - **`ON DELETE SET NULL` sobre una FK compuesta anula TODAS las columnas
-  referenciantes**, `sucursal_id` incluida, que es NOT NULL en los 60 pares ⇒ el
+  referenciantes**, el tenant incluido, que es NOT NULL en 68 de los 69 pares ⇒ el
   borrado del padre pasaría a fallar con un 23502. Hay que escribirlo
-  `ON DELETE SET NULL (columna)`, que existe recién en **PostgreSQL 15**. La 187
-  tiene un guard de versión.
-- **Que `sucursal_id` sea NOT NULL en los dos lados no es un detalle**: la FK es
-  MATCH SIMPLE y se da por satisfecha si CUALQUIERA de las columnas
-  referenciantes es NULL. Aflojar ese NOT NULL apaga la protección en silencio.
+  `ON DELETE SET NULL (columna)`, que existe recién en **PostgreSQL 15**. Prod
+  corre 17.6, así que el guard de versión de la 187 no va a saltar; queda igual.
+- **Que el tenant sea NOT NULL no es un detalle**: la FK es MATCH SIMPLE y se da
+  por satisfecha si CUALQUIERA de las columnas referenciantes es NULL. Aflojar ese
+  NOT NULL apaga media protección en silencio. El único caso hoy es
+  `comision_reglas.sucursal_id`, nullable a propósito (una regla sin sucursal es
+  global): el reporte lo marca `parcial` en vez de contarlo como cubierto.
+- **Un tenant NULL es "global", no "cruzada".** La primera versión contaba la
+  divergencia con `IS DISTINCT FROM` y una regla de comisión global —tenant NULL
+  contra un producto de otra sucursal— salía como violación, dejando el preflight
+  de la 187 abortando para siempre por una fila legal. El reporte tiene que contar
+  **exactamente** lo que la FK rechaza, o los dos dejan de decir lo mismo.
 - **El reporte cuenta los pares protegidos, no sólo los rotos.** La primera
   versión sólo miraba FK de una columna y después de la 187 el tablero quedaba
   vacío: un gate que se apaga solo justo cuando empieza a tener algo que vigilar.
+
+Y la razón de fondo para que todo salga del catálogo: **el repo predecía 60 pares
+y prod tiene 69.** Los 9 que faltaban (`comision_reglas`,
+`grupo_precio_escala_minimos`, `metas_preventista`, `productos.categoria_id`,
+`productos.marca_id`, `pedido_item_sustituciones.ajuste_producto_id_nuevo`) los
+encuentra `pg_constraint` y los habría perdido una lista escrita leyendo
+`migrations/`. Es la regla de oro de este archivo, cobrándose una más.
 
 El gate permanente es `scripts/check-sucursal-cruzada.mjs`, un paso más del
 workflow `integridad.yml`: una tabla nueva con `sucursal_id` y FK simple sale en
@@ -184,8 +208,10 @@ rojo al día siguiente. Ése es el punto — el hallazgo no fue "compra_items es
 mal", fue "hay una clase de tabla que está mal y nadie la miraba".
 
 `movimiento_sucursal_items` **no** está en la lista y no es un olvido: no tiene
-`sucursal_id` propio, la resuelve por join con el movimiento. Lo que no se copia
-no puede contradecirse. Igual `compra_cargo_repartos` (183).
+columna de tenant propia, la resuelve por join con el movimiento. Lo que no se
+copia no puede contradecirse. Igual `compra_cargo_repartos` (183), y por eso
+`movimientos_sucursal` —que sólo tiene `sucursal_origen_id` y
+`sucursal_destino_id`— ni siquiera entra al análisis.
 
 La **181** cierra la otra mitad de la auditoría adversarial: las invariantes que
 vivían en el front. Trigger `pedidos_proteger_columnas` (el chofer sólo escribe

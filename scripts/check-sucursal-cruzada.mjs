@@ -53,6 +53,7 @@ if (!Array.isArray(pares) || pares.length === 0) {
 
 const cruzados = pares.filter((p) => Number(p.divergentes) > 0);
 const sinProteger = pares.filter((p) => !p.protegida);
+const parciales = pares.filter((p) => p.protegida && p.parcial);
 
 console.log(`Aislamiento por sucursal: ${pares.length} pares hija->padre`);
 console.log(
@@ -63,6 +64,18 @@ if (sinProteger.length) {
   console.log('\nSin FK compuesta (la hija puede colgarse de un padre de otra sucursal):');
   for (const p of sinProteger) {
     console.log(`  ${p.hija}.${p.columna} -> ${p.padre}  (${p.filas} filas)`);
+  }
+}
+
+// Cobertura parcial: el tenant es nullable, y la FK compuesta es MATCH SIMPLE,
+// así que las filas sin sucursal quedan afuera del chequeo. NO es motivo de
+// rojo —hoy es `comision_reglas`, donde una regla sin sucursal es global a
+// propósito— pero tiene que verse: si mañana aparece un par nuevo acá, es que
+// alguien aflojó un NOT NULL y apagó media protección sin querer.
+if (parciales.length) {
+  console.log('\nCobertura parcial (tenant nullable: las filas sin sucursal no se chequean):');
+  for (const p of parciales) {
+    console.log(`  ${p.hija}.${p.columna} -> ${p.padre}`);
   }
 }
 
