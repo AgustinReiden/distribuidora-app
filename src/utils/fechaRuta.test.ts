@@ -7,7 +7,7 @@
  * cargado y media ruta sin entregar.
  */
 import { describe, it, expect } from 'vitest';
-import { fechaDeRuta } from './useRecorridoActivoQuery';
+import { fechaDeRuta } from './fechaRuta';
 
 describe('fechaDeRuta', () => {
   describe('en la madrugada acepta la ruta de ayer', () => {

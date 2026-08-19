@@ -13,8 +13,8 @@ import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
-import { fechaLocalISO } from '../../utils/formatters'
 import { guardarRuta, leerRuta, type RutaCacheada } from '../../lib/rutaOfflineCache'
+import { fechaDeRuta } from '../../utils/fechaRuta'
 import type { PedidoConCliente } from '../../components/rutaActiva/useEntregaParada'
 
 export interface RecorridoActivo {
@@ -53,36 +53,6 @@ interface RecorridoPedidoRaw {
   orden_entrega: number | null
   estado_entrega: string | null
   pedido: (Record<string, unknown> & { orden_entrega?: number | null }) | null
-}
-
-/** Hasta esta hora local, una ruta de ayer todavía puede estar en curso. */
-const HORA_CORTE_RUTA_DE_AYER = 6
-
-/**
- * Fechas de recorrido que le pueden corresponder al chofer.
- *
- * Antes esto era un `.eq('fecha', fechaLocalISO())` a secas y dejaba sin ruta a
- * quien cruza la medianoche terminando el reparto: a las 00:05 la ruta que está
- * haciendo pasa a ser "de ayer" y la pantalla le decía que el administrador
- * todavía no armó la suya, con el camión cargado.
- *
- * Pero aceptar la de ayer SIEMPRE es peor que el bug original. En producción hay
- * decenas de recorridos que quedaron `en_curso` de días pasados porque nada los
- * cierra, así que un chofer sin ruta hoy vería la de ayer —con paradas ya
- * entregadas— a las diez de la mañana. Por eso la ventana: sólo en la madrugada,
- * que es cuando "ayer" de verdad significa "el turno que todavía no terminé".
- * Pasada esa hora, no tener ruta es la respuesta correcta.
- *
- * La causa de fondo (recorridos que nunca se cierran) se ataca aparte.
- */
-export function fechaDeRuta(
-  hoy = fechaLocalISO(),
-  horaLocal = new Date().getHours(),
-): { hoy: string; ayer: string | null } {
-  if (horaLocal >= HORA_CORTE_RUTA_DE_AYER) return { hoy, ayer: null }
-  const d = new Date(`${hoy}T12:00:00`)
-  d.setDate(d.getDate() - 1)
-  return { hoy, ayer: fechaLocalISO(d) }
 }
 
 async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoActivo | null> {
