@@ -545,28 +545,11 @@ export interface UseOptimizarRutaReturn {
   limpiarRuta: () => void;
 }
 
-export interface PedidoOffline {
-  id: string;
-  data: PedidoFormInput;
-  timestamp: number;
-}
-
-export interface MermaOffline {
-  id: string;
-  data: MermaFormInput;
-  timestamp: number;
-}
-
-export interface UseOfflineSyncReturn {
-  isOnline: boolean;
-  pedidosPendientes: PedidoOffline[];
-  mermasPendientes: MermaOffline[];
-  sincronizando: boolean;
-  guardarPedidoOffline: (pedido: PedidoFormInput) => void;
-  guardarMermaOffline: (merma: MermaFormInput) => void;
-  sincronizarPedidos: (crearPedido: UsePedidosReturn['crearPedido'], descontarStock: UseProductosReturn['descontarStock']) => Promise<{ sincronizados: number; errores: string[] }>;
-  sincronizarMermas: (registrarMerma: UseMermasReturn['registrarMerma']) => Promise<{ sincronizados: number; errores: string[] }>;
-}
+// PedidoOffline / MermaOffline / UseOfflineSyncReturn viven en
+// `hooks/useOfflineSync.ts`, que es la implementacion real. Habia acá una copia
+// stale con OTRA forma (`{ id, data, timestamp }`) que no coincidia con nada:
+// quien la importara desde `../../types` tipaba contra una cola que no existe.
+export type { PedidoOffline, MermaOffline, UseOfflineSyncReturn } from '../hooks/useOfflineSync'
 
 // =============================================================================
 // APP STATE

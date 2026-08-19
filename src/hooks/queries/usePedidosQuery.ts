@@ -612,6 +612,23 @@ export function usePedidosAsignadosQuery(enabled = false) {
 }
 
 /**
+ * Invalida todas las queries de pedidos de la sucursal activa.
+ *
+ * Existe para que quien solo necesita "refrescar pedidos" no tenga que montar
+ * un hook que ademas trae datos. Es lo que reemplazo al `refetch` de
+ * `usePedidos()` en el arranque de la app, que hacia un fetch completo del
+ * historico para tirarlo a la basura.
+ */
+export function useInvalidatePedidos() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return () => {
+    queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+  }
+}
+
+/**
  * Hook para crear un pedido
  */
 export function useCrearPedidoMutation() {

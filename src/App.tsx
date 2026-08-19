@@ -6,10 +6,10 @@ import {
   setErrorNotifier,
   useAuth,
   useMermas,
-  usePedidos,
   useProductos
 } from './hooks/supabase'
 import { useInvalidateMetricas } from './hooks/queries'
+import { useCrearPedidoMutation, useInvalidatePedidos } from './hooks/queries/usePedidosQuery'
 import { lazyWithReload } from './utils/lazyWithReload'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { NotificationProvider, useNotification } from './contexts/NotificationContext'
@@ -76,14 +76,33 @@ function PendingSyncRuntime({
   sincronizarMermas
 }: PendingSyncRuntimeProps): ReactElement {
   const notify = useNotification()
-  const { productos, descontarStock, refetch: refetchProductos } = useProductos()
-  const { crearPedido, refetch: refetchPedidos } = usePedidos()
+  const { productos, refetch: refetchProductos } = useProductos()
   const { registrarMerma, refetch: refetchMermas } = useMermas()
   const invalidateMetricas = useInvalidateMetricas()
+  // Antes esto era `usePedidos()`, cuyo `useEffect` de montaje traia TODOS los
+  // pedidos (4.800+) con sus items y el producto entero embebido en cada linea,
+  // sin `limit` ni filtro — para quedarse solo con `crearPedido`. Y `crearPedido`
+  // repetia ese fetch despues de cada alta. Sobre el 3G de un preventista en
+  // ruta son varios MB antes de poder hacer nada, justo en el escenario donde la
+  // red es peor. Ahora se usa la mutation de TanStack Query, que solo invalida.
+  const crearPedidoMut = useCrearPedidoMutation()
+  const invalidarPedidos = useInvalidatePedidos()
 
   const refetchMetricas = useCallback(async () => {
     invalidateMetricas()
   }, [invalidateMetricas])
+
+  const refetchPedidos = useCallback(async () => {
+    invalidarPedidos()
+  }, [invalidarPedidos])
+
+  // El replay le pasa el objeto que define `CrearPedidoFunction`; la mutation
+  // toma exactamente esa forma, asi que el adaptador es solo el `mutateAsync`.
+  const crearPedido = useCallback(
+    (input: Parameters<SyncDependencies['crearPedido']>[0]) =>
+      crearPedidoMut.mutateAsync(input as Parameters<typeof crearPedidoMut.mutateAsync>[0]),
+    [crearPedidoMut],
+  )
 
   const { handleSincronizar } = useSyncManager({
     isOnline,
@@ -94,7 +113,6 @@ function PendingSyncRuntime({
     sincronizarPedidos,
     sincronizarMermas,
     crearPedido: crearPedido as SyncDependencies['crearPedido'],
-    descontarStock: descontarStock as SyncDependencies['descontarStock'],
     registrarMerma: registrarMerma as SyncDependencies['registrarMerma'],
     refetchPedidos,
     refetchProductos,
