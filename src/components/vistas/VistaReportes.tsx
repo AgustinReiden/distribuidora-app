@@ -5,11 +5,17 @@
  * - Por Preventista
  * - Cuentas por Cobrar (con aging)
  * - Rentabilidad por Producto
- * - Ventas por Cliente
- * - Ventas por Zona
+ * - Ventas por Cliente  (RPC reporte_ventas_por_cliente, mig 197)
+ * - Ventas por Zona     (mismo RPC, mismo cache)
+ * - Valuación de Stock
  *
  * Los sub-componentes están extraídos en archivos separados para
  * mejor mantenibilidad y separación de concerns.
+ *
+ * Nota sobre los filtros: "Por Cliente" y "Por Zona" NO usan el panel
+ * "Filtrar por Fecha" de arriba. Tienen el suyo (`FiltrosVentas`) porque además
+ * de fechas filtran por preventista y ofrecen atajos de mes; el estado vive acá
+ * para que las dos pestañas compartan la misma entrada de cache.
  */
 import React, { useState, useEffect, ChangeEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -21,8 +27,6 @@ import type {
   ReportePreventista,
   ReporteCuentaPorCobrar,
   ReporteRentabilidad,
-  VentaPorCliente,
-  VentaPorZona,
   TotalesRentabilidad
 } from '../../types';
 
@@ -33,7 +37,10 @@ import {
   ReporteRentabilidadSection,
   ReporteVentasClientes,
   ReporteVentasZonas,
-  ReporteValuacionInventario
+  ReporteValuacionInventario,
+  FiltrosVentas,
+  filtrosVentasIniciales,
+  type FiltrosVentasValue
 } from './reportes';
 
 // =============================================================================
@@ -46,6 +53,7 @@ export interface VistaReportesProps {
   loading: boolean;
   onCalcularReporte: (fechaDesde: string | null, fechaHasta: string | null) => Promise<void>;
   onVerFichaCliente?: (cliente: ClienteDB) => void;
+  onVerFichaClienteId?: (clienteId: string) => void;
 }
 
 interface TabConfig {
@@ -56,6 +64,9 @@ interface TabConfig {
 
 type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion';
 
+/** Tabs que traen sus propios filtros y no usan el panel de fechas de arriba. */
+const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion'];
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -65,20 +76,20 @@ export default function VistaReportes({
   reporteInicializado,
   loading,
   onCalcularReporte,
-  onVerFichaCliente
+  onVerFichaCliente,
+  onVerFichaClienteId
 }: VistaReportesProps): React.ReactElement {
   // Estado local
   const [fechaDesde, setFechaDesde] = useState<string>('');
   const [fechaHasta, setFechaHasta] = useState<string>('');
   const [activeTab, setActiveTab] = useState<ReportTabId>('preventistas');
+  const [filtrosVentas, setFiltrosVentas] = useState<FiltrosVentasValue>(filtrosVentasIniciales);
 
   // Reportes financieros
   const {
     loading: loadingFinanciero,
     generarReporteCuentasPorCobrar,
-    generarReporteRentabilidad,
-    generarReporteVentasPorCliente,
-    generarReporteVentasPorZona
+    generarReporteRentabilidad
   } = useReportesFinancieros();
 
   // Estados de reportes
@@ -87,8 +98,6 @@ export default function VistaReportes({
     productos: [],
     totales: {} as TotalesRentabilidad
   });
-  const [reporteClientes, setReporteClientes] = useState<VentaPorCliente[]>([]);
-  const [reporteZonas, setReporteZonas] = useState<VentaPorZona[]>([]);
 
   // Configuración de tabs
   const tabs: TabConfig[] = [
@@ -123,21 +132,6 @@ export default function VistaReportes({
             setReporteRentabilidad(rent);
           }
           break;
-        case 'clientes':
-          if (reporteClientes.length === 0) {
-            const clientes = await generarReporteVentasPorCliente(
-              fechaDesde || null,
-              fechaHasta || null
-            );
-            setReporteClientes(clientes);
-          }
-          break;
-        case 'zonas':
-          if (reporteZonas.length === 0) {
-            const zonas = await generarReporteVentasPorZona(fechaDesde || null, fechaHasta || null);
-            setReporteZonas(zonas);
-          }
-          break;
       }
     };
 
@@ -162,19 +156,6 @@ export default function VistaReportes({
           setReporteRentabilidad(rent);
           break;
         }
-        case 'clientes': {
-          const clientes = await generarReporteVentasPorCliente(
-            fechaDesde || null,
-            fechaHasta || null
-          );
-          setReporteClientes(clientes);
-          break;
-        }
-        case 'zonas': {
-          const zonas = await generarReporteVentasPorZona(fechaDesde || null, fechaHasta || null);
-          setReporteZonas(zonas);
-          break;
-        }
       }
     }
   };
@@ -186,6 +167,7 @@ export default function VistaReportes({
   };
 
   const isLoading = loading || loadingFinanciero;
+  const esTabDeVentas = activeTab === 'clientes' || activeTab === 'zonas';
 
   return (
     <div className="space-y-4">
@@ -209,8 +191,12 @@ export default function VistaReportes({
         ))}
       </div>
 
-      {/* Filtros de fecha (la valuación es una foto del stock actual: no aplican) */}
-      {activeTab !== 'valuacion' && (
+      {/* Filtros propios de las pestañas de ventas: preventista + período */}
+      {esTabDeVentas && <FiltrosVentas value={filtrosVentas} onChange={setFiltrosVentas} />}
+
+      {/* Filtros de fecha genéricos (la valuación es una foto del stock actual y
+          las pestañas de ventas traen los suyos: no aplican) */}
+      {!TABS_CON_FILTROS_PROPIOS.includes(activeTab) && (
       <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm p-4">
         <h2 className="font-semibold mb-3 text-gray-700 dark:text-gray-200">Filtrar por Fecha</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
@@ -299,17 +285,19 @@ export default function VistaReportes({
 
       {activeTab === 'clientes' && (
         <ReporteVentasClientes
-          reporte={reporteClientes}
-          loading={loadingFinanciero}
+          desde={filtrosVentas.desde}
+          hasta={filtrosVentas.hasta}
+          preventistaId={filtrosVentas.preventistaId}
           formatPrecio={formatPrecio}
-          onVerCliente={onVerFichaCliente as ((cliente: ClienteDB | null) => void) | undefined}
+          onVerCliente={onVerFichaClienteId}
         />
       )}
 
       {activeTab === 'zonas' && (
         <ReporteVentasZonas
-          reporte={reporteZonas}
-          loading={loadingFinanciero}
+          desde={filtrosVentas.desde}
+          hasta={filtrosVentas.hasta}
+          preventistaId={filtrosVentas.preventistaId}
           formatPrecio={formatPrecio}
         />
       )}

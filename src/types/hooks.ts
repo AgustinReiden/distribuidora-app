@@ -1500,28 +1500,14 @@ export interface ReporteRentabilidad {
   totales: TotalesRentabilidad;
 }
 
-export interface VentaPorCliente {
-  cliente: ClienteDB | null;
-  cantidadPedidos: number;
-  totalVentas: number;
-  pedidosPagados: number;
-  pedidosPendientes: number;
-}
-
-export interface VentaPorZona {
-  zona: string;
-  cantidadPedidos: number;
-  totalVentas: number;
-  cantidadClientes: number;
-  ticketPromedio: number;
-}
+// Las ventas por cliente y por zona ya no se agregan en el navegador: salen del
+// RPC `reporte_ventas_por_cliente` (mig 197). Sus tipos viven en
+// `hooks/queries/useVentasPorClienteQuery.ts`.
 
 export interface UseReportesFinancierosReturn {
   loading: boolean;
   generarReporteCuentasPorCobrar: () => Promise<ReporteCuentaPorCobrar[]>;
   generarReporteRentabilidad: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<ReporteRentabilidad>;
-  generarReporteVentasPorCliente: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<VentaPorCliente[]>;
-  generarReporteVentasPorZona: (fechaDesde?: string | null, fechaHasta?: string | null) => Promise<VentaPorZona[]>;
 }
 
 // =============================================================================
