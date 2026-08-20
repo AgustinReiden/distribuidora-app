@@ -1,0 +1,2715 @@
+{
+  "_": "GENERADO por scripts/espejo-motor-compras.mjs --fijar. No editar a mano. Es la salida del motor de SQL (mig 193) para cada caso, redondeada a los mismos decimales a los que el espejo compara: la referencia contra la que prorrateoCompra.espejo.test.ts corre el motor de TypeScript sin base. Sin fecha a proposito: regenerarlo sin cambios tiene que dar un archivo identico, para que un diff vacio signifique \"el SQL no se movio\".",
+  "decimales": 6,
+  "casos": [
+    {
+      "caso": "reparto · proporcional al peso",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 1000,
+        "pesos": {
+          "1": 1,
+          "2": 1
+        }
+      },
+      "celdas": 2,
+      "sql": {
+        "1": 500,
+        "2": 500
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · la suma da el monto exacto",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 1000,
+        "pesos": {
+          "1": 1,
+          "2": 1,
+          "3": 1
+        }
+      },
+      "celdas": 3,
+      "sql": {
+        "1": 333.34,
+        "2": 333.33,
+        "3": 333.33
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · el residuo va a la linea de mayor peso",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 100,
+        "pesos": {
+          "1": 1,
+          "2": 1,
+          "3": 4
+        }
+      },
+      "celdas": 3,
+      "sql": {
+        "1": 16.67,
+        "2": 16.67,
+        "3": 66.66
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · empate de peso maximo: desempata por menor id",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 100,
+        "pesos": {
+          "3": 1,
+          "5": 1,
+          "7": 1
+        }
+      },
+      "celdas": 3,
+      "sql": {
+        "3": 33.34,
+        "5": 33.33,
+        "7": 33.33
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · peso cero excluye la linea",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 880,
+        "pesos": {
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      "celdas": 3,
+      "sql": {
+        "1": 0,
+        "2": 0,
+        "3": 880
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · monto negativo (bonificacion)",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": -100,
+        "pesos": {
+          "1": 1,
+          "2": 1,
+          "3": 1
+        }
+      },
+      "celdas": 3,
+      "sql": {
+        "1": -33.34,
+        "2": -33.33,
+        "3": -33.33
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · redondeo de Postgres: medio centavo negativo",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": -0.01,
+        "pesos": {
+          "1": 1,
+          "2": 1
+        }
+      },
+      "celdas": 2,
+      "sql": {
+        "1": 0,
+        "2": -0.01
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · suma de pesos cero devuelve vacio",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 1000,
+        "pesos": {
+          "1": 0,
+          "2": 0
+        }
+      },
+      "celdas": 0,
+      "sql": {},
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · sin pesos devuelve vacio",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 100,
+        "pesos": {}
+      },
+      "celdas": 0,
+      "sql": {},
+      "sql_error": null
+    },
+    {
+      "caso": "reparto · el flete real: 1.900.000 sobre 26 pallets",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 1900000,
+        "pesos": {
+          "1": 0.5,
+          "2": 0.5,
+          "3": 2,
+          "4": 0.5,
+          "5": 0.5,
+          "6": 1,
+          "7": 1,
+          "8": 2,
+          "9": 1,
+          "10": 2,
+          "11": 4,
+          "12": 1,
+          "13": 1,
+          "14": 2,
+          "15": 1,
+          "16": 1,
+          "17": 1,
+          "18": 1,
+          "19": 1,
+          "20": 1,
+          "21": 1
+        }
+      },
+      "celdas": 21,
+      "sql": {
+        "1": 36538.46,
+        "2": 36538.46,
+        "3": 146153.85,
+        "4": 36538.46,
+        "5": 36538.46,
+        "6": 73076.92,
+        "7": 73076.92,
+        "8": 146153.85,
+        "9": 73076.92,
+        "10": 146153.85,
+        "11": 292307.72,
+        "12": 73076.92,
+        "13": 73076.92,
+        "14": 146153.85,
+        "15": 73076.92,
+        "16": 73076.92,
+        "17": 73076.92,
+        "18": 73076.92,
+        "19": 73076.92,
+        "20": 73076.92,
+        "21": 73076.92
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · sin cargos: neto x (1 + II%)",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 14,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 8.6956,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 108.6956
+          }
+        ],
+        "totales": {
+          "iva": 210,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 1000,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 86.956
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · un cargo NO gravado entra al costo pero no a la base de IVA",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": 500,
+            "condicion_iva": "no_gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 1
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 14,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 21,
+            "cargos": 50,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 150
+          }
+        ],
+        "totales": {
+          "iva": 210,
+          "no_gravado": 500,
+          "neto_exento": 0,
+          "neto_gravado": 1000,
+          "cargos_al_costo": 500,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · un cargo fuera de factura entra al costo y no al IVA",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": 500,
+            "condicion_iva": "gravado",
+            "en_factura": false,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 1
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 14,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 150
+          }
+        ],
+        "totales": {
+          "iva": 210,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 1000,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · afectaBaseII=false: baja el IVA pero no el impuesto interno",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 10,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": -200,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 1
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 14,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 10,
+            "iva": 16.8,
+            "cargos": 0,
+            "base_iva": 80,
+            "costo_neto": 100,
+            "costo_real": 90
+          }
+        ],
+        "totales": {
+          "iva": 168,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 800,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 100
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · afectaBaseII=true: baja las dos bases",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 10,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": -200,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": true,
+            "pesos": {
+              "1": 1
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 14,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 8,
+            "iva": 16.8,
+            "cargos": 0,
+            "base_iva": 80,
+            "costo_neto": 100,
+            "costo_real": 88
+          }
+        ],
+        "totales": {
+          "iva": 168,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 800,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 80
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · el factor de ajuste cuadra el II declarado",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 10,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {
+          "10": 110
+        }
+      },
+      "celdas": 15,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 11,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 111
+          }
+        ],
+        "totales": {
+          "iva": 210,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 1000,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 110
+        },
+        "factor_ajuste": {
+          "10": 1.1
+        }
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · cantidad 0 no explota",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 0,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 14,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 0,
+            "cargos": 0,
+            "base_iva": 0,
+            "costo_neto": 0,
+            "costo_real": 0
+          }
+        ],
+        "totales": {
+          "iva": 0,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 0,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · la linea exenta no suma a netoGravado pero tiene costo",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 0,
+            "condicion_iva": "exento"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 21,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 100
+          },
+          {
+            "id": 2,
+            "ii": 0,
+            "iva": 0,
+            "cargos": 0,
+            "base_iva": 0,
+            "costo_neto": 100,
+            "costo_real": 100
+          }
+        ],
+        "totales": {
+          "iva": 210,
+          "no_gravado": 0,
+          "neto_exento": 1000,
+          "neto_gravado": 1000,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · la linea no gravada abre su propio total",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 0,
+            "condicion_iva": "no_gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 21,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 100
+          },
+          {
+            "id": 2,
+            "ii": 0,
+            "iva": 0,
+            "cargos": 0,
+            "base_iva": 0,
+            "costo_neto": 100,
+            "costo_real": 100
+          }
+        ],
+        "totales": {
+          "iva": 210,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 1000,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 1000,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · un cargo en factura que no prorratea: no gravado y no costo",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": 500,
+            "condicion_iva": "no_gravado",
+            "en_factura": true,
+            "prorratea_al_costo": false,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 1
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 14,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 0,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 100
+          }
+        ],
+        "totales": {
+          "iva": 210,
+          "no_gravado": 500,
+          "neto_exento": 0,
+          "neto_gravado": 1000,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 0
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "motor · 4.17 y 4.1667 son alicuotas distintas",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 4.17,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {
+          "4.1667": 50
+        }
+      },
+      "celdas": 22,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 5,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 105
+          },
+          {
+            "id": 2,
+            "ii": 4.17,
+            "iva": 21,
+            "cargos": 0,
+            "base_iva": 100,
+            "costo_neto": 100,
+            "costo_real": 104.17
+          }
+        ],
+        "totales": {
+          "iva": 420,
+          "no_gravado": 0,
+          "neto_exento": 0,
+          "neto_gravado": 2000,
+          "cargos_al_costo": 0,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 91.7
+        },
+        "factor_ajuste": {
+          "4.1667": 1.19999
+        }
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "testigo · factura A0005-00461415 completa",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.golden.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 60,
+            "costo_unitario": 4793.61,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 60,
+            "costo_unitario": 4793.61,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 3,
+            "cantidad": 120,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 4,
+            "cantidad": 75,
+            "costo_unitario": 3994.67,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 5,
+            "cantidad": 75,
+            "costo_unitario": 3994.67,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 6,
+            "cantidad": 120,
+            "costo_unitario": 2972.04,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 7,
+            "cantidad": 80,
+            "costo_unitario": 2316.91,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 8,
+            "cantidad": 280,
+            "costo_unitario": 2197.07,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 9,
+            "cantidad": 120,
+            "costo_unitario": 4626.22,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 10,
+            "cantidad": 150,
+            "costo_unitario": 5123.97,
+            "bonificacion": 0.6,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 11,
+            "cantidad": 240,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 12,
+            "cantidad": 60,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 13,
+            "cantidad": 60,
+            "costo_unitario": 5992.01,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 14,
+            "cantidad": 120,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 15,
+            "cantidad": 60,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 16,
+            "cantidad": 115,
+            "costo_unitario": 8347.11,
+            "bonificacion": 0.6,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 17,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 18,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 19,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 20,
+            "cantidad": 120,
+            "costo_unitario": 2796.27,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 21,
+            "cantidad": 168,
+            "costo_unitario": 1030.63,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "Flete y descarga",
+            "monto": 1900000,
+            "condicion_iva": "no_gravado",
+            "en_factura": false,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 0.5,
+              "2": 0.5,
+              "3": 2,
+              "4": 0.5,
+              "5": 0.5,
+              "6": 1,
+              "7": 1,
+              "8": 2,
+              "9": 1,
+              "10": 2,
+              "11": 4,
+              "12": 1,
+              "13": 1,
+              "14": 2,
+              "15": 1,
+              "16": 1,
+              "17": 1,
+              "18": 1,
+              "19": 1,
+              "20": 1,
+              "21": 1
+            }
+          },
+          {
+            "id": 2,
+            "concepto": "Pallets x 9 tacos",
+            "monto": 162000,
+            "condicion_iva": "no_gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 0.5,
+              "2": 0.5,
+              "3": 2,
+              "4": 1,
+              "5": 1,
+              "6": 1,
+              "7": 1,
+              "8": 2,
+              "9": 1,
+              "10": 2,
+              "11": 4,
+              "12": 1,
+              "13": 1,
+              "14": 2,
+              "15": 1,
+              "16": 1,
+              "17": 1,
+              "18": 1,
+              "19": 1,
+              "20": 1,
+              "21": 1
+            }
+          },
+          {
+            "id": 3,
+            "concepto": "Separadores bidon",
+            "monto": 8800,
+            "condicion_iva": "no_gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "21": 1
+            }
+          },
+          {
+            "id": 4,
+            "concepto": "Bonif. promo COLA 3.00",
+            "monto": -103465.32,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": true,
+            "pesos": {
+              "3": 689768.8056,
+              "11": 1379537.6112
+            }
+          },
+          {
+            "id": 5,
+            "concepto": "Bonif. promo 3000cc",
+            "monto": -203318.28,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "3": 689768.8056,
+              "11": 1379537.6112,
+              "12": 344884.4028,
+              "13": 357363.47640000004,
+              "14": 689768.8056,
+              "15": 344884.4028
+            }
+          },
+          {
+            "id": 6,
+            "concepto": "Redondeo",
+            "monto": -0.49,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": true,
+            "pesos": {
+              "1": 285890.9004,
+              "2": 285890.9004,
+              "3": 689768.8056,
+              "4": 297802.6485,
+              "5": 297802.6485,
+              "6": 354504.9312,
+              "7": 184240.6832,
+              "8": 611488.5224000001,
+              "9": 551815.5216,
+              "10": 763983.927,
+              "11": 1379537.6112,
+              "12": 344884.4028,
+              "13": 357363.47640000004,
+              "14": 689768.8056,
+              "15": 344884.4028,
+              "16": 954158.1441,
+              "17": 531994.764,
+              "18": 531994.764,
+              "19": 531994.764,
+              "20": 333539.08560000005,
+              "21": 172106.96496
+            }
+          }
+        ],
+        "ii_declarado": {
+          "8.6956": 338884.46,
+          "4.1667": 199027.21
+        }
+      },
+      "celdas": 156,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 198.536928,
+            "iva": 1000.618116,
+            "cargos": 658.974333,
+            "base_iva": 4764.848173,
+            "costo_neto": 4764.84834,
+            "costo_real": 5622.359435
+          },
+          {
+            "id": 2,
+            "ii": 198.536928,
+            "iva": 1000.618116,
+            "cargos": 658.974333,
+            "base_iva": 4764.848173,
+            "costo_neto": 4764.84834,
+            "costo_real": 5622.359435
+          },
+          {
+            "id": 3,
+            "ii": 474.838052,
+            "iva": 1082.260507,
+            "cargos": 1317.94875,
+            "base_iva": 5153.621463,
+            "costo_neto": 5748.07338,
+            "costo_real": 6946.408266
+          },
+          {
+            "id": 4,
+            "ii": 165.447233,
+            "iva": 833.847388,
+            "cargos": 567.179467,
+            "base_iva": 3970.701847,
+            "costo_neto": 3970.70198,
+            "costo_real": 4703.328547
+          },
+          {
+            "id": 5,
+            "ii": 165.447233,
+            "iva": 833.847388,
+            "cargos": 567.179467,
+            "base_iva": 3970.701847,
+            "costo_neto": 3970.70198,
+            "costo_real": 4703.328547
+          },
+          {
+            "id": 6,
+            "ii": 123.092967,
+            "iva": 620.383595,
+            "cargos": 658.974333,
+            "base_iva": 2954.207593,
+            "costo_neto": 2954.20776,
+            "costo_real": 3736.274894
+          },
+          {
+            "id": 7,
+            "ii": 95.959451,
+            "iva": 483.631767,
+            "cargos": 988.4615,
+            "base_iva": 2303.008415,
+            "costo_neto": 2303.00854,
+            "costo_real": 3387.429366
+          },
+          {
+            "id": 8,
+            "ii": 90.996039,
+            "iva": 458.616369,
+            "cargos": 564.835179,
+            "base_iva": 2183.887473,
+            "costo_neto": 2183.88758,
+            "costo_real": 2839.71869
+          },
+          {
+            "id": 9,
+            "ii": 399.863965,
+            "iva": 965.67711,
+            "cargos": 658.974333,
+            "base_iva": 4598.46243,
+            "costo_neto": 4598.46268,
+            "costo_real": 5657.300728
+          },
+          {
+            "id": 10,
+            "ii": 0,
+            "iva": 1069.577442,
+            "cargos": 1054.359,
+            "base_iva": 5093.225913,
+            "costo_neto": 5093.22618,
+            "costo_real": 6147.584913
+          },
+          {
+            "id": 11,
+            "ii": 474.838049,
+            "iva": 1082.260499,
+            "cargos": 1317.948833,
+            "base_iva": 5153.621422,
+            "costo_neto": 5748.07338,
+            "costo_real": 6946.408304
+          },
+          {
+            "id": 12,
+            "ii": 499.829522,
+            "iva": 1142.61526,
+            "cargos": 1317.948667,
+            "base_iva": 5441.025047,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.803236
+          },
+          {
+            "id": 13,
+            "ii": 248.171051,
+            "iva": 1183.958917,
+            "cargos": 1317.948667,
+            "base_iva": 5637.899607,
+            "costo_neto": 5956.05794,
+            "costo_real": 7204.019325
+          },
+          {
+            "id": 14,
+            "ii": 499.82953,
+            "iva": 1142.615277,
+            "cargos": 1317.94875,
+            "base_iva": 5441.02513,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.80341
+          },
+          {
+            "id": 15,
+            "ii": 499.829522,
+            "iva": 1142.61526,
+            "cargos": 1317.948667,
+            "base_iva": 5441.025047,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.803236
+          },
+          {
+            "id": 16,
+            "ii": 0,
+            "iva": 1742.375668,
+            "cargos": 687.625391,
+            "base_iva": 8297.026992,
+            "costo_neto": 8297.02734,
+            "costo_real": 8984.652383
+          },
+          {
+            "id": 17,
+            "ii": 158.333035,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130635
+          },
+          {
+            "id": 18,
+            "ii": 158.333035,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130635
+          },
+          {
+            "id": 19,
+            "ii": 158.333035,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130635
+          },
+          {
+            "id": 20,
+            "ii": 115.813102,
+            "iva": 583.693365,
+            "cargos": 658.974333,
+            "base_iva": 2779.492213,
+            "costo_neto": 2779.49238,
+            "costo_real": 3554.279648
+          },
+          {
+            "id": 21,
+            "ii": 42.685598,
+            "iva": 215.133694,
+            "cargos": 523.076905,
+            "base_iva": 1024.44616,
+            "costo_neto": 1024.44622,
+            "costo_real": 1590.208663
+          }
+        ],
+        "totales": {
+          "iva": 2139612.842695,
+          "no_gravado": 170800,
+          "neto_exento": 0,
+          "neto_gravado": 10188632.58426,
+          "cargos_al_costo": 2070800,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 537911.67
+        },
+        "factor_ajuste": {
+          "4.1667": 1,
+          "8.6956": 1
+        }
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "testigo · la misma factura sin el cargo de separadores",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.golden.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 60,
+            "costo_unitario": 4793.61,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 60,
+            "costo_unitario": 4793.61,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 3,
+            "cantidad": 120,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 4,
+            "cantidad": 75,
+            "costo_unitario": 3994.67,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 5,
+            "cantidad": 75,
+            "costo_unitario": 3994.67,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 6,
+            "cantidad": 120,
+            "costo_unitario": 2972.04,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 7,
+            "cantidad": 80,
+            "costo_unitario": 2316.91,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 8,
+            "cantidad": 280,
+            "costo_unitario": 2197.07,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 9,
+            "cantidad": 120,
+            "costo_unitario": 4626.22,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 10,
+            "cantidad": 150,
+            "costo_unitario": 5123.97,
+            "bonificacion": 0.6,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 11,
+            "cantidad": 240,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 12,
+            "cantidad": 60,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 13,
+            "cantidad": 60,
+            "costo_unitario": 5992.01,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 14,
+            "cantidad": 120,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 15,
+            "cantidad": 60,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 16,
+            "cantidad": 115,
+            "costo_unitario": 8347.11,
+            "bonificacion": 0.6,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 17,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 18,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 19,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 20,
+            "cantidad": 120,
+            "costo_unitario": 2796.27,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 21,
+            "cantidad": 168,
+            "costo_unitario": 1030.63,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "Flete y descarga",
+            "monto": 1900000,
+            "condicion_iva": "no_gravado",
+            "en_factura": false,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 0.5,
+              "2": 0.5,
+              "3": 2,
+              "4": 0.5,
+              "5": 0.5,
+              "6": 1,
+              "7": 1,
+              "8": 2,
+              "9": 1,
+              "10": 2,
+              "11": 4,
+              "12": 1,
+              "13": 1,
+              "14": 2,
+              "15": 1,
+              "16": 1,
+              "17": 1,
+              "18": 1,
+              "19": 1,
+              "20": 1,
+              "21": 1
+            }
+          },
+          {
+            "id": 2,
+            "concepto": "Pallets x 9 tacos",
+            "monto": 162000,
+            "condicion_iva": "no_gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 0.5,
+              "2": 0.5,
+              "3": 2,
+              "4": 1,
+              "5": 1,
+              "6": 1,
+              "7": 1,
+              "8": 2,
+              "9": 1,
+              "10": 2,
+              "11": 4,
+              "12": 1,
+              "13": 1,
+              "14": 2,
+              "15": 1,
+              "16": 1,
+              "17": 1,
+              "18": 1,
+              "19": 1,
+              "20": 1,
+              "21": 1
+            }
+          },
+          {
+            "id": 4,
+            "concepto": "Bonif. promo COLA 3.00",
+            "monto": -103465.32,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": true,
+            "pesos": {
+              "3": 689768.8056,
+              "11": 1379537.6112
+            }
+          },
+          {
+            "id": 5,
+            "concepto": "Bonif. promo 3000cc",
+            "monto": -203318.28,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "3": 689768.8056,
+              "11": 1379537.6112,
+              "12": 344884.4028,
+              "13": 357363.47640000004,
+              "14": 689768.8056,
+              "15": 344884.4028
+            }
+          },
+          {
+            "id": 6,
+            "concepto": "Redondeo",
+            "monto": -0.49,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": true,
+            "pesos": {
+              "1": 285890.9004,
+              "2": 285890.9004,
+              "3": 689768.8056,
+              "4": 297802.6485,
+              "5": 297802.6485,
+              "6": 354504.9312,
+              "7": 184240.6832,
+              "8": 611488.5224000001,
+              "9": 551815.5216,
+              "10": 763983.927,
+              "11": 1379537.6112,
+              "12": 344884.4028,
+              "13": 357363.47640000004,
+              "14": 689768.8056,
+              "15": 344884.4028,
+              "16": 954158.1441,
+              "17": 531994.764,
+              "18": 531994.764,
+              "19": 531994.764,
+              "20": 333539.08560000005,
+              "21": 172106.96496
+            }
+          }
+        ],
+        "ii_declarado": {
+          "8.6956": 338884.46,
+          "4.1667": 199027.21
+        }
+      },
+      "celdas": 156,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 198.536928,
+            "iva": 1000.618116,
+            "cargos": 658.974333,
+            "base_iva": 4764.848173,
+            "costo_neto": 4764.84834,
+            "costo_real": 5622.359435
+          },
+          {
+            "id": 2,
+            "ii": 198.536928,
+            "iva": 1000.618116,
+            "cargos": 658.974333,
+            "base_iva": 4764.848173,
+            "costo_neto": 4764.84834,
+            "costo_real": 5622.359435
+          },
+          {
+            "id": 3,
+            "ii": 474.838052,
+            "iva": 1082.260507,
+            "cargos": 1317.94875,
+            "base_iva": 5153.621463,
+            "costo_neto": 5748.07338,
+            "costo_real": 6946.408266
+          },
+          {
+            "id": 4,
+            "ii": 165.447233,
+            "iva": 833.847388,
+            "cargos": 567.179467,
+            "base_iva": 3970.701847,
+            "costo_neto": 3970.70198,
+            "costo_real": 4703.328547
+          },
+          {
+            "id": 5,
+            "ii": 165.447233,
+            "iva": 833.847388,
+            "cargos": 567.179467,
+            "base_iva": 3970.701847,
+            "costo_neto": 3970.70198,
+            "costo_real": 4703.328547
+          },
+          {
+            "id": 6,
+            "ii": 123.092967,
+            "iva": 620.383595,
+            "cargos": 658.974333,
+            "base_iva": 2954.207593,
+            "costo_neto": 2954.20776,
+            "costo_real": 3736.274894
+          },
+          {
+            "id": 7,
+            "ii": 95.959451,
+            "iva": 483.631767,
+            "cargos": 988.4615,
+            "base_iva": 2303.008415,
+            "costo_neto": 2303.00854,
+            "costo_real": 3387.429366
+          },
+          {
+            "id": 8,
+            "ii": 90.996039,
+            "iva": 458.616369,
+            "cargos": 564.835179,
+            "base_iva": 2183.887473,
+            "costo_neto": 2183.88758,
+            "costo_real": 2839.71869
+          },
+          {
+            "id": 9,
+            "ii": 399.863965,
+            "iva": 965.67711,
+            "cargos": 658.974333,
+            "base_iva": 4598.46243,
+            "costo_neto": 4598.46268,
+            "costo_real": 5657.300728
+          },
+          {
+            "id": 10,
+            "ii": 0,
+            "iva": 1069.577442,
+            "cargos": 1054.359,
+            "base_iva": 5093.225913,
+            "costo_neto": 5093.22618,
+            "costo_real": 6147.584913
+          },
+          {
+            "id": 11,
+            "ii": 474.838049,
+            "iva": 1082.260499,
+            "cargos": 1317.948833,
+            "base_iva": 5153.621422,
+            "costo_neto": 5748.07338,
+            "costo_real": 6946.408304
+          },
+          {
+            "id": 12,
+            "ii": 499.829522,
+            "iva": 1142.61526,
+            "cargos": 1317.948667,
+            "base_iva": 5441.025047,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.803236
+          },
+          {
+            "id": 13,
+            "ii": 248.171051,
+            "iva": 1183.958917,
+            "cargos": 1317.948667,
+            "base_iva": 5637.899607,
+            "costo_neto": 5956.05794,
+            "costo_real": 7204.019325
+          },
+          {
+            "id": 14,
+            "ii": 499.82953,
+            "iva": 1142.615277,
+            "cargos": 1317.94875,
+            "base_iva": 5441.02513,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.80341
+          },
+          {
+            "id": 15,
+            "ii": 499.829522,
+            "iva": 1142.61526,
+            "cargos": 1317.948667,
+            "base_iva": 5441.025047,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.803236
+          },
+          {
+            "id": 16,
+            "ii": 0,
+            "iva": 1742.375668,
+            "cargos": 687.625391,
+            "base_iva": 8297.026992,
+            "costo_neto": 8297.02734,
+            "costo_real": 8984.652383
+          },
+          {
+            "id": 17,
+            "ii": 158.333035,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130635
+          },
+          {
+            "id": 18,
+            "ii": 158.333035,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130635
+          },
+          {
+            "id": 19,
+            "ii": 158.333035,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130635
+          },
+          {
+            "id": 20,
+            "ii": 115.813102,
+            "iva": 583.693365,
+            "cargos": 658.974333,
+            "base_iva": 2779.492213,
+            "costo_neto": 2779.49238,
+            "costo_real": 3554.279648
+          },
+          {
+            "id": 21,
+            "ii": 42.685598,
+            "iva": 215.133694,
+            "cargos": 470.695952,
+            "base_iva": 1024.44616,
+            "costo_neto": 1024.44622,
+            "costo_real": 1537.827711
+          }
+        ],
+        "totales": {
+          "iva": 2139612.842695,
+          "no_gravado": 162000,
+          "neto_exento": 0,
+          "neto_gravado": 10188632.58426,
+          "cargos_al_costo": 2062000,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 537911.67
+        },
+        "factor_ajuste": {
+          "4.1667": 1,
+          "8.6956": 1
+        }
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "testigo · sin el II declarado (factor 1, sin ajuste)",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.golden.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 60,
+            "costo_unitario": 4793.61,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 2,
+            "cantidad": 60,
+            "costo_unitario": 4793.61,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 3,
+            "cantidad": 120,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 4,
+            "cantidad": 75,
+            "costo_unitario": 3994.67,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 5,
+            "cantidad": 75,
+            "costo_unitario": 3994.67,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 6,
+            "cantidad": 120,
+            "costo_unitario": 2972.04,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 7,
+            "cantidad": 80,
+            "costo_unitario": 2316.91,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 8,
+            "cantidad": 280,
+            "costo_unitario": 2197.07,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 9,
+            "cantidad": 120,
+            "costo_unitario": 4626.22,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 10,
+            "cantidad": 150,
+            "costo_unitario": 5123.97,
+            "bonificacion": 0.6,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 11,
+            "cantidad": 240,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 12,
+            "cantidad": 60,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 13,
+            "cantidad": 60,
+            "costo_unitario": 5992.01,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 14,
+            "cantidad": 120,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 15,
+            "cantidad": 60,
+            "costo_unitario": 5782.77,
+            "bonificacion": 0.6,
+            "impuestos_internos": 8.6956,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 16,
+            "cantidad": 115,
+            "costo_unitario": 8347.11,
+            "bonificacion": 0.6,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 17,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 18,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 19,
+            "cantidad": 140,
+            "costo_unitario": 3822.9,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 20,
+            "cantidad": 120,
+            "costo_unitario": 2796.27,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 21,
+            "cantidad": 168,
+            "costo_unitario": 1030.63,
+            "bonificacion": 0.6,
+            "impuestos_internos": 4.1667,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "Flete y descarga",
+            "monto": 1900000,
+            "condicion_iva": "no_gravado",
+            "en_factura": false,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 0.5,
+              "2": 0.5,
+              "3": 2,
+              "4": 0.5,
+              "5": 0.5,
+              "6": 1,
+              "7": 1,
+              "8": 2,
+              "9": 1,
+              "10": 2,
+              "11": 4,
+              "12": 1,
+              "13": 1,
+              "14": 2,
+              "15": 1,
+              "16": 1,
+              "17": 1,
+              "18": 1,
+              "19": 1,
+              "20": 1,
+              "21": 1
+            }
+          },
+          {
+            "id": 2,
+            "concepto": "Pallets x 9 tacos",
+            "monto": 162000,
+            "condicion_iva": "no_gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 0.5,
+              "2": 0.5,
+              "3": 2,
+              "4": 1,
+              "5": 1,
+              "6": 1,
+              "7": 1,
+              "8": 2,
+              "9": 1,
+              "10": 2,
+              "11": 4,
+              "12": 1,
+              "13": 1,
+              "14": 2,
+              "15": 1,
+              "16": 1,
+              "17": 1,
+              "18": 1,
+              "19": 1,
+              "20": 1,
+              "21": 1
+            }
+          },
+          {
+            "id": 3,
+            "concepto": "Separadores bidon",
+            "monto": 8800,
+            "condicion_iva": "no_gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "21": 1
+            }
+          },
+          {
+            "id": 4,
+            "concepto": "Bonif. promo COLA 3.00",
+            "monto": -103465.32,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": true,
+            "pesos": {
+              "3": 689768.8056,
+              "11": 1379537.6112
+            }
+          },
+          {
+            "id": 5,
+            "concepto": "Bonif. promo 3000cc",
+            "monto": -203318.28,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "3": 689768.8056,
+              "11": 1379537.6112,
+              "12": 344884.4028,
+              "13": 357363.47640000004,
+              "14": 689768.8056,
+              "15": 344884.4028
+            }
+          },
+          {
+            "id": 6,
+            "concepto": "Redondeo",
+            "monto": -0.49,
+            "condicion_iva": "gravado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": true,
+            "pesos": {
+              "1": 285890.9004,
+              "2": 285890.9004,
+              "3": 689768.8056,
+              "4": 297802.6485,
+              "5": 297802.6485,
+              "6": 354504.9312,
+              "7": 184240.6832,
+              "8": 611488.5224000001,
+              "9": 551815.5216,
+              "10": 763983.927,
+              "11": 1379537.6112,
+              "12": 344884.4028,
+              "13": 357363.47640000004,
+              "14": 689768.8056,
+              "15": 344884.4028,
+              "16": 954158.1441,
+              "17": 531994.764,
+              "18": 531994.764,
+              "19": 531994.764,
+              "20": 333539.08560000005,
+              "21": 172106.96496
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 154,
+      "sql": {
+        "lineas": [
+          {
+            "id": 1,
+            "ii": 198.536929,
+            "iva": 1000.618116,
+            "cargos": 658.974333,
+            "base_iva": 4764.848173,
+            "costo_neto": 4764.84834,
+            "costo_real": 5622.359436
+          },
+          {
+            "id": 2,
+            "ii": 198.536929,
+            "iva": 1000.618116,
+            "cargos": 658.974333,
+            "base_iva": 4764.848173,
+            "costo_neto": 4764.84834,
+            "costo_real": 5622.359436
+          },
+          {
+            "id": 3,
+            "ii": 474.837974,
+            "iva": 1082.260507,
+            "cargos": 1317.94875,
+            "base_iva": 5153.621463,
+            "costo_neto": 5748.07338,
+            "costo_real": 6946.408187
+          },
+          {
+            "id": 4,
+            "ii": 165.447234,
+            "iva": 833.847388,
+            "cargos": 567.179467,
+            "base_iva": 3970.701847,
+            "costo_neto": 3970.70198,
+            "costo_real": 4703.328547
+          },
+          {
+            "id": 5,
+            "ii": 165.447234,
+            "iva": 833.847388,
+            "cargos": 567.179467,
+            "base_iva": 3970.701847,
+            "costo_neto": 3970.70198,
+            "costo_real": 4703.328547
+          },
+          {
+            "id": 6,
+            "ii": 123.092968,
+            "iva": 620.383595,
+            "cargos": 658.974333,
+            "base_iva": 2954.207593,
+            "costo_neto": 2954.20776,
+            "costo_real": 3736.274894
+          },
+          {
+            "id": 7,
+            "ii": 95.959452,
+            "iva": 483.631767,
+            "cargos": 988.4615,
+            "base_iva": 2303.008415,
+            "costo_neto": 2303.00854,
+            "costo_real": 3387.429367
+          },
+          {
+            "id": 8,
+            "ii": 90.996039,
+            "iva": 458.616369,
+            "cargos": 564.835179,
+            "base_iva": 2183.887473,
+            "costo_neto": 2183.88758,
+            "costo_real": 2839.718691
+          },
+          {
+            "id": 9,
+            "ii": 399.863899,
+            "iva": 965.67711,
+            "cargos": 658.974333,
+            "base_iva": 4598.46243,
+            "costo_neto": 4598.46268,
+            "costo_real": 5657.300662
+          },
+          {
+            "id": 10,
+            "ii": 0,
+            "iva": 1069.577442,
+            "cargos": 1054.359,
+            "base_iva": 5093.225913,
+            "costo_neto": 5093.22618,
+            "costo_real": 6147.584913
+          },
+          {
+            "id": 11,
+            "ii": 474.83797,
+            "iva": 1082.260499,
+            "cargos": 1317.948833,
+            "base_iva": 5153.621422,
+            "costo_neto": 5748.07338,
+            "costo_real": 6946.408225
+          },
+          {
+            "id": 12,
+            "ii": 499.82944,
+            "iva": 1142.61526,
+            "cargos": 1317.948667,
+            "base_iva": 5441.025047,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.803153
+          },
+          {
+            "id": 13,
+            "ii": 248.171052,
+            "iva": 1183.958917,
+            "cargos": 1317.948667,
+            "base_iva": 5637.899607,
+            "costo_neto": 5956.05794,
+            "costo_real": 7204.019326
+          },
+          {
+            "id": 14,
+            "ii": 499.829447,
+            "iva": 1142.615277,
+            "cargos": 1317.94875,
+            "base_iva": 5441.02513,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.803327
+          },
+          {
+            "id": 15,
+            "ii": 499.82944,
+            "iva": 1142.61526,
+            "cargos": 1317.948667,
+            "base_iva": 5441.025047,
+            "costo_neto": 5748.07338,
+            "costo_real": 7258.803153
+          },
+          {
+            "id": 16,
+            "ii": 0,
+            "iva": 1742.375668,
+            "cargos": 687.625391,
+            "base_iva": 8297.026992,
+            "costo_neto": 8297.02734,
+            "costo_real": 8984.652383
+          },
+          {
+            "id": 17,
+            "ii": 158.333036,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130636
+          },
+          {
+            "id": 18,
+            "ii": 158.333036,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130636
+          },
+          {
+            "id": 19,
+            "ii": 158.333036,
+            "iva": 797.992116,
+            "cargos": 564.835143,
+            "base_iva": 3799.962457,
+            "costo_neto": 3799.9626,
+            "costo_real": 4523.130636
+          },
+          {
+            "id": 20,
+            "ii": 115.813102,
+            "iva": 583.693365,
+            "cargos": 658.974333,
+            "base_iva": 2779.492213,
+            "costo_neto": 2779.49238,
+            "costo_real": 3554.279649
+          },
+          {
+            "id": 21,
+            "ii": 42.685598,
+            "iva": 215.133694,
+            "cargos": 523.076905,
+            "base_iva": 1024.44616,
+            "costo_neto": 1024.44622,
+            "costo_real": 1590.208663
+          }
+        ],
+        "totales": {
+          "iva": 2139612.842695,
+          "no_gravado": 170800,
+          "neto_exento": 0,
+          "neto_gravado": 10188632.58426,
+          "cargos_al_costo": 2070800,
+          "neto_no_gravado": 0,
+          "impuestos_internos": 537911.614725
+        },
+        "factor_ajuste": {}
+      },
+      "sql_error": null
+    },
+    {
+      "caso": "contrato · peso negativo",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 100,
+        "pesos": {
+          "1": 1,
+          "2": -1
+        }
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "prorratear_cargo: peso negativo en la linea 2 (-1). Los pesos son proporciones; el 0 excluye una linea."
+    },
+    {
+      "caso": "contrato · peso no finito (null en el cable)",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 100,
+        "pesos": {
+          "1": null,
+          "2": 1
+        }
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "prorratear_cargo: peso no finito en la linea 1 (null). Se esperan numeros finitos; el 0 excluye una linea."
+    },
+    {
+      "caso": "contrato · peso no finito (la cadena \"NaN\")",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": 100,
+        "pesos": {
+          "1": 1,
+          "2": "NaN"
+        }
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "prorratear_cargo: peso no finito en la linea 2 (\"NaN\"). Se esperan numeros finitos; el 0 excluye una linea."
+    },
+    {
+      "caso": "contrato · monto no finito (null en el cable)",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": null,
+        "pesos": {
+          "1": 1
+        }
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "prorratear_cargo: monto no finito (NULL)."
+    },
+    {
+      "caso": "contrato · monto no finito (la cadena \"Infinity\")",
+      "motor": "prorratear_cargo",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "monto": "Infinity",
+        "pesos": {
+          "1": 1
+        }
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "prorratear_cargo: monto no finito (Infinity)."
+    },
+    {
+      "caso": "contrato · cantidad negativa",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 7,
+            "cantidad": -1,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "calcular_costos_compra: cantidad invalida en la linea 7 (-1). Se espera un numero finito no negativo."
+    },
+    {
+      "caso": "contrato · cantidad no finita (null en el cable)",
+      "motor": "calcular_costos_compra",
+      "origen": "prorrateoCompra.test.ts",
+      "entrada": {
+        "items": [
+          {
+            "id": 4,
+            "cantidad": null,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "calcular_costos_compra: cantidad invalida en la linea 4 (null). Se espera un numero finito no negativo."
+    },
+    {
+      "caso": "contrato · condicion_iva invalida en la linea",
+      "motor": "calcular_costos_compra",
+      "origen": "mig 193",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravada"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "calcular_costos_compra: condicion_iva invalida en la linea 1 (\"gravada\"). Se espera gravado, exento o no_gravado."
+    },
+    {
+      "caso": "contrato · condicion_iva invalida en el cargo",
+      "motor": "calcular_costos_compra",
+      "origen": "mig 193",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [
+          {
+            "id": 1,
+            "concepto": "x",
+            "monto": 100,
+            "condicion_iva": "grabado",
+            "en_factura": true,
+            "prorratea_al_costo": true,
+            "afecta_base_ii": false,
+            "pesos": {
+              "1": 1
+            }
+          }
+        ],
+        "ii_declarado": {}
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "calcular_costos_compra: condicion_iva invalida en el cargo 1 (x) (\"grabado\"). Se espera gravado, exento o no_gravado."
+    },
+    {
+      "caso": "contrato · dos lineas con el mismo id",
+      "motor": "calcular_costos_compra",
+      "origen": "mig 193",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          },
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 0,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {}
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "calcular_costos_compra: la linea 1 aparece mas de una vez."
+    },
+    {
+      "caso": "contrato · dos tasas declaradas que colapsan al mismo bucket",
+      "motor": "calcular_costos_compra",
+      "origen": "mig 193",
+      "entrada": {
+        "items": [
+          {
+            "id": 1,
+            "cantidad": 10,
+            "costo_unitario": 100,
+            "bonificacion": 0,
+            "impuestos_internos": 10,
+            "porcentaje_iva": 21,
+            "condicion_iva": "gravado"
+          }
+        ],
+        "cargos": [],
+        "ii_declarado": {
+          "10": 100,
+          "10.0": 100
+        }
+      },
+      "celdas": 0,
+      "sql": null,
+      "sql_error": "calcular_costos_compra: las tasas declaradas \"10\" y \"10.0\" caen en el mismo bucket de 4 decimales y se pisarian."
+    }
+  ]
+}
