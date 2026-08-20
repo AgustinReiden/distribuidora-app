@@ -1,6 +1,6 @@
 name: Integridad de datos
 
-# Gate de integridad (Capa 3 del plan docs/plan-auditoria-integridad.md).
+# Gate de integridad (Capa 3 del plan docs/archive/2026-06-29-plan-auditoria-integridad.md).
 # Corre auditoria_integridad() contra prod y falla si hay checks critical/high
 # en rojo. Diario + a demanda. Requiere los secrets SUPABASE_URL y
 # SUPABASE_SERVICE_ROLE_KEY (service_role, NO la anon key).

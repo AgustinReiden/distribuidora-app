@@ -1,360 +1,165 @@
-# Arquitectura de Distribuidora App
+# Arquitectura
 
-## Visión General
+> Describe lo que hay **hoy**. Todo lo que dice acá se puede verificar con `ls`, `grep`
+> o corriendo los comandos. Si algo no se puede verificar, no está escrito.
+>
+> Última verificación contra el código: 2026-08-20.
 
-Distribuidora App es una aplicación web construida con React 19 + Vite para la gestión de una distribuidora de alimentos. La arquitectura sigue principios de separación de concerns y está diseñada para escalabilidad y mantenibilidad.
+## Stack
 
-## Stack Tecnológico
+| Capa | Qué |
+|---|---|
+| Front | React 19 + Vite 7, TypeScript |
+| Estado servidor | TanStack Query 5 |
+| Estilos | Tailwind 3 + Radix UI |
+| Validación | Zod 4 |
+| Back | Supabase — Postgres + Auth + RLS |
+| Edge | Deno (`supabase/functions/`) |
+| Offline | Dexie (IndexedDB) |
+| Tests | Vitest 4 (unit) + Playwright (e2e) |
+| Deploy | push a `main` → webhook de Coolify |
 
-| Capa | Tecnología |
-|------|------------|
-| Frontend | React 19 + Vite |
-| Estilos | Tailwind CSS |
-| Backend | Supabase (PostgreSQL + Auth + RLS) |
-| Testing | Vitest + Playwright |
-| CI/CD | GitHub Actions |
+## Árbol de `src/`
 
-## Estructura de Directorios
+Conteos reales de archivos, para dar idea de dónde está el peso:
 
 ```
 src/
-├── components/          # Componentes React
-│   ├── layout/         # Componentes de layout (Header, Sidebar, etc.)
-│   ├── modals/         # Modales de la aplicación
-│   ├── pedidos/        # Componentes específicos de pedidos
-│   └── vistas/         # Vistas principales
-├── hooks/              # Custom hooks
-│   ├── supabase/       # Hooks de datos (clientes, productos, etc.)
-│   └── handlers/       # Hooks de handlers de UI
-├── services/           # Capa de servicios
-│   ├── api/           # Servicios de API (CRUD)
-│   └── business/      # Lógica de negocio
-├── lib/               # Utilidades y configuraciones
-│   ├── schemas.js     # Esquemas de validación Zod
-│   ├── sentry.js      # Integración Sentry
-│   └── pdf/           # Generación de PDFs
-├── utils/             # Funciones utilitarias
-└── App.jsx            # Componente raíz
+├── components/
+│   ├── modals/          77   el grueso de la UI
+│   ├── vistas/          23   pantallas
+│   ├── containers/      20   estado + handlers de cada dominio
+│   ├── ui/              15   primitivas
+│   ├── pedidos/         12
+│   ├── productos/       12
+│   ├── layout/           6
+│   ├── rutaActiva/       6
+│   ├── geolocalizacion/  5
+│   └── dashboard, clientes, misEntregas, a11y, auth, metas, perfil, recorridos
+├── hooks/
+│   ├── queries/         50   capa de datos real (TanStack Query)
+│   ├── supabase/        19   acceso directo y auth
+│   ├── state/            3
+│   └── handlers/         7   MUERTO — ver abajo
+├── utils/               96   lógica pura, es donde viven los cálculos testeables
+├── lib/                 16   supabase.ts, schemas.ts, offlineDb.ts, permisos.ts, pdf/
+├── contexts/            12
+├── services/
+│   ├── api/              4
+│   └── business/         1
+├── constants/            5
+└── types/                3
 ```
 
-## Capas de la Arquitectura
-
-### 1. Capa de Presentación (Components)
-
-Componentes React organizados por dominio y función.
+## Cómo fluyen los datos
 
 ```
-┌─────────────────────────────────────────────┐
-│              Componentes UI                  │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐       │
-│  │ Vistas  │ │ Modales │ │ Layout  │       │
-│  └────┬────┘ └────┬────┘ └────┬────┘       │
-│       │           │           │             │
-│       └───────────┼───────────┘             │
-│                   ▼                         │
-│           Handlers Hooks                    │
-└─────────────────────────────────────────────┘
+Componente
+   ↓  hook de src/hooks/queries/   ← la capa de datos
+TanStack Query  (cache, invalidación, reintentos)
+   ↓
+supabase-js  →  RPC SECURITY DEFINER  o  PostgREST con RLS
+   ↓
+Postgres
 ```
 
-**Principios:**
-- Componentes pequeños y enfocados
-- Props tipadas con JSDoc
-- Error Boundaries para manejo de errores
-- Virtualización para listas largas
+Las escrituras van por dos caminos, y la división es deliberada:
 
-### 2. Capa de Estado (Hooks)
+- **Operaciones transaccionales** —pedidos, pagos, stock, recorridos— pasan por una
+  **RPC `SECURITY DEFINER`**, para que la regla de negocio y la transacción vivan en un
+  solo lugar. En `usePedidosQuery.ts`, por ejemplo, hay 10 `.rpc()` contra 4 escrituras
+  directas.
+- **ABM de catálogo** —clientes, productos, proveedores, zonas, marcas, categorías,
+  promociones, usuarios— escribe directo contra PostgREST, apoyado en RLS.
 
-Hooks personalizados que manejan estado y lógica de UI.
+En total: 72 llamadas `.rpc()` y 73 escrituras directas en `src/hooks/queries/`.
 
-```javascript
-// Hook de datos
-const { clientes, loading, agregarCliente } = useClientes()
+Consecuencia importante: **una RPC `SECURITY DEFINER` saltea RLS**, así que el aislamiento
+por sucursal no puede depender sólo de las policies. Se ata además con FKs compuestas
+`(columna, sucursal)`. Hay un gate de CI que lo verifica.
 
-// Hook de handlers
-const { handleNuevoCliente, handleEditarCliente } = useClienteHandlers()
+Sin conexión, el alta de pedido se encola en IndexedDB (`src/lib/offlineDb.ts`) y se
+replaya después contra `crear_pedido_idempotente`, que es idempotente por diseño.
 
-// Hook de servicio
-const { data, execute, loading } = useService(() => clienteService.getAll())
+## Los containers
+
+`src/components/containers/` es donde vive el estado y los handlers de cada dominio
+(`ClientesContainer`, `PedidosContainer`, `ProductosContainer`, …). Un container arma
+los datos, define qué pasa al confirmar cada acción, y monta los modales de su dominio.
+
+Los modales se montan **dentro** del container que los usa. Una confirmación disparada
+desde un modal Radix tiene que renderizarse dentro de ese modal: como hermano en el
+container queda detrás del overlay y falla en silencio.
+
+## Contextos que realmente se montan
+
+`ThemeProvider`, `AuthProvider`, `NotificationProvider` (en `App.tsx`),
+`AuthDataProvider`, `SucursalProvider`, y `QueryClientProvider` (en `main.tsx`).
+
+`src/contexts/` exporta más providers de los que se montan. En particular
+**`HandlersProvider` está exportado y nunca se monta** — es parte del código muerto de
+abajo.
+
+## Código muerto conocido
+
+`src/hooks/handlers/` (7 archivos) **no tiene ningún consumidor**:
+
+```bash
+grep -rn "from ['\"].*hooks/handlers" src/ e2e/ | grep -v "^src/hooks/handlers/"
+# (sin resultados)
 ```
 
-**Tipos de Hooks:**
+Es el resto de una arquitectura anterior en la que los handlers de UI vivían en hooks
+propios; hoy viven en los containers. Está anotado en
+[#495](https://github.com/AgustinReiden/distribuidora-app/issues/495) junto con
+`HandlersProvider`.
 
-| Tipo | Ubicación | Propósito |
-|------|-----------|-----------|
-| Supabase Hooks | `hooks/supabase/` | CRUD y datos |
-| Handler Hooks | `hooks/handlers/` | Lógica de UI |
-| Utility Hooks | `hooks/` | Funcionalidad reutilizable |
-
-### 3. Capa de Servicios (Services)
-
-Abstracción de operaciones de datos con lógica de negocio.
-
-```
-┌─────────────────────────────────────────────┐
-│              Capa de Servicios              │
-│                                             │
-│  ┌─────────────────────────────────────┐   │
-│  │          Business Services          │   │
-│  │  ┌──────────────┐ ┌──────────────┐ │   │
-│  │  │ StockManager │ │ OrderManager │ │   │
-│  │  └──────┬───────┘ └──────┬───────┘ │   │
-│  └─────────┼────────────────┼──────────┘   │
-│            ▼                ▼              │
-│  ┌─────────────────────────────────────┐   │
-│  │           API Services              │   │
-│  │  ┌────────┐ ┌────────┐ ┌────────┐  │   │
-│  │  │Cliente │ │Producto│ │ Pedido │  │   │
-│  │  │Service │ │Service │ │Service │  │   │
-│  │  └────┬───┘ └────┬───┘ └────┬───┘  │   │
-│  └───────┼──────────┼──────────┼───────┘   │
-│          └──────────┼──────────┘           │
-│                     ▼                      │
-│  ┌─────────────────────────────────────┐   │
-│  │           BaseService               │   │
-│  │  (CRUD genérico + RPC + Cache)      │   │
-│  └─────────────────────────────────────┘   │
-└─────────────────────────────────────────────┘
-```
-
-**BaseService - Operaciones:**
-- `getAll(options)` - Obtener todos con filtros
-- `getById(id)` - Obtener por ID
-- `create(data)` / `createMany(items)` - Crear
-- `update(id, data)` / `updateWhere(filters, data)` - Actualizar
-- `delete(id)` / `deleteWhere(filters)` - Eliminar
-- `rpc(fn, params, fallback)` - Llamadas RPC con fallback
-- `count(filters)` / `exists(filters)` - Consultas
-
-### 4. Capa de Datos (Supabase)
-
-Backend serverless con PostgreSQL y Row Level Security.
-
-```
-┌─────────────────────────────────────────────┐
-│              Supabase                        │
-│                                             │
-│  ┌─────────────┐  ┌─────────────────────┐  │
-│  │    Auth     │  │   Row Level Security │  │
-│  │ (JWT + RLS) │  │   (Políticas)       │  │
-│  └──────┬──────┘  └──────────┬──────────┘  │
-│         │                    │              │
-│         ▼                    ▼              │
-│  ┌─────────────────────────────────────┐   │
-│  │           PostgreSQL                │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌───────┐ │   │
-│  │  │clientes │ │productos│ │pedidos│ │   │
-│  │  └─────────┘ └─────────┘ └───────┘ │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌───────┐ │   │
-│  │  │perfiles │ │ pagos   │ │compras│ │   │
-│  │  └─────────┘ └─────────┘ └───────┘ │   │
-│  └─────────────────────────────────────┘   │
-│                                             │
-│  ┌─────────────────────────────────────┐   │
-│  │         RPC Functions               │   │
-│  │  • descontar_stock_atomico          │   │
-│  │  • restaurar_stock_atomico          │   │
-│  │  • crear_pedido_completo            │   │
-│  │  • eliminar_pedido_completo         │   │
-│  └─────────────────────────────────────┘   │
-└─────────────────────────────────────────────┘
-```
-
-## Flujo de Datos
-
-```
-Usuario → Componente → Handler Hook → Service → Supabase
-                                         ↓
-                                    RPC/Query
-                                         ↓
-Usuario ← Componente ← Hook State ← Service ← Response
-```
-
-**Ejemplo: Crear Pedido**
-
-```javascript
-// 1. Usuario hace clic en "Crear Pedido"
-// 2. Handler hook procesa el evento
-const handleCrearPedido = async (datos) => {
-  // 3. Servicio ejecuta lógica de negocio
-  const pedido = await pedidoService.crearPedidoCompleto(
-    datos,
-    items,
-    true // descontar stock
-  )
-
-  // 4. Hook actualiza estado
-  setPedidos(prev => [...prev, pedido])
-
-  // 5. UI se actualiza automáticamente
-}
-```
-
-## Manejo de Errores
-
-### Estrategia de Error Boundaries
-
-```
-┌─────────────────────────────────────────────┐
-│           ErrorBoundary (Root)              │
-│  ┌───────────────────────────────────────┐ │
-│  │     CompactErrorBoundary (Section)    │ │
-│  │  ┌─────────────────────────────────┐ │ │
-│  │  │         Componente              │ │ │
-│  │  │                                 │ │ │
-│  │  │  try {                          │ │ │
-│  │  │    await service.operation()    │ │ │
-│  │  │  } catch (error) {              │ │ │
-│  │  │    // Categorizar error         │ │ │
-│  │  │    // Mostrar mensaje apropiado │ │ │
-│  │  │  }                              │ │ │
-│  │  └─────────────────────────────────┘ │ │
-│  └───────────────────────────────────────┘ │
-└─────────────────────────────────────────────┘
-```
-
-### Categorías de Error
-
-| Categoría | Acción | Reintento |
-|-----------|--------|-----------|
-| `network` | Verificar conexión | Sí (3x) |
-| `auth` | Redirigir a login | No |
-| `validation` | Mostrar errores | No |
-| `database` | Reintentar | Sí (2x) |
-| `unknown` | Error genérico | Sí (1x) |
+Se documenta acá porque la versión anterior de este archivo describía esos handlers como
+la capa central de la app, con diagrama incluido — o sea que la arquitectura escrita
+mandaba a leer una capa que no existe.
 
 ## Seguridad
 
-### Capas de Seguridad
+- **RLS** en las tablas, con helpers de rol (`es_preventista()`, `es_transportista()`,
+  `tiene_rol_extra()`). Ojo: `es_preventista()` devuelve `true` también para `admin` y
+  `encargado` — ver `CLAUDE.md`.
+- **`perfiles.rol`** es la identidad; **`perfil_roles`** agrega capacidades extra.
+- Toda función `SECURITY DEFINER` nueva nace con `EXECUTE` para `PUBLIC` y hay que
+  revocarlo en la misma migración. Gate de CI en `.github/workflows/integridad.yml`.
+- El aislamiento por sucursal se ata con FKs compuestas, no sólo con RLS.
 
-1. **Frontend**
-   - Sanitización con DOMPurify
-   - Validación con Zod
-   - CSP estricto
-   - Encriptación localStorage (AES-GCM)
+## Migraciones
 
-2. **Backend (Supabase)**
-   - Row Level Security
-   - JWT Authentication
-   - Políticas por rol
+`migrations/` es una **vista curada**, no un espejo de producción. La fuente de verdad es
+el ledger de prod. El número se elige al final, justo antes de aplicar. Todo el detalle
+—incluidas las tres veces que esto falló— está en `migrations/MANIFEST.md`.
 
-3. **DevOps**
-   - Pre-commit hooks (secretos)
-   - npm audit en CI
-   - Dependabot
+## Edge functions
+
+```
+supabase/functions/
+├── telegram-webhook/   bot (agente Gemini con tools por rol)
+├── telegram-digest/    resumen programado
+├── optimizar-ruta/     optimización de recorridos (Google Routes)
+├── _shared/            utils compartidos con el front — ver abajo
+└── tests/
+```
+
+Algunos utils están **duplicados a propósito** entre `src/utils/` y
+`supabase/functions/_shared/utils/`, porque Deno no puede importar del árbol de Vite.
+Llevan una cabecera `⚠ AUTO-SYNCED ... NO EDITAR ACÁ` y hay un test
+(`tests/sync_utils.test.ts`) que verifica que no se desincronicen. Si tocás uno, tocá el
+otro.
 
 ## Testing
 
-### Pirámide de Tests
+- **Unit** (Vitest): 98 archivos, 1391 tests. Corren sin `.env` — así se detectan fallos
+  de import que un `.env` local enmascara.
+- **E2E** (Playwright, chromium): `e2e/`.
+- **Edge** (Deno): `deno task test` desde `supabase/functions/`.
+- **Integridad de datos**: `.github/workflows/integridad.yml` corre a diario una batería
+  de invariantes contra prod, más el drift-check de migraciones, el aislamiento por
+  sucursal y los permisos `EXECUTE`.
 
-```
-        ┌─────────┐
-        │   E2E   │  Playwright
-        │ (Login) │
-       ┌┴─────────┴┐
-       │Integration│  Vitest + Services
-       │  (API)    │
-      ┌┴───────────┴┐
-      │    Unit     │  Vitest
-      │(Logic/Utils)│
-      └─────────────┘
-```
-
-### Cobertura
-
-| Tipo | Herramienta | Cobertura |
-|------|-------------|-----------|
-| Unit | Vitest | Schemas, Utils, Services |
-| Integration | Vitest | Hooks, Services |
-| E2E | Playwright | Login, Accesibilidad |
-
-## CI/CD
-
-### Pipeline
-
-```
-Push → Lint → Test → Build → Security → Deploy
-         │      │      │        │
-         │      │      │        └── npm audit
-         │      │      └── Vite build
-         │      └── Vitest + Playwright
-         └── ESLint
-```
-
-### Ambientes
-
-| Branch | Ambiente | URL |
-|--------|----------|-----|
-| `develop` | Staging | staging.app.com |
-| `main` | Production | app.com |
-
-## Patrones de Diseño
-
-### Singleton (Servicios)
-
-```javascript
-// Instancia única exportada
-export const clienteService = new ClienteService()
-```
-
-### Factory (Error Recovery)
-
-```javascript
-function getRecoveryInfo(category) {
-  return recoveryStrategies[category]
-}
-```
-
-### Observer (React State)
-
-```javascript
-const [state, setState] = useState()
-// React re-renderiza automáticamente
-```
-
-### Strategy (RPC Fallback)
-
-```javascript
-await service.rpc('function', params, fallbackFn)
-```
-
-## Guía de Contribución
-
-### Crear nuevo componente
-
-1. Crear archivo en `src/components/[domain]/`
-2. Agregar tests en `__tests__/`
-3. Exportar desde `index.js`
-
-### Crear nuevo servicio
-
-1. Extender `BaseService` si es CRUD
-2. Agregar a `services/index.js`
-3. Crear tests en `services/__tests__/`
-
-### Crear nuevo hook
-
-1. Usar `useService` para operaciones async
-2. Manejar loading/error states
-3. Documentar con JSDoc
-
-## Performance
-
-### Optimizaciones Implementadas
-
-- **Code Splitting**: Rutas lazy-loaded
-- **Virtualización**: `react-window` para listas
-- **Memoization**: `useMemo`, `useCallback`
-- **Caché**: `useService` con TTL
-
-### Métricas Target
-
-| Métrica | Target |
-|---------|--------|
-| LCP | < 2.5s |
-| FID | < 100ms |
-| CLS | < 0.1 |
-| Bundle Size | < 500KB (gzip) |
-
----
-
-*Última actualización: 2026-01-21*
+La lógica de negocio se escribe en `src/utils/` justamente para poder testearla sin
+montar componentes.

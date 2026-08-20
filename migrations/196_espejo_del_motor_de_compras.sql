@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 196 · El espejo entre las dos implementaciones del motor de compras
 -- ============================================================================
--- Ver docs/plans/2026-08-18-cargos-y-cuadre-de-compras.md y la mig 193.
+-- Ver docs/archive/2026-08-18-cargos-y-cuadre-de-compras.md y la mig 193.
 --
 -- EL PROBLEMA. El motor de costos de una compra está escrito DOS veces:
 --

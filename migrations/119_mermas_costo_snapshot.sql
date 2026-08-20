@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 119 · mermas_stock.costo_unitario: snapshot de costo al registrar la merma
 -- ============================================================================
--- Riesgo documentado (docs/plan-auditoria-integridad.md ítem 8): las mermas se
+-- Riesgo documentado (docs/archive/2026-06-29-plan-auditoria-integridad.md ítem 8): las mermas se
 -- valuaban SIEMPRE a costo vivo → el KPI de un mes cerrado cambiaba si después
 -- se actualizaba el costo del producto. El trigger BEFORE INSERT congela el
 -- costo_real canónico (mig 111) en el alta, cubriendo TODOS los caminos de

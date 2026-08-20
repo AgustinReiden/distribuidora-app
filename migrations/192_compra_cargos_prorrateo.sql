@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 192 · Compras: cargos prorrateados y cuadre fiscal
 -- ============================================================================
--- Ver docs/plans/2026-08-18-cargos-y-cuadre-de-compras.md
+-- Ver docs/archive/2026-08-18-cargos-y-cuadre-de-compras.md
 --
 -- Tres cosas que la carga de compras no sabía representar:
 --   · flete, pallets y separadores (el 16,2% del costo de la factura testigo)

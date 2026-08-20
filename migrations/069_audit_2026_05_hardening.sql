@@ -1,5 +1,5 @@
 -- Migración 069: hardening de seguridad/permisos (Auditoría 2026-05)
--- Cambios reversibles y SIN tocar datos. Ver docs/AUDIT_REPORT_2026-05.md.
+-- Cambios reversibles y SIN tocar datos. Ver docs/archive/2026-05-29-AUDIT_REPORT.md.
 -- Proyecto: hmuchlzmuqqxcldbzkgc (ManaosApp).
 --
 -- Resumen:

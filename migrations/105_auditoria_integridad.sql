@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 105 · auditoria_integridad(): batería de invariantes de integridad de datos
 -- ============================================================================
--- Corre todas las invariantes del plan (docs/plan-auditoria-integridad.md) y
+-- Corre todas las invariantes del plan (docs/archive/2026-06-29-plan-auditoria-integridad.md) y
 -- devuelve un tablero JSONB: cada check con su conteo de violaciones (0 = OK).
 -- overall_ok = true si NINGÚN check critical/high tiene violaciones.
 -- Pensado para: panel /reportes-gerenciales, checklist pre-presentación y un
@@ -153,4 +153,4 @@ REVOKE EXECUTE ON FUNCTION public.auditoria_integridad() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.auditoria_integridad() TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.auditoria_integridad() IS
-  'Batería de invariantes de integridad (ver docs/plan-auditoria-integridad.md). Devuelve tablero JSONB; overall_ok=true si ningún check critical/high tiene violaciones. Admin-only.';
+  'Batería de invariantes de integridad (ver docs/archive/2026-06-29-plan-auditoria-integridad.md). Devuelve tablero JSONB; overall_ok=true si ningún check critical/high tiene violaciones. Admin-only.';

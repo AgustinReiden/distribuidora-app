@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 194 · Compras: las RPCs aprenden a recibir cargos y el II declarado
 -- ============================================================================
--- Ver docs/plans/2026-08-18-cargos-y-cuadre-de-compras.md
+-- Ver docs/archive/2026-08-18-cargos-y-cuadre-de-compras.md
 --
 -- La 192 creó las tablas, la 193 el motor de cálculo. Acá se enchufa ese motor
 -- a las dos RPCs que la app usa de verdad:
