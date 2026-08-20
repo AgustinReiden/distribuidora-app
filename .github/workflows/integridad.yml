@@ -90,3 +90,25 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-permisos.mjs
+
+      # El motor de costos de una compra está escrito dos veces —TypeScript para
+      # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
+      # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos
+      # casos y deja que la comparación la haga Postgres.
+      #
+      # Va acá y no en la suite de vitest porque necesita la base. La contraparte
+      # local y sin red es `src/utils/prorrateoCompra.espejo.test.ts`, que compara
+      # el TS contra un fixture congelado y por eso NO ve si el que se movió fue
+      # el SQL. Éste sí.
+      #
+      # Único paso que necesita node_modules: carga el motor de TypeScript con
+      # Vite en vez de copiar la aritmética al script. Sin `if [ -z ... ] exit 0`
+      # a propósito — el paso de secrets de arriba ya falla por todos.
+      - name: Espejo del motor de compras (TS vs SQL)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          npm ci --no-audit --no-fund
+          node scripts/espejo-motor-compras.mjs
