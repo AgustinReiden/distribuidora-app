@@ -66,6 +66,8 @@ Si no entra claro en una caja, probablemente no hace falta escribirlo.
   `GRANT TO authenticated` no lo revierte. Hay un gate de CI que lo verifica.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
+- **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
+  idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada.
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
 
@@ -96,6 +98,11 @@ helpers revierte el multi-rol en silencio.
 `PGRST201`, y falla **toda** la query, no sólo el embed. El `select` es un string: no lo
 ven ni `tsc` ni eslint ni los tests. Probá todo embed nuevo con `curl` + anon key antes
 de mergear. Ya rompió "Armar ruta" en producción.
+
+Pariente de la misma familia: **dos sobrecargas SQL con rangos `[obligatorios, total]`
+superpuestos** hacen que PostgREST no sepa cuál llamar y tire `PGRST203`, también en
+runtime y también invisible para `tsc` y para los tests. Al cambiarle la firma a una
+función, **dropeá la vieja** — no dejes las dos conviviendo "por compatibilidad".
 
 **6. Nunca `npm audit fix --force`.** Degrada `exceljs` a 3.4.0 y rompe todos los exports
 a Excel. El gate de CI es `--audit-level=high --omit=dev`; los `moderate` conviven a
