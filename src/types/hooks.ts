@@ -969,6 +969,8 @@ export interface CompraDBExtended {
   percepcion_iva?: number;
   percepcion_iibb?: number;
   no_gravado?: number;
+  /** Bonificaciones generales gravadas de la factura, con su signo (mig 195). */
+  bonificaciones?: number;
   otros_impuestos?: number;
   total: number;
   forma_pago?: string;
@@ -976,7 +978,91 @@ export interface CompraDBExtended {
   notas?: string | null;
   tipo_factura?: 'ZZ' | 'FC';
   items?: CompraItemDBExtended[];
+  /**
+   * Cargos prorrateados (mig 192). `undefined` significa "no los leí", no "no
+   * tiene": quien edite la compra sin ellos le borra el flete en silencio.
+   */
+  cargos?: CompraCargoDBExtended[];
+  /** Impuesto interno declarado por alícuota (mig 194): {tasa: monto}. */
+  ii_declarado?: Record<number, number> | null;
   created_at?: string;
+}
+
+/** Cómo se pre-llena el vector de pesos de un cargo (`compra_cargos.base_prorrateo`). */
+export type BaseProrrateoCompra = 'monto' | 'cantidad' | 'unidades';
+
+/**
+ * Un cargo de una compra anterior, reusado como plantilla en la siguiente.
+ *
+ * Viaja SIN monto a propósito: el concepto y las banderas fiscales se repiten
+ * factura a factura —el flete y los pallets de Manaos son los mismos todos los
+ * meses— y el importe no.
+ */
+export interface CargoPlantillaCompra {
+  concepto: string;
+  condicionIva: CondicionIva;
+  enFactura: boolean;
+  prorrateaAlCosto: boolean;
+  afectaBaseII: boolean;
+  baseProrrateo: BaseProrrateoCompra;
+  /**
+   * producto_id → peso.
+   *
+   * Los repartos se guardan contra `compra_items.id`, que no significa nada en
+   * otra compra: el producto es lo único que sobrevive de una factura a la que
+   * viene. Una línea de la compra nueva que no matchee ningún producto de la
+   * vieja queda en 0, o sea excluida del cargo.
+   */
+  pesosPorProducto: Record<string, number>;
+}
+
+/**
+ * Un cargo tal como viaja a las RPCs de compra (mig 194).
+ *
+ * `pesos` va por ÍNDICE del array de items del MISMO payload, base 0. No por
+ * producto y no por el id local del modal: `compra_items.id` todavía no existe
+ * cuando el cliente arma esto, así que el índice es lo único que las dos puntas
+ * pueden nombrar. La RPC rechaza un índice fuera de rango.
+ */
+export interface CompraCargoInput {
+  concepto: string;
+  /** SIN IVA. Negativo = bonificación. */
+  monto: number;
+  condicionIva: CondicionIva;
+  enFactura: boolean;
+  prorrateaAlCosto: boolean;
+  afectaBaseII: boolean;
+  baseProrrateo: BaseProrrateoCompra;
+  /** índice de la línea (base 0) → peso. El 0 excluye la línea. */
+  pesos: Record<number, number>;
+}
+
+/** Un reparto persistido: contra qué línea pesa un cargo y cuánto. */
+export interface CompraCargoRepartoDB {
+  compra_item_id: string;
+  peso: number;
+}
+
+/** Un cargo tal como vuelve de la base, con su vector de pesos. */
+export interface CompraCargoDBExtended {
+  id: string;
+  orden?: number | null;
+  concepto: string;
+  monto: number;
+  condicion_iva?: CondicionIva | null;
+  en_factura?: boolean | null;
+  prorratea_al_costo?: boolean | null;
+  afecta_base_ii?: boolean | null;
+  base_prorrateo?: BaseProrrateoCompra | null;
+  repartos?: CompraCargoRepartoDB[] | null;
+}
+
+/** Los cargos de la última compra no cancelada de un proveedor. */
+export interface PlantillaCargosProveedor {
+  compraId: string;
+  numeroFactura: string | null;
+  fechaCompra: string | null;
+  cargos: CargoPlantillaCompra[];
 }
 
 export interface CompraFormInputExtended {
@@ -991,6 +1077,12 @@ export interface CompraFormInputExtended {
   percepcionIva?: number;
   percepcionIibb?: number;
   noGravado?: number;
+  /**
+   * Σ de los cargos GRAVADOS que vienen en la factura, con su signo (mig 195).
+   * Negativo = bonificación general. Sin esta columna la cabecera no tiene dónde
+   * restar una bonificación que no es un renglón de producto.
+   */
+  bonificaciones?: number;
   otrosImpuestos?: number;
   total?: number;
   formaPago?: string;
@@ -1009,6 +1101,14 @@ export interface CompraFormInputExtended {
   }>;
   /** Líneas cuya tasa de II fue editada a mano: se propaga al producto tras registrar (mig 123 UI). */
   cambiosImpuestosInternos?: Array<{ productoId: string; nombre: string; impuestosInternos: number }>;
+  /** Cargos de la factura (mig 194). Los pesos van por índice de `items`. */
+  cargos?: CompraCargoInput[];
+  /**
+   * Impuesto interno declarado por alícuota: {tasa: monto}. Alimenta el factor
+   * de ajuste del motor; sin esto el factor se calcula en la vista previa del
+   * navegador y se tira a la basura al guardar.
+   */
+  iiDeclarado?: Record<number, number>;
 }
 
 export interface ProveedorFormInputExtended {
@@ -1037,9 +1137,20 @@ export interface ResumenCompras {
   porProveedor: Record<string, ResumenComprasPorProveedor>;
 }
 
+/**
+ * Lo que devuelve `registrar_compra_completa`, avisos incluidos.
+ *
+ * Los dos warnings son BLANDOS: la compra quedó registrada igual. La RPC no
+ * puede decidir cuál de los dos números que el usuario tipeó está bien, así que
+ * los deja como llegaron y avisa. Si el cliente los tira, el aviso no existe.
+ */
 export interface RegistrarCompraResult {
   success: boolean;
   compraId: string;
+  /** El total calculado no coincide con el informado (umbral: 1 peso). */
+  warningDescuadre?: string | null;
+  /** La apertura del impuesto interno por alícuota no cuadra con el total, o declara una tasa que ninguna línea usa. */
+  warningIiDeclarado?: string | null;
 }
 
 export interface UseComprasReturnExtended {

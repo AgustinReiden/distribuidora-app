@@ -6,16 +6,32 @@
  */
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle } from 'lucide-react'
-import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
-import { calcularTotalesCompra } from '../../utils/calculations'
-import type { TotalesCompra } from '../../utils/calculations'
-import { OPCIONES_CONDICION_IVA, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
+import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy } from 'lucide-react'
+import { formatPrecio } from '../../utils/formatters'
+import { redondearSQL } from '../../utils/calculations'
+import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
+import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra } from '../../utils/prorrateoCompra'
+import type { CostosCompra, TotalesCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import NumberInput from '../ui/NumberInput'
 import { supabase } from '../../lib/supabase'
+// Del módulo y no del barrel: éste es un modal lazy y el barrel se lleva puesto
+// todo el resto de los hooks de query al chunk.
+import { useCargosPlantillaProveedorQuery } from '../../hooks/queries/useComprasQuery'
 import { CompactErrorBoundary } from '../ErrorBoundary'
-import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, ProveedorFormInputExtended } from '../../types'
+import type { CondicionIva, ProductoDB, ProveedorDBExtended, CompraFormInputExtended, PlantillaCargosProveedor, ProveedorFormInputExtended } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload';
+import {
+  compraReducer, initialState, matchProductoEstricto, construirCompraItemDesdeScan,
+  lineasParaMotor, cargosParaMotor, iiDeclaradoParaMotor,
+  cuadreImpuestoInterno, DESVIO_II_TOLERADO, cargosPlantillaNuevos,
+  cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
+  resolucionBasesII,
+} from './ModalCompra.reducer'
+import type {
+  CompraItemForm, CargoCompraForm, CambiosCargo, BaseProrrateo,
+  FacturaEscaneada, FacturaItemEscaneado, CompraState, CompraActionType,
+} from './ModalCompra.reducer'
+
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
 const ModalImportarCompra = lazyWithReload(() => import('./ModalImportarCompra'))
@@ -24,173 +40,9 @@ const ModalImportarCompra = lazyWithReload(() => import('./ModalImportarCompra')
 // TIPOS
 // =============================================================================
 
-/** Item de compra en el formulario */
-export interface CompraItemForm {
-  productoId: string;
-  productoNombre: string;
-  productoCodigo?: string | null;
-  cantidad: number;
-  bonificacion: number;
-  costoUnitario: number;
-  impuestosInternos: number;
-  porcentajeIva: number;
-  /** Condición de la línea (mig 177). Se siembra del producto y se puede pisar acá. */
-  condicionIva: CondicionIva;
-  stockActual: number;
-}
-
 /** Clave del selector fiscal para el par que tenga la línea. */
 const claveCondicionLinea = (item: CompraItemForm): string =>
   claveCondicionIva(item.condicionIva, item.porcentajeIva)
-
-/** Resultado del escaneo de factura via n8n */
-export interface FacturaEscaneada {
-  proveedorNombre: string | null;
-  proveedorCuit: string | null;
-  numeroFactura: string | null;
-  fechaCompra: string | null;
-  items: Array<{
-    codigo: string | null;
-    descripcion: string;
-    cantidad: number;
-    costoUnitario: number;
-    bonificacion: number;
-    iva: number;
-  }>;
-  subtotal: number | null;
-  iva: number | null;
-  total: number | null;
-  formaPago: string | null;
-  confianza: number;
-}
-
-/** Item escaneado pendiente de revisión humana */
-export type FacturaItemEscaneado = FacturaEscaneada['items'][number]
-
-/**
- * Normaliza strings para comparar nombres/códigos: minúsculas,
- * trim, colapsa whitespace.
- */
-function normalizarTexto(s: string | null | undefined): string {
-  return (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
-}
-
-/**
- * Auto-link estricto: solo retorna match si código exacto o nombre exacto
- * (case/espacios normalizados). Cualquier otra coincidencia (parcial,
- * substring) queda fuera para que el usuario decida.
- */
-function matchProductoEstricto(
-  scanItem: FacturaItemEscaneado,
-  productos: ProductoDB[]
-): ProductoDB | null {
-  const cod = normalizarTexto(scanItem.codigo)
-  if (cod) {
-    const porCodigo = productos.find(p => normalizarTexto(p.codigo) === cod)
-    if (porCodigo) return porCodigo
-  }
-  const desc = normalizarTexto(scanItem.descripcion)
-  if (desc) {
-    const porNombre = productos.find(p => normalizarTexto(p.nombre) === desc)
-    if (porNombre) return porNombre
-  }
-  return null
-}
-
-/** Construye un CompraItemForm a partir de un producto resuelto + datos de la factura. */
-function construirCompraItemDesdeScan(
-  producto: ProductoDB,
-  scanItem: FacturaItemEscaneado
-): CompraItemForm {
-  return {
-    productoId: producto.id,
-    productoNombre: producto.nombre,
-    productoCodigo: producto.codigo || scanItem.codigo,
-    cantidad: scanItem.cantidad || 1,
-    bonificacion: scanItem.bonificacion || 0,
-    costoUnitario: scanItem.costoUnitario || 0,
-    impuestosInternos: 0,
-    // `??`, no `||`: un 0 legítimo del escaneo (línea exenta) se convertía en 21.
-    porcentajeIva: scanItem.iva ?? producto.porcentaje_iva ?? 21,
-    condicionIva: producto.condicion_iva ?? 'gravado',
-    stockActual: producto.stock || 0
-  }
-}
-
-/** Totales impresos en la factura física, para el panel "Control contra factura" (0 = no cargado) */
-export interface ControlFactura {
-  gravado: number;
-  iva: number;
-  impuestosInternos: number;
-  percepciones: number;
-  total: number;
-}
-
-/** Estado del reducer de compra */
-export interface CompraState {
-  /** Percepción de IVA de la factura (crédito fiscal, no costo) — solo FC */
-  percepcionIva: number;
-  /** Percepción de IIBB de la factura (crédito fiscal, no costo) — solo FC */
-  percepcionIibb: number;
-  /** Conceptos no gravados (ej: pallets valorizados) — solo FC */
-  noGravado: number;
-  controlFactura: ControlFactura;
-  proveedorId: string;
-  proveedorNombre: string;
-  usarProveedorNuevo: boolean;
-  numeroFactura: string;
-  fechaCompra: string;
-  formaPago: string;
-  tipoFactura: 'ZZ' | 'FC';
-  notas: string;
-  items: CompraItemForm[];
-  busquedaProducto: string;
-  mostrarBuscador: boolean;
-  modoItemRapido: boolean;
-  guardando: boolean;
-  error: string;
-  // Escaneo de factura
-  escaneando: boolean;
-  resultadoEscaneo: FacturaEscaneada | null;
-  errorEscaneo: string;
-  /** Items del último escaneo que no se auto-vincularon y esperan decisión del usuario. */
-  itemsPendientesScan: FacturaItemEscaneado[];
-}
-
-/** Tipos de acciones del reducer */
-type CompraActionType =
-  | { type: 'SET_PROVEEDOR_ID'; payload: string }
-  | { type: 'SET_PROVEEDOR_NOMBRE'; payload: string }
-  | { type: 'SET_USAR_PROVEEDOR_NUEVO'; payload: boolean }
-  | { type: 'SET_NUMERO_FACTURA'; payload: string }
-  | { type: 'SET_FECHA_COMPRA'; payload: string }
-  | { type: 'SET_FORMA_PAGO'; payload: string }
-  | { type: 'SET_TIPO_FACTURA'; payload: 'ZZ' | 'FC' }
-  | { type: 'SET_NOTAS'; payload: string }
-  | { type: 'SET_BUSQUEDA'; payload: string }
-  | { type: 'SET_MOSTRAR_BUSCADOR'; payload: boolean }
-  | { type: 'SET_GUARDANDO'; payload: boolean }
-  | { type: 'SET_ERROR'; payload: string }
-  | { type: 'AGREGAR_ITEM'; payload: ProductoDB }
-  | { type: 'ACTUALIZAR_ITEM'; payload: { index: number; campo: keyof CompraItemForm; valor: number | string } }
-  // Condición y alícuota se setean juntas: la condición manda sobre la tasa.
-  | { type: 'SET_CONDICION_ITEM'; payload: { index: number; clave: string } }
-  | { type: 'ELIMINAR_ITEM'; payload: number }
-  | { type: 'LIMPIAR_BUSQUEDA' }
-  | { type: 'SET_MODO_ITEM_RAPIDO'; payload: boolean }
-  | { type: 'AGREGAR_ITEM_RAPIDO'; payload: { productoId: string; nombre: string; codigo: string; costoUnitario: number } }
-  | { type: 'IMPORTAR_ITEMS'; payload: CompraItemForm[] }
-  | { type: 'SET_ESCANEANDO'; payload: boolean }
-  | { type: 'SET_RESULTADO_ESCANEO'; payload: FacturaEscaneada | null }
-  | { type: 'SET_ERROR_ESCANEO'; payload: string }
-  | { type: 'APLICAR_ESCANEO'; payload: { proveedorId: string; proveedorNombre: string; numeroFactura: string; fechaCompra: string; formaPago: string; items: CompraItemForm[]; pendientes: FacturaItemEscaneado[] } }
-  | { type: 'RESOLVER_PENDIENTE_VINCULAR'; payload: { index: number; producto: ProductoDB } }
-  | { type: 'RESOLVER_PENDIENTE_CREAR'; payload: { index: number; producto: ProductoDB } }
-  | { type: 'RESOLVER_PENDIENTE_OMITIR'; payload: { index: number } }
-  | { type: 'LIMPIAR_PENDIENTES_SCAN' }
-  | { type: 'SET_EXTRAS'; payload: Partial<Pick<CompraState, 'percepcionIva' | 'percepcionIibb' | 'noGravado'>> }
-  | { type: 'SET_CONTROL'; payload: Partial<ControlFactura> }
-  | { type: 'APLICAR_BONIF_GLOBAL'; payload: number };
 
 /** Props del componente principal */
 export interface ModalCompraProps {
@@ -256,11 +108,42 @@ interface ItemRowProps {
   condicionDelProducto?: string;
 }
 
+/** Props de CargosSection */
+interface CargosSectionProps {
+  state: CompraState;
+  dispatch: React.Dispatch<CompraActionType>;
+  /** Cargos de la última compra de este proveedor. null = no hay ninguna con cargos. */
+  plantilla?: PlantillaCargosProveedor | null;
+  /** Lo que el impuesto interno declarado permite deducir. null = el motor no pudo. */
+  resolucion: ResultadoBasesII | null;
+}
+
+/** Props de CargoRow */
+interface CargoRowProps {
+  cargo: CargoCompraForm;
+  items: CompraItemForm[];
+  dispatch: React.Dispatch<CompraActionType>;
+  resolucion: ResultadoBasesII | null;
+}
+
+/** Props de GrillaPesos */
+interface GrillaPesosProps {
+  cargo: CargoCompraForm;
+  items: CompraItemForm[];
+  dispatch: React.Dispatch<CompraActionType>;
+}
+
+/** Props de VistaPreviaCostosSection */
+interface VistaPreviaCostosProps {
+  state: CompraState;
+}
+
 /** Props de ResumenSection */
 interface ResumenSectionProps {
   totales: TotalesCompra;
   state: CompraState;
   dispatch: React.Dispatch<CompraActionType>;
+  resolucion: ResultadoBasesII | null;
 }
 
 // Constantes
@@ -274,254 +157,44 @@ const FORMAS_PAGO = [
   { value: 'tarjeta', label: 'Tarjeta' }
 ]
 
-// Estado inicial
-const initialState: CompraState = {
-  // Desglose fiscal extra (solo FC)
-  percepcionIva: 0,
-  percepcionIibb: 0,
-  noGravado: 0,
-  controlFactura: { gravado: 0, iva: 0, impuestosInternos: 0, percepciones: 0, total: 0 },
-  // Proveedor
-  proveedorId: '',
-  proveedorNombre: '',
-  usarProveedorNuevo: false,
-  // Datos de compra
-  numeroFactura: '',
-  fechaCompra: fechaLocalISO(),
-  formaPago: 'efectivo',
-  tipoFactura: 'FC',
-  notas: '',
-  // Items
-  items: [],
-  // UI
-  busquedaProducto: '',
-  mostrarBuscador: false,
-  modoItemRapido: false,
-  guardando: false,
-  error: '',
-  // Escaneo
-  escaneando: false,
-  resultadoEscaneo: null,
-  errorEscaneo: '',
-  itemsPendientesScan: []
-}
-
-// Reducer
-function compraReducer(state: CompraState, action: CompraActionType): CompraState {
-  switch (action.type) {
-    case 'SET_PROVEEDOR_ID':
-      return { ...state, proveedorId: action.payload }
-    case 'SET_PROVEEDOR_NOMBRE':
-      return { ...state, proveedorNombre: action.payload }
-    case 'SET_USAR_PROVEEDOR_NUEVO':
-      return { ...state, usarProveedorNuevo: action.payload }
-    case 'SET_NUMERO_FACTURA':
-      return { ...state, numeroFactura: action.payload }
-    case 'SET_FECHA_COMPRA':
-      return { ...state, fechaCompra: action.payload }
-    case 'SET_FORMA_PAGO':
-      return { ...state, formaPago: action.payload }
-    case 'SET_TIPO_FACTURA':
-      return { ...state, tipoFactura: action.payload }
-    case 'SET_NOTAS':
-      return { ...state, notas: action.payload }
-    case 'SET_BUSQUEDA':
-      return { ...state, busquedaProducto: action.payload, mostrarBuscador: true }
-    case 'SET_MOSTRAR_BUSCADOR':
-      return { ...state, mostrarBuscador: action.payload }
-    case 'SET_GUARDANDO':
-      return { ...state, guardando: action.payload }
-    case 'SET_ERROR':
-      return { ...state, error: action.payload }
-
-    case 'AGREGAR_ITEM': {
-      const producto = action.payload
-      const existente = state.items.find(i => i.productoId === producto.id)
-
-      if (existente) {
-        return {
-          ...state,
-          items: state.items.map(i =>
-            i.productoId === producto.id
-              ? { ...i, cantidad: i.cantidad + 1 }
-              : i
-          ),
-          busquedaProducto: '',
-          mostrarBuscador: false
-        }
-      }
-
-      return {
-        ...state,
-        items: [...state.items, {
-          productoId: producto.id,
-          productoNombre: producto.nombre,
-          productoCodigo: producto.codigo,
-          cantidad: 1,
-          bonificacion: 0,
-          costoUnitario: producto.costo_sin_iva || 0,
-          impuestosInternos: producto.impuestos_internos || 0,
-          porcentajeIva: producto.porcentaje_iva ?? 21,
-          condicionIva: producto.condicion_iva ?? 'gravado',
-          stockActual: producto.stock
-        }],
-        busquedaProducto: '',
-        mostrarBuscador: false
-      }
-    }
-
-    case 'ACTUALIZAR_ITEM':
-      return {
-        ...state,
-        items: state.items.map((item, i) =>
-          i === action.payload.index
-            ? { ...item, [action.payload.campo]: action.payload.valor }
-            : item
-        )
-      }
-
-    case 'SET_CONDICION_ITEM': {
-      const opcion = OPCIONES_CONDICION_IVA.find(o => o.clave === action.payload.clave)
-      if (!opcion) return state
-      return {
-        ...state,
-        items: state.items.map((item, i) =>
-          i === action.payload.index
-            ? { ...item, condicionIva: opcion.condicion, porcentajeIva: opcion.porcentaje }
-            : item
-        )
-      }
-    }
-
-    case 'ELIMINAR_ITEM':
-      return {
-        ...state,
-        items: state.items.filter((_, i) => i !== action.payload)
-      }
-
-    case 'LIMPIAR_BUSQUEDA':
-      return { ...state, busquedaProducto: '', mostrarBuscador: false }
-
-    case 'SET_MODO_ITEM_RAPIDO':
-      return { ...state, modoItemRapido: action.payload }
-
-    case 'AGREGAR_ITEM_RAPIDO': {
-      const { productoId, nombre, codigo, costoUnitario } = action.payload
-      return {
-        ...state,
-        items: [...state.items, {
-          productoId,
-          productoNombre: nombre,
-          productoCodigo: codigo,
-          cantidad: 1,
-          bonificacion: 0,
-          costoUnitario,
-          impuestosInternos: 0,
-          porcentajeIva: 21,
-          condicionIva: 'gravado',
-          stockActual: 0
-        }],
-        modoItemRapido: false,
-        busquedaProducto: '',
-        mostrarBuscador: false
-      }
-    }
-
-    case 'IMPORTAR_ITEMS':
-      return {
-        ...state,
-        items: [...state.items, ...action.payload]
-      }
-
-    case 'SET_ESCANEANDO':
-      return { ...state, escaneando: action.payload, errorEscaneo: '' }
-
-    case 'SET_RESULTADO_ESCANEO':
-      return { ...state, resultadoEscaneo: action.payload, escaneando: false }
-
-    case 'SET_ERROR_ESCANEO':
-      return { ...state, errorEscaneo: action.payload, escaneando: false }
-
-    case 'APLICAR_ESCANEO': {
-      const { proveedorId, proveedorNombre, numeroFactura, fechaCompra, formaPago, items, pendientes } = action.payload
-      return {
-        ...state,
-        proveedorId,
-        proveedorNombre,
-        usarProveedorNuevo: !proveedorId && !!proveedorNombre,
-        numeroFactura,
-        fechaCompra: fechaCompra || state.fechaCompra,
-        formaPago: formaPago || state.formaPago,
-        items,
-        itemsPendientesScan: pendientes,
-        resultadoEscaneo: null,
-        errorEscaneo: ''
-      }
-    }
-
-    case 'RESOLVER_PENDIENTE_VINCULAR':
-    case 'RESOLVER_PENDIENTE_CREAR': {
-      const { index, producto } = action.payload
-      const scanItem = state.itemsPendientesScan[index]
-      if (!scanItem) return state
-      const nuevoItem = construirCompraItemDesdeScan(producto, scanItem)
-      // Si ya existe un item con el mismo productoId, sumar cantidades
-      const existenteIdx = state.items.findIndex(i => i.productoId === producto.id)
-      const itemsActualizados = existenteIdx >= 0
-        ? state.items.map((i, idx) =>
-            idx === existenteIdx
-              ? { ...i, cantidad: i.cantidad + nuevoItem.cantidad }
-              : i
-          )
-        : [...state.items, nuevoItem]
-      return {
-        ...state,
-        items: itemsActualizados,
-        itemsPendientesScan: state.itemsPendientesScan.filter((_, i) => i !== index)
-      }
-    }
-
-    case 'RESOLVER_PENDIENTE_OMITIR': {
-      const { index } = action.payload
-      return {
-        ...state,
-        itemsPendientesScan: state.itemsPendientesScan.filter((_, i) => i !== index)
-      }
-    }
-
-    case 'LIMPIAR_PENDIENTES_SCAN':
-      return { ...state, itemsPendientesScan: [] }
-
-    case 'SET_EXTRAS':
-      return { ...state, ...action.payload }
-
-    case 'SET_CONTROL':
-      return { ...state, controlFactura: { ...state.controlFactura, ...action.payload } }
-
-    case 'APLICAR_BONIF_GLOBAL':
-      return {
-        ...state,
-        items: state.items.map(item => ({ ...item, bonificacion: action.payload }))
-      }
-
-    default:
-      return state
-  }
-}
-
 // Hook para cálculos de impuestos: delega en calcularTotalesCompra (fuente
 // única, testeada con la factura Manaos). ZZ: lo pagado es todo (sin IVA, II
 // ni percepciones).
+//
+// Los cargos entran acá y no sólo en la vista previa: desde que una bonificación
+// se carga como cargo, el neto gravado, el IVA y el impuesto interno de la
+// cabecera dependen de ellos, y son los que viajan a `compras.iva` y a
+// `compras.impuestos_internos`. Sin esto la posición fiscal quedaba inflada.
+//
+// El motor lanza ante un peso o una cantidad corruptos —mientras el usuario
+// tipea, un campo a medio escribir alcanza— así que la llamada va envuelta: se
+// cae a la aritmética sin cargos para no dejar el resumen en blanco. No tapa
+// nada: la vista previa muestra el error con su texto y `validarCargos` frena
+// el guardado antes de que un número así llegue a la base.
 function useCalculosImpuestos(
   items: CompraItemForm[],
   tipoFactura: 'ZZ' | 'FC',
   percepcionIva: number,
   percepcionIibb: number,
-  noGravado: number
+  noGravado: number,
+  cargos: CargoCompraForm[],
+  iiDeclarado: Record<number, number>
 ): TotalesCompra {
   return useMemo(
-    () => calcularTotalesCompra(items, tipoFactura, { percepcionIva, percepcionIibb, noGravado }),
-    [items, tipoFactura, percepcionIva, percepcionIibb, noGravado]
+    () => {
+      const extras = { percepcionIva, percepcionIibb, noGravado }
+      // El borde va adentro del memo: `cargosParaMotor` arma un array nuevo en
+      // cada render y como dependencia anularía la memoización.
+      try {
+        return calcularTotalesCompra(
+          items, tipoFactura, extras,
+          cargosParaMotor(cargos), iiDeclaradoParaMotor(iiDeclarado, tipoFactura)
+        )
+      } catch {
+        return calcularTotalesCompra(items, tipoFactura, extras)
+      }
+    },
+    [items, tipoFactura, percepcionIva, percepcionIibb, noGravado, cargos, iiDeclarado]
   )
 }
 
@@ -532,8 +205,21 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
-  const totales = useCalculosImpuestos(state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado)
+  const totales = useCalculosImpuestos(
+    state.items, state.tipoFactura, state.percepcionIva, state.percepcionIibb, state.noGravado,
+    state.cargos, state.iiDeclarado
+  )
   const { subtotal, iva, impuestosInternos, total } = totales
+
+  // Qué bonificaciones bajan la base del impuesto interno, deducido del
+  // declarado. Se calcula UNA vez acá y baja a las dos secciones que lo
+  // muestran —los casilleros de "Cargos y prorrateo" y el cuadre del resumen—
+  // porque son la misma respuesta dicha en dos lugares y calcularla dos veces
+  // es la forma de que un día digan cosas distintas.
+  const resolucionII = useMemo(
+    () => resolucionBasesII(state.items, state.cargos, state.iiDeclarado, state.tipoFactura),
+    [state.items, state.cargos, state.iiDeclarado, state.tipoFactura]
+  )
 
   // Tasa de II vigente por producto: para autocompletar y detectar líneas que
   // difieren (alícuota cambiada en la factura → se propaga al producto al guardar).
@@ -555,6 +241,14 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
     [productos]
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Cargos de la última compra de este proveedor, para reusarlos. Se pide al
+  // elegir el proveedor y no al apretar el botón: así la sección sabe de
+  // antemano si hay algo para traer, en vez de ofrecer un botón que a veces no
+  // hace nada. Con proveedor nuevo (sin id) la query queda apagada.
+  const plantillaCargos = useCargosPlantillaProveedorQuery(
+    state.usarProveedorNuevo ? null : state.proveedorId
+  )
 
   // Productos filtrados
   const productosFiltrados = useMemo(() => {
@@ -715,6 +409,15 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         return
       }
     }
+    // Lo que la RPC va a rechazar de los cargos, dicho antes de salir a la red.
+    // La validación que manda sigue siendo la de la mig 194 —corre aunque el
+    // cliente esté viejo— pero un round trip para enterarse de que el flete no
+    // tiene ninguna línea asignada es un round trip de más.
+    const errorCargos = validarCargos(state.cargos)
+    if (errorCargos) {
+      dispatch({ type: 'SET_ERROR', payload: errorCargos })
+      return
+    }
 
     dispatch({ type: 'SET_GUARDANDO', payload: true })
     try {
@@ -729,6 +432,9 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         percepcionIva: state.tipoFactura === 'FC' ? state.percepcionIva : 0,
         percepcionIibb: state.tipoFactura === 'FC' ? state.percepcionIibb : 0,
         noGravado: state.tipoFactura === 'FC' ? state.noGravado : 0,
+        // mig 195. Ya viene en 0 en ZZ desde el motor; el `total` de arriba la
+        // tiene adentro, así que las dos puntas del cuadre dicen lo mismo.
+        bonificaciones: totales.bonificaciones,
         otrosImpuestos: 0,
         total,
         // Líneas FC cuya tasa de II fue editada a mano: la alícuota nueva se
@@ -745,6 +451,13 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         formaPago: state.formaPago,
         notas: state.notas,
         tipoFactura: state.tipoFactura,
+        // Los pesos viajan por ÍNDICE del array de items de abajo: los
+        // compra_items.id no existen todavía. `cargosParaRPC` traduce contra
+        // ESE mismo array, así que los dos tienen que salir de `state.items`.
+        cargos: cargosParaRPC(state.items, state.cargos),
+        // En ZZ la RPC lo descarta igual; mandarlo ya filtrado deja a las dos
+        // puntas diciendo lo mismo.
+        iiDeclarado: iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura),
         items: state.items.map(item => {
           const costoConBonif = (item.costoUnitario || 0) * (1 - (item.bonificacion || 0) / 100)
           return {
@@ -890,9 +603,22 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
               onImportarExcel={() => setModalImportarOpen(true)}
             />
 
+            {/* Cargos y prorrateo. También en ZZ —el 47,9% de las compras—: el
+                tipo de comprobante decide si se agregan impuestos encima, no si
+                se ignoran costos, y un flete que factura un transportista aparte
+                no está adentro del precio pagado. La regla de ZZ se aplica en el
+                borde del motor (lineasParaMotor), no apagando la sección.
+                El único gate es tener líneas donde repartir. */}
+            {state.items.length > 0 && (
+              <>
+                <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII} />
+                <VistaPreviaCostosSection state={state} />
+              </>
+            )}
+
             {/* Totales */}
             {state.items.length > 0 && (
-              <ResumenSection totales={totales} state={state} dispatch={dispatch} />
+              <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} />
             )}
 
             {/* Notas */}
@@ -1916,6 +1642,652 @@ function ItemPendienteRow({
   )
 }
 
+/** Bases de reparto ofrecidas, con la ayuda que explica cada una. */
+const BASES_PRORRATEO: Array<{ value: BaseProrrateo; label: string; ayuda: string }> = [
+  { value: 'monto', label: 'Por monto', ayuda: 'Cada línea pesa lo que vale (neto ya bonificado). Es lo habitual para el flete.' },
+  { value: 'cantidad', label: 'Por cantidad', ayuda: 'Cada línea pesa sus unidades. Sirve para pallets y separadores.' },
+  // La mig 192 la llama 'unidades', pero la regla es peso 1 en TODAS las líneas:
+  // lo que reparte son partes iguales, no unidades del producto.
+  { value: 'unidades', label: 'Partes iguales', ayuda: 'Todas las líneas pesan lo mismo, sin importar monto ni cantidad.' },
+]
+
+/** ¿Este peso puede entrar a `prorratearCargo` sin hacerlo lanzar? */
+function pesoInvalido(peso: number): boolean {
+  return !Number.isFinite(peso) || peso < 0
+}
+
+/**
+ * Reparto de un cargo línea por línea: el peso editable y la plata que le toca.
+ *
+ * `prorratearCargo` LANZA ante un peso no finito o negativo, y está bien que lo
+ * haga: convertir basura en 0 la volvería indistinguible de una exclusión
+ * deliberada, y el 0 ES el mecanismo de exclusión. Consecuencias acá:
+ *  - Quien parsea es el formulario. NumberInput sólo emite números finitos y
+ *    clampea a min=0, así que un campo a medio tipear ("", "1.") nunca llega al
+ *    cálculo: el peso confirmado sigue siendo el anterior.
+ *  - Igual se detectan las filas inválidas ANTES de llamar, y la llamada va
+ *    envuelta. Un peso podrido deja su fila en error; no deja el modal en
+ *    blanco.
+ */
+function GrillaPesos({ cargo, items, dispatch }: GrillaPesosProps) {
+  // Sólo las líneas ya numeradas por el reducer; sin id no hay dónde colgar el peso.
+  const lineas = items.flatMap(item =>
+    item.lineaId === undefined ? [] : [{ item, id: item.lineaId }]
+  )
+
+  const pesoDe = (id: number): number => cargo.pesos[id] ?? 0
+  const hayInvalidos = lineas.some(l => pesoInvalido(pesoDe(l.id)))
+
+  // Sin useMemo: son un puñado de líneas y el React Compiler ya memoiza. Lo que
+  // no puede faltar es el try, que es lo que separa "esa fila está en error" de
+  // "el modal desapareció".
+  const reparto = ((): Record<number, number> | null => {
+    if (hayInvalidos) return null
+    try {
+      return prorratearCargo(cargo.monto, cargo.pesos)
+    } catch {
+      return null
+    }
+  })()
+
+  const totalPeso = lineas.reduce((acc, l) => acc + (pesoInvalido(pesoDe(l.id)) ? 0 : pesoDe(l.id)), 0)
+  const sumaRepartida = reparto ? Object.values(reparto).reduce((acc, v) => acc + v, 0) : 0
+  // El residuo va a la línea de mayor peso justamente para que esto cierre al
+  // centavo. Si alguna vez no cierra, es un bug del motor y hay que verlo.
+  const cuadra = reparto !== null && Math.abs(sumaRepartida - cargo.monto) < 0.005
+
+  const setPeso = (id: number, peso: number) =>
+    dispatch({ type: 'SET_PESO_CARGO', payload: { cargoId: cargo.id, lineaId: id, peso } })
+
+  const inputPeso = (id: number, invalida: boolean) => (
+    <NumberInput
+      min={0}
+      emptyValue={0}
+      value={invalida ? 0 : pesoDe(id)}
+      onChange={(n) => setPeso(id, n)}
+      commitOnChange
+      title="0 excluye la línea de este cargo"
+      className={`w-full px-2 py-1 text-right border rounded text-sm dark:bg-gray-700 dark:text-white ${
+        invalida ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'dark:border-gray-600'
+      }`}
+    />
+  )
+
+  const montoAsignado = (id: number) => (reparto === null ? null : reparto[id] ?? 0)
+
+  return (
+    <div className="mt-2 space-y-2">
+      {/* Header solo en desktop */}
+      <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
+        <div className="col-span-6">Producto</div>
+        <div className="col-span-3 text-right">Peso</div>
+        <div className="col-span-3 text-right">Le toca</div>
+      </div>
+
+      {lineas.map(({ item, id }) => {
+        const invalida = pesoInvalido(pesoDe(id))
+        const asignado = montoAsignado(id)
+        return (
+          <div key={id} className="bg-gray-50 dark:bg-gray-900 rounded px-2 py-2">
+            {/* Mobile: apilado */}
+            <div className="md:hidden space-y-2">
+              <p className="text-sm text-gray-800 dark:text-white">{item.productoNombre}</p>
+              <div className="grid grid-cols-2 gap-2 items-center">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Peso</label>
+                  {inputPeso(id, invalida)}
+                </div>
+                <div className="text-right">
+                  <span className="block text-xs text-gray-500 mb-1">Le toca</span>
+                  <span className="text-sm font-medium text-gray-800 dark:text-white">
+                    {asignado === null ? '—' : formatPrecio(asignado)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop: grilla */}
+            <div className="hidden md:grid grid-cols-12 gap-2 items-center">
+              <p className="col-span-6 text-sm text-gray-800 dark:text-white truncate" title={item.productoNombre}>
+                {item.productoNombre}
+              </p>
+              <div className="col-span-3">{inputPeso(id, invalida)}</div>
+              <div className="col-span-3 text-right text-sm font-medium text-gray-800 dark:text-white">
+                {asignado === null ? '—' : formatPrecio(asignado)}
+              </div>
+            </div>
+
+            {invalida && (
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                Peso inválido ({String(pesoDe(id))}): tiene que ser un número mayor o igual a 0. El 0 excluye la línea.
+              </p>
+            )}
+          </div>
+        )
+      })}
+
+      <div className="flex justify-between items-center text-sm pt-2 border-t dark:border-gray-600">
+        <span className="text-gray-600 dark:text-gray-400">Suma repartida</span>
+        <span className={`font-medium ${cuadra ? 'text-gray-800 dark:text-white' : 'text-red-600'}`}>
+          {reparto === null ? '—' : formatPrecio(sumaRepartida)}
+          <span className="text-gray-500 font-normal"> / {formatPrecio(cargo.monto)}</span>
+        </span>
+      </div>
+
+      {hayInvalidos && (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          Hay pesos inválidos: mientras estén así este cargo no se reparte.
+        </p>
+      )}
+      {!hayInvalidos && totalPeso === 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          ⚠ Todos los pesos están en 0: este cargo no se reparte a ninguna línea y no llega a ningún costo.
+        </p>
+      )}
+      {!hayInvalidos && totalPeso > 0 && !cuadra && (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          El reparto no suma el monto del cargo. Es un error de cálculo, no de carga: no registres la compra así.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Un cargo de la factura: concepto, monto y las tres decisiones fiscales.
+ *
+ * El signo vive en un toggle y no en el campo, porque NumberInput no deja
+ * tipear el "-" (sanitiza a dígitos). Tipear -500 y que quede 500 en silencio
+ * sería peor que pedir el gesto explícito.
+ */
+/**
+ * Lo que el impuesto interno declarado tiene para decir sobre el casillero de
+ * ESTE cargo.
+ *
+ * Desde el solver, `afectaBaseII` deja de ser una pregunta que el usuario no
+ * puede contestar —lo decide el proveedor y la factura testigo demuestra que
+ * trató dos bonificaciones del mismo comprobante de forma distinta— y pasa a ser
+ * una respuesta que sale de la factura. Pero sigue siendo editable, así que la
+ * leyenda tiene que decir de dónde salió el valor que se está viendo: deducido,
+ * puesto a mano, o indeterminable.
+ *
+ * El caso que más importa es el tercero: un cargo que casi no mueve el impuesto
+ * interno de ninguna alícuota no se puede deducir de ningún declarado, y decirlo
+ * es mejor que dejar el casillero mudo al lado de otros que sí se resolvieron.
+ */
+function leyendaBaseII(
+  cargo: CargoCompraForm,
+  resolucion: ResultadoBasesII | null
+): { texto: string; clase: string } | null {
+  if (!resolucion || cargo.condicionIva !== 'gravado') return null
+  if (resolucion.indeterminables.includes(cargo.id)) {
+    return {
+      texto: 'La factura no alcanza para deducirlo: este cargo casi no mueve el impuesto interno de ninguna alícuota.',
+      clase: 'text-gray-500 dark:text-gray-400',
+    }
+  }
+  if (resolucion.estado !== 'unica' || !resolucion.candidatos.includes(cargo.id)) return null
+  const deducido = resolucion.soluciones[0].asignacion[cargo.id]
+  if (!cargo.afectaBaseIIManual) {
+    return {
+      texto: 'Deducido del impuesto interno declarado en la factura. Cambialo si sabés que es otra cosa.',
+      clase: 'text-green-700 dark:text-green-400',
+    }
+  }
+  return deducido === cargo.afectaBaseII
+    ? {
+        texto: 'Lo marcaste vos, y es lo mismo que dice el impuesto interno declarado.',
+        clase: 'text-gray-500 dark:text-gray-400',
+      }
+    : {
+        texto: `Lo marcaste vos. Según el impuesto interno declarado, ${deducido ? 'sí' : 'no'} debería bajar la base — manda lo tuyo.`,
+        clase: 'text-amber-700 dark:text-amber-300',
+      }
+}
+
+function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
+  // El signo es estado de la fila y no `cargo.monto < 0`: con monto en 0 el
+  // toggle volvería solo a "Cargo" apenas se elige "Bonificación".
+  const [esBonificacion, setEsBonificacion] = useState(cargo.monto < 0)
+  const [mostrarPesos, setMostrarPesos] = useState(false)
+  const set = (cambios: CambiosCargo) =>
+    dispatch({ type: 'ACTUALIZAR_CARGO', payload: { id: cargo.id, cambios } })
+
+  const cambiarSigno = (bonificacion: boolean) => {
+    setEsBonificacion(bonificacion)
+    const magnitud = Math.abs(cargo.monto)
+    set({ monto: bonificacion ? -magnitud : magnitud })
+  }
+
+  const baseElegida = BASES_PRORRATEO.find(b => b.value === cargo.baseProrrateo)
+  const leyenda = leyendaBaseII(cargo, resolucion)
+
+  return (
+    <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border dark:border-gray-600 space-y-3">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <label className="block text-xs text-gray-500 mb-1">Concepto</label>
+          <input
+            type="text"
+            value={cargo.concepto}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ concepto: e.target.value })}
+            placeholder="Flete, pallets, separadores, bonificación..."
+            className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => dispatch({ type: 'ELIMINAR_CARGO', payload: cargo.id })}
+          className="mt-5 p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded shrink-0"
+          title="Quitar este cargo"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Monto (sin IVA)</label>
+          <div className="flex gap-1">
+            <div className="flex rounded overflow-hidden border dark:border-gray-600 shrink-0">
+              {([false, true] as const).map(bonif => (
+                <button
+                  key={String(bonif)}
+                  type="button"
+                  onClick={() => cambiarSigno(bonif)}
+                  title={bonif ? 'Resta del costo (bonificación)' : 'Suma al costo'}
+                  className={`px-2 py-1.5 text-sm font-medium transition-colors ${
+                    esBonificacion === bonif
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {bonif ? '−' : '+'}
+                </button>
+              ))}
+            </div>
+            <NumberInput
+              min={0}
+              emptyValue={0}
+              value={Math.abs(cargo.monto)}
+              onChange={(n) => set({ monto: esBonificacion ? -Math.abs(n) : Math.abs(n) })}
+              commitOnChange
+              placeholder="0.00"
+              className="w-full px-2 py-1.5 text-right text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs text-gray-500 mb-1" title="Un cargo gravado tributa a la alícuota de las líneas donde cae: no lleva alícuota propia.">
+            Tratamiento frente al IVA
+          </label>
+          <select
+            value={cargo.condicionIva}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => set({ condicionIva: e.target.value as CondicionIva })}
+            className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          >
+            {OPCIONES_CONDICION_SIN_ALICUOTA.map(o => (
+              <option key={o.condicion} value={o.condicion}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Base de reparto</label>
+          <select
+            value={cargo.baseProrrateo}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => set({ baseProrrateo: e.target.value as BaseProrrateo })}
+            title={baseElegida?.ayuda}
+            className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+          >
+            {BASES_PRORRATEO.map(b => (
+              <option key={b.value} value={b.value}>{b.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Las dos casillas son independientes: el flete de un tercero entra al
+          costo pero no está en el papel; un redondeo de factura, al revés. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={cargo.enFactura}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ enFactura: e.target.checked })}
+            className="mt-0.5 w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+          />
+          <span className="text-sm dark:text-gray-200">
+            Viene en la factura
+            <span className="block text-xs text-gray-500 dark:text-gray-400">
+              Está impreso en el comprobante y suma al cuadre contra el papel.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={cargo.prorrateaAlCosto}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ prorrateaAlCosto: e.target.checked })}
+            className="mt-0.5 w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+          />
+          <span className="text-sm dark:text-gray-200">
+            Entra al costo
+            <span className="block text-xs text-gray-500 dark:text-gray-400">
+              Se prorratea al costo unitario de los productos.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {/* Sólo para un cargo gravado: el motor lo lee como `gravado &&
+          afectaBaseII`, así que ofrecerlo en exento o no gravado prometería un
+          efecto que no ocurre. Al salir de "gravado" el reducer lo apaga. */}
+      {cargo.condicionIva === 'gravado' && (
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={cargo.afectaBaseII}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => set({ afectaBaseII: e.target.checked })}
+            className="mt-0.5 w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+          />
+          <span className="text-sm dark:text-gray-200">
+            Afecta la base de impuestos internos
+            <span className="block text-xs text-gray-500 dark:text-gray-400">
+              Un descuento de precio baja la base; una bonificación comercial no.
+            </span>
+            {leyenda && <span className={`block text-xs ${leyenda.clase}`}>{leyenda.texto}</span>}
+          </span>
+        </label>
+      )}
+
+      <div className="pt-2 border-t dark:border-gray-700">
+        <button
+          type="button"
+          onClick={() => setMostrarPesos(v => !v)}
+          className="text-sm text-blue-600 hover:underline"
+        >
+          {mostrarPesos
+            ? 'Ocultar reparto'
+            : `Ver reparto entre ${items.length} ${items.length === 1 ? 'línea' : 'líneas'} ▸`}
+        </button>
+        {mostrarPesos && <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} />}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Sección "Cargos y prorrateo": el flete, los pallets y los separadores que hoy
+ * no se cargan en ningún lado y son el 16,2% del costo.
+ *
+ * Plegada por defecto: el promedio es 4,1 ítems por compra y la compra chica no
+ * tiene por qué ver esto. Va también en ZZ —el 47,9% de las compras—: el tipo de
+ * comprobante decide si se agregan impuestos encima, no si se ignoran costos.
+ */
+function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSectionProps) {
+  const [abierta, setAbierta] = useState(false)
+  const { cargos } = state
+  const totalAlCosto = cargos.filter(c => c.prorrateaAlCosto).reduce((acc, c) => acc + c.monto, 0)
+  const totalEnFactura = cargos.filter(c => c.enFactura).reduce((acc, c) => acc + c.monto, 0)
+  // Los de la plantilla que faltan, con el MISMO criterio que usa el reducer al
+  // aplicarla: lo que dice el botón es exactamente lo que va a pasar.
+  const deLaPlantilla = plantilla?.cargos ?? []
+  const paraTraer = cargosPlantillaNuevos(cargos, deLaPlantilla)
+  const facturaPlantilla = plantilla?.numeroFactura ? `factura ${plantilla.numeroFactura}` : 'la última compra'
+
+  return (
+    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4">
+      <button
+        type="button"
+        onClick={() => setAbierta(v => !v)}
+        className="w-full flex items-center justify-between gap-2 text-left"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {abierta
+            ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
+            : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />}
+          <Truck className="w-5 h-5 text-gray-500 shrink-0" />
+          <h3 className="font-medium text-gray-800 dark:text-white truncate">Cargos y prorrateo</h3>
+          {cargos.length > 0 && (
+            <span className="px-1.5 py-0.5 text-xs rounded bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300 shrink-0">
+              {cargos.length}
+            </span>
+          )}
+        </div>
+        {!abierta && (
+          <span className="text-xs text-gray-500 text-right shrink-0">
+            {cargos.length === 0
+              ? 'Flete, pallets, bonificaciones'
+              : `${formatPrecio(totalAlCosto)} al costo`}
+          </span>
+        )}
+      </button>
+
+      {abierta && (
+        <div className="mt-3 space-y-3">
+          {cargos.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              Conceptos de la factura que no son renglones de producto: flete, pallets,
+              separadores, bonificaciones. Se reparten entre las líneas y entran al costo.
+            </p>
+          ) : (
+            cargos.map(cargo => (
+              <CargoRow key={cargo.id} cargo={cargo} items={state.items} dispatch={dispatch}
+                        resolucion={resolucion} />
+            ))
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => dispatch({ type: 'AGREGAR_CARGO' })}
+              className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Agregar cargo
+            </button>
+
+            {/* Plantilla del proveedor: el flete y los pallets de Manaos son los
+                mismos todos los meses y el reparto a mano no es sostenible. Se
+                traen los conceptos, las banderas y los pesos; el monto queda en
+                0 porque es lo único que cambia factura a factura. */}
+            {paraTraer.length > 0 && (
+              <button
+                type="button"
+                onClick={() => dispatch({ type: 'APLICAR_CARGOS_PLANTILLA', payload: deLaPlantilla })}
+                title={`Trae ${paraTraer.map(c => c.concepto).join(', ')} de ${facturaPlantilla}, con sus pesos y el monto en 0`}
+                className="flex items-center gap-1 px-3 py-1.5 border border-green-600 text-green-700 dark:text-green-400 rounded hover:bg-green-50 dark:hover:bg-green-900/30 text-sm transition-colors"
+              >
+                <Copy className="w-4 h-4" /> Traer cargos de la última compra de este proveedor
+              </button>
+            )}
+          </div>
+
+          {deLaPlantilla.length > 0 && paraTraer.length === 0 && (
+            <p className="text-xs text-gray-500">
+              Los cargos de {facturaPlantilla} ({deLaPlantilla.map(c => c.concepto).join(', ')}) ya están cargados.
+            </p>
+          )}
+
+          {cargos.length > 0 && (
+            <div className="pt-2 border-t dark:border-gray-700 space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600 dark:text-gray-400">En la factura:</span>
+                <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(totalEnFactura)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600 dark:text-gray-400">Al costo de los productos:</span>
+                <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(totalAlCosto)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Vista previa del costo de cada producto: las cuatro columnas que hoy el
+ * gerente lee del Excel (base IVA, impuesto interno, no gravado, IVA) más el
+ * costo unitario final, y abajo el costo puesto en depósito.
+ *
+ * La alimenta `calcularCostosCompra`, que es el espejo TS de la mig 193: lo que
+ * se ve acá es lo que va a calcular la base al registrar.
+ *
+ * `calcularCostosCompra` lanza ante una cantidad o un peso corrupto —el mismo
+ * criterio que `prorratearCargo`, y por la misma razón— así que la llamada va
+ * envuelta: un dato podrido muestra el error acá adentro y no deja el modal en
+ * blanco.
+ */
+function VistaPreviaCostosSection({ state }: VistaPreviaCostosProps) {
+  const [abierta, setAbierta] = useState(false)
+
+  const esZZ = state.tipoFactura === 'ZZ'
+  const lineas = lineasParaMotor(state.items, state.tipoFactura)
+  const cargos = cargosParaMotor(state.cargos)
+  const iiDeclarado = iiDeclaradoParaMotor(state.iiDeclarado, state.tipoFactura)
+
+  const calculo = ((): { ok: true; costos: CostosCompra } | { ok: false; error: string } => {
+    try {
+      return { ok: true, costos: calcularCostosCompra(lineas, cargos, iiDeclarado) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'No se pudo calcular el costo' }
+    }
+  })()
+
+  const porLinea = calculo.ok
+    ? new Map(calculo.costos.lineas.map(l => [l.id, l]))
+    : new Map<number, CostosCompra['lineas'][number]>()
+  const costoEnDeposito = calculo.ok
+    ? calculo.costos.lineas.reduce((acc, l) => {
+        const item = state.items.find(i => i.lineaId === l.id)
+        return acc + l.costoRealUnitario * (item?.cantidad || 0)
+      }, 0)
+    : 0
+
+  // Factores de ajuste realmente aplicados (los que no son 1). Es lo único que
+  // hace falta decir acá: el que los carga es el panel de control.
+  const ajustesII = calculo.ok
+    ? Object.entries(calculo.costos.factorAjuste)
+        .filter(([, factor]) => redondearSQL(factor, 4) !== 1)
+        .map(([tasa, factor]) => `${tasa}% ×${redondearSQL(factor, 4)}`)
+    : []
+
+  const celda = (valor: number | undefined) => (valor === undefined ? '—' : formatPrecio(valor))
+
+  return (
+    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 sm:p-4">
+      <button
+        type="button"
+        onClick={() => setAbierta(v => !v)}
+        className="w-full flex items-center justify-between gap-2 text-left"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {abierta
+            ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
+            : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />}
+          <Calculator className="w-5 h-5 text-gray-500 shrink-0" />
+          <h3 className="font-medium text-gray-800 dark:text-white truncate">Costo por producto</h3>
+        </div>
+        {!abierta && (
+          <span className="text-xs text-gray-500 text-right shrink-0">
+            {calculo.ok ? `${formatPrecio(costoEnDeposito)} en depósito` : 'no se pudo calcular'}
+          </span>
+        )}
+      </button>
+
+      {abierta && (
+        <div className="mt-3 space-y-3">
+          {!calculo.ok ? (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-600 dark:text-red-400">{calculo.error}</p>
+            </div>
+          ) : (
+            <>
+              {/* La apertura del II se carga en "Control contra factura", que es
+                  donde se cuadra contra el papel; acá sólo se avisa que el
+                  ajuste está aplicado, porque mueve la columna de al lado. */}
+              {ajustesII.length > 0 && (
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  Impuesto interno ajustado al declarado en la factura ({ajustesII.join(', ')}).
+                  El campo está en "Control contra factura".
+                </p>
+              )}
+
+              {/* Header solo en desktop */}
+              <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-500 uppercase px-2">
+                <div className="col-span-2">Producto</div>
+                <div className="col-span-2 text-right">Base IVA</div>
+                <div className="col-span-2 text-right">Imp. int.</div>
+                <div className="col-span-2 text-right">No grav.</div>
+                <div className="col-span-2 text-right">IVA</div>
+                <div className="col-span-2 text-right">Costo unit.</div>
+              </div>
+
+              <div className="space-y-2">
+                {state.items.map((item, index) => {
+                  const c = item.lineaId === undefined ? undefined : porLinea.get(item.lineaId)
+                  return (
+                    <div key={item.lineaId ?? index} className="bg-white dark:bg-gray-800 rounded px-2 py-2 border dark:border-gray-600">
+                      {/* Mobile: apilado */}
+                      <div className="md:hidden space-y-1">
+                        <p className="text-sm font-medium text-gray-800 dark:text-white">{item.productoNombre}</p>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+                          <span className="text-gray-500">Base IVA</span>
+                          <span className="text-right dark:text-gray-200">{celda(c?.baseIvaUnitaria)}</span>
+                          <span className="text-gray-500">Imp. interno</span>
+                          <span className="text-right dark:text-gray-200">{celda(c?.iiUnitario)}</span>
+                          <span className="text-gray-500">No gravado</span>
+                          <span className="text-right dark:text-gray-200">{celda(c?.cargosUnitarios)}</span>
+                          <span className="text-gray-500">IVA</span>
+                          <span className="text-right dark:text-gray-200">{celda(c?.ivaUnitario)}</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-1 border-t dark:border-gray-600">
+                          <span className="text-xs text-gray-500">Costo unitario</span>
+                          <span className="text-sm font-semibold text-gray-800 dark:text-white">{celda(c?.costoRealUnitario)}</span>
+                        </div>
+                      </div>
+
+                      {/* Desktop: grilla */}
+                      <div className="hidden md:grid grid-cols-12 gap-2 items-center text-xs">
+                        <p className="col-span-2 text-gray-800 dark:text-white truncate" title={item.productoNombre}>
+                          {item.productoNombre}
+                        </p>
+                        <span className="col-span-2 text-right dark:text-gray-200">{celda(c?.baseIvaUnitaria)}</span>
+                        <span className="col-span-2 text-right dark:text-gray-200">{celda(c?.iiUnitario)}</span>
+                        <span className="col-span-2 text-right dark:text-gray-200">{celda(c?.cargosUnitarios)}</span>
+                        <span className="col-span-2 text-right dark:text-gray-200">{celda(c?.ivaUnitario)}</span>
+                        <span className="col-span-2 text-right font-semibold text-gray-800 dark:text-white">{celda(c?.costoRealUnitario)}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Todos los importes son por unidad.
+                {esZZ && ' En ZZ lo pagado ya incluye IVA e impuestos internos: por eso las dos columnas van en cero y el cargo suma igual.'}
+              </p>
+
+              <div className="flex justify-between items-center pt-2 border-t dark:border-gray-600">
+                <span className="font-medium text-gray-800 dark:text-white">Costo puesto en depósito</span>
+                <span className="text-lg font-bold text-green-600">{formatPrecio(costoEnDeposito)}</span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Neto + impuestos internos + los cargos que entran al costo. El IVA queda afuera:
+                es crédito fiscal, no costo.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Fila del panel de control: calculado vs impreso en la factura */
 function ControlRow({ label, calculado, impreso, onChange }: {
   label: string;
@@ -1948,14 +2320,39 @@ function ControlRow({ label, calculado, impreso, onChange }: {
   )
 }
 
-function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
-  const { subtotalBruto, bonificacionTotal, subtotal, netoGravado, netoExento, netoNoGravado,
-          netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb, noGravado, total } = totales
+function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSectionProps) {
+  const { subtotalBruto, bonificacionTotal, subtotal, bonificaciones, netoGravado, netoExento,
+          netoNoGravado, netoPorAlicuota, iva, impuestosInternos, percepcionIva, percepcionIibb,
+          noGravado, total } = totales
   const esFC = state.tipoFactura === 'FC'
   const [bonifGlobal, setBonifGlobal] = useState(0)
   const [mostrarControl, setMostrarControl] = useState(false)
   const ctrl = state.controlFactura
   const percepcionesCalc = percepcionIva + percepcionIibb
+  const cuadreII = cuadreImpuestoInterno(state.items, state.cargos, state.iiDeclarado, state.tipoFactura)
+  // Los cargos que pre-llenan el "No gravado" de cabecera, para poder nombrarlos.
+  const cargosNoGravados = cargosNoGravadosEnFactura(state.cargos)
+  const noGravadoCargos = noGravadoDeCargos(state.cargos)
+
+  // ── Lo que el impuesto interno declarado permite deducir ───────────────────
+  // El ajuste que se está aplicando HOY, alícuota por alícuota. Es lo que hay
+  // que nombrar cuando la deducción no sale: el usuario tiene que saber que
+  // está viendo una aproximación y no un cálculo.
+  const ajusteII = (cuadreII ?? [])
+    .filter(c => c.declarado !== undefined && Math.abs(c.desvio) > 1e-9)
+    .map(c => `${redondearSQL(c.desvio * 100, 2)}% al ${c.tasa}%`)
+    .join(' y ')
+  const nombreCargo = (id: number) =>
+    state.cargos.find(c => c.id === id)?.concepto.trim() || '(sin concepto)'
+  const deduccion = resolucion?.estado === 'unica' ? resolucion.soluciones[0].asignacion : null
+  const porQueNo =
+    resolucion?.estado === 'ambigua'
+      ? 'Hay más de una combinación que llega al mismo número, así que la factura no alcanza para elegir.'
+      : resolucion?.estado === 'sin_solucion'
+        ? 'Ninguna combinación llega a lo declarado: puede faltar un cargo, o estar mal cargada una alícuota.'
+        : resolucion?.estado === 'demasiadas_hipotesis'
+          ? 'Hay demasiadas bonificaciones gravadas para probarlas todas sin arriesgar una coincidencia.'
+          : ''
 
   return (
     <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 space-y-4">
@@ -2023,6 +2420,19 @@ function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
           <div>
             <label className="block text-xs text-gray-500 mb-1" title="Conceptos fuera del IVA (ej: pallets/separadores valorizados)">
               No gravado
+              {/* La vuelta al automático, que si no un número tipeado queda
+                  clavado para siempre. Mismo gesto explícito que re-elegir la
+                  base de reparto de un cargo. */}
+              {state.noGravadoManual && noGravadoCargos !== state.noGravado && (
+                <button
+                  type="button"
+                  onClick={() => dispatch({ type: 'USAR_NO_GRAVADO_DE_CARGOS' })}
+                  className="ml-2 text-blue-600 hover:underline"
+                  title="Volver a la suma de los cargos no gravados que vienen en la factura"
+                >
+                  usar los cargos ({formatPrecio(noGravadoCargos)})
+                </button>
+              )}
             </label>
             <NumberInput
               min={0}
@@ -2032,6 +2442,15 @@ function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
               commitOnChange
               className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
             />
+            {/* De dónde sale el número. Sin esto el campo parece pedir un dato
+                que el modal ya tiene cargado tres secciones más arriba. */}
+            <p className="mt-1 text-[11px] leading-tight text-gray-500">
+              {state.noGravadoManual
+                ? `Tipeado a mano.${cargosNoGravados.length > 0 ? ` Los cargos no gravados de la factura suman ${formatPrecio(noGravadoCargos)}.` : ''}`
+                : cargosNoGravados.length > 0
+                  ? `Sale de los cargos no gravados de la factura: ${cargosNoGravados.map(c => c.concepto.trim() || 'sin concepto').join(', ')}.`
+                  : 'Se completa solo con los cargos no gravados que vengan en la factura.'}
+            </p>
           </div>
         </div>
       )}
@@ -2053,6 +2472,17 @@ function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
           <span className="text-gray-600 dark:text-gray-400">{esFC ? 'Gravado (neto):' : 'Subtotal Neto:'}</span>
           <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(esFC ? netoGravado : subtotal)}</span>
         </div>
+        {/* Sub-fila y no una fila propia: el gravado de arriba YA tiene la
+            bonificación restada. Se muestra porque es la diferencia entre el
+            neto de los renglones y lo que la factura llama gravado, y hasta la
+            mig 195 no estaba en ningún lado —el total quedaba 306.784,09 arriba
+            del papel en la factura testigo—. */}
+        {esFC && bonificaciones !== 0 && (
+          <div className="flex justify-between text-xs text-orange-600 dark:text-orange-400 pl-3">
+            <span>└ incluye bonificaciones de la factura:</span>
+            <span className="font-medium">{formatPrecio(bonificaciones)}</span>
+          </div>
+        )}
         {/* Con condiciones mezcladas el "gravado" solo ya no explica el total */}
         {esFC && netoExento > 0 && (
           <div className="flex justify-between text-sm">
@@ -2149,6 +2579,77 @@ function ResumenSection({ totales, state, dispatch }: ResumenSectionProps) {
                 onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { iva: n } })} />
               <ControlRow label="Imp. internos" calculado={impuestosInternos} impreso={ctrl.impuestosInternos}
                 onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { impuestosInternos: n } })} />
+              {/* Apertura del II POR ALÍCUOTA. La factura lo trae abierto y casi
+                  nunca coincide al peso con el calculado: el gerente hoy corrige
+                  esa diferencia a mano en un Excel, con un factor de 1,0496. Acá
+                  ese número se carga una vez y viaja a la base, que es la única
+                  forma de que el costo guardado lo tenga.
+                  Las alícuotas salen de las líneas, no de una lista fija. */}
+              {cuadreII === null ? (
+                <p className="text-xs text-red-600 dark:text-red-400 pl-3">
+                  No se pudo abrir el impuesto interno por alícuota (ver "Costo por producto").
+                </p>
+              ) : cuadreII.map(c => (
+                <div key={c.tasa} className="grid grid-cols-12 gap-2 items-center text-xs">
+                  <span className="col-span-4 text-gray-500 pl-3">└ declarado al {c.tasa}%</span>
+                  <span className="col-span-3 text-right text-gray-500">{formatPrecio(c.calculado)}</span>
+                  <div className="col-span-3">
+                    <NumberInput
+                      min={0}
+                      emptyValue={0}
+                      value={c.declarado ?? 0}
+                      onChange={(n) => dispatch({ type: 'SET_II_DECLARADO', payload: { tasa: c.tasa, monto: n } })}
+                      commitOnChange
+                      placeholder="factura"
+                      title="Lo que la factura declara de impuesto interno para esta alícuota"
+                      className="w-full px-2 py-1 text-right border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-xs"
+                    />
+                  </div>
+                  <span className={`col-span-2 text-right font-medium ${
+                    c.declarado === undefined ? 'text-gray-400'
+                      : Math.abs(c.desvio) > DESVIO_II_TOLERADO ? 'text-amber-600' : 'text-green-600'
+                  }`}>
+                    {c.declarado === undefined ? '—' : `×${redondearSQL(c.factor, 4)}`}
+                  </span>
+                </div>
+              ))}
+              {/* LA DEDUCCIÓN. El casillero "afecta la base de impuestos
+                  internos" no lo puede contestar el que carga la factura: lo
+                  decide el proveedor, y la testigo demuestra que trató las dos
+                  bonificaciones del MISMO comprobante de forma distinta. Pero la
+                  factura declara el impuesto interno POR ALÍCUOTA, y eso es una
+                  ecuación: con las dos bonificaciones reales hay 4 combinaciones
+                  y una sola cierra —a 6 centavos sobre 338.884—. */}
+              {resolucion && resolucion.candidatos.length > 0 && (
+                deduccion ? (
+                  <p className="text-xs text-green-700 dark:text-green-400 pl-3">
+                    ✓ El impuesto interno declarado determina las bonificaciones:{' '}
+                    {resolucion.candidatos
+                      .map(id => `"${nombreCargo(id)}" ${deduccion[id] ? 'baja' : 'no baja'} la base`)
+                      .join('; ')}
+                    . Quedó marcado así en "Cargos y prorrateo"; si sabés que está mal, cambialo ahí.
+                  </p>
+                ) : ajusteII ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-300 pl-3">
+                    No pude determinar qué bonificaciones bajan la base. Apliqué un ajuste
+                    del {ajusteII}. {porQueNo} Ese ajuste reparte el impuesto interno de la
+                    bonificación entre TODOS los productos de la alícuota, incluso los que no
+                    estuvieron en la promoción: a ésos les carga de más y a los de la promoción,
+                    de menos. Es una aproximación — si sabés cuál bonificación es descuento de
+                    precio, marcala a mano en "Cargos y prorrateo".
+                  </p>
+                ) : null
+              )}
+              {/* Aviso, no bloqueo: hay facturas con redondeos raros. */}
+              {(cuadreII ?? [])
+                .filter(c => Math.abs(c.desvio) > DESVIO_II_TOLERADO)
+                .map(c => (
+                  <p key={c.tasa} className="text-xs text-amber-700 dark:text-amber-300 pl-3">
+                    ⚠ El impuesto interno declarado al {c.tasa}% difiere un {redondearSQL(c.desvio * 100, 2)}%
+                    del calculado. Revisá si alguna bonificación no debería bajar la base, o si alguna
+                    alícuota está mal cargada.
+                  </p>
+                ))}
               <ControlRow label="Percepciones" calculado={percepcionesCalc} impreso={ctrl.percepciones}
                 onChange={(n) => dispatch({ type: 'SET_CONTROL', payload: { percepciones: n } })} />
               <ControlRow label="TOTAL" calculado={total} impreso={ctrl.total}
