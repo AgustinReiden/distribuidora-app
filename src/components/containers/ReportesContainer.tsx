@@ -50,10 +50,17 @@ export default function ReportesContainer(): React.ReactElement {
     setReporteInicializado(true)
   }, [])
 
-  const handleVerFichaCliente = useCallback((cliente: ClienteDB) => {
-    setClienteFichaId(cliente.id)
+  // `clientes.id` es bigint: PostgREST lo devuelve como number en runtime aunque
+  // ClienteDB lo tipe string, y el RPC de ventas también. Se guarda y se compara
+  // siempre como string para que las dos fuentes coincidan.
+  const handleVerFichaClienteId = useCallback((clienteId: string) => {
+    setClienteFichaId(String(clienteId))
     setModalFichaOpen(true)
   }, [])
+
+  const handleVerFichaCliente = useCallback((cliente: ClienteDB) => {
+    handleVerFichaClienteId(String(cliente.id))
+  }, [handleVerFichaClienteId])
 
   return (
     <>
@@ -64,13 +71,14 @@ export default function ReportesContainer(): React.ReactElement {
           loading={isLoading}
           onCalcularReporte={handleCalcularReporte}
           onVerFichaCliente={handleVerFichaCliente}
+          onVerFichaClienteId={handleVerFichaClienteId}
         />
       </Suspense>
 
       {modalFichaOpen && clienteFichaId && (
         <Suspense fallback={null}>
           <ModalFichaCliente
-            cliente={clientes.find(cliente => cliente.id === clienteFichaId) || null}
+            cliente={clientes.find(cliente => String(cliente.id) === clienteFichaId) || null}
             onClose={() => {
               setModalFichaOpen(false)
               setClienteFichaId(null)

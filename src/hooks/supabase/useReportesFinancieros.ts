@@ -5,8 +5,6 @@ import type {
   ReporteRentabilidad,
   ProductoRentabilidad,
   TotalesRentabilidad,
-  VentaPorCliente,
-  VentaPorZona,
   AgingDeuda,
   UseReportesFinancierosReturn,
   ClienteDB,
@@ -30,31 +28,8 @@ interface PedidoWithItems {
   }>;
 }
 
-interface PedidoWithCliente {
-  id: string;
-  cliente_id: string;
-  estado: string;
-  estado_pago?: string;
-  total: number;
-  created_at?: string;
-  cliente?: ClienteDB | null;
-}
-
 interface ProductoStatsMap {
   [key: string]: ProductoRentabilidad;
-}
-
-interface ClienteStatsMap {
-  [key: string]: VentaPorCliente;
-}
-
-interface ZonaStatsMap {
-  [key: string]: {
-    zona: string;
-    cantidadPedidos: number;
-    totalVentas: number;
-    clientes: Set<string>;
-  };
 }
 
 export function useReportesFinancieros(): UseReportesFinancierosReturn {
@@ -263,97 +238,10 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
     }
   }
 
-  const generarReporteVentasPorCliente = async (
-    fechaDesde: string | null = null,
-    fechaHasta: string | null = null
-  ): Promise<VentaPorCliente[]> => {
-    setLoading(true)
-    try {
-      let query = supabase.from('pedidos').select(`*, cliente:clientes(*)`)
-      if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
-      if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
-
-      const { data: pedidos, error } = await query
-      if (error) throw error
-
-      const pedidosTyped = (pedidos || []) as PedidoWithCliente[]
-
-      const clienteStats: ClienteStatsMap = {}
-      pedidosTyped.forEach(p => {
-        const clienteId = p.cliente_id
-        if (!clienteStats[clienteId]) {
-          clienteStats[clienteId] = {
-            cliente: p.cliente || null,
-            cantidadPedidos: 0,
-            totalVentas: 0,
-            pedidosPagados: 0,
-            pedidosPendientes: 0
-          }
-        }
-        clienteStats[clienteId].cantidadPedidos += 1
-        clienteStats[clienteId].totalVentas += p.total || 0
-        if (p.estado_pago === 'pagado') clienteStats[clienteId].pedidosPagados += 1
-        else clienteStats[clienteId].pedidosPendientes += 1
-      })
-
-      return Object.values(clienteStats).sort((a, b) => b.totalVentas - a.totalVentas)
-    } catch {
-      return []
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const generarReporteVentasPorZona = async (
-    fechaDesde: string | null = null,
-    fechaHasta: string | null = null
-  ): Promise<VentaPorZona[]> => {
-    setLoading(true)
-    try {
-      let query = supabase.from('pedidos').select(`*, cliente:clientes(*)`)
-      if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
-      if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
-
-      const { data: pedidos, error } = await query
-      if (error) throw error
-
-      const pedidosTyped = (pedidos || []) as PedidoWithCliente[]
-
-      const zonaStats: ZonaStatsMap = {}
-      pedidosTyped.forEach(p => {
-        const zona = p.cliente?.zona || 'Sin zona'
-        if (!zonaStats[zona]) {
-          zonaStats[zona] = {
-            zona,
-            cantidadPedidos: 0,
-            totalVentas: 0,
-            clientes: new Set<string>()
-          }
-        }
-        zonaStats[zona].cantidadPedidos += 1
-        zonaStats[zona].totalVentas += p.total || 0
-        zonaStats[zona].clientes.add(p.cliente_id)
-      })
-
-      return Object.values(zonaStats).map(z => ({
-        zona: z.zona,
-        cantidadPedidos: z.cantidadPedidos,
-        totalVentas: z.totalVentas,
-        cantidadClientes: z.clientes.size,
-        ticketPromedio: z.cantidadPedidos > 0 ? z.totalVentas / z.cantidadPedidos : 0
-      })).sort((a, b) => b.totalVentas - a.totalVentas)
-    } catch {
-      return []
-    } finally {
-      setLoading(false)
-    }
-  }
 
   return {
     loading,
     generarReporteCuentasPorCobrar,
-    generarReporteRentabilidad,
-    generarReporteVentasPorCliente,
-    generarReporteVentasPorZona
+    generarReporteRentabilidad
   }
 }
