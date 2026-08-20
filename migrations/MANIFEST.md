@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-08-19** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-08-20** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,108 +137,90 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 192.** Estado al 2026-08-19 (todo lo de abajo está
-aplicado, salvo donde se aclara):
+**La próxima migración es la 197** — la última numerada en el repo es
+`196_espejo_del_motor_de_compras`.
 
-| NN | estado |
-|----|--------|
-| 182 | `182_pagos_fecha_en_hora_argentina` |
-| 183 | `183_cerrar_recorridos_terminados` |
-| 184–185 | **libres en `main`, pero reservadas** por la rama de cargos de compra (ver abajo) |
-| 186 | `186_quien_cruza_de_sucursal` |
-| 187 | `187_la_hija_no_cruza_de_sucursal` |
-| 188 | `188_anon_deja_de_ejecutar_rpcs` |
-| 189 | `189_auditoria_de_permisos_execute` |
-| 190 | `190_guards_de_estado_y_cobranza` |
-| 190b | `190b_pagos_forzar_usuario_no_definer` — aplicada sin archivo; el archivo se escribió después, leyendo el catálogo |
-| 191 | `191_pagos_forzar_usuario_sin_public` |
+La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
+una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`
+contra `SUM(compra_items.subtotal)`, así que un cargo gravado que no es un renglón de
+producto no tenía dónde ir y dejaba `compras.total` por encima del papel.
 
-> ⚠️ **La rama de cargos de compra (`claude/invoice-cost-calculation-370b62`)
-> tiene `183_compra_cargos_prorrateo.sql` y `184_compra_cargos_funciones.sql`, y
-> la 183 ya la ocupó `183_cerrar_recorridos_terminados` en `main`.** Esa rama hay
-> que renumerarla a 192+ antes de mergear. Es la tercera vez que pasa lo mismo
-> (el `167` duplicado, la 183 que nació 182, y ahora ésta): **el número no se
-> reserva escribiendo el archivo, se reserva aplicando la migración.** Mientras
-> la rama esté abierta el número no es de nadie.
+La **196** es el **espejo del motor**: `espejo_motor_compras(jsonb, integer)` recibe un lote
+de casos con la salida que dio el motor de TypeScript, corre el de SQL sobre la MISMA entrada
+y devuelve las celdas donde no coinciden, comparando con `IS DISTINCT FROM` sobre `numeric`
+—así `500` y `500.00` son el mismo número y un centavo no—. Que sólo una de las dos LANCE
+también cuenta como divergencia. La consume `scripts/espejo-motor-compras.mjs` desde el gate
+de integridad, que es el único lugar con credenciales de servicio. Es la única función de
+este bloque que **no** se le da a `authenticated`: no la llama ni el front ni el bot.
 
-Al elegir número hay que mirar las tres cosas: el ledger, `origin/main` y las
-ramas abiertas.
+La **193** es el motor de cálculo de esos cargos, en SQL, y va entero adentro de un solo
+`BEGIN/COMMIT` porque el motor a medias no sirve para nada. Trae tres cosas:
+`prorratear_cargo(numeric, jsonb)` reparte UN cargo sobre un vector `{id_de_línea: peso}` y
+manda el residuo del redondeo a la línea de mayor peso, para que la suma dé el monto EXACTO;
+`costo_real_unitario` gana un 4º argumento aditivo para los cargos —y se **dropea** la de 3
+en vez de dejar las dos, porque dos sobrecargas con aridades superpuestas dan `PGRST203` en
+runtime, invisible para `tsc` y para los tests (la trampa de la mig 176)—; y
+`calcular_costos_compra(jsonb, jsonb, jsonb)` arma las tres bases (IVA de factura, costo,
+impuesto interno), ajusta el II al declarado por alícuota y devuelve los unitarios por línea
+más los totales. Es **espejo exacto** de `src/utils/prorrateoCompra.ts`: si cambiás una,
+cambiá la otra. Los tres llamadores de `costo_real_unitario` se parchean en la MISMA
+transacción leyendo su cuerpo del **catálogo vivo** con `pg_get_functiondef` —nunca copiando
+el del archivo, que puede estar viejo— y exigiendo que el ancla aparezca exactamente una vez.
+Hoy los tres pasan `0`, así que **ningún costo se mueve**: los cargos de verdad entran en la
+194. **Aplicada a producción el 2026-08-19**, igual que la 192 y la 194.
 
-Las **186** y **187** cierran un agujero de RLS preexistente, encontrado de paso
-al revisar la 183. Las policies de las tablas hijas validan `sucursal_id =
-current_sucursal_id()` sobre la propia fila y **nadie valida que el padre
-referenciado sea de esa misma sucursal**; las FK no pasan por RLS, así que una
-línea podía colgarse de la compra de la otra sucursal, quedar invisible para su
-dueña —la policy de SELECT filtra por el `sucursal_id` de la línea— y moverle el
-costo igual. **Medido contra prod el 2026-08-19: 69 pares y 0 filas cruzadas.**
-Era latente, no un incidente.
+Verificada contra la factura testigo `A0005-00461415` (21 renglones, 13,3 M) con un ensayo
+sobre prod que termina en `RAISE EXCEPTION` para garantizar el rollback: **126 celdas
+comparadas** (21 líneas × 6 campos) con `IS DISTINCT FROM` sobre `numeric` contra la salida
+del TS, **0 divergencias**, y el factor de ajuste del impuesto interno da **1,000000 en las
+dos alícuotas** (8,6956 y 4,1667) — que es el corazón del rediseño: el Excel del gerente
+necesita un 1,0496 puesto a mano, y modelando `afecta_base_ii` cuadra solo.
 
-La **186** es sólo lectura: `auditoria_sucursal_cruzada()` y sus helpers
-`_pares_sucursal_cruzada()` y `_tenant_col_por_tabla()`, que descubren los pares
-hija→padre **del catálogo**, no de una lista. La **187** convierte cada FK de una
-columna en compuesta `(columna, tenant) → padre(id, tenant)`, el mismo patrón
-estructural que la 183 estrena para `compra_cargos`. No toca ni una fila y aborta
-con la lista completa si encuentra alguna cruzada.
+La **192** es el esqueleto de datos de los cargos de compra: `compra_cargos` (flete,
+pallets, separadores, bonificaciones; monto negativo = bonificación) y
+`compra_cargo_repartos` (el vector de pesos, donde un peso 0 excluye la línea y por
+eso el "alcance" no existe como concepto aparte), más el snapshot
+`compra_items.cargos_unitarios`. Todavía **sin funciones**: el motor vive por ahora
+sólo en `src/utils/prorrateoCompra.ts` y las RPC llegan en las migraciones
+siguientes: la **193** trae el motor de cálculo y la **194** las RPCs y el check de
+integridad. Van en archivos separados a propósito — appendearlas a la 192 las dejaría
+fuera de su `BEGIN/COMMIT` y un fallo a mitad daría tablas creadas con RPCs a medias.
+**Aplicada a producción el 2026-08-19**, junto con la 193 y la 194: las tres se aplicaron
+seguidas y verificando entre una y otra (firmas, gate de integridad y que ningún costo ya
+guardado se moviera).
 
-Seis cosas que conviene no volver a descubrir:
+**El rollback deja de ser gratis apenas haya cargos.** Mientras no exista ninguno,
+dropear las dos tablas y la columna devuelve el costo exacto (Σ cargos = 0). En cuanto
+los cargos entren al `costo_real_unitario` y al costo promedio, dropearlas borra CUÁLES
+fueron los cargos pero no los saca de los costos ya calculados: quedan costos que los
+incluyen sin registro de su origen. Desde ahí no es reversible sino
+reversible-con-recálculo, y hay que recomputar antes de dropear. El plan de rollback
+está escrito al pie del archivo.
 
-- **Se eligió FK y no un `EXISTS` en las policies** porque casi toda la escritura
-  de esta base entra por RPCs `SECURITY DEFINER`, que saltean RLS por definición:
-  una policy no las ve pasar. La FK sí. Refuerza el argumento que cinco de estas
-  hijas (`recorrido_cambios`, `promo_acumuladores`, `pedido_item_sustituciones`,
-  `comision_reglas`, `metas_preventista`) tengan **sólo policies de SELECT**: el
-  default-deny de RLS ya les cierra PostgREST, así que su único camino de
-  escritura es justo el que ninguna policy vigila.
-- **El tenant no siempre se llama `sucursal_id`.** `transferencias_stock` tiene
-  las dos columnas: `tenant_sucursal_id` es el tenant (es la que usa su policy de
-  escritura) y `sucursal_id` es **la otra punta del traslado**. Comparar contra la
-  segunda daba 4 de 13 filas "cruzadas" que son historia correcta —un traslado
-  tiene las dos puntas distintas por definición—; contra la primera dan 0. Si
-  alguien las "arreglaba", rompía datos buenos. De ahí `_tenant_col_por_tabla()`.
-- **`ON DELETE SET NULL` sobre una FK compuesta anula TODAS las columnas
-  referenciantes**, el tenant incluido, que es NOT NULL en 68 de los 69 pares ⇒ el
-  borrado del padre pasaría a fallar con un 23502. Hay que escribirlo
-  `ON DELETE SET NULL (columna)`, que existe recién en **PostgreSQL 15**. Prod
-  corre 17.6, así que el guard de versión de la 187 no va a saltar; queda igual.
-- **Que el tenant sea NOT NULL no es un detalle**: la FK es MATCH SIMPLE y se da
-  por satisfecha si CUALQUIERA de las columnas referenciantes es NULL. Aflojar ese
-  NOT NULL apaga media protección en silencio. El único caso hoy es
-  `comision_reglas.sucursal_id`, nullable a propósito (una regla sin sucursal es
-  global): el reporte lo marca `parcial` en vez de contarlo como cubierto.
-- **Un tenant NULL es "global", no "cruzada".** La primera versión contaba la
-  divergencia con `IS DISTINCT FROM` y una regla de comisión global —tenant NULL
-  contra un producto de otra sucursal— salía como violación, dejando el preflight
-  de la 187 abortando para siempre por una fila legal. El reporte tiene que contar
-  **exactamente** lo que la FK rechaza, o los dos dejan de decir lo mismo.
-- **El reporte cuenta los pares protegidos, no sólo los rotos.** La primera
-  versión sólo miraba FK de una columna y después de la 187 el tablero quedaba
-  vacío: un gate que se apaga solo justo cuando empieza a tener algo que vigilar.
+Tres decisiones de esa 192 que no son obvias leyendo el DDL. Las policies de
+`compra_cargo_repartos` son **cuatro**, no una `FOR ALL`: un reparto es la plata (mueve
+el costo de los productos), así que replica el permiso de `mt_compra_items_*` —depósito
+lee y carga, admin corrige y borra—; una `FOR ALL` que sólo mirara la sucursal le habría
+dado escritura a preventistas y transportistas. Y `compra_cargo_repartos` lleva
+`compra_id` **denormalizado** para poder atar sus dos FK como compuestas contra
+`compra_cargos(id, compra_id)` y `compra_items(id, compra_id)`: sin eso nada impedía que
+un reparto apuntara a la línea de otra compra o de otra sucursal, y no queremos que esa
+garantía dependa de que la RPC se porte bien. De ahí los `UNIQUE (id, compra_id)` en las
+dos tablas padre, redundantes por construcción pero necesarios como destino de la FK.
 
-**Resultado de aplicarlas (2026-08-19):** 69 pares, **69 protegidos**, 0 sin
-proteger, 0 filas cruzadas, 2 parciales (`comision_reglas`). 69 FK compuestas y
-19 UNIQUE nuevas; ningún `SET NULL` quedó sin su lista de columnas.
-`auditoria_integridad()` siguió en `overall_ok = true` con 0 critical/high, y los
-advisors de Supabase no sumaron ningún ERROR. Verificado además en vivo, dentro de
-un bloque que se revierte: el INSERT cruzado y el item de traslado mal etiquetado
-se rechazan con 23503, y el INSERT coherente sigue entrando.
+Y el mismo truco un nivel más arriba: `compra_cargos` referencia
+`compras(id, sucursal_id)`, no `compras(id)`. Cierra un hueco concreto — `es_admin()` es
+global y `current_sucursal_id()` sale del header, así que un admin parado en la sucursal
+A podía colgar un cargo con `sucursal_id = A` sobre una compra de B; la policy de INSERT
+chequea la fila y pasa, y una FK simple no mira la sucursal. Lo peor era que el cargo
+quedaba **invisible** para los usuarios de B, porque la policy de SELECT filtra por la
+sucursal del cargo. El hueco equivalente en `compra_items` (nada ata su `sucursal_id` al
+de `compras`) es preexistente y queda para un trabajo aparte.
 
-Y la razón de fondo para que todo salga del catálogo: **el repo predecía 60 pares
-y prod tiene 69.** Los 9 que faltaban (`comision_reglas`,
-`grupo_precio_escala_minimos`, `metas_preventista`, `productos.categoria_id`,
-`productos.marca_id`, `pedido_item_sustituciones.ajuste_producto_id_nuevo`) los
-encuentra `pg_constraint` y los habría perdido una lista escrita leyendo
-`migrations/`. Es la regla de oro de este archivo, cobrándose una más.
-
-El gate permanente es `scripts/check-sucursal-cruzada.mjs`, un paso más del
-workflow `integridad.yml`: una tabla nueva con `sucursal_id` y FK simple sale en
-rojo al día siguiente. Ése es el punto — el hallazgo no fue "compra_items está
-mal", fue "hay una clase de tabla que está mal y nadie la miraba".
-
-`movimiento_sucursal_items` **no** está en la lista y no es un olvido: no tiene
-columna de tenant propia, la resuelve por join con el movimiento. Lo que no se
-copia no puede contradecirse. Igual `compra_cargo_repartos` (183), y por eso
-`movimientos_sucursal` —que sólo tiene `sucursal_origen_id` y
-`sucursal_destino_id`— ni siquiera entra al análisis.
+La **182** (`182_pagos_fecha_en_hora_argentina`) no es de esta tanda: entró por `main`
+mientras la rama de compras estaba abierta. Cambia el default de `pagos.fecha` a hora
+argentina porque la base corre en UTC y entre las 21:00 y las 24:00 ART `CURRENT_DATE`
+fechaba el cobro al día siguiente. 0 casos en prod; no reescribe filas.
 
 La **181** cierra la otra mitad de la auditoría adversarial: las invariantes que
 vivían en el front. Trigger `pedidos_proteger_columnas` (el chofer sólo escribe
@@ -381,6 +363,28 @@ día siguiente. Ese es exactamente el escenario para el que existe el gate: el p
 saca a `anon` del default privilege, pero **a PUBLIC no lo puede sacar** (medido, ver la
 migración), así que toda función nueva sigue naciendo con PUBLIC y **cada migración tiene que
 revocarlo**. Ver `README.md § Permisos`.
+
+**Y `ls migrations/` tampoco alcanza solo: hay que preguntarle al ledger.** La tanda de
+cargos de compra nació como 182 y terminó siendo 183. El worktree venía de un commit de 6
+atrás, y desde adentro `ls migrations/` mostraba la 181 como última: la 182 ya existía en
+`origin/main` y estaba aplicada en prod desde hacía un día, pero el árbol local no la veía.
+Un worktree o una rama larga esconden exactamente este choque, y no lo detecta ningún test
+—dos migraciones con el mismo número no rompen nada hasta que hay que aplicarlas—.
+
+**Y le volvió a pasar a la misma tanda, DOS veces más, así que la regla de arriba no era
+suficiente.** Con el motor ya escrito como 184, otras tres ramas aplicaron
+`183_cerrar_recorridos_terminados` y las 186–189; el ledger llegó a 189 y las tres pasaron a
+**190** (tablas), **191** (funciones) y **192** (RPCs). Y ahí se las volvieron a comer:
+antes de aplicarlas entraron `190_guards_de_estado_y_cobranza`,
+`190b_pagos_forzar_usuario_no_definer` y `191_pagos_forzar_usuario_sin_public`, así que
+terminaron en **192** (tablas), **193** (funciones) y **194** (RPCs), que es donde están
+aplicadas. A la tercera la regla se siguió al pie: se reconfirmó contra el ledger en el
+minuto anterior a aplicar. Son **TRES** las fuentes que pueden ocupar un número —
+`origin/main`, el ledger de prod y **las ramas abiertas de los demás**— y a la tercera no se
+la puede consultar de forma confiable. Por eso la regla ya no es a quién preguntarle sino
+**cuándo**: elegí el número **al final, justo antes de aplicar**. Numerar al empezar es
+reservar algo que no se puede reservar, y el costo de renumerar después no es `git mv` — es
+la prosa, que ningún reemplazo mecánico agarra.
 
 ---
 
