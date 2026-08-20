@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 193 · Compras: el motor de cálculo de los cargos, en SQL
 -- ============================================================================
--- Ver docs/plans/2026-08-18-cargos-y-cuadre-de-compras.md
+-- Ver docs/archive/2026-08-18-cargos-y-cuadre-de-compras.md
 --
 -- La 192 creó las tablas; acá va la aritmética que las lee. El archivo se llena
 -- en tres tramos, y con la task 8 queda completo:

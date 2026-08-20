@@ -71,7 +71,7 @@ Las migraciones están en `migrations/` (ver [`migrations/README.md`](../migrati
 
 1. **Migración inversa manual** (preferido si el cambio es chico): escribir un `NNN_revert_<cosa>.sql` con el `DROP` / `ALTER` opuesto y aplicarlo vía SQL Editor. Commitearlo al repo para dejar registro.
 2. **Point-in-time recovery (PITR) de Supabase**: solo disponible en el plan Pro+. Requiere dashboard de Supabase → Database → Backups → PITR. Restaura la DB entera a un timestamp — **destructivo para datos escritos después**. Último recurso.
-3. **Backup manual previo**: si se anticipaba riesgo, debería haberse corrido un `pg_dump` antes. Ver [`docs/RLS_MIGRATION_GUIDE.md`](./RLS_MIGRATION_GUIDE.md) que menciona "Backup de la base de datos (recomendado)" como pre-requisito.
+3. **Backup manual previo**: si se anticipaba riesgo, debería haberse corrido un `pg_dump` antes. Ver [`docs/archive/2026-02-03-RLS_MIGRATION_GUIDE.md`](./archive/2026-02-03-RLS_MIGRATION_GUIDE.md) que menciona "Backup de la base de datos (recomendado)" como pre-requisito.
 
 Si el rollback de código (Opción A arriba) ya resolvió el síntoma y la migración no rompe por sí misma, **dejá la migración aplicada** y seguí. Revertir DDL innecesariamente introduce más riesgo.
 
@@ -103,7 +103,7 @@ Si algún paso falla, NO seguir con el día. Escalar.
 
 - [`docs/DEPLOY_GUIDE.md`](./DEPLOY_GUIDE.md) — flujo de deploy, entornos y variables.
 - [`migrations/README.md`](../migrations/README.md) — scheme de migraciones Supabase.
-- [`docs/RLS_MIGRATION_GUIDE.md`](./RLS_MIGRATION_GUIDE.md) — políticas RLS y pre-requisitos de backup.
+- [`docs/archive/2026-02-03-RLS_MIGRATION_GUIDE.md`](./archive/2026-02-03-RLS_MIGRATION_GUIDE.md) — políticas RLS y pre-requisitos de backup.
 - `.github/workflows/deploy.yml` — job `deploy-coolify` y trigger del webhook.
 
 ## Contactos

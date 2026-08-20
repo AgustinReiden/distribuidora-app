@@ -9,7 +9,7 @@
  *
  * Reemplaza a VistaRutaTransportista (lista vertical) como vista del rol
  * transportista en /pedidos. La lógica de entrega/cobro/salvedad es la misma
- * (useEntregaParada). Diseño: docs/plans/2026-06-12-ruta-activa-design.md
+ * (useEntregaParada). Diseño: docs/archive/2026-06-12-ruta-activa-design.md
  */
 import React, { useState, useMemo, useEffect, useCallback, Suspense } from 'react';
 import { AlertTriangle, Crosshair, WifiOff, Truck, Volume2, VolumeX, LocateFixed, ArrowLeft } from 'lucide-react';
