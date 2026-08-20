@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta, calcularTotalesCompra, calcularMargenPorcentaje, calcularNetoDesdeTotal } from './calculations'
+import { calcularCostoReal, calcularCostoFinanciero, calcularNetoVenta, calcularMargenPorcentaje, calcularNetoDesdeTotal } from './calculations'
+import { calcularTotalesCompra } from './prorrateoCompra'
+import type { CargoCompra } from './prorrateoCompra'
 
 // Fixture: factura A 0005-00455160 de Refres Now (Manaos) → T.P. Export,
 // 16/06/2026. Tasas efectivas de imp. internos sobre el neto:
@@ -166,6 +168,106 @@ describe('calcularTotalesCompra (estructura de la factura A)', () => {
     expect(t.netoGravado).toBeCloseTo(t.subtotal, 6)
     expect(t.netoExento).toBe(0)
     expect(t.netoNoGravado).toBe(0)
+  })
+})
+
+// Los cargos movieron el neto gravado, el IVA y el impuesto interno de la
+// cabecera al motor. Estos tests fijan las dos mitades del contrato: que una
+// compra SIN cargos siga dando exactamente lo de antes (forward-only), y que con
+// cargos diga lo que dice el papel.
+describe('calcularTotalesCompra: los cargos y el forward-only', () => {
+  const items = [
+    { cantidad: 240, costoUnitario: 5397.25, bonificacion: 0.6, porcentajeIva: 21, impuestosInternos: 8.6956, lineaId: 1 },
+    { cantidad: 120, costoUnitario: 2796.27, bonificacion: 0.6, porcentajeIva: 21, impuestosInternos: 4.1667, lineaId: 2 },
+    { cantidad: 150, costoUnitario: 5123.97, bonificacion: 0.6, porcentajeIva: 21, impuestosInternos: 0, lineaId: 3 },
+  ]
+  const neto = (i: typeof items[number]) => i.cantidad * i.costoUnitario * (1 - i.bonificacion / 100)
+
+  it('sin cargos da la aritmetica de siempre: neto x tasa y neto x alicuota', () => {
+    // Escrita a mano y no contra el motor: es LA formula de antes de los cargos.
+    // Si el motor dejara de reducirse a esto, una compra sin cargos cambiaria de
+    // numero en silencio, que es justo lo que no puede pasar.
+    const t = calcularTotalesCompra(items, 'FC', { percepcionIva: 1000, noGravado: 2000 })
+    expect(t.impuestosInternos).toBeCloseTo(
+      items.reduce((a, i) => a + neto(i) * i.impuestosInternos / 100, 0), 6)
+    expect(t.iva).toBeCloseTo(items.reduce((a, i) => a + neto(i) * i.porcentajeIva / 100, 0), 6)
+    expect(t.netoGravado).toBeCloseTo(items.reduce((a, i) => a + neto(i), 0), 6)
+    expect(t.subtotal).toBeCloseTo(items.reduce((a, i) => a + neto(i), 0), 6)
+  })
+
+  it('pasar cargos vacios es lo mismo que no pasarlos', () => {
+    expect(calcularTotalesCompra(items, 'FC', {}, [], {}))
+      .toEqual(calcularTotalesCompra(items, 'FC'))
+  })
+
+  it('una bonificacion cargada como cargo baja el IVA y el impuesto interno', () => {
+    // El defecto que cerro esto: `calcularTotalesCompra` no veia los cargos, asi
+    // que la bonificacion no bajaba ninguna de las dos bases y la cabecera
+    // viajaba inflada a compras.iva y compras.impuestos_internos.
+    const bonif: CargoCompra = {
+      id: 1, concepto: 'Bonif. promo', monto: -100_000, condicionIva: 'gravado',
+      enFactura: true, prorrateaAlCosto: true, afectaBaseII: true,
+      pesos: { 1: 1, 2: 0, 3: 0 },
+    }
+    const sin = calcularTotalesCompra(items, 'FC')
+    const con = calcularTotalesCompra(items, 'FC', {}, [bonif])
+
+    expect(con.netoGravado).toBeCloseTo(sin.netoGravado - 100_000, 2)
+    expect(con.iva).toBeCloseTo(sin.iva - 100_000 * 0.21, 2)
+    // Cae entera sobre la linea 1, que es la del 8,6956%.
+    expect(con.impuestosInternos).toBeCloseTo(sin.impuestosInternos - 100_000 * 0.086956, 2)
+    // El subtotal NO se toca: lo clava COMPRA-A2 contra SUM(compra_items.subtotal).
+    expect(con.subtotal).toBeCloseTo(sin.subtotal, 6)
+  })
+
+  it('una bonificacion comercial baja el IVA pero NO el impuesto interno', () => {
+    // Es el descubrimiento del rediseno: afectaBaseII distingue el descuento de
+    // precio de la bonificacion comercial.
+    const comercial: CargoCompra = {
+      id: 1, concepto: 'Bonif. comercial', monto: -100_000, condicionIva: 'gravado',
+      enFactura: true, prorrateaAlCosto: true, afectaBaseII: false,
+      pesos: { 1: 1, 2: 0, 3: 0 },
+    }
+    const sin = calcularTotalesCompra(items, 'FC')
+    const con = calcularTotalesCompra(items, 'FC', {}, [comercial])
+
+    expect(con.iva).toBeCloseTo(sin.iva - 100_000 * 0.21, 2)
+    expect(con.impuestosInternos).toBeCloseTo(sin.impuestosInternos, 6)
+  })
+
+  it('un cargo no gravado no toca ninguna de las dos bases', () => {
+    // El flete y los pallets entran al COSTO, no a la base del IVA ni a la del
+    // impuesto interno. La cabecera de no gravado va por su propio campo.
+    const flete: CargoCompra = {
+      id: 1, concepto: 'Flete', monto: 500_000, condicionIva: 'no_gravado',
+      enFactura: false, prorrateaAlCosto: true, afectaBaseII: false,
+      pesos: { 1: 1, 2: 1, 3: 1 },
+    }
+    const sin = calcularTotalesCompra(items, 'FC')
+    const con = calcularTotalesCompra(items, 'FC', {}, [flete])
+
+    expect(con.iva).toBeCloseTo(sin.iva, 6)
+    expect(con.impuestosInternos).toBeCloseTo(sin.impuestosInternos, 6)
+    expect(con.netoGravado).toBeCloseTo(sin.netoGravado, 6)
+  })
+
+  it('en ZZ los cargos no agregan impuestos, igual que la RPC', () => {
+    const cargo: CargoCompra = {
+      id: 1, concepto: 'Bonif.', monto: -100_000, condicionIva: 'gravado',
+      enFactura: true, prorrateaAlCosto: true, afectaBaseII: true,
+      pesos: { 1: 1, 2: 0, 3: 0 },
+    }
+    const t = calcularTotalesCompra(items, 'ZZ', { noGravado: 2000 }, [cargo], { 8.6956: 999 })
+    expect(t.iva).toBe(0)
+    expect(t.impuestosInternos).toBe(0)
+    expect(t.total).toBeCloseTo(t.subtotal, 2)
+  })
+
+  it('el impuesto interno de cabecera queda ajustado al declarado', () => {
+    // Es lo que hace que compras.impuestos_internos y el factor de ajuste hablen
+    // del mismo numero, en vez de que el costo use uno y la cabecera otro.
+    const t = calcularTotalesCompra(items, 'FC', {}, [], { 8.6956: 500_000, 4.1667: 10_000 })
+    expect(t.impuestosInternos).toBeCloseTo(510_000, 2)
   })
 })
 
