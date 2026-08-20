@@ -28,6 +28,29 @@ export const OPCIONES_CONDICION_IVA: OpcionCondicionIva[] = [
   { clave: 'no_gravado', label: 'No gravado', labelCorto: 'No grav.', condicion: 'no_gravado', porcentaje: 0 },
 ];
 
+/** Nombre de la condición sola, sin la alícuota. */
+const LABEL_CONDICION: Record<CondicionIva, string> = {
+  gravado: 'Gravado',
+  exento: 'Exento',
+  no_gravado: 'No gravado',
+};
+
+/**
+ * Tratamientos frente al IVA SIN alícuota, para lo que tributa a la de otro.
+ *
+ * Un cargo de compra (flete, pallets, bonificación) no lleva alícuota propia:
+ * hereda la de las líneas sobre las que se prorratea, y por eso `CargoCompra`
+ * no tiene `porcentajeIva`. Ofrecerle el selector completo pondría "21%" y
+ * "10,5%" como opciones distintas que hacen exactamente lo mismo.
+ *
+ * Se deriva de OPCIONES_CONDICION_IVA a propósito, para que siga habiendo una
+ * sola lista: agregar una condición allá la trae acá, y el Record de arriba
+ * obliga a nombrarla.
+ */
+export const OPCIONES_CONDICION_SIN_ALICUOTA: Array<{ condicion: CondicionIva; label: string }> =
+  Array.from(new Set(OPCIONES_CONDICION_IVA.map(o => o.condicion)))
+    .map(condicion => ({ condicion, label: LABEL_CONDICION[condicion] }));
+
 /** Clave del selector para un par (condición, alícuota) cargado. */
 export function claveCondicionIva(
   condicion: CondicionIva | null | undefined,
