@@ -138,6 +138,7 @@ export {
   useComprasQuery,
   useCompraQuery,
   useComprasByProveedorQuery,
+  useCargosPlantillaProveedorQuery,
   useRegistrarCompraMutation,
   useActualizarCompraMutation,
   useAnularCompraMutation,

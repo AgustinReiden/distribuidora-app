@@ -41,6 +41,27 @@ const ModalEditarCompra = lazyWithReload(() => import('../modals/ModalEditarComp
 const ModalCambiarProveedor = lazyWithReload(() => import('../modals/ModalCambiarProveedor'))
 const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 
+/**
+ * Muestra los avisos blandos que devuelven las RPCs de compra.
+ *
+ * La RPC no puede saber cuál de los dos números que el usuario tipeó está bien
+ * —el total del papel o la suma de las líneas, el II de cabecera o su apertura
+ * por alícuota— así que no pisa ninguno, deja los dos como llegaron y avisa.
+ * El texto sube tal cual: reescribirlo acá haría que la app y la base cuenten
+ * la misma diferencia con dos números distintos.
+ *
+ * `persist` porque son la clase de aviso que se lee después: el toast dura 4
+ * segundos y un descuadre de factura se revisa contra el papel, no al vuelo.
+ */
+function avisosDeLaBase(
+  notify: { warning: (message: string, options?: { persist?: boolean }) => void },
+  ...mensajes: Array<string | null | undefined>
+): void {
+  for (const mensaje of mensajes) {
+    if (mensaje) notify.warning(mensaje, { persist: true })
+  }
+}
+
 function LoadingState() {
   return (
     <div className="flex items-center justify-center py-20">
@@ -139,8 +160,14 @@ export default function ComprasContainer(): React.ReactElement {
 
   const handleGuardarCompra = useCallback(async (data: CompraFormInputExtended) => {
     try {
-      await registrarCompra.mutateAsync({ ...data, usuarioId: user?.id ?? null })
+      const res = await registrarCompra.mutateAsync({ ...data, usuarioId: user?.id ?? null })
       notify.success('Compra registrada')
+      // Los avisos de la RPC, que hasta acá se descartaban. Son blandos: la
+      // compra YA está registrada, por eso van como warning y no como error, y
+      // persisten en el centro de notificaciones — el toast del éxito los tapa
+      // en la pantalla y el descuadre de una factura es justo lo que hay que
+      // poder releer después.
+      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al registrar compra'
       notify.error(msg)
@@ -194,6 +221,9 @@ export default function ComprasContainer(): React.ReactElement {
     try {
       const res = await actualizarCompra.mutateAsync(input)
       notify.success('Compra actualizada')
+      // Editar los items puede dejar el II declarado sin cuadrar (una línea que
+      // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
+      avisosDeLaBase(notify, null, res.warningIiDeclarado)
       // CPP forward-only (mig 128): editar una compra que NO es la última del
       // producto no re-promedia el costo — avisar para corregirlo en la ficha.
       if (res.warningCostoPromedio.length > 0) {

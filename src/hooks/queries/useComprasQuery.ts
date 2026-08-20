@@ -7,9 +7,13 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
+  BaseProrrateoCompra,
+  CargoPlantillaCompra,
+  CompraCargoInput,
   CompraDBExtended,
   CompraFormInputExtended,
   CondicionIva,
+  PlantillaCargosProveedor,
   RegistrarCompraResult
 } from '../../types'
 
@@ -40,6 +44,29 @@ interface RPCResult {
   success: boolean
   compra_id: string
   error?: string
+  /** Avisos blandos: la compra se guardó igual. Ver RegistrarCompraResult. */
+  warning_descuadre?: string | null
+  warning_ii_declarado?: string | null
+}
+
+/**
+ * Los cargos en el shape que espera la mig 194: snake_case y los pesos por
+ * índice del array de items del mismo payload.
+ *
+ * La traducción de `lineaId` a índice ya vino hecha (`cargosParaRPC` del
+ * reducer, o el remapeo de ModalEditarCompra): acá sólo se renombra.
+ */
+function serializarCargos(cargos: CompraCargoInput[]): Array<Record<string, unknown>> {
+  return cargos.map(c => ({
+    concepto: c.concepto,
+    monto: c.monto,
+    condicion_iva: c.condicionIva,
+    en_factura: c.enFactura,
+    prorratea_al_costo: c.prorrateaAlCosto,
+    afecta_base_ii: c.afectaBaseII,
+    base_prorrateo: c.baseProrrateo,
+    pesos: c.pesos,
+  }))
 }
 
 // Fetch functions
@@ -50,7 +77,12 @@ async function fetchCompras(): Promise<CompraDBExtended[]> {
       *,
       proveedor:proveedores(*),
       items:compra_items(*, producto:productos(*)),
-      usuario:perfiles(id, nombre)
+      usuario:perfiles(id, nombre),
+      cargos:compra_cargos(
+        id, orden, concepto, monto, condicion_iva, en_factura,
+        prorratea_al_costo, afecta_base_ii, base_prorrateo,
+        repartos:compra_cargo_repartos(compra_item_id, peso)
+      )
     `)
     .order('created_at', { ascending: false })
 
@@ -68,7 +100,12 @@ async function fetchCompraById(id: string): Promise<CompraDBExtended | null> {
       *,
       proveedor:proveedores(*),
       items:compra_items(*, producto:productos(*)),
-      usuario:perfiles(id, nombre)
+      usuario:perfiles(id, nombre),
+      cargos:compra_cargos(
+        id, orden, concepto, monto, condicion_iva, en_factura,
+        prorratea_al_costo, afecta_base_ii, base_prorrateo,
+        repartos:compra_cargo_repartos(compra_item_id, peso)
+      )
     `)
     .eq('id', id)
     .single()
@@ -90,6 +127,110 @@ async function fetchComprasByProveedor(proveedorId: string): Promise<CompraDBExt
 
   if (error) throw error
   return (data || []) as CompraDBExtended[]
+}
+
+/** Las filas crudas que necesita la plantilla de cargos. */
+interface FilaPlantillaCargos {
+  id: string | number
+  numero_factura: string | null
+  fecha_compra: string | null
+  items: Array<{ id: string | number; producto_id: string | number }> | null
+  cargos: Array<{
+    orden: number | null
+    concepto: string
+    condicion_iva: CondicionIva | null
+    en_factura: boolean | null
+    prorratea_al_costo: boolean | null
+    afecta_base_ii: boolean | null
+    base_prorrateo: BaseProrrateoCompra | null
+    repartos: Array<{ compra_item_id: string | number; peso: number | string | null }> | null
+  }> | null
+}
+
+/**
+ * Los cargos de la última compra no cancelada de un proveedor, para reusarlos
+ * en la que se está cargando.
+ *
+ * El `!inner` del embed no es decoración: sin él "la última compra" es la última
+ * a secas, y el botón se queda mudo apenas el proveedor mete una factura sin
+ * flete. Lo que sirve de plantilla es la última compra que TIENE cargos.
+ *
+ * Los pesos se traducen de `compra_item_id` a `producto_id` acá y no en el
+ * modal: el id de la línea vieja sólo se puede resolver contra los items de
+ * ESTA query, y afuera no significa nada.
+ *
+ * Devuelve null cuando el proveedor no tiene ninguna compra con cargos. La RLS
+ * de `compra_cargos` pide admin o depósito, así que para otro rol el `!inner`
+ * deja la lista vacía y el botón simplemente no aparece.
+ */
+async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<PlantillaCargosProveedor | null> {
+  const { data, error } = await supabase
+    .from('compras')
+    .select(`
+      id,
+      numero_factura,
+      fecha_compra,
+      items:compra_items(id, producto_id),
+      cargos:compra_cargos!inner(
+        orden,
+        concepto,
+        condicion_iva,
+        en_factura,
+        prorratea_al_costo,
+        afecta_base_ii,
+        base_prorrateo,
+        repartos:compra_cargo_repartos(compra_item_id, peso)
+      )
+    `)
+    .eq('proveedor_id', proveedorId)
+    // En prod los estados son 'recibida' y 'cancelada'; no hay 'activa'.
+    .neq('estado', 'cancelada')
+    .order('fecha_compra', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(1)
+
+  if (error) throw error
+
+  const compra = (data as FilaPlantillaCargos[] | null)?.[0]
+  if (!compra) return null
+
+  const productoPorItem = new Map<string, string>(
+    (compra.items ?? []).map(i => [String(i.id), String(i.producto_id)])
+  )
+
+  // El orden de los cargos se ordena acá y no en la query: `orden` es una
+  // columna de la tabla embebida y ordenar por ahí depende de la versión del
+  // cliente. Son 6 cargos en la factura más grande.
+  const cargos: CargoPlantillaCompra[] = [...(compra.cargos ?? [])]
+    .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+    .map(c => {
+      const pesosPorProducto: Record<string, number> = {}
+      for (const r of c.repartos ?? []) {
+        const productoId = productoPorItem.get(String(r.compra_item_id))
+        if (productoId === undefined) continue
+        // Dos líneas del mismo producto en la compra vieja: los pesos se suman.
+        // En la compra nueva hay una sola línea por producto (AGREGAR_ITEM las
+        // fusiona), así que lo que corresponde traer es el peso del producto
+        // entero y no el de una de sus dos mitades.
+        pesosPorProducto[productoId] = (pesosPorProducto[productoId] ?? 0) + Number(r.peso ?? 0)
+      }
+      return {
+        concepto: c.concepto,
+        condicionIva: c.condicion_iva ?? 'no_gravado',
+        enFactura: c.en_factura ?? true,
+        prorrateaAlCosto: c.prorratea_al_costo ?? true,
+        afectaBaseII: c.afecta_base_ii ?? false,
+        baseProrrateo: c.base_prorrateo ?? 'unidades',
+        pesosPorProducto,
+      }
+    })
+
+  return {
+    compraId: String(compra.id),
+    numeroFactura: compra.numero_factura ?? null,
+    fechaCompra: compra.fecha_compra ?? null,
+    cargos,
+  }
 }
 
 // Mutation functions
@@ -122,7 +263,16 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     p_impuestos_internos: compraData.impuestosInternos || 0,
     p_percepcion_iva: compraData.percepcionIva || 0,
     p_percepcion_iibb: compraData.percepcionIibb || 0,
-    p_no_gravado: compraData.noGravado || 0
+    p_no_gravado: compraData.noGravado || 0,
+    // mig 195. Sin esto, una factura con bonificación general queda con el total
+    // de cabecera por encima del papel (306.784,09 en la testigo) y COMPRA-A1
+    // —severidad high— se pone rojo, que es lo que vuelve inútil al gate diario.
+    p_bonificaciones: compraData.bonificaciones || 0,
+    // mig 194. Sin estos dos la RPC no ejecuta una sola línea del camino nuevo
+    // del costo: el flete no llega a ningún producto y el factor de ajuste del
+    // impuesto interno se calcula en la vista previa y se tira a la basura.
+    p_cargos: serializarCargos(compraData.cargos ?? []),
+    p_ii_declarado: compraData.iiDeclarado ?? {}
   })
 
   if (error) throw error
@@ -132,7 +282,18 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     throw new Error(result.error || 'Error al registrar compra')
   }
 
-  return { success: true, compraId: result.compra_id }
+  // Los avisos suben tal como los redactó la RPC, sin reinterpretarlos. Son
+  // blandos por diseño —la compra está registrada— y decían dos cosas que
+  // nadie estaba leyendo: que el total calculado no coincide con el informado,
+  // y que la apertura del impuesto interno por alícuota no cierra contra el
+  // total (o declara una tasa que ninguna línea usa, con lo cual ese importe
+  // no llega a ningún costo).
+  return {
+    success: true,
+    compraId: result.compra_id,
+    warningDescuadre: result.warning_descuadre ?? null,
+    warningIiDeclarado: result.warning_ii_declarado ?? null,
+  }
 }
 
 /**
@@ -196,6 +357,24 @@ export function useComprasByProveedorQuery(proveedorId: string) {
 }
 
 /**
+ * Cargos de la última compra con cargos de un proveedor, como plantilla.
+ *
+ * Se dispara al elegir el proveedor y no al apretar el botón: así el modal sabe
+ * ANTES si hay algo para traer y puede decir cuántos cargos y de qué factura,
+ * en vez de ofrecer un botón que a veces no hace nada.
+ */
+export function useCargosPlantillaProveedorQuery(proveedorId: string | null | undefined) {
+  const { currentSucursalId } = useSucursal()
+  const id = proveedorId ? String(proveedorId) : ''
+  return useQuery({
+    queryKey: [...comprasKeys.byProveedor(currentSucursalId, id), 'cargos-plantilla'] as const,
+    queryFn: () => fetchCargosPlantillaProveedor(id),
+    enabled: !!id,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/**
  * Hook para registrar una compra
  */
 export function useRegistrarCompraMutation() {
@@ -238,6 +417,26 @@ export interface ActualizarCompraItemsInput {
     condicionIva?: CondicionIva
     impuestosInternos?: number
   }>
+  /**
+   * Los cargos de la compra (mig 194). Obligatorio y no opcional a propósito:
+   * `actualizar_compra_items` borra y recrea las líneas en cada edición y el
+   * CASCADE se lleva puesto el vector de pesos, así que un cliente que no los
+   * reenvía deja los cargos vivos con el vector vacío y el flete deja de
+   * repartirse en silencio. Que el tipo lo exija obliga a cada llamador a
+   * decidir, en vez de olvidarse.
+   *
+   * `null` significa "no los conozco" y es lo único que activa el guard de la
+   * RPC; `[]` significa "esta compra no tiene ninguno" y es un dato. Mandar `[]`
+   * cuando no se leyeron los borra, que es justo lo que el guard impide.
+   *
+   * Los pesos van por índice de `items` (base 0), ya remapeados a las líneas
+   * que sobreviven a esta edición.
+   */
+  cargos: CompraCargoInput[] | null
+  /** El II declarado por alícuota, con la misma distinción null/{}: sin él el factor de ajuste se revierte solo. */
+  iiDeclarado: Record<number, number> | null
+  /** Σ de los cargos gravados en factura, con su signo (mig 195). null = no tocar. */
+  bonificaciones?: number | null
 }
 
 /** Producto cuyo CPP puede haber quedado distorsionado al editar una compra vieja (mig 128). */
@@ -249,7 +448,7 @@ export interface WarningCostoPromedio {
 
 async function actualizarCompraItems(
   input: ActualizarCompraItemsInput
-): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[] }> {
+): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[]; warningIiDeclarado: string | null }> {
   const itemsParaRPC: CompraItemRPC[] = input.items.map(item => ({
     producto_id: item.productoId,
     cantidad: item.cantidad,
@@ -272,6 +471,14 @@ async function actualizarCompraItems(
     p_percepcion_iva: input.percepcionIva ?? null,
     p_percepcion_iibb: input.percepcionIibb ?? null,
     p_no_gravado: input.noGravado ?? null,
+    // mig 195. `null` = "no lo mandes", y la RPC deja lo que ya tenía: un
+    // cliente viejo no puede borrar la bonificación de cabecera sin querer.
+    p_bonificaciones: input.bonificaciones ?? null,
+    // mig 194. `null` viaja como null a propósito: es lo que hace que la RPC
+    // rechace la edición de una compra con cargos hecha por un cliente que no
+    // los leyó, en vez de borrárselos en silencio.
+    p_cargos: input.cargos === null ? null : serializarCargos(input.cargos),
+    p_ii_declarado: input.iiDeclarado,
   })
 
   if (error) throw error
@@ -280,11 +487,18 @@ async function actualizarCompraItems(
     compra_id: string
     error?: string
     warning_costo_promedio?: WarningCostoPromedio[] | null
+    warning_ii_declarado?: string | null
   }
   if (!result.success) {
     throw new Error(result.error || 'Error al actualizar compra')
   }
-  return { compraId: result.compra_id, warningCostoPromedio: result.warning_costo_promedio ?? [] }
+  // `actualizar_compra_items` NO devuelve `warning_descuadre`: no recalcula el
+  // total contra el informado, lo recibe ya hecho. Sólo el del II declarado.
+  return {
+    compraId: result.compra_id,
+    warningCostoPromedio: result.warning_costo_promedio ?? [],
+    warningIiDeclarado: result.warning_ii_declarado ?? null,
+  }
 }
 
 /**

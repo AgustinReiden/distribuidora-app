@@ -202,8 +202,15 @@ export function calcularCostoPromedioPonderado(
 }
 
 // ============================================
-// CÁLCULOS DE COMPRAS (desglose fiscal completo)
+// CONDICIÓN FRENTE AL IVA
 // ============================================
+//
+// El desglose fiscal de una compra (calcularTotalesCompra y sus tipos) vive en
+// prorrateoCompra.ts y no acá: desde que los cargos existen, el neto gravado,
+// el IVA y el impuesto interno de la cabecera salen del motor de costos, y este
+// módulo es una hoja sin imports que el motor importa. Traer el motor para acá
+// invertiría esa dependencia. Lo único que queda es el tipo, que es genérico y
+// lo usa medio código base.
 
 /**
  * Condición frente al IVA de una línea o de un producto (mig 177).
@@ -211,119 +218,6 @@ export function calcularCostoPromedioPonderado(
  * el libro IVA (columnas distintas), no para el total.
  */
 export type CondicionIva = 'gravado' | 'exento' | 'no_gravado';
-
-export interface CompraItemCalculo {
-  cantidad: number;
-  costoUnitario: number;
-  bonificacion?: number;
-  porcentajeIva?: number;
-  /** Tasa efectiva de imp. internos (%) */
-  impuestosInternos?: number;
-  /** Default: 'gravado' (así se comporta una línea que no lo trae). */
-  condicionIva?: CondicionIva;
-}
-
-export interface CompraExtras {
-  percepcionIva?: number;
-  percepcionIibb?: number;
-  noGravado?: number;
-  otrosImpuestos?: number;
-}
-
-export interface TotalesCompra {
-  subtotalBruto: number;
-  bonificacionTotal: number;
-  /**
-   * Neto de TODAS las líneas (bruto − bonif) = netoGravado + netoExento +
-   * netoNoGravado. Es lo que se manda como p_subtotal y lo que valida el check
-   * COMPRA-A2 contra SUM(compra_items.subtotal): no estrecharlo a "sólo
-   * gravado" o toda factura mixta quedaría en rojo.
-   */
-  subtotal: number;
-  netoGravado: number;
-  netoExento: number;
-  /** Líneas de producto no gravadas. NO es `noGravado` (cabecera, sin línea). */
-  netoNoGravado: number;
-  /** Neto gravado abierto por alícuota: { '21': 10000, '10.5': 5000 } */
-  netoPorAlicuota: Record<string, number>;
-  iva: number;
-  impuestosInternos: number;
-  percepcionIva: number;
-  percepcionIibb: number;
-  /** Conceptos de cabecera fuera del IVA (pallets, envases): sin línea de producto. */
-  noGravado: number;
-  otrosImpuestos: number;
-  total: number;
-}
-
-/**
- * Totales de una compra según tipo de comprobante (fuente única del modal de
- * compras; estructura = factura A real: total = neto de líneas + IVA + II +
- * percepciones + no gravado de cabecera + otros).
- *
- * Una misma factura puede mezclar condiciones (mig 177): sólo las líneas
- * gravadas generan IVA, y el crédito se liquida una vez por alícuota, igual que
- * lo imprime el proveedor.
- *
- * ZZ (sin factura): lo pagado es todo — sin IVA, sin II, sin percepciones ni
- * no gravado, y sin clasificación (espejo del RPC, que fuerza 'gravado').
- * total = subtotal.
- */
-export function calcularTotalesCompra(
-  items: CompraItemCalculo[],
-  tipoFactura: 'ZZ' | 'FC' = 'FC',
-  extras: CompraExtras = {}
-): TotalesCompra {
-  const esFC = tipoFactura === 'FC';
-  let subtotalBruto = 0;
-  let bonificacionTotal = 0;
-  let impuestosInternos = 0;
-  let netoGravado = 0;
-  let netoExento = 0;
-  let netoNoGravado = 0;
-  const netoPorAlicuota: Record<string, number> = {};
-
-  for (const item of items) {
-    const bruto = (item.cantidad || 0) * (item.costoUnitario || 0);
-    const bonif = bruto * (item.bonificacion || 0) / 100;
-    const neto = bruto - bonif;
-    subtotalBruto += bruto;
-    bonificacionTotal += bonif;
-
-    // En ZZ no hay comprobante que clasificar: todo entra como gravado.
-    const condicion: CondicionIva = esFC ? (item.condicionIva ?? 'gravado') : 'gravado';
-    if (condicion === 'exento') netoExento += neto;
-    else if (condicion === 'no_gravado') netoNoGravado += neto;
-    else netoGravado += neto;
-
-    if (esFC) {
-      // Los imp. internos son un impuesto propio: no dependen de la condición
-      // frente al IVA.
-      impuestosInternos += neto * ((item.impuestosInternos || 0) / 100);
-      if (condicion === 'gravado') {
-        const alicuota = String(item.porcentajeIva ?? 21);
-        netoPorAlicuota[alicuota] = (netoPorAlicuota[alicuota] || 0) + neto;
-      }
-    }
-  }
-
-  const iva = Object.entries(netoPorAlicuota)
-    .reduce((acc, [alicuota, neto]) => acc + neto * (parseFloat(alicuota) / 100), 0);
-
-  const subtotal = subtotalBruto - bonificacionTotal;
-  const percepcionIva = esFC ? (extras.percepcionIva || 0) : 0;
-  const percepcionIibb = esFC ? (extras.percepcionIibb || 0) : 0;
-  const noGravado = esFC ? (extras.noGravado || 0) : 0;
-  const otrosImpuestos = esFC ? (extras.otrosImpuestos || 0) : 0;
-  const total = subtotal + iva + impuestosInternos + percepcionIva + percepcionIibb + noGravado + otrosImpuestos;
-
-  return {
-    subtotalBruto, bonificacionTotal, subtotal,
-    netoGravado, netoExento, netoNoGravado, netoPorAlicuota,
-    iva, impuestosInternos,
-    percepcionIva, percepcionIibb, noGravado, otrosImpuestos, total,
-  };
-}
 
 // ============================================
 // CÁLCULOS DE PEDIDOS
@@ -468,6 +362,43 @@ export function redondear(valor: number, decimales: number = 2): number {
 }
 
 /**
+ * Redondea medio ALEJANDOSE del cero, como round(numeric, n) de PostgreSQL.
+ * Existe porque el prorrateo de cargos se va a replicar en plpgsql y los dos
+ * lados tienen que dar el mismo número al centavo.
+ *
+ * Corrige dos asimetrías de `redondear` (que es Math.round pelado):
+ *  - Signo: Math.round redondea medio hacia +infinito, así que diverge en
+ *    negativos (Math.round(-0.5) === -0 vs round(-0.5) = -1).
+ *  - Representación: multiplicar por 10^n arrastra el error del double y baja
+ *    donde Postgres sube (Math.abs(1.005) * 100 da 100.49999999999999, no
+ *    100.5). Por eso el desplazamiento va por string: String(1.005) es "1.005"
+ *    —la representación round-trip más corta del double, o sea su intención
+ *    decimal— y "1.005e2" da 100.5 limpio. Multiplicar no lo logra.
+ *
+ * ALCANCE: la equivalencia es para montos de dinero, no universal. `numeric` es
+ * decimal exacto y `double` no, así que ninguna función sobre double puede ser
+ * espejo de round(numeric, n) en general: un valor que el double ni siquiera
+ * representa no tiene por qué caer del mismo lado. Verificada contra la base
+ * para plata a 2 decimales, que es lo único que redondeamos con esta.
+ */
+export function redondearSQL(valor: number, decimales: number = 2): number {
+  if (!Number.isFinite(valor)) return NaN;
+  const signo = valor < 0 ? -1 : 1;
+  const abs = Math.abs(valor);
+  // Tres casos que no pueden ir por el desplazamiento de string: abajo de 1e-6 y
+  // arriba de 1e21 String() usa notación exponencial y armaría "1e-7e2", y con
+  // decimales < 0 el signo del exponente se duplica y armaría "1234e--2". Van
+  // por multiplicación, que ahí alcanza: los dos extremos redondean a 0 o no son
+  // montos de dinero, y el caso de centenas está verificado contra la base.
+  if (abs !== 0 && (abs < 1e-6 || abs >= 1e21 || decimales < 0)) {
+    const factor = Math.pow(10, decimales);
+    return (signo * Math.round(abs * factor) / factor) + 0;
+  }
+  const desplazado = Math.round(Number(`${abs}e${decimales}`));
+  return signo * Number(`${desplazado}e-${decimales}`) + 0;  // el + 0 normaliza -0
+}
+
+/**
  * Redondea al múltiplo más cercano (ej: redondear a 0.50, 1, 5, 10)
  *
  * @param valor - Número a redondear
@@ -491,7 +422,6 @@ export default {
   calcularNetoVenta,
   calcularCostoReal,
   calcularCostoFinanciero,
-  calcularTotalesCompra,
   calcularSubtotalItem,
   calcularTotalPedido,
   calcularMargenPorcentaje,
@@ -499,5 +429,6 @@ export default {
   calcularPrecioDesdeMargen,
   parsePrecio,
   redondear,
+  redondearSQL,
   redondearAMultiplo
 };
