@@ -10,7 +10,7 @@ import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download } from '
 const loadExcelUtils = () => import('../../utils/excel');
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import type { ProductoDB } from '../../types';
-import type { CompraItemForm } from './ModalCompra';
+import type { CompraItemForm } from './ModalCompra.reducer';
 
 // =============================================================================
 // TIPOS

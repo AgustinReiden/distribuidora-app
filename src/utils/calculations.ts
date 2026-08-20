@@ -432,11 +432,3 @@ export default {
   redondearSQL,
   redondearAMultiplo
 };
-
-// Puente transitorio: `calcularTotalesCompra` y sus tipos se mudaron a
-// `prorrateoCompra.ts` porque el desglose fiscal ahora necesita el motor de
-// cargos, y traer el motor para acá invertía la dependencia. Se re-exporta desde
-// el lugar viejo para no romper a quien todavía importe de acá; el consumidor
-// real (ModalCompra) migra en el PR del modal y ahí se cae este puente.
-export { calcularTotalesCompra } from './prorrateoCompra';
-export type { TotalesCompra, CompraItemCalculo, CompraExtras } from './prorrateoCompra';

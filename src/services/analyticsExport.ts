@@ -296,6 +296,7 @@ export async function fetchComprasFact(
       percepcion_iva,
       percepcion_iibb,
       no_gravado,
+      bonificaciones,
       proveedor:proveedores(nombre, cuit),
       items:compra_items(
         cantidad,
@@ -349,6 +350,9 @@ export async function fetchComprasFact(
         compra_percepcion_iva: compra.percepcion_iva ?? 0,
         compra_percepcion_iibb: compra.percepcion_iibb ?? 0,
         compra_no_gravado: compra.no_gravado ?? 0,
+        // mig 195. Sin esta columna el total exportado no se puede reconstruir
+        // desde el desglose: la bonificación general no es un renglón.
+        compra_bonificaciones: compra.bonificaciones ?? 0,
       })
     }
   }

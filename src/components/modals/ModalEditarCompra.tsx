@@ -22,12 +22,18 @@ import { Loader2, Trash2, AlertCircle, Building2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
-import type { CompraDBExtended, CondicionIva } from '../../types'
+import type { CompraCargoInput, CompraDBExtended, CondicionIva } from '../../types'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva'
 
 /** Item editable dentro del modal. */
 interface ItemEdit {
+  /**
+   * Id de la línea EN LA BASE. No se manda a la RPC —que borra y recrea las
+   * líneas— pero es el único puente entre los repartos guardados
+   * (`compra_cargo_repartos.compra_item_id`) y el índice del payload nuevo.
+   */
+  compraItemId: string
   productoId: string
   nombre: string
   cantidad: number
@@ -69,9 +75,15 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
   // Percepciones y no gravado (cabecera) no se editan acá: se conservan.
   const percepciones = (compra.percepcion_iva ?? 0) + (compra.percepcion_iibb ?? 0)
   const noGravado = compra.no_gravado ?? 0
+  // Las bonificaciones generales tampoco se editan acá: los cargos se reenvían
+  // verbatim, así que su suma no cambia. Pero TIENE que entrar al total, o cada
+  // edición devolvería la cabecera al número inflado que la mig 195 vino a
+  // arreglar —y pondría COMPRA-A1 en rojo sin que nadie tocara una bonificación.
+  const bonificaciones = compra.bonificaciones ?? 0
 
   const [items, setItems] = useState<ItemEdit[]>(() =>
     (compra.items ?? []).map((it) => ({
+      compraItemId: String(it.id),
       productoId: it.producto_id,
       nombre: it.producto?.nombre ?? `Producto #${it.producto_id}`,
       cantidad: it.cantidad ?? 0,
@@ -130,6 +142,46 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
     canCambiarProveedor && onCambiarProveedor && compra.estado !== 'cancelada',
   )
 
+  /**
+   * Los cargos de la compra, listos para reenviar (mig 194).
+   *
+   * Acá no se editan: se reenvían tal cual, con los pesos traducidos de
+   * `compra_item_id` al ÍNDICE que va a tener la línea en el payload nuevo.
+   * Reenviarlos no es opcional. `actualizar_compra_items` borra y recrea las
+   * líneas en cada edición y el CASCADE se lleva puesto el vector de pesos, así
+   * que un cliente que no los manda deja los cargos vivos con el vector vacío:
+   * el flete deja de repartirse y nadie se entera. La RPC tiene un guard para
+   * eso y devuelve "Actualizá la aplicación".
+   *
+   * El peso de una línea eliminada en esta edición se cae del vector: mandarlo
+   * apuntaría a un índice que no existe y la RPC lo rechaza, con razón.
+   */
+  const cargosGuardados = compra.cargos
+  const cargosPayload = useMemo<CompraCargoInput[]>(() => {
+    const indicePorItem = new Map<string, number>()
+    itemsActivos.forEach((it, i) => indicePorItem.set(it.compraItemId, i))
+    return [...(cargosGuardados ?? [])]
+      .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+      .map((c) => {
+        const pesos: Record<number, number> = {}
+        for (const r of c.repartos ?? []) {
+          const indice = indicePorItem.get(String(r.compra_item_id))
+          if (indice === undefined) continue
+          pesos[indice] = Number(r.peso ?? 0)
+        }
+        return {
+          concepto: c.concepto,
+          monto: Number(c.monto ?? 0),
+          condicionIva: c.condicion_iva ?? 'no_gravado',
+          enFactura: c.en_factura ?? true,
+          prorrateaAlCosto: c.prorratea_al_costo ?? true,
+          afectaBaseII: c.afecta_base_ii ?? false,
+          baseProrrateo: c.base_prorrateo ?? 'unidades',
+          pesos,
+        }
+      })
+  }, [cargosGuardados, itemsActivos])
+
   // Totales calculados (incluye imp. internos por línea; percepciones y no
   // gravado de la cabecera se conservan tal cual).
   const totales = useMemo(() => {
@@ -147,9 +199,9 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         impuestosInternos += subtotalItem * ((it.impuestosInternos || 0) / 100)
       }
     }
-    const total = subtotal + iva + impuestosInternos + percepciones + noGravado + otrosImpuestos
+    const total = subtotal + bonificaciones + iva + impuestosInternos + percepciones + noGravado + otrosImpuestos
     return { subtotal, iva, impuestosInternos, total }
-  }, [itemsActivos, esZZ, otrosImpuestos, percepciones, noGravado])
+  }, [itemsActivos, esZZ, otrosImpuestos, percepciones, noGravado, bonificaciones])
 
   function updateItem<K extends keyof ItemEdit>(productoId: string, field: K, value: ItemEdit[K]) {
     setItems((prev) =>
@@ -207,6 +259,12 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
     if (itemsActivos.length === 0) {
       return 'La compra debe tener al menos un item. Si querés vaciarla, anulala desde la lista.'
     }
+    const huerfano = cargosPayload.find(
+      (c) => c.prorrateaAlCosto && Object.values(c.pesos).reduce((a, p) => a + p, 0) === 0,
+    )
+    if (huerfano) {
+      return `El cargo "${huerfano.concepto}" se quedaría sin ninguna línea donde repartirse y ese importe desaparecería del costo. Restaurá la línea que borraste, o anulá la compra y volvé a cargarla.`
+    }
     for (const it of itemsActivos) {
       if (!Number.isFinite(it.cantidad) || it.cantidad <= 0) {
         return `Cantidad invalida en "${it.nombre}". Debe ser mayor a 0.`
@@ -247,15 +305,35 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
       }
     })
 
-    await onGuardar({
-      compraId: compra.id,
-      usuarioId,
-      subtotal: totales.subtotal,
-      iva: totales.iva,
-      total: totales.total,
-      impuestosInternos: totales.impuestosInternos,
-      items: itemsPayload,
-    })
+    try {
+      await onGuardar({
+        compraId: compra.id,
+        usuarioId,
+        subtotal: totales.subtotal,
+        iva: totales.iva,
+        total: totales.total,
+        impuestosInternos: totales.impuestosInternos,
+        items: itemsPayload,
+        // `null` cuando el embed no llegó, y no `[]`: los dos significan cosas
+        // distintas y sólo el null activa el guard de la mig 194. Un `[]` sobre
+        // una compra que sí tiene cargos pasa el guard y los borra, que es
+        // exactamente lo que el guard existe para impedir.
+        cargos: cargosGuardados === undefined ? null : cargosPayload,
+        // Se reenvía el valor guardado, no uno recalculado: acá no se editan
+        // los cargos, así que no hay de dónde sacar otro número.
+        bonificaciones: compra.bonificaciones ?? null,
+        // Misma distinción para la apertura del II: null = "no la conozco",
+        // {} = "esta compra no tiene ajuste". Sin ella el factor se revierte
+        // solo y no deja ningún rastro.
+        iiDeclarado: compra.ii_declarado ?? null,
+      })
+    } catch (err) {
+      // Las RPCs devuelven sus rechazos como {success:false} con HTTP 200 y el
+      // container los convierte en Error. Sin este catch el mensaje sólo vivía
+      // en un toast que se va solo, y encima quedaba una promesa rechazada sin
+      // atender: el usuario veía el modal abierto sin saber qué pasó.
+      setErrorValidacion(err instanceof Error ? err.message : 'No se pudo actualizar la compra.')
+    }
   }
 
   const fechaCompra = compra.fecha_compra ?? '—'
@@ -513,11 +591,27 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
               <span className="tabular-nums">{formatPrecio(noGravado)}</span>
             </div>
           )}
+          {bonificaciones !== 0 && (
+            <div className="flex justify-between dark:text-gray-300">
+              <span>Bonificaciones de la factura (sin cambio)</span>
+              <span className="tabular-nums">{formatPrecio(bonificaciones)}</span>
+            </div>
+          )}
           {otrosImpuestos > 0 && (
             <div className="flex justify-between dark:text-gray-300">
               <span>Otros impuestos (sin cambio)</span>
               <span className="tabular-nums">{formatPrecio(otrosImpuestos)}</span>
             </div>
+          )}
+          {/* Los cargos no se editan acá y tampoco entran en este total: van al
+              costo unitario de los productos, no a la cabecera de la compra.
+              Se listan igual para que quien edite sepa que existen y que se
+              reenvían tal cual. */}
+          {cargosPayload.length > 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+              Cargos prorrateados al costo (sin cambio):{' '}
+              {cargosPayload.map((c) => `${c.concepto} ${formatPrecio(c.monto)}`).join(' · ')}
+            </p>
           )}
           <div className="flex justify-between font-semibold text-base dark:text-white pt-2 border-t dark:border-gray-700">
             <span>Total</span>

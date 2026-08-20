@@ -67,6 +67,8 @@ interface CompraDetalle {
   percepcion_iva?: number;
   percepcion_iibb?: number;
   no_gravado?: number;
+  /** Bonificaciones generales gravadas de la factura, con signo (mig 195). */
+  bonificaciones?: number;
   otros_impuestos?: number;
   total: number;
   notas?: string;
@@ -292,6 +294,15 @@ export default function ModalDetalleCompra({
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">No gravado (cabecera):</span>
                   <span className="font-medium text-gray-800 dark:text-white">{formatPrecio(compra.no_gravado!)}</span>
+                </div>
+              )}
+              {/* Sin esta fila el total no cierra contra las de arriba: el
+                  subtotal es el neto de los RENGLONES y la bonificación general
+                  no es un renglón. */}
+              {(compra.bonificaciones ?? 0) !== 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Bonificaciones de la factura:</span>
+                  <span className="font-medium text-orange-600 dark:text-orange-400">{formatPrecio(compra.bonificaciones!)}</span>
                 </div>
               )}
               {compra.otros_impuestos && compra.otros_impuestos > 0 && (
