@@ -331,7 +331,18 @@ export interface ProductoFormInput {
   codigo?: string;
   nombre: string;
   precio: number;
-  stock: number;
+  /**
+   * Saldo de stock. En una EDICIÓN es opcional a propósito: `undefined` =
+   * "no tocar". La ficha solo lo manda si el admin lo cambió a mano; el resto
+   * del tiempo el saldo lo mueven los pedidos y las compras.
+   */
+  stock?: number;
+  /**
+   * Stock que la ficha vio al abrirse. Viaja junto a `stock` en las ediciones
+   * y hace de compare-and-swap: si el saldo cambió en el medio, el update no
+   * matchea ninguna fila y se aborta en vez de pisar lo que pasó mientras tanto.
+   */
+  stock_esperado?: number;
   stock_minimo?: number;
   categoria?: string;
   /** FK a `marcas` (mig 158). null / '' = sin marca. */
