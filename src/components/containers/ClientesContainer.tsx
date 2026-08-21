@@ -11,6 +11,7 @@ import {
   useCrearClienteMutation,
   useActualizarClienteMutation,
   useEliminarClienteMutation,
+  contarPedidosDeCliente,
   useZonasEstandarizadasQuery,
   useProductosQuery,
   useCrearPedidoCambioEnRutaMutation,
@@ -26,6 +27,7 @@ import { puedeRegistrarPagoCliente } from '../../lib/permisos'
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { formatCurrency } from '../../utils/formatters'
 
 // Lazy load de componentes
 const VistaClientes = lazyWithReload(() => import('../vistas/VistaClientes'))
@@ -126,23 +128,62 @@ export default function ClientesContainer(): React.ReactElement {
     setModalClienteOpen(true)
   }, [])
 
-  const handleEliminarCliente = useCallback((clienteId: string) => {
+  // Borrar un cliente con pedidos NO es una operacion inocente: hasta la mig 200
+  // la FK era ON DELETE SET NULL y los pedidos quedaban sin dueno en silencio.
+  // Asi se perdieron 9 pedidos por $200.070 (mig 199), en cuatro borrados que
+  // eran una deduplicacion legitima: lo que faltaba era que la app dijera que se
+  // estaba llevando puesto. Ahora se cuenta primero y se ofrece desactivar.
+  const handleEliminarCliente = useCallback(async (clienteId: string) => {
     const cliente = clientes.find(c => c.id === clienteId)
     if (!cliente) return
+    const nombre = cliente.nombre_fantasia || cliente.razon_social
+
+    let pedidos: { cantidad: number; total: number }
+    try {
+      pedidos = await contarPedidosDeCliente(clienteId)
+    } catch {
+      // Sin poder contar no se pregunta: preguntar sin saber es lo que causo el problema.
+      notify.error('No se pudo verificar si el cliente tiene pedidos. No se eliminó nada.')
+      return
+    }
+
+    if (pedidos.cantidad === 0) {
+      setConfirmConfig({
+        visible: true, tipo: 'danger', titulo: 'Eliminar cliente',
+        mensaje: `¿Eliminar "${nombre}"? No tiene pedidos asociados.`,
+        onConfirm: async () => {
+          setConfirmConfig({ visible: false })
+          try {
+            await eliminarCliente.mutateAsync(clienteId)
+            notify.success('Cliente eliminado')
+          } catch {
+            notify.error('Error al eliminar cliente')
+          }
+        },
+      })
+      return
+    }
+
+    // Con pedidos la base rechaza el DELETE (FK RESTRICT, mig 200). Se explica
+    // por que y se ofrece la accion que si corresponde: desactivarlo.
     setConfirmConfig({
-      visible: true, tipo: 'danger', titulo: 'Eliminar cliente',
-      mensaje: `¿Eliminar "${cliente.nombre_fantasia || cliente.razon_social}"?`,
+      visible: true, tipo: 'warning', titulo: 'El cliente tiene pedidos',
+      mensaje:
+        `"${nombre}" tiene ${pedidos.cantidad} ` +
+        `${pedidos.cantidad === 1 ? 'pedido' : 'pedidos'} por ${formatCurrency(pedidos.total)}. ` +
+        'No se puede eliminar sin perder esa venta del historial y de la cuenta corriente. ' +
+        'Al confirmar se DESACTIVA: deja de aparecer en las listas y sus pedidos quedan intactos.',
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
         try {
-          await eliminarCliente.mutateAsync(clienteId)
-          notify.success('Cliente eliminado')
+          await actualizarCliente.mutateAsync({ id: clienteId, data: { activo: false } })
+          notify.success(`"${nombre}" quedó desactivado`)
         } catch {
-          notify.error('Error al eliminar cliente')
+          notify.error('Error al desactivar el cliente')
         }
       },
     })
-  }, [clientes, eliminarCliente, notify])
+  }, [clientes, eliminarCliente, actualizarCliente, notify])
 
   const handleGuardarCambioEnRuta = useCallback(async (data: RegistrarCambioInput) => {
     try {
