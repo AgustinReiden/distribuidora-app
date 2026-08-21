@@ -321,7 +321,10 @@ export default function ProductosContainer(): React.ReactElement {
       setModalProductoOpen(false)
       setProductoEditando(null)
     } catch (error) {
-      notify.error('Error al guardar producto')
+      // El mensaje real importa: si el compare-and-swap del stock rechazó el
+      // guardado, dice cuánto hay ahora y qué hacer. Un "Error al guardar"
+      // genérico dejaba al admin sin saber que su ajuste no se aplicó.
+      notify.error(error instanceof Error ? error.message : 'Error al guardar producto')
       throw error
     }
   }, [productoEditando, actualizarProducto, crearProducto, notify])
