@@ -7,16 +7,31 @@ import 'fake-indexeddb/auto'
 // Cleanup after each test
 afterEach(() => {
   cleanup()
+  // Sin esto, lo que escribe un test se filtra al siguiente.
+  localStorageStore.clear()
 })
 
-// Mock localStorage
+// localStorage: almacenamiento REAL en memoria, pero espiable.
+//
+// Antes eran cuatro vi.fn() pelados: getItem devolvia undefined incluso despues
+// de un setItem, asi que nada que dependiera de storage se podia testear. Dos
+// suites terminaron construyendose su propio localStorage en memoria para
+// esquivarlo (useAsync.test.js y rutaOfflineCache.test.ts).
+//
+// No alcanza con poner un storage funcional a secas: ErrorBoundary.test.jsx
+// hace expect(localStorage.removeItem).toHaveBeenCalledWith(...). Por eso cada
+// metodo guarda de verdad Y es un vi.fn(): sirve para las dos cosas.
+const localStorageStore = new Map()
 const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
+  getItem: vi.fn(k => (localStorageStore.has(String(k)) ? localStorageStore.get(String(k)) : null)),
+  setItem: vi.fn((k, v) => { localStorageStore.set(String(k), String(v)) }),
+  removeItem: vi.fn(k => { localStorageStore.delete(String(k)) }),
+  clear: vi.fn(() => { localStorageStore.clear() }),
+  key: vi.fn(i => Array.from(localStorageStore.keys())[i] ?? null),
+  get length() { return localStorageStore.size },
 }
 global.localStorage = localStorageMock
+globalThis.localStorage = localStorageMock
 
 // Mock matchMedia
 Object.defineProperty(window, 'matchMedia', {

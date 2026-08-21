@@ -241,20 +241,10 @@ describe('useToggle', () => {
 })
 
 describe('useLocalStorage', () => {
-  const localStorageMock = {
-    store: {},
-    getItem: vi.fn((key) => localStorageMock.store[key] || null),
-    setItem: vi.fn((key, value) => {
-      localStorageMock.store[key] = value
-    }),
-    clear: vi.fn(() => {
-      localStorageMock.store = {}
-    })
-  }
-
+  // El localStorage del setup global guarda de verdad y ademas es espiable,
+  // asi que no hace falta uno propio.
   beforeEach(() => {
-    Object.defineProperty(window, 'localStorage', { value: localStorageMock })
-    localStorageMock.clear()
+    localStorage.clear()
     vi.clearAllMocks()
   })
 
@@ -264,7 +254,7 @@ describe('useLocalStorage', () => {
   })
 
   it('devuelve valor de storage si existe', () => {
-    localStorageMock.store['test-key'] = JSON.stringify('stored-value')
+    localStorage.setItem('test-key', JSON.stringify('stored-value'))
     const { result } = renderHook(() => useLocalStorage('test-key', 'default'))
     expect(result.current[0]).toBe('stored-value')
   })
@@ -277,7 +267,7 @@ describe('useLocalStorage', () => {
     })
 
     expect(result.current[0]).toBe('new-value')
-    expect(localStorageMock.setItem).toHaveBeenCalledWith('test-key', JSON.stringify('new-value'))
+    expect(localStorage.setItem).toHaveBeenCalledWith('test-key', JSON.stringify('new-value'))
   })
 
   it('acepta función como setter', () => {

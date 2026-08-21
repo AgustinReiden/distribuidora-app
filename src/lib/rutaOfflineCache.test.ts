@@ -7,33 +7,13 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { guardarRuta, leerRuta, olvidarRuta } from './rutaOfflineCache';
 
-// El setup global (src/test/setup.js) reemplaza localStorage por `vi.fn()` que
-// no guarda nada, asi que un cache no se puede testear contra el. Se instala
-// uno real en memoria, igual que hace useAsync.test.js. No se cambia el global:
-// ErrorBoundary.test.jsx depende de que `removeItem` sea un spy.
-function localStorageEnMemoria() {
-  let store: Record<string, string> = {};
-  return {
-    get length() { return Object.keys(store).length; },
-    getItem: (k: string) => (k in store ? store[k] : null),
-    setItem: (k: string, v: string) => { store[k] = String(v); },
-    removeItem: (k: string) => { delete store[k]; },
-    clear: () => { store = {}; },
-    key: (i: number) => Object.keys(store)[i] ?? null,
-  };
-}
-
 const HOY = '2026-08-19';
 const AYER = '2026-08-18';
 const ruta = { id: '10', paradas: [{ id: '1' }], polylines: null };
 
 describe('rutaOfflineCache', () => {
   beforeEach(() => {
-    Object.defineProperty(globalThis, 'localStorage', {
-      value: localStorageEnMemoria(),
-      configurable: true,
-      writable: true,
-    });
+    localStorage.clear();
     vi.useRealTimers();
   });
   afterEach(() => vi.useRealTimers());
