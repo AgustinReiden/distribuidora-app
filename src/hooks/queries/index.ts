@@ -92,7 +92,6 @@ export {
 // Pedidos
 export {
   pedidosKeys,
-  usePedidosQuery,
   usePedidosPaginatedQuery,
   usePedidoQuery,
   usePedidosByTransportistaQuery,

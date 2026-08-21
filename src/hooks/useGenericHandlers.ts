@@ -8,7 +8,7 @@
 import { useCallback } from 'react';
 import { withLoadingState, showDeleteConfirmation } from '../utils/errorHandling';
 import { logger } from '../utils/logger';
-import type { NotifyService, ModalControl, ConfirmModal } from './handlers/types';
+import type { NotifyService, ModalControl, ConfirmModal } from '../types/ui';
 
 // ============================================
 // TIPOS
