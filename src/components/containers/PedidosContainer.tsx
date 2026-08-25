@@ -617,6 +617,26 @@ export default function PedidosContainer(): React.ReactElement {
   }, [])
 
   const handleCancelarPedido = useCallback((pedido: PedidoDB) => {
+    // Si el pedido ya tiene plata cobrada, avisar ANTES: cancelar no devuelve
+    // nada solo, y hasta ahora el pedido cancelado no ofrecia ninguna accion de
+    // pago, asi que ese cobro quedaba colgado sin camino desde la app.
+    const cobrado = Number(pedido.monto_pagado ?? 0)
+    if (cobrado > 0) {
+      setConfirmConfig({
+        visible: true, tipo: 'warning', titulo: 'El pedido tiene pagos registrados',
+        mensaje:
+          `Este pedido tiene ${formatPrecio(cobrado)} cobrados. Cancelarlo NO devuelve ` +
+          'esa plata ni anula los pagos. Si el cobro no corresponde, anulalo desde ' +
+          '"Ver/Anular Pagos" — la accion sigue disponible con el pedido cancelado. ' +
+          'Al confirmar se continua con la cancelacion.',
+        onConfirm: () => {
+          setConfirmConfig({ visible: false })
+          setPedidoCancelando(pedido)
+          setModalCancelarOpen(true)
+        },
+      })
+      return
+    }
     setPedidoCancelando(pedido)
     setModalCancelarOpen(true)
   }, [])
@@ -2113,6 +2133,7 @@ export default function PedidosContainer(): React.ReactElement {
             onConfirmar={pedidoEntregaConPago ? handleEntregarConPago : handleConfirmarPago}
             onAnularPago={isAdmin && !pedidoEntregaConPago ? handleAnularPagoPedido : undefined}
             onEditarFormaPago={(isAdmin || isEncargado) && !pedidoEntregaConPago ? handleEditarFormaPagoPedido : undefined}
+            soloAnulacion={pedidoPago.estado === 'cancelado'}
             modoEntregaTransportista={!!pedidoEntregaConPago}
             onEntregarSinPago={pedidoEntregaConPago ? handleEntregarSinPago : undefined}
             onClose={() => {

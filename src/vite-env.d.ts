@@ -7,7 +7,6 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_API_KEY: string | undefined
   /** Vector Map ID (Google Cloud) para la cámara heading-up de navegación. */
   readonly VITE_GOOGLE_MAP_ID: string | undefined
-  readonly VITE_N8N_WEBHOOK_URL: string | undefined
   readonly VITE_N8N_FACTURA_WEBHOOK_URL: string | undefined
   readonly PROD: boolean
   readonly DEV: boolean

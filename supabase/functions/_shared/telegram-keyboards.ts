@@ -241,6 +241,14 @@ export function buildMainMenuKeyboard(rol: BotRol): InlineKeyboardMarkup {
 function mainMenuEntriesForRol(rol: BotRol): MainMenuEntry[] {
   switch (rol) {
     case "admin":
+      // El admin es el unico que puede tener mas de una sucursal, y sin esta
+      // entrada /sucursal no se descubre: habia que conocer el comando.
+      return [
+        { text: "👥 Buscar cliente", key: "buscar_cliente" },
+        { text: "📦 Buscar producto", key: "buscar_producto" },
+        { text: "🏢 Sucursal", key: "sucursal" },
+        { text: "❓ Ayuda", key: "ayuda" },
+      ];
     case "encargado":
       return [
         { text: "👥 Buscar cliente", key: "buscar_cliente" },

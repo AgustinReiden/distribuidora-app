@@ -49,10 +49,49 @@ let NOW_OVERRIDE: Date | null = null;
  * romper assertions exactas.
  */
 // deno-lint-ignore require-await
-export async function getSystemPrompt(rol: BotRol): Promise<string> {
+export async function getSystemPrompt(
+  rol: BotRol,
+  sucursal?: SucursalContext,
+): Promise<string> {
   const override = OVERRIDES.get(rol);
   if (override !== undefined) return override;
-  return buildDateContext() + "\n\n" + DEFAULTS[rol];
+  const bloques = [buildDateContext()];
+  const ctxSucursal = buildSucursalContext(sucursal);
+  if (ctxSucursal) bloques.push(ctxSucursal);
+  bloques.push(DEFAULTS[rol]);
+  return bloques.join("\n\n");
+}
+
+export interface SucursalContext {
+  /** Nombre de la sucursal activa del bot (bot_usuarios.sucursal_id). */
+  nombre: string | null;
+  /** Cuantas sucursales tiene asignadas el usuario. */
+  asignadas: number;
+}
+
+/**
+ * Bloque que le dice al agente SOBRE QUE SUCURSAL esta contestando.
+ *
+ * Sin esto, a un usuario con dos sucursales el bot le contestaba "ventas de
+ * Taco Pozo ayer" con los numeros de Tucuman y sin aclararlo: un dato
+ * equivocado que parece correcto. Ahora sabe el nombre y tiene la instruccion
+ * de decirlo cuando hay mas de una en juego.
+ */
+export function buildSucursalContext(ctx?: SucursalContext): string {
+  if (!ctx?.nombre) return "";
+  const lineas = [
+    "CONTEXTO DE SUCURSAL",
+    `Sucursal activa: ${ctx.nombre}.`,
+  ];
+  if (ctx.asignadas > 1) {
+    lineas.push(
+      `El usuario tiene ${ctx.asignadas} sucursales asignadas. TODA cifra que ` +
+        `des corresponde a ${ctx.nombre}: aclaralo siempre al responder. Si te ` +
+        `pide datos de otra, decile que cambie con /sucursal, no mezcles ni ` +
+        `estimes.`,
+    );
+  }
+  return lineas.join("\n");
 }
 
 // ----------------------------------------------------------------------------
