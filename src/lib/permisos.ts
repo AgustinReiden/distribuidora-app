@@ -92,6 +92,29 @@ export function puedeCrearPedido(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin' || rol === 'preventista' || rol === 'encargado'
 }
 
+/**
+ * Si el rol puede dar de baja logica (o reactivar) un cliente.
+ *
+ * Espeja lo que ya permite el servidor: el trigger
+ * `clientes_guard_update_preventista` (mig 080) tiene `activo` en su blacklist
+ * SOLO para el rol preventista, asi que encargado si puede. La UI decia `isAdmin`
+ * a mano y le negaba al encargado algo que la base le permite.
+ */
+export function puedeDesactivarCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado'
+}
+
+/**
+ * Si el rol puede eliminar un cliente de verdad (DELETE).
+ *
+ * Solo admin, para coincidir con la policy `mt_clientes_delete`. Ademas casi
+ * nunca aplica: desde la mig 200 la FK de pedidos es RESTRICT, asi que solo se
+ * puede borrar un cliente sin ningun movimiento.
+ */
+export function puedeEliminarCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 /** Si el rol puede ver la facturacion total en el dashboard. Solo admin. */
 export function puedeVerFacturacionTotal(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'

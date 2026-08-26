@@ -8,10 +8,12 @@ import React, { Suspense, useState, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useClientesQuery,
+  useClienteQuery,
   useCrearClienteMutation,
   useActualizarClienteMutation,
   useEliminarClienteMutation,
-  contarPedidosDeCliente,
+  contarReferenciasDeCliente,
+  buscarClientePorRazonSocial,
   useZonasEstandarizadasQuery,
   useProductosQuery,
   useCrearPedidoCambioEnRutaMutation,
@@ -23,7 +25,7 @@ import { useFichaCliente } from '../../hooks/supabase/useFichaCliente'
 import { usePagos } from '../../hooks/supabase'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useQueryClient } from '@tanstack/react-query'
-import { puedeRegistrarPagoCliente } from '../../lib/permisos'
+import { puedeRegistrarPagoCliente, puedeDesactivarCliente, puedeEliminarCliente } from '../../lib/permisos'
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -67,8 +69,12 @@ export default function ClientesContainer(): React.ReactElement {
   // horarios, notas). El resto lo gestiona admin/encargado.
   const edicionRestringida = isPreventista && !isAdmin && !isEncargado
 
+  // "Ver inactivos": el panel es el unico lugar desde donde se reactiva un
+  // cliente dado de baja, asi que tiene que poder mostrarlos a pedido.
+  const [verInactivos, setVerInactivos] = useState(false)
+
   // Queries
-  const { data: clientes = [], isLoading } = useClientesQuery()
+  const { data: clientes = [], isLoading } = useClientesQuery({ includeInactivos: verInactivos })
   // includeInactive: true para no perder el texto cuando una zona se desactiva
   // entre ediciones del cliente — el espejo legacy debe seguir resolviendo
   // aunque la zona ya no esté disponible en el selector activo.
@@ -95,6 +101,12 @@ export default function ClientesContainer(): React.ReactElement {
 
   // Ficha cliente hook - ModalFichaCliente lo usa internamente
   useFichaCliente(clienteFichaId)
+
+  // Se resuelve por ID contra la base y no buscando en `clientes`: con
+  // "Ver inactivos" apagado esa lista no trae los desactivados, y la ficha se
+  // abre igual desde el panel de deudores, donde un inactivo con saldo sigue
+  // figurando.
+  const { data: clienteFicha } = useClienteQuery(clienteFichaId ?? '')
 
   // Estado de edición
   const [clienteEditando, setClienteEditando] = useState<ClienteDB | null>(null)
@@ -138,41 +150,65 @@ export default function ClientesContainer(): React.ReactElement {
     if (!cliente) return
     const nombre = cliente.nombre_fantasia || cliente.razon_social
 
-    let pedidos: { cantidad: number; total: number }
+    let referencias: Awaited<ReturnType<typeof contarReferenciasDeCliente>>
     try {
-      pedidos = await contarPedidosDeCliente(clienteId)
+      referencias = await contarReferenciasDeCliente(clienteId)
     } catch {
       // Sin poder contar no se pregunta: preguntar sin saber es lo que causo el problema.
-      notify.error('No se pudo verificar si el cliente tiene pedidos. No se eliminó nada.')
+      notify.error('No se pudo verificar si el cliente tiene movimientos. No se eliminó nada.')
       return
     }
 
-    if (pedidos.cantidad === 0) {
+    if (!referencias.bloqueanBorrado) {
+      if (!puedeEliminarCliente(rol)) {
+        notify.error('Solo un administrador puede eliminar clientes.')
+        return
+      }
       setConfirmConfig({
         visible: true, tipo: 'danger', titulo: 'Eliminar cliente',
-        mensaje: `¿Eliminar "${nombre}"? No tiene pedidos asociados.`,
+        mensaje: `¿Eliminar "${nombre}"? No tiene pedidos ni movimientos asociados.`,
         onConfirm: async () => {
           setConfirmConfig({ visible: false })
           try {
             await eliminarCliente.mutateAsync(clienteId)
             notify.success('Cliente eliminado')
-          } catch {
-            notify.error('Error al eliminar cliente')
+          } catch (err) {
+            // deleteCliente ya traduce el 23503 a un mensaje que dice que lo traba.
+            notify.error(err instanceof Error ? err.message : 'Error al eliminar cliente')
           }
         },
       })
       return
     }
 
-    // Con pedidos la base rechaza el DELETE (FK RESTRICT, mig 200). Se explica
-    // por que y se ofrece la accion que si corresponde: desactivarlo.
+    if (!puedeDesactivarCliente(rol)) {
+      notify.error('No tenés permiso para desactivar clientes.')
+      return
+    }
+
+    // Con movimientos la base rechaza el DELETE (FKs RESTRICT, migs 200/024/089).
+    // Se explica por que y se ofrece la accion que si corresponde: desactivarlo.
+    const detalle: string[] = []
+    if (referencias.pedidos.cantidad > 0) {
+      detalle.push(
+        `${referencias.pedidos.cantidad} ${referencias.pedidos.cantidad === 1 ? 'pedido' : 'pedidos'} ` +
+        `por ${formatCurrency(referencias.pedidos.total)}`
+      )
+    }
+    if (referencias.cambiosProductos > 0) {
+      detalle.push(`${referencias.cambiosProductos} ${referencias.cambiosProductos === 1 ? 'cambio' : 'cambios'} de producto`)
+    }
+    if (referencias.recorridoCambios > 0) {
+      detalle.push(`${referencias.recorridoCambios} ${referencias.recorridoCambios === 1 ? 'parada' : 'paradas'} de cambio`)
+    }
+
     setConfirmConfig({
-      visible: true, tipo: 'warning', titulo: 'El cliente tiene pedidos',
+      visible: true, tipo: 'warning', titulo: 'El cliente tiene historial',
       mensaje:
-        `"${nombre}" tiene ${pedidos.cantidad} ` +
-        `${pedidos.cantidad === 1 ? 'pedido' : 'pedidos'} por ${formatCurrency(pedidos.total)}. ` +
-        'No se puede eliminar sin perder esa venta del historial y de la cuenta corriente. ' +
-        'Al confirmar se DESACTIVA: deja de aparecer en las listas y sus pedidos quedan intactos.',
+        `"${nombre}" tiene ${detalle.join(' y ')}. ` +
+        'No se puede eliminar sin perder eso del historial y de la cuenta corriente. ' +
+        'Al confirmar se DESACTIVA: deja de aparecer en el panel y en los pedidos, ' +
+        'pero sus datos siguen intactos y visibles en los reportes.',
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
         try {
@@ -183,7 +219,26 @@ export default function ClientesContainer(): React.ReactElement {
         }
       },
     })
-  }, [clientes, eliminarCliente, actualizarCliente, notify])
+  }, [clientes, eliminarCliente, actualizarCliente, notify, rol])
+
+  // Reactivar: la contracara de desactivar. Sin esto la baja logica seria un
+  // viaje de ida y el unico camino de vuelta seria crear un cliente nuevo, que
+  // es exactamente lo que parte el historial en dos.
+  const handleReactivarCliente = useCallback(async (clienteId: string) => {
+    const cliente = clientes.find(c => c.id === clienteId)
+    if (!cliente) return
+    const nombre = cliente.nombre_fantasia || cliente.razon_social
+    if (!puedeDesactivarCliente(rol)) {
+      notify.error('No tenés permiso para reactivar clientes.')
+      return
+    }
+    try {
+      await actualizarCliente.mutateAsync({ id: clienteId, data: { activo: true } })
+      notify.success(`"${nombre}" volvió a estar activo`)
+    } catch {
+      notify.error('Error al reactivar el cliente')
+    }
+  }, [clientes, actualizarCliente, notify, rol])
 
   const handleGuardarCambioEnRuta = useCallback(async (data: RegistrarCambioInput) => {
     try {
@@ -297,13 +352,25 @@ export default function ClientesContainer(): React.ReactElement {
     const nombreNuevoNorm = nombreNuevo.toLowerCase()
     const nombreOriginalNorm = (clienteEditando?.razon_social || '').trim().toLowerCase()
     if (nombreNuevoNorm && nombreNuevoNorm !== nombreOriginalNorm) {
-      const yaExiste = clientes.some(
-        c => c.id !== clienteEditando?.id &&
-          c.activo !== false &&
-          (c.razon_social || '').trim().toLowerCase() === nombreNuevoNorm
-      )
-      if (yaExiste) {
-        notify.error(`Ya existe un cliente con el nombre "${nombreNuevo}" en esta sucursal.`)
+      // Se consulta la BASE, no el array `clientes`: por defecto ese array no
+      // trae inactivos, asi que mirarlo dejaba crear un clon exacto del cliente
+      // recien desactivado -- la forma mas facil de partirle el historial al
+      // medio, y justo el movimiento que origino los 9 pedidos huerfanos.
+      // Cuando el que choca esta inactivo, el mensaje ofrece reactivarlo.
+      let choque: Awaited<ReturnType<typeof buscarClientePorRazonSocial>> = null
+      try {
+        choque = await buscarClientePorRazonSocial(nombreNuevo, clienteEditando?.id)
+      } catch {
+        notify.error('No se pudo verificar si el nombre ya existe. No se guardó nada.')
+        return
+      }
+      if (choque) {
+        notify.error(
+          choque.activo === false
+            ? `Ya existe "${nombreNuevo}" en esta sucursal, pero está inactivo. ` +
+              `Activá "Ver inactivos" y reactivalo, así conserva su historial.`
+            : `Ya existe un cliente con el nombre "${nombreNuevo}" en esta sucursal.`
+        )
         return
       }
     }
@@ -424,7 +491,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, clientes, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user, zonas])
+  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user, zonas])
 
   return (
     <>
@@ -438,6 +505,10 @@ export default function ClientesContainer(): React.ReactElement {
           onNuevoCliente={handleNuevoCliente}
           onEditarCliente={handleEditarCliente}
           onEliminarCliente={handleEliminarCliente}
+          onReactivarCliente={handleReactivarCliente}
+          verInactivos={verInactivos}
+          onVerInactivosChange={setVerInactivos}
+          puedeDesactivar={puedeDesactivarCliente(rol)}
           onVerFichaCliente={handleVerFichaCliente}
           onGestionarZonas={isAdmin ? handleGestionarZonas : undefined}
           onVerDeudores={(isAdmin || isEncargado) ? () => setModalDeudoresOpen(true) : undefined}
@@ -475,7 +546,7 @@ export default function ClientesContainer(): React.ReactElement {
       {modalFichaOpen && clienteFichaId && (
         <Suspense fallback={null}>
           <ModalFichaCliente
-            cliente={clientes.find(c => c.id === clienteFichaId) || null}
+            cliente={clienteFicha ?? clientes.find(c => c.id === clienteFichaId) ?? null}
             onClose={() => {
               setModalFichaOpen(false)
               setClienteFichaId(null)

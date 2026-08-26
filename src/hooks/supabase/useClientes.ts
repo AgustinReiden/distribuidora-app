@@ -9,7 +9,14 @@
  * - useEliminarClienteMutation() para eliminar
  *
  * Migración: Reemplazar `const { clientes } = useClientes()`
- * con `const { data: clientes } = useClientesQuery()`
+ * con `const { data: clientes } = useClientesQuery()`.
+ *
+ * OJO, el reemplazo NO es equivalente: este hook va por `clienteService.getAll()`,
+ * que no filtra `activo` y trae también los clientes dados de baja.
+ * `useClientesQuery()` devuelve **solo los activos**. Casi siempre eso es lo que
+ * se quiere, pero si el consumidor necesita ver las bajas —un reporte histórico,
+ * un backup— tiene que pedir `useClientesQuery({ includeInactivos: true })` y no
+ * asumir que el swap conserva el conjunto de datos.
  */
 
 import { useState, useEffect, useCallback } from 'react'

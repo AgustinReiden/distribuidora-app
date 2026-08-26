@@ -12,6 +12,8 @@ import { logger } from '../utils/logger'
 import type { MermaFormInput, ProductoDB } from '../types'
 import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
+import { motivoMontoMinimo } from '../utils/montoMinimo'
+import { leerMontoMinimoCacheado } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
 
 /**
@@ -343,15 +345,33 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   }, [loadPendingOperations])
 
   /**
-   * Guarda un pedido en modo offline con validación de stock
-   * Ahora usa IndexedDB via queueOperation
-   * Usa pedidosPendientesRef para evitar re-renders innecesarios
+   * Guarda un pedido en modo offline.
+   *
+   * Valida **compra mínima** (migs 204/205, contra el último valor cacheado en
+   * Dexie) y stock ANTES de encolar: si alguna falla no encola nada y devuelve
+   * `{ success: false, error }`. Ojo que la compra mínima corre siempre, incluso
+   * con `validarStock: false`.
+   *
+   * Usa IndexedDB via queueOperation, y `pedidosPendientesRef` para evitar
+   * re-renders innecesarios.
    */
   const guardarPedidoOffline = useCallback(async (
     pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
     options: GuardarPedidoOptions = {}
   ): Promise<GuardarPedidoResult> => {
     const { productos = [], validarStock = true } = options
+
+    // Compra mínima (migs 204/205). ESTE es el chequeo que evita el peor final:
+    // sin él, un pedido por debajo del mínimo se acepta en el teléfono sin
+    // señal, el preventista se va del comercio, y el rechazo del servidor llega
+    // horas después — como una operación fallida en IndexedDB que sólo se ve en
+    // el panel de fallidas. El mínimo se lee del caché de Dexie, que es lo mejor
+    // que se puede saber sin conexión (ver usePoliticasComercialesQuery).
+    const minimo = await leerMontoMinimoCacheado(currentSucursalIdRef.current).catch(() => 0)
+    const motivoMinimo = motivoMontoMinimo(Number(pedidoData.total) || 0, minimo)
+    if (motivoMinimo) {
+      return { success: false, error: motivoMinimo }
+    }
 
     // Validar stock si se proporciona lista de productos
     if (validarStock && productos.length > 0 && pedidoData.items?.length > 0) {

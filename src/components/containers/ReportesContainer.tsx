@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useClientesQuery, useReportePreventistasQuery } from '../../hooks/queries'
+import { useClienteQuery, useClientesQuery, useReportePreventistasQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import type { ClienteDB } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -38,6 +38,12 @@ export default function ReportesContainer(): React.ReactElement {
   } = useReportePreventistasQuery(filtros.fechaDesde, filtros.fechaHasta, reporteInicializado)
 
   const { data: clientes = [] } = useClientesQuery()
+
+  // La ficha se resuelve por ID contra la base, NO buscando en `clientes`: esa
+  // lista ya no trae inactivos, y un cliente desactivado con deuda sigue
+  // apareciendo en el panel de deudores. Buscarlo en la lista devolvia null y
+  // la ficha se abria vacia justo para el caso que mas importa mirar.
+  const { data: clienteFicha } = useClienteQuery(clienteFichaId ?? '')
 
   useEffect(() => {
     if (error) {
@@ -78,7 +84,7 @@ export default function ReportesContainer(): React.ReactElement {
       {modalFichaOpen && clienteFichaId && (
         <Suspense fallback={null}>
           <ModalFichaCliente
-            cliente={clientes.find(cliente => String(cliente.id) === clienteFichaId) || null}
+            cliente={clienteFicha ?? clientes.find(cliente => String(cliente.id) === clienteFichaId) ?? null}
             onClose={() => {
               setModalFichaOpen(false)
               setClienteFichaId(null)

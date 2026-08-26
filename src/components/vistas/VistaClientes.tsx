@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
-import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle, RotateCcw } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import Paginacion from '../layout/Paginacion';
 import ClientesViewHeader from '../clientes/ClientesViewHeader';
@@ -35,6 +35,13 @@ export interface VistaClientesProps {
   onNuevoCliente: () => void;
   onEditarCliente: (cliente: ClienteDB) => void;
   onEliminarCliente: (id: string) => void;
+  /** Vuelve a poner activo un cliente dado de baja. */
+  onReactivarCliente: (id: string) => void;
+  /** Estado del check "Ver inactivos" (lo gobierna el container: cambia la query). */
+  verInactivos: boolean;
+  onVerInactivosChange: (valor: boolean) => void;
+  /** Si el usuario puede desactivar/reactivar (admin o encargado). */
+  puedeDesactivar: boolean;
   onVerFichaCliente?: (cliente: ClienteDB) => void;
   /** Solo se pasa cuando el usuario es admin (gating en el container). */
   onGestionarZonas?: () => void;
@@ -55,6 +62,10 @@ export default function VistaClientes({
   onNuevoCliente,
   onEditarCliente,
   onEliminarCliente,
+  onReactivarCliente,
+  verInactivos,
+  onVerInactivosChange,
+  puedeDesactivar,
   onVerFichaCliente,
   onGestionarZonas,
   onVerDeudores
@@ -280,6 +291,20 @@ export default function VistaClientes({
       {/* Stats */}
       <ClienteStats clientes={clientes} />
 
+      {/* Ver inactivos: el unico camino de vuelta para un cliente dado de baja.
+          Cambia la query (no filtra en memoria), por eso lo gobierna el container. */}
+      {puedeDesactivar && (
+        <label className="flex items-center gap-2 text-xs font-medium text-stone-600 dark:text-stone-300 cursor-pointer select-none w-fit">
+          <input
+            type="checkbox"
+            checked={verInactivos}
+            onChange={(e) => onVerInactivosChange(e.target.checked)}
+            className="rounded border-stone-300 dark:border-gray-600 text-amber-600 focus:ring-amber-500"
+          />
+          Ver clientes inactivos
+        </label>
+      )}
+
       {/* Contador de resultados (solo si hay filtros activos) */}
       {filtrosActivos && (
         <div className="text-xs font-medium uppercase tracking-[0.1em] text-stone-500 dark:text-stone-400">
@@ -302,8 +327,10 @@ export default function VistaClientes({
               idx={idx}
               isAdmin={isAdmin}
               canEditar={isAdmin || isEncargado || isPreventista}
+              puedeDesactivar={puedeDesactivar}
               onEditar={() => onEditarCliente(cliente)}
               onEliminar={() => onEliminarCliente(cliente.id)}
+              onReactivar={() => onReactivarCliente(cliente.id)}
               onVerFicha={onVerFichaCliente ? () => onVerFichaCliente(cliente) : undefined}
             />
           ))}
@@ -330,12 +357,15 @@ interface ClienteCardProps {
   idx: number;
   isAdmin: boolean;
   canEditar: boolean;
+  puedeDesactivar: boolean;
   onEditar: () => void;
   onEliminar: () => void;
+  onReactivar: () => void;
   onVerFicha?: () => void;
 }
 
-function ClienteCard({ cliente, idx, isAdmin, canEditar, onEditar, onEliminar, onVerFicha }: ClienteCardProps) {
+function ClienteCard({ cliente, idx, isAdmin, canEditar, puedeDesactivar, onEditar, onEliminar, onReactivar, onVerFicha }: ClienteCardProps) {
+  const inactivo = cliente.activo === false;
   const saldo = cliente.saldo_cuenta ?? 0;
   const saldoColor =
     saldo > 0 ? 'text-rose-700 dark:text-rose-300'
@@ -344,7 +374,11 @@ function ClienteCard({ cliente, idx, isAdmin, canEditar, onEditar, onEliminar, o
 
   return (
     <div
-      className="group bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl shadow-warm hover:shadow-warm-md hover:-translate-y-px hover:border-stone-300 dark:hover:border-gray-600 transition-[transform,box-shadow,border-color] duration-200 overflow-hidden flex flex-col"
+      className={`group bg-white dark:bg-gray-800 border rounded-xl shadow-warm hover:shadow-warm-md hover:-translate-y-px dark:hover:border-gray-600 transition-[transform,box-shadow,border-color] duration-200 overflow-hidden flex flex-col ${
+        inactivo
+          ? 'border-stone-300 dark:border-gray-600 opacity-60 grayscale'
+          : 'border-stone-200/80 dark:border-gray-700 hover:border-stone-300'
+      }`}
       style={{
         animation: 'card-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both',
         animationDelay: `${Math.min(idx, 12) * 40}ms`,
@@ -353,6 +387,11 @@ function ClienteCard({ cliente, idx, isAdmin, canEditar, onEditar, onEliminar, o
       {/* Crumb + acciones admin */}
       <div className="px-4 pt-3 flex items-center justify-between gap-2">
         <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-stone-500 dark:text-stone-400 flex items-center gap-0 min-w-0 flex-wrap">
+          {inactivo && (
+            <span className="mr-2 px-1.5 py-0.5 rounded bg-stone-200 dark:bg-gray-700 text-stone-700 dark:text-stone-300 tracking-normal">
+              Inactivo
+            </span>
+          )}
           {cliente.codigo != null && (
             <span className="tabular-nums">#{cliente.codigo}</span>
           )}
@@ -380,14 +419,27 @@ function ClienteCard({ cliente, idx, isAdmin, canEditar, onEditar, onEliminar, o
                 <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             )}
-            {isAdmin && (
-              <button
-                onClick={onEliminar}
-                className="p-1.5 text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-md transition-colors"
-                aria-label={`Eliminar cliente ${cliente.nombre_fantasia}`}
-              >
-                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
+            {inactivo ? (
+              puedeDesactivar && (
+                <button
+                  onClick={onReactivar}
+                  className="p-1.5 text-stone-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-md transition-colors"
+                  aria-label={`Reactivar cliente ${cliente.nombre_fantasia}`}
+                >
+                  <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              )
+            ) : (
+              (isAdmin || puedeDesactivar) && (
+                <button
+                  onClick={onEliminar}
+                  className="p-1.5 text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-md transition-colors"
+                  aria-label={`Eliminar o desactivar cliente ${cliente.nombre_fantasia}`}
+                  title="Eliminar. Si el cliente tiene historial, se ofrece desactivarlo."
+                >
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              )
             )}
           </div>
         )}

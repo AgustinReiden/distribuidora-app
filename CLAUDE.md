@@ -54,6 +54,11 @@ Si no entra claro en una caja, probablemente no hace falta escribirlo.
 - `migrations/` — SQL numerado. Ver Trampas.
 - `supabase/functions/` — edge functions Deno (bot de Telegram, optimizar-ruta)
 
+La política comercial configurable no vive en el código: está en la tabla
+`politicas_comerciales` (una fila por sucursal) y se edita en `/configuracion`. Un
+parámetro de negocio que cambia va ahí, no en una constante, una env var ni una columna
+suelta en `sucursales`.
+
 ## Convenciones
 
 - **Nada de refactors de paso.** Un bug que no es el que viniste a arreglar → issue.
@@ -70,6 +75,13 @@ Si no entra claro en una caja, probablemente no hace falta escribirlo.
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada.
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
+- **Toda lectura nueva de `clientes` decide qué hace con los inactivos.** Un cliente con
+  pedidos no se puede borrar (la FK es RESTRICT desde la mig 200), así que desactivarlo es la
+  única salida y siempre va a haber inactivos. `fetchClientes` filtra `activo = true` por
+  defecto (`includeInactivos` para el panel, que es desde donde se reactiva). Lo operativo
+  —selectores, rutas, recorridos— los oculta; el historial —reportes, cuenta corriente y los
+  embeds `cliente:clientes(*)`— **tiene** que seguir viéndolos, que es de lo que se trata la
+  baja lógica. Una consulta que no elige está eligiendo mal por omisión.
 
 ## Trampas
 
@@ -117,6 +129,15 @@ que ya mordieron en la misma migración:
 **7. Nunca `npm audit fix --force`.** Degrada `exceljs` a 3.4.0 y rompe todos los exports
 a Excel. El gate de CI es `--audit-level=high --omit=dev`; los `moderate` conviven a
 propósito. Para arreglar un high: `npm audit fix --package-lock-only`.
+
+**8. Un mínimo de pedido no puede ser un CHECK sobre `pedidos.total`.** Parece el lugar
+obvio para la compra mínima (mig 204/205), y rompe la cancelación: `cancelar_pedido` pone
+`total = 0` (mig 175) y el invariante `VENTA-I` de `auditoria_integridad()` **exige** que un
+pedido cancelado tenga total 0 (mig 105). Las dos reglas se contradicen y ningún código lo
+dice. Por eso se valida **al crear** —dentro de `crear_pedido_completo` y de
+`crear_pedido_completo_bot`— y nunca como constraint ni como trigger sobre el `UPDATE` del
+total. Corolario: la política rige el alta, no retroactivamente. Cuando el mínimo sube, los
+pedidos viejos por debajo eran legales cuando se crearon y tienen que seguir siéndolo.
 
 ## Los pendientes van a issues
 

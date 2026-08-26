@@ -10,8 +10,18 @@ import type { ClienteDB } from '../../types'
 // Query keys
 export const clientesKeys = {
   all: (sucursalId: number | null) => ['clientes', sucursalId] as const,
-  lists: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'list'] as const,
-  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...clientesKeys.lists(sucursalId), filters] as const,
+  /**
+   * OJO: la lista tiene DOS variantes en cache (con y sin inactivos), y el
+   * segundo argumento tiene default. `lists(sucursalId)` compila y apunta a la
+   * de activos, asi que usarla como filtro de invalidacion deja la otra vieja
+   * -- y `tsc` no lo ve. Para invalidar o escribir sobre "la lista", usá
+   * `listsPrefix` con las APIs plurales (`setQueriesData`/`getQueriesData`),
+   * que alcanzan a las dos.
+   */
+  lists: (sucursalId: number | null, includeInactivos = false) =>
+    [...clientesKeys.all(sucursalId), 'list', includeInactivos] as const,
+  listsPrefix: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...clientesKeys.listsPrefix(sucursalId), filters] as const,
   details: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'detail'] as const,
   detail: (sucursalId: number | null, id: string) => [...clientesKeys.details(sucursalId), id] as const,
   byZona: (sucursalId: number | null, zona: string) => [...clientesKeys.all(sucursalId), 'zona', zona] as const,
@@ -38,11 +48,24 @@ function flattenClienteRow(row: ClienteRow): ClienteDB {
 const CLIENTE_SELECT = '*, cliente_preventistas(preventista_id), cliente_descuentos_categoria(categoria, descuento_porcentaje)'
 
 // Fetch functions
-async function fetchClientes(): Promise<ClienteDB[]> {
-  const { data, error } = await supabase
+
+// Baja logica: `activo = false` es un cliente dado de baja. Se filtra ACA y no en
+// cada consumidor porque este fetch alimenta el panel, los tres autocompletes de
+// pedidos, el dashboard y los recorridos: un filtro por pantalla se olvida en la
+// proxima. Hasta la mig 200 la app ofrecia desactivar y no filtraba en ningun
+// lado, asi que el cliente "desactivado" seguia apareciendo entero y la accion
+// parecia no hacer nada.
+// El historial NO pasa por aca: los pedidos viejos resuelven el nombre por el
+// embed `cliente:clientes(*)` de PedidosContainer, y los reportes por sus RPCs.
+async function fetchClientes(includeInactivos = false): Promise<ClienteDB[]> {
+  let query = supabase
     .from('clientes')
     .select(CLIENTE_SELECT)
     .order('nombre_fantasia')
+
+  if (!includeInactivos) query = query.eq('activo', true)
+
+  const { data, error } = await query
 
   if (error) throw error
   return ((data as ClienteRow[]) || []).map(flattenClienteRow)
@@ -185,12 +208,17 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
 
-  // Detección de duplicados por ubicación (~0.2 metros de tolerancia)
+  // Detección de duplicados por ubicación (~0.2 metros de tolerancia).
+  // Mira TAMBIEN a los inactivos, y a proposito: el caso que origino todo el
+  // incidente de los huerfanos (mig 199) fue una deduplicacion -- alguien creaba
+  // el cliente nuevo y despues borraba el viejo. Si el de esa esquina esta
+  // desactivado, lo que corresponde es reactivarlo, no crear un segundo cliente
+  // con la misma direccion y partirle el historial al medio.
   if (cliente.latitud != null && cliente.longitud != null) {
     const TOLERANCE = 0.000002 // ~0.2 metros (6 decimales de precisión)
     const { data: cercanos } = await supabase
       .from('clientes')
-      .select('id, nombre_fantasia, razon_social')
+      .select('id, nombre_fantasia, razon_social, activo')
       .gte('latitud', cliente.latitud - TOLERANCE)
       .lte('latitud', cliente.latitud + TOLERANCE)
       .gte('longitud', cliente.longitud - TOLERANCE)
@@ -198,7 +226,14 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       .limit(1)
 
     if (cercanos && cercanos.length > 0) {
-      const nombre = cercanos[0].nombre_fantasia || cercanos[0].razon_social
+      const encontrado = cercanos[0] as { nombre_fantasia?: string; razon_social?: string; activo?: boolean }
+      const nombre = encontrado.nombre_fantasia || encontrado.razon_social
+      if (encontrado.activo === false) {
+        throw new Error(
+          `Ya existe un cliente en esta ubicación, "${nombre}", pero está inactivo. ` +
+          `Activá "Ver inactivos" en el panel de clientes y reactivalo, así conserva su historial.`
+        )
+      }
       throw new Error(
         `Ya existe un cliente en esta ubicación: ${nombre}. ` +
         `Si necesitás crear otro, modificá ligeramente la dirección.`
@@ -295,44 +330,135 @@ async function deleteCliente(id: string): Promise<void> {
     .delete()
     .eq('id', id)
 
-  if (error) throw error
+  if (!error) return
+
+  // 23503 = foreign_key_violation. La base es la fuente de verdad: aunque el
+  // container cuenta las referencias antes de preguntar, entre el conteo y el
+  // DELETE puede entrar un pedido. Sin esta traduccion el usuario ve
+  // "Error al eliminar cliente" y no tiene forma de saber que lo trabo.
+  if (error.code === '23503') {
+    const referencias = await contarReferenciasDeCliente(id).catch(() => null)
+    const partes: string[] = []
+    if (referencias) {
+      const { cantidad } = referencias.pedidos
+      if (cantidad > 0) partes.push(`${cantidad} pedido${cantidad === 1 ? '' : 's'}`)
+      if (referencias.cambiosProductos > 0) {
+        partes.push(`${referencias.cambiosProductos} cambio${referencias.cambiosProductos === 1 ? '' : 's'} de producto`)
+      }
+      if (referencias.recorridoCambios > 0) {
+        partes.push(`${referencias.recorridoCambios} parada${referencias.recorridoCambios === 1 ? '' : 's'} de cambio`)
+      }
+    }
+    const ref = partes.length > 0 ? partes.join(', ') : 'movimientos asociados'
+    throw new Error(
+      `No se puede eliminar: el cliente tiene ${ref}. Desactivalo para sacarlo de las listas sin perder el historial.`
+    )
+  }
+
+  throw error
 }
 
 /**
- * Cuenta los pedidos de un cliente y cuanto suman, para poder avisar ANTES de
- * borrarlo.
+ * Busca un cliente por razon social exacta (case-insensitive), INCLUIDOS los
+ * inactivos, dentro de la sucursal activa (la RLS la acota sola).
  *
- * Existe porque la FK era ON DELETE SET NULL y borrar un cliente desprendia sus
- * pedidos en silencio: 9 pedidos por $200.070 quedaron sin dueno asi (mig 199).
- * Desde la mig 200 la FK es RESTRICT y la base rechaza el borrado, pero el
- * usuario merece saber por que antes de intentarlo, no despues.
+ * No alcanza con mirar el array que ya tiene el container: por defecto ese array
+ * NO trae inactivos, asi que el chequeo de duplicados no los veia y dejaba crear
+ * un clon exacto del cliente recien desactivado.
+ *
+ * `ilike` sin comodines es igualdad case-insensitive. Se escapan `%` y `_`
+ * porque en un nombre son literales, no comodines.
  */
-export async function contarPedidosDeCliente(
-  clienteId: string
-): Promise<{ cantidad: number; total: number }> {
-  const { data, error } = await supabase
-    .from('pedidos')
-    .select('total')
-    .eq('cliente_id', clienteId)
+export async function buscarClientePorRazonSocial(
+  razonSocial: string,
+  excluirId?: string
+): Promise<{ id: string; nombre_fantasia?: string; razon_social?: string; activo?: boolean } | null> {
+  const patron = razonSocial.trim().replace(/[\\%_]/g, m => `\\${m}`)
+  if (!patron) return null
 
+  let query = supabase
+    .from('clientes')
+    .select('id, nombre_fantasia, razon_social, activo')
+    .ilike('razon_social', patron)
+    .limit(2)
+
+  if (excluirId) query = query.neq('id', excluirId)
+
+  const { data, error } = await query
   if (error) throw error
-  const filas = data || []
+  return (data && data.length > 0) ? (data[0] as { id: string; nombre_fantasia?: string; razon_social?: string; activo?: boolean }) : null
+}
+
+export interface ReferenciasCliente {
+  /** Pedidos del cliente y cuanto suman. Es la referencia que se le explica al usuario. */
+  pedidos: { cantidad: number; total: number }
+  /** Cambios de producto (mig 024). FK sin ON DELETE => RESTRICT. */
+  cambiosProductos: number
+  /** Paradas de cambio en recorridos (mig 089). FK sin ON DELETE => RESTRICT. */
+  recorridoCambios: number
+  /** true si alguna FK RESTRICT va a rechazar el DELETE. */
+  bloqueanBorrado: boolean
+}
+
+/**
+ * Cuenta todo lo que cuelga de un cliente, para poder avisar ANTES de borrarlo.
+ *
+ * Existe porque la FK de pedidos era ON DELETE SET NULL y borrar un cliente
+ * desprendia sus pedidos en silencio: 9 pedidos por $200.070 quedaron sin dueno
+ * asi (mig 199). Desde la mig 200 la FK es RESTRICT y la base rechaza el
+ * borrado, pero el usuario merece saber por que antes de intentarlo, no despues.
+ *
+ * OJO: `pedidos` no es la unica FK que traba el DELETE. `cambios_productos`
+ * (024) y `recorrido_cambios` (089) tampoco declaran ON DELETE, y en Postgres
+ * eso es NO ACTION -- o sea RESTRICT. Contando solo pedidos, un cliente con un
+ * cambio de producto y ningun pedido caia igual en el 23503, pero la app le
+ * mostraba el confirm de "no tiene pedidos asociados" y despues un
+ * "Error al eliminar cliente" sin explicacion.
+ */
+export async function contarReferenciasDeCliente(
+  clienteId: string
+): Promise<ReferenciasCliente> {
+  const [pedidosRes, cambiosRes, recorridoRes] = await Promise.all([
+    supabase.from('pedidos').select('total').eq('cliente_id', clienteId),
+    supabase.from('cambios_productos').select('id').eq('cliente_id', clienteId),
+    supabase.from('recorrido_cambios').select('id').eq('cliente_id', clienteId),
+  ])
+
+  if (pedidosRes.error) throw pedidosRes.error
+  if (cambiosRes.error) throw cambiosRes.error
+  if (recorridoRes.error) throw recorridoRes.error
+
+  const filas = pedidosRes.data || []
+  const cambiosProductos = (cambiosRes.data || []).length
+  const recorridoCambios = (recorridoRes.data || []).length
+
   return {
-    cantidad: filas.length,
-    total: filas.reduce((acc, p) => acc + Number(p.total || 0), 0),
+    pedidos: {
+      cantidad: filas.length,
+      total: filas.reduce((acc, p) => acc + Number(p.total || 0), 0),
+    },
+    cambiosProductos,
+    recorridoCambios,
+    bloqueanBorrado: filas.length > 0 || cambiosProductos > 0 || recorridoCambios > 0,
   }
 }
 
 // Hooks
 
 /**
- * Hook para obtener todos los clientes activos
+ * Hook para obtener los clientes de la sucursal activa.
+ *
+ * Por defecto devuelve SOLO los activos: un cliente dado de baja no tiene que
+ * aparecer en el panel ni en ningun selector. `includeInactivos` es para el
+ * check "Ver inactivos" del panel de clientes, que es desde donde se los
+ * reactiva -- sin eso, desactivar seria un viaje de ida.
  */
-export function useClientesQuery() {
+export function useClientesQuery(opts?: { includeInactivos?: boolean }) {
   const { currentSucursalId } = useSucursal()
+  const includeInactivos = opts?.includeInactivos ?? false
   return useQuery({
-    queryKey: clientesKeys.lists(currentSucursalId),
-    queryFn: fetchClientes,
+    queryKey: clientesKeys.lists(currentSucursalId, includeInactivos),
+    queryFn: () => fetchClientes(includeInactivos),
     staleTime: 5 * 60 * 1000, // 5 minutos
   })
 }
@@ -385,14 +511,14 @@ export function useCrearClienteMutation() {
     mutationFn: (cliente: ClienteCreateInput) => createCliente(cliente, currentSucursalId),
     onSuccess: (newCliente) => {
       // Actualizar cache de lista
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
-        if (!old) return [newCliente]
+      queryClient.setQueriesData<ClienteDB[]>({ queryKey: clientesKeys.listsPrefix(currentSucursalId) }, (old) => {
+        if (!old) return old
         return [...old, newCliente].sort((a, b) =>
           (a.nombre_fantasia || '').localeCompare(b.nombre_fantasia || '')
         )
       })
-      // Invalidar zonas por si es una nueva zona
-      queryClient.invalidateQueries({ queryKey: clientesKeys.zonas(currentSucursalId) })
+      // Invalidar el prefijo: alcanza a las dos variantes de lista y a las zonas
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
       // Invalidar clientes por zona si aplica
       if (newCliente.zona) {
         queryClient.invalidateQueries({ queryKey: clientesKeys.byZona(currentSucursalId, newCliente.zona) })
@@ -412,12 +538,15 @@ export function useActualizarClienteMutation() {
     mutationFn: updateCliente,
     // Optimistic update
     onMutate: async ({ id, data: cliente }) => {
-      await queryClient.cancelQueries({ queryKey: clientesKeys.lists(currentSucursalId) })
+      // Plural y por prefijo: la mutacion mas comun de esta pantalla es
+      // desactivar/reactivar, que es justo la que cambia de que variante de la
+      // lista tiene que salir el cliente. Tocando una sola, la otra queda vieja.
+      const prefijo = clientesKeys.listsPrefix(currentSucursalId)
+      await queryClient.cancelQueries({ queryKey: prefijo })
 
-      const previousClientes = queryClient.getQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId))
+      const previousClientes = queryClient.getQueriesData<ClienteDB[]>({ queryKey: prefijo })
 
-      // Aplicar cambios optimistamente
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
+      queryClient.setQueriesData<ClienteDB[]>({ queryKey: prefijo }, (old) => {
         if (!old) return old
         return old.map(c => c.id === id ? { ...c, ...cliente } as ClienteDB : c)
       })
@@ -425,9 +554,9 @@ export function useActualizarClienteMutation() {
       return { previousClientes }
     },
     onError: (_, __, context) => {
-      // Rollback on error
-      if (context?.previousClientes) {
-        queryClient.setQueryData(clientesKeys.lists(currentSucursalId), context.previousClientes)
+      // Rollback: se restaura cada variante con lo que tenia antes.
+      for (const [queryKey, data] of context?.previousClientes ?? []) {
+        queryClient.setQueryData(queryKey, data)
       }
     },
     onSuccess: (updatedCliente) => {
@@ -435,15 +564,27 @@ export function useActualizarClienteMutation() {
       queryClient.setQueryData(clientesKeys.detail(currentSucursalId, updatedCliente.id), updatedCliente)
     },
     onSettled: () => {
-      // Revalidar para asegurar consistencia
-      queryClient.invalidateQueries({ queryKey: clientesKeys.lists(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: clientesKeys.zonas(currentSucursalId) })
+      // Se invalida el PREFIJO `all`, no `lists()`: desde que la lista tiene dos
+      // variantes en cache (con y sin inactivos), invalidar solo la de activos
+      // dejaba la otra vieja. Se notaba justo en el caso que importa: desactivar
+      // un cliente y que siguiera figurando en "Ver inactivos" como activo.
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
     },
   })
 }
 
 /**
- * Hook para eliminar (desactivar) un cliente
+ * Hook para ELIMINAR de verdad un cliente (DELETE).
+ *
+ * Solo admin (policy `mt_clientes_delete`) y solo si el cliente no tiene ninguna
+ * referencia: desde la mig 200 la FK de pedidos es RESTRICT, y `cambios_productos`
+ * y `recorrido_cambios` tampoco declaran ON DELETE. En la practica casi nunca
+ * aplica -- 678 de los 712 clientes tienen pedidos.
+ *
+ * **La baja logica NO pasa por aca**: desactivar es
+ * `useActualizarClienteMutation` con `{ activo: false }`, y reactivar con
+ * `{ activo: true }`. El "(desactivar)" que decia antes este docstring era de
+ * cuando eliminar y desactivar eran la misma cosa.
  */
 export function useEliminarClienteMutation() {
   const queryClient = useQueryClient()
@@ -454,11 +595,11 @@ export function useEliminarClienteMutation() {
     onSuccess: (_, deletedId) => {
       // Remover de cache de detalle
       queryClient.removeQueries({ queryKey: clientesKeys.detail(currentSucursalId, deletedId) })
-      // Actualizar cache de lista
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
-        if (!old) return []
-        return old.filter(c => c.id !== deletedId)
-      })
+      // Sacarlo de las dos variantes de la lista (con y sin inactivos)
+      queryClient.setQueriesData<ClienteDB[]>(
+        { queryKey: clientesKeys.listsPrefix(currentSucursalId) },
+        (old) => (old ? old.filter(c => c.id !== deletedId) : old)
+      )
     },
   })
 }
