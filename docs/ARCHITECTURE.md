@@ -3,7 +3,7 @@
 > Describe lo que hay **hoy**. Todo lo que dice acá se puede verificar con `ls`, `grep`
 > o corriendo los comandos. Si algo no se puede verificar, no está escrito.
 >
-> Última verificación contra el código: 2026-08-20.
+> Última verificación contra el código: 2026-08-26.
 
 ## Stack
 
@@ -26,7 +26,7 @@ Conteos reales de archivos, para dar idea de dónde está el peso:
 ```
 src/
 ├── components/
-│   ├── modals/          77   el grueso de la UI
+│   ├── modals/          78   el grueso de la UI
 │   ├── vistas/          23   pantallas
 │   ├── containers/      20   estado + handlers de cada dominio
 │   ├── ui/              15   primitivas
@@ -37,18 +37,17 @@ src/
 │   ├── geolocalizacion/  5
 │   └── dashboard, clientes, misEntregas, a11y, auth, metas, perfil, recorridos
 ├── hooks/
-│   ├── queries/         50   capa de datos real (TanStack Query)
+│   ├── queries/         51   capa de datos real (TanStack Query)
 │   ├── supabase/        19   acceso directo y auth
-│   ├── state/            3
-│   └── handlers/         7   MUERTO — ver abajo
+│   └── state/            3
 ├── utils/               96   lógica pura, es donde viven los cálculos testeables
 ├── lib/                 16   supabase.ts, schemas.ts, offlineDb.ts, permisos.ts, pdf/
-├── contexts/            12
+├── contexts/            11
 ├── services/
-│   ├── api/              4
+│   ├── api/              3   clientes y productos (ver abajo)
 │   └── business/         1
 ├── constants/            5
-└── types/                3
+└── types/                4
 ```
 
 ## Cómo fluyen los datos
@@ -96,27 +95,22 @@ container queda detrás del overlay y falla en silencio.
 `ThemeProvider`, `AuthProvider`, `NotificationProvider` (en `App.tsx`),
 `AuthDataProvider`, `SucursalProvider`, y `QueryClientProvider` (en `main.tsx`).
 
-`src/contexts/` exporta más providers de los que se montan. En particular
-**`HandlersProvider` está exportado y nunca se monta** — es parte del código muerto de
-abajo.
+Todos los que `src/contexts/` exporta se montan. No siempre fue así.
 
-## Código muerto conocido
+## La capa que no existe
 
-`src/hooks/handlers/` (7 archivos) **no tiene ningún consumidor**:
+Si encontrás documentación, comentarios o ramas que hablen de **handlers de UI en hooks
+propios** (`src/hooks/handlers/`, `HandlersContext`, `useHandlerActions`) o de un
+**`pedidoService`**, están hablando de arquitecturas que se intentaron y no se
+terminaron. Se retiraron en agosto de 2026 (#495, #496, #503).
 
-```bash
-grep -rn "from ['\"].*hooks/handlers" src/ e2e/ | grep -v "^src/hooks/handlers/"
-# (sin resultados)
-```
+Los handlers viven en `src/components/containers/`. Los pedidos se leen y escriben por
+`src/hooks/queries/`. `src/services/api/` quedó con `clienteService` y `productoService`,
+que sí se usan.
 
-Es el resto de una arquitectura anterior en la que los handlers de UI vivían en hooks
-propios; hoy viven en los containers. Está anotado en
-[#495](https://github.com/AgustinReiden/distribuidora-app/issues/495) junto con
-`HandlersProvider`.
-
-Se documenta acá porque la versión anterior de este archivo describía esos handlers como
-la capa central de la app, con diagrama incluido — o sea que la arquitectura escrita
-mandaba a leer una capa que no existe.
+Se deja escrito porque la versión anterior de este archivo describía esos handlers como
+la capa central de la app, con diagrama incluido: la arquitectura escrita mandaba a leer
+una capa que ya no ejecutaba nadie.
 
 ## Seguridad
 
@@ -153,7 +147,7 @@ otro.
 
 ## Testing
 
-- **Unit** (Vitest): 98 archivos, 1391 tests. Corren sin `.env` — así se detectan fallos
+- **Unit** (Vitest): del orden de 100 archivos y 1400 tests. Corren sin `.env` — así se detectan fallos
   de import que un `.env` local enmascara.
 - **E2E** (Playwright, chromium): `e2e/`.
 - **Edge** (Deno): `deno task test` desde `supabase/functions/`.

@@ -80,11 +80,12 @@ src/
 │   └── vistas/       # Vistas principales
 ├── contexts/         # React Contexts (Theme, Notifications)
 ├── hooks/            # Custom hooks
-│   ├── supabase/     # Hooks de API (useClientes, usePedidos, etc.)
-│   └── handlers/     # Handlers de eventos
+│   ├── queries/      # Capa de datos (TanStack Query) — la que se usa
+│   ├── supabase/     # Hooks de acceso directo y auth
+│   └── state/        # Hooks de estado
 ├── lib/              # Configuraciones y utilidades core
 │   ├── pdf/          # Generadores de PDF
-│   └── schemas.js    # Schemas de validación Zod
+│   └── schemas.ts    # Schemas de validación Zod
 ├── utils/            # Utilidades generales
 └── test/             # Utilidades de testing
 ```
