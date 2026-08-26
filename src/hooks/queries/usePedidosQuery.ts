@@ -166,49 +166,6 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
 }
 
 // Fetch functions
-async function fetchPedidos(): Promise<PedidoDB[]> {
-  const { data, error } = await supabase
-    .from('pedidos')
-    .select(PEDIDO_SELECT)
-    .order('created_at', { ascending: false })
-    .limit(500) // Limitar carga inicial para evitar consumo excesivo de memoria
-
-  if (error) throw error
-
-  // Enrich with perfiles
-  const perfilIds = new Set<string>()
-  for (const pedido of (data || [])) {
-    if (pedido.usuario_id) perfilIds.add(pedido.usuario_id as string)
-    if (pedido.transportista_id) perfilIds.add(pedido.transportista_id as string)
-  }
-
-  let perfilesMap: Record<string, PerfilDB> = {}
-  if (perfilIds.size > 0) {
-    const { data: perfiles } = await supabase
-      .from('perfiles')
-      .select('id, nombre, email')
-      .in('id', Array.from(perfilIds))
-
-    if (perfiles) {
-      perfilesMap = Object.fromEntries(
-        (perfiles as PerfilDB[]).map(p => [p.id, p])
-      )
-    }
-  }
-
-  // Enrich with salvedades
-  const salvedadesMap = await enrichWithSalvedades(data || [])
-
-  // Enrich pedidos with perfil data + salvedades
-  const enrichedPedidos = (data || []).map(pedido => ({
-    ...pedido,
-    usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
-    salvedades: salvedadesMap[String(pedido.id)] || [],
-  }))
-
-  return enrichedPedidos as PedidoDB[]
-}
 
 async function fetchPedidoById(id: string): Promise<PedidoDB | null> {
   const { data, error } = await supabase
@@ -337,7 +294,7 @@ async function fetchPedidosPaginated(
 
   if (error) throw error
 
-  // Enrich with perfiles (same logic as fetchPedidos)
+  // Enrich with perfiles
   const perfilIds = new Set<string>()
   for (const pedido of (data || [])) {
     if (pedido.usuario_id) perfilIds.add(pedido.usuario_id as string)
@@ -526,18 +483,6 @@ async function eliminarPedido(id: string, motivo?: string, usuarioId?: string): 
 }
 
 // Hooks
-
-/**
- * Hook para obtener todos los pedidos
- */
-export function usePedidosQuery() {
-  const { currentSucursalId } = useSucursal()
-  return useQuery({
-    queryKey: pedidosKeys.lists(currentSucursalId),
-    queryFn: fetchPedidos,
-    staleTime: 2 * 60 * 1000, // 2 minutos - pedidos cambian frecuentemente
-  })
-}
 
 /**
  * Hook para obtener un pedido por ID

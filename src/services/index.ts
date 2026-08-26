@@ -18,15 +18,6 @@ export type { ClienteWithPedidos, ResumenCuenta, ValidationResult as ClienteVali
 export { productoService } from './api/productoService'
 export type { StockItem, ProductoVendido, ValidationResult as ProductoValidationResult } from './api/productoService'
 
-export { pedidoService } from './api/pedidoService'
-export type {
-  PedidoFiltros,
-  PedidoData,
-  PedidoItemInput,
-  PedidoEstadisticas,
-  PedidoHistorialEntry,
-  OrdenEntrega
-} from './api/pedidoService'
 
 // Servicios de Negocio (lógica de dominio)
 export { stockManager } from './business/stockManager'
@@ -44,13 +35,11 @@ export type {
 // Re-exportar como objeto para conveniencia
 import { clienteService } from './api/clienteService'
 import { productoService } from './api/productoService'
-import { pedidoService } from './api/pedidoService'
 import { stockManager } from './business/stockManager'
 
 export const services = {
   clientes: clienteService,
   productos: productoService,
-  pedidos: pedidoService,
   stock: stockManager
 }
 

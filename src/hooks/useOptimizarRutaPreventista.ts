@@ -1,13 +1,15 @@
 import { useState, useCallback } from 'react';
 import type { ClienteDB } from '../types';
 import { getDepositoCoords } from './useOptimizarRuta';
+import { supabase } from '../lib/supabase';
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
 export interface ClienteParaOptimizar {
-  pedido_id: string; // Mapped from cliente_id for n8n compatibility
+  /** La edge function llama `pedido_id` a la clave de cada parada. */
+  pedido_id: string;
   cliente_id: string;
   cliente_nombre: string;
   direccion: string;
@@ -49,9 +51,6 @@ export interface UseOptimizarRutaPreventistaReturn {
 // CONSTANTS
 // ============================================================================
 
-const N8N_WEBHOOK_URL: string = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
-const GOOGLE_API_KEY: string = import.meta.env.VITE_GOOGLE_API_KEY || '';
-
 // ============================================================================
 // HOOK
 // ============================================================================
@@ -70,18 +69,13 @@ export function useOptimizarRutaPreventista(): UseOptimizarRutaPreventistaReturn
       return null;
     }
 
-    if (!N8N_WEBHOOK_URL) {
-      setError('La URL del servicio de optimización no está configurada. Configura VITE_N8N_WEBHOOK_URL en las variables de entorno.');
-      return null;
-    }
-
     // Filter clients with coordinates
     const clientesConCoords: ClienteParaOptimizar[] = clientes
       .filter((c): c is ClienteDB & { latitud: number; longitud: number } =>
         c.latitud != null && c.longitud != null
       )
       .map(c => ({
-        pedido_id: c.id,       // n8n expects pedido_id
+        pedido_id: c.id,       // la edge llama pedido_id a la clave de la parada
         cliente_id: c.id,
         cliente_nombre: c.nombre_fantasia || 'Sin nombre',
         direccion: c.direccion || '',
@@ -105,36 +99,27 @@ export function useOptimizarRutaPreventista(): UseOptimizarRutaPreventistaReturn
     const deposito = getDepositoCoords();
 
     try {
-      const response = await fetch(N8N_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transportista_id: preventistaId,  // reuse field for n8n
-          deposito_lat: deposito.lat,
-          deposito_lng: deposito.lng,
-          pedidos: clientesConCoords,         // reuse field for n8n
-          google_api_key: GOOGLE_API_KEY
-        })
-      });
-
-      if (!response.ok) {
-        let errorDetail = '';
-        try {
-          const errorText = await response.text();
-          errorDetail = errorText ? ` - ${errorText}` : '';
-        } catch {
-          // ignore
+      // Misma Edge Function que usa la ruta de reparto. Antes esto iba a un
+      // webhook de n8n con la API key de Google en el body; la edge la tiene
+      // como secret del servidor y exige JWT.
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        'optimizar-ruta',
+        {
+          body: {
+            transportista_id: preventistaId,
+            deposito_lat: deposito.lat,
+            deposito_lng: deposito.lng,
+            // La edge llama `pedidos` a sus paradas; acá son clientes a visitar.
+            pedidos: clientesConCoords,
+          },
         }
-        throw new Error(`Error HTTP: ${response.status}${errorDetail}`);
+      );
+
+      if (fnError) {
+        throw new Error(fnError.message || 'No se pudo contactar el servicio de optimización');
       }
 
-      let data: Record<string, unknown>;
-      try {
-        const responseText = await response.text();
-        data = JSON.parse(responseText);
-      } catch {
-        throw new Error('La respuesta no es JSON válido');
-      }
+      const data = (fnData ?? {}) as Record<string, unknown>;
 
       if (data.error) {
         throw new Error((data.mensaje as string) || (data.error as string));
@@ -158,7 +143,8 @@ export function useOptimizarRutaPreventista(): UseOptimizarRutaPreventistaReturn
         duracion_total: data.duracion_total as number | undefined,
         distancia_formato: data.distancia_formato as string | undefined,
         duracion_formato: data.duracion_formato as string | undefined,
-        polyline: data.polyline as string | undefined
+        // La edge devuelve `polylines` (un tramo por leg); la UI no lo usa hoy.
+        polyline: (data.polylines as string[] | undefined)?.[0]
       };
 
       setRutaOptimizada(result);

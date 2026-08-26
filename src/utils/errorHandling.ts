@@ -7,7 +7,7 @@
  * - Ejecutar operaciones asíncronas con manejo de errores
  */
 
-import type { NotifyService } from '../hooks/handlers/types';
+import type { NotifyService } from '../types/ui';
 import { logger } from './logger';
 
 // ============================================

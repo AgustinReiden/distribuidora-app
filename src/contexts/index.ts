@@ -49,24 +49,3 @@ export { ThemeProvider, useTheme } from './ThemeContext'
 
 // Notifications
 export { NotificationProvider, useNotification } from './NotificationContext'
-
-// Handlers (para reducir props drilling)
-export { HandlersProvider } from './HandlersContext'
-export type {
-  PedidoActionsContext,
-  ClienteActionsContext,
-  ProductoActionsContext,
-  CompraActionsContext,
-  ProveedorActionsContext,
-  UsuarioActionsContext
-} from './HandlersContext'
-
-// Hooks de handlers (separados para cumplir con react-refresh)
-export {
-  usePedidoActions,
-  useClienteActions,
-  useProductoActions,
-  useCompraActions,
-  useProveedorActions,
-  useUsuarioActions
-} from '../hooks/useHandlerActions'

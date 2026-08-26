@@ -7,7 +7,7 @@
  *
  * Esto permite una migración gradual hacia el uso de contextos.
  */
-import React, { useState, memo, useContext } from 'react';
+import React, { useState, memo } from 'react';
 import { Clock, Package, Truck, Check, Eye, ChevronDown, ChevronUp, CreditCard, User, MapPin, Phone, FileText, Building2, Timer, FileDown, LucideIcon, AlertTriangle, Gift, RefreshCw } from 'lucide-react';
 import { importConRecarga } from '../../utils/lazyWithReload';
 const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { formato?: 'a4' | 'comanda' } = {}) => {
@@ -18,7 +18,6 @@ import { formatPrecio, formatFecha, formatHora, getEstadoColor, getEstadoPagoCol
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
 import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQuery';
-import { PedidoActionsCtx } from '../../contexts/HandlersContext';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
@@ -287,18 +286,18 @@ function PedidoCard({
   const [expandido, setExpandido] = useState<boolean>(false);
   const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
 
-  // Intentar usar contexto si está disponible (migración gradual)
-  const pedidoActions = useContext(PedidoActionsCtx);
   const { user } = useAuthData();
 
-  // Usar handlers del contexto si están disponibles, de lo contrario usar props
-  const handleVerHistorial = onVerHistorial ?? pedidoActions?.handleVerHistorial;
-  const handleEditarPedido = onEditarPedido ?? pedidoActions?.handleEditarPedido;
-  const handleMarcarEnPreparacion = onMarcarEnPreparacion ?? pedidoActions?.handleMarcarEnPreparacion;
-  const handleVolverAPendiente = onVolverAPendiente ?? pedidoActions?.handleVolverAPendiente;
-  const handleMarcarEntregado = onMarcarEntregado ?? pedidoActions?.handleMarcarEntregado;
-  const handleDesmarcarEntregado = onDesmarcarEntregado ?? pedidoActions?.handleDesmarcarEntregado;
-  const handleRegistrarPago = onRegistrarPago ?? pedidoActions?.handleRegistrarPago;
+  // Los handlers llegan por props. Hubo un intento de pasarlos por contexto
+  // (HandlersContext) que nunca se termino: el provider no se montaba nunca, asi
+  // que el useContext devolvia null y el fallback jamas se ejecutaba. Se retiro.
+  const handleVerHistorial = onVerHistorial;
+  const handleEditarPedido = onEditarPedido;
+  const handleMarcarEnPreparacion = onMarcarEnPreparacion;
+  const handleVolverAPendiente = onVolverAPendiente;
+  const handleMarcarEntregado = onMarcarEntregado;
+  const handleDesmarcarEntregado = onDesmarcarEntregado;
+  const handleRegistrarPago = onRegistrarPago;
   // Impresión de comanda individual (ticket 75mm). Autocontenido: reusa la misma
   // utilidad que el ReciboDropdown del footer; solo necesita el pedido y su cliente.
   const handleImprimirComanda = React.useCallback(async (p: PedidoDB): Promise<void> => {

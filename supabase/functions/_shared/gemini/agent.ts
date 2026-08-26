@@ -33,6 +33,7 @@ import type { GeminiContent } from "./types.ts";
 import { isFunctionCallPart, isTextPart } from "./types.ts";
 import { callGemini } from "./client.ts";
 import { getSystemPrompt } from "./prompts/base.ts";
+import type { SucursalContext } from "./prompts/base.ts";
 import { toolsToGeminiDeclarations } from "./schema.ts";
 import { getToolsForRole, invokeTool } from "../tools/registry.ts";
 import { logEvent } from "../audit.ts";
@@ -254,7 +255,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     : await loadConversation(supabase, telegram_user_id);
 
   // 2. System prompt + tools del rol.
-  const systemPrompt = await getSystemPrompt(user.rol);
+  // De que sucursal son los numeros que va a dar. Con una sola asignada esto
+  // es ruido; con dos, es la diferencia entre un dato y un dato equivocado que
+  // parece correcto.
+  const systemPrompt = await getSystemPrompt(
+    user.rol,
+    await resolverContextoSucursal(supabase, user),
+  );
   const allTools = getToolsForRole(user.rol);
   const toolDecls = toolsToGeminiDeclarations(allTools);
 
@@ -488,3 +495,31 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
 
 /** Para tests: expone el cap. */
 export const _MAX_TOOL_ITERATIONS_FOR_TESTS = MAX_TOOL_ITERATIONS;
+
+
+/**
+ * Nombre de la sucursal activa del bot y cuantas tiene asignadas el usuario.
+ * Si algo falla se devuelve undefined: el bot tiene que seguir contestando
+ * aunque no pueda rotular la sucursal.
+ */
+async function resolverContextoSucursal(
+  supabase: SupabaseClient,
+  user: BotUser,
+): Promise<SucursalContext | undefined> {
+  if (user.sucursal_id == null) return undefined;
+  try {
+    const [{ data: suc }, { count }] = await Promise.all([
+      supabase.from("sucursales").select("nombre").eq("id", user.sucursal_id)
+        .maybeSingle(),
+      supabase.from("usuario_sucursales").select("sucursal_id", {
+        count: "exact",
+        head: true,
+      }).eq("usuario_id", user.perfil_id),
+    ]);
+    const nombre = (suc as { nombre?: string } | null)?.nombre ?? null;
+    if (!nombre) return undefined;
+    return { nombre, asignadas: count ?? 1 };
+  } catch {
+    return undefined;
+  }
+}

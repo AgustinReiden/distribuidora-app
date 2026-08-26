@@ -132,19 +132,28 @@ function AccionesDropdown({
       });
     }
 
-    // Registrar pago / ver-editar pagos (admin o encargado, mientras no este cancelado).
+    // Registrar pago / ver-editar pagos (admin o encargado).
     // Cuando estado_pago === 'pagado', el modal abre en modo solo-lectura + edicion de
     // forma de pago de pagos previos (con bloqueo SQL si la rendicion esta cerrada).
+    //
+    // Un pedido CANCELADO no se puede cobrar, pero si le quedaron pagos hay que
+    // poder verlos y anularlos. Antes la condicion los excluia por completo y el
+    // unico camino era SQL. Se ofrece solo si efectivamente tiene plata cargada.
+    const tienePagos = Number(pedido.monto_pagado ?? 0) > 0;
     if (
       (isAdmin || isEncargado) &&
-      pedido.estado !== 'cancelado' &&
+      (!cancelado || tienePagos) &&
       onRegistrarPago
     ) {
       items.push({
-        label: pedido.estado_pago === 'pagado' ? 'Ver/Editar Pagos' : 'Registrar Pago',
+        label: cancelado
+          ? 'Ver/Anular Pagos'
+          : pedido.estado_pago === 'pagado' ? 'Ver/Editar Pagos' : 'Registrar Pago',
         icon: DollarSign,
         onClick: () => onRegistrarPago(pedido),
-        className: 'text-green-700 dark:text-green-400'
+        className: cancelado
+          ? 'text-amber-700 dark:text-amber-400'
+          : 'text-green-700 dark:text-green-400'
       });
     }
 

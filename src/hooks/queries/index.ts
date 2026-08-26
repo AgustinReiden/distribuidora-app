@@ -87,12 +87,12 @@ export {
   useCrearClienteMutation,
   useActualizarClienteMutation,
   useEliminarClienteMutation,
+  contarPedidosDeCliente,
 } from './useClientesQuery'
 
 // Pedidos
 export {
   pedidosKeys,
-  usePedidosQuery,
   usePedidosPaginatedQuery,
   usePedidoQuery,
   usePedidosByTransportistaQuery,

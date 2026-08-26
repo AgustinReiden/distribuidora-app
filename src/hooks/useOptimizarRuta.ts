@@ -168,7 +168,6 @@ export interface OptimizarRutaRequestBody {
   ventanas?: VentanaPedido[];
   /** Barrida por pedido: hace que el orden entre bloques sea duro. */
   barridas?: BarridaPedido[];
-  google_api_key?: string;
 }
 
 export interface UseOptimizarRutaReturn {
@@ -188,15 +187,6 @@ export interface UseOptimizarRutaReturn {
 // ============================================================================
 // CONSTANTS
 // ============================================================================
-
-// URL del webhook de n8n para optimizar rutas — LEGACY, solo fallback.
-// El camino principal es la Edge Function `optimizar-ruta` (la API key de
-// Google vive como secret del servidor y la función exige JWT).
-const N8N_WEBHOOK_URL: string = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
-
-// Google API Key para el workflow legacy de n8n (Routes API).
-// TODO: eliminar VITE_GOOGLE_API_KEY del bundle cuando se retire el fallback n8n.
-const GOOGLE_API_KEY: string = import.meta.env.VITE_GOOGLE_API_KEY || '';
 
 // Coordenadas del depósito por defecto (se pueden configurar)
 const DEPOSITO_DEFAULT: DepositoCoords = {
@@ -248,7 +238,7 @@ export const setDepositoCoords = (lat: number, lng: number): boolean => {
 // ============================================================================
 
 /**
- * Hook para optimizar rutas de entrega usando Google Routes API vía n8n
+ * Hook para optimizar rutas de entrega con la Edge Function `optimizar-ruta`
  */
 export function useOptimizarRuta(): UseOptimizarRutaReturn {
   const [loading, setLoading] = useState<boolean>(false);
@@ -339,36 +329,8 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       );
       const fnResult = !fnError && fnData ? (fnData as RutaOptimizadaResponse) : null;
 
-      if (fnResult && !fnResult.error) {
-        data = fnResult;
-      } else if (N8N_WEBHOOK_URL) {
-        // Fallback legacy: webhook n8n (requiere mandar la API key desde el
-        // cliente). Eliminar cuando la edge function esté consolidada.
-        const response = await fetch(N8N_WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...requestBody, google_api_key: GOOGLE_API_KEY })
-        });
-
-        if (!response.ok) {
-          let errorDetail = '';
-          try {
-            const errorText = await response.text();
-            errorDetail = errorText ? ` - ${errorText}` : '';
-          } catch {
-            // No se pudo leer el cuerpo del error
-          }
-          throw new Error(`Error HTTP: ${response.status}${errorDetail}`);
-        }
-
-        try {
-          data = JSON.parse(await response.text()) as RutaOptimizadaResponse;
-        } catch {
-          throw new Error('La respuesta no es JSON válido');
-        }
-      } else if (fnResult) {
-        // Sin fallback configurado: dejar que el manejo de error de abajo
-        // (data.error) muestre el mensaje de la edge function.
+      if (fnResult) {
+        // Si trae error de negocio lo resuelve el manejo de abajo (data.error).
         data = fnResult;
       } else {
         throw new Error(
@@ -376,7 +338,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
         );
       }
 
-      // Verificar si la respuesta indica error (del workflow n8n)
+      // Verificar si la respuesta indica error de negocio
       if (data.error) {
         throw new Error(data.mensaje || data.error);
       }
@@ -522,8 +484,3 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
  * Configuración del depósito (exportada para uso en otros componentes)
  */
 export const DEPOSITO_CONFIG: DepositoCoords = DEPOSITO_DEFAULT;
-
-/**
- * URL del webhook (exportada para debug/configuración)
- */
-export const WEBHOOK_URL: string = N8N_WEBHOOK_URL;

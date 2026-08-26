@@ -164,6 +164,8 @@ interface ClienteCreateInput {
   horario_entrega?: string
   /** "No atiende con horario fijo": suprime el pedido de horario al cargar un pedido (mig 157). */
   sin_horario_fijo?: boolean
+  /** Baja logica: se desactiva en vez de borrar cuando el cliente tiene pedidos. */
+  activo?: boolean
   rubro?: string
   notas?: string
   preventista_id?: string | null
@@ -294,6 +296,31 @@ async function deleteCliente(id: string): Promise<void> {
     .eq('id', id)
 
   if (error) throw error
+}
+
+/**
+ * Cuenta los pedidos de un cliente y cuanto suman, para poder avisar ANTES de
+ * borrarlo.
+ *
+ * Existe porque la FK era ON DELETE SET NULL y borrar un cliente desprendia sus
+ * pedidos en silencio: 9 pedidos por $200.070 quedaron sin dueno asi (mig 199).
+ * Desde la mig 200 la FK es RESTRICT y la base rechaza el borrado, pero el
+ * usuario merece saber por que antes de intentarlo, no despues.
+ */
+export async function contarPedidosDeCliente(
+  clienteId: string
+): Promise<{ cantidad: number; total: number }> {
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select('total')
+    .eq('cliente_id', clienteId)
+
+  if (error) throw error
+  const filas = data || []
+  return {
+    cantidad: filas.length,
+    total: filas.reduce((acc, p) => acc + Number(p.total || 0), 0),
+  }
 }
 
 // Hooks

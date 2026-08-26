@@ -54,6 +54,13 @@ export interface ModalPagoPedidoProps {
    * dia del pago esta cerrada.
    */
   onEditarFormaPago?: (pagoId: string, nuevaForma: string) => Promise<void>
+  /**
+   * Solo ver y anular pagos previos, sin poder registrar uno nuevo.
+   * Es el caso del pedido CANCELADO: cobrarlo no corresponde, pero si tenia
+   * pagos hay que poder verlos y anularlos. Antes ese pedido no ofrecia ninguna
+   * accion de pago, asi que el unico camino era SQL.
+   */
+  soloAnulacion?: boolean
   /** Activa el flujo "Entregar sin pago / Entregar y registrar pago". */
   modoEntregaTransportista?: boolean
   /** Solo aplica con modoEntregaTransportista. */
@@ -81,6 +88,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   onConfirmar,
   onAnularPago,
   onEditarFormaPago,
+  soloAnulacion,
   modoEntregaTransportista,
   onEntregarSinPago,
   onClose,
@@ -338,8 +346,16 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           </div>
         )}
 
+        {/* Aviso del modo solo-anulacion */}
+        {soloAnulacion && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+            Este pedido está <strong>cancelado</strong>. No se pueden registrar pagos
+            nuevos; sí se pueden anular los que hayan quedado registrados.
+          </div>
+        )}
+
         {/* Form nuevo pago */}
-        {saldoPendiente > 0 ? (
+        {!soloAnulacion && saldoPendiente > 0 ? (
           <>
             <div>
               <label className="block text-sm font-medium mb-1 dark:text-gray-200">Fecha de pago</label>
@@ -467,7 +483,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             {saldoPendiente > 0 ? 'Entregar a cuenta corriente (sin cobrar)' : 'Confirmar entrega'}
           </button>
         )}
-        {saldoPendiente > 0 && (
+        {!soloAnulacion && saldoPendiente > 0 && (
           <button
             onClick={() => { void handleSubmit() }}
             disabled={guardando || excedeSaldo || !algunMontoValido}
