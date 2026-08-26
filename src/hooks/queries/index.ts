@@ -91,6 +91,17 @@ export {
   buscarClientePorRazonSocial,
 } from './useClientesQuery'
 
+// Politica comercial por sucursal (mig 204)
+export {
+  usePoliticasComercialesQuery,
+  useActualizarMontoMinimoMutation,
+  useImpactoMinimoQuery,
+  leerMontoMinimoCacheado,
+  POLITICAS_POR_DEFECTO,
+  politicasComercialesKeys,
+} from './usePoliticasComercialesQuery'
+export type { PoliticasComerciales, ImpactoMinimo } from './usePoliticasComercialesQuery'
+
 // Pedidos
 export {
   pedidosKeys,

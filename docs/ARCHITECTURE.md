@@ -27,8 +27,8 @@ Conteos reales de archivos, para dar idea de dónde está el peso:
 src/
 ├── components/
 │   ├── modals/          78   el grueso de la UI
-│   ├── vistas/          23   pantallas
-│   ├── containers/      20   estado + handlers de cada dominio
+│   ├── vistas/          24   pantallas
+│   ├── containers/      21   estado + handlers de cada dominio
 │   ├── ui/              15   primitivas
 │   ├── pedidos/         12
 │   ├── productos/       12
@@ -37,10 +37,10 @@ src/
 │   ├── geolocalizacion/  5
 │   └── dashboard, clientes, misEntregas, a11y, auth, metas, perfil, recorridos
 ├── hooks/
-│   ├── queries/         51   capa de datos real (TanStack Query)
+│   ├── queries/         53   capa de datos real (TanStack Query)
 │   ├── supabase/        19   acceso directo y auth
 │   └── state/            3
-├── utils/               96   lógica pura, es donde viven los cálculos testeables
+├── utils/               99   lógica pura, es donde viven los cálculos testeables
 ├── lib/                 16   supabase.ts, schemas.ts, offlineDb.ts, permisos.ts, pdf/
 ├── contexts/            11
 ├── services/
@@ -62,7 +62,7 @@ supabase-js  →  RPC SECURITY DEFINER  o  PostgREST con RLS
 Postgres
 ```
 
-Las escrituras van por dos caminos, y la división es deliberada:
+Las escrituras van por tres caminos, y la división es deliberada:
 
 - **Operaciones transaccionales** —pedidos, pagos, stock, recorridos— pasan por una
   **RPC `SECURITY DEFINER`**, para que la regla de negocio y la transacción vivan en un
@@ -70,8 +70,12 @@ Las escrituras van por dos caminos, y la división es deliberada:
   directas.
 - **ABM de catálogo** —clientes, productos, proveedores, zonas, marcas, categorías,
   promociones, usuarios— escribe directo contra PostgREST, apoyado en RLS.
+- **Configuración comercial** —`politicas_comerciales`, una fila por sucursal, editable en
+  `/configuracion` por admin y encargado— escribe por RPC, pero no por transaccionalidad: es
+  para que el servidor selle `actualizado_por` con `auth.uid()`. Si ese campo lo mandara el
+  cliente sería un dato que el cliente elige, y la auditoría no auditaría nada.
 
-En total: 72 llamadas `.rpc()` y 73 escrituras directas en `src/hooks/queries/`.
+En total: 73 llamadas `.rpc()` y 74 escrituras directas en `src/hooks/queries/`.
 
 Consecuencia importante: **una RPC `SECURITY DEFINER` saltea RLS**, así que el aislamiento
 por sucursal no puede depender sólo de las policies. Se ata además con FKs compuestas
@@ -79,6 +83,12 @@ por sucursal no puede depender sólo de las policies. Se ata además con FKs com
 
 Sin conexión, el alta de pedido se encola en IndexedDB (`src/lib/offlineDb.ts`) y se
 replaya después contra `crear_pedido_idempotente`, que es idempotente por diseño.
+
+Las reglas que la base hace cumplir al crear un pedido —stock, mínimo por producto, compra
+mínima de la sucursal— se validan **también antes de encolar**, con la última configuración
+conocida cacheada en Dexie. No es redundancia: un pedido que se acepta en el teléfono y lo
+rechaza el servidor recién al sincronizar falla horas después, lejos del cliente, y queda
+como una operación fallida en IndexedDB que sólo se ve en el panel de fallidas.
 
 ## Los containers
 

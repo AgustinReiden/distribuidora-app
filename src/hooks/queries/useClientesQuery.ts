@@ -10,9 +10,18 @@ import type { ClienteDB } from '../../types'
 // Query keys
 export const clientesKeys = {
   all: (sucursalId: number | null) => ['clientes', sucursalId] as const,
+  /**
+   * OJO: la lista tiene DOS variantes en cache (con y sin inactivos), y el
+   * segundo argumento tiene default. `lists(sucursalId)` compila y apunta a la
+   * de activos, asi que usarla como filtro de invalidacion deja la otra vieja
+   * -- y `tsc` no lo ve. Para invalidar o escribir sobre "la lista", usá
+   * `listsPrefix` con las APIs plurales (`setQueriesData`/`getQueriesData`),
+   * que alcanzan a las dos.
+   */
   lists: (sucursalId: number | null, includeInactivos = false) =>
     [...clientesKeys.all(sucursalId), 'list', includeInactivos] as const,
-  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...clientesKeys.lists(sucursalId), filters] as const,
+  listsPrefix: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'list'] as const,
+  list: (sucursalId: number | null, filters: Record<string, unknown>) => [...clientesKeys.listsPrefix(sucursalId), filters] as const,
   details: (sucursalId: number | null) => [...clientesKeys.all(sucursalId), 'detail'] as const,
   detail: (sucursalId: number | null, id: string) => [...clientesKeys.details(sucursalId), id] as const,
   byZona: (sucursalId: number | null, zona: string) => [...clientesKeys.all(sucursalId), 'zona', zona] as const,
@@ -502,8 +511,8 @@ export function useCrearClienteMutation() {
     mutationFn: (cliente: ClienteCreateInput) => createCliente(cliente, currentSucursalId),
     onSuccess: (newCliente) => {
       // Actualizar cache de lista
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
-        if (!old) return [newCliente]
+      queryClient.setQueriesData<ClienteDB[]>({ queryKey: clientesKeys.listsPrefix(currentSucursalId) }, (old) => {
+        if (!old) return old
         return [...old, newCliente].sort((a, b) =>
           (a.nombre_fantasia || '').localeCompare(b.nombre_fantasia || '')
         )
@@ -529,12 +538,15 @@ export function useActualizarClienteMutation() {
     mutationFn: updateCliente,
     // Optimistic update
     onMutate: async ({ id, data: cliente }) => {
-      await queryClient.cancelQueries({ queryKey: clientesKeys.lists(currentSucursalId) })
+      // Plural y por prefijo: la mutacion mas comun de esta pantalla es
+      // desactivar/reactivar, que es justo la que cambia de que variante de la
+      // lista tiene que salir el cliente. Tocando una sola, la otra queda vieja.
+      const prefijo = clientesKeys.listsPrefix(currentSucursalId)
+      await queryClient.cancelQueries({ queryKey: prefijo })
 
-      const previousClientes = queryClient.getQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId))
+      const previousClientes = queryClient.getQueriesData<ClienteDB[]>({ queryKey: prefijo })
 
-      // Aplicar cambios optimistamente
-      queryClient.setQueryData<ClienteDB[]>(clientesKeys.lists(currentSucursalId), (old) => {
+      queryClient.setQueriesData<ClienteDB[]>({ queryKey: prefijo }, (old) => {
         if (!old) return old
         return old.map(c => c.id === id ? { ...c, ...cliente } as ClienteDB : c)
       })
@@ -542,9 +554,9 @@ export function useActualizarClienteMutation() {
       return { previousClientes }
     },
     onError: (_, __, context) => {
-      // Rollback on error
-      if (context?.previousClientes) {
-        queryClient.setQueryData(clientesKeys.lists(currentSucursalId), context.previousClientes)
+      // Rollback: se restaura cada variante con lo que tenia antes.
+      for (const [queryKey, data] of context?.previousClientes ?? []) {
+        queryClient.setQueryData(queryKey, data)
       }
     },
     onSuccess: (updatedCliente) => {
@@ -562,7 +574,17 @@ export function useActualizarClienteMutation() {
 }
 
 /**
- * Hook para eliminar (desactivar) un cliente
+ * Hook para ELIMINAR de verdad un cliente (DELETE).
+ *
+ * Solo admin (policy `mt_clientes_delete`) y solo si el cliente no tiene ninguna
+ * referencia: desde la mig 200 la FK de pedidos es RESTRICT, y `cambios_productos`
+ * y `recorrido_cambios` tampoco declaran ON DELETE. En la practica casi nunca
+ * aplica -- 678 de los 712 clientes tienen pedidos.
+ *
+ * **La baja logica NO pasa por aca**: desactivar es
+ * `useActualizarClienteMutation` con `{ activo: false }`, y reactivar con
+ * `{ activo: true }`. El "(desactivar)" que decia antes este docstring era de
+ * cuando eliminar y desactivar eran la misma cosa.
  */
 export function useEliminarClienteMutation() {
   const queryClient = useQueryClient()
@@ -574,12 +596,10 @@ export function useEliminarClienteMutation() {
       // Remover de cache de detalle
       queryClient.removeQueries({ queryKey: clientesKeys.detail(currentSucursalId, deletedId) })
       // Sacarlo de las dos variantes de la lista (con y sin inactivos)
-      for (const incluirInactivos of [false, true]) {
-        queryClient.setQueryData<ClienteDB[]>(
-          clientesKeys.lists(currentSucursalId, incluirInactivos),
-          (old) => (old ? old.filter(c => c.id !== deletedId) : old)
-        )
-      }
+      queryClient.setQueriesData<ClienteDB[]>(
+        { queryKey: clientesKeys.listsPrefix(currentSucursalId) },
+        (old) => (old ? old.filter(c => c.id !== deletedId) : old)
+      )
     },
   })
 }

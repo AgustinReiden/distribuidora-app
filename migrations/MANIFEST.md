@@ -142,22 +142,27 @@ cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y
 Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
 número se reserva **aplicando**, no escribiendo el archivo.
 
-Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las tres
-últimas sí:
+Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204 y
+205 sí:
 
 - **203** `bot_buscar_cliente` pasa a filtrar `activo = TRUE`. Era el único camino
   del bot que no lo hacía, y es la puerta de entrada: un cliente dado de baja
   seguía siendo encontrable desde Telegram aunque en la web ya no apareciera.
+  `CREATE OR REPLACE` puro: **no toca ninguna fila**.
 - **204** crea `politicas_comerciales` (una fila por sucursal) con
   `monto_minimo_pedido`, más `monto_minimo_pedido()` y
-  `actualizar_monto_minimo_pedido()`. Arranca en 0 en todas las sucursales, o sea
-  que aplicarla no cambia ningún comportamiento hasta que alguien cargue un número.
+  `actualizar_monto_minimo_pedido()`. **Sí toca filas**: inserta una por sucursal
+  (3 al aplicarla), todas con el mínimo en 0 — o sea que aplicarla no cambia
+  ningún comportamiento hasta que alguien cargue un número.
 - **205** hace cumplir ese mínimo. Parchea `crear_pedido_completo` y
   `crear_pedido_completo_bot` leyendo del catálogo vivo, y le prende el escape
   hatch `app.omitir_minimo_pedido` a `cambiar_cliente_pedido`.
   **El mínimo se valida SOLO al crear**, nunca como CHECK sobre `pedidos.total`:
   cancelar un pedido lo pone en 0 (mig 175) y el invariante `VENTA-I` exige que
   así sea (mig 105), así que un CHECK haría imposible cancelar.
+  Sólo redefine funciones: **no toca ninguna fila**. El rollback está al pie del
+  archivo y es gratis mientras los mínimos sigan en 0; si alguien ya cargó uno,
+  revertirla apaga la validación sin avisar.
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`

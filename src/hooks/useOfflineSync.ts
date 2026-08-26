@@ -345,9 +345,15 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   }, [loadPendingOperations])
 
   /**
-   * Guarda un pedido en modo offline con validación de stock
-   * Ahora usa IndexedDB via queueOperation
-   * Usa pedidosPendientesRef para evitar re-renders innecesarios
+   * Guarda un pedido en modo offline.
+   *
+   * Valida **compra mínima** (migs 204/205, contra el último valor cacheado en
+   * Dexie) y stock ANTES de encolar: si alguna falla no encola nada y devuelve
+   * `{ success: false, error }`. Ojo que la compra mínima corre siempre, incluso
+   * con `validarStock: false`.
+   *
+   * Usa IndexedDB via queueOperation, y `pedidosPendientesRef` para evitar
+   * re-renders innecesarios.
    */
   const guardarPedidoOffline = useCallback(async (
     pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
