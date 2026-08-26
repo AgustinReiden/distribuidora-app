@@ -34,7 +34,13 @@ export interface ProductoFormData {
   /** FK a `marcas` (mig 158). '' = sin marca. Ortogonal a la categoría. */
   marca_id?: string | null;
   proveedor_id: string;
-  stock: number | string;
+  /**
+   * Saldo de stock. Opcional porque en una edición se OMITE si el admin no lo
+   * tocó: `undefined` llega al update como "no tocar este campo".
+   */
+  stock?: number | string;
+  /** Stock que la ficha vio al abrirse; viaja solo si el admin lo cambió (CAS). */
+  stock_esperado?: number;
   stock_minimo: number;
   /**
    * Mínimo de unidades que hay que pedir de este producto (mig 147).
@@ -280,6 +286,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     }
   };
 
+  // ── Stock: saldo vivo, no campo del form ─────────────────────────────────
+  // Lo mueven los pedidos y las compras mientras la ficha está abierta. Se
+  // manda SOLO si el admin lo cambió a mano, y con el valor que vio al abrir.
+  const esEdicion = Boolean(producto);
+  const stockOriginal = Number(producto?.stock ?? 0);
+  const stockCambiado = esEdicion && Number(form.stock) !== stockOriginal;
+
   const handleSubmit = (): void => {
     // La etiqueta es accesoria al fardo: sin unidades configuradas no tiene
     // sentido persistirla. Normalizar acá hace de defensa en profundidad por
@@ -317,6 +330,16 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         id: producto?.id,
         costo_real: costoReal > 0 ? costoReal : null,
         ...(cppCorregido !== undefined ? { costo_promedio: cppCorregido } : {}),
+        // El stock es un saldo vivo, no un campo de la ficha: entre que se
+        // abre el modal y se guarda, el preventista pudo haber vendido. Si el
+        // admin no lo tocó, no viaja (undefined = "no tocar"). Si lo tocó,
+        // viaja con el valor esperado para que el update aborte si el saldo
+        // cambió en el medio, en vez de pisar las ventas.
+        ...(esEdicion
+          ? (stockCambiado
+              ? { stock_esperado: stockOriginal }
+              : { stock: undefined })
+          : {}),
       });
       return;
     }
@@ -359,6 +382,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
               className={inputClass('stock')}
             />
             {errores.stock && <p className="text-red-500 text-xs mt-1">{errores.stock}</p>}
+            {esEdicion && (
+              <p className="text-xs text-gray-500 mt-1">
+                {stockCambiado
+                  ? `Ajuste manual: ${stockOriginal} → ${Number(form.stock) || 0}. Si entra una venta antes de guardar, el ajuste se rechaza y hay que rehacerlo.`
+                  : 'Lo mueven solos las compras y los pedidos. Guardar la ficha no lo toca salvo que lo edites acá.'}
+              </p>
+            )}
           </div>
         </div>
 

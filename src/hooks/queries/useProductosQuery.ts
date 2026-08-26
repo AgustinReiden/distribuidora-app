@@ -100,7 +100,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       nombre: producto.nombre,
       codigo: producto.codigo || null,
       precio: producto.precio,
-      stock: producto.stock,
+      // El alta sí fija el saldo inicial (en la edición `stock` es opcional).
+      stock: producto.stock ?? 0,
       stock_minimo: producto.stock_minimo ?? 10,
       // Mínimo de venta (mig 147): distinto de stock_minimo. null = sin mínimo.
       cantidad_minima_venta: producto.cantidad_minima_venta ?? null,
@@ -169,14 +170,43 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
     updateData.etiqueta_bulto = producto.etiqueta_bulto || null
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('productos')
     .update(updateData)
     .eq('id', id)
-    .select()
-    .single()
+
+  // Compare-and-swap sobre el stock. El saldo NO es un campo del form: lo
+  // mueven los pedidos del preventista y las compras mientras la ficha está
+  // abierta. Sin esta guarda, guardar la ficha lo reescribía con el valor que
+  // tenía al abrirla y borraba las ventas del medio — pasó en prod (Taco Pozo,
+  // 19/08: 20 unidades vendidas a los ONE BLOCK reaparecieron en stock 29
+  // segundos después). Si el saldo ya no es el esperado, el update no matchea
+  // ninguna fila y abortamos con un mensaje, en vez de pisar en silencio.
+  const conCas = producto.stock !== undefined && producto.stock_esperado !== undefined
+  if (conCas) {
+    query = query.eq('stock', producto.stock_esperado as number)
+  }
+
+  const { data, error } = await query.select().maybeSingle()
 
   if (error) throw error
+  if (!data) {
+    if (conCas) {
+      const { data: actual } = await supabase
+        .from('productos')
+        .select('stock')
+        .eq('id', id)
+        .maybeSingle()
+      if (actual) {
+        throw new Error(
+          `El stock cambió mientras editabas: ahora hay ${actual.stock} y la ficha ` +
+          `tenía ${producto.stock_esperado}. Cerrá la ficha, abrila de nuevo y ` +
+          `volvé a cargar el ajuste. No se guardó nada.`
+        )
+      }
+    }
+    throw new Error('No se pudo actualizar el producto: no existe o no tenés permiso.')
+  }
   return data as ProductoDB
 }
 
@@ -279,10 +309,16 @@ export function useActualizarProductoMutation() {
 
       const previousProductos = queryClient.getQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId))
 
-      // Aplicar cambios optimistamente
+      // Aplicar cambios optimistamente. Se filtran las claves `undefined`
+      // ("no tocar") para no blanquear el campo en el cache — el caso vivo es
+      // `stock`, que la ficha omite cuando el admin no lo editó. Y
+      // `stock_esperado` es del protocolo del update, no una columna.
+      const cambios = Object.fromEntries(
+        Object.entries(producto).filter(([k, v]) => v !== undefined && k !== 'stock_esperado')
+      )
       queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
-        return old.map(p => p.id === id ? { ...p, ...producto } as ProductoDB : p)
+        return old.map(p => p.id === id ? { ...p, ...cambios } as ProductoDB : p)
       })
 
       return { previousProductos }
