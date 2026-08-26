@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-08-20** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-08-26** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,8 +137,27 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 197** — la última numerada en el repo es
-`196_espejo_del_motor_de_compras`.
+**La próxima migración es la 206** — la última numerada en el repo es
+`205_hacer_valer_la_compra_minima`, y el ledger de prod está alineado con ella.
+Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
+número se reserva **aplicando**, no escribiendo el archivo.
+
+Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las tres
+últimas sí:
+
+- **203** `bot_buscar_cliente` pasa a filtrar `activo = TRUE`. Era el único camino
+  del bot que no lo hacía, y es la puerta de entrada: un cliente dado de baja
+  seguía siendo encontrable desde Telegram aunque en la web ya no apareciera.
+- **204** crea `politicas_comerciales` (una fila por sucursal) con
+  `monto_minimo_pedido`, más `monto_minimo_pedido()` y
+  `actualizar_monto_minimo_pedido()`. Arranca en 0 en todas las sucursales, o sea
+  que aplicarla no cambia ningún comportamiento hasta que alguien cargue un número.
+- **205** hace cumplir ese mínimo. Parchea `crear_pedido_completo` y
+  `crear_pedido_completo_bot` leyendo del catálogo vivo, y le prende el escape
+  hatch `app.omitir_minimo_pedido` a `cambiar_cliente_pedido`.
+  **El mínimo se valida SOLO al crear**, nunca como CHECK sobre `pedidos.total`:
+  cancelar un pedido lo pone en 0 (mig 175) y el invariante `VENTA-I` exige que
+  así sea (mig 105), así que un CHECK haría imposible cancelar.
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`
