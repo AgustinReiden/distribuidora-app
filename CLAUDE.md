@@ -10,7 +10,7 @@ npm ci                 # los worktrees nacen sin node_modules — ver Trampas
 npm run dev            # Vite
 npm run typecheck      # tsc --noEmit
 npm run lint           # eslint
-npm run test:run       # vitest (98 archivos / 1391 tests)
+npm run test:run       # vitest (~100 archivos, ~1400 tests)
 npm run build          # vite build + PWA
 ```
 
@@ -104,7 +104,17 @@ superpuestos** hacen que PostgREST no sepa cuál llamar y tire `PGRST203`, tambi
 runtime y también invisible para `tsc` y para los tests. Al cambiarle la firma a una
 función, **dropeá la vieja** — no dejes las dos conviviendo "por compatibilidad".
 
-**6. Nunca `npm audit fix --force`.** Degrada `exceljs` a 3.4.0 y rompe todos los exports
+**6. Antes de una migración de datos, fijate qué más depende de esa columna.** Dos cosas
+que ya mordieron en la misma migración:
+- `trigger_actualizar_saldo_pedido` es `AFTER UPDATE **OF total, monto_pagado**`. Esa
+  lista de columnas hace que mover `cliente_id` **no** lo dispare: la reatribución se
+  veía hecha y los saldos quedaban sin actualizar. Si tocás una columna, chequeá
+  `pg_get_triggerdef` — un `UPDATE OF` no cubre lo que no nombra.
+- Las FKs del aislamiento por sucursal son **compuestas** (`pedidos_cliente_id_fkey` es
+  `(cliente_id, sucursal_id) → clientes(id, sucursal_id)`). Al recrear una, preservá las
+  dos columnas: dejarla simple rompe el aislamiento y no falla nada visible.
+
+**7. Nunca `npm audit fix --force`.** Degrada `exceljs` a 3.4.0 y rompe todos los exports
 a Excel. El gate de CI es `--audit-level=high --omit=dev`; los `moderate` conviven a
 propósito. Para arreglar un high: `npm audit fix --package-lock-only`.
 

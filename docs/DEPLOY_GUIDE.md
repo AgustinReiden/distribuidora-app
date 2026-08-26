@@ -24,8 +24,8 @@ gh run view --log
 
 | Entorno | Plataforma | Trigger | URL | Vars de build |
 |---------|-----------|---------|-----|---------------|
-| Producción | Coolify (Docker + Nginx) | Push a `main` (webhook `COOLIFY_WEBHOOK_URL`) | Dominio productivo (Hostinger) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN`, `VITE_GOOGLE_API_KEY`, `VITE_N8N_WEBHOOK_URL`, `VITE_N8N_FACTURA_WEBHOOK_URL`, `VITE_APP_VERSION`, `N8N_UPSTREAM` (runtime) |
-| Staging | Vercel | `workflow_dispatch` manual con `environment=staging` | Preview URL Vercel | `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN` (secret GitHub) → `VITE_SENTRY_DSN` (env de build), `VITE_GOOGLE_API_KEY`, `VITE_N8N_WEBHOOK_URL`, `VITE_N8N_FACTURA_WEBHOOK_URL` |
+| Producción | Coolify (Docker + Nginx) | Push a `main` (webhook `COOLIFY_WEBHOOK_URL`) | Dominio productivo (Hostinger) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN`, `VITE_GOOGLE_API_KEY`, `VITE_N8N_FACTURA_WEBHOOK_URL`, `VITE_APP_VERSION`, `N8N_UPSTREAM` (runtime) |
+| Staging | Vercel | `workflow_dispatch` manual con `environment=staging` | Preview URL Vercel | `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN` (secret GitHub) → `VITE_SENTRY_DSN` (env de build), `VITE_GOOGLE_API_KEY`, `VITE_N8N_FACTURA_WEBHOOK_URL` |
 | Local | Vite dev server | `npm run dev` | `http://localhost:5173` | `.env` local (ver `.env.example`) |
 
 ## Flujo de Deploy a Producción
@@ -116,8 +116,7 @@ Fuente: `.env.example` para las `VITE_*` (build-time). `N8N_UPSTREAM` es runtime
 |----------|-----------|-------------|
 | `VITE_SUPABASE_URL` | Sí | URL del proyecto Supabase (`https://<ref>.supabase.co`). |
 | `VITE_SUPABASE_ANON_KEY` | Sí | Clave anon pública de Supabase. RLS protege los datos; no es un secreto. |
-| `VITE_GOOGLE_API_KEY` | No | Google Routes API key para optimización de rutas en cliente. Preferiblemente usar n8n en backend. |
-| `VITE_N8N_WEBHOOK_URL` | Sí | Ruta al webhook de optimización de ruta. En prod: `/api/n8n/webhook/optimizar-ruta` (proxy nginx). |
+| `VITE_GOOGLE_API_KEY` | Sí | Key del SDK de Google Maps (autocompletado de direcciones, geocoding inverso). Viaja en el bundle porque el SDK se carga con `<script src="...?key=">`: es pública por diseño y se protege con restricciones de referrer HTTP en Google Cloud Console. **No** la usa la optimización de rutas — eso va por la Edge Function `optimizar-ruta`, que tiene su propia key como secret del servidor. |
 | `VITE_N8N_FACTURA_WEBHOOK_URL` | Sí | Ruta al webhook de escaneo de factura. En prod: `/api/n8n/webhook/escanear-factura`. |
 | `VITE_SENTRY_DSN` | Recomendado | DSN de Sentry para reportar errores de producción. Vacío desactiva Sentry. |
 | `VITE_APP_VERSION` | Recomendado | Versión de la app para releases de Sentry. En staging (job `deploy-staging`) el workflow pasa `${{ github.sha }}`. En producción (Coolify) se configura como env var en el dashboard de Coolify y se pasa como `ARG` al build del Dockerfile; el `ARG VITE_APP_VERSION` del Dockerfile no define default, así que si no se setea queda vacío. |
@@ -127,7 +126,7 @@ Fuente: `.env.example` para las `VITE_*` (build-time). `N8N_UPSTREAM` es runtime
 
 - **Coolify:** Environment Variables del servicio (se pasan como `ARG` al build del Dockerfile, excepto `N8N_UPSTREAM` que va como `ENV` runtime).
 - **Vercel:** Project Settings → Environment Variables, o como secrets del workflow (`STAGING_*`).
-- **GitHub Actions secrets:** `Settings → Secrets and variables → Actions`. Requeridos: `COOLIFY_WEBHOOK_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_GOOGLE_API_KEY`, `VITE_N8N_WEBHOOK_URL`, `VITE_N8N_FACTURA_WEBHOOK_URL`.
+- **GitHub Actions secrets:** `Settings → Secrets and variables → Actions`. Requeridos: `COOLIFY_WEBHOOK_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `STAGING_SUPABASE_URL`, `STAGING_SUPABASE_ANON_KEY`, `SENTRY_DSN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_GOOGLE_API_KEY`, `VITE_N8N_FACTURA_WEBHOOK_URL`.
 
 ## Monitoreo Post-Deploy
 
