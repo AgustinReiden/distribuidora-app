@@ -13,6 +13,8 @@ import {
   puedeAccederTransferencias,
   puedeControlarStock,
   puedeRegistrarPagoCliente,
+  puedeDesactivarCliente,
+  puedeEliminarCliente,
   mostrarMontosEnStats,
 } from './permisos'
 import type { RolUsuario } from '@/types'
@@ -113,6 +115,42 @@ describe('permisos por rol', () => {
       expect(puedeRegistrarPagoCliente('deposito')).toBe(false)
       expect(puedeRegistrarPagoCliente(null)).toBe(false)
       expect(puedeRegistrarPagoCliente(undefined)).toBe(false)
+    })
+  })
+
+  // Espejo del trigger `clientes_guard_update_preventista` (mig 080), que tiene
+  // `activo` en su blacklist SOLO para el rol preventista. La UI decia `isAdmin`
+  // a mano y le negaba al encargado algo que la base si le permite; si alguien
+  // vuelve a cerrar esto a admin puro, el encargado pierde la unica forma de
+  // sacar un cliente de las listas sin borrarle el historial.
+  describe('puedeDesactivarCliente (baja logica)', () => {
+    it('permite admin y encargado, como el trigger de la mig 080', () => {
+      expect(puedeDesactivarCliente('admin')).toBe(true)
+      expect(puedeDesactivarCliente('encargado')).toBe(true)
+    })
+
+    it('bloquea al preventista, que el trigger rechaza con 42501', () => {
+      expect(puedeDesactivarCliente('preventista')).toBe(false)
+      expect(puedeDesactivarCliente('transportista')).toBe(false)
+      expect(puedeDesactivarCliente('deposito')).toBe(false)
+      expect(puedeDesactivarCliente(null)).toBe(false)
+      expect(puedeDesactivarCliente(undefined)).toBe(false)
+    })
+  })
+
+  // Espejo de la policy `mt_clientes_delete`, que exige es_admin(). Ojo: desde
+  // la mig 200 la FK de pedidos es RESTRICT, asi que esto solo aplica a clientes
+  // sin ningun movimiento.
+  describe('puedeEliminarCliente (DELETE real)', () => {
+    it('permite solo admin', () => {
+      expect(puedeEliminarCliente('admin')).toBe(true)
+    })
+
+    it('bloquea al encargado, que si puede desactivar pero no borrar', () => {
+      expect(puedeEliminarCliente('encargado')).toBe(false)
+      expect(puedeEliminarCliente('preventista')).toBe(false)
+      expect(puedeEliminarCliente(null)).toBe(false)
+      expect(puedeEliminarCliente(undefined)).toBe(false)
     })
   })
 })

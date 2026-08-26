@@ -4,7 +4,8 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
-  UserCog, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck
+  UserCog,
+  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -96,6 +97,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'horarios-clientes', icon: Clock, label: 'Horarios a revisar', roles: ['admin'] },
       { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
       { id: 'bot-telegram', icon: Send, label: 'Bot Telegram', roles: ['admin'] },
+      { id: 'configuracion', icon: Settings, label: 'Configuración', roles: ['admin', 'encargado'] },
     ]
   }
 ];

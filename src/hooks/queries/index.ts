@@ -87,7 +87,8 @@ export {
   useCrearClienteMutation,
   useActualizarClienteMutation,
   useEliminarClienteMutation,
-  contarPedidosDeCliente,
+  contarReferenciasDeCliente,
+  buscarClientePorRazonSocial,
 } from './useClientesQuery'
 
 // Pedidos

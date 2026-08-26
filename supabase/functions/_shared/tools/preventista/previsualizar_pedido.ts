@@ -313,6 +313,24 @@ export const previsualizarPedidoTool: Tool<
       }
     }
 
+    // ---- Compra mínima del pedido ----
+    // El mínimo en $ es de la SUCURSAL (migs 204/205), a diferencia del MOQ de
+    // más arriba que es por producto. Se corta acá, antes de persistir la
+    // confirmación pendiente: `crear_pedido_completo_bot` lo rechaza igual, pero
+    // entonces el preventista ya apretó "confirmar" y recibe un error opaco.
+    const { data: politica } = await sb
+      .from("politicas_comerciales")
+      .select("monto_minimo_pedido")
+      .eq("sucursal_id", sucursalId)
+      .maybeSingle();
+    const montoMinimo = Number(politica?.monto_minimo_pedido ?? 0) || 0;
+    if (montoMinimo > 0 && total < montoMinimo) {
+      throw new Error(
+        `El pedido no alcanza la compra mínima de $${montoMinimo.toLocaleString("es-AR")}. ` +
+          `Total del pedido: $${total.toLocaleString("es-AR")}.`,
+      );
+    }
+
     // ---- Alerta de crédito ----
     const limiteCredito = Number(cliente.limite_credito ?? 0);
     const saldoActual = Number(cliente.saldo_cuenta ?? 0);

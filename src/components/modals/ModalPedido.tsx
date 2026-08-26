@@ -10,6 +10,8 @@ import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQ
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { obtenerMOQ } from '../../utils/precioMayorista';
+import { motivoMontoMinimo } from '../../utils/montoMinimo';
+import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
@@ -374,6 +376,16 @@ const ModalPedido = memo(function ModalPedido({
   const totalParaMostrar = hayDescuentoTotal ? totalConDescuentoCliente : calcularTotal();
   const hayItems = nuevoPedido.items.length > 0;
 
+  // Compra mínima de la sucursal (migs 204/205). La base la rechaza igual, pero
+  // el rechazo del servidor llega con el cliente adelante y el carrito entero
+  // cargado — y si el pedido se cargó sin señal, llega horas después. Se bloquea
+  // acá por lo mismo que se bloquea el MOQ, y sobre el total que realmente se
+  // persiste (el que ya tiene descuentos y promos aplicados).
+  const { politicas } = usePoliticasComercialesQuery();
+  const motivoMinimo = hayItems
+    ? motivoMontoMinimo(totalParaMostrar, politicas.montoMinimoPedido)
+    : null;
+
   const tipoFacturaToggle = (
     <label className="flex items-center gap-1.5">
       <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Factura</span>
@@ -736,6 +748,13 @@ const ModalPedido = memo(function ModalPedido({
             aria-hidden={!carritoAbierto}
           >
             <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4 min-h-0">
+              {/* Compra mínima del pedido (bloquea confirmar) */}
+              {motivoMinimo && (
+                <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
+                  <strong>No se puede confirmar:</strong> {motivoMinimo}
+                </div>
+              )}
+
               {/* Violaciones MOQ (bloquean confirmar) */}
               {violacionesMOQ.length > 0 && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
@@ -1176,6 +1195,13 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
+        {/* Aviso compacto de compra mínima (siempre visible cuando aplica) */}
+        {motivoMinimo && (
+          <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
+            {motivoMinimo}
+          </div>
+        )}
+
         {/* Aviso compacto de violaciones (siempre visible cuando aplican) */}
         {violacionesMOQ.length > 0 && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
@@ -1213,7 +1239,7 @@ const ModalPedido = memo(function ModalPedido({
           <button
             type="button"
             onClick={onGuardar}
-            disabled={guardando || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente}
+            disabled={guardando || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null}
             className="px-5 bg-green-600 text-white font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 text-sm"
           >
             {guardando && <Loader2 className="w-4 h-4 animate-spin" />}

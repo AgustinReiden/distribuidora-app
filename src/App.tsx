@@ -36,6 +36,7 @@ import ProductosContainer from './components/containers/ProductosContainer'
 import ProveedoresContainer from './components/containers/ProveedoresContainer'
 import RevisionHorariosContainer from './components/containers/RevisionHorariosContainer'
 import UsuariosContainer from './components/containers/UsuariosContainer'
+import ConfiguracionContainer from './components/containers/ConfiguracionContainer'
 
 // lazyWithReload: si un chunk quedó obsoleto tras un deploy (PWA con SW que
 // tomó control a mitad de sesión), recarga una vez en vez de colgar el Suspense.
@@ -304,6 +305,11 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/usuarios"
                   element={isAdmin ? <UsuariosContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                <Route
+                  path="/configuracion"
+                  element={isAdminOrEncargado ? <ConfiguracionContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route
