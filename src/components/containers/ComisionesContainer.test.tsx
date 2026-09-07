@@ -66,11 +66,19 @@ function resultadoCon(preventistas: ComisionesResultado['preventistas']): Comisi
   }
 }
 
+/**
+ * El modal se carga con `lazyWithReload`, así que la PRIMERA prueba del archivo
+ * paga el `import()` dinámico y las demás lo toman del caché del módulo. Con el
+ * millisegundo por defecto de `findBy` eso da un test que pasa solo o en
+ * caliente y cae en frío o con la máquina cargada: verde cinco corridas
+ * seguidas y rojo en el pre-commit. El timeout largo es por la carga del
+ * chunk, no por la aserción.
+ */
 async function abrirReglas() {
   const user = userEvent.setup()
   render(<ComisionesContainer />)
   await user.click(await screen.findByRole('button', { name: 'Reglas de comisión' }))
-  return screen.findByRole('combobox', { name: 'Vendedor' })
+  return screen.findByRole('combobox', { name: 'Vendedor' }, { timeout: 15000 })
 }
 
 describe('ComisionesContainer › desplegable de reglas', () => {
