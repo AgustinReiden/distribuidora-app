@@ -21,7 +21,12 @@ const MOTIVOS_MERMA: MotivoMermaOption[] = [
   { value: 'devolucion', label: 'Devolucion defectuosa', icon: '<-' },
   { value: 'error_inventario', label: 'Error de inventario', icon: '#' },
   { value: 'muestra', label: 'Muestra/Degustacion', icon: '*' },
-  { value: 'promociones', label: 'Promociones', icon: '%' },
+  // 'promociones' NO se ofrece a mano. Ese motivo lo escribe el motor de
+  // promociones como contrapartida de un regalo que ya esta contabilizado en el
+  // pedido, y por eso el reporte gerencial lo EXCLUYE de las mermas (mig 130) y
+  // el historial lo deja fuera del total. Una merma real cargada a mano con ese
+  // motivo desaparecia de todos los KPIs sin dejar rastro: la plata se
+  // evaporaba. Para una perdida real esta 'otro'.
   { value: 'otro', label: 'Otro motivo', icon: '?' }
 ]
 
