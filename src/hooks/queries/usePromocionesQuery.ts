@@ -14,6 +14,7 @@ import type {
   PedidoItemSustitucionDB,
 } from '../../types'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
+import { traerTodo } from '../../utils/paginacion'
 
 // Query keys
 export const promocionesKeys = {
@@ -448,18 +449,27 @@ export function usePromoUnidadesEntregadasQuery() {
   return useQuery({
     queryKey: [...promocionesKeys.all(currentSucursalId), 'unidades_entregadas'] as const,
     queryFn: async (): Promise<Map<string, number>> => {
-      const { data, error } = await supabase
-        .from('pedido_items')
-        .select('promocion_id, cantidad, pedidos!inner(estado)')
-        .eq('es_bonificacion', true)
-        .not('promocion_id', 'is', null)
-        .neq('pedidos.estado', 'cancelado')
-      if (error) {
-        if (error.message.includes('does not exist')) return new Map()
+      // Paginado: hoy son ~1.207 filas, o sea que ya pasaba el tope de
+      // PostgREST. Contar de menos las unidades ya entregadas hace que el tope
+      // de cada promoción se alcance MÁS TARDE de lo que corresponde.
+      let data: { promocion_id: string | number; cantidad: number }[]
+      try {
+        data = await traerTodo<{ promocion_id: string | number; cantidad: number }>(
+          () => supabase
+            .from('pedido_items')
+            .select('promocion_id, cantidad, pedidos!inner(estado)')
+            .eq('es_bonificacion', true)
+            .not('promocion_id', 'is', null)
+            .neq('pedidos.estado', 'cancelado')
+            .order('id'),
+          { etiqueta: 'items bonificados' },
+        )
+      } catch (error) {
+        if ((error as Error).message.includes('does not exist')) return new Map()
         throw error
       }
       const map = new Map<string, number>()
-      for (const row of (data ?? []) as { promocion_id: string | number; cantidad: number }[]) {
+      for (const row of data) {
         const key = String(row.promocion_id)
         map.set(key, (map.get(key) ?? 0) + Number(row.cantidad ?? 0))
       }

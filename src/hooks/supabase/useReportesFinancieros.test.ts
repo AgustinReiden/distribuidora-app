@@ -10,7 +10,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 // Cadena thenable: la query es .from().select().neq() y opcionalmente
-// .gte().lte(); se await sobre el último eslabón, sea cual sea.
+// .gte().lte(), y ahora termina en .range() porque las lecturas se paginan.
+// `range` devuelve la cadena, que es thenable: como el lote entra en una
+// página, el paginador corta en la primera vuelta.
 function createChainableMock(finalData: { data: unknown; error: unknown }) {
   const chain: Record<string, unknown> = {
     select: vi.fn(),
@@ -20,6 +22,7 @@ function createChainableMock(finalData: { data: unknown; error: unknown }) {
     eq: vi.fn(),
     in: vi.fn(),
     order: vi.fn(),
+    range: vi.fn(),
   }
   Object.keys(chain).forEach(k => {
     ;(chain[k] as ReturnType<typeof vi.fn>).mockReturnValue(chain)
