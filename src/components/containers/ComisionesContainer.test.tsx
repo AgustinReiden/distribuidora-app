@@ -1,12 +1,15 @@
 /**
- * El desplegable de "Reglas de comisión" salía de un padrón filtrado por
- * `rol = 'preventista'`, y como la regla se identifica por
- * `comision_reglas.preventista_id`, a un admin o a un encargado no había forma
- * de asignarle un %. Pero `calcular_comisiones` agrupa por `pedidos.usuario_id`
- * sin mirar rol (mig 150): esa gente YA acumula comisión al % por defecto.
+ * El desplegable de "Reglas de comisión" tuvo dos bugs encadenados. El primero:
+ * salía de un padrón filtrado por `rol = 'preventista'`, así que a un admin o a
+ * un encargado no había forma de asignarle un %. El segundo, al arreglar mal el
+ * primero: pasó a salir de quien vendió EN EL PERÍODO CONSULTADO, así que la
+ * lista cambiaba al cambiar el rango de fechas y un admin sin ventas seguía sin
+ * aparecer.
  *
- * El test monta el modal de verdad y mira el `<select>`, no una lista interna:
- * es el desplegable lo que estaba roto.
+ * Ahora el piso es el padrón de quienes PUEDEN vender. La regla de armado vive
+ * en `vendedoresElegibles` y tiene sus propios tests; acá se prueba el cableado
+ * del container montando el modal de verdad y mirando el `<select>`, que es lo
+ * que estaba roto.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
@@ -18,7 +21,7 @@ const mockPadron = vi.fn()
 
 vi.mock('../../hooks/queries', () => ({
   useCalcularComisionesQuery: () => mockCalcular(),
-  usePreventistasQuery: () => mockPadron(),
+  useVendedoresComisionablesQuery: () => mockPadron(),
   useComisionReglasQuery: () => ({ data: [], isLoading: false }),
   useGuardarComisionReglaMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDesactivarComisionReglaMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -132,6 +135,42 @@ describe('ComisionesContainer › desplegable de reglas', () => {
     const select = await abrirReglas()
 
     expect(within(select).getAllByRole('option', { name: 'Ana' })).toHaveLength(1)
+  })
+
+  it('un admin que NO vendió en el período aparece igual en el desplegable', async () => {
+    // Es el bug que arregla este cambio: antes la fuente era quien vendió en el
+    // período, así que Julio —2 pedidos en todo el año— aparecía o desaparecía
+    // según el mes que estuvieras mirando.
+    mockCalcular.mockReturnValue({
+      data: resultadoCon([vendedor('u-vendio', 'Marcelo', 33000)]),
+      isLoading: false,
+      error: null,
+    })
+    mockPadron.mockReturnValue({
+      data: [
+        { id: 'u-julio', nombre: 'Julio', email: 'julio@x.com' },
+        { id: 'u-vendio', nombre: 'Marcelo', email: 'm@x.com' },
+      ],
+    })
+
+    const select = await abrirReglas()
+
+    expect(within(select).getByRole('option', { name: 'Julio' })).toBeInTheDocument()
+  })
+
+  it('rescata a quien vendió pero ya no está en el padrón', async () => {
+    // Christian: preventista inactivo con $804.249 acumulados. Sale del padrón
+    // por `activo = false` y hay que poder editarle la regla igual.
+    mockCalcular.mockReturnValue({
+      data: resultadoCon([vendedor('u-christian', 'Christian', 40212490)]),
+      isLoading: false,
+      error: null,
+    })
+    mockPadron.mockReturnValue({ data: [{ id: 'u-otro', nombre: 'Ana', email: 'a@x.com' }] })
+
+    const select = await abrirReglas()
+
+    expect(within(select).getByRole('option', { name: 'Christian' })).toBeInTheDocument()
   })
 
   it('mantiene la opción «Todos» para la regla general', async () => {

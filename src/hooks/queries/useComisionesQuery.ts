@@ -42,7 +42,14 @@ export interface ComisionPreventista {
 export interface ComisionesResultado {
   desde: string
   hasta: string
+  /** @deprecated Desde la mig 207 el default depende del rol: es el de preventista. */
   comision_default: number
+  /**
+   * Los dos defaults por rol de `politicas_comerciales` (mig 207). Opcionales
+   * porque una respuesta cacheada de antes de la migración no los trae.
+   */
+  comision_pct_preventista?: number
+  comision_pct_otros?: number
   preventistas: ComisionPreventista[]
   totales: {
     base: number

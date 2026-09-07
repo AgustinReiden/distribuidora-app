@@ -34,7 +34,10 @@ export interface PreventistaOption {
 
 export interface ModalComisionReglasProps {
   preventistas: PreventistaOption[]
-  comisionDefault: number
+  /** % por defecto de los preventistas (mig 207). */
+  comisionPreventista: number
+  /** % por defecto del resto: admin, encargado (mig 207). */
+  comisionOtros: number
   onClose: () => void
 }
 
@@ -50,7 +53,8 @@ const ORIGENES_REGLA: Array<{ value: '' | OrigenPrecio; label: string }> = [
 
 export default function ModalComisionReglas({
   preventistas,
-  comisionDefault,
+  comisionPreventista,
+  comisionOtros,
   onClose,
 }: ModalComisionReglasProps) {
   const notify = useNotification()
@@ -142,9 +146,11 @@ export default function ModalComisionReglas({
         <div className="flex items-start gap-3 p-3 rounded-lg bg-stone-50 dark:bg-gray-900/40 border border-stone-200 dark:border-gray-700">
           <Percent className="w-5 h-5 shrink-0 mt-0.5 text-indigo-600" aria-hidden="true" />
           <p className="text-xs text-stone-600 dark:text-gray-300">
-            Gana la regla más específica que coincida. Sin ninguna regla que aplique se usa el{' '}
-            <strong>{comisionDefault}%</strong>. Cargá una regla con origen «Cualquiera» para el %
-            base del vendedor y otra con «{etiquetaOrigen('mayorista')}» para el % reducido.
+            Gana la regla más específica que coincida. Sin ninguna regla que aplique se usa el
+            porcentaje por defecto según el rol: <strong>{comisionPreventista}%</strong> para
+            preventistas y <strong>{comisionOtros}%</strong> para el resto (admin, encargado), que
+            se configuran en Configuración. Cargá una regla con origen «Cualquiera» para el % base
+            de una persona y otra con «{etiquetaOrigen('mayorista')}» para el % reducido.
           </p>
         </div>
 
@@ -242,7 +248,8 @@ export default function ModalComisionReglas({
           <p className="text-sm text-stone-500">Cargando reglas…</p>
         ) : reglas.length === 0 ? (
           <p className="text-sm text-stone-500 dark:text-gray-400">
-            No hay reglas cargadas: todo se comisiona al {comisionDefault}%.
+            No hay reglas cargadas: se comisiona con el default por rol
+            ({comisionPreventista}% preventistas, {comisionOtros}% el resto).
           </p>
         ) : (
           <div className="overflow-x-auto">
