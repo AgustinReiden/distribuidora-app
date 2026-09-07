@@ -263,6 +263,8 @@ export default function VistaReportes({
           reportePreventistas={reportePreventistas}
           loading={loading}
           formatPrecio={formatPrecio}
+          desde={fechaDesde}
+          hasta={fechaHasta}
         />
       )}
 
@@ -280,6 +282,8 @@ export default function VistaReportes({
           reporte={reporteRentabilidad}
           loading={loadingFinanciero}
           formatPrecio={formatPrecio}
+          desde={fechaDesde}
+          hasta={fechaHasta}
         />
       )}
 

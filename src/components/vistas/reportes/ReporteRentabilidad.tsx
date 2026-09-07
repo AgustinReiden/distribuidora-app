@@ -1,8 +1,8 @@
 /**
  * Componente para mostrar el reporte de rentabilidad por producto
  */
-import React from 'react';
-import { Package } from 'lucide-react';
+import React, { useState } from 'react';
+import { Package, Download, Loader2 } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import type { ReporteRentabilidad } from '../../../types';
 
@@ -10,19 +10,90 @@ export interface ReporteRentabilidadProps {
   reporte: ReporteRentabilidad;
   loading: boolean;
   formatPrecio: (precio: number) => string;
+  /** Sólo para el nombre del archivo: '' = sin filtro de fecha. */
+  desde?: string;
+  hasta?: string;
 }
+
+/** Lo que la tabla muestra en pantalla. El Excel se lleva TODOS. */
+const PRODUCTOS_EN_PANTALLA = 20;
 
 export function ReporteRentabilidadSection({
   reporte,
   loading,
-  formatPrecio
+  formatPrecio,
+  desde = '',
+  hasta = ''
 }: ReporteRentabilidadProps): React.ReactElement {
-  if (loading) return <LoadingSpinner />;
-
+  const [exportando, setExportando] = useState(false);
   const { productos, totales } = reporte;
+  const periodo = desde || hasta ? `${desde || 'inicio'}_${hasta || 'hoy'}` : 'todo';
+
+  const exportar = async (): Promise<void> => {
+    if (productos.length === 0) return;
+    setExportando(true);
+    try {
+      // TODOS los productos, no los 20 de la pantalla. El nombre de la hoja lo
+      // dice para que nadie crea que el archivo no coincide con lo que ve.
+      const filas = productos.map((p, i) => ({
+        '#': i + 1,
+        Producto: p.nombre,
+        Código: p.codigo ?? '',
+        Vendido: p.cantidadVendida ?? 0,
+        Ingresos: p.ingresos ?? 0,
+        Costos: p.costos ?? 0,
+        Margen: p.margen ?? 0,
+        '% margen': (p.margenPorcentaje ?? 0) / 100
+      }));
+
+      // El desglose fiscal está en la pantalla y no en la tabla: sin esta hoja
+      // el Excel perdería el IVA y los impuestos internos, que es lo que separa
+      // la venta bruta del ingreso real.
+      const resumen = [
+        { Concepto: 'Ventas brutas', Monto: totales.ventasBrutas ?? 0 },
+        { Concepto: 'IVA discriminado', Monto: totales.ivaDiscriminado ?? 0 },
+        { Concepto: 'Impuestos internos', Monto: totales.impuestosInternos ?? 0 },
+        { Concepto: 'Ventas netas', Monto: totales.ventasNetas ?? 0 },
+        { Concepto: 'Ingresos netos', Monto: totales.ingresosTotales ?? 0 },
+        { Concepto: 'Costos', Monto: totales.costosTotales ?? 0 },
+        { Concepto: 'Margen', Monto: totales.margenTotal ?? 0 },
+        { Concepto: '% margen', Monto: (totales.margenPorcentaje ?? 0) / 100 },
+        { Concepto: 'Pedidos', Monto: totales.cantidadPedidos ?? 0 },
+        { Concepto: 'Productos en el reporte', Monto: productos.length }
+      ];
+
+      const { createMultiSheetExcel } = await import('../../../utils/excel');
+      await createMultiSheetExcel(
+        [
+          { name: 'Resumen', data: resumen, columnWidths: [26, 18] },
+          { name: `Productos (todos, ${productos.length})`, data: filas, columnWidths: [5, 40, 14, 10, 16, 16, 16, 11] }
+        ],
+        `rentabilidad-${periodo}`
+      );
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          onClick={exportar}
+          disabled={exportando || productos.length === 0}
+          className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+        >
+          {exportando ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+          Exportar a Excel
+        </button>
+      </div>
+
       {/* Desglose Ventas */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg">
@@ -99,7 +170,7 @@ export function ReporteRentabilidadSection({
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
-              {productos.slice(0, 20).map((p, i) => (
+              {productos.slice(0, PRODUCTOS_EN_PANTALLA).map((p, i) => (
                 <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="px-4 py-3">
                     <p className="font-medium">{p.nombre}</p>
@@ -128,6 +199,12 @@ export function ReporteRentabilidadSection({
               ))}
             </tbody>
           </table>
+          {productos.length > PRODUCTOS_EN_PANTALLA && (
+            <p className="px-4 py-3 text-sm text-gray-500 border-t dark:border-gray-700">
+              Se muestran los {PRODUCTOS_EN_PANTALLA} de mayor margen. El Excel lleva los{' '}
+              {productos.length}.
+            </p>
+          )}
         </div>
       )}
     </div>
