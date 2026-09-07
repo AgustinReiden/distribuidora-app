@@ -209,7 +209,7 @@ export default function VistaComisiones({
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-gray-700/50">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Preventista</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Vendedor</th>
                 <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Base</th>
                 <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Ítems</th>
                 <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">
