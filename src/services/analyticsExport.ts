@@ -7,6 +7,8 @@
 import { supabase } from '../lib/supabase'
 import type { SheetConfig } from '../utils/excel'
 import { calculateMarketBasket } from '../utils/marketBasket'
+import { costoCanonicoUnitario } from '../utils/costoCanonico'
+import type { ProductoCosto } from '../utils/costoCanonico'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,7 +55,7 @@ export async function fetchVentasDetallado(
         precio_unitario,
         subtotal,
         costo_unitario_al_crear,
-        producto:productos(id, nombre, codigo, categoria, costo_con_iva, costo_real)
+        producto:productos(id, nombre, codigo, categoria, costo_con_iva, costo_real, costo_promedio)
       )
     `)
     .gte('created_at', `${desde}T00:00:00`)
@@ -88,10 +90,12 @@ export async function fetchVentasDetallado(
 
     for (const item of items) {
       const producto = item.producto as Record<string, unknown> | null
-      // Costo canónico (mig 120): snapshot al crear → costo_real vivo → legacy
-      // costo_con_iva (que incluía IVA y sobreestimaba el costo).
-      const costoUnitario = Number(
-        item.costo_unitario_al_crear ?? producto?.costo_real ?? producto?.costo_con_iva ?? 0
+      // Costo canónico (mig 130): el mismo COALESCE que el reporte gerencial.
+      // Antes se salteaba costo_promedio y caía a costo_con_iva, que es el
+      // costo FINANCIERO (IVA adentro): inflaba el costo y hundía el margen.
+      const costoUnitario = costoCanonicoUnitario(
+        item.costo_unitario_al_crear as number | null,
+        producto as ProductoCosto | null
       )
       const precioUnitario = Number(item.precio_unitario || 0)
       const cantidad = Number(item.cantidad || 0)
@@ -241,8 +245,12 @@ export async function fetchProductosDimension(
 
   return (productosRes.data || []).map(p => {
     const ventas = ventasPorProducto.get(p.id) || { cantidad: 0, ingresos: 0, dias: new Set() }
-    // Costo real canónico (mig 111); fallback legacy a costo_con_iva.
-    const costoUnitario = Number(p.costo_real ?? p.costo_con_iva ?? 0)
+    // Costo canónico (mig 130) SIN snapshot: esta hoja agrega por producto
+    // sobre todo el período, así que no hay un `costo_unitario_al_crear` único
+    // que congelar. El margen de acá vale el costo de HOY: para recomputarlo
+    // línea por línea con el costo congelado está la hoja Ventas_Detallado, y
+    // por eso se exporta también costo_promedio.
+    const costoUnitario = costoCanonicoUnitario(null, p as ProductoCosto)
     const costoTotal = costoUnitario * ventas.cantidad
     const margenTotal = ventas.ingresos - costoTotal
 
@@ -261,6 +269,8 @@ export async function fetchProductosDimension(
       costo_sin_iva: p.costo_sin_iva ?? 0,
       costo_con_iva: p.costo_con_iva ?? 0,
       costo_real: p.costo_real ?? 0,
+      costo_promedio: p.costo_promedio ?? 0,
+      costo_unitario_usado: costoUnitario,
       activo: p.activo !== false ? 'Si' : 'No',
       total_vendido: ventas.cantidad,
       total_ingresos: Number(ventas.ingresos.toFixed(2)),
