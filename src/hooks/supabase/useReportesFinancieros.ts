@@ -12,6 +12,7 @@ import type {
   PagoDB,
   ProductoDB
 } from '../../types'
+import { costoCanonicoUnitario } from '../../utils/costoCanonico'
 
 interface PedidoWithItems {
   id: string;
@@ -185,13 +186,15 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
             ventasNetas += subtotalItem
           }
 
-          // Costo canónico (mig 120): snapshot congelado al crear el pedido;
-          // fallback a productos.costo_real (mig 111) y por último a la
-          // fórmula vieja. Antes usaba costo_sin_iva vivo SIN imp. internos.
-          const costoUnitario = ((item as Record<string, unknown>).costo_unitario_al_crear as number | null)
-            ?? prod.costo_real
-            ?? ((prod.costo_sin_iva || 0) * (1 + (prod.impuestos_internos || 0) / 100))
-          productoStats[id].costos += (costoUnitario || 0) * item.cantidad
+          // Costo canónico (mig 130): el mismo COALESCE que el reporte
+          // gerencial. Antes se salteaba costo_promedio y cobraba el costo de
+          // reposición como CMV, así que esta pestaña y el gerencial daban
+          // márgenes distintos para el mismo período.
+          const costoUnitario = costoCanonicoUnitario(
+            (item as Record<string, unknown>).costo_unitario_al_crear as number | null,
+            prod
+          )
+          productoStats[id].costos += costoUnitario * item.cantidad
         })
       })
 
