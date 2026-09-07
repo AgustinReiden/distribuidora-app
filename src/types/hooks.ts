@@ -889,6 +889,12 @@ export interface MermaDBExtended {
   stock_nuevo: number;
   usuario_id?: string | null;
   created_at?: string;
+  /**
+   * Costo promedio ponderado CONGELADO al momento de la merma (mig 119), lo
+   * sella un trigger BEFORE INSERT así que cubre todos los caminos de alta.
+   * NULL en las 479 filas anteriores a que existiera.
+   */
+  costo_unitario?: number | null;
 }
 
 export interface MermaFormInputExtended {

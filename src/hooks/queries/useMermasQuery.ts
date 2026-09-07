@@ -23,12 +23,54 @@ export const mermasKeys = {
   byMotivo: (sucursalId: number | null, motivo: string) => [...mermasKeys.all(sucursalId), 'motivo', motivo] as const,
 }
 
+/**
+ * Tope de filas por consulta. PostgREST corta solo y en SILENCIO: sin un límite
+ * explícito la pantalla diría "todas" y estaría mostrando las N más recientes.
+ * Explícito, la UI puede comparar `length` contra esto y avisar.
+ */
+export const LIMITE_MERMAS = 1000
+
+export interface FiltrosMermas {
+  /** 'YYYY-MM-DD' en hora de Argentina. */
+  desde?: string | null
+  /** 'YYYY-MM-DD' en hora de Argentina, inclusive. */
+  hasta?: string | null
+}
+
+/**
+ * El corte por fecha va al SERVIDOR, no al cliente: sin filtro la consulta trae
+ * todo y se come el tope de PostgREST. El índice `idx_mermas_fecha` sobre
+ * created_at DESC ya existe, así que es gratis.
+ *
+ * `created_at` es timestamptz y el día que le importa al usuario es el día
+ * ARGENTINO, que es el corte que usa el reporte gerencial
+ * (`created_at AT TIME ZONE 'America/Argentina/Buenos_Aires'`). Comparar contra
+ * un ISO sin offset cortaría en UTC y mandaría todo lo cargado después de las
+ * 21hs al día siguiente. El offset va fijo en -03:00 porque Argentina no tiene
+ * horario de verano desde 2009; la zona por nombre se usa en `fechaLocalISO`.
+ */
+function rangoArgentino(filtros?: FiltrosMermas) {
+  return {
+    desde: filtros?.desde ? `${filtros.desde}T00:00:00-03:00` : null,
+    // Inclusive hasta el último microsegundo del día: es la precisión de
+    // timestamptz, así que no se pierde ninguna fila del borde.
+    hasta: filtros?.hasta ? `${filtros.hasta}T23:59:59.999999-03:00` : null,
+  }
+}
+
 // Fetch functions
-async function fetchMermas(): Promise<MermaDBExtended[]> {
-  const { data, error } = await supabase
+async function fetchMermas(filtros?: FiltrosMermas): Promise<MermaDBExtended[]> {
+  const rango = rangoArgentino(filtros)
+  let query = supabase
     .from('mermas_stock')
     .select('*')
     .order('created_at', { ascending: false })
+    .limit(LIMITE_MERMAS)
+
+  if (rango.desde) query = query.gte('created_at', rango.desde)
+  if (rango.hasta) query = query.lte('created_at', rango.hasta)
+
+  const { data, error } = await query
 
   if (error) {
     if (error.message.includes('does not exist')) return []
@@ -84,7 +126,12 @@ async function registrarMerma(
       observaciones: mermaData.observaciones || null,
       stock_anterior: mermaData.stockAnterior,
       stock_nuevo: mermaData.stockNuevo,
-      usuario_id: mermaData.usuarioId || null,
+      // El modal de carga nunca manda usuarioId, así que TODA merma manual
+      // entraba con usuario_id NULL y el historial no podía decir quién la
+      // registró. Es el invariante MERMA-I (mig 105). Se resuelve acá y no en
+      // el formulario: quien registra es siempre el que tiene la sesión, no
+      // algo que el usuario elija.
+      usuario_id: mermaData.usuarioId || (await supabase.auth.getUser()).data.user?.id || null,
       sucursal_id: sucursalId
     }])
     .select()
@@ -125,11 +172,15 @@ async function registrarMerma(
 /**
  * Hook para obtener todas las mermas
  */
-export function useMermasQuery() {
+export function useMermasQuery(filtros?: FiltrosMermas) {
   const { currentSucursalId } = useSucursal()
+  const desde = filtros?.desde ?? null
+  const hasta = filtros?.hasta ?? null
   return useQuery({
-    queryKey: mermasKeys.lists(currentSucursalId),
-    queryFn: fetchMermas,
+    // `list` con los filtros adentro: dos rangos distintos son dos cachés
+    // distintas, si no el segundo mostraría el resultado del primero.
+    queryKey: mermasKeys.list(currentSucursalId, { desde, hasta }),
+    queryFn: () => fetchMermas({ desde, hasta }),
     staleTime: 5 * 60 * 1000, // 5 minutos
   })
 }
