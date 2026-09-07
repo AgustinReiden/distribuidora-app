@@ -138,6 +138,7 @@ export {
   useTransportistasQuery,
   usePreventistasQuery,
   usePreventistasAsignablesQuery,
+  useVendedoresComisionablesQuery,
   usePerfilRolesQuery,
   useAsignarPerfilRolesMutation,
   useActualizarUsuarioMutation,
