@@ -130,6 +130,21 @@ export function puedeRegistrarPagoCliente(rol: RolUsuario | null | undefined): b
   return rol === 'admin' || rol === 'encargado'
 }
 
+/**
+ * Si el rol puede ver el aviso de deuda previa del cliente al cargar un pedido y
+ * en la tarjeta del pedido. Admin, encargado y preventista.
+ *
+ * Es quien vende el que necesita saberlo antes de tomar el pedido. Se le oculta
+ * al transportista y al depósito, que también entran a /pedidos
+ * (TopNavigation): el saldo que ve la app es el del último sync y no incluye lo
+ * cobrado en la calle, así que en el reparto sería un número desactualizado
+ * discutiéndose delante del cliente. Al encargado sí, por el mismo criterio con
+ * el que `mostrarMontosEnStats` le deja ver el stat de impagos.
+ */
+export function puedeVerDeudaCliente(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado' || rol === 'preventista'
+}
+
 /** Si el rol puede editar el descuento porcentual precargado del cliente. */
 export function puedeEditarDescuentoCliente(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'

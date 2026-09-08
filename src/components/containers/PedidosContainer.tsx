@@ -19,6 +19,7 @@ import PanelPedidosTrabados from '../pedidos/PanelPedidosTrabados'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
+import { puedeVerDeudaCliente } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { useQueryClient } from '@tanstack/react-query'
@@ -145,7 +146,7 @@ const campoFechaEntrega = (): NonNullable<ConfirmConfig['campoFecha']> => ({
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
-  const { user, isAdmin, isPreventista, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
+  const { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
   // Cola offline del alta. La cola real vive en IndexedDB, asi que esta
   // instancia del hook convive sin problema con la de App.tsx (se avisan por
   // el evento OFFLINE_QUEUE_CHANGED).
@@ -195,13 +196,20 @@ export default function PedidosContainer(): React.ReactElement {
   // Queries - use debounced search to avoid firing on every keystroke
   const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago, actualizarFormaPagoDePago } = usePagos()
 
-  const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
+  // dataUpdatedAt: cuándo se trajo esta página del servidor. Sólo se usa para
+  // fechar el saldo del cliente en el aviso de deuda cuando no hay señal — el
+  // número que se ve entonces es el del último sync.
+  const {
+    data: paginatedResult,
+    isLoading: loadingPedidos,
+    dataUpdatedAt: pedidosActualizadosAt,
+  } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
   )
   const { data: statsSummary = EMPTY_PEDIDO_STATS_SUMMARY } = usePedidoStatsQuery(
     filtros, debouncedBusqueda, authReady
   )
-  const { data: clientes = [] } = useClientesQuery()
+  const { data: clientes = [], dataUpdatedAt: clientesActualizadosAt } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()
   const { data: transportistas = [] } = useTransportistasQuery()
   // Zonas activas (para elegir zonas preferidas por chofer en el split)
@@ -1903,6 +1911,7 @@ export default function PedidosContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaPedidos
           pedidos={pedidos}
+          saldoActualizadoAt={pedidosActualizadosAt}
           totalCount={totalCount}
           statsSummary={statsSummary}
           paginaActual={paginaActual}
@@ -2073,6 +2082,8 @@ export default function PedidosContainer(): React.ReactElement {
             onPreventistaChange={(preventistaId: string) => setNuevoPedido(prev => ({ ...prev, preventistaId }))}
             currentUserId={user?.id}
             isOffline={!isOnline}
+            puedeVerDeuda={puedeVerDeudaCliente(perfil?.rol)}
+            saldoActualizadoAt={clientesActualizadosAt}
           />
         </Suspense>
       )}
