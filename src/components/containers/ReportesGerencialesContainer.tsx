@@ -141,6 +141,7 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
         analisis={analisis ?? null}
         comisionCalculada={comisionCalc?.totales.comision ?? null}
         comisionCalculadaPrev={comisionCalcPrev?.totales.comision ?? null}
+        comisionPorVendedor={comisionCalc?.preventistas ?? null}
       />
     </Suspense>
   )
