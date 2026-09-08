@@ -1,6 +1,6 @@
 import { useState, useMemo, memo, useRef } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent } from 'lucide-react';
-import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
+import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
@@ -11,6 +11,7 @@ import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import { obtenerMOQ } from '../../utils/precioMayorista';
 import { motivoMontoMinimo } from '../../utils/montoMinimo';
+import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
@@ -119,6 +120,17 @@ export interface ModalPedidoProps {
   onActualizarPrecio?: (productoId: string, precio: number) => void;
   /** Si está offline */
   isOffline?: boolean;
+  /**
+   * Si el rol puede ver el aviso de deuda previa del cliente. Lo decide el
+   * container con `puedeVerDeudaCliente` (src/lib/permisos.ts) para no evaluar
+   * el criterio de permisos acá adentro.
+   */
+  puedeVerDeuda?: boolean;
+  /**
+   * Timestamp del fetch de clientes (`dataUpdatedAt`). Solo se usa sin conexión,
+   * para fechar el saldo en el aviso de deuda.
+   */
+  saldoActualizadoAt?: number | null;
   /** Callback al cambiar el preventista asignado (solo admin) */
   onPreventistaChange?: (preventistaId: string) => void;
   /** ID del usuario actual (default del selector de preventista) */
@@ -168,6 +180,8 @@ const ModalPedido = memo(function ModalPedido({
   onPreventistaChange,
   currentUserId,
   isOffline,
+  puedeVerDeuda,
+  saldoActualizadoAt,
   regalosOverride,
   onCambiarRegaloCreacion,
   promosEliminadas,
@@ -254,6 +268,17 @@ const ModalPedido = memo(function ModalPedido({
   // con el cliente esperando, nadie lo hacía y el ruteo quedaba sin ventanas.
   const faltaHorarioCliente =
     !!onGuardarHorarioCliente && clienteSinHorario(clienteSeleccionado);
+
+  // Deuda previa del cliente elegido. AVISA, NO BLOQUEA: es una decisión
+  // explícita: quien vende decide si igual le carga el pedido. Por eso no toca
+  // `disabled` del botón Confirmar, a diferencia del mínimo de compra.
+  // Acá el saldo no incluye este pedido —todavía no existe—, así que se usa
+  // crudo; en la tarjeta hay que descontarlo (ver src/utils/deudaCliente.ts).
+  const avisoDeuda = puedeVerDeuda
+    ? avisoDeudaCliente(clienteSeleccionado?.saldo_cuenta, {
+        saldoAl: isOffline && saldoActualizadoAt ? formatFecha(new Date(saldoActualizadoAt)) : null,
+      })
+    : null;
 
   const handleCapturarGps = async (): Promise<void> => {
     setGpsCapturando(true);
@@ -544,6 +569,19 @@ const ModalPedido = memo(function ModalPedido({
               </div>
             )}
 
+            {/* Deuda previa del cliente elegido. Se muestra acá, en el momento
+                en que se lo elige, que es cuando todavía se puede hablar del
+                tema con el cliente adelante. Sólo avisa. */}
+            {avisoDeuda && (
+              <div
+                role="status"
+                className="mt-3 p-3 rounded-lg border bg-rose-50 border-rose-300 text-sm text-rose-900 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-200 flex items-start gap-2"
+              >
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                <span>{avisoDeuda.detalle}</span>
+              </div>
+            )}
+
             {/* Horario faltante del cliente ya seleccionado. Va DENTRO del
                 ModalBase (no como modal hermano): un Radix Dialog deja
                 cualquier overlay hermano detrás y sería inalcanzable.
@@ -748,6 +786,15 @@ const ModalPedido = memo(function ModalPedido({
             aria-hidden={!carritoAbierto}
           >
             <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4 min-h-0">
+              {/* Deuda previa del cliente (avisa, NO bloquea). Va primero: es lo
+                  único de este bloque que no impide confirmar, y repetirlo acá
+                  es para que no se pierda si el carrito se armó largo. */}
+              {avisoDeuda && (
+                <div role="status" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-sm text-rose-900 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-200">
+                  {avisoDeuda.detalle}
+                </div>
+              )}
+
               {/* Compra mínima del pedido (bloquea confirmar) */}
               {motivoMinimo && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">

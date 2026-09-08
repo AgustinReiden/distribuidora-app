@@ -29,6 +29,11 @@ import type { PedidoStatsSummary } from '../../hooks/queries';
 export interface VistaPedidosProps {
   /** Pedidos de la página actual (ya paginados server-side) */
   pedidos: PedidoDB[];
+  /**
+   * `dataUpdatedAt` de la query de pedidos. Sólo lo usa la card sin conexión,
+   * para fechar el saldo del cliente en el aviso de deuda previa.
+   */
+  saldoActualizadoAt?: number | null;
   /** Total de pedidos que coinciden con los filtros (para paginación) */
   totalCount: number;
   /** Totales por estado/pago sobre todos los pedidos filtrados (no sólo la página) */
@@ -114,6 +119,7 @@ export interface VistaPedidosProps {
 
 export default function VistaPedidos({
   pedidos,
+  saldoActualizadoAt,
   totalCount,
   statsSummary,
   paginaActual,
@@ -253,6 +259,7 @@ export default function VistaPedidos({
               >
                 <PedidoCard
                   pedido={pedido}
+                  saldoActualizadoAt={saldoActualizadoAt}
                   isAdmin={isAdmin}
                   isPreventista={isPreventista}
                   isTransportista={isTransportista}
