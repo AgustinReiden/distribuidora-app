@@ -15,6 +15,9 @@
  */
 import { describe, it, expect } from 'vitest'
 import { avisoDeudaCliente } from './deudaCliente'
+// El importe sale de `formatPrecio`, que es Intl y separa con espacio DURO:
+// hardcodearlo con un espacio normal nunca matchea.
+import { formatPrecio } from './formatters'
 
 describe('avisoDeudaCliente — al crear el pedido (sin pedido propio)', () => {
   it('no avisa cuando el cliente está al día', () => {
@@ -91,11 +94,58 @@ describe('avisoDeudaCliente — en la tarjeta (el saldo YA incluye este pedido)'
   })
 })
 
+describe('avisoDeudaCliente — qué dice el texto según lo que el dato garantiza', () => {
+  it('en la tarjeta habla de OTROS pedidos, no de deuda previa', () => {
+    // Con `pedido`, el monto es la deuda menos ESE pedido — y eso puede venir
+    // de un pedido POSTERIOR. Decir "previa" ahí es cronológicamente falso.
+    const aviso = avisoDeudaCliente(50000, { pedido: { total: 20000, monto_pagado: 0 } })
+
+    expect(aviso?.etiqueta).toBe(`Debe ${formatPrecio(30000)} por otros pedidos`)
+    expect(aviso?.detalle).toContain('Además de este pedido')
+    expect(aviso?.detalle).not.toContain('previa')
+  })
+
+  it('el detalle avisa que puede haber pedidos posteriores', () => {
+    const aviso = avisoDeudaCliente(50000, { pedido: { total: 20000 } })
+    expect(aviso?.detalle).toContain('posteriores')
+  })
+
+  it('en el alta sí es toda la deuda del cliente, y el texto lo dice', () => {
+    // Sin `pedido` no hay nada que descontar: el pedido todavía no existe.
+    const aviso = avisoDeudaCliente(50000)
+
+    expect(aviso?.etiqueta).toBe(`Debe ${formatPrecio(50000)}`)
+    expect(aviso?.detalle).toContain('deuda previa')
+    expect(aviso?.etiqueta).not.toContain('otros pedidos')
+  })
+
+  // El caso que motivó el cambio, con los dos pedidos de un mismo cliente.
+  it('la tarjeta del pedido VIEJO no llama "previa" a la deuda del nuevo', () => {
+    // Cliente con A (viejo, $20.000) y B (nuevo, $30.000), los dos impagos.
+    // El saldo del cliente es 50.000 y la tarjeta de A muestra los 30.000 de B.
+    const enLaTarjetaDeA = avisoDeudaCliente(50000, { pedido: { total: 20000, monto_pagado: 0 } })
+
+    expect(enLaTarjetaDeA?.monto).toBe(30000)
+    expect(enLaTarjetaDeA?.detalle).not.toContain('previa')
+  })
+})
+
 describe('avisoDeudaCliente — saldo posiblemente viejo (offline)', () => {
   it('habla en pasado y dice de cuándo es el dato', () => {
     const aviso = avisoDeudaCliente(12500, { saldoAl: '6/9, 14:32' })
     expect(aviso?.etiqueta).toContain('6/9, 14:32')
     expect(aviso?.detalle).toContain('6/9, 14:32')
+    expect(aviso?.detalle).toContain('cobrado después')
+  })
+
+  it('sin conexión, en la tarjeta, el detalle sigue diciendo el alcance', () => {
+    const aviso = avisoDeudaCliente(50000, {
+      pedido: { total: 20000 },
+      saldoAl: '6/9, 14:32',
+    })
+    // La antigüedad pesa más que el alcance: el badge la lleva a ella.
+    expect(aviso?.etiqueta).toBe(`Debía ${formatPrecio(30000)} al 6/9, 14:32`)
+    expect(aviso?.detalle).toContain('por otros pedidos')
     expect(aviso?.detalle).toContain('cobrado después')
   })
 
