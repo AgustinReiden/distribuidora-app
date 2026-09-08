@@ -54,8 +54,8 @@ const $$ = (x: number): string => money(x).replace(/\s/g, ' ');
 
 /** Un preventista y un encargado, como en los datos reales de agosto. */
 const VENDEDORES = [
-  { nombre: 'Juan', rol: 'preventista', pedidos: 100, venta: 15121320, margen_comercial: 3000000, bonif: 200000, base_nc: 15121320 },
-  { nombre: 'Jony', rol: 'encargado', pedidos: 20, venta: 2964100, margen_comercial: 600000, bonif: 40000, base_nc: 2964100 },
+  { id: 'u-juan', nombre: 'Juan', rol: 'preventista', pedidos: 100, venta: 15121320, margen_comercial: 3000000, bonif: 200000, base_nc: 15121320 },
+  { id: 'u-jony', nombre: 'Jony', rol: 'encargado', pedidos: 20, venta: 2964100, margen_comercial: 600000, bonif: 40000, base_nc: 2964100 },
 ];
 
 function reporte(): ReporteGerencial {
@@ -84,11 +84,11 @@ const periodo = {
 
 /** Lo que devuelve `calcular_comisiones`: Jony es encargado, cobra 0. */
 const COMISION_REAL = [
-  { nombre: 'Juan', comision: 302426 },
-  { nombre: 'Jony', comision: 0 },
+  { id: 'u-juan', nombre: 'Juan', comision: 302426 },
+  { id: 'u-jony', nombre: 'Jony', comision: 0 },
 ];
 
-function renderVista(comisionPorVendedor: { nombre: string; comision: number }[] | null = COMISION_REAL) {
+function renderVista(comisionPorVendedor: { id: string; nombre: string; comision: number }[] | null = COMISION_REAL) {
   return render(
     <VistaReportesGerenciales
       reporte={reporte()}
@@ -192,6 +192,47 @@ describe('VistaReportesGerenciales › comisión por vendedor', () => {
     // Real: 302.426 + 0. Simulado: (15.121.320 + 2.964.100) × 2% = 361.708.
     expect(within(total).getByText($$(302426))).toBeInTheDocument();
     expect(within(total).getByText($$(361708))).toBeInTheDocument();
+  });
+
+  // El motivo de la mig 209: antes el cruce era por nombre y dos homónimos
+  // compartían la celda de comisión sin que nadie se enterara.
+  it('cruza por ID, no por nombre: dos homónimos no comparten comisión', async () => {
+    const user = userEvent.setup();
+    render(
+      <VistaReportesGerenciales
+        reporte={{
+          ...reporte(),
+          vendedores: [
+            { ...VENDEDORES[0], id: 'u-juan-1', nombre: 'Juan' },
+            { ...VENDEDORES[1], id: 'u-juan-2', nombre: 'Juan' },
+          ],
+        } as unknown as ReporteGerencial}
+        loading={false} error={null} sucursalSel={1} periodoSel={periodo}
+        opcionesSucursal={[{ id: 1, nombre: 'Tucumán' }]} opcionesPeriodo={[periodo]}
+        onSucursal={vi.fn()} onPeriodo={vi.fn()} onRango={vi.fn()}
+        incluirNoEntregados={false} onIncluirNoEntregados={vi.fn()}
+        comparar={false} onComparar={vi.fn()}
+        metas={null} metasEditable={false} onGuardarMeta={vi.fn()} guardandoMeta={false}
+        analisis={null}
+        comisionCalculada={302426}
+        comisionPorVendedor={[
+          { id: 'u-juan-1', nombre: 'Juan', comision: 302426 },
+          { id: 'u-juan-2', nombre: 'Juan', comision: 0 },
+        ]}
+      />
+    );
+    await abrirDetalle(user);
+
+    // Los dos se llaman igual; cada uno tiene que ver SU número. Se mira la
+    // celda de la columna real por posición (Vendedor, Venta, Mg neto, % neto,
+    // Comisión, Simulado) y no por texto: el primero tiene el mismo importe en
+    // las dos columnas y `getByText` encontraría dos.
+    const filas = screen.getAllByText('Juan').map(e => e.closest('tr') as HTMLElement);
+    expect(filas).toHaveLength(2);
+    const comisionReal = (fila: HTMLElement) =>
+      within(fila).getAllByRole('cell')[4].textContent?.replace(/\s/g, ' ');
+    expect(comisionReal(filas[0])).toBe($$(302426));
+    expect(comisionReal(filas[1])).toBe($$(0));
   });
 
   it('mientras la comisión real no llegó, se muestra sólo el simulador', async () => {
