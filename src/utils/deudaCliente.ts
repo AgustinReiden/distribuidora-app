@@ -21,6 +21,16 @@
  * inflaría la deuda mostrada. Ante la duda, este aviso subestima: acusar de una
  * deuda que no existe, delante del cliente, es peor que no avisar.
  *
+ * "OTROS PEDIDOS", NO "DEUDA PREVIA"
+ * ---------------------------------
+ * Con `pedido`, el monto es la deuda del cliente MENOS este pedido — y eso
+ * incluye pedidos POSTERIORES a él. Para un cliente con un solo impago da lo
+ * mismo, pero hay 10 clientes con dos o más (hasta 5): en la tarjeta del más
+ * viejo, el número es el de los más nuevos. Llamarlo "deuda previa" ahí es
+ * cronológicamente falso, y es la clase de imprecisión que termina en una
+ * discusión con el cliente en el mostrador. El texto dice lo que el dato
+ * garantiza: que hay deuda por FUERA de este pedido.
+ *
  * OFFLINE
  * -------
  * El saldo que ve un teléfono sin señal es el del último sync y no incluye lo
@@ -87,14 +97,33 @@ export function avisoDeudaCliente(
 
   const importe = formatPrecio(monto)
   const saldoAl = opts.saldoAl?.trim()
+  // Con `pedido` el monto excluye a ESE pedido, así que la deuda es "por otros
+  // pedidos" y no "previa": puede venir de uno posterior. Sin `pedido` —el alta,
+  // donde todavía no existe— sí es toda la deuda del cliente.
+  const esPorOtrosPedidos = !!opts.pedido
 
-  return saldoAl
+  if (saldoAl) {
+    // Sin conexión el dato es del último sync: se habla en pasado y se fecha.
+    // La antigüedad pesa más que el alcance, así que el badge la lleva a ella y
+    // el alcance queda en el detalle.
+    return {
+      monto,
+      etiqueta: `Debía ${importe} al ${saldoAl}`,
+      detalle: esPorOtrosPedidos
+        ? `Sin conexión: al ${saldoAl} este cliente debía ${importe} por otros pedidos. ` +
+          `No incluye lo que se le haya cobrado después.`
+        : `Sin conexión: al ${saldoAl} este cliente debía ${importe}. ` +
+          `No incluye lo que se le haya cobrado después.`,
+    }
+  }
+
+  return esPorOtrosPedidos
     ? {
         monto,
-        etiqueta: `Debía ${importe} al ${saldoAl}`,
+        etiqueta: `Debe ${importe} por otros pedidos`,
         detalle:
-          `Sin conexión: al ${saldoAl} este cliente debía ${importe}. ` +
-          `No incluye lo que se le haya cobrado después.`,
+          `Además de este pedido, este cliente debe ${importe}. ` +
+          `Puede incluir pedidos posteriores a éste.`,
       }
     : {
         monto,

@@ -109,6 +109,14 @@ describe('PedidoCard — aviso de deuda previa', () => {
     expect(screen.getByText(/Debe/)).toHaveTextContent('20.000')
   })
 
+  // El badge NO dice "deuda previa": el monto es la deuda menos ESTE pedido, y
+  // eso puede venir de uno posterior. Un cliente con dos impagos ve, en la
+  // tarjeta del viejo, el saldo del nuevo.
+  it('el badge dice que la deuda es por OTROS pedidos', () => {
+    renderCard(hacerPedido(50000), 'preventista')
+    expect(screen.getByText(/Debe/)).toHaveTextContent('por otros pedidos')
+  })
+
   it('no avisa cuando el cliente está al día', () => {
     renderCard(hacerPedido(0), 'preventista')
     expect(screen.queryByText(/Debe/)).not.toBeInTheDocument()
