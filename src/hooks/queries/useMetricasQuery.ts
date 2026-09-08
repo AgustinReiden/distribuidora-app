@@ -125,71 +125,30 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   }
 }
 
+/**
+ * Ventas por vendedor. La agregación la hace la base (mig 208): devuelve una
+ * fila por vendedor en vez de traer todos los pedidos del período con sus
+ * items para sumarlos acá.
+ *
+ * OJO, cambia dos números respecto de la versión que corría en el navegador:
+ * "Pagado" y "Pendiente" ahora salen de `monto_pagado` y no de baldes por
+ * `estado_pago`. La versión vieja usaba el total ENTERO del pedido según su
+ * estado, así que ignoraba los pagos parciales y dejaba afuera de los dos
+ * baldes a los pedidos en cualquier otro estado. En agosto eso eran $250.050
+ * que no aparecían en ninguna columna: pagado + pendiente no daba las ventas.
+ * Ahora cierran exacto.
+ */
 async function calcularReportePreventistas(
   fechaDesde?: string | null,
   fechaHasta?: string | null
 ): Promise<ReportePreventista[]> {
-  // Paginado igual que el dashboard: sin filtro son ~5.258 pedidos y con un mes
-  // puesto siguen siendo ~1.064, o sea que el tope se pasaba igual.
-  const pedidos = await traerTodo<PedidoDB>(
-    () => {
-      let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
-      if (fechaDesde) query = query.gte('fecha', fechaDesde)
-      if (fechaHasta) query = query.lte('fecha', fechaHasta)
-      return query.order('id')
-    },
-    { etiqueta: 'pedidos por preventista' },
-  )
-
-  if (pedidos.length === 0) {
-    return []
-  }
-
-  const pedidosTyped = pedidos.filter(p => p.estado !== 'cancelado')
-  const usuarioIds = Array.from(new Set(pedidosTyped.map(p => p.usuario_id).filter(Boolean))) as string[]
-
-  const { data: usuarios } = await supabase.from('perfiles').select('id, nombre, email').in('id', usuarioIds)
-  const usuariosMap: Record<string, { id: string; nombre: string; email: string }> = {}
-  ;((usuarios || []) as Array<{ id: string; nombre: string; email: string }>).forEach(u => {
-    usuariosMap[u.id] = u
+  const { data, error } = await supabase.rpc('reporte_ventas_por_preventista', {
+    p_desde: fechaDesde ?? null,
+    p_hasta: fechaHasta ?? null,
+    p_sucursal_id: null,
   })
-
-  const reportePorPreventista: Record<string, ReportePreventista> = {}
-
-  pedidosTyped.forEach(pedido => {
-    const usuarioId = pedido.usuario_id
-    if (!usuarioId) return
-
-    const usuario = usuariosMap[usuarioId]
-    const usuarioNombre = usuario?.nombre || 'Usuario desconocido'
-
-    if (!reportePorPreventista[usuarioId]) {
-      reportePorPreventista[usuarioId] = {
-        id: usuarioId,
-        nombre: usuarioNombre,
-        email: usuario?.email || 'N/A',
-        totalVentas: 0,
-        cantidadPedidos: 0,
-        pedidosPendientes: 0,
-        pedidosAsignados: 0,
-        pedidosEntregados: 0,
-        totalPagado: 0,
-        totalPendiente: 0
-      }
-    }
-
-    reportePorPreventista[usuarioId].totalVentas += pedido.total || 0
-    reportePorPreventista[usuarioId].cantidadPedidos += 1
-
-    if (pedido.estado === 'pendiente') reportePorPreventista[usuarioId].pedidosPendientes += 1
-    if (pedido.estado === 'asignado') reportePorPreventista[usuarioId].pedidosAsignados += 1
-    if (pedido.estado === 'entregado') reportePorPreventista[usuarioId].pedidosEntregados += 1
-
-    if (pedido.estado_pago === 'pagado') reportePorPreventista[usuarioId].totalPagado += pedido.total || 0
-    else if (pedido.estado_pago === 'pendiente') reportePorPreventista[usuarioId].totalPendiente += pedido.total || 0
-  })
-
-  return Object.values(reportePorPreventista).sort((a, b) => b.totalVentas - a.totalVentas)
+  if (error) throw error
+  return (data ?? []) as ReportePreventista[]
 }
 
 // Hooks

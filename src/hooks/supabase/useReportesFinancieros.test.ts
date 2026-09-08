@@ -1,167 +1,168 @@
 /**
- * Tests de la pestaña "Rentabilidad" de /reportes.
+ * Tests de los reportes financieros.
  *
- * Foco: la cascada de costo. Este hook calculaba el CMV con
- * `costo_unitario_al_crear ?? costo_real ?? fórmula`, salteándose
- * `costo_promedio` — que es justamente la base de CMV del reporte gerencial
- * (mig 130). Las dos pantallas daban márgenes distintos para el mismo período.
+ * QUÉ CAMBIÓ Y POR QUÉ ESTOS TESTS SON OTROS
+ * ------------------------------------------
+ * La versión anterior de este archivo probaba la cascada de costo de
+ * Rentabilidad calculada en JS. Esa cascada ya no existe acá: se movió a SQL
+ * (`reporte_rentabilidad`, mig 208), con la misma definición que
+ * `reporte_gerencial` (mig 130).
+ *
+ * Reimplementarla en JS sólo para poder testearla sería volver a tener dos
+ * definiciones del mismo número — que es exactamente el problema que este
+ * trabajo vino a cerrar. La cascada en SQL se verificó contra prod comparando
+ * el RPC con el cálculo manual sobre la misma foto de datos (203 productos,
+ * $35.169.818 de costo, idénticos).
+ *
+ * Lo que queda para testear en JS es el contrato del wrapper: que llame al RPC
+ * con los parámetros correctos, que desempaquete el JSON, y que un desvío de
+ * consistencia se avise en vez de pasar desapercibido.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
-// Cadena thenable: la query es .from().select().neq() y opcionalmente
-// .gte().lte(), y ahora termina en .range() porque las lecturas se paginan.
-// `range` devuelve la cadena, que es thenable: como el lote entra en una
-// página, el paginador corta en la primera vuelta.
-function createChainableMock(finalData: { data: unknown; error: unknown }) {
-  const chain: Record<string, unknown> = {
-    select: vi.fn(),
-    neq: vi.fn(),
-    gte: vi.fn(),
-    lte: vi.fn(),
-    eq: vi.fn(),
-    in: vi.fn(),
-    order: vi.fn(),
-    range: vi.fn(),
-  }
-  Object.keys(chain).forEach(k => {
-    ;(chain[k] as ReturnType<typeof vi.fn>).mockReturnValue(chain)
-  })
-  chain.then = vi.fn((resolve: (v: unknown) => void) => {
-    resolve(finalData)
-    return Promise.resolve(finalData)
-  })
-  return chain
-}
-
-const mockFrom = vi.fn()
+const mockRpc = vi.fn()
+const mockNotifyError = vi.fn()
 
 vi.mock('./base', () => ({
-  supabase: { from: (...args: unknown[]) => mockFrom(...args) },
-  notifyError: vi.fn(),
+  supabase: { rpc: (...args: unknown[]) => mockRpc(...args) },
+  notifyError: (...args: unknown[]) => mockNotifyError(...args),
 }))
 
 import { useReportesFinancieros } from './useReportesFinancieros'
-import type { ReporteRentabilidad } from '../../types'
 
-/** Un pedido de una línea, para aislar la cascada de costo. */
-function pedidoConItem(item: Record<string, unknown>, producto: Record<string, unknown>) {
-  return [
-    {
-      id: 'p1',
-      cliente_id: 'c1',
-      estado: 'entregado',
-      total: 1000,
-      created_at: '2026-01-15T10:00:00',
-      tipo_factura: 'FC',
-      items: [{ id: 'i1', ...item, producto: { id: 'prod1', nombre: 'Producto A', codigo: 'PA001', ...producto } }],
-    },
-  ]
-}
-
-async function correrReporte(pedidos: unknown[]): Promise<ReporteRentabilidad> {
-  mockFrom.mockReturnValue(createChainableMock({ data: pedidos, error: null }))
-  const { result } = renderHook(() => useReportesFinancieros())
-  let reporte!: ReporteRentabilidad
-  await act(async () => {
-    reporte = await result.current.generarReporteRentabilidad()
-  })
-  return reporte
-}
-
-describe('useReportesFinancieros › generarReporteRentabilidad', () => {
+describe('useReportesFinancieros', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  describe('cascada de costo canónica (mig 130)', () => {
-    it('sin snapshot usa costo_promedio, no costo_real', async () => {
-      // Los tres costos distintos a propósito: el número que sale dice en qué
-      // escalón de la cascada se cayó el cálculo.
-      const reporte = await correrReporte(
-        pedidoConItem(
-          { cantidad: 10, precio_unitario: 100, subtotal: 1000, costo_unitario_al_crear: null },
-          { costo_promedio: 60, costo_real: 80, costo_con_iva: 95, costo_sin_iva: 70, impuestos_internos: 10 }
-        )
-      )
+  describe('generarReporteCuentasPorCobrar', () => {
+    it('llama al RPC y devuelve las filas ya agregadas por la base', async () => {
+      const clientes = [
+        { cliente: { id: '1', nombre_fantasia: 'Kiosco' }, saldoPendiente: 6000 },
+      ]
+      mockRpc.mockResolvedValue({
+        data: { clientes, consistencia: { clientes_con_desvio: [] } },
+        error: null,
+      })
 
-      expect(reporte.productos[0].costos).toBe(600)
-      expect(reporte.productos[0].margen).toBe(400)
-      expect(reporte.totales.costosTotales).toBe(600)
+      const { result } = renderHook(() => useReportesFinancieros())
+      let filas!: unknown[]
+      await act(async () => {
+        filas = await result.current.generarReporteCuentasPorCobrar()
+      })
+
+      expect(mockRpc).toHaveBeenCalledWith('reporte_cuentas_por_cobrar', { p_sucursal_id: null })
+      expect(filas).toEqual(clientes)
     })
 
-    it('el snapshot congelado gana sobre costo_promedio', async () => {
-      // Es lo que hace que el margen de un mes cerrado no se mueva cuando
-      // cambia el costo de hoy.
-      const reporte = await correrReporte(
-        pedidoConItem(
-          { cantidad: 10, precio_unitario: 100, subtotal: 1000, costo_unitario_al_crear: 45 },
-          { costo_promedio: 60, costo_real: 80 }
-        )
-      )
+    // El auto-chequeo del RPC no sirve de nada si el front lo ignora.
+    it('avisa cuando el saldo del trigger no coincide con el calculado', async () => {
+      mockRpc.mockResolvedValue({
+        data: {
+          clientes: [],
+          consistencia: {
+            clientes_con_desvio: [
+              { cliente_id: '1', nombre: 'Kiosco', saldo_calculado: 100, saldo_cuenta: 900 },
+            ],
+          },
+        },
+        error: null,
+      })
 
-      expect(reporte.productos[0].costos).toBe(450)
-      expect(reporte.productos[0].margen).toBe(550)
+      const { result } = renderHook(() => useReportesFinancieros())
+      await act(async () => {
+        await result.current.generarReporteCuentasPorCobrar()
+      })
+
+      expect(mockNotifyError).toHaveBeenCalledWith(expect.stringContaining('1 cliente'))
     })
 
-    it('sin snapshot ni promedio cae a costo_real', async () => {
-      const reporte = await correrReporte(
-        pedidoConItem(
-          { cantidad: 10, precio_unitario: 100, subtotal: 1000, costo_unitario_al_crear: null },
-          { costo_promedio: null, costo_real: 80, costo_sin_iva: 70, impuestos_internos: 10 }
-        )
-      )
+    it('sin desvíos no molesta al usuario', async () => {
+      mockRpc.mockResolvedValue({
+        data: { clientes: [], consistencia: { clientes_con_desvio: [] } },
+        error: null,
+      })
 
-      expect(reporte.productos[0].costos).toBe(800)
+      const { result } = renderHook(() => useReportesFinancieros())
+      await act(async () => {
+        await result.current.generarReporteCuentasPorCobrar()
+      })
+
+      expect(mockNotifyError).not.toHaveBeenCalled()
     })
 
-    it('sin snapshot, promedio ni costo_real usa la fórmula con impuestos internos', async () => {
-      const reporte = await correrReporte(
-        pedidoConItem(
-          { cantidad: 10, precio_unitario: 100, subtotal: 1000, costo_unitario_al_crear: null },
-          { costo_promedio: null, costo_real: null, costo_sin_iva: 100, impuestos_internos: 10 }
-        )
-      )
+    it('un error del RPC se avisa y devuelve lista vacía, no rompe la pantalla', async () => {
+      mockRpc.mockResolvedValue({ data: null, error: { message: 'boom' } })
 
-      expect(reporte.productos[0].costos).toBe(1100)
-    })
+      const { result } = renderHook(() => useReportesFinancieros())
+      let filas!: unknown[]
+      await act(async () => {
+        filas = await result.current.generarReporteCuentasPorCobrar()
+      })
 
-    it('un producto sin ningún costo cargado no rompe los totales', async () => {
-      const reporte = await correrReporte(
-        pedidoConItem(
-          { cantidad: 10, precio_unitario: 100, subtotal: 1000, costo_unitario_al_crear: null },
-          { costo_promedio: null, costo_real: null, costo_sin_iva: null }
-        )
-      )
-
-      expect(reporte.productos[0].costos).toBe(0)
-      expect(reporte.totales.margenTotal).toBe(1000)
-      expect(Number.isNaN(reporte.totales.costosTotales)).toBe(false)
+      expect(filas).toEqual([])
+      expect(mockNotifyError).toHaveBeenCalledWith(expect.stringContaining('boom'))
     })
   })
 
-  describe('el ingreso sigue siendo el real (mig 123)', () => {
-    it('en FC el margen se mide contra el neto, no contra el precio final', async () => {
-      const reporte = await correrReporte(
-        pedidoConItem(
-          {
-            cantidad: 10,
-            precio_unitario: 121,
-            subtotal: 1210,
-            costo_unitario_al_crear: 50,
-            ingreso_real_unitario: 100,
-            neto_unitario: 100,
-            iva_unitario: 21,
-          },
-          { costo_promedio: 60 }
-        )
-      )
+  describe('generarReporteRentabilidad', () => {
+    it('le pasa el rango de fechas al RPC', async () => {
+      mockRpc.mockResolvedValue({ data: { productos: [], totales: {} }, error: null })
 
-      expect(reporte.productos[0].ingresos).toBe(1000)
-      expect(reporte.productos[0].costos).toBe(500)
-      expect(reporte.productos[0].margen).toBe(500)
-      expect(reporte.totales.ivaDiscriminado).toBe(210)
-      expect(reporte.totales.ventasBrutas).toBe(1210)
+      const { result } = renderHook(() => useReportesFinancieros())
+      await act(async () => {
+        await result.current.generarReporteRentabilidad('2026-08-01', '2026-08-31')
+      })
+
+      expect(mockRpc).toHaveBeenCalledWith('reporte_rentabilidad', {
+        p_desde: '2026-08-01',
+        p_hasta: '2026-08-31',
+        p_sucursal_id: null,
+      })
+    })
+
+    it('sin fechas manda null, que en el RPC significa todo el histórico', async () => {
+      mockRpc.mockResolvedValue({ data: { productos: [], totales: {} }, error: null })
+
+      const { result } = renderHook(() => useReportesFinancieros())
+      await act(async () => {
+        await result.current.generarReporteRentabilidad()
+      })
+
+      expect(mockRpc).toHaveBeenCalledWith('reporte_rentabilidad', {
+        p_desde: null,
+        p_hasta: null,
+        p_sucursal_id: null,
+      })
+    })
+
+    it('desempaqueta productos y totales', async () => {
+      const productos = [{ id: '1', nombre: 'Coca', margen: 400 }]
+      const totales = { ingresosTotales: 1000, costosTotales: 600, margenTotal: 400 }
+      mockRpc.mockResolvedValue({ data: { productos, totales }, error: null })
+
+      const { result } = renderHook(() => useReportesFinancieros())
+      let reporte!: { productos: unknown[]; totales: unknown }
+      await act(async () => {
+        reporte = await result.current.generarReporteRentabilidad()
+      })
+
+      expect(reporte.productos).toEqual(productos)
+      expect(reporte.totales).toEqual(totales)
+    })
+
+    it('una respuesta vacía no rompe: devuelve la forma esperada', async () => {
+      mockRpc.mockResolvedValue({ data: null, error: null })
+
+      const { result } = renderHook(() => useReportesFinancieros())
+      let reporte!: { productos: unknown[]; totales: unknown }
+      await act(async () => {
+        reporte = await result.current.generarReporteRentabilidad()
+      })
+
+      expect(reporte.productos).toEqual([])
+      expect(reporte.totales).toEqual({})
     })
   })
 })
