@@ -19,6 +19,7 @@ import type {
   ReportePreventista,
   PedidoDB
 } from '../../types'
+import { traerTodo } from '../../utils/paginacion'
 
 // Query keys
 export const metricasKeys = {
@@ -56,18 +57,23 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   const ventana = ventanaPeriodoDashboard(periodo, hoyISO, fechaDesde, fechaHasta)
 
   // -- Query principal del período (para 'historico' baja todo: intencional) --
-  const principalPromise = (async () => {
-    let query = supabase
-      .from('pedidos')
-      .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
-      .neq('estado', 'cancelado')
-    if (usuarioId) query = query.eq('usuario_id', usuarioId)
-    if (ventana.desde) query = query.gte('fecha', ventana.desde)
-    if (ventana.hasta) query = query.lte('fecha', ventana.hasta)
-    const { data, error } = await query.order('created_at', { ascending: false })
-    if (error) throw error
-    return (data as PedidoMetricaRow[]) || []
-  })()
+  // Paginado: un mes típico ya son ~1.064 pedidos, así que sin esto los KPIs
+  // del dashboard se calculaban sobre un subconjunto arbitrario. El desempate
+  // por `id` hace falta para que la paginación sea estable: `created_at` solo
+  // no es único.
+  const principalPromise = traerTodo<PedidoMetricaRow>(
+    () => {
+      let query = supabase
+        .from('pedidos')
+        .select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*))`)
+        .neq('estado', 'cancelado')
+      if (usuarioId) query = query.eq('usuario_id', usuarioId)
+      if (ventana.desde) query = query.gte('fecha', ventana.desde)
+      if (ventana.hasta) query = query.lte('fecha', ventana.hasta)
+      return query.order('created_at', { ascending: false }).order('id')
+    },
+    { etiqueta: 'pedidos del dashboard' },
+  )
 
   // -- Período anterior de igual duración terminando el día antes (misma
   //    convención que el comparativo del RPC reporte_gerencial). Sin `desde`
@@ -123,23 +129,23 @@ async function calcularReportePreventistas(
   fechaDesde?: string | null,
   fechaHasta?: string | null
 ): Promise<ReportePreventista[]> {
-  let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
+  // Paginado igual que el dashboard: sin filtro son ~5.258 pedidos y con un mes
+  // puesto siguen siendo ~1.064, o sea que el tope se pasaba igual.
+  const pedidos = await traerTodo<PedidoDB>(
+    () => {
+      let query = supabase.from('pedidos').select(`*, items:pedido_items(*)`)
+      if (fechaDesde) query = query.gte('fecha', fechaDesde)
+      if (fechaHasta) query = query.lte('fecha', fechaHasta)
+      return query.order('id')
+    },
+    { etiqueta: 'pedidos por preventista' },
+  )
 
-  if (fechaDesde) {
-    query = query.gte('fecha', fechaDesde)
-  }
-  if (fechaHasta) {
-    query = query.lte('fecha', fechaHasta)
-  }
-
-  const { data: pedidos, error } = await query
-  if (error) throw error
-
-  if (!pedidos || pedidos.length === 0) {
+  if (pedidos.length === 0) {
     return []
   }
 
-  const pedidosTyped = (pedidos as PedidoDB[]).filter(p => p.estado !== 'cancelado')
+  const pedidosTyped = pedidos.filter(p => p.estado !== 'cancelado')
   const usuarioIds = Array.from(new Set(pedidosTyped.map(p => p.usuario_id).filter(Boolean))) as string[]
 
   const { data: usuarios } = await supabase.from('perfiles').select('id, nombre, email').in('id', usuarioIds)

@@ -11,6 +11,7 @@ import type {
   ClienteDB,
   ProductoDB
 } from '../../types'
+import { traerTodo } from '../../utils/paginacion'
 
 interface PedidoExportacion {
   id: string;
@@ -86,6 +87,39 @@ interface ResumenPago {
 
 type BackupTipo = 'completo' | 'clientes' | 'productos' | 'pedidos';
 
+/**
+ * Baja una tabla entera para el backup y VERIFICA que esté completa.
+ *
+ * Un backup truncado es el peor caso de esta familia de bugs: los demás
+ * muestran un número mal en una pantalla y alguien lo nota, éste produce un
+ * archivo que parece bien y falla el día que hay que restaurarlo. Antes de este
+ * cambio bajaba 1.000 de 5.555 pedidos sin ninguna señal.
+ *
+ * Por eso no alcanza con paginar: se pide el `count` exacto a la base y se
+ * compara. Si no coinciden se tira, porque un backup que no puede demostrar que
+ * está completo no sirve como backup.
+ */
+async function bajarTodoVerificado<T>(
+  tabla: string,
+  hacerQuery: () => { range(d: number, h: number): PromiseLike<{ data: T[] | null; error: { message: string } | null }> },
+): Promise<T[]> {
+  const { count, error: errorCount } = await supabase
+    .from(tabla)
+    .select('*', { count: 'exact', head: true })
+  if (errorCount) throw new Error(`No se pudo contar ${tabla}: ${errorCount.message}`)
+
+  const filas = await traerTodo<T>(hacerQuery, { etiqueta: tabla })
+
+  if (count != null && filas.length !== count) {
+    throw new Error(
+      `El backup de ${tabla} quedó incompleto: se bajaron ${filas.length} de ${count} filas. ` +
+      `No se generó el archivo — un backup incompleto es peor que ninguno, porque parece bueno.`,
+    )
+  }
+
+  return filas
+}
+
 export function useBackup(): UseBackupReturnExtended {
   const [exportando, setExportando] = useState<boolean>(false)
 
@@ -94,16 +128,22 @@ export function useBackup(): UseBackupReturnExtended {
     try {
       const backup: BackupData = { fecha: new Date().toISOString(), tipo }
       if (tipo === 'completo' || tipo === 'clientes') {
-        const { data } = await supabase.from('clientes').select('*')
-        backup.clientes = (data || []) as ClienteDB[]
+        backup.clientes = await bajarTodoVerificado<ClienteDB>(
+          'clientes',
+          () => supabase.from('clientes').select('*').order('id'),
+        )
       }
       if (tipo === 'completo' || tipo === 'productos') {
-        const { data } = await supabase.from('productos').select('*')
-        backup.productos = (data || []) as ProductoDB[]
+        backup.productos = await bajarTodoVerificado<ProductoDB>(
+          'productos',
+          () => supabase.from('productos').select('*').order('id'),
+        )
       }
       if (tipo === 'completo' || tipo === 'pedidos') {
-        const { data } = await supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)`)
-        backup.pedidos = (data || []) as PedidoDB[]
+        backup.pedidos = await bajarTodoVerificado<PedidoDB>(
+          'pedidos',
+          () => supabase.from('pedidos').select(`*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)`).order('id'),
+        )
       }
       return backup
     } finally {

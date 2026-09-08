@@ -42,8 +42,11 @@ export function ReporteCuentasPorCobrar({
         CUIT: r.cliente.cuit ?? '',
         Teléfono: r.cliente.telefono ?? '',
         Activo: r.cliente.activo === false ? 'No' : 'Sí',
-        'Total facturado': r.totalDeuda,
-        Pagado: r.totalPagado,
+        // Los tres son del MISMO conjunto de pedidos: los que todavía tienen
+        // saldo. "Pagado" NO es el histórico del cliente — mezclarlos era el
+        // bug de #521, que hacía desaparecer deudores de la lista.
+        'Total facturado (pedidos con saldo)': r.totalDeuda,
+        'Pagado a cuenta de esos pedidos': r.totalPagado,
         Saldo: r.saldoPendiente,
         Corriente: r.aging.corriente,
         '1-30 días': r.aging.vencido30,

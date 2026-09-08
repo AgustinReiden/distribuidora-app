@@ -8,6 +8,7 @@ import type {
   PedidoDB,
   ProductoDB
 } from '../../types'
+import { traerTodo } from '../../utils/paginacion'
 
 interface PedidoWithItems {
   id: string;
@@ -37,12 +38,20 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
     setLoading(true)
     try {
       // Query ligera: todos los pedidos del cliente (sólo columnas necesarias para stats)
-      const { data: todosLiviano, error: errorLiv } = await supabase
-        .from('pedidos')
-        .select('id, total, estado, estado_pago, created_at')
-        .eq('cliente_id', clienteId)
-        .order('created_at', { ascending: false })
-      if (errorLiv) throw errorLiv
+      // Paginado aunque hoy el cliente más activo tenga ~117 pedidos: a su ritmo
+      // cruza las 1.000 en unos 3 años, y cuando lo haga esto se convierte en el
+      // bug de #521 —`totalCompras` saldría de los 1.000 pedidos más recientes y
+      // `montoPagado` de 1.000 pagos cualesquiera, o sea dos universos
+      // distintos—. La correctitud de hoy es coincidencia de volumen, no diseño.
+      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'total' | 'estado' | 'estado_pago' | 'created_at'>>(
+        () => supabase
+          .from('pedidos')
+          .select('id, total, estado, estado_pago, created_at')
+          .eq('cliente_id', clienteId)
+          .order('created_at', { ascending: false })
+          .order('id'),
+        { etiqueta: 'pedidos del cliente' },
+      )
 
       // Query pesada: últimos 50 pedidos con items (para UI + productos favoritos)
       const { data: pedidos, error: errorPedidos } = await supabase
@@ -66,11 +75,15 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const montoSinEntregar = pedidosSinEntregar.reduce((s, p) => s + (p.total || 0), 0)
 
       // Fetch pagos from the pagos table (source of truth for payments)
-      const { data: pagosCliente } = await supabase
-        .from('pagos')
-        .select('monto')
-        .eq('cliente_id', clienteId)
-      const totalPagosRegistrados = (pagosCliente || []).reduce((s: number, p: { monto: number }) => s + (p.monto || 0), 0)
+      const pagosCliente = await traerTodo<{ monto: number }>(
+        () => supabase
+          .from('pagos')
+          .select('monto')
+          .eq('cliente_id', clienteId)
+          .order('id'),
+        { etiqueta: 'pagos del cliente' },
+      )
+      const totalPagosRegistrados = pagosCliente.reduce((s: number, p: { monto: number }) => s + (p.monto || 0), 0)
 
       // Productos favoritos se calculan sobre los últimos 50 pedidos (limitación aceptada)
       const productosFrecuencia: ProductosFrecuenciaMap = {}

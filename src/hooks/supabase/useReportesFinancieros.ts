@@ -13,6 +13,8 @@ import type {
   ProductoDB
 } from '../../types'
 import { costoCanonicoUnitario } from '../../utils/costoCanonico'
+import { traerTodo } from '../../utils/paginacion'
+import { armarCuentasPorCobrar } from '../../utils/cuentasPorCobrar'
 
 interface PedidoWithItems {
   id: string;
@@ -39,79 +41,27 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
   const generarReporteCuentasPorCobrar = async (): Promise<ReporteCuentaPorCobrar[]> => {
     setLoading(true)
     try {
-      const { data: clientes, error: errorClientes } = await supabase
-        .from('clientes')
-        .select('*')
-        .order('nombre_fantasia')
-      if (errorClientes) throw errorClientes
+      // Los INACTIVOS entran a propósito: un informe de deuda que esconde al que
+      // debe y ya no opera no sirve para cobrarle (baja lógica, CLAUDE.md).
+      const clientes = await traerTodo<ClienteDB>(
+        () => supabase.from('clientes').select('*').order('id'),
+        { etiqueta: 'clientes' },
+      )
 
-      const { data: pedidos, error: errorPedidos } = await supabase
-        .from('pedidos')
-        .select('*')
-        .neq('estado_pago', 'pagado')
-      if (errorPedidos) throw errorPedidos
+      // Ya NO se leen los pagos acá. El saldo se arma pedido por pedido con
+      // `total - monto_pagado`; leer el histórico de pagos del cliente era
+      // justamente el bug (#521): se le restaba a la deuda de los impagos toda
+      // la plata que el cliente pagó en su vida.
+      const pedidos = await traerTodo<PedidoDB>(
+        () => supabase
+          .from('pedidos')
+          .select('id, cliente_id, total, monto_pagado, estado, fecha, fecha_entrega, created_at')
+          .neq('estado_pago', 'pagado')
+          .order('id'),
+        { etiqueta: 'pedidos impagos' },
+      )
 
-      const { data: pagos, error: errorPagos } = await supabase
-        .from('pagos')
-        .select('*')
-      if (errorPagos && !errorPagos.message.includes('does not exist')) throw errorPagos
-
-      const clientesTyped = (clientes || []) as ClienteDB[]
-      const pedidosTyped = (pedidos || []) as PedidoDB[]
-      const pagosTyped = (pagos || []) as PagoDB[]
-
-      const hoy = new Date()
-      const reporte: ReporteCuentaPorCobrar[] = clientesTyped.map(cliente => {
-        const pedidosCliente = pedidosTyped.filter(p => p.cliente_id === cliente.id)
-        const pagosCliente = pagosTyped.filter(p => p.cliente_id === cliente.id)
-
-        const totalDeuda = pedidosCliente.reduce((s, p) => s + (p.total || 0), 0)
-        const totalPagado = pagosCliente.reduce((s, p) => s + (p.monto || 0), 0)
-        const saldoPendiente = totalDeuda - totalPagado
-
-        let corriente = 0, vencido30 = 0, vencido60 = 0, vencido90 = 0
-        pedidosCliente.forEach(p => {
-          // Use outstanding balance per order, not full total (BUG-9 fix)
-          const saldoPedido = (p.total || 0) - (p.monto_pagado || 0)
-          if (saldoPedido <= 0) return // Skip fully paid orders
-
-          // La mora se cuenta desde la ENTREGA, no desde la creación del pedido.
-          // Un pedido con saldo pero aún NO entregado todavía no genera mora: va
-          // a "corriente" (el cliente todavía no recibió la mercadería).
-          if (p.estado !== 'entregado') {
-            corriente += saldoPedido
-            return
-          }
-          // Base de antigüedad: fecha de entrega real. Para pedidos entregados sin
-          // fecha_entrega (datos viejos) se usa la fecha del pedido como fallback.
-          const baseStr = p.fecha_entrega || p.fecha || p.created_at || 0
-          const fechaBase = new Date(baseStr)
-          const diasCredito = cliente.dias_credito || 30
-          const fechaVencimiento = new Date(fechaBase)
-          fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito)
-          const diasVencido = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24))
-
-          if (diasVencido <= 0) corriente += saldoPedido
-          else if (diasVencido <= 30) vencido30 += saldoPedido
-          else if (diasVencido <= 60) vencido60 += saldoPedido
-          else vencido90 += saldoPedido
-        })
-
-        const aging: AgingDeuda = { corriente, vencido30, vencido60, vencido90 }
-
-        return {
-          cliente,
-          totalDeuda,
-          totalPagado,
-          saldoPendiente,
-          limiteCredito: cliente.limite_credito || 0,
-          creditoDisponible: (cliente.limite_credito || 0) - saldoPendiente,
-          aging,
-          pedidosPendientes: pedidosCliente.length
-        }
-      }).filter(r => r.saldoPendiente > 0).sort((a, b) => b.saldoPendiente - a.saldoPendiente)
-
-      return reporte
+      return armarCuentasPorCobrar(clientes, pedidos) as unknown as ReporteCuentaPorCobrar[]
     } catch (error) {
       notifyError('Error al generar reporte: ' + (error as Error).message)
       return []
@@ -126,15 +76,18 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
   ): Promise<ReporteRentabilidad> => {
     setLoading(true)
     try {
-      let query = supabase.from('pedidos').select(`*, items:pedido_items(*, producto:productos(*))`)
-        .neq('estado', 'cancelado')
-      if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
-      if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
-
-      const { data: pedidos, error } = await query
-      if (error) throw error
-
-      const pedidosTyped = (pedidos || []) as PedidoWithItems[]
+      // Paginado: un solo mes ya pasa las 1.000 filas de PostgREST, así que sin
+      // esto el margen se calculaba sobre un subconjunto arbitrario.
+      const pedidosTyped = await traerTodo<PedidoWithItems>(
+        () => {
+          let q = supabase.from('pedidos').select(`*, items:pedido_items(*, producto:productos(*))`)
+            .neq('estado', 'cancelado')
+          if (fechaDesde) q = q.gte('created_at', `${fechaDesde}T00:00:00`)
+          if (fechaHasta) q = q.lte('created_at', `${fechaHasta}T23:59:59`)
+          return q.order('id')
+        },
+        { etiqueta: 'pedidos para rentabilidad' },
+      )
 
       const productoStats: ProductoStatsMap = {}
       let ventasBrutas = 0

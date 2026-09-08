@@ -38,6 +38,8 @@ function createChainableMock(finalData: { data: unknown; error: unknown }) {
     is: vi.fn(),
     order: vi.fn(),
     in: vi.fn(),
+    // Las lecturas de tablas grandes se paginan: `range` cierra la cadena.
+    range: vi.fn(),
   }
 
   // Make each method return the chain itself
@@ -862,8 +864,12 @@ describe('analyticsExport', () => {
       const chain = createChainableMock({ data: null, error: { message: 'DB error' } })
       vi.mocked(supabase.from).mockReturnValue(chain as never)
 
+      // Las siete consultas corren en paralelo y todas fallan: cuál rechaza
+      // primero no está definido, así que fijar una era un test frágil. Lo que
+      // importa es que el error propague Y diga cuál consulta falló, que es
+      // justo lo que un export de siete hojas necesita para diagnosticarse.
       await expect(exportarBI('2026-01-01', '2026-01-31')).rejects.toThrow(
-        'Error cargando ventas: DB error'
+        /^Error cargando \w+: DB error$/
       )
 
       expect(createMultiSheetExcel).not.toHaveBeenCalled()
