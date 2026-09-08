@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import {
-  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange, ChevronDown, Target,
+  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange, ChevronDown, Target, Download,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import NumberInput from '../ui/NumberInput'
@@ -14,6 +14,10 @@ import ModalMetas from './reportes-gerenciales/ModalMetas'
 import ModalAlertaDetalle from './reportes-gerenciales/ModalAlertaDetalle'
 import type { ReporteGerencial, AnalisisMensual, MetasGerenciales, Alerta, BonifPromo } from '../../hooks/queries'
 import { usePosicionFiscalQuery } from '../../hooks/queries/useReporteGerencialQuery'
+import {
+  BLOQUES_GERENCIAL, hojasDeBloque, hojasTodo, nombreArchivo,
+  type BloqueGerencial,
+} from '../../utils/exportGerencial'
 
 // Alertas cuyo detalle es una LISTA (modal). El resto hace scroll a su sección.
 const ALERTA_CON_LISTA = new Set(['cobranza_vencida', 'clientes_inactivos', 'productos_sin_costo'])
@@ -113,6 +117,36 @@ function Semaforo({ cur, meta, factor }: { cur: number; meta: number | null | un
   )
 }
 
+/**
+ * El export es FRACCIONADO: un botón por sección, no un único archivo con todo
+ * el dashboard adentro. El armado de las filas vive en `utils/exportGerencial`,
+ * con tests — acá sólo queda disparar la descarga.
+ */
+function BotonExportar({
+  onExportar, exportando, titulo, label,
+}: {
+  onExportar: () => void
+  exportando: boolean
+  titulo: string
+  label?: string
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onExportar}
+      disabled={exportando}
+      title={titulo}
+      aria-label={titulo}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 shrink-0"
+    >
+      {exportando
+        ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+        : <Download className="w-3.5 h-3.5" aria-hidden="true" />}
+      {label ?? 'Excel'}
+    </button>
+  )
+}
+
 function SectionTitle({ icon: Icon, title, hint, right }: { icon: React.ElementType; title: string; hint?: string; right?: React.ReactNode }): React.ReactElement {
   return (
     <div className="flex items-start justify-between gap-3 mb-4">
@@ -203,6 +237,30 @@ export default function VistaReportesGerenciales({
     return { comision, contrib: kp.margen_neto - kp.mermas - comision }
   }, [kp, comPct, comBase, comisionCalculadaPrev])
 
+  // Export fraccionado: qué bloque se está bajando (null = ninguno).
+  const [exportando, setExportando] = useState<string | null>(null)
+
+  const exportar = async (bloqueId: string): Promise<void> => {
+    if (!reporte) return
+    setExportando(bloqueId)
+    try {
+      const bloque = BLOQUES_GERENCIAL.find(b => b.id === bloqueId)
+      const hojas = bloque ? hojasDeBloque(reporte, bloque) : hojasTodo(reporte)
+      const { createMultiSheetExcel } = await import('../../utils/excel')
+      await createMultiSheetExcel(hojas, nombreArchivo(reporte, bloqueId))
+    } finally {
+      setExportando(null)
+    }
+  }
+
+  const botonDe = (b: BloqueGerencial): React.ReactElement => (
+    <BotonExportar
+      onExportar={() => void exportar(b.id)}
+      exportando={exportando === b.id}
+      titulo={`Descargar ${b.label} en Excel`}
+    />
+  )
+
   // Bonificaciones agrupadas por promoción (subtotales + filas por producto).
   const bonifAgrupado = useMemo(() => {
     const grupos = new Map<string, { promocion: string; costo: number; valor_venta: number; items: BonifPromo[] }>()
@@ -240,6 +298,24 @@ export default function VistaReportesGerenciales({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Export: el resumen (KPIs) y el dashboard entero. Cada sección tiene
+              además su propio botón — el export es fraccionado a propósito. */}
+          {reporte && (
+            <>
+              <BotonExportar
+                onExportar={() => void exportar('resumen')}
+                exportando={exportando === 'resumen'}
+                titulo="Descargar los KPIs del período en Excel"
+                label="Resumen"
+              />
+              <BotonExportar
+                onExportar={() => void exportar('todo')}
+                exportando={exportando === 'todo'}
+                titulo="Descargar todos los bloques del dashboard en un solo Excel"
+                label="Todo"
+              />
+            </>
+          )}
           {/* Toggle: ventas entregadas vs todos los pedidos (pendientes/en camino/entregados) */}
           <div className="flex items-center bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg p-0.5 shadow-sm">
             {([['Entregadas', false], ['Todos', true]] as const).map(([lbl, val]) => (
@@ -388,6 +464,16 @@ export default function VistaReportesGerenciales({
           )}
 
           {/* Qué requiere tu atención */}
+          {(reporte.alertas ?? []).length > 0 && (
+            <div className="flex justify-end -mb-3">
+              <BotonExportar
+                onExportar={() => void exportar('alertas')}
+                exportando={exportando === 'alertas'}
+                titulo="Descargar las alertas del período en Excel"
+                label="Alertas a Excel"
+              />
+            </div>
+          )}
           <Alertas items={reporte.alertas ?? []} onSelect={onAlerta} />
 
           {/* Detalle completo: colapsable; los gráficos montan recién al abrir (perf) */}
@@ -444,7 +530,7 @@ export default function VistaReportesGerenciales({
 
           {/* Evolución mensual */}
           <Card id="sec-evolucion" className="p-5">
-            <SectionTitle icon={TrendingUp} title="Evolución mensual" hint="Venta, bonificaciones y margen neto por mes." />
+            <SectionTitle icon={TrendingUp} title="Evolución mensual" hint="Venta, bonificaciones y margen neto por mes." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'evolucion')!)} />
             <div className="grid lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2 h-72"><EvolucionChart data={reporte.mensual} /></div>
               <div className="overflow-x-auto">
@@ -486,6 +572,8 @@ export default function VistaReportesGerenciales({
               icon={Percent} title="Equipo comercial y comisiones"
               hint="La comisión se recalcula en vivo."
               right={
+                <div className="flex items-center gap-2">
+                {botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'vendedores')!)}
                 <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/40 border dark:border-gray-600 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Comisión</span>
@@ -498,6 +586,7 @@ export default function VistaReportesGerenciales({
                     <option value="nc">No cancelado</option>
                     <option value="ent">Entregado</option>
                   </select>
+                </div>
                 </div>
               }
             />
@@ -545,7 +634,7 @@ export default function VistaReportesGerenciales({
 
           {/* Categorías */}
           <Card id="sec-categorias" className="p-5">
-            <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = margen inflado por productos sin costo." />
+            <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = margen inflado por productos sin costo." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'categorias')!)} />
             <div className="grid lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2 h-80"><CategoriasChart data={reporte.categorias} /></div>
               <div className="overflow-x-auto">
@@ -570,7 +659,7 @@ export default function VistaReportesGerenciales({
           {/* Top productos / clientes */}
           <div className="grid lg:grid-cols-2 gap-5">
             <Card className="p-5">
-              <SectionTitle icon={TrendingUp} title="Top 10 productos" hint="Por facturación de venta real." />
+              <SectionTitle icon={TrendingUp} title="Top 10 productos" hint="Por facturación de venta real." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'top-productos')!)} />
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
                   <th className={`${th} text-left`}>Producto</th><th className={`${th} text-right`}>Unid.</th><th className={`${th} text-right`}>Venta</th>
@@ -587,7 +676,7 @@ export default function VistaReportesGerenciales({
               </table>
             </Card>
             <Card id="sec-clientes" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Top 10 clientes" hint="Por facturación entregada." />
+              <SectionTitle icon={TrendingUp} title="Top 10 clientes" hint="Por facturación entregada." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'top-clientes')!)} />
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
                   <th className={`${th} text-left`}>Cliente</th><th className={`${th} text-right`}>Ped.</th><th className={`${th} text-right`}>Venta</th>
@@ -608,7 +697,7 @@ export default function VistaReportesGerenciales({
           {/* Cobranza + costos */}
           <div className="grid lg:grid-cols-2 gap-5">
             <Card id="sec-cobranza" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`Pagos registrados de las ventas del período. ${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} />
+              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`Pagos registrados de las ventas del período. ${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'cobranza')!)} />
               <div className="grid grid-cols-2 gap-4 items-center">
                 <div className="h-48"><CobranzaDonut cobranza={reporte.cobranza} /></div>
                 <table className="w-full">
@@ -632,7 +721,7 @@ export default function VistaReportesGerenciales({
               </div>
             </Card>
             <Card id="sec-mermas" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Otros costos del período" hint="Mermas, bonificaciones y reposición." />
+              <SectionTitle icon={TrendingUp} title="Otros costos del período" hint="Mermas, bonificaciones y reposición." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'mermas')!)} />
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
                   <th className={`${th} text-left`}>Mes</th><th className={`${th} text-right`}>Mermas</th><th className={`${th} text-right`}>Bonif.</th><th className={`${th} text-right`}>Compras</th>
@@ -657,6 +746,7 @@ export default function VistaReportesGerenciales({
               <SectionTitle
                 icon={TrendingUp} title="Bonificaciones y promociones"
                 hint="Qué se regaló, de qué promoción salió y cuánto vale: costo real vs precio de lista. Unidades en botellas (bot.) cuando la promo es fraccionada."
+                right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'bonificaciones')!)}
               />
               <div className="grid lg:grid-cols-3 gap-5">
                 <div className="lg:col-span-2 h-72"><BonifPromosChart data={reporte.bonif_promos ?? []} /></div>
