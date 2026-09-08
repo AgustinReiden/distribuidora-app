@@ -64,6 +64,12 @@ export interface VistaReportesGerencialesProps {
    */
   comisionCalculada?: number | null
   comisionCalculadaPrev?: number | null
+  /**
+   * Comisión REAL por vendedor, del RPC `calcular_comisiones` (mig 150+207).
+   * Es lo que se liquida: respeta el rol y las reglas individuales. null =
+   * todavía no llegó.
+   */
+  comisionPorVendedor?: { nombre: string; comision: number }[] | null
 }
 
 // ---- helpers de UI -------------------------------------------------------
@@ -170,7 +176,7 @@ export default function VistaReportesGerenciales({
   reporte, loading, error, sucursalSel, periodoSel, opcionesSucursal, opcionesPeriodo,
   onSucursal, onPeriodo, onRango, incluirNoEntregados, onIncluirNoEntregados,
   comparar, onComparar, metas, metasEditable, onGuardarMeta, guardandoMeta, analisis,
-  comisionCalculada, comisionCalculadaPrev,
+  comisionCalculada, comisionCalculadaPrev, comisionPorVendedor,
 }: VistaReportesGerencialesProps): React.ReactElement {
   const [comPct, setComPct] = useState(2)
   const [comBase, setComBase] = useState<'nc' | 'ent'>('nc')
@@ -236,6 +242,23 @@ export default function VistaReportesGerenciales({
       : base * comPct / 100
     return { comision, contrib: kp.margen_neto - kp.mermas - comision }
   }, [kp, comPct, comBase, comisionCalculadaPrev])
+
+  /**
+   * Comisión real por vendedor, indexada por nombre.
+   *
+   * El cruce es POR NOMBRE porque `reporte_gerencial.vendedores[]` no trae el
+   * id del perfil — sólo `nombre` y `rol`. Hoy no hay nombres repetidos en
+   * `perfiles`, pero nada lo impide: si algún día los hay, los dos homónimos
+   * comparten la misma celda. La salida definitiva es que el RPC devuelva el
+   * id; mientras tanto esto es lo que hay sin tocar SQL.
+   */
+  const comisionRealPorNombre = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const v of comisionPorVendedor ?? []) m.set(v.nombre, v.comision)
+    return m
+  }, [comisionPorVendedor])
+
+  const hayComisionReal = (comisionPorVendedor?.length ?? 0) > 0
 
   // Export fraccionado: qué bloque se está bajando (null = ninguno).
   const [exportando, setExportando] = useState<string | null>(null)
@@ -577,7 +600,7 @@ export default function VistaReportesGerenciales({
                 <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/40 border dark:border-gray-600 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Comisión</span>
-                    <NumberInput min={0} max={100} value={comPct} onChange={setComPct} commitOnChange emptyValue={0}
+                    <NumberInput aria-label="Porcentaje de comisión a simular" min={0} max={100} value={comPct} onChange={setComPct} commitOnChange emptyValue={0}
                       className="w-14 px-2 py-1 border rounded text-center text-sm font-semibold dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
                     <span className="text-sm font-medium text-gray-600 dark:text-gray-300">%</span>
                   </div>
@@ -596,7 +619,15 @@ export default function VistaReportesGerenciales({
                   <thead><tr className="border-b dark:border-gray-700">
                     <th className={`${th} text-left`}>Vendedor</th><th className={`${th} text-right`}>Venta</th>
                     <th className={`${th} text-right`}>Mg neto</th><th className={`${th} text-right`}>% neto</th>
-                    <th className={`${th} text-right`}>Comisión</th>
+                    {hayComisionReal && (
+                      <th className={`${th} text-right`} title="Lo que se liquida: según las reglas vigentes y el rol de cada uno. Es el mismo número que /comisiones.">
+                        Comisión
+                      </th>
+                    )}
+                    <th className={`${th} text-right ${hayComisionReal ? 'text-gray-400 dark:text-gray-500' : ''}`}
+                        title={hayComisionReal ? 'Simulación: el mismo % para todos, sin mirar rol ni reglas. No es lo que se paga.' : undefined}>
+                      {hayComisionReal ? `Simulado ${String(comPct).replace('.', ',')}%` : 'Comisión'}
+                    </th>
                   </tr></thead>
                   <tbody className="divide-y dark:divide-gray-700/60">
                     {[...reporte.vendedores].sort((a, b) => b.venta - a.venta).map((v, i) => {
@@ -612,7 +643,17 @@ export default function VistaReportesGerenciales({
                           <td className={`${td} text-right tabular-nums`}>{moneyC(v.venta)}</td>
                           <td className={`${td} text-right tabular-nums ${mn < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{moneyC(mn)}</td>
                           <td className={`${td} text-right tabular-nums font-medium ${mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pct(mnp)}</td>
-                          <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>{money(base * comPct / 100)}</td>
+                          {hayComisionReal && (
+                            <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>
+                              {money(comisionRealPorNombre.get(v.nombre) ?? 0)}
+                            </td>
+                          )}
+                          {/* Simulación. Va apagada cuando al lado está la real,
+                              para que nadie lea el número del simulador como si
+                              fuera el que se paga. */}
+                          <td className={`${td} text-right tabular-nums ${hayComisionReal ? 'text-gray-400 dark:text-gray-500' : 'font-bold text-gray-900 dark:text-white'}`}>
+                            {money(base * comPct / 100)}
+                          </td>
                         </tr>
                       )
                     })}
@@ -623,7 +664,14 @@ export default function VistaReportesGerenciales({
                       <td className={`${td} text-right tabular-nums`}>{moneyC(reporte.vendedores.reduce((s, v) => s + v.venta, 0))}</td>
                       <td className={`${td} text-right tabular-nums`}>{moneyC(reporte.vendedores.reduce((s, v) => s + v.margen_comercial - v.bonif, 0))}</td>
                       <td className={td}></td>
-                      <td className={`${td} text-right tabular-nums`}>{money(reporte.vendedores.reduce((s, v) => s + (comBase === 'nc' ? v.base_nc : v.venta) * comPct / 100, 0))}</td>
+                      {hayComisionReal && (
+                        <td className={`${td} text-right tabular-nums`}>
+                          {money(reporte.vendedores.reduce((s, v) => s + (comisionRealPorNombre.get(v.nombre) ?? 0), 0))}
+                        </td>
+                      )}
+                      <td className={`${td} text-right tabular-nums ${hayComisionReal ? 'text-gray-400 dark:text-gray-500 font-normal' : ''}`}>
+                        {money(reporte.vendedores.reduce((s, v) => s + (comBase === 'nc' ? v.base_nc : v.venta) * comPct / 100, 0))}
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
