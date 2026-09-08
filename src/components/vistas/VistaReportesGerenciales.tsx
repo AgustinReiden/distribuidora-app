@@ -69,7 +69,7 @@ export interface VistaReportesGerencialesProps {
    * Es lo que se liquida: respeta el rol y las reglas individuales. null =
    * todavía no llegó.
    */
-  comisionPorVendedor?: { nombre: string; comision: number }[] | null
+  comisionPorVendedor?: { id: string; nombre: string; comision: number }[] | null
 }
 
 // ---- helpers de UI -------------------------------------------------------
@@ -244,17 +244,16 @@ export default function VistaReportesGerenciales({
   }, [kp, comPct, comBase, comisionCalculadaPrev])
 
   /**
-   * Comisión real por vendedor, indexada por nombre.
+   * Comisión real por vendedor, indexada por ID del perfil (mig 209).
    *
-   * El cruce es POR NOMBRE porque `reporte_gerencial.vendedores[]` no trae el
-   * id del perfil — sólo `nombre` y `rol`. Hoy no hay nombres repetidos en
-   * `perfiles`, pero nada lo impide: si algún día los hay, los dos homónimos
-   * comparten la misma celda. La salida definitiva es que el RPC devuelva el
-   * id; mientras tanto esto es lo que hay sin tocar SQL.
+   * Antes el cruce era por NOMBRE, porque `reporte_gerencial.vendedores[]` no
+   * traía el id: dos homónimos habrían compartido la celda de comisión sin que
+   * nadie se enterara. Ahora los dos RPCs devuelven el mismo id y el cruce es
+   * exacto.
    */
-  const comisionRealPorNombre = useMemo(() => {
+  const comisionRealPorId = useMemo(() => {
     const m = new Map<string, number>()
-    for (const v of comisionPorVendedor ?? []) m.set(v.nombre, v.comision)
+    for (const v of comisionPorVendedor ?? []) m.set(v.id, v.comision)
     return m
   }, [comisionPorVendedor])
 
@@ -645,7 +644,7 @@ export default function VistaReportesGerenciales({
                           <td className={`${td} text-right tabular-nums font-medium ${mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pct(mnp)}</td>
                           {hayComisionReal && (
                             <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>
-                              {money(comisionRealPorNombre.get(v.nombre) ?? 0)}
+                              {money(comisionRealPorId.get(v.id) ?? 0)}
                             </td>
                           )}
                           {/* Simulación. Va apagada cuando al lado está la real,
@@ -666,7 +665,7 @@ export default function VistaReportesGerenciales({
                       <td className={td}></td>
                       {hayComisionReal && (
                         <td className={`${td} text-right tabular-nums`}>
-                          {money(reporte.vendedores.reduce((s, v) => s + (comisionRealPorNombre.get(v.nombre) ?? 0), 0))}
+                          {money(reporte.vendedores.reduce((s, v) => s + (comisionRealPorId.get(v.id) ?? 0), 0))}
                         </td>
                       )}
                       <td className={`${td} text-right tabular-nums ${hayComisionReal ? 'text-gray-400 dark:text-gray-500 font-normal' : ''}`}>

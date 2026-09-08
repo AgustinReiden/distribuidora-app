@@ -125,6 +125,8 @@ export interface ReporteMes {
 }
 
 export interface ReporteVendedor {
+  /** Id del perfil (mig 209). Es la clave para cruzar con calcular_comisiones. */
+  id: string
   nombre: string
   rol: string
   pedidos: number
