@@ -20,6 +20,9 @@ export type { ReporteVentasZonasProps } from './ReporteVentasZonas';
 export { ReporteValuacionInventario } from './ReporteValuacionInventario';
 export type { ReporteValuacionInventarioProps } from './ReporteValuacionInventario';
 
+export { ReporteStockRed } from './ReporteStockRed';
+export type { ReporteStockRedProps } from './ReporteStockRed';
+
 export { FiltrosVentas } from './FiltrosVentas';
 export type { FiltrosVentasProps } from './FiltrosVentas';
 export { filtrosVentasIniciales } from './filtrosVentasState';
