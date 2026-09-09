@@ -196,7 +196,14 @@ export default function PedidosContainer(): React.ReactElement {
   // Queries - use debounced search to avoid firing on every keystroke
   const { registrarPago, registrarPagosBatch, fetchPagosPedido, eliminarPago, actualizarFormaPagoDePago } = usePagos()
 
-  const { data: paginatedResult, isLoading: loadingPedidos } = usePedidosPaginatedQuery(
+  // dataUpdatedAt: cuándo se trajo esta página del servidor. Sólo se usa para
+  // fechar la deuda previa cuando no hay señal — el número que se ve entonces es
+  // el del último sync y no incluye lo cobrado después.
+  const {
+    data: paginatedResult,
+    isLoading: loadingPedidos,
+    dataUpdatedAt: pedidosActualizadosAt,
+  } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
   )
   const { data: statsSummary = EMPTY_PEDIDO_STATS_SUMMARY } = usePedidoStatsQuery(
@@ -1904,6 +1911,7 @@ export default function PedidosContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaPedidos
           pedidos={pedidos}
+          saldoActualizadoAt={pedidosActualizadosAt}
           totalCount={totalCount}
           statsSummary={statsSummary}
           paginaActual={paginaActual}

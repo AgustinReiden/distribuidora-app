@@ -134,6 +134,18 @@ const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, 
 export const PEDIDO_SELECT = `*, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
 const PEDIDO_SELECT_CLIENTE_INNER = `*, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
 
+// `deuda_previa` es una computed column de PostgREST: la funcion SQL del mismo
+// nombre (mig 215), que devuelve lo que el cliente debia ANTES de este pedido.
+// No sale de `clientes.saldo_cuenta`: ese es un escalar del presente e incluye
+// los pedidos POSTERIORES, que fue el bug del PR #530.
+//
+// Va SOLO en la lista, no en el PEDIDO_SELECT compartido: la calcula por fila y
+// la ruta (useRecorridoExistenteQuery) y la hoja de ruta
+// (useRecorridosHojaRutaQuery) traen muchos pedidos y no la muestran. Medido:
+// ~65 ms por pagina de 20.
+const PEDIDO_SELECT_LISTA = `${PEDIDO_SELECT}, deuda_previa` as const
+const PEDIDO_SELECT_LISTA_CLIENTE_INNER = `${PEDIDO_SELECT_CLIENTE_INNER}, deuda_previa` as const
+
 // Helper: cargar salvedades para un conjunto de pedidos
 async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise<Record<string, PedidoSalvedadResumen[]>> {
   const pedidosEntregadosIds = pedidos
@@ -244,7 +256,7 @@ async function fetchPedidosPaginated(
   const hasSearch = search && search.trim().length > 0
 
   // Use !inner join when searching so PostgREST filters parent rows by client fields
-  const selectStr = hasSearch ? PEDIDO_SELECT_CLIENTE_INNER : PEDIDO_SELECT
+  const selectStr = hasSearch ? PEDIDO_SELECT_LISTA_CLIENTE_INNER : PEDIDO_SELECT_LISTA
 
   let query = supabase
     .from('pedidos')
