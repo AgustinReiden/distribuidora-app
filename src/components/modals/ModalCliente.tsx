@@ -1,5 +1,5 @@
 import { useState, memo, useRef, useMemo } from 'react';
-import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2 } from 'lucide-react';
+import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2, Lock } from 'lucide-react';
 import ModalBase from './ModalBase';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
@@ -66,6 +66,12 @@ export interface ClienteFormData {
   descuentosPorCategoria: Array<{ categoria: string; porcentaje: number }>;
   preventista_id: string;
   preventista_ids: string[];
+  /**
+   * "Solo administradores" (mig 214). Excluyente con `preventista_ids`: si esta
+   * en true el cliente no lleva asignaciones, y la base las borra igual al
+   * marcarlo. Solo admin lo edita.
+   */
+  reservado_admin: boolean;
 }
 
 /** Datos para guardar cliente */
@@ -188,7 +194,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       porcentaje: Number(d.descuento_porcentaje) || 0,
     })),
     preventista_id: cliente.preventista_id || '',
-    preventista_ids: cliente.preventista_ids || []
+    preventista_ids: cliente.preventista_ids || [],
+    reservado_admin: cliente.reservado_admin ?? false
   } : {
     tipo_documento: 'CUIT',
     numero_documento: '',
@@ -215,7 +222,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     tipoFacturaDefault: 'ZZ',
     descuentosPorCategoria: [],
     preventista_id: '',
-    preventista_ids: []
+    preventista_ids: [],
+    reservado_admin: false
   });
 
   // State para captura de GPS del navegador (botón "Usar mi ubicación actual").
@@ -280,6 +288,16 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           : [...prev.preventista_ids, id]
       };
     });
+  };
+  /**
+   * Los tres estados son excluyentes: al reservar el cliente a administracion
+   * se vacian las asignaciones. Si no, el form manda las dos cosas y el trigger
+   * de la base rechaza el INSERT en cliente_preventistas.
+   */
+  const toggleReservadoAdmin = (): void => {
+    setForm(prev => prev.reservado_admin
+      ? { ...prev, reservado_admin: false }
+      : { ...prev, reservado_admin: true, preventista_ids: [] });
   };
   const preventistasVisibles = preventistas.filter(p =>
     (p.nombre || '').toLowerCase().includes(preventistasFiltro.trim().toLowerCase())
@@ -732,8 +750,36 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
           </div>
         </div>
 
+        {/* Solo administradores (mig 214). Tercer estado, excluyente con la
+            asignacion N-a-N: por eso cuando esta tildado el selector de
+            preventistas de abajo no se muestra. */}
+        {isAdmin && (
+          <div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.reservado_admin}
+                onChange={toggleReservadoAdmin}
+                className="rounded mt-1"
+              />
+              <span>
+                <span className="flex items-center gap-1 text-sm font-medium dark:text-gray-200">
+                  <Lock className="w-4 h-4" />
+                  Solo administradores
+                </span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400">
+                  Ningún preventista lo va a ver ni le va a poder cargar pedidos. Lo
+                  siguen viendo administración, el encargado y el transportista que se
+                  lo entrega. El preventista que ya le vendió sigue viendo sus pedidos
+                  anteriores.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
         {/* Preventistas asignados (N-a-N) */}
-        {isAdmin && preventistas.length > 0 && (
+        {isAdmin && !form.reservado_admin && preventistas.length > 0 && (
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
               <Users className="w-4 h-4" />

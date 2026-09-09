@@ -137,17 +137,17 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 214** — la última numerada en el repo es
-`213_cerrar_el_acl_del_trigger_de_la_212`, y el ledger de prod está alineado con ella.
+**La próxima migración es la 215** — la última numerada en el repo es
+`214_un_cliente_reservado_a_administracion`, y el ledger de prod está alineado con ella.
 Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
 número se reserva **aplicando**, no escribiendo el archivo.
 
 (Esta línea decía 206 hasta el 2026-09-08, con las 206–209 ya aplicadas: la
 numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Si aplicás
-una migración, actualizá también esta línea.)
+una migración, actualizá también esta línea. Última actualización: 214, el 2026-09-09.)
 
 Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204,
-205, 212 y 213 sí:
+205, 212, 213 y 214 sí:
 
 - **203** `bot_buscar_cliente` pasa a filtrar `activo = TRUE`. Era el único camino
   del bot que no lo hacía, y es la puerta de entrada: un cliente dado de baja
@@ -213,6 +213,26 @@ Las 206–209 tampoco tienen prosa acá. Las 210 y 211 sí:
   como parte del INSERT, no el caller—, así que queda con `postgres` + `service_role`, igual
   que `completar_origen_precio_item` (148) y `validar_precio_item_pedido`. Verificado que el
   trigger sigue disparando después del revoke. **No toca ninguna fila.**
+- **214** agrega el tercer estado de asignación de clientes: `clientes.reservado_admin`
+  ("Solo administradores"). No es "invisible para todos menos admin" — admin, encargado,
+  transportista y depósito lo ven entero, y el preventista que **ya le vendió** también,
+  porque si no el embed `cliente:clientes(*)` devuelve NULL y los `!inner` de
+  `usePedidosQuery` / `usePedidoStatsQuery` le hacen **desaparecer** los pedidos viejos de
+  la lista y del count, en silencio. Lo que cierra es que un preventista lo tome como
+  cliente nuevo. No se pudo modelar como ausencia de asignación porque "sin preventista
+  asignado" ya significa *visible para todos* (mig 028), ni dentro de
+  `cliente_preventistas` porque `cp_insert` (002) deja auto-asignarse a cualquiera. Es
+  **excluyente** con las asignaciones, enforceado en las dos direcciones. Toca las tres
+  policies de `clientes` (select, update e insert — la de update es independiente de la de
+  select y por eso también la lleva), 4 triggers nuevos, y repite el filtro a mano en
+  `bot_buscar_cliente`, `bot_historico_pedidos_cliente`, `bot_productos_recurrentes_cliente`
+  y `registrar_visita_cliente` porque el bot corre con `service_role` y bypassea la RLS
+  (misma familia que la 203). `bot_mis_clientes` y `bot_sugerir_visitas_rfm` no hacen falta:
+  hacen INNER JOIN contra `cliente_preventistas`. El trigger sobre `pedidos` cubre
+  `crear_pedido_completo` y `crear_pedido_completo_bot` sin tocarles el cuerpo vivo (la 205
+  le inyecta código al primero). **No toca ninguna fila**: la columna nace en `false` y todo
+  el predicado nuevo es una tautología mientras nadie marque a nadie. Verificado contra prod
+  con un usuario de cada rol.
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`

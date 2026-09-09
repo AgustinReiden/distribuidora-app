@@ -201,6 +201,11 @@ interface ClienteCreateInput {
   notas?: string
   preventista_id?: string | null
   preventista_ids?: string[]
+  /**
+   * "Solo administradores" (mig 214): tercer estado de asignacion, excluyente
+   * con `preventista_ids`. Solo admin lo escribe.
+   */
+  reservado_admin?: boolean
   descuentos_categoria?: { categoria: string; descuento_porcentaje: number }[]
   /** FC/ZZ por defecto al crear pedidos de este cliente (mig 116) */
   tipo_factura_default?: 'ZZ' | 'FC'
@@ -276,6 +281,10 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       notas: clienteFields.notas || null,
       tipo_factura_default: clienteFields.tipo_factura_default ?? 'ZZ',
       place_id: clienteFields.place_id || null,
+      // "Solo administradores" (mig 214). Esta lista es explicita, asi que sin
+      // esta linea la marca se perderia en silencio al crear. La RLS de INSERT
+      // solo la acepta en true si el que crea es admin.
+      reservado_admin: clienteFields.reservado_admin ?? false,
       sucursal_id: sucursalId,
       ...(clienteFields.preventista_id ? { preventista_id: clienteFields.preventista_id } : {})
     }])

@@ -87,6 +87,14 @@ suelta en `sucursales`.
   —selectores, rutas, recorridos— los oculta; el historial —reportes, cuenta corriente y los
   embeds `cliente:clientes(*)`— **tiene** que seguir viéndolos, que es de lo que se trata la
   baja lógica. Una consulta que no elige está eligiendo mal por omisión.
+- **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
+  `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
+  **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
+  `reservado_admin` **no** es "solo lo ve admin": lo ven también encargado, transportista y
+  depósito, y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
+  viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. Todo
+  camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
+  sigue mostrando.
 
 ## Trampas
 
