@@ -159,14 +159,25 @@ async function fetchClientesByZona(zona: string): Promise<ClienteDB[]> {
 }
 
 async function fetchZonasUnicas(): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('clientes')
-    .select('zona')
-    .not('zona', 'is', null)
+  // Lee una fila por cliente para quedarse con 13 zonas distintas. Paginado
+  // porque `clientes` es la tabla que más cerca está del tope: hoy 461 filas
+  // con zona de las 722 totales. Pasado el tope no degrada de a poco —se
+  // pierde una zona entera del filtro, sin aviso—, y una zona que desaparece
+  // de la lista es un pedazo del reparto que deja de poder elegirse.
+  //
+  // Lo correcto sería que la base devuelva las zonas distintas en vez de las
+  // filas (como `reporte_ventas_por_cliente`, mig 197). Mientras tanto esto es
+  // correcto para cualquier volumen, que es lo que estaba en juego.
+  const data = await traerTodo<{ zona: string | null }>(
+    () => supabase
+      .from('clientes')
+      .select('zona')
+      .not('zona', 'is', null)
+      .order('id'),
+    { etiqueta: 'zonas de clientes' },
+  )
 
-  if (error) throw error
-
-  const zonas = [...new Set((data || []).map(c => c.zona).filter(Boolean) as string[])]
+  const zonas = [...new Set(data.map(c => c.zona).filter(Boolean) as string[])]
   return zonas.sort()
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { traerTodo, PAGINA_SUPABASE, TOPE_SEGURIDAD } from './paginacion'
+import { traerTodo, traerTodoVerificado, PAGINA_SUPABASE, TOPE_SEGURIDAD } from './paginacion'
 
 /**
  * Simula el builder de supabase-js: `.range(desde, hasta)` devuelve una porción
@@ -130,6 +130,97 @@ describe('traerTodo', () => {
       }))
       await traerTodo(factory, { pagina: 1000 })
       expect(factory).toHaveBeenCalledTimes(3)
+    })
+  })
+})
+
+describe('traerTodoVerificado', () => {
+  const contarOk = (n: number) => () => Promise.resolve({ count: n, error: null })
+
+  describe('cuando puede demostrar que trajo todo', () => {
+    it('devuelve las filas si coinciden con el count', async () => {
+      const { factory } = fakeTabla(filasDe(2500))
+      const filas = await traerTodoVerificado(factory, {
+        pagina: 1000,
+        contar: contarOk(2500),
+      })
+      expect(filas).toHaveLength(2500)
+    })
+
+    it('sirve para una tabla vacia', async () => {
+      const { factory } = fakeTabla([])
+      expect(await traerTodoVerificado(factory, { contar: contarOk(0) })).toEqual([])
+    })
+  })
+
+  describe('cuando NO puede, no deja generar el archivo', () => {
+    // El caso de #523: la consulta devuelve 1.000 de 5.555 y nadie se entera.
+    // Aca el count no coincide, asi que tiene que tirar en vez de devolver.
+    it('tira si bajo menos filas que el count', async () => {
+      // La foto exacta de #523: la base dice 5.555 y solo llegan 1.000.
+      const { factory } = fakeTabla(filasDe(1000))
+      await expect(
+        traerTodoVerificado(factory, { pagina: 1000, contar: contarOk(5555) }),
+      ).rejects.toThrow(/incompleto/)
+    })
+
+    it('el error dice cuantas filas se bajaron de cuantas', async () => {
+      const { factory } = fakeTabla(filasDe(1000))
+      await expect(
+        traerTodoVerificado(factory, { pagina: 1000, contar: contarOk(5555) }),
+      ).rejects.toThrow(/1000 de 5555/)
+    })
+
+    it('el error dice QUE quedo incompleto', async () => {
+      const { factory } = fakeTabla(filasDe(10))
+      await expect(
+        traerTodoVerificado(factory, {
+          etiqueta: 'el backup de pedidos',
+          contar: contarOk(99),
+        }),
+      ).rejects.toThrow(/el backup de pedidos/)
+    })
+
+    // Una fila insertada entre el conteo y la ultima pagina tambien rompe.
+    // Es a proposito: rehacer un backup es barato, uno incompleto no.
+    it('tira tambien si bajo MAS filas que el count', async () => {
+      const { factory } = fakeTabla(filasDe(11))
+      await expect(
+        traerTodoVerificado(factory, { contar: contarOk(10) }),
+      ).rejects.toThrow(/incompleto/)
+    })
+
+    it('propaga el error del conteo sin llegar a paginar', async () => {
+      const { factory, rangos } = fakeTabla(filasDe(10))
+      await expect(
+        traerTodoVerificado(factory, {
+          etiqueta: 'el backup de pedidos',
+          contar: () => Promise.resolve({ count: null, error: { message: 'boom' } }),
+        }),
+      ).rejects.toThrow('No se pudo contar el backup de pedidos: boom')
+      expect(rangos).toHaveLength(0)
+    })
+
+    // Un error a mitad de la paginacion tampoco puede terminar en archivo.
+    it('propaga el error de una pagina', async () => {
+      const { factory } = fakeTabla(filasDe(10), { error: { message: 'boom' } })
+      await expect(
+        traerTodoVerificado(factory, { contar: contarOk(10) }),
+      ).rejects.toThrow('boom')
+    })
+  })
+
+  describe('cuando la base no da un count', () => {
+    // `count: null` es "no se pudo contar", no "hay cero". Verificar contra eso
+    // convertiria cualquier consulta en un fallo; se deja pasar lo que trajo
+    // `traerTodo`, que ya de por si pagina hasta agotar.
+    it('no inventa una verificacion si el count viene null', async () => {
+      const { factory } = fakeTabla(filasDe(2500))
+      const filas = await traerTodoVerificado(factory, {
+        pagina: 1000,
+        contar: () => Promise.resolve({ count: null, error: null }),
+      })
+      expect(filas).toHaveLength(2500)
     })
   })
 })

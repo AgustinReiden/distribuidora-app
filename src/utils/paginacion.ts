@@ -102,3 +102,58 @@ export async function traerTodo<T>(
     `Es un freno de seguridad: revisá el filtro de la consulta, o pasá a un RPC que agregue en la base.`,
   )
 }
+
+/** Lo mínimo que se necesita de una consulta de conteo (`head: true`). */
+interface ConCount {
+  count: number | null
+  error: { message: string } | null
+}
+
+export interface OpcionesVerificado extends OpcionesPaginado {
+  /**
+   * Pide el `count` exacto a la base. TIENE que mirar el mismo universo que
+   * `hacerQuery` —los mismos filtros, la misma tabla—: si el conteo y las
+   * páginas no ven lo mismo, la comparación no prueba nada. Por eso conviene
+   * armar los filtros en una sola función y usarla para las dos cosas.
+   */
+  contar: () => PromiseLike<ConCount>
+}
+
+/**
+ * Como `traerTodo`, pero además DEMUESTRA que trajo todo.
+ *
+ * Paginar arregla el truncado mientras nada falle. Para un archivo que se
+ * guarda —un backup, un export— eso no alcanza: si alguna página vuelve corta,
+ * el resultado sigue siendo un archivo con cara de completo, y de eso nadie se
+ * entera hasta el día que hay que usarlo. El backup llegó a guardar 1.000 de
+ * 5.555 pedidos así (#523).
+ *
+ * Entonces se pide el `count` exacto y se compara. Si no coinciden, tira: el
+ * que llama NO tiene que generar el archivo.
+ *
+ * Nota sobre la carrera: entre el conteo y la última página alguien puede
+ * insertar una fila, y entonces esto falla aunque no haya ningún bug. Es a
+ * propósito. Un backup que se rehace es barato; uno incompleto que nadie
+ * cuestionó, no.
+ */
+export async function traerTodoVerificado<T>(
+  hacerQuery: () => ConRange<T>,
+  opciones: OpcionesVerificado,
+): Promise<T[]> {
+  const etiqueta = opciones.etiqueta ?? 'la consulta'
+
+  const { count, error } = await opciones.contar()
+  if (error) throw new Error(`No se pudo contar ${etiqueta}: ${error.message}`)
+
+  const filas = await traerTodo<T>(hacerQuery, opciones)
+
+  if (count != null && filas.length !== count) {
+    throw new Error(
+      `No se generó el archivo: ${etiqueta} quedó incompleto, ` +
+      `se bajaron ${filas.length} de ${count} filas. ` +
+      `Un archivo que dice estar completo y trae una parte es peor que ninguno, porque nadie lo revisa.`,
+    )
+  }
+
+  return filas
+}

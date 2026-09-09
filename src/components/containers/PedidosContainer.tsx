@@ -63,6 +63,7 @@ import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useRegistrarGeolocalizacionPedido } from '../../hooks/useRegistrarGeolocalizacionPedido'
 import type { GpsResult, GpsStatus } from '../../hooks/useGeolocationCapture'
 import { supabase } from '../../hooks/supabase/base'
+import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
 import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
@@ -708,34 +709,57 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [entregaYPagoMasivos, notify, requestIdMasivo])
 
-  // Fetch todos los pedidos con filtros actuales (sin paginación) para export
+  // Fetch todos los pedidos con filtros actuales para export.
+  //
+  // "Todos" tiene que ser todos. Sin paginar, esto traía 1.000 de los 5.617
+  // pedidos y el Excel/PDF salía igual, con cara de completo: es el mismo
+  // truncado silencioso del backup (#523), en un artefacto que también se
+  // archiva. Por eso además de paginar se VERIFICA contra el `count` exacto y
+  // se tira si no coincide, como `bajarTodoVerificado` en useBackup.ts.
   const fetchAllFilteredPedidos = useCallback(async (): Promise<PedidoDB[]> => {
     const hasSearch = debouncedBusqueda && debouncedBusqueda.trim().length > 0
     const selectStr = hasSearch
       ? '*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
       : '*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
 
-    let query = supabase
-      .from('pedidos')
-      .select(selectStr)
-      .order('created_at', { ascending: false })
+    // Los filtros se arman en UN solo lugar: el conteo y las páginas tienen que
+    // mirar exactamente el mismo universo, o la verificación no prueba nada.
+    // El desempate por `id` hace falta porque `created_at` no es único y
+    // paginar sin orden estable repite filas y saltea otras.
+    const armarQuery = (opciones?: { count: 'exact'; head: true }) => {
+      let query = supabase
+        .from('pedidos')
+        .select(selectStr, opciones)
+        .order('created_at', { ascending: false })
+        .order('id')
 
-    if (filtros.estado && filtros.estado !== 'todos') query = query.eq('estado', filtros.estado)
-    if (filtros.estadoPago && filtros.estadoPago !== 'todos') query = query.eq('estado_pago', filtros.estadoPago)
-    if (filtros.transportistaId && filtros.transportistaId !== 'todos') query = query.eq('transportista_id', filtros.transportistaId)
-    if (filtros.fechaDesde) query = query.gte('fecha', filtros.fechaDesde)
-    if (filtros.fechaHasta) query = query.lte('fecha', filtros.fechaHasta)
-    if (!filtros.verCancelados && filtros.estado !== 'cancelado') query = query.neq('estado', 'cancelado')
-    if (hasSearch) {
-      const trimmed = debouncedBusqueda!.trim()
-      query = query.or(
-        `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
-        { referencedTable: 'clientes' }
-      )
+      if (filtros.estado && filtros.estado !== 'todos') query = query.eq('estado', filtros.estado)
+      if (filtros.estadoPago && filtros.estadoPago !== 'todos') query = query.eq('estado_pago', filtros.estadoPago)
+      if (filtros.transportistaId && filtros.transportistaId !== 'todos') query = query.eq('transportista_id', filtros.transportistaId)
+      if (filtros.fechaDesde) query = query.gte('fecha', filtros.fechaDesde)
+      if (filtros.fechaHasta) query = query.lte('fecha', filtros.fechaHasta)
+      if (!filtros.verCancelados && filtros.estado !== 'cancelado') query = query.neq('estado', 'cancelado')
+      if (hasSearch) {
+        const trimmed = debouncedBusqueda!.trim()
+        query = query.or(
+          `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
+          { referencedTable: 'clientes' }
+        )
+      }
+      return query
     }
 
-    const { data, error } = await query
-    if (error) throw error
+    type FilaExport = Record<string, unknown> & {
+      usuario_id?: string | null
+      transportista_id?: string | null
+    }
+    const data = await traerTodoVerificado<FilaExport>(
+      () => armarQuery(),
+      {
+        etiqueta: 'el export de pedidos',
+        contar: () => armarQuery({ count: 'exact', head: true }),
+      },
+    )
 
     // Enrich with perfiles
     const perfilIds = new Set<string>()
@@ -830,8 +854,11 @@ export default function PedidosContainer(): React.ReactElement {
       ], `pedidos-${suffix}-${fechaLocalISO()}`)
 
       notify.success(`Excel exportado: ${pedidosExport.length} pedidos`)
-    } catch {
-      notify.error('Error al exportar Excel')
+    } catch (e) {
+      // El mensaje va entero: si el export se abortó por venir incompleto, el
+      // motivo es justamente lo que hay que leer. Un "Error al exportar" pelado
+      // deja al usuario reintentando sin saber qué pasó.
+      notify.error('Error al exportar Excel: ' + (e as Error).message)
     }
     setExportando(false)
   }, [pedidos, notify, fetchAllFilteredPedidos])

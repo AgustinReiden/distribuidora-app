@@ -342,7 +342,13 @@ export async function fetchComprasFact(
   desde: string,
   hasta: string
 ): Promise<Record<string, unknown>[]> {
-  const { data, error } = await supabase
+  // Paginado como los otros datasets del export. Hoy son 158 compras en toda
+  // la vida del proyecto, muy lejos del tope: se pagina igual porque un export
+  // a BI que trunca no avisa, y las tres consultas de este archivo tienen que
+  // dar la misma garantia. El desempate por `id` va porque `created_at` no es
+  // unico.
+  const data = await traerTodo<Record<string, unknown> & { created_at: string }>(
+    () => supabase
     .from('compras')
     .select(`
       id,
@@ -373,8 +379,9 @@ export async function fetchComprasFact(
     .gte('created_at', `${desde}T00:00:00`)
     .lte('created_at', `${hasta}T23:59:59`)
     .order('created_at', { ascending: false })
-
-  if (error) throw new Error(`Error cargando compras: ${error.message}`)
+    .order('id'),
+    { etiqueta: 'compras' },
+  )
 
   const rows: Record<string, unknown>[] = []
 
