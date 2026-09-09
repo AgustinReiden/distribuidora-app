@@ -136,9 +136,15 @@ export interface PedidoItemDB {
   es_bonificacion?: boolean;
   promocion_id?: string;
   descripcion_regalo?: string | null;
-  /** Datos de la promo asociada (sólo presente cuando promocion_id está set) */
+  /** Factor de fracción congelado al crear la línea (mig 212). Manda sobre el
+   *  vivo de la promo para todo lo que DESCRIBE la línea (issue #534). */
+  unidades_por_bloque_al_crear?: number | null;
+  /** Datos de la promo asociada (sólo presente cuando promocion_id está set).
+   *  Es el fallback vivo de `factor_bonificacion`, y por eso trae también el
+   *  gate `regalo_mueve_stock`, no sólo el divisor. */
   promocion?: {
     unidades_por_bloque?: number | null;
+    regalo_mueve_stock?: boolean | null;
   } | null;
   /** Precio sin IVA por unidad, SIEMPRE (teórico en ZZ; mig 123) */
   neto_unitario?: number;
