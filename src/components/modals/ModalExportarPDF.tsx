@@ -49,6 +49,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   const [busquedaPedido, setBusquedaPedido] = useState<string>('');
   const [todosLosPedidos, setTodosLosPedidos] = useState<PedidoDB[] | null>(null);
   const [cargandoTodos, setCargandoTodos] = useState(false);
+  const [errorTodos, setErrorTodos] = useState<string | null>(null);
   // Hoja de ruta Y comandas: se descargan desde la ruta YA armada de un día +
   // transportista (persistida en recorridos), no desde pedidos filtrados a mano.
   const [fechaRuta, setFechaRuta] = useState<string>(fechaLocalISO());
@@ -102,13 +103,17 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
 
     if (nuevoAlcance === 'todos' && !todosLosPedidos && fetchAllFilteredPedidos) {
       setCargandoTodos(true);
+      setErrorTodos(null);
       try {
         const todos = await fetchAllFilteredPedidos();
         setTodosLosPedidos(todos);
-      } catch {
-        // Fallback: usar pedidos de la pagina
+      } catch (e) {
+        // Fallback: usar pedidos de la pagina, PERO diciendolo. Volver a
+        // "pagina actual" en silencio es como se veia antes el truncado:
+        // el usuario pide todos, recibe una parte y nada se lo avisa.
         setTodosLosPedidos(null);
         setAlcance('pagina');
+        setErrorTodos((e as Error).message);
       } finally {
         setCargandoTodos(false);
       }
@@ -299,6 +304,11 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                 Todos los pedidos (con filtros)
               </button>
             </div>
+            {errorTodos && (
+              <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+                No se pudo traer todos los pedidos, se usa la página actual. {errorTodos}
+              </p>
+            )}
           </div>
         )}
 

@@ -11,7 +11,7 @@ import type {
   ClienteDB,
   ProductoDB
 } from '../../types'
-import { traerTodo } from '../../utils/paginacion'
+import { traerTodoVerificado } from '../../utils/paginacion'
 
 interface PedidoExportacion {
   id: string;
@@ -92,32 +92,22 @@ type BackupTipo = 'completo' | 'clientes' | 'productos' | 'pedidos';
  *
  * Un backup truncado es el peor caso de esta familia de bugs: los demás
  * muestran un número mal en una pantalla y alguien lo nota, éste produce un
- * archivo que parece bien y falla el día que hay que restaurarlo. Antes de este
- * cambio bajaba 1.000 de 5.555 pedidos sin ninguna señal.
+ * archivo que parece bien y falla el día que hay que restaurarlo. Antes de esto
+ * bajaba 1.000 de 5.555 pedidos sin ninguna señal (#523).
  *
- * Por eso no alcanza con paginar: se pide el `count` exacto a la base y se
- * compara. Si no coinciden se tira, porque un backup que no puede demostrar que
- * está completo no sirve como backup.
+ * El cómo está en `traerTodoVerificado`, que es donde vive la comparación
+ * contra el `count` y donde está testeada.
  */
 async function bajarTodoVerificado<T>(
   tabla: string,
   hacerQuery: () => { range(d: number, h: number): PromiseLike<{ data: T[] | null; error: { message: string } | null }> },
 ): Promise<T[]> {
-  const { count, error: errorCount } = await supabase
-    .from(tabla)
-    .select('*', { count: 'exact', head: true })
-  if (errorCount) throw new Error(`No se pudo contar ${tabla}: ${errorCount.message}`)
-
-  const filas = await traerTodo<T>(hacerQuery, { etiqueta: tabla })
-
-  if (count != null && filas.length !== count) {
-    throw new Error(
-      `El backup de ${tabla} quedó incompleto: se bajaron ${filas.length} de ${count} filas. ` +
-      `No se generó el archivo — un backup incompleto es peor que ninguno, porque parece bueno.`,
-    )
-  }
-
-  return filas
+  return traerTodoVerificado<T>(hacerQuery, {
+    etiqueta: `el backup de ${tabla}`,
+    // El backup baja la tabla entera, así que el conteo no lleva filtros. En un
+    // export filtrado el conteo tiene que repetir los mismos filtros.
+    contar: () => supabase.from(tabla).select('*', { count: 'exact', head: true }),
+  })
 }
 
 export function useBackup(): UseBackupReturnExtended {
