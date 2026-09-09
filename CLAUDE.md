@@ -66,9 +66,14 @@ suelta en `sucursales`.
 - Los schemas Zod de un modal lazy van **co-locados en el modal**, no importados de un
   chunk compartido: si no, un bundle viejo del PWA valida contra un schema desincronizado
   y tira "Invalid input" sin ningún error de chunk.
-- Toda función `SECURITY DEFINER` nueva nace con `EXECUTE` para `PUBLIC`. Hay que
-  **revocarlo explícitamente en la misma migración** (`REVOKE ... FROM PUBLIC, anon`).
-  `GRANT TO authenticated` no lo revierte. Hay un gate de CI que lo verifica.
+- **Toda función nueva** de `public` nace con `EXECUTE` para `PUBLIC` — sea `SECURITY
+  DEFINER` o no — y Supabase además se lo concede a `anon` por separado. Hay que
+  **revocar las dos mitades en la misma migración** (`REVOKE ... FROM PUBLIC, anon`);
+  `GRANT TO authenticated` no lo revierte. El gate de CI (`scripts/check-permisos.mjs`)
+  falla ante **cualquier** función alcanzable con la anon key, no solo las definer.
+  Una función de **trigger** no necesita `EXECUTE` para nadie: la invoca el executor como
+  parte del DML, no el caller. Dejala en `postgres` + `service_role`, como
+  `completar_origen_precio_item` (148) o `validar_precio_item_pedido`.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
 - **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
