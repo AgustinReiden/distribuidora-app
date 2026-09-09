@@ -20,6 +20,8 @@ import AccionesDropdown from './PedidoActions';
 import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQuery';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo';
+import { avisoDeudaCliente } from '../../utils/deudaCliente';
+import { puedeVerDeudaCliente } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
 import type { PedidoDB, MotivoSalvedad } from '../../types';
 
@@ -53,6 +55,12 @@ export interface PedidoCardProps {
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
+  /**
+   * Timestamp del fetch que trajo estos pedidos (`dataUpdatedAt`). Solo se usa
+   * sin conexion, para fechar la deuda en el aviso: el numero es el del ultimo
+   * sync y no incluye lo cobrado despues.
+   */
+  saldoActualizadoAt?: number | null;
 }
 
 interface EstadoConfig {
@@ -282,11 +290,27 @@ function PedidoCard({
   onDesmarcarEntregado,
   onCancelarPedido,
   onRegistrarPago,
+  saldoActualizadoAt,
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
   const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
 
-  const { user } = useAuthData();
+  const { user, perfil, isOnline } = useAuthData();
+
+  // Deuda que el cliente ya tenia ANTES de este pedido. Viene calculada de la
+  // base (`deuda_previa`, mig 215) y NO se deriva de `cliente.saldo_cuenta`:
+  // ese es el saldo de HOY, e incluye este pedido y los posteriores. Derivarlo
+  // fue el bug del PR #530 --cada pedido nuevo inflaba el aviso de las tarjetas
+  // viejas del mismo cliente-- y por eso el numero se calcula donde estan los
+  // pedidos anteriores, no aca.
+  // El gate por rol se evalua contra `perfil.rol` (rol primario) y no contra las
+  // props isAdmin/isPreventista: VirtualizedPedidoList no pasa `isEncargado`, y
+  // el badge tiene que decidirse igual desde las dos listas que montan la card.
+  const avisoDeuda = puedeVerDeudaCliente(perfil?.rol)
+    ? avisoDeudaCliente(pedido.deuda_previa, {
+        saldoAl: !isOnline && saldoActualizadoAt ? formatFecha(new Date(saldoActualizadoAt)) : null,
+      })
+    : null;
 
   // Los handlers llegan por props. Hubo un intento de pasarlos por contexto
   // (HandlersContext) que nunca se termino: el provider no se montaba nunca, asi
@@ -357,6 +381,21 @@ function PedidoCard({
               {/* Mobile: deja que la dirección wrappee a 2 líneas (line-clamp-2)
                   para que el operador la vea entera. Desktop: trunca a 1 línea. */}
               <span className="line-clamp-2 sm:line-clamp-none sm:truncate">{pedido.cliente.direccion}</span>
+            </p>
+          )}
+          {/* Deuda que el cliente traia de antes de este pedido. Va aca --bajo
+              el nombre-- y no entre los badges de la derecha porque habla del
+              CLIENTE, no del pedido; ahi se leeria como un estado de pago de
+              este pedido. Es informativo: no bloquea nada. */}
+          {avisoDeuda && (
+            <p className="mt-1.5">
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/70 dark:bg-rose-900/25 dark:text-rose-300 dark:border-rose-800/40"
+                title={avisoDeuda.detalle}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                <span className="tabular-nums">{avisoDeuda.etiqueta}</span>
+              </span>
             </p>
           )}
         </div>
