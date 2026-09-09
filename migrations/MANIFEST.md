@@ -137,14 +137,17 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 215** — la última numerada en el repo es
-`214_un_cliente_reservado_a_administracion`, y el ledger de prod está alineado con ella.
-Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
+**La próxima migración es la 218** — la última numerada en el repo es
+`217_el_detector_de_duplicados_ve_lo_que_la_rls_tapa`, y el ledger de prod está alineado
+con ella. Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
 número se reserva **aplicando**, no escribiendo el archivo.
 
 (Esta línea decía 206 hasta el 2026-09-08, con las 206–209 ya aplicadas: la
-numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Si aplicás
-una migración, actualizá también esta línea. Última actualización: 214, el 2026-09-09.)
+numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Volvió a pasar el
+2026-09-09: decía 215 con la 215 y la 216 ya aplicadas y sus archivos en `main`, así que
+quien fue a escribir la 217 leyó "escribí la 215" y habría pisado dos migraciones vivas.
+Si aplicás una migración, actualizá también esta línea. Última actualización: 217, el
+2026-09-09.)
 
 Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204,
 205, 212, 213 y 214 sí:
@@ -233,6 +236,28 @@ Las 206–209 tampoco tienen prosa acá. Las 210 y 211 sí:
   le inyecta código al primero). **No toca ninguna fila**: la columna nace en `false` y todo
   el predicado nuevo es una tautología mientras nadie marque a nadie. Verificado contra prod
   con un usuario de cada rol.
+
+- **217** hace que el detector de duplicados por ubicación de `createCliente` vea por
+  encima de la RLS (issue #543). Corría **como el usuario**, o sea que a un preventista le
+  ocultaba los clientes de OTRO preventista: la consulta volvía vacía, no avisaba nada y
+  se creaba un CLON. Es la misma forma de fail-open que la 214 documenta en
+  `cliente_preventistas_no_reservado` —un guard que consulta bajo la policy que le tapa la
+  fila no falla, **aprueba**—, y por eso `existe_cliente_en_ubicacion` es SECURITY DEFINER.
+  Verificado impersonando: el cliente 22 existe en esas coordenadas y la consulta del
+  detector con el JWT de Osvaldo devolvía 0 filas. Importó más con el tiempo sin que nadie
+  tocara el código: cuando se escribió el detector la base era casi toda huérfanos (401 vs
+  26, mig 028) y hoy es al revés (598 asignados vs 124). **Devuelve un booleano**, nunca la
+  fila: si devolviera el nombre estaríamos filtrando por la ventana lo que la policy tapa
+  por la puerta, y el front por eso muestra un mensaje sin identidad y avisa a admin y
+  encargado por `_notificar_sucursal_roles` (con dedupe de 24 h, porque el alta se
+  reintenta). El front conserva su consulta con RLS y llama a la RPC **solo si aquella no
+  encontró nada**: así el caso visible no cambia en nada y la función nunca tiene que
+  contestar "¿este usuario puede verlo?", que obligaría a copiar `mt_clientes_select` aden-
+  tro y a mantener las dos sincronizadas. Mira a los **inactivos** a propósito (migs
+  199/200). Un `reservado_admin` (214) cae en la rama de "no lo ve": bloquea el clon sin
+  delatar que está reservado. **El detector por RAZÓN SOCIAL se deja ciego a propósito**:
+  ahí el mismo booleano sería fácil de sondear probando nombres, así que el clon por nombre
+  contra un cliente ajeno se sigue pudiendo crear —decisión tomada, no olvido—.
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`
