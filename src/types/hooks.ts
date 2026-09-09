@@ -174,11 +174,17 @@ export interface PedidoDB {
   cliente?: ClienteDB;
   /**
    * Lo que el cliente debia ANTES de este pedido, calculado en la base
-   * (computed column `deuda_previa`, mig 215). Solo la trae la lista de
-   * pedidos. No confundir con `cliente.saldo_cuenta`, que es el saldo de HOY e
-   * incluye este pedido y los posteriores.
+   * (computed column `deuda_previa`, mig 215). No confundir con
+   * `cliente.saldo_cuenta`, que es el saldo de HOY e incluye este pedido y los
+   * posteriores.
    */
   deuda_previa?: number;
+  /**
+   * Que boletas componen esa deuda, en orden cronologico (computed column
+   * `deuda_previa_detalle`, mig 218). Va impresa en la comanda: el
+   * transportista necesita saber cuales reclamar para poder imputar el cobro.
+   */
+  deuda_previa_detalle?: Array<{ id: string | number; fecha?: string | null; monto: number }>;
   usuario_id?: string;
   usuario?: PerfilDB | null;
   transportista_id?: string | null;

@@ -19,6 +19,9 @@ import {
 
 function rutaDeNotificacion(n: NotificacionDB): string | null {
   if (n.entidad_tipo === 'movimiento_sucursal') return '/transferencias'
+  // Alta duplicada bloqueada (mig 217): el admin tiene que ir a ver el cliente
+  // que chocó y decidir si se lo asigna al preventista que lo intentó.
+  if (n.entidad_tipo === 'cliente') return '/clientes'
   return null
 }
 

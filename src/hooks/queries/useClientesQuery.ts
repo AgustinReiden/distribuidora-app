@@ -263,6 +263,40 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
         `Si necesitás crear otro, modificá ligeramente la dirección.`
       )
     }
+
+    // Que la consulta de arriba no haya encontrado nada NO significa que no
+    // haya nadie: pasa por la RLS, que a un preventista le tapa los clientes de
+    // OTRO preventista y los reservados a administración (mig 214). Con 598 de
+    // 722 clientes asignados, el detector era ciego para la mayoría de la base
+    // y dejaba crear el clon sin avisar nada (#543).
+    //
+    // `existe_cliente_en_ubicacion` (mig 217) es SECURITY DEFINER y ve por
+    // encima de la policy. Devuelve un booleano pelado a propósito: si
+    // devolviera el nombre estaríamos filtrando por la ventana lo que la RLS
+    // tapa por la puerta. Por eso este mensaje no dice cuál es —no se puede— y
+    // la RPC le avisa a administración, que sí lo ve entero.
+    const { data: hayOculto, error: errorOculto } = await supabase
+      .rpc('existe_cliente_en_ubicacion', {
+        p_latitud: cliente.latitud,
+        p_longitud: cliente.longitud,
+      })
+
+    // Fail-closed, como el chequeo de nombre duplicado: si no se pudo
+    // verificar, no se crea. Seguir de largo ante el error es volver al bug —
+    // un guard que no puede mirar y aprueba igual.
+    if (errorOculto) {
+      throw new Error(
+        'No se pudo verificar si ya hay un cliente en esta ubicación. No se creó nada; probá de nuevo.'
+      )
+    }
+
+    if (hayOculto) {
+      throw new Error(
+        'Ya existe un cliente en esta ubicación, pero no está en tu cartera, así que no podemos mostrarte cuál. ' +
+        'Ya le avisamos a administración para que lo revise. ' +
+        'Si de verdad es otro comercio en la misma puerta, pediles que te lo habiliten.'
+      )
+    }
   }
 
   const { preventista_ids, descuentos_categoria, ...clienteFields } = cliente

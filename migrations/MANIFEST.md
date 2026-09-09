@@ -137,14 +137,22 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 215** — la última numerada en el repo es
-`214_un_cliente_reservado_a_administracion`, y el ledger de prod está alineado con ella.
-Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
-número se reserva **aplicando**, no escribiendo el archivo.
+**La próxima migración es la 220.** El ledger de prod llega hasta
+`219_la_venta_es_de_quien_la_carga`. **Ojo con el 218**: `218_que_boletas_debe_no_solo_cuanto`
+está aplicada en prod pero su archivo todavía no está en el repo (viene de otra rama sin
+mergear), así que el hueco entre la 217 y la 219 acá es esperable y no es drift.
+Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el número se
+reserva **aplicando**, no escribiendo el archivo.
 
 (Esta línea decía 206 hasta el 2026-09-08, con las 206–209 ya aplicadas: la
-numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Si aplicás
-una migración, actualizá también esta línea. Última actualización: 214, el 2026-09-09.)
+numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Volvió a pasar el
+2026-09-09: decía 215 con la 215 y la 216 ya aplicadas y sus archivos en `main`, así que
+quien fue a escribir la 217 leyó "escribí la 215" y habría pisado dos migraciones vivas.
+Y otra vez el mismo día: la 218 se aplicó desde otra sesión **mientras** se escribía la que
+terminó siendo la 219 — que salió con el número correcto sólo porque se confirmó contra el
+ledger en el último momento, no porque esta línea estuviera al día. Moraleja: esta línea es
+una ayuda, el ledger es la verdad. Si aplicás una migración, actualizá también esta línea.
+Última actualización: 219, el 2026-09-09.)
 
 Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204,
 205, 212, 213 y 214 sí:
@@ -233,6 +241,53 @@ Las 206–209 tampoco tienen prosa acá. Las 210 y 211 sí:
   le inyecta código al primero). **No toca ninguna fila**: la columna nace en `false` y todo
   el predicado nuevo es una tautología mientras nadie marque a nadie. Verificado contra prod
   con un usuario de cada rol.
+
+- **217** hace que el detector de duplicados por ubicación de `createCliente` vea por
+  encima de la RLS (issue #543). Corría **como el usuario**, o sea que a un preventista le
+  ocultaba los clientes de OTRO preventista: la consulta volvía vacía, no avisaba nada y
+  se creaba un CLON. Es la misma forma de fail-open que la 214 documenta en
+  `cliente_preventistas_no_reservado` —un guard que consulta bajo la policy que le tapa la
+  fila no falla, **aprueba**—, y por eso `existe_cliente_en_ubicacion` es SECURITY DEFINER.
+  Verificado impersonando: el cliente 22 existe en esas coordenadas y la consulta del
+  detector con el JWT de Osvaldo devolvía 0 filas. Importó más con el tiempo sin que nadie
+  tocara el código: cuando se escribió el detector la base era casi toda huérfanos (401 vs
+  26, mig 028) y hoy es al revés (598 asignados vs 124). **Devuelve un booleano**, nunca la
+  fila: si devolviera el nombre estaríamos filtrando por la ventana lo que la policy tapa
+  por la puerta, y el front por eso muestra un mensaje sin identidad y avisa a admin y
+  encargado por `_notificar_sucursal_roles` (con dedupe de 24 h, porque el alta se
+  reintenta). El front conserva su consulta con RLS y llama a la RPC **solo si aquella no
+  encontró nada**: así el caso visible no cambia en nada y la función nunca tiene que
+  contestar "¿este usuario puede verlo?", que obligaría a copiar `mt_clientes_select` aden-
+  tro y a mantener las dos sincronizadas. Mira a los **inactivos** a propósito (migs
+  199/200). Un `reservado_admin` (214) cae en la rama de "no lo ve": bloquea el clon sin
+  delatar que está reservado. **El detector por RAZÓN SOCIAL se deja ciego a propósito**:
+  ahí el mismo booleano sería fácil de sondear probando nombres, así que el clon por nombre
+  contra un cliente ajeno se sigue pudiendo crear —decisión tomada, no olvido—.
+
+- **219** cierra el forjado de la atribución en el ALTA de pedidos (issue #549).
+  `mt_pedidos_insert` es `(es_preventista() AND sucursal_id = current_sucursal_id())` y **no
+  mira `usuario_id`**, así que por PostgREST se podía insertar un pedido atribuido a
+  cualquiera —y como `es_preventista()` incluye admin y encargado (trampa 4), el predicado
+  no acotaba casi nada—. Importa porque `calcular_comisiones` agrupa por `pedidos.usuario_id`:
+  una atribución forjada mueve plata de una liquidación a otra. **El UPDATE ya estaba
+  tapado** por `pedidos_proteger_columnas`, que bloquea `usuario_id` y otras para todo el que
+  no sea encargado ni admin; faltaba lo mismo en el alta, y esa asimetría INSERT/UPDATE fue
+  justamente lo que dejó pasar el agujero. Por eso el guard va **adentro de esa misma
+  función** —que ahora corre `BEFORE INSERT OR UPDATE`— y no en una nueva: partir la regla en
+  dos lugares reproduce el problema. El bloque nuevo va DESPUÉS del `RETURN NEW` de
+  `es_encargado_o_admin()`, así el flujo real de "admin carga a nombre de un preventista"
+  (55 de los 5.628 pedidos del último año) queda cubierto sin escribir una línea, y ANTES de
+  todo lo que usa `OLD`. **La identidad sale de `auth.uid()`, no del COALESCE de la 216**: acá
+  el bloque solo se alcanza con `current_user = 'authenticated'`, donde `auth.uid()` nunca es
+  NULL, y el fallback a `NEW.creado_por` sería **fail-open** porque en un INSERT directo lo
+  manda el atacante. La función **sigue siendo INVOKER** a propósito: adentro de una SECURITY
+  DEFINER `current_user` es el dueño, su primera línea daría siempre true y toda la
+  protección de columnas se apagaría en silencio (hay un check en la migración que lo
+  impide). Los RPC y el bot **no pasan por acá** —son DEFINER, salen por esa primera
+  línea— y ya validan lo mismo por su cuenta. Verificado impersonando contra prod los 7
+  casos, incluidos los dos RPC punta a punta y el camino del bot. **No cierra** el INSERT
+  directo con `usuario_id NULL`: no es atribuírsela a otro sino a nadie, y la columna es
+  nullable con 2 pedidos así en el último año.
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`
