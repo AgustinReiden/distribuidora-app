@@ -526,6 +526,37 @@ export function usePromoAcumuladorQuery(
   return useQuery({
     queryKey: [...promocionesKeys.all(currentSucursalId), 'acumulador', pid, rid] as const,
     queryFn: async (): Promise<PromoAcumuladorDB | null> => {
+      // La barra del regalo DEFAULT no tiene fila en promo_acumuladores: vive en
+      // `promociones.usos_pendientes` y en ningún otro lado (issue #553). Se
+      // sintetiza acá para que quien consuma el hook no tenga que saber en cuál
+      // de los dos lugares cae cada sabor.
+      const { data: promo, error: errorPromo } = await supabase
+        .from('promociones')
+        .select('producto_regalo_id, ajuste_producto_id, usos_pendientes, sucursal_id')
+        .eq('id', pid)
+        .maybeSingle()
+      if (errorPromo) throw errorPromo
+
+      const p = promo as {
+        producto_regalo_id: number | null
+        ajuste_producto_id: number | null
+        usos_pendientes: number | null
+        sucursal_id: number
+      } | null
+
+      if (p && p.producto_regalo_id != null && String(p.producto_regalo_id) === rid) {
+        return {
+          id: `default-${pid}`,
+          promocion_id: pid,
+          producto_regalo_id: rid,
+          ajuste_producto_id: p.ajuste_producto_id != null ? String(p.ajuste_producto_id) : null,
+          usos_pendientes: p.usos_pendientes ?? 0,
+          sucursal_id: p.sucursal_id,
+          created_at: '',
+          updated_at: '',
+        }
+      }
+
       const { data, error } = await supabase
         .from('promo_acumuladores')
         .select('*')
