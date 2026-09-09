@@ -82,3 +82,91 @@ export function avisoDeudaCliente(
         detalle: `Este cliente tiene una deuda previa de ${importe}.`,
       }
 }
+
+// ---------------------------------------------------------------------------
+// Bloque de deuda para la comanda impresa
+// ---------------------------------------------------------------------------
+
+/** Una boleta anterior sin pagar, tal como la devuelve `deuda_previa_detalle`. */
+export interface BoletaAdeudada {
+  id: string | number
+  /** Fecha del pedido, `YYYY-MM-DD`. */
+  fecha?: string | null
+  monto: number
+}
+
+export interface LineaDeuda {
+  /** Ya formateada para el ticket: "#1234 15/08". */
+  etiqueta: string
+  monto: number
+}
+
+export interface BloqueDeudaComanda {
+  /** El total que encabeza el bloque. Es `deuda_previa`, el numero canonico. */
+  total: number
+  /** Las lineas del desglose. Siempre suman `total`. */
+  lineas: LineaDeuda[]
+}
+
+/** Cuantas boletas entran en un ticket de 75mm sin comerse el papel. */
+const MAX_LINEAS = 6
+
+/** "2026-09-08" -> "08/09". Sin Date: es date-only, y `new Date` la correria de dia. */
+function fechaCorta(fecha: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(fecha ?? '')
+  return m ? `${m[3]}/${m[2]}` : ''
+}
+
+/**
+ * Desglose de la deuda para imprimir en la comanda, o null si no hay nada que
+ * cobrar. El transportista necesita saber QUE boletas reclamar, no solo cuanto:
+ * con el numero suelto no puede imputar el cobro.
+ *
+ * Las lineas SIEMPRE suman el total:
+ *  - si hay mas boletas que las que entran en el papel, las que sobran se
+ *    agrupan en una linea ("y N boletas mas") con su suma;
+ *  - si el total es menor que la suma de las boletas, la diferencia es un pago
+ *    a cuenta sin imputar y sale como linea aparte. Hoy no puede pasar (no hay
+ *    un solo pago a cuenta en la base), pero si aparece uno, el ticket cuadra
+ *    igual en vez de mostrar un desglose que no da.
+ */
+export function bloqueDeudaComanda(
+  total: number | null | undefined,
+  boletas: BoletaAdeudada[] | null | undefined,
+  opts: { maxLineas?: number } = {},
+): BloqueDeudaComanda | null {
+  const totalRedondeado = Math.round(aNumero(total) * 100) / 100
+  if (totalRedondeado < EPSILON) return null
+
+  const maxLineas = opts.maxLineas ?? MAX_LINEAS
+  const items = (boletas ?? []).filter(b => aNumero(b.monto) >= EPSILON)
+
+  const lineas: LineaDeuda[] = []
+  const visibles = items.length > maxLineas ? items.slice(0, maxLineas - 1) : items
+  for (const b of visibles) {
+    const fecha = fechaCorta(b.fecha)
+    lineas.push({
+      etiqueta: fecha ? `#${b.id} ${fecha}` : `#${b.id}`,
+      monto: Math.round(aNumero(b.monto) * 100) / 100,
+    })
+  }
+
+  const restantes = items.slice(visibles.length)
+  if (restantes.length > 0) {
+    const suma = restantes.reduce((t, b) => t + aNumero(b.monto), 0)
+    lineas.push({
+      etiqueta: `y ${restantes.length} boleta${restantes.length === 1 ? '' : 's'} mas`,
+      monto: Math.round(suma * 100) / 100,
+    })
+  }
+
+  // Lo que el total no explica: un pago a cuenta que no esta imputado a
+  // ninguna boleta. Va como linea negativa para que el desglose cierre.
+  const sumado = lineas.reduce((t, l) => t + l.monto, 0)
+  const diferencia = Math.round((totalRedondeado - sumado) * 100) / 100
+  if (Math.abs(diferencia) >= EPSILON) {
+    lineas.push({ etiqueta: diferencia < 0 ? 'A cuenta' : 'Otros', monto: diferencia })
+  }
+
+  return { total: totalRedondeado, lineas }
+}
