@@ -60,6 +60,8 @@ interface ClienteLookupRow {
   direccion: string | null;
   telefono: string | null;
   zona: string | null;
+  /** Reservado a administración (mig 214): ningún preventista lo toma. */
+  reservado_admin: boolean;
 }
 
 /**
@@ -121,7 +123,7 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
     // para que la regla "asignado a mí O huérfano" sea expresable sin truco
     // de inner join).
     let clienteQuery = sb.from("clientes")
-      .select("id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id")
+      .select("id, codigo, nombre_fantasia, razon_social, direccion, telefono, zona, sucursal_id, reservado_admin")
       .eq("id", cliente_id)
       .eq("activo", true);
     if (ctx.sucursal_id != null) {
@@ -157,6 +159,26 @@ export const fichaClienteTool: Tool<FichaClienteParams, FichaClienteResult> = {
         throw new Error("Cliente asignado a otro preventista");
       }
       // Si no tiene asignaciones (huérfano) o me incluye → seguimos.
+
+      // Reservado a administración (mig 214). El cliente reservado NO tiene
+      // asignaciones, así que llega hasta acá por la rama de huérfano — que es
+      // justo la que significa "lo ve cualquier preventista". Hay que repetir
+      // el filtro a mano porque el bot corre con service_role y la RLS no lo
+      // frena. Excepción: si ya le vendió, sigue viendo la ficha, si no sus
+      // pedidos viejos quedarían sin cliente.
+      if (cliente.reservado_admin) {
+        const { count, error: hErr } = await sb
+          .from("pedidos")
+          .select("id", { count: "exact", head: true })
+          .eq("cliente_id", cliente_id)
+          .eq("usuario_id", ctx.perfil_id);
+        if (hErr) {
+          throw new Error(`ficha_cliente: historial lookup: ${hErr.message}`);
+        }
+        if ((count ?? 0) === 0) {
+          throw new Error("Cliente reservado a administración");
+        }
+      }
     }
 
     const { data: resumen, error: rErr } = await sb.rpc(

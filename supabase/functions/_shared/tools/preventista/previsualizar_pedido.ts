@@ -102,6 +102,8 @@ interface ClienteRow {
   limite_credito: number | string;
   activo: boolean;
   sucursal_id: number;
+  /** Reservado a administración (mig 214): ningún preventista le carga pedidos. */
+  reservado_admin: boolean;
 }
 
 export const previsualizarPedidoTool: Tool<
@@ -180,9 +182,18 @@ export const previsualizarPedidoTool: Tool<
     }
     // Scoping preventista: el cliente debe estar asignado a él O ser huérfano
     if (ctx.rol === "preventista") {
-      const allowed = await isClienteAccesibleParaPreventista(sb, cliente_id, ctx.perfil_id);
+      const allowed = await isClienteAccesibleParaPreventista(
+        sb,
+        cliente_id,
+        ctx.perfil_id,
+        cliente.reservado_admin === true,
+      );
       if (!allowed) {
-        throw new Error("Cliente asignado a otro preventista");
+        throw new Error(
+          cliente.reservado_admin === true
+            ? "Cliente reservado a administración"
+            : "Cliente asignado a otro preventista",
+        );
       }
     }
 
@@ -441,7 +452,7 @@ async function loadCliente(
 ): Promise<ClienteRow | null> {
   const { data, error } = await sb
     .from("clientes")
-    .select("id, codigo, nombre_fantasia, razon_social, saldo_cuenta, limite_credito, activo, sucursal_id")
+    .select("id, codigo, nombre_fantasia, razon_social, saldo_cuenta, limite_credito, activo, sucursal_id, reservado_admin")
     .eq("id", clienteId)
     .eq("sucursal_id", sucursalId)
     .eq("activo", true)
@@ -456,7 +467,15 @@ async function isClienteAccesibleParaPreventista(
   sb: SupabaseClient,
   clienteId: number,
   perfilId: string,
+  reservadoAdmin: boolean,
 ): Promise<boolean> {
+  // Reservado a administración (mig 214): no hay excepción de historial acá.
+  // Ver el pasado es una cosa; cargarle un pedido nuevo es justo lo que la
+  // marca cierra. El trigger trg_pedidos_cliente_reservado lo rechaza igual en
+  // la base, pero el bot corre con service_role y conviene fallar antes, con un
+  // mensaje entendible en vez de un error de Postgres.
+  if (reservadoAdmin) return false;
+
   const { data, error } = await sb
     .from("cliente_preventistas")
     .select("preventista_id")

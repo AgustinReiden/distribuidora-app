@@ -380,6 +380,11 @@ export default function ClientesContainer(): React.ReactElement {
     // se espeja con el primer asignado para no romper lecturas en otros modulos
     // hasta que se elimine la columna en una migracion futura.
     const isCreating = !clienteEditando
+    // "Solo administradores" (mig 214) es el tercer estado de asignacion y es
+    // EXCLUYENTE con la N-a-N: un cliente reservado no lleva preventistas. Si
+    // igual mandaramos ids, el trigger trg_cliente_preventistas_no_reservado
+    // rechaza el INSERT. Solo admin puede marcarlo (RLS + trigger de la base).
+    const reservadoAdmin = isAdmin && (data.reservado_admin ?? false)
     // Solo admin puede editar las asignaciones desde la UI. Un preventista
     // editando un cliente NO debe tocar la tabla N-a-N (RLS lo rechazaria y
     // ademas no vio el selector). La unica excepcion: al crear, el preventista
@@ -390,9 +395,12 @@ export default function ClientesContainer(): React.ReactElement {
     let ids: string[] | undefined
     if (willTouchAssignments) {
       const baseIds = data.preventista_ids || []
-      ids = isCreating && isPreventista && !isAdmin && user?.id
-        ? Array.from(new Set([...baseIds, user.id]))
-        : baseIds
+      // Reservado: sin asignaciones, y sin la auto-asignacion del que lo crea.
+      ids = reservadoAdmin
+        ? []
+        : isCreating && isPreventista && !isAdmin && user?.id
+          ? Array.from(new Set([...baseIds, user.id]))
+          : baseIds
     }
 
     // Dual-write zona text + zona_id durante el deprecation window:
@@ -468,6 +476,10 @@ export default function ClientesContainer(): React.ReactElement {
       // cliente_descuentos_categoria exige es_admin()). Para no-admin omitimos
       // la clave para que replaceCategoriaDiscounts ni se ejecute.
       ...(isAdmin ? {
+        // Visibilidad (mig 214): solo admin la administra. El allow-list de la
+        // mig 080 se lo bloquea al preventista y trg_clientes_reservado_solo_admin
+        // al encargado, pero igual no mandamos la clave si no es admin.
+        reservado_admin: reservadoAdmin,
         // FC/ZZ por defecto de pedidos (mig 116): solo admin lo edita (el guard
         // trigger de clientes lo bloquea para preventistas de todas formas).
         tipo_factura_default: data.tipoFacturaDefault ?? 'ZZ',

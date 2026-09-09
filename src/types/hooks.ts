@@ -66,8 +66,16 @@ export interface ClienteDB {
    * IDs de preventistas asignados (N-a-N via tabla cliente_preventistas).
    * Si el array está vacío o ausente, cualquier preventista lo puede ver.
    * Si contiene uno o más IDs, solo esos preventistas (y admin) lo ven.
+   * Excluyente con `reservado_admin`: si el cliente está reservado, esto va vacío.
    */
   preventista_ids?: string[];
+  /**
+   * Tercer estado de asignación (mig 214): el cliente lo atiende administración.
+   * Lo ven admin, encargado, transportista y depósito, y el preventista que ya
+   * le vendió (su historial no se rompe). Ningún otro preventista lo ve ni lo
+   * puede tomar. Solo admin lo pone y lo saca.
+   */
+  reservado_admin?: boolean;
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
