@@ -268,15 +268,23 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           </div>
         )}
 
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="activo"
-            checked={form.activo}
-            onChange={e => handleFieldChange('activo', e.target.checked)}
-            className="w-4 h-4"
-          />
-          <label htmlFor="activo" className="text-sm dark:text-gray-200">Usuario activo</label>
+        <div>
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="activo"
+              checked={form.activo}
+              onChange={e => handleFieldChange('activo', e.target.checked)}
+              className="w-4 h-4"
+            />
+            <label htmlFor="activo" className="text-sm dark:text-gray-200">Usuario activo</label>
+          </div>
+          {!form.activo && (
+            <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+              Al desactivarlo no va a poder iniciar sesión y se le cierran las sesiones abiertas.
+              No se borra nada: su historial queda intacto y se revierte volviendo a tildarlo.
+            </p>
+          )}
         </div>
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
