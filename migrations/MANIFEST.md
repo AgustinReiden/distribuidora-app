@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-09-08** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-09-09** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 212** — la última numerada en el repo es
-`211_el_costo_viaja_con_el_producto`, y el ledger de prod está alineado con ella.
+**La próxima migración es la 214** — la última numerada en el repo es
+`213_cerrar_el_acl_del_trigger_de_la_212`, y el ledger de prod está alineado con ella.
 Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
 número se reserva **aplicando**, no escribiendo el archivo.
 
@@ -146,8 +146,8 @@ número se reserva **aplicando**, no escribiendo el archivo.
 numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Si aplicás
 una migración, actualizá también esta línea.)
 
-Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204 y
-205 sí:
+Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204,
+205, 212 y 213 sí:
 
 - **203** `bot_buscar_cliente` pasa a filtrar `activo = TRUE`. Era el único camino
   del bot que no lo hacía, y es la puerta de entrada: un cliente dado de baja
@@ -189,6 +189,30 @@ Las 206–209 tampoco tienen prosa acá. Las 210 y 211 sí:
   (el costo del origen HOY no es el de aquellas unidades y el CPP es forward-only).
   La regla `GREATEST(origen, destino)` del camino "match con un producto existente"
   queda **igual**: es una decisión comercial de la 076, no un olvido.
+- **212** congela por ítem el factor de fracción de las bonificaciones en
+  `pedido_items.unidades_por_bloque_al_crear` + `origen_unidades_por_bloque`, y parchea
+  `reporte_gerencial` para leer de ahí vía `factor_bonificacion(...)`. Un **solo** número
+  colapsa gate y divisor (1 = no fraccionar): congelar solo el divisor dejaba abierto que
+  un flip de `regalo_mueve_stock` en el modal multiplicara por 6 o 12 el costo de todas las
+  bonificaciones históricas de esa promo. El histórico **se reconstruyó**, no se congeló con
+  el valor de hoy porque sí: se midió desde `promo_ajustes` (toda fila con
+  `|unidades_ajustadas| = 1` fuerza `bloques = stock_por_bloque = 1`, así que
+  `|usos_ajustados|` **es** el factor vivo de ese instante) y las 5 promos que fraccionan
+  dan `min = max = valor vivo` en las 651 mediciones exactas. **Sí toca filas**: 1.243 de
+  1.313 bonificaciones. Las 70 restantes son anteriores a la primera medición de su promo y
+  quedan en NULL a propósito — caen al valor vivo, igual que antes. El parche es sobre la
+  definición **viva** (la 130 fue redefinida 10 veces). Verificado corriendo el reporte de
+  los 6 meses × 4 sucursales antes y después: **cero diferencias**, que es lo que tiene que
+  pasar si el factor nunca cambió. Rollback al pie del archivo.
+- **213** le cierra el ACL a `completar_unidades_por_bloque_item()`, la función del trigger
+  de la 212, que había quedado ejecutable por `anon`. La 212 le puso el `REVOKE` al helper
+  `factor_bonificacion` pero no a ésta, razonando que la regla de la casa habla de funciones
+  `SECURITY DEFINER` y ésta es invoker. **Ese razonamiento es equivocado**: el gate
+  `scripts/check-permisos.mjs` falla ante *cualquier* función de `public` alcanzable con la
+  anon key. Una función de trigger no necesita `EXECUTE` para nadie —la invoca el executor
+  como parte del INSERT, no el caller—, así que queda con `postgres` + `service_role`, igual
+  que `completar_origen_precio_item` (148) y `validar_precio_item_pedido`. Verificado que el
+  trigger sigue disparando después del revoke. **No toca ninguna fila.**
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`
