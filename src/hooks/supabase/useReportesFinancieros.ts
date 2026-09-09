@@ -1,116 +1,57 @@
+/**
+ * Reportes financieros: cuentas por cobrar y rentabilidad.
+ *
+ * Los dos son wrappers finos sobre RPCs (mig 208): la agregación la hace la
+ * base y acá sólo se desempaqueta el JSON. Antes este archivo bajaba miles de
+ * filas para sumarlas en el navegador, que era a la vez incorrecto —PostgREST
+ * cortaba en 1.000 sin avisar— y caro.
+ */
 import { useState } from 'react'
 import { supabase, notifyError } from './base'
 import type {
   ReporteCuentaPorCobrar,
   ReporteRentabilidad,
-  ProductoRentabilidad,
-  TotalesRentabilidad,
-  AgingDeuda,
   UseReportesFinancierosReturn,
-  ClienteDB,
-  PedidoDB,
-  PagoDB,
-  ProductoDB
 } from '../../types'
-
-interface PedidoWithItems {
-  id: string;
-  cliente_id: string;
-  estado: string;
-  estado_pago?: string;
-  total: number;
-  created_at?: string;
-  items?: Array<{
-    cantidad: number;
-    precio_unitario: number;
-    subtotal?: number;
-    producto?: ProductoDB | null;
-  }>;
-}
-
-interface ProductoStatsMap {
-  [key: string]: ProductoRentabilidad;
-}
 
 export function useReportesFinancieros(): UseReportesFinancierosReturn {
   const [loading, setLoading] = useState<boolean>(false)
 
+  /**
+   * Cuentas por cobrar. La agregación la hace la BASE (mig 208): devuelve una
+   * fila por cliente CON saldo —111 hoy— en vez de bajar los 720 clientes y
+   * todos sus pedidos impagos para sumarlos acá.
+   *
+   * El saldo se deriva pedido por pedido (`total - monto_pagado`) y por
+   * construcción es la suma de sus tramos de aging. El RPC devuelve además el
+   * `saldo_cuenta` que mantiene el trigger y un bloque `consistencia`: si algún
+   * día los dos dejan de coincidir, el reporte lo dice en vez de que dos
+   * pantallas muestren números distintos y nadie sepa cuál creer.
+   */
   const generarReporteCuentasPorCobrar = async (): Promise<ReporteCuentaPorCobrar[]> => {
     setLoading(true)
     try {
-      const { data: clientes, error: errorClientes } = await supabase
-        .from('clientes')
-        .select('*')
-        .order('nombre_fantasia')
-      if (errorClientes) throw errorClientes
+      const { data, error } = await supabase.rpc('reporte_cuentas_por_cobrar', {
+        p_sucursal_id: null,
+      })
+      if (error) throw error
 
-      const { data: pedidos, error: errorPedidos } = await supabase
-        .from('pedidos')
-        .select('*')
-        .neq('estado_pago', 'pagado')
-      if (errorPedidos) throw errorPedidos
+      const res = data as {
+        clientes?: unknown[]
+        consistencia?: { clientes_con_desvio?: unknown[] }
+      } | null
 
-      const { data: pagos, error: errorPagos } = await supabase
-        .from('pagos')
-        .select('*')
-      if (errorPagos && !errorPagos.message.includes('does not exist')) throw errorPagos
+      const desvios = res?.consistencia?.clientes_con_desvio ?? []
+      if (desvios.length > 0) {
+        // No se rompe el reporte por esto —los números siguen siendo los
+        // derivados de los pedidos— pero tiene que verse.
+        notifyError(
+          `Atención: ${desvios.length} cliente(s) tienen el saldo denormalizado ` +
+          `distinto del calculado. El reporte usa el calculado.`
+        )
+      }
 
-      const clientesTyped = (clientes || []) as ClienteDB[]
-      const pedidosTyped = (pedidos || []) as PedidoDB[]
-      const pagosTyped = (pagos || []) as PagoDB[]
-
-      const hoy = new Date()
-      const reporte: ReporteCuentaPorCobrar[] = clientesTyped.map(cliente => {
-        const pedidosCliente = pedidosTyped.filter(p => p.cliente_id === cliente.id)
-        const pagosCliente = pagosTyped.filter(p => p.cliente_id === cliente.id)
-
-        const totalDeuda = pedidosCliente.reduce((s, p) => s + (p.total || 0), 0)
-        const totalPagado = pagosCliente.reduce((s, p) => s + (p.monto || 0), 0)
-        const saldoPendiente = totalDeuda - totalPagado
-
-        let corriente = 0, vencido30 = 0, vencido60 = 0, vencido90 = 0
-        pedidosCliente.forEach(p => {
-          // Use outstanding balance per order, not full total (BUG-9 fix)
-          const saldoPedido = (p.total || 0) - (p.monto_pagado || 0)
-          if (saldoPedido <= 0) return // Skip fully paid orders
-
-          // La mora se cuenta desde la ENTREGA, no desde la creación del pedido.
-          // Un pedido con saldo pero aún NO entregado todavía no genera mora: va
-          // a "corriente" (el cliente todavía no recibió la mercadería).
-          if (p.estado !== 'entregado') {
-            corriente += saldoPedido
-            return
-          }
-          // Base de antigüedad: fecha de entrega real. Para pedidos entregados sin
-          // fecha_entrega (datos viejos) se usa la fecha del pedido como fallback.
-          const baseStr = p.fecha_entrega || p.fecha || p.created_at || 0
-          const fechaBase = new Date(baseStr)
-          const diasCredito = cliente.dias_credito || 30
-          const fechaVencimiento = new Date(fechaBase)
-          fechaVencimiento.setDate(fechaVencimiento.getDate() + diasCredito)
-          const diasVencido = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24))
-
-          if (diasVencido <= 0) corriente += saldoPedido
-          else if (diasVencido <= 30) vencido30 += saldoPedido
-          else if (diasVencido <= 60) vencido60 += saldoPedido
-          else vencido90 += saldoPedido
-        })
-
-        const aging: AgingDeuda = { corriente, vencido30, vencido60, vencido90 }
-
-        return {
-          cliente,
-          totalDeuda,
-          totalPagado,
-          saldoPendiente,
-          limiteCredito: cliente.limite_credito || 0,
-          creditoDisponible: (cliente.limite_credito || 0) - saldoPendiente,
-          aging,
-          pedidosPendientes: pedidosCliente.length
-        }
-      }).filter(r => r.saldoPendiente > 0).sort((a, b) => b.saldoPendiente - a.saldoPendiente)
-
-      return reporte
+      return (res?.clientes ?? []) as ReporteCuentaPorCobrar[]
     } catch (error) {
       notifyError('Error al generar reporte: ' + (error as Error).message)
       return []
@@ -119,125 +60,38 @@ export function useReportesFinancieros(): UseReportesFinancierosReturn {
     }
   }
 
+  /**
+   * Rentabilidad por producto, también agregada en la base (mig 208). Antes
+   * bajaba los pedidos del período con sus items y sus productos embebidos, que
+   * era el payload más pesado de todos los reportes.
+   *
+   * La cascada de costo y el ingreso real fiscal viven ahora en SQL, con la
+   * misma definición que `reporte_gerencial` (migs 130 y 123).
+   */
   const generarReporteRentabilidad = async (
     fechaDesde: string | null = null,
     fechaHasta: string | null = null
   ): Promise<ReporteRentabilidad> => {
     setLoading(true)
     try {
-      let query = supabase.from('pedidos').select(`*, items:pedido_items(*, producto:productos(*))`)
-        .neq('estado', 'cancelado')
-      if (fechaDesde) query = query.gte('created_at', `${fechaDesde}T00:00:00`)
-      if (fechaHasta) query = query.lte('created_at', `${fechaHasta}T23:59:59`)
-
-      const { data: pedidos, error } = await query
-      if (error) throw error
-
-      const pedidosTyped = (pedidos || []) as PedidoWithItems[]
-
-      const productoStats: ProductoStatsMap = {}
-      let ventasBrutas = 0
-      let ivaDiscriminado = 0
-      let impuestosInternosTotales = 0
-      let ventasNetas = 0
-
-      pedidosTyped.forEach(p => {
-        const tipoFactura = (p as unknown as Record<string, unknown>).tipo_factura as string || 'ZZ'
-
-        p.items?.forEach(item => {
-          const prod = item.producto
-          if (!prod) return
-          const id = prod.id
-          if (!productoStats[id]) {
-            productoStats[id] = {
-              id,
-              nombre: prod.nombre,
-              codigo: prod.codigo,
-              cantidadVendida: 0,
-              ingresos: 0,
-              costos: 0,
-              margen: 0,
-              margenPorcentaje: 0
-            }
-          }
-          const subtotalItem = item.subtotal || (item.cantidad * item.precio_unitario)
-          productoStats[id].cantidadVendida += item.cantidad
-          ventasBrutas += subtotalItem
-
-          // Ingreso REAL por item (mig 123): FC = neto (el IVA se remite), ZZ =
-          // precio final. Snapshot en ingreso_real_unitario; fallback por tipo
-          // para filas legacy.
-          const itemRec = item as Record<string, unknown>
-          const realUnit = itemRec.ingreso_real_unitario as number | null | undefined
-          if (realUnit != null) {
-            productoStats[id].ingresos += realUnit * item.cantidad
-            ivaDiscriminado += ((itemRec.iva_unitario as number) || 0) * item.cantidad
-            impuestosInternosTotales += ((itemRec.impuestos_internos_unitario as number) || 0) * item.cantidad
-            ventasNetas += ((itemRec.neto_unitario as number) ?? realUnit) * item.cantidad
-          } else if (tipoFactura === 'FC' && itemRec.neto_unitario != null) {
-            const netoItem = (itemRec.neto_unitario as number) * item.cantidad
-            productoStats[id].ingresos += netoItem
-            ivaDiscriminado += ((itemRec.iva_unitario as number) || 0) * item.cantidad
-            ventasNetas += netoItem
-          } else {
-            // ZZ o legacy sin desglose: real = final
-            productoStats[id].ingresos += subtotalItem
-            ventasNetas += subtotalItem
-          }
-
-          // Costo canónico (mig 120): snapshot congelado al crear el pedido;
-          // fallback a productos.costo_real (mig 111) y por último a la
-          // fórmula vieja. Antes usaba costo_sin_iva vivo SIN imp. internos.
-          const costoUnitario = ((item as Record<string, unknown>).costo_unitario_al_crear as number | null)
-            ?? prod.costo_real
-            ?? ((prod.costo_sin_iva || 0) * (1 + (prod.impuestos_internos || 0) / 100))
-          productoStats[id].costos += (costoUnitario || 0) * item.cantidad
-        })
+      const { data, error } = await supabase.rpc('reporte_rentabilidad', {
+        p_desde: fechaDesde,
+        p_hasta: fechaHasta,
+        p_sucursal_id: null,
       })
-
-      const reporteProductos: ProductoRentabilidad[] = Object.values(productoStats).map(p => ({
-        ...p,
-        margen: p.ingresos - p.costos,
-        margenPorcentaje: p.ingresos > 0 ? ((p.ingresos - p.costos) / p.ingresos * 100) : 0
-      })).sort((a, b) => b.margen - a.margen)
-
-      const totales: TotalesRentabilidad = {
-        ingresosTotales: reporteProductos.reduce((s, p) => s + p.ingresos, 0),
-        costosTotales: reporteProductos.reduce((s, p) => s + p.costos, 0),
-        margenTotal: reporteProductos.reduce((s, p) => s + p.margen, 0),
-        cantidadPedidos: pedidosTyped.length,
-        margenPorcentaje: 0,
-        ventasBrutas,
-        ivaDiscriminado,
-        impuestosInternos: impuestosInternosTotales,
-        ventasNetas
+      if (error) throw error
+      const res = data as ReporteRentabilidad | null
+      return {
+        productos: res?.productos ?? [],
+        totales: res?.totales ?? ({} as ReporteRentabilidad['totales']),
       }
-      totales.margenPorcentaje = totales.ingresosTotales > 0
-        ? (totales.margenTotal / totales.ingresosTotales * 100)
-        : 0
-
-      return { productos: reporteProductos, totales }
     } catch (error) {
       notifyError('Error al generar reporte: ' + (error as Error).message)
-      return {
-        productos: [],
-        totales: {
-          ingresosTotales: 0,
-          costosTotales: 0,
-          margenTotal: 0,
-          cantidadPedidos: 0,
-          margenPorcentaje: 0,
-          ventasBrutas: 0,
-          ivaDiscriminado: 0,
-          impuestosInternos: 0,
-          ventasNetas: 0
-        }
-      }
+      return { productos: [], totales: {} as ReporteRentabilidad['totales'] }
     } finally {
       setLoading(false)
     }
   }
-
 
   return {
     loading,

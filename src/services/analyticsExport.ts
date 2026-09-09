@@ -7,10 +7,46 @@
 import { supabase } from '../lib/supabase'
 import type { SheetConfig } from '../utils/excel'
 import { calculateMarketBasket } from '../utils/marketBasket'
+import { costoCanonicoUnitario } from '../utils/costoCanonico'
+import type { ProductoCosto } from '../utils/costoCanonico'
+import { traerTodo } from '../utils/paginacion'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Filas del export a BI. Este repo no tiene tipos generados de la base, así que
+ * se declaran acá las columnas que el export efectivamente usa.
+ */
+interface ClienteBI {
+  id: string
+  [k: string]: unknown
+}
+
+interface ProductoBI {
+  id: string
+  nombre?: string | null
+  codigo?: string | null
+  categoria?: string | null
+  precio?: number | null
+  stock?: number | null
+  stock_minimo?: number | null
+  costo_sin_iva?: number | null
+  costo_con_iva?: number | null
+  costo_real?: number | null
+  costo_promedio?: number | null
+  impuestos_internos?: number | null
+  activo?: boolean | null
+}
+
+interface ItemBI {
+  producto_id: string
+  cantidad?: number | null
+  precio_unitario?: number | null
+  subtotal?: number | null
+  pedido?: unknown
+}
 
 function formatDate(iso: string) {
   const d = new Date(iso)
@@ -35,7 +71,8 @@ export async function fetchVentasDetallado(
   desde: string,
   hasta: string
 ): Promise<Record<string, unknown>[]> {
-  const { data: pedidos, error } = await supabase
+  const pedidos = await traerTodo<Record<string, unknown>>(
+    () => supabase
     .from('pedidos')
     .select(`
       id,
@@ -53,14 +90,17 @@ export async function fetchVentasDetallado(
         precio_unitario,
         subtotal,
         costo_unitario_al_crear,
-        producto:productos(id, nombre, codigo, categoria, costo_con_iva, costo_real)
+        producto:productos(id, nombre, codigo, categoria, costo_con_iva, costo_real, costo_promedio)
       )
     `)
     .gte('created_at', `${desde}T00:00:00`)
     .lte('created_at', `${hasta}T23:59:59`)
     .order('created_at', { ascending: false })
-
-  if (error) throw new Error(`Error cargando ventas: ${error.message}`)
+    .order('id'),
+    // Un mes típico ya son ~1.064 pedidos: sin paginar el export a BI salía
+    // truncado y con forma de archivo oficial.
+    { etiqueta: 'ventas' },
+  )
 
   // Fetch perfiles separately (FK join pedidos->perfiles doesn't work reliably)
   const perfilIds = new Set<string>()
@@ -88,10 +128,12 @@ export async function fetchVentasDetallado(
 
     for (const item of items) {
       const producto = item.producto as Record<string, unknown> | null
-      // Costo canónico (mig 120): snapshot al crear → costo_real vivo → legacy
-      // costo_con_iva (que incluía IVA y sobreestimaba el costo).
-      const costoUnitario = Number(
-        item.costo_unitario_al_crear ?? producto?.costo_real ?? producto?.costo_con_iva ?? 0
+      // Costo canónico (mig 130): el mismo COALESCE que el reporte gerencial.
+      // Antes se salteaba costo_promedio y caía a costo_con_iva, que es el
+      // costo FINANCIERO (IVA adentro): inflaba el costo y hundía el margen.
+      const costoUnitario = costoCanonicoUnitario(
+        item.costo_unitario_al_crear as number | null,
+        producto as ProductoCosto | null
       )
       const precioUnitario = Number(item.precio_unitario || 0)
       const cantidad = Number(item.cantidad || 0)
@@ -99,7 +141,7 @@ export async function fetchVentasDetallado(
       const costoTotal = costoUnitario * cantidad
       const margenTotal = subtotal - costoTotal
 
-      const dt = formatDate(p.created_at)
+      const dt = formatDate(String(p.created_at))
 
       rows.push({
         pedido_id: p.id,
@@ -144,19 +186,24 @@ export async function fetchClientesDimension(
   desde: string,
   hasta: string
 ): Promise<Record<string, unknown>[]> {
-  const [clientesRes, pedidosRes] = await Promise.all([
-    supabase.from('clientes').select('*'),
-    supabase
-      .from('pedidos')
-      .select('id, cliente_id, total, created_at')
-      .gte('created_at', `${desde}T00:00:00`)
-      .lte('created_at', `${hasta}T23:59:59`),
+  const [clientes, pedidosPeriodo] = await Promise.all([
+    traerTodo<ClienteBI>(
+      () => supabase.from('clientes').select('*').order('id'),
+      { etiqueta: 'clientes' },
+    ),
+    traerTodo<{ cliente_id: string; total: number; created_at: string }>(
+      () => supabase
+        .from('pedidos')
+        .select('id, cliente_id, total, created_at')
+        .gte('created_at', `${desde}T00:00:00`)
+        .lte('created_at', `${hasta}T23:59:59`)
+        .order('id'),
+      { etiqueta: 'pedidos por cliente' },
+    ),
   ])
 
-  if (clientesRes.error) throw new Error(`Error cargando clientes: ${clientesRes.error.message}`)
-
   const pedidosPorCliente = new Map<string, Array<{ total: number; created_at: string }>>()
-  for (const p of pedidosRes.data || []) {
+  for (const p of pedidosPeriodo) {
     const arr = pedidosPorCliente.get(p.cliente_id) || []
     arr.push({ total: p.total, created_at: p.created_at })
     pedidosPorCliente.set(p.cliente_id, arr)
@@ -164,7 +211,7 @@ export async function fetchClientesDimension(
 
   const now = Date.now()
 
-  return (clientesRes.data || []).map(c => {
+  return clientes.map(c => {
     const pedidos = pedidosPorCliente.get(c.id) || []
     const totalCompras = pedidos.reduce((s, p) => s + (p.total || 0), 0)
     const cantidadPedidos = pedidos.length
@@ -216,19 +263,26 @@ export async function fetchProductosDimension(
   desde: string,
   hasta: string
 ): Promise<Record<string, unknown>[]> {
-  const [productosRes, itemsRes] = await Promise.all([
-    supabase.from('productos').select('*'),
-    supabase
-      .from('pedido_items')
-      .select('producto_id, cantidad, precio_unitario, subtotal, pedido:pedidos!inner(created_at)')
-      .gte('pedido.created_at', `${desde}T00:00:00`)
-      .lte('pedido.created_at', `${hasta}T23:59:59`),
+  // `pedido_items` son ~18.800 filas y un mes son varios miles: era el que más
+  // truncaba de todo el export.
+  const [productos, items] = await Promise.all([
+    traerTodo<ProductoBI>(
+      () => supabase.from('productos').select('*').order('id'),
+      { etiqueta: 'productos' },
+    ),
+    traerTodo<ItemBI>(
+      () => supabase
+        .from('pedido_items')
+        .select('producto_id, cantidad, precio_unitario, subtotal, pedido:pedidos!inner(created_at)')
+        .gte('pedido.created_at', `${desde}T00:00:00`)
+        .lte('pedido.created_at', `${hasta}T23:59:59`)
+        .order('id'),
+      { etiqueta: 'ítems vendidos' },
+    ),
   ])
 
-  if (productosRes.error) throw new Error(`Error cargando productos: ${productosRes.error.message}`)
-
   const ventasPorProducto = new Map<string, { cantidad: number; ingresos: number; dias: Set<string> }>()
-  for (const item of itemsRes.data || []) {
+  for (const item of items) {
     const existing = ventasPorProducto.get(item.producto_id) || { cantidad: 0, ingresos: 0, dias: new Set<string>() }
     existing.cantidad += item.cantidad || 0
     existing.ingresos += item.subtotal || (item.precio_unitario || 0) * (item.cantidad || 0)
@@ -239,10 +293,14 @@ export async function fetchProductosDimension(
     ventasPorProducto.set(item.producto_id, existing)
   }
 
-  return (productosRes.data || []).map(p => {
+  return productos.map(p => {
     const ventas = ventasPorProducto.get(p.id) || { cantidad: 0, ingresos: 0, dias: new Set() }
-    // Costo real canónico (mig 111); fallback legacy a costo_con_iva.
-    const costoUnitario = Number(p.costo_real ?? p.costo_con_iva ?? 0)
+    // Costo canónico (mig 130) SIN snapshot: esta hoja agrega por producto
+    // sobre todo el período, así que no hay un `costo_unitario_al_crear` único
+    // que congelar. El margen de acá vale el costo de HOY: para recomputarlo
+    // línea por línea con el costo congelado está la hoja Ventas_Detallado, y
+    // por eso se exporta también costo_promedio.
+    const costoUnitario = costoCanonicoUnitario(null, p as ProductoCosto)
     const costoTotal = costoUnitario * ventas.cantidad
     const margenTotal = ventas.ingresos - costoTotal
 
@@ -261,6 +319,8 @@ export async function fetchProductosDimension(
       costo_sin_iva: p.costo_sin_iva ?? 0,
       costo_con_iva: p.costo_con_iva ?? 0,
       costo_real: p.costo_real ?? 0,
+      costo_promedio: p.costo_promedio ?? 0,
+      costo_unitario_usado: costoUnitario,
       activo: p.activo !== false ? 'Si' : 'No',
       total_vendido: ventas.cantidad,
       total_ingresos: Number(ventas.ingresos.toFixed(2)),
@@ -368,29 +428,32 @@ export async function fetchCobranzasFact(
   desde: string,
   hasta: string
 ): Promise<Record<string, unknown>[]> {
-  const { data, error } = await supabase
-    .from('pagos')
-    .select(`
-      id,
-      created_at,
-      monto,
-      forma_pago,
-      referencia,
-      notas,
-      cliente:clientes(id, nombre_fantasia, zona),
-      pedido_id
-    `)
-    .gte('created_at', `${desde}T00:00:00`)
-    .lte('created_at', `${hasta}T23:59:59`)
-    .order('created_at', { ascending: false })
+  // ~1.208 pagos en un solo mes: también pasaba el tope.
+  const data = await traerTodo<Record<string, unknown>>(
+    () => supabase
+      .from('pagos')
+      .select(`
+        id,
+        created_at,
+        monto,
+        forma_pago,
+        referencia,
+        notas,
+        cliente:clientes(id, nombre_fantasia, zona),
+        pedido_id
+      `)
+      .gte('created_at', `${desde}T00:00:00`)
+      .lte('created_at', `${hasta}T23:59:59`)
+      .order('created_at', { ascending: false })
+      .order('id'),
+    { etiqueta: 'cobranzas' },
+  )
 
-  if (error) throw new Error(`Error cargando cobranzas: ${error.message}`)
-
-  return (data || []).map(pago => {
+  return data.map(pago => {
     const cliente = pago.cliente as unknown as Record<string, unknown> | null
     return {
       pago_id: pago.id,
-      fecha: new Date(pago.created_at).toLocaleDateString('es-AR'),
+      fecha: new Date(String(pago.created_at)).toLocaleDateString('es-AR'),
       cliente_id: safe(cliente?.id),
       cliente_nombre: safe(cliente?.nombre_fantasia),
       cliente_zona: safe(cliente?.zona),
@@ -412,29 +475,33 @@ export async function fetchCanastaProductos(
   hasta: string
 ): Promise<Record<string, unknown>[]> {
   // Fetch pedidos and all productos in parallel
-  const [pedidosRes, productosRes] = await Promise.all([
-    supabase
-      .from('pedidos')
-      .select('id, items:pedido_items(producto_id)')
-      .gte('created_at', `${desde}T00:00:00`)
-      .lte('created_at', `${hasta}T23:59:59`),
-    supabase
-      .from('productos')
-      .select('id, nombre, codigo'),
+  const [pedidosCanasta, productosCanasta] = await Promise.all([
+    traerTodo<{ id: string; items: { producto_id: string }[] }>(
+      () => supabase
+        .from('pedidos')
+        .select('id, items:pedido_items(producto_id)')
+        .gte('created_at', `${desde}T00:00:00`)
+        .lte('created_at', `${hasta}T23:59:59`)
+        .order('id'),
+      { etiqueta: 'pedidos para canasta' },
+    ),
+    traerTodo<{ id: string; nombre: string; codigo: string }>(
+      () => supabase.from('productos').select('id, nombre, codigo').order('id'),
+      { etiqueta: 'productos' },
+    ),
   ])
 
-  if (pedidosRes.error) throw new Error(`Error cargando pedidos para canasta: ${pedidosRes.error.message}`)
-  if (!pedidosRes.data || pedidosRes.data.length === 0) return []
+  if (pedidosCanasta.length === 0) return []
 
   const pairs = calculateMarketBasket(
-    pedidosRes.data.map(p => ({ items: (p.items || []) as Array<{ producto_id: string }> })),
+    pedidosCanasta.map(p => ({ items: (p.items || []) as Array<{ producto_id: string }> })),
     2
   )
 
   if (pairs.length === 0) return []
 
   // Build name lookup from all productos
-  const names = new Map((productosRes.data || []).map(p => [p.id, p]))
+  const names = new Map(productosCanasta.map(p => [p.id, p]))
 
   return pairs.map(pair => ({
     producto_a_id: pair.producto_a,

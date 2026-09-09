@@ -9,6 +9,7 @@ import { Loader2 } from 'lucide-react'
 import {
   usePoliticasComercialesQuery,
   useActualizarMontoMinimoMutation,
+  useActualizarComisionesDefaultMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -30,6 +31,7 @@ export default function ConfiguracionContainer() {
   const { currentSucursalNombre } = useSucursal()
   const { politicas, isLoading } = usePoliticasComercialesQuery()
   const actualizar = useActualizarMontoMinimoMutation()
+  const actualizarComisiones = useActualizarComisionesDefaultMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -49,6 +51,15 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizar, notify])
 
+  const handleGuardarComisiones = useCallback(async (pctPreventista: number, pctOtros: number) => {
+    try {
+      await actualizarComisiones.mutateAsync({ pctPreventista, pctOtros })
+      notify.success(`Comisión por defecto: ${pctPreventista}% preventistas, ${pctOtros}% el resto`)
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudieron guardar las comisiones')
+    }
+  }, [actualizarComisiones, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -60,6 +71,10 @@ export default function ConfiguracionContainer() {
         onMontoTipeado={setMontoTipeado}
         onGuardar={handleGuardar}
         nombreSucursal={currentSucursalNombre}
+        comisionPctPreventista={politicas.comisionPctPreventista}
+        comisionPctOtros={politicas.comisionPctOtros}
+        guardandoComisiones={actualizarComisiones.isPending}
+        onGuardarComisiones={handleGuardarComisiones}
       />
     </Suspense>
   )

@@ -25,6 +25,7 @@ export const usuariosKeys = {
   transportistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'transportistas'] as const,
   preventistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistas'] as const,
   preventistasAsignables: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistasAsignables'] as const,
+  vendedoresComisionables: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'vendedoresComisionables'] as const,
   rolesExtra: (sucursalId: number | null, id: string) =>
     [...usuariosKeys.all(sucursalId), 'rolesExtra', id] as const,
 }
@@ -175,6 +176,31 @@ async function fetchPreventistasAsignables(sucursalId: number | null): Promise<P
   return (data as PerfilDB[]) || []
 }
 
+// Padron de quienes PUEDEN vender, para las reglas de comision.
+//
+// Es una tercera lista a proposito, y no un ensanche de las dos de arriba:
+// `fetchPreventistas` la usan ModalCliente y RecorridoPreventistaContainer,
+// donde filtrar por rol si es lo correcto, y `fetchPreventistasAsignables`
+// decide quien puede ser el `usuario_id` de un pedido. Tocar cualquiera de las
+// dos cambiaria pantallas que no tienen nada que ver con comisiones.
+//
+// Los tres roles salen de quien puede ser el vendedor de un pedido segun
+// `crear_pedido_completo` (mig 205). Los transportistas quedan afuera: no
+// pueden serlo, y en los datos no tienen ni un pedido.
+async function fetchVendedoresComisionables(sucursalId: number | null): Promise<PerfilDB[]> {
+  if (!sucursalId) return []
+  const { data, error } = await supabase
+    .from('perfiles')
+    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .in('rol', ['admin', 'encargado', 'preventista'])
+    .eq('activo', true)
+    .eq('usuario_sucursales.sucursal_id', sucursalId)
+    .order('nombre')
+
+  if (error) throw error
+  return (data as PerfilDB[]) || []
+}
+
 // Mutation functions
 async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioUpdateInput }): Promise<PerfilDB> {
   const { data, error } = await supabase
@@ -317,6 +343,21 @@ export function usePreventistasAsignablesQuery() {
   return useQuery({
     queryKey: usuariosKeys.preventistasAsignables(currentSucursalId),
     queryFn: () => fetchPreventistasAsignables(currentSucursalId),
+    enabled: !!currentSucursalId,
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+/**
+ * Padron de quienes pueden vender (admin + encargado + preventista activos).
+ * Es el piso estable del desplegable de reglas de comision: no depende del
+ * periodo que se este mirando.
+ */
+export function useVendedoresComisionablesQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: usuariosKeys.vendedoresComisionables(currentSucursalId),
+    queryFn: () => fetchVendedoresComisionables(currentSucursalId),
     enabled: !!currentSucursalId,
     staleTime: 10 * 60 * 1000,
   })

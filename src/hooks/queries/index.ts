@@ -38,6 +38,10 @@ export {
 } from './useCategoriasQuery'
 export type { CategoriaDB } from './useCategoriasQuery'
 
+// Stock de la red (cross-sucursal, solo lectura)
+export { stockRedKeys, useStockRedQuery } from './useStockRedQuery'
+export type { StockRed, StockRedSucursal } from './useStockRedQuery'
+
 // Marcas (mig 158)
 export {
   marcasKeys,
@@ -138,6 +142,7 @@ export {
   useTransportistasQuery,
   usePreventistasQuery,
   usePreventistasAsignablesQuery,
+  useVendedoresComisionablesQuery,
   usePerfilRolesQuery,
   useAsignarPerfilRolesMutation,
   useActualizarUsuarioMutation,

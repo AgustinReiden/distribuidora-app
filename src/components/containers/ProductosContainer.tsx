@@ -13,7 +13,7 @@ import {
   useActualizarProductoMutation,
   useEliminarProductoMutation,
 } from '../../hooks/queries'
-import { useMermasQuery, useRegistrarMermaMutation } from '../../hooks/queries'
+import { useRegistrarMermaMutation, useUsuariosQuery } from '../../hooks/queries'
 import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
@@ -94,7 +94,9 @@ export default function ProductosContainer(): React.ReactElement {
 
   // Queries
   const { data: productos = [], isLoading } = useProductosQuery()
-  const { data: mermas = [] } = useMermasQuery()
+  // Para poder decir QUIÉN registró cada merma: el prop nunca se pasaba y el
+  // historial mostraba "Usuario desconocido" en todas las filas.
+  const { data: usuarios = [] } = useUsuariosQuery()
   const { data: proveedores = [] } = useProveedoresActivosQuery()
   const { data: clientes = [] } = useClientesQuery()
   const { data: categoriasTabla = [] } = useCategoriasQuery()
@@ -453,8 +455,8 @@ export default function ProductosContainer(): React.ReactElement {
       {modalHistorialOpen && (
         <Suspense fallback={null}>
           <ModalHistorialMermas
-            mermas={mermas as Parameters<typeof ModalHistorialMermas>[0]['mermas']}
             productos={productos as unknown as Parameters<typeof ModalHistorialMermas>[0]['productos']}
+            usuarios={usuarios as unknown as Parameters<typeof ModalHistorialMermas>[0]['usuarios']}
             onClose={() => setModalHistorialOpen(false)}
           />
         </Suspense>

@@ -1,7 +1,8 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
-import { useCalcularComisionesQuery, usePreventistasQuery } from '../../hooks/queries'
+import { useCalcularComisionesQuery, useVendedoresComisionablesQuery } from '../../hooks/queries'
+import { vendedoresElegibles } from '../../utils/vendedoresComision'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
@@ -36,11 +37,15 @@ export default function ComisionesContainer(): React.ReactElement {
   // El cálculo lo resuelve la DB (mig 150): misma base que el reporte gerencial
   // y % por regla vigente, en vez del `ventas × % tipeado` que había acá.
   const { data: resultado, isLoading, error } = useCalcularComisionesQuery(fechaDesde, fechaHasta)
-  const { data: preventistasData = [] } = usePreventistasQuery()
+  const { data: padron = [] } = useVendedoresComisionablesQuery()
 
+  // El padrón —quienes PUEDEN vender— es el piso, así la lista no cambia al
+  // cambiar el rango de fechas; `resultado.preventistas` sólo suma al que ya
+  // no está en el padrón pero tiene comisión acumulada. La regla vive en
+  // `vendedoresElegibles`, con tests.
   const preventistas = useMemo(
-    () => preventistasData.map(p => ({ id: p.id, nombre: p.nombre || p.email || 'Sin nombre' })),
-    [preventistasData],
+    () => vendedoresElegibles(padron, resultado?.preventistas),
+    [padron, resultado],
   )
 
   useEffect(() => {
@@ -71,7 +76,8 @@ export default function ComisionesContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalComisionReglas
             preventistas={preventistas}
-            comisionDefault={resultado?.comision_default ?? 2}
+            comisionPreventista={resultado?.comision_pct_preventista ?? resultado?.comision_default ?? 2}
+            comisionOtros={resultado?.comision_pct_otros ?? 0}
             onClose={() => setModalReglasOpen(false)}
           />
         </Suspense>

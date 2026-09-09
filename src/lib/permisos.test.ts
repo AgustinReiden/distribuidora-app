@@ -13,6 +13,7 @@ import {
   puedeAccederTransferencias,
   puedeControlarStock,
   puedeRegistrarPagoCliente,
+  puedeVerDeudaCliente,
   puedeDesactivarCliente,
   puedeEliminarCliente,
   mostrarMontosEnStats,
@@ -115,6 +116,26 @@ describe('permisos por rol', () => {
       expect(puedeRegistrarPagoCliente('deposito')).toBe(false)
       expect(puedeRegistrarPagoCliente(null)).toBe(false)
       expect(puedeRegistrarPagoCliente(undefined)).toBe(false)
+    })
+  })
+
+  // /pedidos esta habilitado para cinco roles (TopNavigation), pero el aviso de
+  // deuda es para quien VENDE: el que decide si le carga un pedido mas a un
+  // cliente que debe. El transportista y el deposito lo ven sin poder hacer
+  // nada con el, y en el reparto el saldo es el del ultimo sync: no incluye lo
+  // que el chofer acaba de cobrar.
+  describe('puedeVerDeudaCliente (aviso de deuda previa)', () => {
+    it('permite a quien vende y a quien controla la cuenta', () => {
+      expect(puedeVerDeudaCliente('admin')).toBe(true)
+      expect(puedeVerDeudaCliente('encargado')).toBe(true)
+      expect(puedeVerDeudaCliente('preventista')).toBe(true)
+    })
+
+    it('lo oculta en el reparto y en deposito', () => {
+      expect(puedeVerDeudaCliente('transportista')).toBe(false)
+      expect(puedeVerDeudaCliente('deposito')).toBe(false)
+      expect(puedeVerDeudaCliente(null)).toBe(false)
+      expect(puedeVerDeudaCliente(undefined)).toBe(false)
     })
   })
 

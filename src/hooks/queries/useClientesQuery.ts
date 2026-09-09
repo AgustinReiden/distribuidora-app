@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { ClienteDB } from '../../types'
+import { traerTodo } from '../../utils/paginacion'
 
 // Query keys
 export const clientesKeys = {
@@ -58,17 +59,24 @@ const CLIENTE_SELECT = '*, cliente_preventistas(preventista_id), cliente_descuen
 // El historial NO pasa por aca: los pedidos viejos resuelven el nombre por el
 // embed `cliente:clientes(*)` de PedidosContainer, y los reportes por sus RPCs.
 async function fetchClientes(includeInactivos = false): Promise<ClienteDB[]> {
-  let query = supabase
-    .from('clientes')
-    .select(CLIENTE_SELECT)
-    .order('nombre_fantasia')
+  // Paginado: son 720 clientes y el tope de PostgREST es 1.000. Todavía entra,
+  // pero esta consulta alimenta los selectores de toda la app —si se corta, un
+  // cliente deja de poder elegirse y no hay ningún error que lo delate—. El
+  // desempate por `id` hace falta porque `nombre_fantasia` no es único.
+  const data = await traerTodo<ClienteRow>(
+    () => {
+      let query = supabase
+        .from('clientes')
+        .select(CLIENTE_SELECT)
+        .order('nombre_fantasia')
+        .order('id')
+      if (!includeInactivos) query = query.eq('activo', true)
+      return query
+    },
+    { etiqueta: 'clientes' },
+  )
 
-  if (!includeInactivos) query = query.eq('activo', true)
-
-  const { data, error } = await query
-
-  if (error) throw error
-  return ((data as ClienteRow[]) || []).map(flattenClienteRow)
+  return data.map(flattenClienteRow)
 }
 
 async function fetchClienteById(id: string): Promise<ClienteDB | null> {

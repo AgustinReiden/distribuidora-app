@@ -26,6 +26,10 @@ import { cacheData, getCachedData } from '../../lib/offlineDb'
 export interface PoliticasComerciales {
   /** Monto mínimo en $ que debe alcanzar un pedido. 0 = sin política. */
   montoMinimoPedido: number
+  /** % por defecto de quien tiene rol preventista (mig 207). */
+  comisionPctPreventista: number
+  /** % por defecto de quien NO es preventista: admin, encargado (mig 207). */
+  comisionPctOtros: number
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -34,12 +38,18 @@ export const politicasComercialesKeys = {
   all: (sucursalId: number | null) => ['politicas-comerciales', sucursalId] as const,
 }
 
-export const POLITICAS_POR_DEFECTO: PoliticasComerciales = { montoMinimoPedido: 0 }
+// Los valores de arranque de la mig 207, que son los que rigen si todavía no
+// llegó la fila del servidor. No inventan nada: son el default de las columnas.
+export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
+  montoMinimoPedido: 0,
+  comisionPctPreventista: 2,
+  comisionPctOtros: 0,
+}
 
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido')
+    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros')
     .maybeSingle()
 
   if (error) throw error
@@ -48,6 +58,9 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
   // sucursal creada después todavía no la tendría, y eso no es un error.
   const politicas: PoliticasComerciales = {
     montoMinimoPedido: Number(data?.monto_minimo_pedido ?? 0) || 0,
+    // `?? 2` y no `|| 2`: un 0 configurado a mano es un valor, no un hueco.
+    comisionPctPreventista: Number(data?.comision_pct_preventista ?? 2),
+    comisionPctOtros: Number(data?.comision_pct_otros ?? 0),
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -113,11 +126,61 @@ export function useActualizarMontoMinimoMutation() {
       if (error) throw error
       // Se refresca el caché de Dexie en el acto: si no, un teléfono que queda
       // sin señal justo después seguiría validando contra el mínimo viejo.
-      await cacheData(CACHE_KEY, { montoMinimoPedido: monto }, undefined, currentSucursalId).catch(() => {})
+      // Se preserva el resto de la política: pisar el caché con un objeto de un
+      // solo campo dejaría los porcentajes en undefined hasta la próxima lectura.
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        { ...(previo ?? POLITICAS_POR_DEFECTO), montoMinimoPedido: monto },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
       return Number(data ?? monto)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * Fija los dos % de comisión por defecto de la sucursal activa.
+ *
+ * Va por RPC por lo mismo que el monto mínimo: `actualizado_por` lo sella el
+ * servidor con auth.uid(). Los dos porcentajes viajan juntos porque son una
+ * sola decisión —"cuánto cobra cada tipo de vendedor"— y mandarlos por separado
+ * dejaría un estado intermedio raro entre las dos escrituras.
+ */
+export function useActualizarComisionesDefaultMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (input: { pctPreventista: number; pctOtros: number }) => {
+      const { error } = await supabase.rpc('actualizar_comisiones_default', {
+        p_pct_preventista: input.pctPreventista,
+        p_pct_otros: input.pctOtros,
+      })
+      if (error) throw error
+
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        {
+          ...(previo ?? POLITICAS_POR_DEFECTO),
+          comisionPctPreventista: input.pctPreventista,
+          comisionPctOtros: input.pctOtros,
+        },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return input
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+      // El cálculo de comisiones cambia de resultado: su caché queda viejo.
+      queryClient.invalidateQueries({ queryKey: ['comisiones'] })
     },
   })
 }

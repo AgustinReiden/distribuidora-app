@@ -7,7 +7,7 @@
  * usuario) y filtra por sucursal/categoría del lado del cliente.
  */
 import React, { useMemo, useState } from 'react';
-import { Package, AlertTriangle } from 'lucide-react';
+import { Package, AlertTriangle, Download, Loader2 } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import {
   useValuacionInventarioQuery,
@@ -44,6 +44,88 @@ export function ReporteValuacionInventario({
     );
   }, [productosFiltrados]);
 
+  const [exportando, setExportando] = useState(false);
+
+  const exportar = async (): Promise<void> => {
+    if (!data) return;
+    setExportando(true);
+    try {
+      const nombreSucursal =
+        sucursalFiltro === 'todas'
+          ? 'Todas'
+          : (data.sucursales.find((x) => x.sucursal_id === sucursalFiltro)?.sucursal_nombre ??
+             String(sucursalFiltro));
+
+      // El filtro es EN CLIENTE: exportar data.productos crudo ignoraría los
+      // filtros que el usuario tiene puestos en pantalla y el archivo no
+      // coincidiría con lo que está mirando. Por eso van los FILTRADOS, y el
+      // filtro aplicado queda escrito en la hoja de metadatos: fuera de la app,
+      // nadie puede saber si este archivo es de una sucursal o de todas.
+      const meta = [
+        { Campo: 'Generado', Valor: data.meta.generado_at },
+        { Campo: 'Criterio', Valor: data.meta.criterio },
+        { Campo: 'Sucursal (filtro aplicado)', Valor: nombreSucursal },
+        { Campo: 'Categoría (filtro aplicado)', Valor: categoriaFiltro === 'todas' ? 'Todas' : categoriaFiltro },
+        { Campo: 'Productos en este archivo', Valor: productosFiltrados.length },
+        { Campo: 'Productos en el reporte completo', Valor: data.productos.length },
+        { Campo: 'Unidades', Valor: totalesFiltro.unidades },
+        { Campo: 'Valuación a costo promedio', Valor: totalesFiltro.promedio },
+        { Campo: 'Valuación a costo de reposición', Valor: totalesFiltro.reposicion },
+        { Campo: 'Diferencia', Valor: totalesFiltro.reposicion - totalesFiltro.promedio },
+        { Campo: 'Productos con stock negativo', Valor: data.calidad_datos.stock_negativo },
+        { Campo: 'Productos sin costo', Valor: data.calidad_datos.sin_costo },
+      ];
+
+      const filas = productosFiltrados.map((p) => ({
+        Producto: p.nombre,
+        Categoría: p.categoria,
+        Sucursal: p.sucursal_nombre,
+        Stock: p.stock,
+        'Costo promedio': p.costo_promedio ?? '',
+        'Costo reposición': p.costo_reposicion ?? '',
+        'Última compra': p.ultimo_tipo_compra ?? '',
+        'Valuación promedio': p.valuacion_promedio,
+        'Valuación reposición': p.valuacion_reposicion,
+        Diferencia: p.diferencia,
+      }));
+
+      // Las categorías del RPC son GLOBALES: con un filtro puesto no cuadrarían
+      // con el detalle. Se recalculan sobre lo filtrado, que es lo que el
+      // usuario está viendo.
+      const porCategoria = new Map<string, { productos: number; unidades: number; promedio: number; reposicion: number }>();
+      for (const p of productosFiltrados) {
+        const acc = porCategoria.get(p.categoria) ?? { productos: 0, unidades: 0, promedio: 0, reposicion: 0 };
+        acc.productos += 1;
+        acc.unidades += Math.max(p.stock, 0);
+        acc.promedio += p.valuacion_promedio || 0;
+        acc.reposicion += p.valuacion_reposicion || 0;
+        porCategoria.set(p.categoria, acc);
+      }
+      const categoriasFilas = [...porCategoria.entries()]
+        .map(([categoria, v]) => ({
+          Categoría: categoria,
+          Productos: v.productos,
+          Unidades: v.unidades,
+          'Valuación promedio': v.promedio,
+          'Valuación reposición': v.reposicion,
+          Diferencia: v.reposicion - v.promedio,
+        }))
+        .sort((a, b) => b['Valuación promedio'] - a['Valuación promedio']);
+
+      const { createMultiSheetExcel } = await import('../../../utils/excel');
+      await createMultiSheetExcel(
+        [
+          { name: 'Info', data: meta, columnWidths: [34, 26] },
+          { name: 'Por categoría', data: categoriasFilas, columnWidths: [28, 11, 11, 20, 20, 16] },
+          { name: 'Detalle', data: filas, columnWidths: [40, 24, 18, 9, 16, 17, 14, 20, 20, 16] },
+        ],
+        `valuacion-inventario-${nombreSucursal}-${data.meta.generado_at.slice(0, 10)}`.replace(/\s+/g, '_')
+      );
+    } finally {
+      setExportando(false);
+    }
+  };
+
   if (isLoading) return <LoadingSpinner />;
   if (error) {
     return (
@@ -59,6 +141,21 @@ export function ReporteValuacionInventario({
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          onClick={exportar}
+          disabled={exportando || productosFiltrados.length === 0}
+          className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+        >
+          {exportando ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+          Exportar a Excel
+        </button>
+      </div>
+
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
@@ -121,6 +218,7 @@ export function ReporteValuacionInventario({
       <div className="flex flex-wrap gap-3">
         {data.sucursales.length > 1 && (
           <select
+            aria-label="Sucursal"
             value={sucursalFiltro}
             onChange={(e) => setSucursalFiltro(e.target.value === 'todas' ? 'todas' : Number(e.target.value))}
             className="px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
@@ -132,6 +230,7 @@ export function ReporteValuacionInventario({
           </select>
         )}
         <select
+          aria-label="Categoría"
           value={categoriaFiltro}
           onChange={(e) => setCategoriaFiltro(e.target.value)}
           className="px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"

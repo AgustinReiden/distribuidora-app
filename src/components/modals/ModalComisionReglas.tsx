@@ -34,7 +34,10 @@ export interface PreventistaOption {
 
 export interface ModalComisionReglasProps {
   preventistas: PreventistaOption[]
-  comisionDefault: number
+  /** % por defecto de los preventistas (mig 207). */
+  comisionPreventista: number
+  /** % por defecto del resto: admin, encargado (mig 207). */
+  comisionOtros: number
   onClose: () => void
 }
 
@@ -50,7 +53,8 @@ const ORIGENES_REGLA: Array<{ value: '' | OrigenPrecio; label: string }> = [
 
 export default function ModalComisionReglas({
   preventistas,
-  comisionDefault,
+  comisionPreventista,
+  comisionOtros,
   onClose,
 }: ModalComisionReglasProps) {
   const notify = useNotification()
@@ -63,9 +67,17 @@ export default function ModalComisionReglas({
   const [porcentaje, setPorcentaje] = useState<number>(2)
   const [vigenteDesde, setVigenteDesde] = useState<string>(fechaLocalISO())
 
+  /**
+   * El fallback NO puede ser un rótulo genérico: una regla con `preventista_id`
+   * NULL ya se muestra como «Todos», así que un nombre genérico para un id que
+   * no está en la lista se lee como si la regla fuera para todos —justo lo
+   * contrario de lo que es—. La lista se arma con quien vendió en el período
+   * mostrado, así que un id ausente significa exactamente eso.
+   */
   const nombrePreventista = useMemo(() => {
     const map = new Map(preventistas.map(p => [p.id, p.nombre]))
-    return (id: string | null): string => (id ? map.get(id) ?? 'Preventista' : 'Todos')
+    return (id: string | null): string =>
+      id ? (map.get(id) ?? 'Vendedor sin ventas en el período') : 'Todos'
   }, [preventistas])
 
   /**
@@ -126,7 +138,7 @@ export default function ModalComisionReglas({
   return (
     <ModalBase
       title="Reglas de comisión"
-      description="Porcentaje por preventista y por origen del precio"
+      description="Porcentaje por vendedor y por origen del precio"
       onClose={onClose}
       maxWidth="max-w-3xl"
     >
@@ -134,9 +146,11 @@ export default function ModalComisionReglas({
         <div className="flex items-start gap-3 p-3 rounded-lg bg-stone-50 dark:bg-gray-900/40 border border-stone-200 dark:border-gray-700">
           <Percent className="w-5 h-5 shrink-0 mt-0.5 text-indigo-600" aria-hidden="true" />
           <p className="text-xs text-stone-600 dark:text-gray-300">
-            Gana la regla más específica que coincida. Sin ninguna regla que aplique se usa el{' '}
-            <strong>{comisionDefault}%</strong>. Cargá una regla con origen «Cualquiera» para el %
-            base del preventista y otra con «{etiquetaOrigen('mayorista')}» para el % reducido.
+            Gana la regla más específica que coincida. Sin ninguna regla que aplique se usa el
+            porcentaje por defecto según el rol: <strong>{comisionPreventista}%</strong> para
+            preventistas y <strong>{comisionOtros}%</strong> para el resto (admin, encargado), que
+            se configuran en Configuración. Cargá una regla con origen «Cualquiera» para el % base
+            de una persona y otra con «{etiquetaOrigen('mayorista')}» para el % reducido.
           </p>
         </div>
 
@@ -163,7 +177,7 @@ export default function ModalComisionReglas({
         <div className="rounded-lg border dark:border-gray-700 p-3 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="regla-preventista" className="block text-sm font-medium mb-1">Preventista</label>
+              <label htmlFor="regla-preventista" className="block text-sm font-medium mb-1">Vendedor</label>
               <select
                 id="regla-preventista"
                 value={preventistaId}
@@ -234,14 +248,15 @@ export default function ModalComisionReglas({
           <p className="text-sm text-stone-500">Cargando reglas…</p>
         ) : reglas.length === 0 ? (
           <p className="text-sm text-stone-500 dark:text-gray-400">
-            No hay reglas cargadas: todo se comisiona al {comisionDefault}%.
+            No hay reglas cargadas: se comisiona con el default por rol
+            ({comisionPreventista}% preventistas, {comisionOtros}% el resto).
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-stone-50 dark:bg-gray-700/50">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">Preventista</th>
+                  <th className="px-3 py-2 text-left font-medium">Vendedor</th>
                   <th className="px-3 py-2 text-left font-medium">Origen</th>
                   <th className="px-3 py-2 text-right font-medium">%</th>
                   <th className="px-3 py-2 text-left font-medium">Vigencia</th>

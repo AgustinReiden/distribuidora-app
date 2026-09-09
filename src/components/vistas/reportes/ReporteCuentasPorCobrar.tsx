@@ -1,8 +1,8 @@
 /**
  * Componente para mostrar el reporte de cuentas por cobrar con aging
  */
-import React from 'react';
-import { DollarSign } from 'lucide-react';
+import React, { useState } from 'react';
+import { DollarSign, Download, Loader2 } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import type { ClienteDB, ReporteCuentaPorCobrar } from '../../../types';
 
@@ -19,7 +19,7 @@ export function ReporteCuentasPorCobrar({
   formatPrecio,
   onVerCliente
 }: ReporteCuentasPorCobrarProps): React.ReactElement {
-  if (loading) return <LoadingSpinner />;
+  const [exportando, setExportando] = useState(false);
 
   // Totales por aging
   const totalCorriente = reporte.reduce((s, r) => s + r.aging.corriente, 0);
@@ -28,8 +28,76 @@ export function ReporteCuentasPorCobrar({
   const total90 = reporte.reduce((s, r) => s + r.aging.vencido90, 0);
   const totalGeneral = reporte.reduce((s, r) => s + r.saldoPendiente, 0);
 
+  const exportar = async (): Promise<void> => {
+    if (reporte.length === 0) return;
+    setExportando(true);
+    try {
+      // `cliente` y `aging` vienen anidados: el Excel es plano, así que se
+      // aplanan a columnas. El aging va en columnas y no en filas porque la
+      // lectura del informe es "quién me debe y de cuándo", por cliente.
+      const detalle = reporte.map((r) => ({
+        Cliente: r.cliente.nombre_fantasia ?? '',
+        'Razón social': r.cliente.razon_social ?? '',
+        Zona: r.cliente.zona || 'Sin zona',
+        CUIT: r.cliente.cuit ?? '',
+        Teléfono: r.cliente.telefono ?? '',
+        Activo: r.cliente.activo === false ? 'No' : 'Sí',
+        // Los tres son del MISMO conjunto de pedidos: los que todavía tienen
+        // saldo. "Pagado" NO es el histórico del cliente — mezclarlos era el
+        // bug de #521, que hacía desaparecer deudores de la lista.
+        'Total facturado (pedidos con saldo)': r.totalDeuda,
+        'Pagado a cuenta de esos pedidos': r.totalPagado,
+        Saldo: r.saldoPendiente,
+        Corriente: r.aging.corriente,
+        '1-30 días': r.aging.vencido30,
+        '31-60 días': r.aging.vencido60,
+        '+60 días': r.aging.vencido90,
+        'Límite de crédito': r.limiteCredito,
+        'Crédito disponible': r.creditoDisponible,
+        'Pedidos pendientes': r.pedidosPendientes,
+      }));
+
+      const resumen = [
+        { Tramo: 'Corriente', Monto: totalCorriente, Clientes: reporte.filter((r) => r.aging.corriente > 0).length },
+        { Tramo: '1-30 días', Monto: total30, Clientes: reporte.filter((r) => r.aging.vencido30 > 0).length },
+        { Tramo: '31-60 días', Monto: total60, Clientes: reporte.filter((r) => r.aging.vencido60 > 0).length },
+        { Tramo: '+60 días', Monto: total90, Clientes: reporte.filter((r) => r.aging.vencido90 > 0).length },
+        { Tramo: 'TOTAL', Monto: totalGeneral, Clientes: reporte.length },
+      ];
+
+      const { createMultiSheetExcel } = await import('../../../utils/excel');
+      await createMultiSheetExcel(
+        [
+          { name: 'Resumen aging', data: resumen, columnWidths: [16, 18, 11] },
+          { name: 'Por cliente', data: detalle, columnWidths: [34, 34, 20, 15, 16, 8, 17, 15, 15, 14, 13, 13, 13, 18, 19, 12] },
+        ],
+        // Sin período: la cuenta corriente es una foto de HOY, no de un rango.
+        `cuentas-por-cobrar-${new Date().toLocaleDateString('sv-SE')}`
+      );
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
+
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          onClick={exportar}
+          disabled={exportando || reporte.length === 0}
+          className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+        >
+          {exportando ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+          Exportar a Excel
+        </button>
+      </div>
+
       {/* Resumen Aging */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">

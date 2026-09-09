@@ -6,8 +6,8 @@
  * viaje. Antes esta pestaña agregaba en el navegador y arrastraba los mismos
  * dos bugs que la de clientes (contaba cancelados y se cortaba en 1.000 filas).
  */
-import React from 'react';
-import { MapPin } from 'lucide-react';
+import React, { useState } from 'react';
+import { MapPin, Download, Loader2 } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
 import { useVentasPorClienteQuery } from '../../../hooks/queries/useVentasPorClienteQuery';
 
@@ -25,6 +25,33 @@ export function ReporteVentasZonas({
   formatPrecio,
 }: ReporteVentasZonasProps): React.ReactElement {
   const { data, isLoading, error } = useVentasPorClienteQuery(desde, hasta, preventistaId);
+  const [exportando, setExportando] = useState(false);
+
+  // Mismo contenido que la hoja "Por zona" del export de "Por Cliente": es el
+  // mismo hook y la misma cache. Se repite acá porque quien está mirando esta
+  // pestaña no tiene por qué saber que el otro reporte se lo lleva de regalo.
+  const exportar = async (): Promise<void> => {
+    if (!data) return;
+    setExportando(true);
+    try {
+      const porZona = data.zonas.map((z) => ({
+        Zona: z.zona,
+        Clientes: z.clientes,
+        Pedidos: z.pedidos,
+        Total: z.total,
+        '% del total': data.totales.total ? z.total / data.totales.total : 0,
+        'Ticket promedio': z.ticket_promedio,
+      }));
+
+      const { createMultiSheetExcel } = await import('../../../utils/excel');
+      await createMultiSheetExcel(
+        [{ name: 'Por zona', data: porZona, columnWidths: [24, 10, 10, 15, 12, 15] }],
+        `ventas-por-zona-${data.meta.preventista_nombre}-${desde}_${hasta}`.replace(/\s+/g, '_')
+      );
+    } finally {
+      setExportando(false);
+    }
+  };
 
   if (isLoading) return <LoadingSpinner />;
 
@@ -48,7 +75,23 @@ export function ReporteVentasZonas({
   const { totales, zonas } = data;
 
   return (
-    <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg overflow-x-auto">
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          onClick={exportar}
+          disabled={exportando}
+          className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+        >
+          {exportando ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+          Exportar a Excel
+        </button>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg overflow-x-auto">
       <table className="w-full">
         <thead className="bg-gray-50 dark:bg-gray-700/50">
           <tr>
@@ -111,6 +154,7 @@ export function ReporteVentasZonas({
           </tr>
         </tfoot>
       </table>
+      </div>
     </div>
   );
 }

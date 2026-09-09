@@ -16,6 +16,7 @@ import type {
   PedidoDB,
   PagoDB
 } from '../../types'
+import { traerTodo } from '../../utils/paginacion'
 
 /** Violación de unique constraint: el reintento chocó con la fila que ya existe. */
 const ES_DUPLICADO = (error: unknown): boolean =>
@@ -356,12 +357,19 @@ export function usePagos(): UsePagosReturnExtended {
       const { data, error } = await supabase.rpc('obtener_resumen_cuenta_cliente', { p_cliente_id: clienteId })
       if (error) {
         const { data: cliente } = await supabase.from('clientes').select('*').eq('id', clienteId).single()
-        const { data: pedidosCliente } = await supabase.from('pedidos').select('*').eq('cliente_id', clienteId)
-        const { data: pagosCliente } = await supabase.from('pagos').select('*').eq('cliente_id', clienteId)
+        // Paginado por lo mismo que la ficha: hoy ningún cliente llega a 1.000
+        // pedidos ni a 1.000 pagos, pero si llegara los dos lados de la resta
+        // truncarían por separado y el saldo dejaría de significar algo.
+        const pedidosTyped = await traerTodo<PedidoDB>(
+          () => supabase.from('pedidos').select('*').eq('cliente_id', clienteId).order('id'),
+          { etiqueta: 'pedidos del cliente' },
+        )
+        const pagosTyped = await traerTodo<PagoDB>(
+          () => supabase.from('pagos').select('*').eq('cliente_id', clienteId).order('id'),
+          { etiqueta: 'pagos del cliente' },
+        )
 
         const clienteTyped = cliente as ClienteDB | null
-        const pedidosTyped = (pedidosCliente || []) as PedidoDB[]
-        const pagosTyped = (pagosCliente || []) as PagoDB[]
 
         const pedidosValidos = pedidosTyped.filter(p => p.estado !== 'cancelado')
 

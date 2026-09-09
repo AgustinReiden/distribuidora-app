@@ -38,6 +38,8 @@ function createChainableMock(finalData: { data: unknown; error: unknown }) {
     is: vi.fn(),
     order: vi.fn(),
     in: vi.fn(),
+    // Las lecturas de tablas grandes se paginan: `range` cierra la cadena.
+    range: vi.fn(),
   }
 
   // Make each method return the chain itself
@@ -79,30 +81,40 @@ describe('analyticsExport', () => {
             cuit: '20-12345678-9',
           },
           items: [
+            // i1: con snapshot congelado. Gana sobre los tres costos vivos.
             {
               id: 'i1',
               cantidad: 2,
               precio_unitario: 100,
               subtotal: 200,
+              costo_unitario_al_crear: 60,
               producto: {
                 id: 'prod1',
                 nombre: 'Producto A',
                 codigo: 'PA001',
                 categoria: 'Bebidas',
-                costo_con_iva: 80,
+                costo_promedio: 70,
+                costo_real: 80,
+                costo_con_iva: 95,
               },
             },
+            // i2: sin snapshot. Gana costo_promedio (90), NO costo_real (100)
+            // ni costo_con_iva (130). Los tres distintos a propósito: si la
+            // cascada se rompe, el número dice en qué escalón se cayó.
             {
               id: 'i2',
               cantidad: 3,
               precio_unitario: 150,
               subtotal: 450,
+              costo_unitario_al_crear: null,
               producto: {
                 id: 'prod2',
                 nombre: 'Producto B',
                 codigo: 'PB002',
                 categoria: 'Snacks',
-                costo_con_iva: 100,
+                costo_promedio: 90,
+                costo_real: 100,
+                costo_con_iva: 130,
               },
             },
           ],
@@ -139,11 +151,11 @@ describe('analyticsExport', () => {
         cantidad: 2,
         precio_unitario: 100,
         subtotal: 200,
-        costo_unitario: 80,
-        costo_total: 160,
-        margen_unitario: 20,
-        margen_total: 40,
-        margen_porcentaje: 20,
+        costo_unitario: 60,
+        costo_total: 120,
+        margen_unitario: 40,
+        margen_total: 80,
+        margen_porcentaje: 40,
         estado_pedido: 'entregado',
         forma_pago: 'efectivo',
         preventista: 'Juan Perez',
@@ -156,9 +168,10 @@ describe('analyticsExport', () => {
         cantidad: 3,
         precio_unitario: 150,
         subtotal: 450,
-        costo_total: 300,
-        margen_total: 150,
-        margen_porcentaje: 33.33,
+        costo_unitario: 90,
+        costo_total: 270,
+        margen_total: 180,
+        margen_porcentaje: 40,
       })
     })
 
@@ -219,7 +232,7 @@ describe('analyticsExport', () => {
               cantidad: 1,
               precio_unitario: 0,
               subtotal: 0,
-              producto: { id: 'p1', nombre: 'Producto', costo_con_iva: 50 },
+              producto: { id: 'p1', nombre: 'Producto', costo_promedio: 50 },
             },
           ],
         },
@@ -231,6 +244,50 @@ describe('analyticsExport', () => {
       const result = await fetchVentasDetallado('2026-01-01', '2026-01-31')
 
       expect(result[0].margen_porcentaje).toBe(0)
+    })
+
+    // mig 130: costo_con_iva es el costo FINANCIERO (IVA adentro) y su propio
+    // COMMENT dice "NO usar para margen real". Era el último fallback de esta
+    // hoja: metía el IVA dentro del costo y mostraba menos margen del real.
+    it('no usa costo_con_iva como fallback de costo', async () => {
+      const mockPedidos = [
+        {
+          id: 'p1',
+          created_at: '2026-01-15T10:30:00',
+          estado: 'entregado',
+          usuario_id: null,
+          transportista_id: null,
+          cliente: { id: 'c1', nombre_fantasia: 'Cliente' },
+          items: [
+            {
+              id: 'i1',
+              cantidad: 1,
+              precio_unitario: 200,
+              subtotal: 200,
+              costo_unitario_al_crear: null,
+              // Producto sin promedio ni costo_real: cae a la fórmula
+              // (100 + 10% de internos), no a los 145 con IVA adentro.
+              producto: {
+                id: 'prod1',
+                nombre: 'Sin promedio',
+                costo_promedio: null,
+                costo_real: null,
+                costo_sin_iva: 100,
+                impuestos_internos: 10,
+                costo_con_iva: 145,
+              },
+            },
+          ],
+        },
+      ]
+
+      const chain = createChainableMock({ data: mockPedidos, error: null })
+      vi.mocked(supabase.from).mockReturnValue(chain as never)
+
+      const result = await fetchVentasDetallado('2026-01-01', '2026-01-31')
+
+      expect(result[0].costo_unitario).toBe(110)
+      expect(result[0].margen_total).toBe(90)
     })
   })
 
@@ -313,9 +370,9 @@ describe('analyticsExport', () => {
   describe('fetchProductosDimension', () => {
     it('should calculate rotation and velocidad_venta', async () => {
       const mockProductos = [
-        { id: 'p1', nombre: 'Rapido', stock: 100, costo_con_iva: 50, activo: true },
-        { id: 'p2', nombre: 'Medio', stock: 50, costo_con_iva: 30, activo: true },
-        { id: 'p3', nombre: 'Lento', stock: 200, costo_con_iva: 20, activo: true },
+        { id: 'p1', nombre: 'Rapido', stock: 100, costo_promedio: 50, activo: true },
+        { id: 'p2', nombre: 'Medio', stock: 50, costo_promedio: 30, activo: true },
+        { id: 'p3', nombre: 'Lento', stock: 200, costo_promedio: 20, activo: true },
       ]
 
       const mockItems = [
@@ -377,8 +434,8 @@ describe('analyticsExport', () => {
 
     it('should calculate stock_dias and handle zero rotation', async () => {
       const mockProductos = [
-        { id: 'p1', nombre: 'Con ventas', stock: 100, costo_con_iva: 50, activo: true },
-        { id: 'p2', nombre: 'Sin ventas', stock: 50, costo_con_iva: 30, activo: true },
+        { id: 'p1', nombre: 'Con ventas', stock: 100, costo_promedio: 50, activo: true },
+        { id: 'p2', nombre: 'Sin ventas', stock: 50, costo_promedio: 30, activo: true },
       ]
 
       const mockItems = [
@@ -404,6 +461,93 @@ describe('analyticsExport', () => {
 
       expect(result[0].stock_dias).toBe(10) // 100 stock / 10 rotation
       expect(result[1].stock_dias).toBe('N/A') // no sales
+    })
+
+    // mig 130: esta hoja calculaba el margen con costo_real (reposición) y
+    // caía a costo_con_iva (financiero, IVA adentro). Ahora usa la misma
+    // cascada que el gerencial: costo_promedio primero.
+    it('calcula el margen con costo_promedio, no con costo_real', async () => {
+      const mockProductos = [
+        {
+          id: 'p1',
+          nombre: 'Con promedio',
+          stock: 10,
+          costo_promedio: 60,
+          costo_real: 80,
+          costo_con_iva: 95,
+          activo: true,
+        },
+        {
+          id: 'p2',
+          nombre: 'Sin promedio',
+          stock: 10,
+          costo_promedio: null,
+          costo_real: 80,
+          costo_con_iva: 95,
+          activo: true,
+        },
+      ]
+
+      const mockItems = [
+        {
+          producto_id: 'p1',
+          cantidad: 10,
+          precio_unitario: 100,
+          subtotal: 1000,
+          pedido: { created_at: '2026-01-15T10:00:00' },
+        },
+        {
+          producto_id: 'p2',
+          cantidad: 10,
+          precio_unitario: 100,
+          subtotal: 1000,
+          pedido: { created_at: '2026-01-15T10:00:00' },
+        },
+      ]
+
+      const productosChain = createChainableMock({ data: mockProductos, error: null })
+      const itemsChain = createChainableMock({ data: mockItems, error: null })
+
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? productosChain : itemsChain) as never
+      })
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      // p1: 1000 - 10*60 = 400 (con costo_real habría dado 200)
+      expect(result[0]).toMatchObject({
+        costo_unitario_usado: 60,
+        margen_total: 400,
+        margen_porcentaje: 40,
+      })
+      // p2: sin promedio, cae a costo_real. 1000 - 10*80 = 200
+      expect(result[1]).toMatchObject({
+        costo_unitario_usado: 80,
+        margen_total: 200,
+        margen_porcentaje: 20,
+      })
+    })
+
+    // Power BI necesita el promedio para recomputar el CMV por su cuenta.
+    it('exporta costo_promedio y el costo que efectivamente usó', async () => {
+      const mockProductos = [
+        { id: 'p1', nombre: 'Producto', stock: 5, costo_promedio: 42, costo_real: 50, activo: true },
+      ]
+
+      const productosChain = createChainableMock({ data: mockProductos, error: null })
+      const itemsChain = createChainableMock({ data: [], error: null })
+
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? productosChain : itemsChain) as never
+      })
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      expect(result[0]).toMatchObject({ costo_promedio: 42, costo_real: 50, costo_unitario_usado: 42 })
     })
 
     it('should throw error on productos fetch error', async () => {
@@ -720,8 +864,12 @@ describe('analyticsExport', () => {
       const chain = createChainableMock({ data: null, error: { message: 'DB error' } })
       vi.mocked(supabase.from).mockReturnValue(chain as never)
 
+      // Las siete consultas corren en paralelo y todas fallan: cuál rechaza
+      // primero no está definido, así que fijar una era un test frágil. Lo que
+      // importa es que el error propague Y diga cuál consulta falló, que es
+      // justo lo que un export de siete hojas necesita para diagnosticarse.
       await expect(exportarBI('2026-01-01', '2026-01-31')).rejects.toThrow(
-        'Error cargando ventas: DB error'
+        /^Error cargando \w+: DB error$/
       )
 
       expect(createMultiSheetExcel).not.toHaveBeenCalled()

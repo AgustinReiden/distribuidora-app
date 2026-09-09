@@ -46,16 +46,18 @@ import { useClientesQuery, clientesKeys } from './useClientesQuery'
 const FILAS = [{ id: '1', nombre_fantasia: 'Activo', activo: true }]
 
 /**
- * El builder de PostgREST es encadenable y "thenable": `fetchClientes` puede
- * terminar en `.order(...)` o en `.eq(...)` según el flag, así que las dos
- * puntas tienen que resolver a `{ data, error }`.
+ * El builder de PostgREST es encadenable. `fetchClientes` se pagina, así que la
+ * cadena termina siempre en `.range(...)`: es esa la que resuelve a
+ * `{ data, error }`. Como el lote entra en una sola página, el paginador corta
+ * en la primera vuelta.
  */
 function armarBuilder() {
   const resultado = Promise.resolve({ data: FILAS, error: null })
   const builder: Record<string, unknown> = {}
   builder.select = select.mockReturnValue(builder)
   builder.order = order.mockReturnValue(builder)
-  builder.eq = eq.mockReturnValue(resultado)
+  builder.eq = eq.mockReturnValue(builder)
+  builder.range = vi.fn().mockReturnValue(resultado)
   builder.then = resultado.then.bind(resultado)
   return builder
 }
