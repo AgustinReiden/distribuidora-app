@@ -5,10 +5,11 @@
  * Incluye: nombre, fechas, selector de productos, reglas (cantidad_compra, cantidad_bonificacion).
  */
 import { useState, useMemo } from 'react'
-import { X, Search, Gift, ChevronDown, ChevronRight, Layers, Ban, Package, Droplet } from 'lucide-react'
+import { X, Search, Gift, ChevronDown, ChevronRight, Layers, Ban, Package, Droplet, AlertTriangle } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
+import { usePreviewCambioFactorQuery } from '../../hooks/queries/usePromocionesQuery'
 
 export interface ModalPromocionProps {
   promocion: PromocionConDetalles | null
@@ -77,6 +78,7 @@ export default function ModalPromocion({
   const [busqueda, setBusqueda] = useState('')
   const [busquedaRegalo, setBusquedaRegalo] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmandoFactor, setConfirmandoFactor] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const productosFiltrados = useMemo(() => {
@@ -138,6 +140,25 @@ export default function ModalPromocion({
     })
   }
 
+  // Cambiar el factor de una promo con barras abiertas cierra bloques y mueve
+  // stock en la misma transacción del guardado (trigger de renormalización,
+  // issue #535). El preview es read-only y comparte la aritmética con ese
+  // trigger, así que lo que se muestra acá es lo que va a pasar.
+  const factorNuevo = parseInt(unidadesPorBloque)
+  const factorCambia = isEditing
+    && tipoRegalo === 'fraccion'
+    && Number.isFinite(factorNuevo)
+    && factorNuevo > 0
+    && factorNuevo !== (promocion?.unidades_por_bloque ?? null)
+  const { data: preview, isLoading: cargandoPreview } = usePreviewCambioFactorQuery(
+    promocion?.id ?? null,
+    Number.isFinite(factorNuevo) ? factorNuevo : null,
+    1,
+    factorCambia
+  )
+  const barrasQueCierran = (preview ?? []).filter(b => b.bloques_a_cerrar > 0)
+  const fardosAMover = barrasQueCierran.reduce((acc, b) => acc + b.unidades_de_stock, 0)
+
   const handleSubmit = async () => {
     setError(null)
 
@@ -164,16 +185,7 @@ export default function ModalPromocion({
       return
     }
 
-    // Derivados segun tipo de regalo.
-    // - Fraccion: ajuste_automatico=true (descuenta fardo al cerrar bloque),
-    //   regalo_mueve_stock=false (no descuenta al entregar la botella suelta).
-    // - Unidad entera: ajuste_automatico=false, regalo_mueve_stock=true
-    //   (el stock se descuenta al entregar cada unidad completa).
-    const esFraccion = tipoRegalo === 'fraccion'
-    const finalAjusteAutomatico = esFraccion
-    const finalRegaloMueveStock = !esFraccion
-
-    if (esFraccion) {
+    if (tipoRegalo === 'fraccion') {
       if (!descripcionRegalo.trim()) {
         setError('Escribí una descripción del regalo (ej: "1 botella Manaos Naranja 600cc")')
         return
@@ -189,6 +201,30 @@ export default function ModalPromocion({
       }
     }
 
+    // El factor cambió: no se guarda sin que el admin vea qué le pasa a las
+    // barras abiertas. La confirmación se renderiza DENTRO del modal, no como
+    // hermano en el container, o queda atrás del overlay.
+    if (factorCambia) {
+      setConfirmandoFactor(true)
+      return
+    }
+
+    await guardar()
+  }
+
+  const guardar = async () => {
+    const compra = parseInt(cantidadCompra)
+    const bonif = parseInt(cantidadBonificacion)
+    // Derivados segun tipo de regalo.
+    // - Fraccion: ajuste_automatico=true (descuenta fardo al cerrar bloque),
+    //   regalo_mueve_stock=false (no descuenta al entregar la botella suelta).
+    // - Unidad entera: ajuste_automatico=false, regalo_mueve_stock=true
+    //   (el stock se descuenta al entregar cada unidad completa).
+    const esFraccion = tipoRegalo === 'fraccion'
+    const finalAjusteAutomatico = esFraccion
+    const finalRegaloMueveStock = !esFraccion
+
+    setConfirmandoFactor(false)
     setSaving(true)
     const limite = limiteUsos ? parseInt(limiteUsos) : null
     const prio = parseInt(prioridad)
@@ -232,7 +268,7 @@ export default function ModalPromocion({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+      <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b dark:border-gray-700">
           <h2 className="text-lg font-semibold dark:text-white">
@@ -752,6 +788,70 @@ export default function ModalPromocion({
             {saving ? 'Guardando...' : isEditing ? 'Actualizar' : 'Crear Promocion'}
           </button>
         </div>
+
+        {/* Confirmación del cambio de factor. Va DENTRO del modal: como hermano
+            en el container quedaría detrás de este overlay y fallaría en silencio. */}
+        {confirmandoFactor && (
+          <div className="absolute inset-0 bg-black/50 rounded-xl flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-base font-semibold dark:text-white">
+                    Cambiás el factor de {promocion?.unidades_por_bloque ?? '?'} a {factorNuevo}
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Las unidades ya regaladas que todavía no cerraron un bloque se
+                    saldan con el factor nuevo, ahora.
+                  </p>
+                </div>
+              </div>
+
+              {cargandoPreview ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 py-3">Calculando…</p>
+              ) : barrasQueCierran.length === 0 ? (
+                <p className="text-sm text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-2">
+                  No se mueve stock: ninguna barra abierta llega a cerrar un bloque
+                  con el factor nuevo.
+                </p>
+              ) : (
+                <div className="text-sm bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2 space-y-1">
+                  <p className="text-amber-800 dark:text-amber-200 font-medium">
+                    Se descuentan {fardosAMover} {fardosAMover === 1 ? 'unidad' : 'unidades'} de stock:
+                  </p>
+                  <ul className="text-amber-700 dark:text-amber-300 space-y-0.5">
+                    {barrasQueCierran.map((b, i) => (
+                      <li key={`${b.producto_regalo_id ?? 'x'}-${i}`}>
+                        {/* resto_* son `numeric` en la RPC y PostgREST los puede
+                            mandar como string ("4.00"); Number() normaliza. */}
+                        {b.producto_regalo ?? 'Regalo'}: {Number(b.resto_actual)} pendientes →
+                        cierra {b.bloques_a_cerrar} {b.bloques_a_cerrar === 1 ? 'bloque' : 'bloques'},
+                        descuenta {b.unidades_de_stock} de {b.contenedor ?? 'sin contenedor'},
+                        queda en {Number(b.resto_final)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => setConfirmandoFactor(false)}
+                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                >
+                  Volver
+                </button>
+                <button
+                  onClick={guardar}
+                  disabled={saving || cargandoPreview}
+                  className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Guardar igual
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
