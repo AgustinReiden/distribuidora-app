@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-08-26** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-09-08** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,10 +137,14 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 206** — la última numerada en el repo es
-`205_hacer_valer_la_compra_minima`, y el ledger de prod está alineado con ella.
+**La próxima migración es la 212** — la última numerada en el repo es
+`211_el_costo_viaja_con_el_producto`, y el ledger de prod está alineado con ella.
 Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
 número se reserva **aplicando**, no escribiendo el archivo.
+
+(Esta línea decía 206 hasta el 2026-09-08, con las 206–209 ya aplicadas: la
+numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Si aplicás
+una migración, actualizá también esta línea.)
 
 Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204 y
 205 sí:
@@ -163,6 +167,28 @@ Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 
   Sólo redefine funciones: **no toca ninguna fila**. El rollback está al pie del
   archivo y es gratis mientras los mínimos sigan en 0; si alguien ya cargó uno,
   revertirla apaga la validación sin avisar.
+
+Las 206–209 tampoco tienen prosa acá. Las 210 y 211 sí:
+
+- **210** crea `reporte_stock_red(bigint)`: stock, costo y precio de **todas** las
+  sucursales activas, solo lectura, gate de admin por rol crudo. Es el único RPC que
+  **no** intersecta contra `usuario_sucursales` — a propósito: 5 de los 7 admins están
+  asignados a una sola sucursal y no veían la otra por ningún lado. No se relajó
+  `mt_productos_select` porque `fetchProductos` no filtra por sucursal en ningún call
+  site y la policy es sobre la fila entera. Nombre nuevo en vez de un parámetro en la
+  131, para no dejar dos sobrecargas ambiguas (PGRST203, ver mig 176).
+  **No toca ninguna fila.**
+- **211** parchea `aceptar_movimiento_sucursal` para que el producto que se CREA en el
+  destino se lleve `costo_real`, `costo_promedio` y `ultimo_tipo_compra` del origen.
+  Sin eso nacía con los tres en NULL y la cascada de costo caía al último escalón, que
+  tiene semántica FC (neto + impuestos internos): con un origen ZZ eso suma dos veces
+  el impuesto interno. El parche es **quirúrgico sobre la definición viva** (mismo
+  patrón que la 177, que ya la había parcheado in situ: un `CREATE OR REPLACE` armado
+  desde `migrations/139` revertiría `condicion_iva` en silencio).
+  **No toca ninguna fila** — no backfillea los 5 productos que ya quedaron sin costo
+  (el costo del origen HOY no es el de aquellas unidades y el CPP es forward-only).
+  La regla `GREATEST(origen, destino)` del camino "match con un producto existente"
+  queda **igual**: es una decisión comercial de la 076, no un olvido.
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`

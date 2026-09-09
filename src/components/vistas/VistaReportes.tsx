@@ -8,6 +8,7 @@
  * - Ventas por Cliente  (RPC reporte_ventas_por_cliente, mig 197)
  * - Ventas por Zona     (mismo RPC, mismo cache)
  * - Valuación de Stock
+ * - Stock de la red   (RPC reporte_stock_red — cross-sucursal, solo lectura)
  *
  * Los sub-componentes están extraídos en archivos separados para
  * mejor mantenibilidad y separación de concerns.
@@ -19,7 +20,7 @@
  */
 import React, { useState, useEffect, ChangeEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes } from 'lucide-react';
+import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { useReportesFinancieros } from '../../hooks/supabase';
 import type {
@@ -38,6 +39,7 @@ import {
   ReporteVentasClientes,
   ReporteVentasZonas,
   ReporteValuacionInventario,
+  ReporteStockRed,
   FiltrosVentas,
   filtrosVentasIniciales,
   type FiltrosVentasValue
@@ -62,10 +64,10 @@ interface TabConfig {
   icon: LucideIcon;
 }
 
-type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion';
+type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red';
 
 /** Tabs que traen sus propios filtros y no usan el panel de fechas de arriba. */
-const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion'];
+const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red'];
 
 // =============================================================================
 // COMPONENT
@@ -106,7 +108,8 @@ export default function VistaReportes({
     { id: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
     { id: 'clientes', label: 'Por Cliente', icon: Users },
     { id: 'zonas', label: 'Por Zona', icon: MapPin },
-    { id: 'valuacion', label: 'Valuación de Stock', icon: Boxes }
+    { id: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
+    { id: 'stock-red', label: 'Stock de la Red', icon: Network }
   ];
 
   // Cargar reporte automáticamente solo la primera vez
@@ -308,6 +311,10 @@ export default function VistaReportes({
 
       {activeTab === 'valuacion' && (
         <ReporteValuacionInventario formatPrecio={formatPrecio} />
+      )}
+
+      {activeTab === 'stock-red' && (
+        <ReporteStockRed formatPrecio={formatPrecio} />
       )}
     </div>
   );
