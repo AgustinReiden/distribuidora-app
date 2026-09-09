@@ -18,6 +18,7 @@ import {
   setItalicStyle
 } from './utils'
 import { formatAclaracionBulto } from './utils/formatBulto'
+import { bloqueDeudaComanda } from '../../utils/deudaCliente'
 
 // Colores de marca Crecer Distribuciones
 const BRAND = {
@@ -376,6 +377,11 @@ function calcularAlturaComanda(pedido) {
   if (pedido.canal === 'cambio') height += 18 // banner CAMBIO/DEVOLUCION + retirar/entregar
   height += 32 // total + forma pago + estado
   if (pedido.estado_pago === 'parcial') height += 6
+  // Deuda anterior: titulo + una linea por boleta. El alto del ticket ES el
+  // formato de la pagina, asi que lo que no se cuente aca se dibuja fuera del
+  // papel y no sale impreso nunca.
+  const deuda = bloqueDeudaComanda(pedido.deuda_previa, pedido.deuda_previa_detalle)
+  if (deuda) height += 12 + deuda.lineas.length * 4
   if (pedido.notas) height += 18
   height += 18 // pie
   return Math.max(height, 110)
@@ -556,6 +562,28 @@ function dibujarComanda(doc, pedido) {
     doc.text(`Pagado: ${formatPrecio(montoPagado)}`, margin, y)
     doc.text(`Saldo: ${formatPrecio(pedido.total - montoPagado)}`, ticketWidth - margin, y, { align: 'right' })
     y += 4
+  }
+
+  // === DEUDA ANTERIOR ===
+  // Va despues del total del pedido y antes de las notas: primero lo que se
+  // entrega, despues lo que ademas hay que cobrar. El transportista necesita el
+  // detalle, no solo el total: con el numero suelto no puede imputar el cobro.
+  // Sale en las DOS copias, la del cliente incluida (decision explicita).
+  const deuda = bloqueDeudaComanda(pedido.deuda_previa, pedido.deuda_previa_detalle)
+  if (deuda) {
+    y += 2
+    drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
+    y += 5
+    setHeaderStyle(doc, 11)
+    doc.text('DEUDA ANTERIOR:', margin, y)
+    doc.text(formatPrecio(deuda.total), ticketWidth - margin, y, { align: 'right' })
+    y += 5
+    setNormalStyle(doc, 9)
+    deuda.lineas.forEach(linea => {
+      doc.text(linea.etiqueta, margin + 3, y)
+      doc.text(formatPrecio(linea.monto), ticketWidth - margin, y, { align: 'right' })
+      y += 4
+    })
   }
 
   // === NOTAS ===
