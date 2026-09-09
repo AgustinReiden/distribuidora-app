@@ -115,7 +115,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const usosOrigDespues = usosOrigAntes - cantidadOriginal
   const usosSustAntes = Number(acumuladorSustituto?.usos_pendientes ?? 0)
   const usosSustDespues = usosSustAntes + cantidadNum
-  const bloque = unidadesPorBloque ?? acumuladorOriginal?.unidades_por_bloque ?? 1
+  // El factor sale de la promo en vivo: el acumulador ya no guarda copia (issue #535).
+  const bloque = unidadesPorBloque ?? 1
   // Defensa display: los acumuladores pueden venir fuera de rango (bug backend de bloques).
   // Clampeamos los valores que se muestran al usuario a [0, bloque].
   const clampBloque = (n: number) => Math.max(0, Math.min(n, bloque))

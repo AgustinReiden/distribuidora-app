@@ -1314,18 +1314,33 @@ export interface SustituirRegaloInput {
 /**
  * Acumulador por (promo, producto regalado, sucursal). Una promo modo B
  * puede tener varios acumuladores cuando admin sustituye regalos. Mig 059.
+ *
+ * NO tiene el factor: `unidades_por_bloque` y `stock_por_bloque` salen siempre
+ * de `promociones` en vivo (issue #535). `ajuste_producto_id` sí es dato por
+ * fila — es el contenedor que eligió el admin para ESE sabor sustituido.
  */
 export interface PromoAcumuladorDB {
   id: string;
   promocion_id: string;
   producto_regalo_id: string;
   ajuste_producto_id: string | null;
-  unidades_por_bloque: number | null;
-  stock_por_bloque: number | null;
   usos_pendientes: number;
   sucursal_id: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Una fila de `previsualizar_cambio_factor`: qué le pasaría a una barra. */
+export interface PreviewCambioFactorDB {
+  barra: 'default' | 'sustituto';
+  producto_regalo_id: string | null;
+  producto_regalo: string | null;
+  contenedor_id: string | null;
+  contenedor: string | null;
+  resto_actual: number;
+  bloques_a_cerrar: number;
+  unidades_de_stock: number;
+  resto_final: number;
 }
 
 export interface SustituirRegaloResult {

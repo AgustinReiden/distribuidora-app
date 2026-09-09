@@ -282,8 +282,6 @@ export default function VistaPromociones({
                         producto_regalo_id: defaultProductoId,
                         ajuste_producto_id: accDefault?.ajuste_producto_id
                           ?? (promo.ajuste_producto_id ? String(promo.ajuste_producto_id) : null),
-                        unidades_por_bloque: accDefault?.unidades_por_bloque ?? promo.unidades_por_bloque,
-                        stock_por_bloque: accDefault?.stock_por_bloque ?? promo.stock_por_bloque,
                         usos_pendientes: promo.usos_pendientes ?? 0,
                         sucursal_id: accDefault?.sucursal_id ?? 0,
                         created_at: '',
@@ -303,7 +301,9 @@ export default function VistaPromociones({
                     return (
                       <div className="mb-3 space-y-2">
                         {visibles.map(acc => {
-                          const porBloque = acc.unidades_por_bloque ?? promo.unidades_por_bloque ?? 1
+                          // El factor sale SIEMPRE de la promo en vivo: el acumulador
+                          // ya no guarda copia (issue #535).
+                          const porBloque = promo.unidades_por_bloque ?? 1
                           // Defensa: el acumulador puede venir fuera de rango desde la BD
                           // (bug historico del subsistema de bloques: negativos o > tope).
                           // Clampeamos a [0, porBloque] para no mostrar "24/12" o "-10/12".

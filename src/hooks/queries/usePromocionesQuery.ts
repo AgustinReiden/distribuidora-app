@@ -12,6 +12,7 @@ import type {
   PromocionReglaDB,
   PromoAcumuladorDB,
   PedidoItemSustitucionDB,
+  PreviewCambioFactorDB,
 } from '../../types'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 import { traerTodo } from '../../utils/paginacion'
@@ -574,6 +575,42 @@ export function usePromoAcumuladoresMapQuery() {
     },
     enabled: !!currentSucursalId,
     staleTime: 30 * 1000,
+  })
+}
+
+/**
+ * Qué le pasaría a las barras abiertas de una promo si el factor pasara a los
+ * valores dados. Read-only: la RPC comparte la aritmética con el trigger que
+ * después escribe, así que lo que el modal promete y lo que la base hace no se
+ * pueden separar (issue #535).
+ *
+ * `enabled` sólo cuando el valor propuesto DIFIERE del guardado: preguntar por
+ * el valor que ya está guardado siempre devuelve "no pasa nada".
+ */
+export function usePreviewCambioFactorQuery(
+  promocionId: string | number | null | undefined,
+  unidadesPorBloque: number | null,
+  stockPorBloque: number | null,
+  habilitado: boolean
+) {
+  const { currentSucursalId } = useSucursal()
+  const pid = promocionId == null ? '' : String(promocionId)
+  return useQuery({
+    queryKey: [
+      ...promocionesKeys.all(currentSucursalId),
+      'preview_factor', pid, unidadesPorBloque, stockPorBloque,
+    ] as const,
+    queryFn: async (): Promise<PreviewCambioFactorDB[]> => {
+      const { data, error } = await supabase.rpc('previsualizar_cambio_factor', {
+        p_promocion_id: Number(pid),
+        p_unidades_por_bloque: unidadesPorBloque,
+        p_stock_por_bloque: stockPorBloque,
+      })
+      if (error) throw error
+      return (data ?? []) as PreviewCambioFactorDB[]
+    },
+    enabled: habilitado && !!promocionId && !!currentSucursalId,
+    staleTime: 0,
   })
 }
 
