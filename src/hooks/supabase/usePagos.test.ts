@@ -11,6 +11,9 @@ const mockInsert = vi.fn().mockReturnThis()
 const mockDelete = vi.fn().mockReturnThis()
 const mockEq = vi.fn().mockReturnThis()
 const mockOrder = vi.fn().mockReturnThis()
+// `fetchPagosCliente` se pagina, asi que su cadena termina en `.range()`: es
+// esa la que resuelve a `{ data, error }`, no `.order()`.
+const mockRange = vi.fn()
 const mockSingle = vi.fn()
 const mockIn = vi.fn()
 
@@ -22,6 +25,7 @@ vi.mock('./base', () => ({
       delete: mockDelete,
       eq: mockEq,
       order: mockOrder,
+      range: mockRange,
       single: mockSingle,
       in: mockIn
     })),
@@ -45,6 +49,8 @@ describe('usePagos', () => {
     mockDelete.mockReturnThis()
     mockEq.mockReturnThis()
     mockOrder.mockReturnThis()
+    // Por defecto: una pagina vacia, que corta el paginado en la primera vuelta.
+    mockRange.mockResolvedValue({ data: [], error: null })
   })
 
   describe('fetchPagosCliente', () => {
@@ -53,7 +59,7 @@ describe('usePagos', () => {
         { id: '1', cliente_id: 'c1', monto: 1000, usuario: { id: 'u1', nombre: 'Admin' } },
         { id: '2', cliente_id: 'c1', monto: 500, usuario: { id: 'u1', nombre: 'Admin' } }
       ]
-      mockOrder.mockResolvedValueOnce({ data: mockPagos, error: null })
+      mockRange.mockResolvedValueOnce({ data: mockPagos, error: null })
 
       const { result } = renderHook(() => usePagos())
 
@@ -71,7 +77,7 @@ describe('usePagos', () => {
     })
 
     it('debe manejar errores en fetchPagosCliente', async () => {
-      mockOrder.mockResolvedValueOnce({ data: null, error: new Error('DB error') })
+      mockRange.mockResolvedValueOnce({ data: null, error: { message: 'DB error' } })
 
       const { result } = renderHook(() => usePagos())
 
@@ -283,7 +289,7 @@ describe('usePagos', () => {
         { id: '1', monto: 1000 },
         { id: '2', monto: 500 }
       ]
-      mockOrder.mockResolvedValueOnce({ data: mockPagos, error: null })
+      mockRange.mockResolvedValueOnce({ data: mockPagos, error: null })
 
       const { result } = renderHook(() => usePagos())
 

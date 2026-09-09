@@ -47,13 +47,20 @@ export function usePagos(): UsePagosReturnExtended {
   const fetchPagosCliente = async (clienteId: string): Promise<PagoDBWithUsuario[]> => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('pagos')
-        .select('*, usuario:perfiles(id, nombre)')
-        .eq('cliente_id', clienteId)
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      const pagosData = (data || []) as PagoDBWithUsuario[]
+      // Paginado por lo mismo que las otras dos consultas de la ficha
+      // (`useFichaCliente`): hoy el cliente con más movimiento tiene 118 pagos,
+      // pero la lista de la pestaña "Pagos" es de la misma modal y no tiene
+      // sentido que la mitad aguante el crecimiento y la otra mitad no. El
+      // desempate por `id` va porque `created_at` no es único.
+      const pagosData = await traerTodo<PagoDBWithUsuario>(
+        () => supabase
+          .from('pagos')
+          .select('*, usuario:perfiles(id, nombre)')
+          .eq('cliente_id', clienteId)
+          .order('created_at', { ascending: false })
+          .order('id'),
+        { etiqueta: 'pagos del cliente' },
+      )
       setPagos(pagosData)
       return pagosData
     } catch (error) {
