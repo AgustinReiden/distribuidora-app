@@ -172,6 +172,13 @@ export interface PedidoDB {
   id: string;
   cliente_id: string;
   cliente?: ClienteDB;
+  /**
+   * Lo que el cliente debia ANTES de este pedido, calculado en la base
+   * (computed column `deuda_previa`, mig 215). Solo la trae la lista de
+   * pedidos. No confundir con `cliente.saldo_cuenta`, que es el saldo de HOY e
+   * incluye este pedido y los posteriores.
+   */
+  deuda_previa?: number;
   usuario_id?: string;
   usuario?: PerfilDB | null;
   transportista_id?: string | null;

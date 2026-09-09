@@ -145,16 +145,20 @@ export function SyncStatusBanner({
       {/* Detalles expandibles */}
       {isExpanded && failedOps.length > 0 && (
         <div className="px-4 pb-2 border-t border-red-200 dark:border-red-800">
-          <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+          {/* El motivo va DEBAJO y entero: es lo único que le dice al preventista
+              qué hacer. Truncado a 150px, un rechazo como "Cliente asignado a otro
+              preventista: X (#N) lo atiende Y" se leía "Cliente asignado a…" y
+              terminaba en un llamado a la oficina. */}
+          <ul className="mt-2 space-y-2 max-h-40 overflow-y-auto">
             {failedOps.map((op) => (
               <li
                 key={op.id}
-                className="text-sm text-red-700 dark:text-red-300 flex justify-between"
+                className="text-sm text-red-700 dark:text-red-300"
               >
-                <span>{getOperationLabel(op.type)}</span>
-                <span className="text-red-500 dark:text-red-400 text-xs truncate max-w-[150px]">
+                <span className="font-medium">{getOperationLabel(op.type)}</span>
+                <p className="text-red-500 dark:text-red-400 text-xs break-words">
                   {op.lastError || 'Error desconocido'}
-                </span>
+                </p>
               </li>
             ))}
           </ul>
