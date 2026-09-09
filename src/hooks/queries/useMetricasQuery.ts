@@ -79,35 +79,47 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   //    convención que el comparativo del RPC reporte_gerencial). Sin `desde`
   //    (historico) no hay comparación posible.
   const prev = ventana.desde ? ventanaAnterior(ventana.desde, ventana.hasta ?? hoyISO) : null
+  //
+  //    Paginado por lo mismo que la query principal: el período anterior tiene
+  //    la misma duración que el elegido, así que un mes son ~1.064 pedidos y ya
+  //    pasaba el tope. La comparación "vs período anterior" salía calculada
+  //    sobre 1.000 pedidos contra el total real del período actual: dos
+  //    universos de distinto tamaño, o sea una variación inventada.
   const anteriorPromise = (async () => {
     if (!prev) return null
-    let query = supabase
-      .from('pedidos')
-      .select('total, estado')
-      .neq('estado', 'cancelado')
-      .gte('fecha', prev.desde)
-      .lte('fecha', prev.hasta)
-    if (usuarioId) query = query.eq('usuario_id', usuarioId)
-    const { data, error } = await query
-    if (error) throw error
-    return (data as Array<{ total: number | null; estado: string }>) || []
+    return traerTodo<{ total: number | null; estado: string }>(
+      () => {
+        let query = supabase
+          .from('pedidos')
+          .select('total, estado')
+          .neq('estado', 'cancelado')
+          .gte('fecha', prev.desde)
+          .lte('fecha', prev.hasta)
+        if (usuarioId) query = query.eq('usuario_id', usuarioId)
+        return query.order('id')
+      },
+      { etiqueta: 'pedidos del período anterior' },
+    )
   })()
 
   // -- Últimos 7 días para el gráfico, SIEMPRE (ventana propia, independiente
   //    del período elegido). Mantiene "no cancelados": con entregado-only los
   //    días recientes se verían vacíos hasta cerrar el reparto.
-  const seriePromise = (async () => {
-    let query = supabase
-      .from('pedidos')
-      .select('total, fecha')
-      .neq('estado', 'cancelado')
-      .gte('fecha', addDiasISO(hoyISO, -6))
-      .lte('fecha', hoyISO)
-    if (usuarioId) query = query.eq('usuario_id', usuarioId)
-    const { data, error } = await query
-    if (error) throw error
-    return (data as Array<{ total: number | null; fecha: string | null }>) || []
-  })()
+  //    Paginado aunque hoy 7 días sean ~213 pedidos: es la misma consulta con
+  //    otra ventana, y lo que la salva es el volumen, no el código.
+  const seriePromise = traerTodo<{ total: number | null; fecha: string | null }>(
+    () => {
+      let query = supabase
+        .from('pedidos')
+        .select('total, fecha')
+        .neq('estado', 'cancelado')
+        .gte('fecha', addDiasISO(hoyISO, -6))
+        .lte('fecha', hoyISO)
+      if (usuarioId) query = query.eq('usuario_id', usuarioId)
+      return query.order('id')
+    },
+    { etiqueta: 'pedidos del gráfico' },
+  )
 
   const [pedidos, pedidosAnterior, filasSerie] = await Promise.all([
     principalPromise,
