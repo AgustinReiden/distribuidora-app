@@ -272,18 +272,18 @@ export default function VistaPromociones({
                     // Bar DEFAULT: valor desde el contador global (vivo). Tomamos el
                     // contenedor/config del acumulador default si existe (nombre correcto),
                     // si no del propio promo.
+                    // La barra default no tiene fila de acumulador: vive entera en
+                    // `promociones` (issue #553). Se sintetiza para que las barras
+                    // se rendericen todas igual.
                     if (defaultProductoId) {
-                      const accDefault = accRows.find(
-                        a => String(a.producto_regalo_id) === defaultProductoId
-                      )
                       visibles.push({
                         id: `default-${promo.id}`,
                         promocion_id: String(promo.id),
                         producto_regalo_id: defaultProductoId,
-                        ajuste_producto_id: accDefault?.ajuste_producto_id
-                          ?? (promo.ajuste_producto_id ? String(promo.ajuste_producto_id) : null),
+                        ajuste_producto_id: promo.ajuste_producto_id
+                          ? String(promo.ajuste_producto_id) : null,
                         usos_pendientes: promo.usos_pendientes ?? 0,
-                        sucursal_id: accDefault?.sucursal_id ?? 0,
+                        sucursal_id: 0,
                         created_at: '',
                         updated_at: '',
                       } as PromoAcumuladorDB)
