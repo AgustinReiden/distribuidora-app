@@ -123,13 +123,7 @@ interface ActualizarPagoInput {
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
 const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
-// saldo_cuenta: alimenta el aviso de deuda previa de la tarjeta (src/utils/
-// deudaCliente.ts). Es una columna mas DENTRO del embed que ya existe, no un
-// embed nuevo: agregar un segundo alias a clientes (o embeber pagos) haria
-// ambigua la FK y tiraria PGRST201, volteando la query entera de pedidos.
-// Viaja tambien a useRecorridoExistenteQuery y useRecorridosHojaRutaQuery, que
-// reusan PEDIDO_SELECT; ninguna de las dos la muestra.
-const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id, saldo_cuenta' as const
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
