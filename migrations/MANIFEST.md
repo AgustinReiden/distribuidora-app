@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 213** — la última numerada en el repo es
-`212_congelar_el_factor_de_las_bonificaciones`, y el ledger de prod está alineado con ella.
+**La próxima migración es la 214** — la última numerada en el repo es
+`213_cerrar_el_acl_del_trigger_de_la_212`, y el ledger de prod está alineado con ella.
 Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el
 número se reserva **aplicando**, no escribiendo el archivo.
 
@@ -147,7 +147,7 @@ numeración del repo avanzó cuatro veces sin que nadie la corrigiera. Si aplic�
 una migración, actualizá también esta línea.)
 
 Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204,
-205 y 212 sí:
+205, 212 y 213 sí:
 
 - **203** `bot_buscar_cliente` pasa a filtrar `activo = TRUE`. Era el único camino
   del bot que no lo hacía, y es la puerta de entrada: un cliente dado de baja
@@ -204,6 +204,15 @@ Las 206–209 tampoco tienen prosa acá. Las 210 y 211 sí:
   definición **viva** (la 130 fue redefinida 10 veces). Verificado corriendo el reporte de
   los 6 meses × 4 sucursales antes y después: **cero diferencias**, que es lo que tiene que
   pasar si el factor nunca cambió. Rollback al pie del archivo.
+- **213** le cierra el ACL a `completar_unidades_por_bloque_item()`, la función del trigger
+  de la 212, que había quedado ejecutable por `anon`. La 212 le puso el `REVOKE` al helper
+  `factor_bonificacion` pero no a ésta, razonando que la regla de la casa habla de funciones
+  `SECURITY DEFINER` y ésta es invoker. **Ese razonamiento es equivocado**: el gate
+  `scripts/check-permisos.mjs` falla ante *cualquier* función de `public` alcanzable con la
+  anon key. Una función de trigger no necesita `EXECUTE` para nadie —la invoca el executor
+  como parte del INSERT, no el caller—, así que queda con `postgres` + `service_role`, igual
+  que `completar_origen_precio_item` (148) y `validar_precio_item_pedido`. Verificado que el
+  trigger sigue disparando después del revoke. **No toca ninguna fila.**
 
 La **195** le da a la cabecera la columna `compras.bonificaciones`, que es donde se resta
 una bonificación general: el `subtotal` es el neto de los RENGLONES y lo clava `COMPRA-A2`
