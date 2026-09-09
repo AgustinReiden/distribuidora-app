@@ -1,25 +1,21 @@
 /**
- * Tests del aviso de deuda previa.
+ * Tests del aviso de deuda.
  *
- * POR QUE ESTOS CASOS
- * -------------------
- * El caso que manda es "el saldo incluye este pedido": el trigger
- * `actualizar_saldo_pedido` suma lo impago del pedido al saldo del cliente en el
- * mismo INSERT, así que sin descontarlo la tarjeta de CUALQUIER pedido impago
- * diría "debe" — que es exactamente lo contrario de avisar de un pedido
- * anterior. Si alguien saca ese descuento, este archivo tiene que ponerse rojo.
+ * POR QUE NO HAY CASOS DE "DESCONTAR ESTE PEDIDO"
+ * ----------------------------------------------
+ * Los había, y pasaban: verificaban que del saldo se restara la parte impaga
+ * del pedido de la tarjeta para quedarse con "lo anterior". El cálculo era
+ * correcto y la premisa no: `saldo_cuenta` es del presente, así que lo que
+ * quedaba incluía los pedidos POSTERIORES y cada pedido nuevo inflaba el aviso
+ * de las tarjetas viejas. Los tests verdes le daban respaldo a un modelo mental
+ * equivocado. Se fueron con el cálculo.
  *
- * El segundo en importancia es el sobrepago: ahí la contribución del pedido al
- * saldo es negativa, y restarla sin clamp inventaría deuda. Este aviso se lee
- * delante del cliente; que subestime es aceptable, que acuse de más no.
+ * Lo que queda es formateo de un monto que el llamador ya decidió.
  */
 import { describe, it, expect } from 'vitest'
 import { avisoDeudaCliente } from './deudaCliente'
-// El importe sale de `formatPrecio`, que es Intl y separa con espacio DURO:
-// hardcodearlo con un espacio normal nunca matchea.
-import { formatPrecio } from './formatters'
 
-describe('avisoDeudaCliente — al crear el pedido (sin pedido propio)', () => {
+describe('avisoDeudaCliente', () => {
   it('no avisa cuando el cliente está al día', () => {
     expect(avisoDeudaCliente(0)).toBeNull()
   })
@@ -29,7 +25,7 @@ describe('avisoDeudaCliente — al crear el pedido (sin pedido propio)', () => {
     expect(avisoDeudaCliente(-5000)).toBeNull()
   })
 
-  it('no avisa sin dato de saldo', () => {
+  it('no avisa sin dato', () => {
     expect(avisoDeudaCliente(null)).toBeNull()
     expect(avisoDeudaCliente(undefined)).toBeNull()
     expect(avisoDeudaCliente(NaN)).toBeNull()
@@ -46,106 +42,17 @@ describe('avisoDeudaCliente — al crear el pedido (sin pedido propio)', () => {
     expect(avisoDeudaCliente(0.004)).toBeNull()
     expect(avisoDeudaCliente(0.01)).not.toBeNull()
   })
-})
 
-describe('avisoDeudaCliente — en la tarjeta (el saldo YA incluye este pedido)', () => {
-  it('no avisa cuando la deuda es sólo este pedido', () => {
-    // Único pedido impago del cliente: saldo == lo que este pedido debe.
-    expect(
-      avisoDeudaCliente(30000, { pedido: { total: 30000, monto_pagado: 0 } }),
-    ).toBeNull()
-  })
-
-  it('avisa sólo por lo anterior cuando hay deuda vieja además de este pedido', () => {
-    // Saldo 50.000 = 30.000 de este pedido + 20.000 de antes.
-    const aviso = avisoDeudaCliente(50000, { pedido: { total: 30000, monto_pagado: 0 } })
-    expect(aviso?.monto).toBe(20000)
-  })
-
-  it('descuenta sólo la parte impaga de un pedido con pago parcial', () => {
-    // Este pedido aporta 30.000 - 18.000 = 12.000 al saldo; lo anterior son 8.000.
-    const aviso = avisoDeudaCliente(20000, { pedido: { total: 30000, monto_pagado: 18000 } })
-    expect(aviso?.monto).toBe(8000)
-  })
-
-  it('un pedido ya cobrado no descuenta nada: el saldo es todo deuda previa', () => {
-    const aviso = avisoDeudaCliente(20000, { pedido: { total: 30000, monto_pagado: 30000 } })
-    expect(aviso?.monto).toBe(20000)
-  })
-
-  it('un pedido sobrepagado no infla la deuda avisada', () => {
-    // Aporte real al saldo = -5.000. Restarlo daría 25.000: deuda inventada.
-    const aviso = avisoDeudaCliente(20000, { pedido: { total: 30000, monto_pagado: 35000 } })
-    expect(aviso?.monto).toBe(20000)
-  })
-
-  it('un pedido cancelado (total 0, mig 175) no descuenta nada', () => {
-    const aviso = avisoDeudaCliente(20000, { pedido: { total: 0, monto_pagado: 0 } })
-    expect(aviso?.monto).toBe(20000)
-  })
-
-  it('trata monto_pagado ausente como 0, igual que el COALESCE del trigger', () => {
-    expect(avisoDeudaCliente(30000, { pedido: { total: 30000 } })).toBeNull()
-  })
-
-  it('no deja resto de float cuando el pedido es toda la deuda', () => {
-    // 0.1 + 0.2 en float no da 0.3: sin redondeo esto avisaría por milésimas.
-    expect(avisoDeudaCliente(0.3, { pedido: { total: 0.1 + 0.2, monto_pagado: 0 } })).toBeNull()
+  it('redondea a centavos: no muestra restos de float', () => {
+    expect(avisoDeudaCliente(0.1 + 0.2)?.monto).toBe(0.3)
   })
 })
 
-describe('avisoDeudaCliente — qué dice el texto según lo que el dato garantiza', () => {
-  it('en la tarjeta habla de OTROS pedidos, no de deuda previa', () => {
-    // Con `pedido`, el monto es la deuda menos ESE pedido — y eso puede venir
-    // de un pedido POSTERIOR. Decir "previa" ahí es cronológicamente falso.
-    const aviso = avisoDeudaCliente(50000, { pedido: { total: 20000, monto_pagado: 0 } })
-
-    expect(aviso?.etiqueta).toBe(`Debe ${formatPrecio(30000)} por otros pedidos`)
-    expect(aviso?.detalle).toContain('Además de este pedido')
-    expect(aviso?.detalle).not.toContain('previa')
-  })
-
-  it('el detalle avisa que puede haber pedidos posteriores', () => {
-    const aviso = avisoDeudaCliente(50000, { pedido: { total: 20000 } })
-    expect(aviso?.detalle).toContain('posteriores')
-  })
-
-  it('en el alta sí es toda la deuda del cliente, y el texto lo dice', () => {
-    // Sin `pedido` no hay nada que descontar: el pedido todavía no existe.
-    const aviso = avisoDeudaCliente(50000)
-
-    expect(aviso?.etiqueta).toBe(`Debe ${formatPrecio(50000)}`)
-    expect(aviso?.detalle).toContain('deuda previa')
-    expect(aviso?.etiqueta).not.toContain('otros pedidos')
-  })
-
-  // El caso que motivó el cambio, con los dos pedidos de un mismo cliente.
-  it('la tarjeta del pedido VIEJO no llama "previa" a la deuda del nuevo', () => {
-    // Cliente con A (viejo, $20.000) y B (nuevo, $30.000), los dos impagos.
-    // El saldo del cliente es 50.000 y la tarjeta de A muestra los 30.000 de B.
-    const enLaTarjetaDeA = avisoDeudaCliente(50000, { pedido: { total: 20000, monto_pagado: 0 } })
-
-    expect(enLaTarjetaDeA?.monto).toBe(30000)
-    expect(enLaTarjetaDeA?.detalle).not.toContain('previa')
-  })
-})
-
-describe('avisoDeudaCliente — saldo posiblemente viejo (offline)', () => {
+describe('avisoDeudaCliente — monto posiblemente viejo (offline)', () => {
   it('habla en pasado y dice de cuándo es el dato', () => {
     const aviso = avisoDeudaCliente(12500, { saldoAl: '6/9, 14:32' })
     expect(aviso?.etiqueta).toContain('6/9, 14:32')
     expect(aviso?.detalle).toContain('6/9, 14:32')
-    expect(aviso?.detalle).toContain('cobrado después')
-  })
-
-  it('sin conexión, en la tarjeta, el detalle sigue diciendo el alcance', () => {
-    const aviso = avisoDeudaCliente(50000, {
-      pedido: { total: 20000 },
-      saldoAl: '6/9, 14:32',
-    })
-    // La antigüedad pesa más que el alcance: el badge la lleva a ella.
-    expect(aviso?.etiqueta).toBe(`Debía ${formatPrecio(30000)} al 6/9, 14:32`)
-    expect(aviso?.detalle).toContain('por otros pedidos')
     expect(aviso?.detalle).toContain('cobrado después')
   })
 
