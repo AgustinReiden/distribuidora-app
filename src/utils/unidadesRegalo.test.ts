@@ -8,13 +8,13 @@ import {
 describe('esCantidadEnSubunidades', () => {
   it('es true para el regalo de una promo fraccionada', () => {
     expect(esCantidadEnSubunidades({
-      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6 },
+      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
     })).toBe(true);
   });
 
   it('es false para una línea de venta, aunque tenga promo', () => {
     expect(esCantidadEnSubunidades({
-      cantidad: 30, es_bonificacion: false, promocion: { unidades_por_bloque: 6 },
+      cantidad: 30, es_bonificacion: false, promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
     })).toBe(false);
   });
 
@@ -32,7 +32,7 @@ describe('esCantidadEnSubunidades', () => {
 describe('formatCantidadItem', () => {
   it('aclara la unidad sólo en el regalo fraccionado', () => {
     expect(formatCantidadItem({
-      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6 },
+      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
     })).toBe('x392 botellas');
     expect(formatCantidadItem({ cantidad: 30 })).toBe('x30');
   });
@@ -42,16 +42,16 @@ describe('equivalenteEnUnidades', () => {
   it('convierte a fardos el regalo fraccionado', () => {
     // El caso que disparó todo: 392 botellas = 65,3 fardos, no 392 fardos.
     expect(equivalenteEnUnidades({
-      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6 },
+      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
     })).toBe('≈ 65,3 fardos');
   });
 
   it('no muestra decimales cuando el bloque cierra justo', () => {
     expect(equivalenteEnUnidades({
-      cantidad: 24, es_bonificacion: true, promocion: { unidades_por_bloque: 6 },
+      cantidad: 24, es_bonificacion: true, promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
     })).toBe('≈ 4 fardos');
     expect(equivalenteEnUnidades({
-      cantidad: 6, es_bonificacion: true, promocion: { unidades_por_bloque: 6 },
+      cantidad: 6, es_bonificacion: true, promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
     })).toBe('≈ 1 fardo');
   });
 
@@ -73,7 +73,7 @@ describe('precedencia del factor: congelado sobre vivo', () => {
     cantidad: 392,
     es_bonificacion: true,
     unidades_por_bloque_al_crear: 6,
-    promocion: { unidades_por_bloque: 12 },
+    promocion: { unidades_por_bloque: 12, regalo_mueve_stock: false },
   };
 
   it('convierte con el factor de cuando nació, no con el de hoy', () => {
@@ -84,7 +84,7 @@ describe('precedencia del factor: congelado sobre vivo', () => {
     // Los 70 ítems que la mig 212 dejó en NULL a propósito: se comportan como
     // antes de la migración.
     expect(equivalenteEnUnidades({
-      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6 },
+      cantidad: 392, es_bonificacion: true, promocion: { unidades_por_bloque: 6, regalo_mueve_stock: false },
     })).toBe('≈ 65,3 fardos');
   });
 
@@ -95,13 +95,13 @@ describe('precedencia del factor: congelado sobre vivo', () => {
       cantidad: 5,
       es_bonificacion: true,
       unidades_por_bloque_al_crear: 1,
-      promocion: { unidades_por_bloque: 12 },
+      promocion: { unidades_por_bloque: 12, regalo_mueve_stock: false },
     })).toBe(false);
     expect(formatCantidadItem({
       cantidad: 5,
       es_bonificacion: true,
       unidades_por_bloque_al_crear: 1,
-      promocion: { unidades_por_bloque: 12 },
+      promocion: { unidades_por_bloque: 12, regalo_mueve_stock: false },
     })).toBe('x5');
   });
 
@@ -115,5 +115,49 @@ describe('precedencia del factor: congelado sobre vivo', () => {
     expect(equivalenteEnUnidades({
       cantidad: 24, es_bonificacion: true, unidades_por_bloque_al_crear: 6, promocion: null,
     })).toBe('≈ 4 fardos');
+  });
+});
+
+/**
+ * El fallback al vivo replica la cascada COMPLETA de `factor_bonificacion`, no
+ * sólo el divisor: también el gate `regalo_mueve_stock IS FALSE` (issue #534).
+ * Aplica a los 70 ítems que la mig 212 dejó con el congelado en NULL.
+ */
+describe('el fallback vivo respeta el gate regalo_mueve_stock', () => {
+  it('no fracciona si la promo mueve stock, aunque tenga divisor cargado', () => {
+    // El caso peor de la 212: un flip de false → true que no limpió el divisor.
+    // Sin el gate, este regalo se leería 6 veces más chico.
+    expect(esCantidadEnSubunidades({
+      cantidad: 12,
+      es_bonificacion: true,
+      promocion: { unidades_por_bloque: 6, regalo_mueve_stock: true },
+    })).toBe(false);
+  });
+
+  it('tampoco fracciona si no se sabe si mueve stock', () => {
+    // `IS FALSE` en SQL: NULL no es false, así que no hay fallback vivo.
+    expect(esCantidadEnSubunidades({
+      cantidad: 12,
+      es_bonificacion: true,
+      promocion: { unidades_por_bloque: 6, regalo_mueve_stock: null },
+    })).toBe(false);
+  });
+
+  it('el congelado gana incluso cuando el gate vivo está cerrado', () => {
+    // La línea nació fraccionada; que hoy la promo mueva stock no la reescribe.
+    expect(equivalenteEnUnidades({
+      cantidad: 24,
+      es_bonificacion: true,
+      unidades_por_bloque_al_crear: 6,
+      promocion: { unidades_por_bloque: null, regalo_mueve_stock: true },
+    })).toBe('≈ 4 fardos');
+  });
+
+  it('un divisor vivo en 0 cae al neutro, como el NULLIF del SQL', () => {
+    expect(esCantidadEnSubunidades({
+      cantidad: 12,
+      es_bonificacion: true,
+      promocion: { unidades_por_bloque: 0, regalo_mueve_stock: false },
+    })).toBe(false);
   });
 });

@@ -20,29 +20,37 @@ export interface ItemConUnidad {
   es_bonificacion?: boolean | null;
   /** Factor congelado al crear la línea (mig 212). Manda sobre el vivo. */
   unidades_por_bloque_al_crear?: number | null;
-  promocion?: { unidades_por_bloque?: number | null } | null;
+  promocion?: {
+    unidades_por_bloque?: number | null;
+    regalo_mueve_stock?: boolean | null;
+  } | null;
 }
 
 /**
- * Factor de fracción de esta línea. Misma precedencia que `factor_bonificacion`
- * en SQL (mig 212 §6): congelado → vivo → 1.
+ * Factor de fracción de esta línea. Es el puerto TS de
+ * `public.factor_bonificacion(al_crear, regalo_mueve_stock, unidades_por_bloque)`
+ * (mig 212 §6), con la misma cascada: congelado → vivo → 1.
  *
  * El congelado tiene que ganar. Sin él, editar el factor de una promo cambiaba
  * cómo se lee la cantidad de un regalo en pedidos YA CERRADOS: una promo que
  * pasa de 6 a 12 mostraba un regalo histórico de 392 botellas como ≈32,7 fardos
  * en vez de ≈65,3. Es el mismo bug que la 212 arregló para el reporte, y que
- * seguía abierto para la pantalla y la boleta (issue #552).
+ * seguía abierto para la pantalla y la boleta (issues #534 y #552).
  *
- * El vivo no consulta `regalo_mueve_stock` como sí hace `factor_bonificacion`:
- * `unidades_por_bloque` sólo tiene valor en promos de fracción, donde
- * `regalo_mueve_stock` es false por construcción. El congelado ya no lo
- * necesita: colapsa gate y divisor en un solo número.
+ * El fallback al vivo NO es sólo el divisor: replica también el gate
+ * `regalo_mueve_stock IS FALSE`. Sin ese gate, un flip de false → true en una
+ * promo que todavía tenga `unidades_por_bloque` cargado multiplicaría por 6 o
+ * por 12 la lectura de sus regalos viejos — el caso peor que documenta la 212.
+ * Aplica a los 70 ítems anteriores a la primera medición de su promo, que
+ * quedaron con el congelado en NULL a propósito.
  */
 function factorDeLaLinea(item: ItemConUnidad): number {
-  const factor = item.unidades_por_bloque_al_crear
-    ?? item.promocion?.unidades_por_bloque
-    ?? 1;
-  return Math.max(factor, 1);
+  // `|| null` reproduce el NULLIF(unidades_por_bloque, 0) del SQL: un 0 cae al
+  // neutro en vez de propagarse como divisor.
+  const vivo = item.promocion?.regalo_mueve_stock === false
+    ? (item.promocion?.unidades_por_bloque || null)
+    : null;
+  return Math.max(item.unidades_por_bloque_al_crear ?? vivo ?? 1, 1);
 }
 
 /**
