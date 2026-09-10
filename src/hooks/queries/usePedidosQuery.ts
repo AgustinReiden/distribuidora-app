@@ -141,8 +141,8 @@ const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, 
 // (useRecorridosHojaRutaQuery) y la ruta recien armada
 // (useRecorridoExistenteQuery)— y las tres tienen que llevar la deuda al papel
 // del transportista. Medido: 21 ms las dos juntas sobre 53 pedidos.
-export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
-const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const
+export const PEDIDO_SELECT = `*, deuda_previa, deuda_previa_detalle, cliente:clientes(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
+const PEDIDO_SELECT_CLIENTE_INNER = `*, deuda_previa, deuda_previa_detalle, cliente:clientes!inner(${PEDIDO_CLIENT_COLS}), items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const
 
 
 // Helper: cargar salvedades para un conjunto de pedidos
@@ -204,7 +204,7 @@ async function fetchPedidosByTransportista(transportistaId: string): Promise<Ped
 async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`*, items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque)), pagos(forma_pago, monto)` as const)
+    .select(`*, items:pedido_items(*, producto:productos(${PEDIDO_PRODUCT_COLS}), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)), pagos(forma_pago, monto)` as const)
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(50)
