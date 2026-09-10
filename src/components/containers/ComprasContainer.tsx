@@ -201,16 +201,28 @@ export default function ComprasContainer(): React.ReactElement {
     }
   }, [registrarCompra, actualizarProducto, notify, user])
 
+  // Crear un producto sin salir de la factura. El catch no es decorativo: el
+  // modal deja el formulario como estaba y sigue, así que si el error no se
+  // muestra acá no se muestra en ningún lado. Pasó en prod (Tucumán, 10/09):
+  // el alta chocaba contra el código duplicado del producto que la usuaria
+  // acababa de crear, el botón no hacía nada visible y lo apretó diez veces.
   const handleCrearProductoRapido = useCallback(async (data: { nombre: string; codigo: string; costoSinIva: number }) => {
-    const producto = await crearProducto.mutateAsync({
-      nombre: data.nombre,
-      codigo: data.codigo || undefined,
-      precio: data.costoSinIva * 1.21,
-      stock: 0,
-      costo_sin_iva: data.costoSinIva
-    })
-    notify.success(`Producto "${data.nombre}" creado`)
-    return producto
+    try {
+      const producto = await crearProducto.mutateAsync({
+        nombre: data.nombre,
+        codigo: data.codigo || undefined,
+        precio: data.costoSinIva * 1.21,
+        stock: 0,
+        costo_sin_iva: data.costoSinIva
+      })
+      notify.success(`Producto "${data.nombre}" creado`)
+      return producto
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo crear el producto')
+      // Sigue viajando: el que llama distingue "creado" de "no creado" por el
+      // rechazo, y sobre eso decide si agrega la línea o deja el pendiente.
+      throw err
+    }
   }, [crearProducto, notify])
 
   const handleNotaCredito = useCallback((compra: CompraDBExtended) => {

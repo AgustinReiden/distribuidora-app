@@ -73,6 +73,20 @@ async function fetchProductosStockBajo(umbral: number): Promise<ProductoDB[]> {
   return (data as ProductoDB[]) || []
 }
 
+/**
+ * Error de regla de negocio, marcado como conflicto (409).
+ *
+ * El `retry` global de mutations (main.tsx) reintenta 3 veces con backoff todo
+ * lo que no sea un 4xx, y un `new Error(...)` pelado no lo es: un código
+ * duplicado —que nunca va a dejar de estar duplicado— se reintentaba durante 3
+ * segundos antes de fallar igual. Con el status puesto falla en el acto.
+ */
+function errorDeConflicto(mensaje: string): Error {
+  const error = new Error(mensaje)
+  ;(error as Error & { status?: number }).status = 409
+  return error
+}
+
 // Mutation functions
 async function createProducto(producto: ProductoFormInput, sucursalId: number | null): Promise<ProductoDB> {
   // La RLS multi-tenant requiere sucursal_id = current_sucursal_id() y la
@@ -81,7 +95,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
 
-  // Validar código duplicado
+  // Validar código duplicado. `productos.codigo` no tiene UNIQUE (ver mig 210),
+  // así que esta es la única guarda: si no corta acá, no corta en ningún lado.
   if (producto.codigo) {
     const { data: existente } = await supabase
       .from('productos')
@@ -90,7 +105,13 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
       .limit(1)
       .maybeSingle()
     if (existente) {
-      throw new Error(`Ya existe un producto con código "${producto.codigo}": ${existente.nombre}`)
+      // El mensaje tiene que decir qué hacer, no sólo que no se pudo: el que
+      // llega acá casi siempre está cargando una factura y no sabe que el
+      // producto ya lo creó él mismo un minuto antes, en la línea anterior.
+      throw errorDeConflicto(
+        `Ya existe un producto con código "${producto.codigo}": «${existente.nombre}». ` +
+        'Buscalo por nombre o código y agregalo, o cargá este con otro código.'
+      )
     }
   }
 
