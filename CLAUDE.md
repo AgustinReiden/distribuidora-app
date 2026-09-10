@@ -87,6 +87,13 @@ suelta en `sucursales`.
   —selectores, rutas, recorridos— los oculta; el historial —reportes, cuenta corriente y los
   embeds `cliente:clientes(*)`— **tiene** que seguir viéndolos, que es de lo que se trata la
   baja lógica. Una consulta que no elige está eligiendo mal por omisión.
+- **El stock por lote lo lleva un trigger, no las RPCs.** `trg_lotes_sincronizar` (mig 223)
+  consume FEFO y devuelve al lote en cada `UPDATE productos.stock`, leyendo el mismo
+  `app.stock_origen` que ya usa el ledger. Un camino nuevo que **baje** stock no tiene que
+  tocar `producto_lotes`: el trigger se encarga. Uno que lo **devuelva** —cancelación,
+  salvedad, edición a la baja— sí tiene que etiquetarse con un origen de la lista blanca del
+  trigger, o esas unidades vuelven a la bolsa "sin vencimiento" en vez de a su lote y el
+  contador miente para abajo sin que falle nada.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y

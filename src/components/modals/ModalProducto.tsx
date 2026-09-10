@@ -21,6 +21,9 @@ import { lazyWithReload } from '../../utils/lazyWithReload';
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
 const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/ProductoCondicionesMayoristas'));
 
+// Lazy por lo mismo: solo hace falta al editar, y arrastra la query de lotes.
+const ProductoLotes = lazyWithReload(() => import('../productos/ProductoLotes'));
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -847,6 +850,19 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         {/* porcentajeIva con `?? 21`, no `|| 21`: con la alícuota en 0 (exento /
             no gravado) el margen mayorista se calculaba dividiendo el precio por
             1,21 y salía ~21 puntos peor que el real. */}
+        {/* Vencimientos por lote (migs 223/224). Solo en edición: un producto
+            que todavía no existe no tiene stock ni lotes. El stock sale del
+            form y no del producto, así la "bolsa sin vencimiento" se mueve
+            mientras el admin corrige el stock arriba. */}
+        {producto?.id && (
+          <Suspense fallback={null}>
+            <ProductoLotes
+              productoId={Number(producto.id)}
+              stock={Number(form.stock) || 0}
+            />
+          </Suspense>
+        )}
+
         {producto?.id && (
           <Suspense fallback={null}>
             <ProductoCondicionesMayoristas

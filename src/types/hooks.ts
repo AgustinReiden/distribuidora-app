@@ -1142,6 +1142,11 @@ export interface CompraFormInputExtended {
     porcentajeIva?: number;
     condicionIva?: CondicionIva;
     impuestosInternos?: number;
+    /**
+     * Vencimientos de la línea (migs 223/224). NO viajan en `p_items`: se
+     * mandan aparte con `sincronizar_lotes_compra` una vez que la compra existe.
+     */
+    vencimientos?: Array<{ fecha: string; cantidad: number }>;
   }>;
   /** Líneas cuya tasa de II fue editada a mano: se propaga al producto tras registrar (mig 123 UI). */
   cambiosImpuestosInternos?: Array<{ productoId: string; nombre: string; impuestosInternos: number }>;
@@ -1195,6 +1200,13 @@ export interface RegistrarCompraResult {
   warningDescuadre?: string | null;
   /** La apertura del impuesto interno por alícuota no cuadra con el total, o declara una tasa que ninguna línea usa. */
   warningIiDeclarado?: string | null;
+  /**
+   * Los vencimientos no se pudieron guardar (migs 223/224). La compra SÍ quedó
+   * registrada: el lote va por una segunda llamada, y que falle deja los
+   * vencimientos sin cargar — el mismo estado que si el usuario los hubiera
+   * dejado en blanco, que es un estado soportado. Se avisa, no se rompe.
+   */
+  warningLotes?: string | null;
 }
 
 export interface UseComprasReturnExtended {

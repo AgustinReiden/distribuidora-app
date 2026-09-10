@@ -7,7 +7,7 @@
  * un campo acá.
  */
 import { useState, useEffect, type FormEvent } from 'react';
-import { Loader2, Settings, AlertTriangle, Percent } from 'lucide-react';
+import { Loader2, Settings, AlertTriangle, Percent, CalendarClock } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatters';
 
 export interface VistaConfiguracionProps {
@@ -27,7 +27,154 @@ export interface VistaConfiguracionProps {
   comisionPctOtros: number;
   guardandoComisiones: boolean;
   onGuardarComisiones: (pctPreventista: number, pctOtros: number) => void;
+  /** Dias de anticipacion del aviso amarillo de vencimiento (mig 223). */
+  diasAlertaVencimiento: number;
+  /** Dias de anticipacion del aviso rojo. Siempre <= el amarillo. */
+  diasCriticoVencimiento: number;
+  guardandoAlertas: boolean;
+  onGuardarAlertas: (diasAlerta: number, diasCritico: number) => void;
 }
+
+/**
+ * Los dos umbrales del semaforo de vencimientos.
+ *
+ * Van juntos y en un solo formulario porque la base los valida juntos: el rojo
+ * no puede caer despues del amarillo (CHECK de la mig 223). Mandarlos por
+ * separado dejaria un estado intermedio que el servidor rechaza.
+ *
+ * Que los dos den 0 es una configuracion valida, no un formulario vacio:
+ * significa "avisame solo lo que ya se vencio".
+ */
+function FormAlertasVencimiento({
+  diasAlerta,
+  diasCritico,
+  guardando,
+  onGuardar,
+}: {
+  diasAlerta: number;
+  diasCritico: number;
+  guardando: boolean;
+  onGuardar: (diasAlerta: number, diasCritico: number) => void;
+}) {
+  const [amarillo, setAmarillo] = useState(String(diasAlerta));
+  const [rojo, setRojo] = useState(String(diasCritico));
+  const [error, setError] = useState<string | null>(null);
+
+  // El valor del servidor llega despues del primer render y cambia al cambiar
+  // de sucursal.
+  useEffect(() => { setAmarillo(String(diasAlerta)); }, [diasAlerta]);
+  useEffect(() => { setRojo(String(diasCritico)); }, [diasCritico]);
+
+  const nAmarillo = Number(amarillo);
+  const nRojo = Number(rojo);
+  const validoAmarillo = Number.isInteger(nAmarillo) && nAmarillo >= 0 && nAmarillo <= 3650;
+  const validoRojo = Number.isInteger(nRojo) && nRojo >= 0 && nRojo <= 3650;
+  const ordenOk = validoAmarillo && validoRojo && nRojo <= nAmarillo;
+  const valido = validoAmarillo && validoRojo && ordenOk;
+  const cambio = valido && (nAmarillo !== diasAlerta || nRojo !== diasCritico);
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!validoAmarillo || !validoRojo) {
+      setError('Ingresa una cantidad de dias entre 0 y 3650.');
+      return;
+    }
+    if (!ordenOk) {
+      setError('El aviso rojo no puede ser antes que el amarillo.');
+      return;
+    }
+    setError(null);
+    onGuardar(nAmarillo, nRojo);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl p-5 space-y-4 shadow-warm"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-stone-900 dark:text-white flex items-center gap-2">
+          <CalendarClock className="w-4 h-4 text-stone-500" aria-hidden="true" />
+          Aviso de vencimientos
+        </h2>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          Con cuanta anticipacion se marca un lote en <strong>Vencimientos</strong> y en la
+          ficha del producto. El amarillo es &ldquo;ojo con esto, empujalo&rdquo;; el rojo es
+          &ldquo;hay que liquidarlo ya&rdquo;.
+        </p>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+          Los dos en 0 avisan solo lo que ya se vencio. Un lote vencido nunca bloquea la
+          venta: se marca, y vos decidis.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="dias-alerta" className="block text-sm font-medium text-stone-900 dark:text-white">
+            Amarillo
+          </label>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              id="dias-alerta"
+              type="number"
+              min={0}
+              max={3650}
+              step="1"
+              inputMode="numeric"
+              value={amarillo}
+              onChange={(e) => { setAmarillo(e.target.value); setError(null); }}
+              aria-invalid={!validoAmarillo}
+              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            />
+            <span className="text-stone-500 dark:text-stone-400">dias antes</span>
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="dias-critico" className="block text-sm font-medium text-stone-900 dark:text-white">
+            Rojo
+          </label>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              id="dias-critico"
+              type="number"
+              min={0}
+              max={3650}
+              step="1"
+              inputMode="numeric"
+              value={rojo}
+              onChange={(e) => { setRojo(e.target.value); setError(null); }}
+              aria-invalid={!validoRojo || !ordenOk}
+              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            />
+            <span className="text-stone-500 dark:text-stone-400">dias antes</span>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <p role="alert" className="text-rose-600 text-xs">{error}</p>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={guardando || !cambio}
+          className="px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold text-sm hover:bg-amber-700 disabled:bg-stone-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          {guardando && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+          Guardar avisos
+        </button>
+        {!cambio && valido && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">
+            Vigente: amarillo a {diasAlerta} dias / rojo a {diasCritico}
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
 
 /**
  * Los dos % de comisión por defecto.
@@ -174,6 +321,10 @@ export default function VistaConfiguracion({
   comisionPctOtros,
   guardandoComisiones,
   onGuardarComisiones,
+  diasAlertaVencimiento,
+  diasCriticoVencimiento,
+  guardandoAlertas,
+  onGuardarAlertas,
 }: VistaConfiguracionProps) {
   const [valor, setValor] = useState(String(montoMinimoActual ?? 0));
   const [error, setError] = useState<string | null>(null);
@@ -309,6 +460,13 @@ export default function VistaConfiguracion({
         pctOtros={comisionPctOtros}
         guardando={guardandoComisiones}
         onGuardar={onGuardarComisiones}
+      />
+
+      <FormAlertasVencimiento
+        diasAlerta={diasAlertaVencimiento}
+        diasCritico={diasCriticoVencimiento}
+        guardando={guardandoAlertas}
+        onGuardar={onGuardarAlertas}
       />
     </div>
   );
