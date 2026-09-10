@@ -10,6 +10,7 @@ import {
   usePoliticasComercialesQuery,
   useActualizarMontoMinimoMutation,
   useActualizarComisionesDefaultMutation,
+  useActualizarAlertasVencimientoMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -32,6 +33,7 @@ export default function ConfiguracionContainer() {
   const { politicas, isLoading } = usePoliticasComercialesQuery()
   const actualizar = useActualizarMontoMinimoMutation()
   const actualizarComisiones = useActualizarComisionesDefaultMutation()
+  const actualizarAlertas = useActualizarAlertasVencimientoMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -60,6 +62,19 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarComisiones, notify])
 
+  const handleGuardarAlertas = useCallback(async (diasAlerta: number, diasCritico: number) => {
+    try {
+      await actualizarAlertas.mutateAsync({ diasAlerta, diasCritico })
+      notify.success(
+        diasAlerta === 0 && diasCritico === 0
+          ? 'Solo se van a avisar los lotes ya vencidos'
+          : `Aviso de vencimiento: amarillo a ${diasAlerta} dias, rojo a ${diasCritico}`
+      )
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudieron guardar los avisos')
+    }
+  }, [actualizarAlertas, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -75,6 +90,10 @@ export default function ConfiguracionContainer() {
         comisionPctOtros={politicas.comisionPctOtros}
         guardandoComisiones={actualizarComisiones.isPending}
         onGuardarComisiones={handleGuardarComisiones}
+        diasAlertaVencimiento={politicas.diasAlertaVencimiento}
+        diasCriticoVencimiento={politicas.diasCriticoVencimiento}
+        guardandoAlertas={actualizarAlertas.isPending}
+        onGuardarAlertas={handleGuardarAlertas}
       />
     </Suspense>
   )

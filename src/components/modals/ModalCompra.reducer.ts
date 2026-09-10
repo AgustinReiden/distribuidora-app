@@ -18,6 +18,24 @@ import { calcularCostosCompra, lineaParaMotor, resolverBasesII } from '../../uti
 import type { PesosCargo, LineaCompra, CargoCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import type { BaseProrrateoCompra, CargoPlantillaCompra, CompraCargoInput, CondicionIva, ProductoDB } from '../../types'
 
+/**
+ * Un vencimiento de una línea de factura (migs 223/224).
+ *
+ * Es una lista y no un campo suelto porque una misma línea puede traer dos
+ * lotes: llegan 20 cajas, 12 vencen en marzo y 8 en mayo. Cargar eso como dos
+ * renglones del mismo producto obligaría a partir también el costo y la
+ * bonificación, que son de la línea, no del lote.
+ *
+ * La suma de las cantidades puede ser MENOR que la cantidad de la línea: lo que
+ * no se etiqueta queda en la bolsa "sin vencimiento" del producto, que es un
+ * estado soportado. Nunca mayor.
+ */
+export interface VencimientoLinea {
+  /** 'YYYY-MM-DD'. */
+  fecha: string;
+  cantidad: number;
+}
+
 /** Item de compra en el formulario */
 export interface CompraItemForm {
   productoId: string;
@@ -41,6 +59,15 @@ export interface CompraItemForm {
    * numera todo lo que llegue sin id.
    */
   lineaId?: number;
+  /**
+   * Vencimientos de esta línea (migs 223/224). Opcional: cargarlos es opcional
+   * y una línea sin vencimientos es perfectamente válida.
+   *
+   * No viaja en `p_items` de `registrar_compra_completa`: se manda aparte, con
+   * `sincronizar_lotes_compra`, después de guardar la compra. Ver el encabezado
+   * de la mig 224 para el porqué.
+   */
+  vencimientos?: VencimientoLinea[];
 }
 
 /**
@@ -257,6 +284,8 @@ export type CompraActionType =
   | { type: 'ACTUALIZAR_ITEM'; payload: { index: number; campo: keyof CompraItemForm; valor: number | string } }
   // Condición y alícuota se setean juntas: la condición manda sobre la tasa.
   | { type: 'SET_CONDICION_ITEM'; payload: { index: number; clave: string } }
+  // La sub-fila de vencimientos maneja su propia lista y empuja la foto entera.
+  | { type: 'SET_VENCIMIENTOS_ITEM'; payload: { index: number; vencimientos: VencimientoLinea[] } }
   | { type: 'ELIMINAR_ITEM'; payload: number }
   | { type: 'LIMPIAR_BUSQUEDA' }
   | { type: 'SET_MODO_ITEM_RAPIDO'; payload: boolean }
@@ -767,6 +796,16 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         )
       }
     }
+
+    case 'SET_VENCIMIENTOS_ITEM':
+      return {
+        ...state,
+        items: state.items.map((item, i) =>
+          i === action.payload.index
+            ? { ...item, vencimientos: action.payload.vencimientos }
+            : item
+        )
+      }
 
     case 'ELIMINAR_ITEM':
       return {

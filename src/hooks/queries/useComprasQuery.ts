@@ -5,6 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { aplanarVencimientos } from '../../utils/vencimientos'
 import { fechaLocalISO } from '../../utils/formatters'
 import type {
   BaseProrrateoCompra,
@@ -234,6 +235,56 @@ async function fetchCargosPlantillaProveedor(proveedorId: string): Promise<Plant
 }
 
 // Mutation functions
+/**
+ * Manda los vencimientos de la compra, después de que la compra existe.
+ *
+ * Va en una segunda llamada y no adentro de `registrar_compra_completa` a
+ * propósito: esa RPC, `actualizar_compra_items` y `anular_compra_atomica` son
+ * las tres más parcheadas del repo, y cada parche nuevo sobre el cuerpo vivo es
+ * una oportunidad más de revertir en silencio lo que hizo el anterior. Ver el
+ * encabezado de la mig 224.
+ *
+ * NO propaga el error: la compra ya está registrada y no se va a deshacer por
+ * esto. Que falle deja los vencimientos sin cargar, que es exactamente el mismo
+ * estado que si el usuario los hubiera dejado en blanco — un estado soportado y
+ * visible en la ficha del producto como "sin vencimiento cargado". Devuelve el
+ * texto del aviso para que la pantalla lo muestre.
+ */
+async function sincronizarLotesDeCompra(
+  compraId: string | number,
+  items: { productoId: string; vencimientos?: { fecha: string; cantidad: number }[] }[],
+  /**
+   * `true` = llamar aunque no haya ningún vencimiento. Lo usa la EDICIÓN: la
+   * RPC recibe la foto completa de los lotes de esta factura, así que una lista
+   * vacía es la forma de borrar los que había. En el ALTA no hay nada que
+   * borrar, así que sin vencimientos ni se llama.
+   */
+  forzar = false,
+): Promise<string | null> {
+  const lotes = aplanarVencimientos(items)
+  if (lotes.length === 0 && !forzar) return null
+
+  try {
+    const { data, error } = await supabase.rpc('sincronizar_lotes_compra', {
+      p_compra_id: compraId,
+      p_lotes: lotes,
+    })
+    if (error) throw error
+
+    const res = data as unknown as { warning_clamp?: { producto_id: number; unidades: number }[] }
+    const clamp = res?.warning_clamp ?? []
+    if (clamp.length > 0) {
+      const total = clamp.reduce((acc, c) => acc + c.unidades, 0)
+      return `Se recortaron ${total} u. de vencimientos en ${clamp.length} producto(s): los lotes no entraban en el stock disponible.`
+    }
+    return null
+  } catch (e) {
+    return `La compra se registró, pero los vencimientos no se pudieron guardar: ${
+      e instanceof Error ? e.message : 'error desconocido'
+    }. Se pueden cargar a mano desde la ficha del producto.`
+  }
+}
+
 async function registrarCompra(compraData: CompraFormInputExtended): Promise<RegistrarCompraResult> {
   const itemsParaRPC: CompraItemRPC[] = compraData.items.map(item => ({
     producto_id: item.productoId,
@@ -288,11 +339,14 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
   // y que la apertura del impuesto interno por alícuota no cierra contra el
   // total (o declara una tasa que ninguna línea usa, con lo cual ese importe
   // no llega a ningún costo).
+  const warningLotes = await sincronizarLotesDeCompra(result.compra_id, compraData.items)
+
   return {
     success: true,
     compraId: result.compra_id,
     warningDescuadre: result.warning_descuadre ?? null,
     warningIiDeclarado: result.warning_ii_declarado ?? null,
+    warningLotes,
   }
 }
 
@@ -416,6 +470,8 @@ export interface ActualizarCompraItemsInput {
     porcentajeIva?: number
     condicionIva?: CondicionIva
     impuestosInternos?: number
+    /** Vencimientos de la línea (migs 223/224). Ver CompraFormInputExtended. */
+    vencimientos?: Array<{ fecha: string; cantidad: number }>
   }>
   /**
    * Los cargos de la compra (mig 194). Obligatorio y no opcional a propósito:
@@ -448,7 +504,7 @@ export interface WarningCostoPromedio {
 
 async function actualizarCompraItems(
   input: ActualizarCompraItemsInput
-): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[]; warningIiDeclarado: string | null }> {
+): Promise<{ compraId: string; warningCostoPromedio: WarningCostoPromedio[]; warningIiDeclarado: string | null; warningLotes: string | null }> {
   const itemsParaRPC: CompraItemRPC[] = input.items.map(item => ({
     producto_id: item.productoId,
     cantidad: item.cantidad,
@@ -494,10 +550,17 @@ async function actualizarCompraItems(
   }
   // `actualizar_compra_items` NO devuelve `warning_descuadre`: no recalcula el
   // total contra el informado, lo recibe ya hecho. Sólo el del II declarado.
+  // En la edición se llama SIEMPRE, incluso sin vencimientos: la RPC es la foto
+  // completa de los lotes de esta factura, así que una lista vacía es la forma
+  // de borrar los que había. `actualizar_compra_items` borra y recrea las
+  // líneas, y los lotes tienen que seguir a las líneas.
+  const warningLotes = await sincronizarLotesDeCompra(result.compra_id, input.items, true)
+
   return {
     compraId: result.compra_id,
     warningCostoPromedio: result.warning_costo_promedio ?? [],
     warningIiDeclarado: result.warning_ii_declarado ?? null,
+    warningLotes,
   }
 }
 

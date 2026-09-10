@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useMemo } from 'react'
+import { formatearFechaVencimiento } from '../../utils/vencimientos'
 import { X, ShoppingCart, Package, Building2, Calendar, CreditCard, FileText, TrendingUp, Hash } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import type { CondicionIva, Producto, Proveedor, Usuario } from '../../types'
@@ -97,6 +98,8 @@ export interface ModalDetalleCompraProps {
   onAnular?: (compraId: string) => void;
   onNotaCredito?: (compra: any) => void;
   notasCredito?: NotaCreditoResumen[];
+  /** Lotes que cargo esta compra (migs 223/224). Los trae el container. */
+  lotes?: { producto_id: number; fecha_vencimiento: string; cantidad: number }[];
 }
 
 export default function ModalDetalleCompra({
@@ -104,8 +107,23 @@ export default function ModalDetalleCompra({
   onClose,
   onAnular,
   onNotaCredito,
-  notasCredito = []
+  notasCredito = [],
+  lotes = []
 }: ModalDetalleCompraProps): React.ReactElement | null {
+  // Los lotes son del PRODUCTO, no de la linea: dos lineas del mismo producto
+  // con la misma fecha son un solo lote (lo garantiza el UNIQUE de la mig 223).
+  // El useMemo va ANTES del early return: un hook detras de un `return null`
+  // seria una llamada condicional.
+  const vencimientosPorProducto = useMemo(() => {
+    const mapa = new Map<string, string[]>()
+    for (const lote of lotes) {
+      const clave = String(lote.producto_id)
+      const texto = `${formatearFechaVencimiento(lote.fecha_vencimiento)} (${lote.cantidad} u.)`
+      mapa.set(clave, [...(mapa.get(clave) ?? []), texto])
+    }
+    return mapa
+  }, [lotes])
+
   if (!compra) return null
 
   const estado = ESTADOS_COMPRA[compra.estado] || ESTADOS_COMPRA.pendiente
@@ -241,6 +259,12 @@ export default function ModalDetalleCompra({
                               por qué el total no es subtotal × 1,21. */}
                           {esFC && <span className="ml-2">· {etiquetaFiscalLinea(item)}</span>}
                         </p>
+                        {/* Vencimientos que cargo esta compra (migs 223/224). */}
+                        {vencimientosPorProducto.get(String(item.producto_id))?.length ? (
+                          <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-0.5">
+                            Vence: {vencimientosPorProducto.get(String(item.producto_id))!.join(' · ')}
+                          </p>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 text-center text-gray-800 dark:text-white">
                         {item.cantidad}
