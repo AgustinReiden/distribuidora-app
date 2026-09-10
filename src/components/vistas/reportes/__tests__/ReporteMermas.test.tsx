@@ -114,9 +114,11 @@ function kpiPerdida(): HTMLElement {
   return screen.getByText('Pérdida a costo').parentElement as HTMLElement
 }
 
-function renderTab(data: unknown = reporte()) {
+const onRango = vi.fn()
+
+function renderTab(data: unknown = reporte(), props: Record<string, unknown> = {}) {
   mockUseReporte.mockReturnValue({ data, isLoading: false, error: null })
-  return render(<ReporteMermas formatPrecio={formatPrecio} />)
+  return render(<ReporteMermas formatPrecio={formatPrecio} onRango={onRango} {...props} />)
 }
 
 describe('ReporteMermas', () => {
@@ -130,10 +132,18 @@ describe('ReporteMermas', () => {
       expect(mockUseReporte).toHaveBeenCalledWith(null, '2026-01-01', '2026-09-07', null)
     })
 
-    it('cambiar de período vuelve a consultar con el rango nuevo', async () => {
+    it('cambiar de período escribe el rango en el contexto compartido', async () => {
+      // El período es controlado: la pestaña no se lo guarda para sí, lo sube a
+      // la URL para que el link siga siendo compartible y el gerencial pueda
+      // mandar a alguien exactamente al mismo recorte.
       renderTab()
       await userEvent.selectOptions(screen.getByLabelText(/Período/i), 'mes-2026-09')
-      expect(mockUseReporte).toHaveBeenLastCalledWith(null, '2026-09-01', '2026-09-07', null)
+      expect(onRango).toHaveBeenCalledWith('2026-09-01', '2026-09-07')
+    })
+
+    it('el rango que llega por la URL manda sobre el default de la pestaña', () => {
+      renderTab(reporte(), { desde: '2026-03-01', hasta: '2026-03-31' })
+      expect(mockUseReporte).toHaveBeenCalledWith(null, '2026-03-01', '2026-03-31', null)
     })
 
     it('el filtro de motivo también va al servidor: mueve los totales', async () => {

@@ -11,6 +11,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -91,8 +92,9 @@ const periodo = {
  * completo — que es justo lo contrario de lo que quiere ese caso.
  */
 function renderVista(r: ReporteGerencial | null = reporte()) {
+  // Las cards llevan links "Ver detalle" a /reportes: <Link> exige un Router.
   return render(
-    <VistaReportesGerenciales
+    <MemoryRouter><VistaReportesGerenciales
       reporte={r ?? undefined}
       loading={false}
       error={null}
@@ -113,7 +115,7 @@ function renderVista(r: ReporteGerencial | null = reporte()) {
       guardandoMeta={false}
       analisis={null}
       {...({} as Record<string, unknown>)}
-    />
+    /></MemoryRouter>
   );
 }
 

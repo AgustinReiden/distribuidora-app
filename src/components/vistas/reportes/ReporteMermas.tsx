@@ -32,6 +32,13 @@ import { presetsVentas, type PeriodoPreset } from '../../../utils/periodosReport
 
 export interface ReporteMermasProps {
   formatPrecio: (precio: number) => string;
+  /** Rango del contexto compartido (URL). Vacío = usar el default de la pestaña. */
+  desde?: string;
+  hasta?: string;
+  /** Sucursal del contexto compartido. `undefined` = no vino en la URL. */
+  sucursalUrl?: number | null;
+  /** Escribe el rango en la URL, para que el link siga siendo compartible. */
+  onRango?: (desde: string, hasta: string) => void;
 }
 
 const PRESET_CUSTOM = 'custom';
@@ -41,18 +48,32 @@ function fechaCorta(iso?: string | null): string {
   return new Date(iso).toLocaleDateString('es-AR');
 }
 
-export function ReporteMermas({ formatPrecio }: ReporteMermasProps): React.ReactElement {
+export function ReporteMermas({
+  formatPrecio, desde: desdeUrl, hasta: hastaUrl, sucursalUrl, onRango,
+}: ReporteMermasProps): React.ReactElement {
   const presets = useMemo(() => presetsVentas(), []);
-  const [preset, setPreset] = useState<PeriodoPreset>(presets[0]);
-  const [presetId, setPresetId] = useState<string>(presets[0].id);
-  const [desde, setDesde] = useState<string>(presets[0].desde);
-  const [hasta, setHasta] = useState<string>(presets[0].hasta);
+
+  // El RPC EXIGE un rango, así que esta pestaña no puede quedarse "sin filtro"
+  // como el resto de /reportes: si la URL no trae período, usa su propio
+  // default y no lo escribe (escribirlo cambiaría el contexto de las otras
+  // pestañas sin que nadie lo haya pedido).
+  const desde = desdeUrl || presets[0].desde;
+  const hasta = hastaUrl || presets[0].hasta;
+  const presetDelRango = presets.find((p) => p.desde === desde && p.hasta === hasta);
+  const presetId = presetDelRango?.id ?? PRESET_CUSTOM;
+  const preset: PeriodoPreset = presetDelRango ?? { ...presets[0], id: PRESET_CUSTOM, label: 'Personalizado', desde, hasta };
+
   const [motivo, setMotivo] = useState<string>('todos');
   const [busqueda, setBusqueda] = useState<string>('');
   const [exportando, setExportando] = useState(false);
 
   const { sucursales, hasMultipleSucursales } = useSucursal();
-  const [sucursalSel, setSucursalSel] = useState<number | null>(null);
+  const [sucursalLocal, setSucursalLocal] = useState<number | null | undefined>(undefined);
+  // Un link a una sucursal que el usuario no tiene asignada cae al default en
+  // vez de al 'Acceso denegado' del RPC.
+  const sucursalDeUrl = sucursalUrl != null && !sucursales.some((s) => s.id === sucursalUrl) ? undefined : sucursalUrl;
+  const sucursalSel = sucursalLocal !== undefined ? sucursalLocal : (sucursalDeUrl ?? null);
+  const setSucursalSel = setSucursalLocal;
 
   const opcionesSucursal = useMemo(() => {
     const list = sucursales.map((s) => ({ id: s.id as number | null, nombre: s.nombre }));
@@ -63,13 +84,9 @@ export function ReporteMermas({ formatPrecio }: ReporteMermasProps): React.React
   const { data, isLoading, error } = useMermasReporteQuery(sucursalSel, desde, hasta, motivoParam);
 
   const elegirPreset = (id: string): void => {
-    setPresetId(id);
     if (id === PRESET_CUSTOM) return;
     const p = presets.find((x) => x.id === id);
-    if (!p) return;
-    setPreset(p);
-    setDesde(p.desde);
-    setHasta(p.hasta);
+    if (p) onRango?.(p.desde, p.hasta);
   };
 
   // La búsqueda es SÓLO sobre la lista renderizada: no toca ningún total.
@@ -223,12 +240,12 @@ export function ReporteMermas({ formatPrecio }: ReporteMermasProps): React.React
             <>
               <div>
                 <label htmlFor="mermas-desde" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Desde</label>
-                <input id="mermas-desde" type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
+                <input id="mermas-desde" type="date" value={desde} onChange={(e) => onRango?.(e.target.value, hasta)}
                   className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" />
               </div>
               <div>
                 <label htmlFor="mermas-hasta" className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Hasta</label>
-                <input id="mermas-hasta" type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
+                <input id="mermas-hasta" type="date" value={hasta} onChange={(e) => onRango?.(desde, e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" />
               </div>
             </>
