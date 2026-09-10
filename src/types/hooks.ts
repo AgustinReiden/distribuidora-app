@@ -1710,6 +1710,11 @@ export interface SalvedadItemDB {
   stock_devuelto_at?: string | null;
   pedido_reprogramado_id?: string | null;
   reportado_por: string;
+  /** Si la línea afectada era un regalo, y de qué promo. Los guarda la mig 227
+   *  para que `anular_salvedad` pueda devolverla COMO regalo y no como venta a
+   *  precio 0 (issue #538). NULL en las salvedades anteriores a esa migración. */
+  es_bonificacion?: boolean | null;
+  promocion_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
