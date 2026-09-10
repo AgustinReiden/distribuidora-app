@@ -185,6 +185,20 @@ export {
   useMermasResumen,
 } from './useMermasQuery'
 
+// Reporte de mermas agregado en la base (mig 226)
+export {
+  mermasReporteKeys,
+  fetchReporteMermas,
+  useMermasReporteQuery,
+  LIMITE_DETALLE_MERMAS,
+} from './useMermasReporteQuery'
+export type {
+  ReporteMermas,
+  MermaMotivoReporte,
+  MermaDetalle,
+  TotalesMermasReporte,
+} from './useMermasReporteQuery'
+
 // Cambios de productos cliente↔depósito
 export {
   cambiosProductosKeys,

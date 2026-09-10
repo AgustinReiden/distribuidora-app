@@ -21,6 +21,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -89,8 +90,9 @@ const COMISION_REAL = [
 ];
 
 function renderVista(comisionPorVendedor: { id: string; nombre: string; comision: number }[] | null = COMISION_REAL) {
+  // Las cards llevan links "Ver detalle" a /reportes: <Link> exige un Router.
   return render(
-    <VistaReportesGerenciales
+    <MemoryRouter><VistaReportesGerenciales
       reporte={reporte()}
       loading={false}
       error={null}
@@ -112,7 +114,7 @@ function renderVista(comisionPorVendedor: { id: string; nombre: string; comision
       analisis={null}
       comisionCalculada={302426}
       comisionPorVendedor={comisionPorVendedor}
-    />
+    /></MemoryRouter>
   );
 }
 
@@ -188,7 +190,11 @@ describe('VistaReportesGerenciales › comisión por vendedor', () => {
     renderVista();
     await abrirDetalle(user);
 
-    const total = screen.getByText('Total').closest('tr') as HTMLElement;
+    // 'Total' dejo de ser unico en la pantalla: las cards de Mermas y Compras
+    // tambien cierran con una fila Total. Se acota a la tabla de comisiones,
+    // que es la unica con la columna 'Vendedor'.
+    const tabla = screen.getByText('Vendedor').closest('table') as HTMLElement;
+    const total = within(tabla).getByText('Total').closest('tr') as HTMLElement;
     // Real: 302.426 + 0. Simulado: (15.121.320 + 2.964.100) × 2% = 361.708.
     expect(within(total).getByText($$(302426))).toBeInTheDocument();
     expect(within(total).getByText($$(361708))).toBeInTheDocument();
@@ -199,7 +205,7 @@ describe('VistaReportesGerenciales › comisión por vendedor', () => {
   it('cruza por ID, no por nombre: dos homónimos no comparten comisión', async () => {
     const user = userEvent.setup();
     render(
-      <VistaReportesGerenciales
+      <MemoryRouter><VistaReportesGerenciales
         reporte={{
           ...reporte(),
           vendedores: [
@@ -219,7 +225,7 @@ describe('VistaReportesGerenciales › comisión por vendedor', () => {
           { id: 'u-juan-1', nombre: 'Juan', comision: 302426 },
           { id: 'u-juan-2', nombre: 'Juan', comision: 0 },
         ]}
-      />
+      /></MemoryRouter>
     );
     await abrirDetalle(user);
 

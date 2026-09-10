@@ -1,13 +1,18 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import {
-  Loader2, TrendingUp, Percent, AlertTriangle, FileText, Building2, CalendarRange, ChevronDown, Target, Download,
+  Loader2, TrendingUp, TrendingDown, Percent, AlertTriangle, FileText, Building2, CalendarRange, ChevronDown, Target, Download,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import NumberInput from '../ui/NumberInput'
+import { Criterio } from '../ui/Criterio'
+import { linkAReportes } from '../../utils/paramsReporte'
 import { money, moneyC, pct, N, rolLabel } from './reportes-gerenciales/formato'
 import {
   EvolucionChart, DiarioChart, VendedoresChart, CategoriasChart, WaterfallChart, CobranzaDonut, BonifPromosChart,
+  MermasMotivoChart,
 } from './reportes-gerenciales/charts'
+import { labelMotivo, labelClasificacion } from '../../utils/mermasMotivo'
 import Sparkline from './reportes-gerenciales/Sparkline'
 import Alertas from './reportes-gerenciales/Alertas'
 import ModalMetas from './reportes-gerenciales/ModalMetas'
@@ -168,6 +173,24 @@ function SectionTitle({ icon: Icon, title, hint, right }: { icon: React.ElementT
   )
 }
 
+/**
+ * El puente hacia /reportes: esta pantalla contesta "cómo vamos", la otra
+ * contesta "quién, qué y cuánto exactamente". El link se lleva el período y la
+ * sucursal para que el detalle sea el MISMO recorte que se está mirando acá.
+ */
+function VerDetalle({ tab, desde, hasta, sucursalId }: {
+  tab: string; desde?: string; hasta?: string; sucursalId: number | null
+}): React.ReactElement {
+  return (
+    <Link
+      to={linkAReportes({ tab, desde, hasta, sucursalId })}
+      className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+    >
+      Ver detalle →
+    </Link>
+  )
+}
+
 const th = 'px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
 const td = 'px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200'
 const ACCENTS = { blue: '#2563eb', emerald: '#059669', amber: '#d97706', violet: '#7c3aed', red: '#dc2626', cyan: '#0891b2', slate: '#64748b' }
@@ -284,6 +307,15 @@ export default function VistaReportesGerenciales({
   )
 
   // Bonificaciones agrupadas por promoción (subtotales + filas por producto).
+  /**
+   * `mermas_motivo[]` viene en el payload desde la mig 110 y hasta ahora no se
+   * renderizaba en ninguna pantalla: llegaba al usuario sólo adentro del Excel.
+   */
+  const mermasMotivo = useMemo(
+    () => [...(reporte?.mermas_motivo ?? [])].sort((a, b) => Number(b.costo) - Number(a.costo)),
+    [reporte?.mermas_motivo],
+  )
+
   const bonifAgrupado = useMemo(() => {
     const grupos = new Map<string, { promocion: string; costo: number; valor_venta: number; items: BonifPromo[] }>()
     for (const b of reporte?.bonif_promos ?? []) {
@@ -596,6 +628,7 @@ export default function VistaReportesGerenciales({
               right={
                 <div className="flex items-center gap-2">
                 {botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'vendedores')!)}
+                <VerDetalle tab="preventistas" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} />
                 <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/40 border dark:border-gray-600 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Comisión</span>
@@ -613,6 +646,7 @@ export default function VistaReportesGerenciales({
               }
             />
             <div className="grid lg:grid-cols-3 gap-5">
+            <Criterio className="mb-3">Venta por vendedor = suma de los <strong>subtotales de los ítems</strong> de pedidos <strong>entregados</strong> del canal <strong>app</strong>. <strong>No coincide con "Por Preventista" de Reportes</strong>, que suma el total del pedido de los <strong>no cancelados</strong> y no filtra por canal. Las dos son correctas: miden cosas distintas.</Criterio>
               <div className="lg:col-span-2 overflow-x-auto">
                 <table className="w-full">
                   <thead><tr className="border-b dark:border-gray-700">
@@ -681,7 +715,7 @@ export default function VistaReportesGerenciales({
 
           {/* Categorías */}
           <Card id="sec-categorias" className="p-5">
-            <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = margen inflado por productos sin costo." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'categorias')!)} />
+            <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = margen inflado por productos sin costo." right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'categorias')!)}<VerDetalle tab="rentabilidad" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} /></div>} />
             <div className="grid lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2 h-80"><CategoriasChart data={reporte.categorias} /></div>
               <div className="overflow-x-auto">
@@ -706,7 +740,7 @@ export default function VistaReportesGerenciales({
           {/* Top productos / clientes */}
           <div className="grid lg:grid-cols-2 gap-5">
             <Card className="p-5">
-              <SectionTitle icon={TrendingUp} title="Top 10 productos" hint="Por facturación de venta real." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'top-productos')!)} />
+              <SectionTitle icon={TrendingUp} title="Top 10 productos" hint="Por facturación de venta real." right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'top-productos')!)}<VerDetalle tab="rentabilidad" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} /></div>} />
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
                   <th className={`${th} text-left`}>Producto</th><th className={`${th} text-right`}>Unid.</th><th className={`${th} text-right`}>Venta</th>
@@ -723,7 +757,8 @@ export default function VistaReportesGerenciales({
               </table>
             </Card>
             <Card id="sec-clientes" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Top 10 clientes" hint="Por facturación entregada." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'top-clientes')!)} />
+              <SectionTitle icon={TrendingUp} title="Top 10 clientes" hint="Por facturación entregada." right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'top-clientes')!)}<VerDetalle tab="clientes" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} /></div>} />
+              <Criterio className="mb-3">Suma de los ítems de pedidos <strong>entregados</strong> del canal app, por fecha del pedido. Son los 10 primeros: el listado completo está en Reportes.</Criterio>
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
                   <th className={`${th} text-left`}>Cliente</th><th className={`${th} text-right`}>Ped.</th><th className={`${th} text-right`}>Venta</th>
@@ -744,7 +779,8 @@ export default function VistaReportesGerenciales({
           {/* Cobranza + costos */}
           <div className="grid lg:grid-cols-2 gap-5">
             <Card id="sec-cobranza" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`Pagos registrados de las ventas del período. ${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'cobranza')!)} />
+              <SectionTitle icon={TrendingUp} title="Cobranza y formas de pago" hint={`Pagos registrados de las ventas del período. ${pct(reporte.cobranza.cobrado / (k.venta || 1))} cobrado.`} right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'cobranza')!)}<VerDetalle tab="cuentas" sucursalId={sucursalSel} /></div>} />
+              <Criterio className="mb-3">Pagos <strong>registrados</strong> de los pedidos <strong>del período</strong>. No es el saldo de cuenta corriente: para eso, Cuentas por Cobrar, que es una foto al día de hoy y por eso el link no se lleva el período.</Criterio>
               <div className="grid grid-cols-2 gap-4 items-center">
                 <div className="h-48"><CobranzaDonut cobranza={reporte.cobranza} /></div>
                 <table className="w-full">
@@ -768,24 +804,98 @@ export default function VistaReportesGerenciales({
               </div>
             </Card>
             <Card id="sec-mermas" className="p-5">
-              <SectionTitle icon={TrendingUp} title="Otros costos del período" hint="Mermas, bonificaciones y reposición." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'mermas')!)} />
+              {/* El id sec-mermas es un ancla: la alerta `mermas_alza` baja acá
+                  (irASeccion -> getElementById). Si se renombra, el deep-link de
+                  la alerta se rompe en silencio. Por eso la card se monta
+                  siempre, aunque no haya mermas en el período. */}
+              <SectionTitle
+                icon={TrendingDown} title="Mermas del período"
+                hint="Producto dado de baja: rotura, vencimiento, robo, decomiso, devolución, muestras y ajustes de inventario."
+                right={<div className="flex items-center gap-3">{mermasMotivo.length > 0 ? botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'mermas')!) : null}<VerDetalle tab="mermas" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} /></div>}
+              />
+              {/* Palabra por palabra el mismo texto que la pestaña Mermas de
+                  /reportes: es la prueba de que los dos números se leen igual. */}
+              <Criterio className="mb-3">
+                Mermas por <strong>día de carga</strong>, valuadas al <strong>costo congelado al momento</strong>;
+                las anteriores al snapshot, al costo de hoy. El total <strong>excluye</strong> promociones y
+                reversión de promoción.
+              </Criterio>
+              {mermasMotivo.length === 0 ? (
+                <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">Sin mermas registradas en el período.</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    {/* Los tres baldes salen de los KPIs del RPC, no de sumar el
+                        array: así cruzan por construcción con la KpiCard de arriba. */}
+                    <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 px-3 py-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Pérdida</p>
+                      <p className="text-sm font-semibold tabular-nums text-rose-700 dark:text-rose-300">{moneyC(k.mermas_perdida ?? 0)}</p>
+                    </div>
+                    <div className="rounded-lg bg-gray-100 dark:bg-gray-700/40 px-3 py-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Ajustes</p>
+                      <p className="text-sm font-semibold tabular-nums text-gray-700 dark:text-gray-200">{moneyC(k.mermas_ajuste ?? 0)}</p>
+                    </div>
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Muestras</p>
+                      <p className="text-sm font-semibold tabular-nums text-amber-700 dark:text-amber-300">{moneyC(k.mermas_muestra ?? 0)}</p>
+                    </div>
+                  </div>
+                  <div className="h-56 mb-3"><MermasMotivoChart data={mermasMotivo} /></div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead><tr className="border-b dark:border-gray-700">
+                        <th className={`${th} text-left`}>Motivo</th><th className={`${th} text-left`}>Clasif.</th>
+                        <th className={`${th} text-right`}>Unidades</th><th className={`${th} text-right`}>Costo</th><th className={`${th} text-right`}>% del total</th>
+                      </tr></thead>
+                      <tbody className="divide-y dark:divide-gray-700/60">
+                        {mermasMotivo.map(m => (
+                          <tr key={m.motivo}>
+                            <td className={`${td} font-medium`}>{labelMotivo(m.motivo)}</td>
+                            <td className={`${td} text-gray-500 dark:text-gray-400`}>{labelClasificacion(m.clasificacion)}</td>
+                            <td className={`${td} text-right tabular-nums`}>{N.format(m.unidades)}</td>
+                            <td className={`${td} text-right tabular-nums`}>{moneyC(m.costo)}</td>
+                            <td className={`${td} text-right tabular-nums text-gray-500 dark:text-gray-400`}>{pct(k.mermas ? m.costo / k.mermas : 0)}</td>
+                          </tr>
+                        ))}
+                        <tr className="font-semibold border-t dark:border-gray-700">
+                          <td className={td} colSpan={3}>Total</td>
+                          <td className={`${td} text-right tabular-nums`}>{moneyC(k.mermas)}</td>
+                          <td className={`${td} text-right tabular-nums text-gray-500 dark:text-gray-400`}>100,0%</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </Card>
+          </div>
+
+          {/* Compras: desembolso del período, NO es el costo de lo vendido (eso es
+              el CMV). Vivía mezclado en "Otros costos" junto a mermas y bonif.,
+              donde la columna Bonif. era la misma que ya está en Evolución. */}
+          <Card id="sec-compras" className="p-5">
+            <SectionTitle icon={TrendingUp} title="Compras del período" hint="Desembolso de compras por mes. Excluye canceladas. No es el CMV." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'compras')!)} />
+            <Criterio className="mb-3">Suma del total de las compras por <strong>fecha de compra</strong>, excluyendo canceladas. Es <strong>desembolso</strong> del período, no el costo de lo vendido: eso es el CMV.</Criterio>
+            <div className="overflow-x-auto">
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
-                  <th className={`${th} text-left`}>Mes</th><th className={`${th} text-right`}>Mermas</th><th className={`${th} text-right`}>Bonif.</th><th className={`${th} text-right`}>Compras</th>
+                  <th className={`${th} text-left`}>Mes</th><th className={`${th} text-right`}>Compras</th>
                 </tr></thead>
                 <tbody className="divide-y dark:divide-gray-700/60">
                   {reporte.mensual.map(m => (
                     <tr key={m.mes}>
                       <td className={`${td} font-medium`}>{m.mes}</td>
-                      <td className={`${td} text-right tabular-nums`}>{moneyC(m.mermas)}</td>
-                      <td className={`${td} text-right tabular-nums`}>{moneyC(m.bonif)}</td>
                       <td className={`${td} text-right tabular-nums`}>{moneyC(m.compras)}</td>
                     </tr>
                   ))}
+                  <tr className="font-semibold border-t dark:border-gray-700">
+                    <td className={td}>Total</td>
+                    <td className={`${td} text-right tabular-nums`}>{moneyC(k.compras)}</td>
+                  </tr>
                 </tbody>
               </table>
-            </Card>
-          </div>
+            </div>
+          </Card>
 
           {/* Bonificaciones y promociones: qué se regaló y cuánto vale */}
           {bonifAgrupado.length > 0 && (

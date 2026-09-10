@@ -18,10 +18,13 @@
  * de fechas filtran por preventista y ofrecen atajos de mes; el estado vive acá
  * para que las dos pestañas compartan la misma entrada de cache.
  */
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { escribirRango, leerRango, leerSucursal } from '../../utils/paramsReporte';
 import type { LucideIcon } from 'lucide-react';
-import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
+import { Criterio } from '../ui/Criterio';
 import { useReportesFinancieros } from '../../hooks/supabase';
 import type {
   ClienteDB,
@@ -40,6 +43,7 @@ import {
   ReporteVentasZonas,
   ReporteValuacionInventario,
   ReporteStockRed,
+  ReporteMermas,
   FiltrosVentas,
   filtrosVentasIniciales,
   type FiltrosVentasValue
@@ -64,10 +68,20 @@ interface TabConfig {
   icon: LucideIcon;
 }
 
-type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red';
+type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red' | 'mermas';
 
 /** Tabs que traen sus propios filtros y no usan el panel de fechas de arriba. */
-const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red'];
+const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red', 'mermas'];
+
+/** Los ids validos de `?tab=`. Un valor desconocido cae al default en vez de
+ *  dejar la pantalla en blanco. */
+const TAB_IDS: ReportTabId[] = [
+  'preventistas', 'cuentas', 'rentabilidad', 'clientes', 'zonas', 'valuacion', 'stock-red', 'mermas',
+];
+
+function tabDeUrl(valor: string | null): ReportTabId | null {
+  return TAB_IDS.includes(valor as ReportTabId) ? (valor as ReportTabId) : null;
+}
 
 // =============================================================================
 // COMPONENT
@@ -81,11 +95,38 @@ export default function VistaReportes({
   onVerFichaCliente,
   onVerFichaClienteId
 }: VistaReportesProps): React.ReactElement {
-  // Estado local
-  const [fechaDesde, setFechaDesde] = useState<string>('');
-  const [fechaHasta, setFechaHasta] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<ReportTabId>('preventistas');
-  const [filtrosVentas, setFiltrosVentas] = useState<FiltrosVentasValue>(filtrosVentasIniciales);
+  // La pestaña y el período viven en la URL: así "Ver detalle" del gerencial cae
+  // acá con el MISMO período, el link es compartible y el back de Android
+  // funciona (es una PWA).
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // OJO: el default de esta pantalla es SIN filtro, no "este mes". Varias
+  // pestañas arrancan mostrando todo el histórico; sembrarles un período las
+  // haría cambiar de números en silencio. Los params sólo aparecen cuando el
+  // usuario elige un rango o cuando llega por un deep link.
+  const rangoUrl = leerRango(searchParams);
+  const fechaDesde = rangoUrl.desde ?? '';
+  const fechaHasta = rangoUrl.hasta ?? '';
+  const setRango = useCallback((desde: string, hasta: string): void => {
+    setSearchParams(escribirRango(searchParams, desde || null, hasta || null), { replace: true });
+  }, [searchParams, setSearchParams]);
+  const setFechaDesde = useCallback((v: string): void => setRango(v, fechaHasta), [setRango, fechaHasta]);
+  const setFechaHasta = useCallback((v: string): void => setRango(fechaDesde, v), [setRango, fechaDesde]);
+  /** La sucursal del contexto compartido, para las pestañas que la honran. */
+  const sucursalUrl = leerSucursal(searchParams);
+  const activeTab: ReportTabId = tabDeUrl(searchParams.get('tab')) ?? 'preventistas';
+  const setActiveTab = useCallback((tab: ReportTabId): void => {
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'preventistas') next.delete('tab'); else next.set('tab', tab);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+  const [filtrosVentas, setFiltrosVentas] = useState<FiltrosVentasValue>(() => {
+    const base = filtrosVentasIniciales();
+    // Un deep link con período gana sobre el preset default de la pestaña.
+    return rangoUrl.desde && rangoUrl.hasta
+      ? { ...base, desde: rangoUrl.desde, hasta: rangoUrl.hasta, presetId: 'custom' }
+      : base;
+  });
 
   // Reportes financieros
   const {
@@ -109,7 +150,8 @@ export default function VistaReportes({
     { id: 'clientes', label: 'Por Cliente', icon: Users },
     { id: 'zonas', label: 'Por Zona', icon: MapPin },
     { id: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
-    { id: 'stock-red', label: 'Stock de la Red', icon: Network }
+    { id: 'stock-red', label: 'Stock de la Red', icon: Network },
+    { id: 'mermas', label: 'Mermas', icon: TrendingDown }
   ];
 
   // Cargar reporte automáticamente solo la primera vez
@@ -262,32 +304,56 @@ export default function VistaReportes({
 
       {/* Contenido según tab */}
       {activeTab === 'preventistas' && (
-        <ReportePreventistas
-          reportePreventistas={reportePreventistas}
-          loading={loading}
-          formatPrecio={formatPrecio}
-          desde={fechaDesde}
-          hasta={fechaHasta}
-        />
+        <>
+          <Criterio className="mb-3">
+            Venta = suma del <strong>total</strong> de los pedidos <strong>no cancelados</strong>, por fecha
+            del pedido, atribuidos a quien lo cargó. Incluye pendientes y en camino, y no filtra por canal:
+            por eso da más que "Equipo comercial" del reporte gerencial, que cuenta sólo los entregados del
+            canal app.
+          </Criterio>
+          <ReportePreventistas
+            reportePreventistas={reportePreventistas}
+            loading={loading}
+            formatPrecio={formatPrecio}
+            desde={fechaDesde}
+            hasta={fechaHasta}
+          />
+        </>
       )}
 
       {activeTab === 'cuentas' && (
-        <ReporteCuentasPorCobrar
-          reporte={reporteCuentas}
-          loading={loadingFinanciero}
-          formatPrecio={formatPrecio}
-          onVerCliente={onVerFichaCliente}
-        />
+        <>
+          <Criterio className="mb-3">
+            Saldo <strong>al día de hoy</strong>, no del período: el aging se calcula contra la fecha de
+            entrega de cada pedido y los días de crédito del cliente, así que el período de arriba no lo
+            afecta. Incluye clientes inactivos con deuda — un informe de deuda que esconde al que debe y ya
+            no opera no sirve para cobrarle.
+          </Criterio>
+          <ReporteCuentasPorCobrar
+            reporte={reporteCuentas}
+            loading={loadingFinanciero}
+            formatPrecio={formatPrecio}
+            onVerCliente={onVerFichaCliente}
+          />
+        </>
       )}
 
       {activeTab === 'rentabilidad' && (
-        <ReporteRentabilidadSection
-          reporte={reporteRentabilidad}
-          loading={loadingFinanciero}
-          formatPrecio={formatPrecio}
-          desde={fechaDesde}
-          hasta={fechaHasta}
-        />
+        <>
+          <Criterio className="mb-3">
+            Margen por producto de los pedidos <strong>no cancelados</strong>, filtrados por{' '}
+            <strong>fecha de carga</strong> (<code>created_at</code>) y <strong>no</strong> por fecha del
+            pedido, que es lo que usa el resto de los reportes: por eso no cierra contra "Por Cliente".
+            Ingreso = ingreso real (FC neto · ZZ final); costo = cascada canónica.
+          </Criterio>
+          <ReporteRentabilidadSection
+            reporte={reporteRentabilidad}
+            loading={loadingFinanciero}
+            formatPrecio={formatPrecio}
+            desde={fechaDesde}
+            hasta={fechaHasta}
+          />
+        </>
       )}
 
       {activeTab === 'clientes' && (
@@ -310,11 +376,40 @@ export default function VistaReportes({
       )}
 
       {activeTab === 'valuacion' && (
-        <ReporteValuacionInventario formatPrecio={formatPrecio} />
+        <>
+          <Criterio className="mb-3">
+            Foto del stock de <strong>hoy</strong> a costo promedio ponderado. <strong>No depende del
+            período</strong> elegido arriba ni de la sucursal del contexto: tiene su propio filtro.
+          </Criterio>
+          <ReporteValuacionInventario formatPrecio={formatPrecio} />
+        </>
       )}
 
       {activeTab === 'stock-red' && (
-        <ReporteStockRed formatPrecio={formatPrecio} />
+        <>
+          <Criterio className="mb-3">
+            Stock de <strong>todas</strong> las sucursales al día de hoy. No depende del período ni de la
+            sucursal del contexto: es cross-sucursal por definición.
+          </Criterio>
+          <ReporteStockRed formatPrecio={formatPrecio} />
+        </>
+      )}
+
+      {activeTab === 'mermas' && (
+        <>
+          <Criterio className="mb-3">
+            Mermas por <strong>día de carga</strong>, valuadas al <strong>costo congelado al momento</strong>;
+            las anteriores al snapshot, al costo de hoy. El total <strong>excluye</strong> promociones y
+            reversión de promoción. Es el mismo número que las Mermas del reporte gerencial.
+          </Criterio>
+          <ReporteMermas
+            formatPrecio={formatPrecio}
+            desde={fechaDesde}
+            hasta={fechaHasta}
+            sucursalUrl={sucursalUrl}
+            onRango={setRango}
+          />
+        </>
       )}
     </div>
   );

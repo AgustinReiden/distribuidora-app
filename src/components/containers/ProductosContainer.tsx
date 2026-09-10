@@ -5,7 +5,7 @@
  * Maneja estado de modales y operaciones CRUD.
  */
 import React, { Suspense, useState, useCallback, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import {
   useProductosQuery,
@@ -13,7 +13,7 @@ import {
   useActualizarProductoMutation,
   useEliminarProductoMutation,
 } from '../../hooks/queries'
-import { useRegistrarMermaMutation, useUsuariosQuery } from '../../hooks/queries'
+import { useRegistrarMermaMutation } from '../../hooks/queries'
 import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
@@ -38,7 +38,6 @@ import { lazyWithReload } from '../../utils/lazyWithReload'
 const VistaProductos = lazyWithReload(() => import('../vistas/VistaProductos'))
 const ModalProducto = lazyWithReload(() => import('../modals/ModalProducto'))
 const ModalMermaStock = lazyWithReload(() => import('../modals/ModalMermaStock'))
-const ModalHistorialMermas = lazyWithReload(() => import('../modals/ModalHistorialMermas'))
 const ModalActualizacionMasivaPrecios = lazyWithReload(() => import('../modals/ModalActualizacionMasivaPrecios'))
 const ModalMinimoVentaMasivo = lazyWithReload(() => import('../modals/ModalMinimoVentaMasivo'))
 const ModalGrupoPrecio = lazyWithReload(() => import('../modals/ModalGrupoPrecio'))
@@ -81,6 +80,7 @@ export default function ProductosContainer(): React.ReactElement {
   // vieja, que ahora redirige) puede apuntar directo a las condiciones sin
   // perder el destino, y el link sigue siendo compartible.
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const vista: TabProductos =
     puedeVerCondiciones && searchParams.get('vista') === 'condiciones' ? 'condiciones' : 'productos'
   const handleVistaChange = useCallback((siguiente: TabProductos) => {
@@ -96,7 +96,6 @@ export default function ProductosContainer(): React.ReactElement {
   const { data: productos = [], isLoading } = useProductosQuery()
   // Para poder decir QUIÉN registró cada merma: el prop nunca se pasaba y el
   // historial mostraba "Usuario desconocido" en todas las filas.
-  const { data: usuarios = [] } = useUsuariosQuery()
   const { data: proveedores = [] } = useProveedoresActivosQuery()
   const { data: clientes = [] } = useClientesQuery()
   const { data: categoriasTabla = [] } = useCategoriasQuery()
@@ -113,7 +112,6 @@ export default function ProductosContainer(): React.ReactElement {
   // Estado de modales
   const [modalProductoOpen, setModalProductoOpen] = useState(false)
   const [modalMermaOpen, setModalMermaOpen] = useState(false)
-  const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
   const [modalActualizacionMasivaOpen, setModalActualizacionMasivaOpen] = useState(false)
   const [modalMinimoVentaOpen, setModalMinimoVentaOpen] = useState(false)
   // Producto para el que se está creando una condición mayorista desde su ficha.
@@ -137,7 +135,6 @@ export default function ProductosContainer(): React.ReactElement {
   useResetOnSucursalChange(() => {
     setModalProductoOpen(false)
     setModalMermaOpen(false)
-    setModalHistorialOpen(false)
     setModalActualizacionMasivaOpen(false)
     setModalMinimoVentaOpen(false)
     setCondicionParaProducto(null)
@@ -204,9 +201,12 @@ export default function ProductosContainer(): React.ReactElement {
     setModalMermaOpen(true)
   }, [])
 
+  // El historial dejó de ser un modal: vive en /reportes -> Mermas, donde se
+  // agrega en la base (mig 226). Ahí se puede consolidar la red y los totales
+  // ya no dependen de cuántas filas entraron en la página.
   const handleVerHistorialMermas = useCallback(() => {
-    setModalHistorialOpen(true)
-  }, [])
+    navigate('/reportes?tab=mermas')
+  }, [navigate])
 
   const handleAbrirActualizacionMasiva = useCallback(() => {
     setModalActualizacionMasivaOpen(true)
@@ -447,17 +447,6 @@ export default function ProductosContainer(): React.ReactElement {
               setModalMermaOpen(false)
               setProductoMerma(null)
             }}
-          />
-        </Suspense>
-      )}
-
-      {/* Modal Historial Mermas */}
-      {modalHistorialOpen && (
-        <Suspense fallback={null}>
-          <ModalHistorialMermas
-            productos={productos as unknown as Parameters<typeof ModalHistorialMermas>[0]['productos']}
-            usuarios={usuarios as unknown as Parameters<typeof ModalHistorialMermas>[0]['usuarios']}
-            onClose={() => setModalHistorialOpen(false)}
           />
         </Suspense>
       )}

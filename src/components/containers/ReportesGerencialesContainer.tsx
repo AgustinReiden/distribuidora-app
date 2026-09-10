@@ -1,9 +1,11 @@
-import React, { Suspense, useEffect, useMemo, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useReporteGerencialQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { escribirRango, escribirSucursal, leerRango, leerSucursal } from '../../utils/paramsReporte'
 
 const VistaReportesGerenciales = lazyWithReload(() => import('../vistas/VistaReportesGerenciales'))
 
@@ -69,15 +71,38 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   }, [])
   const opcionesPeriodo = useMemo<PeriodoOpt[]>(() => [...periodos, customDefault], [periodos, customDefault])
 
-  const [periodoSel, setPeriodoSel] = useState<PeriodoOpt>(() => periodos[0]) // default: Este mes
+  // El período y la sucursal viven en la URL para que "Ver detalle" pueda
+  // llevarlos a /reportes, el link sea compartible y el reload los conserve.
+  // Los toggles de abajo NO: son exclusivos de esta pantalla.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rangoUrl = leerRango(searchParams)
+
+  /**
+   * El preset se deriva del rango, no se guarda: así una URL compartida marca
+   * el preset correcto si coincide con alguno, y "Personalizado" si no. Las dos
+   * pantallas ofrecen juegos de presets distintos, por eso lo que viaja son las
+   * fechas y no el id del preset.
+   */
+  const periodoSel = useMemo<PeriodoOpt>(() => {
+    if (!rangoUrl.desde || !rangoUrl.hasta) return periodos[0] // default: Este mes
+    return (
+      periodos.find(p => p.desde === rangoUrl.desde && p.hasta === rangoUrl.hasta) ??
+      periodoCustom(rangoUrl.desde, rangoUrl.hasta)
+    )
+  }, [periodos, rangoUrl.desde, rangoUrl.hasta])
+
   const [incluirNoEntregados, setIncluirNoEntregados] = useState(false)
   const [comparar, setComparar] = useState(true)
 
+  const onPeriodo = useCallback((p: PeriodoOpt): void => {
+    setSearchParams(escribirRango(searchParams, p.desde, p.hasta), { replace: true })
+  }, [searchParams, setSearchParams])
+
   // Cambia el rango personalizado (date pickers de la vista).
-  const onRango = (desde: string, hasta: string) => {
+  const onRango = useCallback((desde: string, hasta: string): void => {
     if (!desde || !hasta || desde > hasta) return
-    setPeriodoSel(periodoCustom(desde, hasta))
-  }
+    setSearchParams(escribirRango(searchParams, desde, hasta), { replace: true })
+  }, [searchParams, setSearchParams])
 
   const { sucursales, hasMultipleSucursales, loading: sucLoading } = useSucursal()
 
@@ -86,12 +111,27 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
     return hasMultipleSucursales ? [{ id: null, nombre: 'Red (consolidado)' }, ...list] : list
   }, [sucursales, hasMultipleSucursales])
 
-  const [sucursalSel, setSucursalSel] = useState<number | null | undefined>(undefined)
+  // La URL manda; si no trae sucursal, se resuelve el default una sola vez y se
+  // escribe, para que el link que el usuario copie ya diga qué está mirando.
+  // Se sigue distinguiendo `undefined` (todavía no resuelta) para no disparar
+  // el RPC antes de que carguen las sucursales.
+  const sucursalUrl = leerSucursal(searchParams)
+  const sucursalValida = sucursalUrl != null && !sucursales.some(s => s.id === sucursalUrl)
+    ? undefined // un link a una sucursal ajena cae al default, no al 'Acceso denegado' del RPC
+    : sucursalUrl
+  const [sucursalFallback, setSucursalFallback] = useState<number | null | undefined>(undefined)
+  const sucursalSel = sucursalValida !== undefined ? sucursalValida : sucursalFallback
+
   useEffect(() => {
-    if (sucursalSel === undefined && sucursales.length > 0) {
-      setSucursalSel(hasMultipleSucursales ? null : sucursales[0].id)
+    if (sucursalValida === undefined && sucursalFallback === undefined && sucursales.length > 0) {
+      setSucursalFallback(hasMultipleSucursales ? null : sucursales[0].id)
     }
-  }, [sucursales, hasMultipleSucursales, sucursalSel])
+  }, [sucursales, hasMultipleSucursales, sucursalValida, sucursalFallback])
+
+  const setSucursalSel = useCallback((id: number | null): void => {
+    setSucursalFallback(id)
+    setSearchParams(escribirSucursal(searchParams, id), { replace: true })
+  }, [searchParams, setSearchParams])
 
   const ready = sucursalSel !== undefined
   const sucParam = sucursalSel ?? null
@@ -128,7 +168,7 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
         opcionesSucursal={opcionesSucursal}
         opcionesPeriodo={opcionesPeriodo}
         onSucursal={setSucursalSel}
-        onPeriodo={setPeriodoSel}
+        onPeriodo={onPeriodo}
         onRango={onRango}
         incluirNoEntregados={incluirNoEntregados}
         onIncluirNoEntregados={setIncluirNoEntregados}

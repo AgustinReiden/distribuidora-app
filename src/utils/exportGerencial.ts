@@ -239,6 +239,19 @@ export function hojasMermas(r: ReporteGerencial): SheetConfig[] {
   return [hoja('Mermas por motivo', filas, [22, 12, 16, 16])]
 }
 
+/**
+ * Compras del período, mes a mes. Es el desembolso, NO el costo de lo vendido
+ * (eso es el CMV, que va en Resumen y en Evolución).
+ */
+export function hojasCompras(r: ReporteGerencial): SheetConfig[] {
+  const filas = (r.mensual ?? []).map(m => ({
+    Mes: m.mes,
+    Compras: n(m.compras),
+  }))
+  if (filas.length === 0) return []
+  return [hoja('Compras', filas, [12, 18])]
+}
+
 // ---------------------------------------------------------------------------
 // Bonificaciones
 // ---------------------------------------------------------------------------
@@ -336,6 +349,7 @@ export const BLOQUES_GERENCIAL: BloqueGerencial[] = [
   { id: 'top-clientes', label: 'Top clientes', hojas: hojasTopClientes },
   { id: 'cobranza', label: 'Cobranza', hojas: hojasCobranza },
   { id: 'mermas', label: 'Mermas', hojas: hojasMermas },
+  { id: 'compras', label: 'Compras', hojas: hojasCompras },
   { id: 'bonificaciones', label: 'Bonificaciones', hojas: hojasBonificaciones },
   { id: 'alertas', label: 'Alertas', hojas: hojasAlertas },
 ]
