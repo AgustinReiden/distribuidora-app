@@ -30,6 +30,7 @@ import BannerActualizacion from './components/BannerActualizacion'
 import SkipLinks from './components/a11y/SkipLinks'
 import ClientesContainer from './components/containers/ClientesContainer'
 import ComprasContainer from './components/containers/ComprasContainer'
+import VencimientosContainer from './components/containers/VencimientosContainer'
 import DashboardContainer from './components/containers/DashboardContainer'
 import PedidosContainer from './components/containers/PedidosContainer'
 import ProductosContainer from './components/containers/ProductosContainer'
@@ -330,6 +331,17 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                 <Route
                   path="/proveedores"
                   element={isAdmin ? <ProveedoresContainer /> : <Navigate to="/pedidos" replace />}
+                />
+
+                {/* Vencimientos por lote (migs 223/224). Deposito entra: es
+                    quien ve la mercaderia y quien tiene que rotarla. Dar de
+                    baja sigue siendo de administracion, y eso lo decide la
+                    RPC, no la ruta. */}
+                <Route
+                  path="/vencimientos"
+                  element={isAdminOrEncargado || effectiveRol === 'deposito'
+                    ? <VencimientosContainer />
+                    : <Navigate to="/pedidos" replace />}
                 />
 
                 {/* Las condiciones mayoristas viven dentro de Productos: son un

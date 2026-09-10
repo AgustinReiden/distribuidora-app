@@ -17,10 +17,12 @@
  * reciente del producto.
  */
 
-import { memo, useMemo, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Trash2, AlertCircle, Building2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
+import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
+import type { VencimientoLinea } from './ModalCompra.reducer'
 import { formatPrecio } from '../../utils/formatters'
 import type { CompraCargoInput, CompraDBExtended, CondicionIva } from '../../types'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
@@ -42,6 +44,12 @@ interface ItemEdit {
   porcentajeIva: number
   condicionIva: CondicionIva
   impuestosInternos: number
+  /**
+   * Vencimientos de la línea (migs 223/224). Se precargan de los lotes que esta
+   * compra ya tiene: `sincronizar_lotes_compra` recibe la FOTO completa, así que
+   * si no se precargaran, abrir el modal y guardar los borraría en silencio.
+   */
+  vencimientos: VencimientoLinea[]
   marcadoParaEliminar: boolean
 }
 
@@ -59,6 +67,16 @@ export interface ModalEditarCompraProps {
   canCambiarProveedor?: boolean
   /** Se dispara al pedir el cambio; el container cierra este modal y abre el de cambio. */
   onCambiarProveedor?: () => void
+  /**
+   * Los lotes que esta compra ya tiene cargados (migs 223/224). Los trae el
+   * container: este modal se testea renderizandolo pelado, sin providers, y una
+   * query adentro obligaria a los tests a mockearla.
+   *
+   * Sin esto, editar una compra le borraria los vencimientos en silencio:
+   * `sincronizar_lotes_compra` recibe la FOTO completa de los lotes de la
+   * factura, asi que abrir el modal y guardar mandaria una lista vacia.
+   */
+  lotesIniciales?: { producto_id: number; fecha_vencimiento: string; cantidad: number }[]
 }
 
 const ModalEditarCompra = memo(function ModalEditarCompra({
@@ -69,6 +87,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
   guardando,
   canCambiarProveedor = false,
   onCambiarProveedor,
+  lotesIniciales,
 }: ModalEditarCompraProps) {
   const esZZ = compra.tipo_factura === 'ZZ'
   const otrosImpuestos = compra.otros_impuestos ?? 0
@@ -94,11 +113,38 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
       porcentajeIva: esZZ ? 0 : (it.porcentaje_iva ?? it.producto?.porcentaje_iva ?? 21),
       condicionIva: esZZ ? 'gravado' : (it.condicion_iva ?? it.producto?.condicion_iva ?? 'gravado'),
       impuestosInternos: esZZ ? 0 : (it.impuestos_internos ?? it.producto?.impuestos_internos ?? 0),
+      // Arranca vacío y lo llena el efecto de abajo cuando llegan los lotes.
+      vencimientos: [],
       marcadoParaEliminar: false,
     })),
   )
 
   const [errorValidacion, setErrorValidacion] = useState<string | null>(null)
+
+  // --- Vencimientos (migs 223/224) ---
+  // Se precargan una sola vez, con un ref y no con una dependencia: los lotes
+  // llegan del container y cualquier movimiento de lote refresca esa query, así
+  // que sin el ref el efecto volvería a correr y pisaría lo que el usuario esté
+  // tipeando.
+  const vencimientosPrecargados = useRef(false)
+
+  useEffect(() => {
+    if (vencimientosPrecargados.current || !lotesIniciales) return
+    vencimientosPrecargados.current = true
+    if (lotesIniciales.length === 0) return
+
+    setItems((prev) =>
+      prev.map((it) => ({
+        ...it,
+        vencimientos: lotesIniciales
+          .filter((l) => String(l.producto_id) === String(it.productoId))
+          // `cantidad` y no `cantidad_restante`: lo que la compra cargó, no lo
+          // que queda. El contador lo lleva la base y se preserva del lado del
+          // servidor cuando la clave (producto, fecha) sobrevive a la edición.
+          .map((l) => ({ fecha: l.fecha_vencimiento, cantidad: l.cantidad })),
+      })),
+    )
+  }, [lotesIniciales])
 
   // Items que efectivamente se persisten (los no eliminados).
   const itemsActivos = useMemo(() => items.filter((i) => !i.marcadoParaEliminar), [items])
@@ -302,6 +348,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         porcentajeIva: esZZ ? 0 : it.porcentajeIva,
         condicionIva: esZZ ? 'gravado' as const : it.condicionIva,
         impuestosInternos: it.impuestosInternos,
+        vencimientos: it.vencimientos,
       }
     })
 
@@ -478,6 +525,13 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                     {formatPrecio(subtotalItem)}
                   </span>
                 </div>
+                {!it.marcadoParaEliminar && (
+                  <VencimientosLineaCompra
+                    cantidadLinea={it.cantidad}
+                    vencimientos={it.vencimientos}
+                    onChange={(v) => updateItem(it.productoId, 'vencimientos', v)}
+                  />
+                )}
               </div>
             )
           })}
@@ -505,7 +559,8 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                   ? 'opacity-40 line-through'
                   : ''
                 return (
-                  <tr key={it.productoId} className={`border-b dark:border-gray-700 ${rowClass}`}>
+                  <Fragment key={it.productoId}>
+                  <tr className={`border-b dark:border-gray-700 ${rowClass}`}>
                     <td className="py-2 pr-2 dark:text-gray-200">{it.nombre}</td>
                     <td className="py-2 px-2">
                       <NumberInput
@@ -557,6 +612,20 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                       </button>
                     </td>
                   </tr>
+                  {/* Los vencimientos no entran en la grilla de columnas: van
+                      en su propia fila debajo de la línea, a todo el ancho. */}
+                  {!it.marcadoParaEliminar && (
+                    <tr className="border-b dark:border-gray-700">
+                      <td colSpan={esZZ ? 6 : 7} className="pb-2">
+                        <VencimientosLineaCompra
+                          cantidadLinea={it.cantidad}
+                          vencimientos={it.vencimientos}
+                          onChange={(v) => updateItem(it.productoId, 'vencimientos', v)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

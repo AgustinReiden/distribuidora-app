@@ -5,7 +5,7 @@ import {
   Truck, Menu, X, LogOut, Moon, Sun, ChevronDown,
   BarChart3, ShoppingCart, Users, Package, TrendingUp,
   UserCog,
-  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck
+  Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock
 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -78,6 +78,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'encargado', 'preventista', 'deposito'] },
       { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin', 'encargado'] },
+      { id: 'vencimientos', icon: CalendarClock, label: 'Vencimientos', roles: ['admin', 'encargado', 'deposito'] },
       { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
       // Condiciones Mayoristas salio de aca: ahora es una pestaña dentro de Productos.
       { id: 'promociones', icon: Gift, label: 'Promociones', roles: ['admin'] },

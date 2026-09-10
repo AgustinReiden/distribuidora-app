@@ -24,6 +24,7 @@ import type { ActualizarCompraItemsInput } from '../../hooks/queries'
 import type { CambiarProveedorPayload } from '../modals/ModalCambiarProveedor'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useLotesCompraQuery } from '../../hooks/queries/useLotesQuery'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CompraDBExtended, CompraFormInputExtended, ProveedorFormInputExtended, NotaCreditoFormInput } from '../../types'
@@ -132,6 +133,11 @@ export default function ComprasContainer(): React.ReactElement {
   const compraConNCId = compraParaNC?.id || compraDetalle?.id
   const notasCreditoQuery = useNotasCreditoByCompraQuery(compraConNCId, !!compraConNCId)
 
+  // Los lotes de la compra abierta (migs 223/224). Se piden aca y no adentro de
+  // los modales porque esos se testean renderizandolos pelados, sin providers.
+  const { data: lotesDetalle } = useLotesCompraQuery(compraDetalle?.id ?? null, !!compraDetalle)
+  const { data: lotesEdicion } = useLotesCompraQuery(compraParaEditar?.id ?? null, !!compraParaEditar)
+
   // Handlers
   const handleNuevaCompra = useCallback(() => {
     setModalCompraOpen(true)
@@ -167,7 +173,7 @@ export default function ComprasContainer(): React.ReactElement {
       // persisten en el centro de notificaciones — el toast del éxito los tapa
       // en la pantalla y el descuadre de una factura es justo lo que hay que
       // poder releer después.
-      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado)
+      avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al registrar compra'
       notify.error(msg)
@@ -223,7 +229,7 @@ export default function ComprasContainer(): React.ReactElement {
       notify.success('Compra actualizada')
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
-      avisosDeLaBase(notify, null, res.warningIiDeclarado)
+      avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes)
       // CPP forward-only (mig 128): editar una compra que NO es la última del
       // producto no re-promedia el costo — avisar para corregirlo en la ficha.
       if (res.warningCostoPromedio.length > 0) {
@@ -338,6 +344,7 @@ export default function ComprasContainer(): React.ReactElement {
             onAnular={handleAnularCompra}
             onNotaCredito={(c) => handleNotaCredito(c as CompraDBExtended)}
             notasCredito={notasCreditoQuery.data as any}
+            lotes={lotesDetalle}
           />
         </Suspense>
       )}
@@ -356,6 +363,7 @@ export default function ComprasContainer(): React.ReactElement {
             guardando={actualizarCompra.isPending}
             canCambiarProveedor={isAdmin}
             onCambiarProveedor={handleAbrirCambioProveedor}
+            lotesIniciales={lotesEdicion}
           />
         </Suspense>
       )}

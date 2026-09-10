@@ -30,7 +30,9 @@ import {
 import type {
   CompraItemForm, CargoCompraForm, CambiosCargo, BaseProrrateo,
   FacturaEscaneada, FacturaItemEscaneado, CompraState, CompraActionType,
+  VencimientoLinea,
 } from './ModalCompra.reducer'
+import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
 
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
@@ -79,6 +81,8 @@ interface ProductosSectionProps {
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
   onCondicionItem: (index: number, clave: string) => void;
   onEliminarItem: (index: number) => void;
+  /** Vencimientos de la línea (migs 223/224). Viajan aparte de p_items. */
+  onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
   onCrearProductoRapido?: (data: { nombre: string; codigo: string; costoSinIva: number }) => Promise<ProductoDB>;
   onImportarExcel?: () => void;
 }
@@ -89,6 +93,8 @@ interface ItemsListProps {
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
   onCondicionItem: (index: number, clave: string) => void;
   onEliminarItem: (index: number) => void;
+  /** Vencimientos de la línea (migs 223/224). Viajan aparte de p_items. */
+  onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
   /** Tasa de II vigente del producto (para avisar si la línea difiere) */
   iiMaster: Record<string, number>;
   /** Clave de condición vigente en la ficha del producto (mig 177) */
@@ -102,6 +108,8 @@ interface ItemRowProps {
   onActualizarItem: (index: number, campo: keyof CompraItemForm, valor: number | string) => void;
   onCondicionItem: (index: number, clave: string) => void;
   onEliminarItem: (index: number) => void;
+  /** Vencimientos de la línea (migs 223/224). Viajan aparte de p_items. */
+  onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
   /** Tasa de II vigente en el maestro del producto (undefined = desconocida) */
   iiDelProducto?: number;
   /** Clave de condición de la ficha (undefined = desconocida) */
@@ -271,6 +279,10 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
 
   const handleCondicionItem = useCallback((index: number, clave: string) => {
     dispatch({ type: 'SET_CONDICION_ITEM', payload: { index, clave } })
+  }, [])
+
+  const handleVencimientosItem = useCallback((index: number, vencimientos: VencimientoLinea[]) => {
+    dispatch({ type: 'SET_VENCIMIENTOS_ITEM', payload: { index, vencimientos } })
   }, [])
 
   const handleEliminarItem = useCallback((index: number) => {
@@ -468,7 +480,10 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             bonificacion: item.bonificacion || 0,
             porcentajeIva: item.porcentajeIva ?? 21,
             condicionIva: item.condicionIva ?? 'gravado',
-            impuestosInternos: item.impuestosInternos ?? 0
+            impuestosInternos: item.impuestosInternos ?? 0,
+            // Viajan aparte de p_items: los manda `sincronizar_lotes_compra`
+            // una vez que la compra existe (mig 224).
+            vencimientos: item.vencimientos ?? []
           }
         })
       })
@@ -599,6 +614,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
               onActualizarItem={handleActualizarItem}
               onCondicionItem={handleCondicionItem}
               onEliminarItem={handleEliminarItem}
+              onVencimientosItem={handleVencimientosItem}
               onCrearProductoRapido={onCrearProductoRapido}
               onImportarExcel={() => setModalImportarOpen(true)}
             />
@@ -835,7 +851,7 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
+function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
   const [creandoItem, setCreandoItem] = useState(false)
   const buscadorRef = useRef<HTMLDivElement>(null)
@@ -1031,7 +1047,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
 
       {/* Lista de items */}
       {state.items.length > 0 ? (
-        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} iiMaster={iiMaster} condicionMaster={condicionMaster} />
+        <ItemsList items={state.items} onActualizarItem={onActualizarItem} onCondicionItem={onCondicionItem} onEliminarItem={onEliminarItem} onVencimientosItem={onVencimientosItem} iiMaster={iiMaster} condicionMaster={condicionMaster} />
       ) : (
         <div className="text-center py-8 text-gray-500">
           <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -1043,7 +1059,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
   )
 }
 
-function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, iiMaster, condicionMaster }: ItemsListProps) {
+function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, iiMaster, condicionMaster }: ItemsListProps) {
   return (
     <div className="space-y-2">
       {/* Header solo en desktop */}
@@ -1065,6 +1081,7 @@ function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, i
           onActualizarItem={onActualizarItem}
           onCondicionItem={onCondicionItem}
           onEliminarItem={onEliminarItem}
+          onVencimientosItem={onVencimientosItem}
           iiDelProducto={iiMaster[String(item.productoId)]}
           condicionDelProducto={condicionMaster[String(item.productoId)]}
         />
@@ -1088,7 +1105,7 @@ function difiereCondicion(item: CompraItemForm, condicionDelProducto?: string): 
   return claveCondicionLinea(item) !== condicionDelProducto
 }
 
-function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, iiDelProducto, condicionDelProducto }: ItemRowProps) {
+function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, iiDelProducto, condicionDelProducto }: ItemRowProps) {
   const iiDifiere = difiereII(item, iiDelProducto)
   const condDifiere = difiereCondicion(item, condicionDelProducto)
   const selectCondicion = (extraClass = '') => (
@@ -1271,6 +1288,13 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
           ⚠ La ficha dice {labelCondicionIva(condicionDelProducto!)}: el cambio aplica sólo a esta compra, el producto no se toca.
         </p>
       )}
+      {/* Al pie de la card y fuera de los dos layouts: así aparece UNA sola vez
+          en mobile y en desktop, en vez de duplicarse. */}
+      <VencimientosLineaCompra
+        cantidadLinea={item.cantidad}
+        vencimientos={item.vencimientos ?? []}
+        onChange={(v) => onVencimientosItem(index, v)}
+      />
     </div>
   )
 }
