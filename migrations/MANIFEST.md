@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-09-09** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-09-10** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,11 +137,9 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 220.** El ledger de prod llega hasta
-`219_la_venta_es_de_quien_la_carga`. **Ojo con el 218**: `218_que_boletas_debe_no_solo_cuanto`
-está aplicada en prod pero su archivo todavía no está en el repo (viene de otra rama sin
-mergear), así que el hueco entre la 217 y la 219 acá es esperable y no es drift.
-Igual, confirmá el número contra las tres fuentes justo antes de aplicar: el número se
+**La próxima migración es la 226.** El ledger de prod llega hasta
+`225_los_lotes_no_pueden_sumar_mas_que_el_stock`.
+Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
 (Esta línea decía 206 hasta el 2026-09-08, con las 206–209 ya aplicadas: la
@@ -152,7 +150,35 @@ Y otra vez el mismo día: la 218 se aplicó desde otra sesión **mientras** se e
 terminó siendo la 219 — que salió con el número correcto sólo porque se confirmó contra el
 ledger en el último momento, no porque esta línea estuviera al día. Moraleja: esta línea es
 una ayuda, el ledger es la verdad. Si aplicás una migración, actualizá también esta línea.
-Última actualización: 219, el 2026-09-09.)
+Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el ledger — la
+222 desde otra rama, sin archivo en el repo en ese momento. Quien fue a escribir las de
+vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
+Última actualización: 225, el 2026-09-10.)
+
+### 223–225 · Vencimientos por lote
+
+Las tres van juntas y en ese orden: la **223** pone el modelo (`producto_lotes`, el motor de
+consumo y el trigger sobre `productos`), la **224** las cinco operaciones (los lotes de una
+compra, etiquetar la bolsa a mano, corregir un contador, dar de baja y el reporte del panel),
+y la **225** los invariantes `LOTE-A/B/C` de `auditoria_integridad()`.
+
+Dos decisiones que no se ven leyendo el SQL:
+
+- **El consumo se engancha en UN trigger sobre `productos`, no en las ~20 RPCs que mueven
+  stock.** Todas pasan por `UPDATE productos SET stock` y ya hay un trigger hermano
+  (`trg_stock_historico`, mig 038) que lee `current_setting('app.stock_origen')`. El trigger
+  nuevo usa el mismo canal: por eso cubre de una sola vez pedidos, bot, mermas —que ni
+  siquiera pasan por una RPC—, movimientos entre sucursales y control de stock.
+- **Los lotes de una compra NO se escriben dentro de `registrar_compra_completa`.** Esa
+  función, `actualizar_compra_items` y `anular_compra_atomica` son las tres más parcheadas del
+  repo (128, 177, 194, 195, todas por ancla sobre el cuerpo vivo). `sincronizar_lotes_compra`
+  es idempotente y la llama el cliente después de guardar; la anulación se detecta con un
+  trigger sobre `compras.estado`. Si esa segunda llamada falla, la compra queda bien y los
+  vencimientos sin cargar — el mismo estado que si el usuario los hubiera dejado en blanco.
+
+La bolsa "sin vencimiento" (`productos.stock` − Σ `cantidad_restante`) **no es una fila**: es
+lo que hace que la feature no necesite backfill ni inventario inicial. El invariante `LOTE-A`
+es esa resta escrita como check.
 
 Las 197–202 no tienen prosa acá (quedaron sin documentar en su momento). Las 203, 204,
 205, 212, 213 y 214 sí:

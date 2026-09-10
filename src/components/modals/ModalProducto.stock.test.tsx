@@ -30,6 +30,12 @@ vi.mock('../productos/ProductoCondicionesMayoristas', () => ({
   default: () => null,
 }))
 
+// Ídem: el bloque de vencimientos (migs 223/224) arrastra la query de lotes,
+// la política comercial y la sesión. Acá se prueba el stock, no los lotes.
+vi.mock('../productos/ProductoLotes', () => ({
+  default: () => null,
+}))
+
 const COCA: ProductoDB = {
   id: '340',
   nombre: 'COCA COLA X 3LTS X 6UND',

@@ -30,6 +30,10 @@ export interface PoliticasComerciales {
   comisionPctPreventista: number
   /** % por defecto de quien NO es preventista: admin, encargado (mig 207). */
   comisionPctOtros: number
+  /** Días de anticipación del aviso amarillo de vencimiento (mig 223). */
+  diasAlertaVencimiento: number
+  /** Días de anticipación del aviso rojo. Siempre <= el amarillo (mig 223). */
+  diasCriticoVencimiento: number
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -44,12 +48,14 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   montoMinimoPedido: 0,
   comisionPctPreventista: 2,
   comisionPctOtros: 0,
+  diasAlertaVencimiento: 60,
+  diasCriticoVencimiento: 15,
 }
 
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
   const { data, error } = await supabase
     .from('politicas_comerciales')
-    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros')
+    .select('monto_minimo_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento')
     .maybeSingle()
 
   if (error) throw error
@@ -61,6 +67,10 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     // `?? 2` y no `|| 2`: un 0 configurado a mano es un valor, no un hueco.
     comisionPctPreventista: Number(data?.comision_pct_preventista ?? 2),
     comisionPctOtros: Number(data?.comision_pct_otros ?? 0),
+    // Mismo criterio que las comisiones: `??` y no `||`, porque 0 días es una
+    // configuración válida ("avisame solo lo ya vencido"), no un hueco.
+    diasAlertaVencimiento: Number(data?.dias_alerta_vencimiento ?? 60),
+    diasCriticoVencimiento: Number(data?.dias_critico_vencimiento ?? 15),
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -223,6 +233,48 @@ export function useImpactoMinimoQuery(montoPropuesto: number) {
         total: filas.length,
         bloqueados: filas.filter(p => (Number(p.total) || 0) < montoPropuesto).length,
       }
+    },
+  })
+}
+
+/**
+ * Fija los dos umbrales de aviso de vencimiento de la sucursal activa.
+ *
+ * Viajan juntos por lo mismo que los dos porcentajes de comisión: son una sola
+ * decisión —"cuándo me preocupo y cuándo me alarmo"— y mandarlos por separado
+ * dejaría un estado intermedio donde el rojo queda después del amarillo, que la
+ * base rechaza con un CHECK.
+ */
+export function useActualizarAlertasVencimientoMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (input: { diasAlerta: number; diasCritico: number }) => {
+      const { error } = await supabase.rpc('actualizar_alertas_vencimiento', {
+        p_dias_alerta: input.diasAlerta,
+        p_dias_critico: input.diasCritico,
+      })
+      if (error) throw error
+
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        {
+          ...(previo ?? POLITICAS_POR_DEFECTO),
+          diasAlertaVencimiento: input.diasAlerta,
+          diasCriticoVencimiento: input.diasCritico,
+        },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return input
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+      // El semáforo del panel y de la ficha se pinta con estos umbrales.
+      queryClient.invalidateQueries({ queryKey: ['lotes'] })
     },
   })
 }
