@@ -18,9 +18,10 @@
  * de fechas filtran por preventista y ofrecen atajos de mes; el estado vive acá
  * para que las dos pestañas compartan la misma entrada de cache.
  */
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { TrendingUp, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, X, Loader2, Users, DollarSign, MapPin, Boxes, Network } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import { useReportesFinancieros } from '../../hooks/supabase';
 import type {
@@ -40,6 +41,7 @@ import {
   ReporteVentasZonas,
   ReporteValuacionInventario,
   ReporteStockRed,
+  ReporteMermas,
   FiltrosVentas,
   filtrosVentasIniciales,
   type FiltrosVentasValue
@@ -64,10 +66,20 @@ interface TabConfig {
   icon: LucideIcon;
 }
 
-type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red';
+type ReportTabId = 'preventistas' | 'cuentas' | 'rentabilidad' | 'clientes' | 'zonas' | 'valuacion' | 'stock-red' | 'mermas';
 
 /** Tabs que traen sus propios filtros y no usan el panel de fechas de arriba. */
-const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red'];
+const TABS_CON_FILTROS_PROPIOS: ReportTabId[] = ['clientes', 'zonas', 'valuacion', 'stock-red', 'mermas'];
+
+/** Los ids validos de `?tab=`. Un valor desconocido cae al default en vez de
+ *  dejar la pantalla en blanco. */
+const TAB_IDS: ReportTabId[] = [
+  'preventistas', 'cuentas', 'rentabilidad', 'clientes', 'zonas', 'valuacion', 'stock-red', 'mermas',
+];
+
+function tabDeUrl(valor: string | null): ReportTabId | null {
+  return TAB_IDS.includes(valor as ReportTabId) ? (valor as ReportTabId) : null;
+}
 
 // =============================================================================
 // COMPONENT
@@ -84,7 +96,15 @@ export default function VistaReportes({
   // Estado local
   const [fechaDesde, setFechaDesde] = useState<string>('');
   const [fechaHasta, setFechaHasta] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<ReportTabId>('preventistas');
+  // La pestaña vive en la URL: así "Historial de mermas" desde Productos puede
+  // linkear directo, el link es compartible y el back de Android funciona.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab: ReportTabId = tabDeUrl(searchParams.get('tab')) ?? 'preventistas';
+  const setActiveTab = useCallback((tab: ReportTabId): void => {
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'preventistas') next.delete('tab'); else next.set('tab', tab);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [filtrosVentas, setFiltrosVentas] = useState<FiltrosVentasValue>(filtrosVentasIniciales);
 
   // Reportes financieros
@@ -109,7 +129,8 @@ export default function VistaReportes({
     { id: 'clientes', label: 'Por Cliente', icon: Users },
     { id: 'zonas', label: 'Por Zona', icon: MapPin },
     { id: 'valuacion', label: 'Valuación de Stock', icon: Boxes },
-    { id: 'stock-red', label: 'Stock de la Red', icon: Network }
+    { id: 'stock-red', label: 'Stock de la Red', icon: Network },
+    { id: 'mermas', label: 'Mermas', icon: TrendingDown }
   ];
 
   // Cargar reporte automáticamente solo la primera vez
@@ -315,6 +336,10 @@ export default function VistaReportes({
 
       {activeTab === 'stock-red' && (
         <ReporteStockRed formatPrecio={formatPrecio} />
+      )}
+
+      {activeTab === 'mermas' && (
+        <ReporteMermas formatPrecio={formatPrecio} />
       )}
     </div>
   );

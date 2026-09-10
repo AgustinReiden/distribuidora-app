@@ -188,7 +188,11 @@ describe('VistaReportesGerenciales › comisión por vendedor', () => {
     renderVista();
     await abrirDetalle(user);
 
-    const total = screen.getByText('Total').closest('tr') as HTMLElement;
+    // 'Total' dejo de ser unico en la pantalla: las cards de Mermas y Compras
+    // tambien cierran con una fila Total. Se acota a la tabla de comisiones,
+    // que es la unica con la columna 'Vendedor'.
+    const tabla = screen.getByText('Vendedor').closest('table') as HTMLElement;
+    const total = within(tabla).getByText('Total').closest('tr') as HTMLElement;
     // Real: 302.426 + 0. Simulado: (15.121.320 + 2.964.100) × 2% = 361.708.
     expect(within(total).getByText($$(302426))).toBeInTheDocument();
     expect(within(total).getByText($$(361708))).toBeInTheDocument();

@@ -40,7 +40,7 @@ vi.mock('../../../utils/excel', () => ({
 vi.mock('../reportes-gerenciales/charts', () => ({
   EvolucionChart: () => <div />, DiarioChart: () => <div />, VendedoresChart: () => <div />,
   CategoriasChart: () => <div />, WaterfallChart: () => <div />, CobranzaDonut: () => <div />,
-  BonifPromosChart: () => <div />,
+  BonifPromosChart: () => <div />, MermasMotivoChart: () => <div />,
 }));
 
 // Mock completo, sin `importOriginal`: el módulo real importa `lib/supabase`,

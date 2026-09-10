@@ -9,6 +9,7 @@ import {
   hojasTopClientes,
   hojasCobranza,
   hojasMermas,
+  hojasCompras,
   hojasBonificaciones,
   hojasAlertas,
   hojasTodo,
@@ -173,6 +174,19 @@ describe('las tablas simples', () => {
     expect(hojasMermas(reporte())[0].data[0]).toMatchObject({
       Motivo: 'rotura', Unidades: 10, Costo: 900, Clasificación: 'perdida',
     })
+  })
+})
+
+describe('hojasCompras', () => {
+  it('lleva el desembolso mes a mes, que es lo que muestra la card', () => {
+    const hojas = hojasCompras(reporte())
+    expect(hojas).toHaveLength(1)
+    expect(hojas[0].name).toBe('Compras')
+    expect(hojas[0].data[0]).toEqual({ Mes: '2026-08', Compras: 70000 })
+  })
+
+  it('sin serie mensual devuelve [] en vez de una hoja en blanco', () => {
+    expect(hojasCompras(reporte({ mensual: [] }))).toEqual([])
   })
 })
 

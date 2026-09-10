@@ -15,8 +15,9 @@ import {
 } from 'chart.js'
 import { Bar, Line, Doughnut } from 'react-chartjs-2'
 import { useTheme } from '../../../contexts/ThemeContext'
-import { money } from './formato'
-import type { ReporteMes, ReporteVendedor, ReporteCategoria, ReporteCobranza, BonifPromo } from '../../../hooks/queries'
+import { money, N } from './formato'
+import { labelMotivo } from '../../../utils/mermasMotivo'
+import type { ReporteMes, ReporteVendedor, ReporteCategoria, ReporteCobranza, BonifPromo, MermaMotivo } from '../../../hooks/queries'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement, PointElement,
@@ -142,6 +143,58 @@ export function VendedoresChart({ data }: { data: ReporteVendedor[] }): React.Re
         scales: {
           x: { stacked: true, ticks: { callback: fmtM, color: t.tick }, grid: { color: t.grid }, border: { display: false } },
           y: { stacked: true, ticks: { color: t.tick }, grid: { display: false }, border: { color: t.border } },
+        },
+      }}
+    />
+  )
+}
+
+/**
+ * Mermas por motivo, en barras horizontales.
+ *
+ * Barras y NO una dona a propósito: `error_inventario`, `otro` y sobre todo
+ * `promociones_reversion` admiten cantidad negativa (el CHECK de la tabla es
+ * `cantidad <> 0`), y una dona no sabe dibujar una porción negativa: dibujaría
+ * una mentira. `CobranzaDonut` sí puede ser dona porque una forma de pago nunca
+ * es negativa.
+ *
+ * El color sale de la clasificación, con el mismo truco de color-por-barra que
+ * ya usa `CategoriasChart` para el margen negativo.
+ */
+export function MermasMotivoChart({ data }: { data: MermaMotivo[] }): React.ReactElement {
+  const t = useChartTheme()
+  const orden = [...data].sort((a, b) => Number(b.costo) - Number(a.costo))
+  const colorDe = (clasificacion: string): string =>
+    clasificacion === 'perdida' ? PALETTE.red
+      : clasificacion === 'muestra' ? PALETTE.amber
+        : PALETTE.slate
+  return (
+    <Bar
+      data={{
+        labels: orden.map(m => labelMotivo(m.motivo)),
+        datasets: [
+          {
+            label: 'Costo',
+            data: orden.map(m => Number(m.costo)),
+            backgroundColor: orden.map(m => colorDe(m.clasificacion)),
+            borderRadius: 4,
+          },
+        ],
+      }}
+      options={{
+        maintainAspectRatio: false, indexAxis: 'y',
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...baseTooltip(t.tooltipBg),
+            callbacks: {
+              label: (c) => ` ${money(Number(c.raw))} · ${N.format(orden[c.dataIndex]?.unidades ?? 0)} u.`,
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { callback: fmtM, color: t.tick }, grid: { color: t.grid }, border: { display: false } },
+          y: { ticks: { color: t.tick, font: { size: 11 } }, grid: { display: false }, border: { color: t.border } },
         },
       }}
     />
