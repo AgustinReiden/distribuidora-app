@@ -885,7 +885,8 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
       }})
       setItemRapido({ nombre: '', codigo: '', costo: 0 })
     } catch {
-      // Error handled by container
+      // El toast lo tira el container. Acá se deja el formulario intacto —con
+      // lo que la usuaria tipeó— para que pueda corregir el dato que falló.
     } finally {
       setCreandoItem(false)
     }
@@ -1498,7 +1499,8 @@ function ItemPendienteRow({
       })
       // El reducer remueve la fila; este componente se desmonta.
     } catch {
-      // Error manejado arriba (toast del container)
+      // El toast lo tira el container. La fila queda pendiente a propósito: si
+      // el alta falló, el ítem de la factura sigue sin producto al que apuntar.
     } finally {
       setCreando(false)
     }
