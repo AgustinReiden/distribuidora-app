@@ -105,9 +105,17 @@ export default function VistaReportes({
   // haría cambiar de números en silencio. Los params sólo aparecen cuando el
   // usuario elige un rango o cuando llega por un deep link.
   const rangoUrl = leerRango(searchParams);
-  const fechaDesde = rangoUrl.desde ?? '';
-  const fechaHasta = rangoUrl.hasta ?? '';
+  // El rango es estado del formulario, sembrado UNA vez desde la URL (igual que
+  // `filtrosVentas` acá abajo). No puede leerse de la URL en cada render: mientras
+  // el usuario completa una punta el rango está a medias, y `escribirRango`
+  // descarta los rangos incompletos a propósito. Atado a la URL, la primera fecha
+  // elegida se borraba sola y "Generar" salía sin filtro — el filtro no andaba.
+  const [fechaDesde, setFechaDesdeState] = useState(rangoUrl.desde ?? '');
+  const [fechaHasta, setFechaHastaState] = useState(rangoUrl.hasta ?? '');
+  /** Publica en la URL lo que ella sabe representar; el formulario guarda el resto. */
   const setRango = useCallback((desde: string, hasta: string): void => {
+    setFechaDesdeState(desde);
+    setFechaHastaState(hasta);
     setSearchParams(escribirRango(searchParams, desde || null, hasta || null), { replace: true });
   }, [searchParams, setSearchParams]);
   const setFechaDesde = useCallback((v: string): void => setRango(v, fechaHasta), [setRango, fechaHasta]);
@@ -185,30 +193,36 @@ export default function VistaReportes({
   }, [activeTab]);
 
   // Handlers
-  const handleGenerarReporte = async (): Promise<void> => {
-    if (activeTab === 'preventistas') {
-      await onCalcularReporte(fechaDesde || null, fechaHasta || null);
-    } else {
-      // Recargar el reporte financiero actual
-      switch (activeTab) {
-        case 'cuentas': {
-          const cuentas = await generarReporteCuentasPorCobrar();
-          setReporteCuentas(cuentas);
-          break;
-        }
-        case 'rentabilidad': {
-          const rent = await generarReporteRentabilidad(fechaDesde || null, fechaHasta || null);
-          setReporteRentabilidad(rent);
-          break;
-        }
+  /** Recarga la pestaña activa con el rango dado. El rango viaja por argumento
+   *  porque "Limpiar" lo recarga con el rango nuevo, no con el del render. */
+  const recargarTab = async (desde: string, hasta: string): Promise<void> => {
+    switch (activeTab) {
+      case 'preventistas':
+        await onCalcularReporte(desde || null, hasta || null);
+        break;
+      case 'cuentas': {
+        const cuentas = await generarReporteCuentasPorCobrar();
+        setReporteCuentas(cuentas);
+        break;
+      }
+      case 'rentabilidad': {
+        const rent = await generarReporteRentabilidad(desde || null, hasta || null);
+        setReporteRentabilidad(rent);
+        break;
       }
     }
   };
 
+  const handleGenerarReporte = async (): Promise<void> => {
+    await recargarTab(fechaDesde, fechaHasta);
+  };
+
+  // Limpiar tiene que recargar la pestaña que se está mirando, no sólo
+  // preventistas: si no, el reporte sigue mostrando el período que el usuario
+  // acaba de borrar.
   const handleLimpiarFiltros = async (): Promise<void> => {
-    setFechaDesde('');
-    setFechaHasta('');
-    await onCalcularReporte(null, null);
+    setRango('', '');
+    await recargarTab('', '');
   };
 
   const isLoading = loading || loadingFinanciero;
@@ -292,6 +306,8 @@ export default function VistaReportes({
               <button
                 onClick={handleLimpiarFiltros}
                 disabled={loading}
+                aria-label="Limpiar filtros"
+                title="Limpiar filtros"
                 className="flex items-center justify-center space-x-2 px-4 py-2 bg-gray-500 dark:bg-gray-600 text-white rounded-lg hover:bg-gray-600 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors"
               >
                 <X className="w-5 h-5" />
