@@ -966,6 +966,14 @@ export default function PedidosContainer(): React.ReactElement {
     queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+    // Editar items mueve stock y saldo, y los dos se leen cacheados: productos
+    // tiene staleTime de 10 min, asi que `violacionesStock` del proximo alta
+    // bloqueaba de mas o dejaba pasar de mas con el stock de hace un rato, y la
+    // cuenta corriente mostraba el saldo anterior al cambio de total.
+    // Prefijo pelado (no `productosKeys.all(sucursalId)`) porque las claves son
+    // por sucursal y aca no hay una a mano: el prefijo las alcanza a todas.
+    queryClient.invalidateQueries({ queryKey: ['productos'] })
+    queryClient.invalidateQueries({ queryKey: ['clientes'] })
   }, [pedidoEditando, user, queryClient])
 
   // Reasignar el preventista del pedido en edicion. Solo admin (la UI ya
