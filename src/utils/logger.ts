@@ -7,36 +7,9 @@
  */
 
 import { captureException, captureMessage } from '../lib/sentry'
+import { redactSensitiveFields } from './redactSensitiveData'
 
 const isDevelopment = import.meta.env.DEV || import.meta.env.MODE === 'development'
-
-// Campos que nunca deben loguearse
-const SENSITIVE_FIELDS = [
-  'password', 'token', 'api_key', 'apiKey', 'secret', 'credential',
-  'authorization', 'auth', 'key', 'cuit', 'dni', 'telefono'
-]
-
-/**
- * Sanitiza un objeto removiendo campos sensibles
- */
-function sanitize<T>(data: T): T {
-  if (data === null || data === undefined) return data
-  if (typeof data !== 'object') return data
-  if (Array.isArray(data)) return data.map(sanitize) as T
-
-  const sanitized: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-    const lowerKey = key.toLowerCase()
-    if (SENSITIVE_FIELDS.some(field => lowerKey.includes(field))) {
-      sanitized[key] = '[REDACTED]'
-    } else if (typeof value === 'object' && value !== null) {
-      sanitized[key] = sanitize(value)
-    } else {
-      sanitized[key] = value
-    }
-  }
-  return sanitized as T
-}
 
 /**
  * Formatea argumentos para logging seguro
@@ -44,7 +17,7 @@ function sanitize<T>(data: T): T {
 function formatArgs(args: unknown[]): unknown[] {
   return args.map(arg => {
     if (typeof arg === 'object' && arg !== null) {
-      return sanitize(arg)
+      return redactSensitiveFields(arg)
     }
     return arg
   })
