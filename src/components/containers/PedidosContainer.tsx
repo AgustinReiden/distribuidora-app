@@ -8,11 +8,6 @@
 import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
-import {
-  aplicarDescuentoClienteItems,
-  esDescuentoDeCategoria,
-  resolverDescuentoPctCliente,
-} from '../../utils/descuentoCliente'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
 import PanelPedidosTrabados from '../pedidos/PanelPedidosTrabados'
@@ -418,12 +413,31 @@ export default function PedidosContainer(): React.ReactElement {
     setPromosEliminadas(prev => prev.filter(p => p.promoId !== promoId))
   }, [])
 
-  // Resolve wholesale prices + promos (con override del regalo elegido por admin
-  // y las promos que el usuario haya quitado a mano)
-  // `preciosResueltos` se usa además para etiquetar el origen del precio de cada
-  // ítem al guardar (mig 148/149): es lo único que sabe si el precio lo fijó una
-  // escala mayorista y cuál.
-  const { itemsFinales, preciosResueltos } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet)
+  // El cliente del pedido en armado: el hook lo necesita para la tercera capa
+  // de precio (descuento general / por categoría), que antes se aplicaba suelta
+  // recién al confirmar.
+  const clienteNuevoPedido = useMemo(
+    () => clientes.find(c => String(c.id) === String(nuevoPedido.clienteId)),
+    [clientes, nuevoPedido.clienteId],
+  )
+  const {
+    itemsFinales,
+    preciosResueltos,
+    itemsConDescuentoCliente,
+    totalConDescuentoCliente,
+    descuentoClientePct,
+    descuentoPorCategoria,
+  } = usePromocionPedido(
+    // Con override del regalo elegido por el admin y las promos que el usuario
+    // haya quitado a mano. `preciosResueltos` se usa además para etiquetar el
+    // origen del precio de cada ítem al guardar (mig 148/149): es lo único que
+    // sabe si el precio lo fijó una escala mayorista y cuál.
+    nuevoPedido.items,
+    undefined,
+    regalosOverride,
+    promosEliminadasSet,
+    { cliente: clienteNuevoPedido, productos },
+  )
 
   // =========================================================================
   // VistaPedidos handlers
@@ -1186,12 +1200,12 @@ export default function PedidosContainer(): React.ReactElement {
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
-      // Descuento del cliente: general + por categoría (la categoría prevalece).
-      // Se aplica DESPUES de promociones/precio mayorista. Mismo helper que usa
-      // ModalPedido, para que el total guardado == el total mostrado en vivo.
-      // Items bonificacion / precioOverride / precio<=0 no se tocan.
-      const clienteSel = clientes.find(c => String(c.id) === String(nuevoPedido.clienteId))
-      const { items: itemsConDescuento, total: totalConDescuento } = aplicarDescuentoClienteItems(itemsFinales, productos, clienteSel)
+      // Promo → mayorista → descuento del cliente ya vienen resueltos por
+      // `orquestarPrecios` (adentro de usePromocionPedido), que es la misma
+      // función que corre el bot de Telegram. Acá no se recalcula nada: el total
+      // que se guarda es exactamente el que ModalPedido viene mostrando.
+      const itemsConDescuento = itemsConDescuentoCliente
+      const totalConDescuento = totalConDescuentoCliente
       let totalNeto = 0
       let totalIva = 0
       const itemsParaCrear = itemsConDescuento.map(item => {
@@ -1234,23 +1248,7 @@ export default function PedidosContainer(): React.ReactElement {
           esBonificacion: item.esBonificacion,
           precioOverride: item.precioOverride,
         })),
-        {
-          preciosResueltos,
-          descuentoClientePct: new Map(
-            itemsFinales.map(item => {
-              const prod = productos.find(p => String(p.id) === String(item.productoId))
-              return [String(item.productoId), resolverDescuentoPctCliente(clienteSel, prod?.categoria)]
-            }),
-          ),
-          descuentoPorCategoria: new Set(
-            itemsFinales
-              .filter(item => {
-                const prod = productos.find(p => String(p.id) === String(item.productoId))
-                return esDescuentoDeCategoria(clienteSel, prod?.categoria)
-              })
-              .map(item => String(item.productoId)),
-          ),
-        },
+        { preciosResueltos, descuentoClientePct, descuentoPorCategoria },
       )
 
       // Se acuña en el primer intento y sobrevive a los reintentos: es lo que
@@ -1413,7 +1411,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, itemsConDescuentoCliente, totalConDescuentoCliente, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
