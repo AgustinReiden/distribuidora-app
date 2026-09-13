@@ -128,6 +128,7 @@ export {
   usePedidosParaEntregaYPagoQuery,
   usePagosMasivosMutation,
   useEntregaYPagoMasivosMutation,
+  fetchPedidoIdsConSalvedad,
 } from './usePedidosQuery'
 export type { PaginatedResult } from './usePedidosQuery'
 export { usePedidoStatsQuery, EMPTY_PEDIDO_STATS_SUMMARY } from './usePedidoStatsQuery'

@@ -128,7 +128,13 @@ function PedidoStats({ summary, isEncargado }: PedidoStatsProps): React.ReactEle
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+    <div className="flex flex-col gap-2">
+      {summary.aproximado && (
+        <p className="text-xs text-amber-700 dark:text-amber-300" role="status">
+          Totales aproximados: hay más pedidos filtrados de los que se pudieron sumar.
+        </p>
+      )}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
       {items.map((item, idx) => {
         const IconComponent = item.icon;
         const showMonto = mostrarMontosEnStats(rol, item.key);
@@ -162,6 +168,7 @@ function PedidoStats({ summary, isEncargado }: PedidoStatsProps): React.ReactEle
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
