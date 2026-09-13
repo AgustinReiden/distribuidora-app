@@ -26,6 +26,14 @@ name: Deploy Edge Functions
 # `verify_jwt` NO se pasa por flag: sale de `supabase/config.toml`, que ya lo
 # deja en false para telegram-webhook y telegram-digest. Pisarlo acá haría que
 # Telegram (que no manda JWT) empiece a comerse 401.
+#
+# CÓMO DETECTAR ESTE DRIFT
+# ------------------------
+# Comparar `gh run list --workflow=deploy-functions.yml` (último éxito) contra
+# el `updated_at` de cada función en `list_edge_functions` (MCP de Supabase,
+# proyecto hmuchlzmuqqxcldbzkgc). Si el segundo es más viejo que el último push
+# a `main` que tocó `supabase/functions/`, el workflow no corrió o falló y
+# nadie se enteró — como pasó del 26/08 al 09/09.
 
 on:
   push:
