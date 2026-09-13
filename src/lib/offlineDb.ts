@@ -534,6 +534,20 @@ export async function clearAllData(): Promise<void> {
 }
 
 /**
+ * Limpia los caches de LECTURA (datos de productos/clientes cacheados y
+ * rutas guardadas). Para logout: a diferencia de `clearAllData`, NO toca
+ * `pendingOperations` -- la cola offline sobrevive al logout (decisión FE-1)
+ * y se oculta por usuario en la UI, no se descarta acá -- ni `syncEvents`,
+ * que es sólo un log de sincronización sin datos de cliente.
+ */
+export async function limpiarCachesDeLectura(): Promise<void> {
+  await db.transaction('rw', [db.offlineCache, db.savedRoutes], async () => {
+    await db.offlineCache.clear()
+    await db.savedRoutes.clear()
+  })
+}
+
+/**
  * Obtener operaciones fallidas
  */
 export async function getFailedOperations(limit = 50): Promise<PendingOperation[]> {

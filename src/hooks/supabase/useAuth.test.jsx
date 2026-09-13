@@ -2,13 +2,29 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 
-const { maybeSingleMock, unsubscribeMock, mockSupabase } = vi.hoisted(() => {
+const {
+  maybeSingleMock,
+  unsubscribeMock,
+  mockSupabase,
+  queryClientClearMock,
+  olvidarRutaMock,
+  olvidarTodasLasRutasMock,
+  limpiarCachesDeLecturaMock
+} = vi.hoisted(() => {
   const maybeSingleMock = vi.fn()
   const unsubscribeMock = vi.fn()
+  const queryClientClearMock = vi.fn()
+  const olvidarRutaMock = vi.fn()
+  const olvidarTodasLasRutasMock = vi.fn()
+  const limpiarCachesDeLecturaMock = vi.fn().mockResolvedValue(undefined)
 
   return {
     maybeSingleMock,
     unsubscribeMock,
+    queryClientClearMock,
+    olvidarRutaMock,
+    olvidarTodasLasRutasMock,
+    limpiarCachesDeLecturaMock,
     mockSupabase: {
       auth: {
         getSession: vi.fn(),
@@ -24,6 +40,23 @@ const { maybeSingleMock, unsubscribeMock, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('./base', () => ({
   supabase: mockSupabase
+}))
+
+vi.mock('../../lib/queryClient', () => ({
+  queryClient: { clear: queryClientClearMock }
+}))
+
+vi.mock('../../lib/rutaOfflineCache', () => ({
+  olvidarRuta: olvidarRutaMock,
+  olvidarTodasLasRutas: olvidarTodasLasRutasMock
+}))
+
+vi.mock('../../lib/offlineDb', () => ({
+  limpiarCachesDeLectura: limpiarCachesDeLecturaMock
+}))
+
+vi.mock('../../contexts/SucursalContext', () => ({
+  SUCURSAL_STORAGE_KEY: 'distribuidora_sucursal_activa'
 }))
 
 import { AuthProvider, useAuth } from './useAuth'
@@ -293,6 +326,54 @@ describe('useAuth', () => {
     expect(result.current.user).toBeNull()
     expect(result.current.perfil).toBeNull()
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+  })
+
+  it('logout limpia la ruta offline, el cache de TanStack Query y los caches de lectura', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+    localStorage.setItem('distribuidora_sucursal_activa', '2')
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(result.current.user?.id).toBe(mockUser.id)
+    })
+
+    await act(async () => {
+      await result.current.logout()
+    })
+
+    expect(olvidarRutaMock).toHaveBeenCalledWith(2, mockUser.id)
+    expect(olvidarTodasLasRutasMock).toHaveBeenCalled()
+    expect(queryClientClearMock).toHaveBeenCalled()
+    expect(limpiarCachesDeLecturaMock).toHaveBeenCalled()
+  })
+
+  it('el evento SIGNED_OUT tambien limpia los datos locales', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(result.current.user?.id).toBe(mockUser.id)
+    })
+
+    act(() => {
+      void authCallback?.('SIGNED_OUT', null)
+    })
+
+    await waitFor(() => {
+      expect(result.current.user).toBeNull()
+    })
+
+    expect(olvidarTodasLasRutasMock).toHaveBeenCalled()
+    expect(queryClientClearMock).toHaveBeenCalled()
+    expect(limpiarCachesDeLecturaMock).toHaveBeenCalled()
   })
 
   /**

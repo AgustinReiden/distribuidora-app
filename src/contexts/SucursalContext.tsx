@@ -4,7 +4,8 @@ import { supabase, setSucursalHeader } from '../lib/supabase'
 import type { UsuarioSucursalDB, RolUsuario } from '../types'
 import { logger } from '../utils/logger'
 
-const SUCURSAL_STORAGE_KEY = 'distribuidora_sucursal_activa'
+/** Exportada para que `useAuth` pueda leer la sucursal activa al hacer logout. */
+export const SUCURSAL_STORAGE_KEY = 'distribuidora_sucursal_activa'
 
 export interface SucursalInfo {
   id: number

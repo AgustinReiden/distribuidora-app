@@ -105,3 +105,26 @@ export function olvidarRuta(sucursalId: number | null, transportistaId: string):
     localStorage.removeItem(clave(sucursalId, transportistaId));
   } catch { /* nada que hacer */ }
 }
+
+/**
+ * Borra TODAS las rutas cacheadas, de cualquier sucursal o chofer.
+ *
+ * Para logout en un dispositivo compartido: `olvidarRuta` sólo conoce al
+ * chofer que se está yendo, pero puede haber quedado la de otro que ya cerró
+ * sesión antes sin pasar por acá (o cuya sucursal en ese momento no se puede
+ * reconstruir). Este barrido cubre eso.
+ */
+export function olvidarTodasLasRutas(): void {
+  try {
+    const claves: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(`${PREFIJO}:`)) {
+        claves.push(key);
+      }
+    }
+    claves.forEach(key => localStorage.removeItem(key));
+  } catch (e) {
+    logger.warn('[rutaOfflineCache] No se pudo barrer las rutas cacheadas:', e);
+  }
+}
