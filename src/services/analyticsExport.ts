@@ -7,7 +7,7 @@
 import { supabase } from '../lib/supabase'
 import type { SheetConfig } from '../utils/excel'
 import { calculateMarketBasket } from '../utils/marketBasket'
-import { costoCanonicoUnitario } from '../utils/costoCanonico'
+import { costoCanonicoUnitario, COLUMNAS_COSTO_CANONICO } from '../utils/costoCanonico'
 import type { ProductoCosto } from '../utils/costoCanonico'
 import { traerTodo } from '../utils/paginacion'
 
@@ -45,11 +45,22 @@ interface ItemBI {
   cantidad?: number | null
   precio_unitario?: number | null
   subtotal?: number | null
+  es_bonificacion?: boolean | null
   pedido?: unknown
 }
 
+/**
+ * 'YYYY-MM-DD' (columnas `fecha`/`fecha_compra`, ambas DATE) parseado a
+ * mediodía local en vez de medianoche UTC: si no, en cualquier zona UTC- este
+ * mismo archivo movería la fila un día para atrás al leer año/mes/día de la
+ * semana, el mismo bug de fondo que documenta `parseDateSafe` en formatters.ts.
+ */
+function parseFechaSegura(fecha: string): Date {
+  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(fecha) ? `${fecha}T12:00:00` : fecha)
+}
+
 function formatDate(iso: string) {
-  const d = new Date(iso)
+  const d = parseFechaSegura(iso)
   return {
     fecha: d.toLocaleDateString('es-AR'),
     año: d.getFullYear(),
@@ -62,6 +73,16 @@ function formatDate(iso: string) {
 function safe(val: unknown, fallback: string | number = ''): string | number {
   return val == null ? fallback : (val as string | number)
 }
+
+/**
+ * Columnas de costo del embed de `productos` en Ventas_Detallado, armadas
+ * desde `COLUMNAS_COSTO_CANONICO` (costoCanonico.ts) para que no se puedan
+ * desincronizar de la cascada. Tipada como `string` (no literal) a propósito:
+ * el parser de tipos de supabase-js no puede resolver un `select` armado con
+ * interpolación, y sin este ensanchado el `.select()` de más abajo no tipa.
+ */
+const PRODUCTO_SELECT_VENTAS: string =
+  `id, nombre, codigo, categoria, ${COLUMNAS_COSTO_CANONICO.join(', ')}`
 
 // ---------------------------------------------------------------------------
 // Dataset 1: Ventas Detallado (fact table)
@@ -76,7 +97,7 @@ export async function fetchVentasDetallado(
     .from('pedidos')
     .select(`
       id,
-      created_at,
+      fecha,
       estado,
       estado_pago,
       forma_pago,
@@ -90,12 +111,14 @@ export async function fetchVentasDetallado(
         precio_unitario,
         subtotal,
         costo_unitario_al_crear,
-        producto:productos(id, nombre, codigo, categoria, costo_con_iva, costo_real, costo_promedio)
+        producto:productos(${PRODUCTO_SELECT_VENTAS})
       )
     `)
-    .gte('created_at', `${desde}T00:00:00`)
-    .lte('created_at', `${hasta}T23:59:59`)
-    .order('created_at', { ascending: false })
+    // pedidos.fecha es la fecha de venta canónica; created_at es sólo de
+    // auditoría y puede quedar en otro día (carga al día siguiente) — mig 029.
+    .gte('fecha', desde)
+    .lte('fecha', hasta)
+    .order('fecha', { ascending: false })
     .order('id'),
     // Un mes típico ya son ~1.064 pedidos: sin paginar el export a BI salía
     // truncado y con forma de archivo oficial.
@@ -141,7 +164,7 @@ export async function fetchVentasDetallado(
       const costoTotal = costoUnitario * cantidad
       const margenTotal = subtotal - costoTotal
 
-      const dt = formatDate(String(p.created_at))
+      const dt = formatDate(String(p.fecha))
 
       rows.push({
         pedido_id: p.id,
@@ -191,21 +214,24 @@ export async function fetchClientesDimension(
       () => supabase.from('clientes').select('*').order('id'),
       { etiqueta: 'clientes' },
     ),
-    traerTodo<{ cliente_id: string; total: number; created_at: string }>(
+    traerTodo<{ cliente_id: string; total: number; fecha: string }>(
       () => supabase
         .from('pedidos')
-        .select('id, cliente_id, total, created_at')
-        .gte('created_at', `${desde}T00:00:00`)
-        .lte('created_at', `${hasta}T23:59:59`)
+        // pedidos.fecha es la fecha de venta canónica (mig 029): created_at
+        // es sólo de auditoría y un pedido cargado al día siguiente lo movía
+        // de mes en este dataset.
+        .select('id, cliente_id, total, fecha')
+        .gte('fecha', desde)
+        .lte('fecha', hasta)
         .order('id'),
       { etiqueta: 'pedidos por cliente' },
     ),
   ])
 
-  const pedidosPorCliente = new Map<string, Array<{ total: number; created_at: string }>>()
+  const pedidosPorCliente = new Map<string, Array<{ total: number; fecha: string }>>()
   for (const p of pedidosPeriodo) {
     const arr = pedidosPorCliente.get(p.cliente_id) || []
-    arr.push({ total: p.total, created_at: p.created_at })
+    arr.push({ total: p.total, fecha: p.fecha })
     pedidosPorCliente.set(p.cliente_id, arr)
   }
 
@@ -218,7 +244,7 @@ export async function fetchClientesDimension(
 
     let diasDesdeUltimo: number | null = null
     if (pedidos.length > 0) {
-      const ultimo = Math.max(...pedidos.map(p => new Date(p.created_at).getTime()))
+      const ultimo = Math.max(...pedidos.map(p => parseFechaSegura(p.fecha).getTime()))
       diasDesdeUltimo = Math.floor((now - ultimo) / 86400000)
     }
 
@@ -273,9 +299,17 @@ export async function fetchProductosDimension(
     traerTodo<ItemBI>(
       () => supabase
         .from('pedido_items')
-        .select('producto_id, cantidad, precio_unitario, subtotal, pedido:pedidos!inner(created_at)')
-        .gte('pedido.created_at', `${desde}T00:00:00`)
-        .lte('pedido.created_at', `${hasta}T23:59:59`)
+        .select('producto_id, cantidad, precio_unitario, subtotal, es_bonificacion, pedido:pedidos!inner(fecha, estado)')
+        .gte('pedido.fecha', desde)
+        .lte('pedido.fecha', hasta)
+        // cancelar_pedido (mig 175) deja los items intactos: sin este filtro
+        // un pedido cancelado seguía sumando ingresos, margen y rotación.
+        .neq('pedido.estado', 'cancelado')
+        // Regalo de promoción: no es venta y además viene en otra unidad
+        // (fracción vs. fardo) — metricasDashboard.ts hace lo mismo para el
+        // dashboard. `is.null` cubre los items de antes de que existiera la
+        // columna: `.eq('es_bonificacion', false)` los hubiese excluido también.
+        .or('es_bonificacion.is.null,es_bonificacion.eq.false')
         .order('id'),
       { etiqueta: 'ítems vendidos' },
     ),
@@ -283,12 +317,17 @@ export async function fetchProductosDimension(
 
   const ventasPorProducto = new Map<string, { cantidad: number; ingresos: number; dias: Set<string> }>()
   for (const item of items) {
+    // La query ya excluye cancelados y bonificaciones server-side (arriba);
+    // el filtro queda acá como defensa, igual que metricasDashboard.ts.
+    const pedido = item.pedido as unknown as Record<string, unknown> | null
+    if (pedido?.estado === 'cancelado') continue
+    if (item.es_bonificacion) continue
+
     const existing = ventasPorProducto.get(item.producto_id) || { cantidad: 0, ingresos: 0, dias: new Set<string>() }
     existing.cantidad += item.cantidad || 0
     existing.ingresos += item.subtotal || (item.precio_unitario || 0) * (item.cantidad || 0)
-    const pedido = item.pedido as unknown as Record<string, unknown> | null
-    if (pedido?.created_at) {
-      existing.dias.add(String(pedido.created_at).split('T')[0])
+    if (pedido?.fecha) {
+      existing.dias.add(String(pedido.fecha))
     }
     ventasPorProducto.set(item.producto_id, existing)
   }
@@ -345,14 +384,14 @@ export async function fetchComprasFact(
   // Paginado como los otros datasets del export. Hoy son 158 compras en toda
   // la vida del proyecto, muy lejos del tope: se pagina igual porque un export
   // a BI que trunca no avisa, y las tres consultas de este archivo tienen que
-  // dar la misma garantia. El desempate por `id` va porque `created_at` no es
-  // unico.
-  const data = await traerTodo<Record<string, unknown> & { created_at: string }>(
+  // dar la misma garantia. El desempate por `id` va porque `fecha_compra` no
+  // es unica.
+  const data = await traerTodo<Record<string, unknown> & { fecha_compra: string }>(
     () => supabase
     .from('compras')
     .select(`
       id,
-      created_at,
+      fecha_compra,
       total,
       estado,
       tipo_factura,
@@ -376,9 +415,11 @@ export async function fetchComprasFact(
         producto:productos(nombre, codigo, categoria)
       )
     `)
-    .gte('created_at', `${desde}T00:00:00`)
-    .lte('created_at', `${hasta}T23:59:59`)
-    .order('created_at', { ascending: false })
+    // compras.fecha_compra es la fecha de la compra (mig 029 la usa el bot);
+    // created_at es sólo de auditoría y no es la que ve el resto de la app.
+    .gte('fecha_compra', desde)
+    .lte('fecha_compra', hasta)
+    .order('fecha_compra', { ascending: false })
     .order('id'),
     { etiqueta: 'compras' },
   )
@@ -393,7 +434,7 @@ export async function fetchComprasFact(
       const producto = item.producto as Record<string, unknown> | null
       rows.push({
         compra_id: compra.id,
-        fecha: new Date(compra.created_at).toLocaleDateString('es-AR'),
+        fecha: parseFechaSegura(compra.fecha_compra).toLocaleDateString('es-AR'),
         proveedor_nombre: safe(proveedor?.nombre),
         proveedor_cuit: safe(proveedor?.cuit),
         producto_nombre: safe(producto?.nombre),
@@ -487,8 +528,8 @@ export async function fetchCanastaProductos(
       () => supabase
         .from('pedidos')
         .select('id, items:pedido_items(producto_id)')
-        .gte('created_at', `${desde}T00:00:00`)
-        .lte('created_at', `${hasta}T23:59:59`)
+        .gte('fecha', desde)
+        .lte('fecha', hasta)
         .order('id'),
       { etiqueta: 'pedidos para canasta' },
     ),
@@ -542,6 +583,11 @@ export async function exportarBI(desde: string, hasta: string): Promise<void> {
     { Campo: 'Fecha de exportacion', Valor: new Date().toLocaleString('es-AR') },
     { Campo: 'Periodo desde', Valor: desde },
     { Campo: 'Periodo hasta', Valor: hasta },
+    {
+      Campo: 'Criterio de fecha',
+      Valor: 'Ventas/Clientes/Productos/Canasta filtran por pedidos.fecha y Compras por '
+        + 'compras.fecha_compra (fecha de venta/compra, no de carga en el sistema)',
+    },
     { Campo: 'Filas en Ventas_Detallado', Valor: ventas.length },
     { Campo: 'Total Clientes', Valor: clientes.length },
     { Campo: 'Total Productos', Valor: productos.length },
