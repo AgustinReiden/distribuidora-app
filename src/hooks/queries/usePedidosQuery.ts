@@ -340,7 +340,50 @@ async function fetchPedidosPaginated(
 }
 
 // Mutation functions
-async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
+/**
+ * Lo que devuelve el alta. `idempotente` dice que el servidor NO creó nada:
+ * ya tenía un pedido con ese `offline_id` y devolvió aquel. Va acompañado del
+ * cliente y el total de ESE pedido para que quien reintenta pueda verificar que
+ * es el suyo antes de darlo por sincronizado (ver `verificarRespuestaIdempotente`
+ * en useOfflineSync). Vienen en null si el pedido no se pudo leer.
+ */
+export interface CrearPedidoResult {
+  id: string
+  idempotente?: boolean
+  clienteId?: string | null
+  total?: number | null
+}
+
+/**
+ * Cliente y total del pedido que el servidor reconoció como ya existente.
+ *
+ * Sin esta lectura, "ya existía" es indistinguible de "existe uno de otro con
+ * la misma clave": la RPC devuelve solo el id. Si la fila no se puede leer
+ * —RLS, o la red se cortó justo acá— devuelve null y el llamador decide; nunca
+ * tira, porque el pedido propio ya está creado y hacer fallar el alta por una
+ * verificación sería el peor intercambio.
+ */
+async function leerPedidoExistente(
+  pedidoId: string,
+): Promise<{ clienteId: string | null; total: number | null } | null> {
+  try {
+    const { data, error } = await supabase
+      .from('pedidos')
+      .select('cliente_id, total')
+      .eq('id', pedidoId)
+      .maybeSingle()
+    if (error || !data) return null
+    const fila = data as { cliente_id: string | number | null; total: number | null }
+    return {
+      clienteId: fila.cliente_id != null ? String(fila.cliente_id) : null,
+      total: fila.total != null ? Number(fila.total) : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> {
   const itemsParaRPC = input.items.map(item => ({
     producto_id: item.productoId || item.producto_id,
     cantidad: item.cantidad,
@@ -379,9 +422,38 @@ async function crearPedido(input: CrearPedidoInput): Promise<{ id: string }> {
 
   if (error) throw error
 
-  const result = data as { success: boolean; pedido_id?: string; errores?: string[] }
+  const result = data as {
+    success: boolean
+    pedido_id?: string
+    errores?: string[]
+    idempotente?: boolean
+  }
   if (!result.success) {
     throw new Error(result.errores?.join(', ') || 'Error al crear pedido')
+  }
+
+  if (result.idempotente) {
+    // El servidor no creó nada: devolvió el pedido que ya tenía con esta clave.
+    // Se lee para saber si es el nuestro, y NO se le registran los orígenes
+    // hasta saberlo: escribirle metadatos al pedido de otro fue exactamente lo
+    // que pasó cuando la clave de idempotencia era `op_<autoincrement>`.
+    const existente = await leerPedidoExistente(result.pedido_id!)
+    const esNuestro =
+      existente?.clienteId != null &&
+      existente.clienteId === String(input.clienteId) &&
+      existente.total != null &&
+      Math.abs(existente.total - input.total) < 0.01
+
+    if (esNuestro) {
+      await registrarOrigenPrecio(result.pedido_id!, input.origenes)
+    }
+
+    return {
+      id: result.pedido_id!,
+      idempotente: true,
+      clienteId: existente?.clienteId ?? null,
+      total: existente?.total ?? null,
+    }
   }
 
   await registrarOrigenPrecio(result.pedido_id!, input.origenes)
