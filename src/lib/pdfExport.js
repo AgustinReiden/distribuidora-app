@@ -8,10 +8,7 @@
 
 export {
   generarOrdenPreparacion,
-  generarHojaRuta,
   generarHojaRutaOptimizada,
-  generarReciboPago,
-  generarEstadoCuenta,
   generarReciboPedido,
   generarComandasMultiples
 } from './pdf'

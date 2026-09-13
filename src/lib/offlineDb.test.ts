@@ -11,9 +11,6 @@ import {
   cacheData,
   getCachedData,
   invalidateCache,
-  saveOptimizedRoute,
-  getSavedRoutes,
-  findMatchingRoute,
   clearAllData,
   getDbStats,
   retryFailedOperation,
@@ -250,89 +247,6 @@ describe('offlineDb', () => {
   })
 
   // ---------------------------------------------------------------------------
-  // saveOptimizedRoute / getSavedRoutes / findMatchingRoute
-  // ---------------------------------------------------------------------------
-
-  describe('saveOptimizedRoute', () => {
-    it('creates a route record', async () => {
-      const id = await saveOptimizedRoute({
-        nombre: 'Ruta Norte',
-        transportistaId: 't1',
-        clienteIds: ['c1', 'c2', 'c3'],
-        ordenOptimizado: [0, 2, 1],
-        distanciaTotal: 15000,
-        duracionEstimada: 3600
-      })
-
-      expect(id).toBeTypeOf('number')
-      const route = await db.savedRoutes.get(id)
-      expect(route).toBeDefined()
-      expect(route!.nombre).toBe('Ruta Norte')
-      expect(route!.clienteIds).toEqual(['c1', 'c2', 'c3'])
-      expect(route!.createdAt).toBeInstanceOf(Date)
-    })
-  })
-
-  describe('getSavedRoutes', () => {
-    it('returns routes filtered by transportistaId', async () => {
-      await saveOptimizedRoute({
-        nombre: 'Ruta A',
-        transportistaId: 't1',
-        clienteIds: ['c1'],
-        ordenOptimizado: [0]
-      })
-      await saveOptimizedRoute({
-        nombre: 'Ruta B',
-        transportistaId: 't2',
-        clienteIds: ['c2'],
-        ordenOptimizado: [0]
-      })
-      await saveOptimizedRoute({
-        nombre: 'Ruta C',
-        transportistaId: 't1',
-        clienteIds: ['c3'],
-        ordenOptimizado: [0]
-      })
-
-      const routes = await getSavedRoutes('t1')
-      expect(routes).toHaveLength(2)
-      expect(routes.every(r => r.transportistaId === 't1')).toBe(true)
-    })
-  })
-
-  describe('findMatchingRoute', () => {
-    it('finds a route with high client-set similarity', async () => {
-      await saveOptimizedRoute({
-        nombre: 'Ruta Norte',
-        transportistaId: 't1',
-        clienteIds: ['c1', 'c2', 'c3', 'c4', 'c5'],
-        ordenOptimizado: [0, 1, 2, 3, 4],
-        distanciaTotal: 20000
-      })
-
-      // Search with 4/5 matching clients — Jaccard = 4/6 ≈ 66.7%
-      // Default tolerance is 20% so threshold = 80%, won't match
-      // Use tolerance 40% so threshold = 60%, should match
-      const match = await findMatchingRoute('t1', ['c1', 'c2', 'c3', 'c4', 'c6'], 40)
-      expect(match).not.toBeNull()
-      expect(match!.nombre).toBe('Ruta Norte')
-    })
-
-    it('returns null when no route has sufficient similarity', async () => {
-      await saveOptimizedRoute({
-        nombre: 'Ruta Norte',
-        transportistaId: 't1',
-        clienteIds: ['c1', 'c2', 'c3'],
-        ordenOptimizado: [0, 1, 2]
-      })
-
-      // Completely different clients — similarity = 0%
-      const match = await findMatchingRoute('t1', ['c10', 'c20', 'c30'])
-      expect(match).toBeNull()
-    })
-  })
-
-  // ---------------------------------------------------------------------------
   // clearAllData
   // ---------------------------------------------------------------------------
 
@@ -340,11 +254,13 @@ describe('offlineDb', () => {
     it('empties all tables', async () => {
       await queueOperation('CREATE_PEDIDO', { n: 1 })
       await cacheData('k', 'v')
-      await saveOptimizedRoute({
+      await db.savedRoutes.add({
         nombre: 'R',
         transportistaId: 't1',
         clienteIds: ['c1'],
-        ordenOptimizado: [0]
+        ordenOptimizado: [0],
+        createdAt: new Date(),
+        updatedAt: new Date()
       })
 
       await clearAllData()
@@ -366,11 +282,13 @@ describe('offlineDb', () => {
       await queueOperation('CREATE_PEDIDO', { n: 1 })
       await queueOperation('UPDATE_PEDIDO', { n: 2 })
       await cacheData('productos', [])
-      await saveOptimizedRoute({
+      await db.savedRoutes.add({
         nombre: 'R',
         transportistaId: 't1',
         clienteIds: ['c1'],
-        ordenOptimizado: [0]
+        ordenOptimizado: [0],
+        createdAt: new Date(),
+        updatedAt: new Date()
       })
 
       const stats = await getDbStats()
