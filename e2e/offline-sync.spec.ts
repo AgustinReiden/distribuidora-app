@@ -6,7 +6,7 @@
  * - Pérdida de conexión durante operaciones
  * - Cierre de app con datos pendientes
  * - Reconexión y sincronización automática
- * - Detección de duplicados
+ * - Registro del service worker (base de todo lo anterior)
  */
 
 import { test, expect, type Page } from '@playwright/test'
@@ -130,11 +130,12 @@ test.describe('Offline Sync - Chaos Tests', () => {
     // El conteo debería ser máximo initialCount + 1
     expect(finalCount).toBeLessThanOrEqual(initialCount + 1)
 
-    // Verificar que no hay errores visibles
+    // Verificar que no hay errores visibles. Como el alta offline arriba está
+    // comentada (no hay credenciales de test para loguear), lo único que pasó
+    // fue navegar, cortar/restaurar la red y recargar: no debería quedar
+    // ningún error en pantalla de eso.
     const errorMessages = page.locator('text=Error, text=error, [role="alert"]')
-    const errorCount = await errorMessages.count()
-    // Puede haber 0 o algunos errores legítimos, pero no deberían ser críticos
-    console.log(`Errores visibles: ${errorCount}`)
+    await expect(errorMessages).toHaveCount(0)
   })
 
   test('2. Múltiples operaciones offline → reconectar → todas deben procesarse en orden', async ({
@@ -185,52 +186,47 @@ test.describe('Offline Sync - Chaos Tests', () => {
       return await getOperationCounts()
     })
 
-    // La mayoría deberían estar completadas o fallidas (pero procesadas)
+    // La mayoría deberían estar completadas o fallidas (pero procesadas): las
+    // 5 encoladas tienen que seguir contabilizadas en algún estado, y la
+    // reconexión tuvo que mover al menos alguna fuera de "pending" en los 10s
+    // de espera.
     const processed = finalCounts.completed + finalCounts.failed
-    console.log(`Procesadas: ${processed}, Pendientes: ${finalCounts.pending}`)
+    expect(processed + finalCounts.pending).toBe(5)
+    expect(processed).toBeGreaterThan(0)
   })
 
-  test('3. Operación duplicada no debe crear registros duplicados', async ({
-    page,
-    context
+  test('3. El service worker se registra en el build (modo offline real)', async ({
+    page
   }) => {
-    await page.goto('/pedidos')
-    await page.waitForLoadState('networkidle')
+    // No hay deduplicación de operaciones encoladas: cada `queueOperation`
+    // crea una entrada nueva aunque el payload sea idéntico, porque el hash
+    // incluye Date.now() (ver src/lib/offlineDb.test.ts, "creates a unique
+    // operation each call"). Ese comportamiento es a propósito, no un bug
+    // pendiente, así que no hay nada que testear ahí.
+    //
+    // Lo que sí vale la pena chequear en este archivo: que el service worker
+    // -la base de TODO lo demás en esta suite, incluida la pantalla en blanco
+    // de iPhone que documenta src/utils/serviceWorker.ts- efectivamente se
+    // registra contra el build servido. `registrarServiceWorker()` corta en
+    // seco si `!import.meta.env.PROD`, así que esto sólo tiene sentido corrido
+    // contra `vite preview` sobre el dist/ compilado (ver playwright.config.ts),
+    // nunca contra `vite dev`.
+    await page.goto('/')
+    await page.waitForLoadState('domcontentloaded')
 
-    // 1. Cortar internet
-    await context.setOffline(true)
-
-    // 2. Intentar encolar la misma operación dos veces
-    const results = await page.evaluate(async () => {
-      // @ts-ignore
-      const { queueOperation, getPendingOperations } = await import('/src/lib/offlineDb.ts')
-
-      const payload = {
-        clienteId: 'test-client',
-        items: [{ productoId: 'prod-1', cantidad: 1 }],
-        total: 100
+    const registration = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return null
+      // El registro es asíncrono desde el arranque de la app; darle margen.
+      for (let intento = 0; intento < 20; intento++) {
+        const reg = await navigator.serviceWorker.getRegistration()
+        if (reg) return { scope: reg.scope, activo: Boolean(reg.active || reg.installing || reg.waiting) }
+        await new Promise(resolve => setTimeout(resolve, 250))
       }
-
-      // Primera operación
-      const id1 = await queueOperation('CREATE_PEDIDO', payload)
-
-      // Segunda operación idéntica (debería ser rechazada o detectada)
-      const id2 = await queueOperation('CREATE_PEDIDO', payload)
-
-      const pending = await getPendingOperations(100)
-
-      return {
-        id1,
-        id2,
-        pendingCount: pending.length
-      }
+      return null
     })
 
-    // Solo una operación debería estar en cola (id2 debería ser null)
-    console.log('Resultados duplicado:', results)
-
-    // La segunda llamada con el mismo payload debería retornar null
-    // (según la implementación de detección de duplicados)
+    expect(registration).not.toBeNull()
+    expect(registration?.activo).toBe(true)
   })
 
   test('4. IndexedDB persiste después de cerrar pestaña', async ({

@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useClientes } from './useClientes'
-import type { ClienteDB, ClienteFormInput } from '../../types'
+import type { Cliente, ClienteDB, ClienteFormInput } from '../../types'
+
+// clienteService (BaseService<Cliente>) está tipado contra el `Cliente` genérico
+// de src/types/index.ts, pero en runtime devuelve filas de la tabla `clientes`
+// con la forma de `ClienteDB` (nombre_fantasia, razon_social, etc.) — igual que
+// useClientes.ts, que castea `as unknown as ClienteDB[]` al leerlo. Estos mocks
+// hacen el mismo casteo en el otro sentido para poder tipar los fixtures como
+// lo que realmente son.
+const asCliente = <T,>(v: T): Cliente => v as unknown as Cliente
 
 // Mock the services module
 vi.mock('../../services', () => ({
@@ -58,7 +66,7 @@ describe('useClientes', () => {
   })
 
   it('should load clientes on mount with loading state', async () => {
-    vi.mocked(clienteService.getAll).mockResolvedValue(mockClientes)
+    vi.mocked(clienteService.getAll).mockResolvedValue(mockClientes.map(asCliente))
 
     const { result } = renderHook(() => useClientes())
 
@@ -90,7 +98,7 @@ describe('useClientes', () => {
   })
 
   it('should validate, create, and add cliente to state sorted', async () => {
-    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]])
+    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]].map(asCliente))
     vi.mocked(clienteService.validate).mockReturnValue({ valid: true, errors: [] })
     
     const newCliente: ClienteDB = {
@@ -109,7 +117,7 @@ describe('useClientes', () => {
       updated_at: '2024-01-03T00:00:00Z',
     }
 
-    vi.mocked(clienteService.create).mockResolvedValue(newCliente)
+    vi.mocked(clienteService.create).mockResolvedValue(asCliente(newCliente))
 
     const { result } = renderHook(() => useClientes())
 
@@ -127,7 +135,6 @@ describe('useClientes', () => {
       zona: 'Zona 1',
       limiteCredito: 75000,
       diasCredito: 60,
-      activo: true,
     }
 
     await act(async () => {
@@ -175,7 +182,6 @@ describe('useClientes', () => {
       zona: '',
       limiteCredito: 0,
       diasCredito: 0,
-      activo: true,
     }
 
     await expect(async () => {
@@ -188,7 +194,7 @@ describe('useClientes', () => {
   })
 
   it('should update cliente and reflect in state', async () => {
-    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]])
+    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]].map(asCliente))
 
     const updatedCliente: ClienteDB = {
       ...mockClientes[0],
@@ -196,7 +202,7 @@ describe('useClientes', () => {
       limite_credito: 60000,
     }
 
-    vi.mocked(clienteService.update).mockResolvedValue(updatedCliente)
+    vi.mocked(clienteService.update).mockResolvedValue(asCliente(updatedCliente))
 
     const { result } = renderHook(() => useClientes())
 
@@ -214,7 +220,6 @@ describe('useClientes', () => {
       zona: 'Zona 1',
       limiteCredito: 60000,
       diasCredito: 30,
-      activo: true,
     }
 
     await act(async () => {
@@ -230,7 +235,7 @@ describe('useClientes', () => {
   })
 
   it('should handle limiteCredito and diasCredito parsing in actualizarCliente', async () => {
-    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]])
+    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]].map(asCliente))
 
     const updatedCliente: ClienteDB = {
       ...mockClientes[0],
@@ -238,7 +243,7 @@ describe('useClientes', () => {
       dias_credito: 45,
     }
 
-    vi.mocked(clienteService.update).mockResolvedValue(updatedCliente)
+    vi.mocked(clienteService.update).mockResolvedValue(asCliente(updatedCliente))
 
     const { result } = renderHook(() => useClientes())
 
@@ -256,7 +261,6 @@ describe('useClientes', () => {
       zona: 'Zona 1',
       limiteCredito: '75000.5' as any, // String that should be parsed
       diasCredito: '45' as any, // String that should be parsed
-      activo: true,
     }
 
     await act(async () => {
@@ -270,8 +274,8 @@ describe('useClientes', () => {
   })
 
   it('should remove cliente from state when deleted', async () => {
-    vi.mocked(clienteService.getAll).mockResolvedValue(mockClientes)
-    vi.mocked(clienteService.delete).mockResolvedValue()
+    vi.mocked(clienteService.getAll).mockResolvedValue(mockClientes.map(asCliente))
+    vi.mocked(clienteService.delete).mockResolvedValue(true)
 
     const { result } = renderHook(() => useClientes())
 
@@ -292,7 +296,7 @@ describe('useClientes', () => {
 
   it('should delegate buscarClientes to service', async () => {
     vi.mocked(clienteService.getAll).mockResolvedValue([])
-    const searchResults = [mockClientes[0]]
+    const searchResults = [mockClientes[0]].map(asCliente)
     vi.mocked(clienteService.buscar).mockResolvedValue(searchResults)
 
     const { result } = renderHook(() => useClientes())
@@ -312,7 +316,7 @@ describe('useClientes', () => {
 
   it('should delegate getClientesPorZona to service', async () => {
     vi.mocked(clienteService.getAll).mockResolvedValue([])
-    const zonaResults = [mockClientes[0]]
+    const zonaResults = [mockClientes[0]].map(asCliente)
     vi.mocked(clienteService.getByZona).mockResolvedValue(zonaResults)
 
     const { result } = renderHook(() => useClientes())
@@ -333,11 +337,9 @@ describe('useClientes', () => {
   it('should delegate getResumenCuenta to service', async () => {
     vi.mocked(clienteService.getAll).mockResolvedValue([])
     const resumenMock = {
-      clienteId: '1',
-      saldoActual: 10000,
-      limiteCredito: 50000,
-      saldoDisponible: 40000,
-      pedidosPendientes: 2,
+      total_pedidos: 5,
+      total_pagos: 3,
+      saldo: 10000,
     }
     vi.mocked(clienteService.getResumenCuenta).mockResolvedValue(resumenMock)
 
@@ -357,7 +359,7 @@ describe('useClientes', () => {
   })
 
   it('should refetch clientes', async () => {
-    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]])
+    vi.mocked(clienteService.getAll).mockResolvedValue([mockClientes[0]].map(asCliente))
 
     const { result } = renderHook(() => useClientes())
 
@@ -369,7 +371,7 @@ describe('useClientes', () => {
     expect(result.current.clientes).toHaveLength(1)
 
     // Change mock to return different data
-    vi.mocked(clienteService.getAll).mockResolvedValue(mockClientes)
+    vi.mocked(clienteService.getAll).mockResolvedValue(mockClientes.map(asCliente))
 
     await act(async () => {
       await result.current.refetch()
@@ -399,7 +401,7 @@ describe('useClientes', () => {
       updated_at: '2024-01-01T00:00:00Z',
     }
 
-    vi.mocked(clienteService.create).mockResolvedValue(newCliente)
+    vi.mocked(clienteService.create).mockResolvedValue(asCliente(newCliente))
 
     const { result } = renderHook(() => useClientes())
 
@@ -417,7 +419,6 @@ describe('useClientes', () => {
       zona: 'Zona Test',
       limiteCredito: '50000.75',
       diasCredito: '30',
-      activo: true,
     }
 
     await act(async () => {

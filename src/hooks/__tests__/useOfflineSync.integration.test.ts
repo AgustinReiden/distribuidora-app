@@ -56,9 +56,9 @@ vi.mock('../../contexts/SucursalContext', () => ({
 describe('useOfflineSync Integration Tests', () => {
   // Productos de prueba
   const mockProductos: ProductoDB[] = [
-    { id: 'p1', nombre: 'Producto 1', stock: 10, precio_final: 100, activo: true } as ProductoDB,
-    { id: 'p2', nombre: 'Producto 2', stock: 5, precio_final: 200, activo: true } as ProductoDB,
-    { id: 'p3', nombre: 'Producto 3', stock: 0, precio_final: 300, activo: true } as ProductoDB
+    { id: 'p1', nombre: 'Producto 1', stock: 10, precio: 100, activo: true } as ProductoDB,
+    { id: 'p2', nombre: 'Producto 2', stock: 5, precio: 200, activo: true } as ProductoDB,
+    { id: 'p3', nombre: 'Producto 3', stock: 0, precio: 300, activo: true } as ProductoDB
   ]
 
   // Mock de funciones de API
@@ -188,7 +188,8 @@ describe('useOfflineSync Integration Tests', () => {
       // Verificar que se llamó a queueOperation
       expect(mockQueueOperation).toHaveBeenCalled()
 
-      const lastCall = mockQueueOperation.mock.calls.at(-1)
+      const calls = mockQueueOperation.mock.calls
+      const lastCall = calls[calls.length - 1]
       expect(lastCall?.[0]).toBe('CREATE_PEDIDO')
       expect(lastCall?.[1]).toMatchObject({
         clienteId: '456',
@@ -496,9 +497,9 @@ describe('useOfflineSync Integration Tests', () => {
 
       // Guardar merma offline (updates local state)
       const mermaData = {
-        producto_id: 'p1',
+        productoId: 'p1',
         cantidad: 2,
-        tipo_merma: 'vencimiento' as const,
+        tipo: 'vencimiento' as const,
         motivo: 'Producto vencido'
       }
 
@@ -508,9 +509,9 @@ describe('useOfflineSync Integration Tests', () => {
 
       expect(result.current.mermasPendientes).toHaveLength(1)
       expect(result.current.mermasPendientes[0]).toMatchObject({
-        producto_id: 'p1',
+        productoId: 'p1',
         cantidad: 2,
-        tipo_merma: 'vencimiento'
+        tipo: 'vencimiento'
       })
 
       // Mock pending merma for sync
@@ -542,7 +543,7 @@ describe('useOfflineSync Integration Tests', () => {
         id: 1,
         type: 'CREATE_MERMA',
         status: 'pending', sucursalId: 1,
-        payload: { producto_id: 'p1', cantidad: 2, tipo_merma: 'rotura', motivo: 'Producto roto' },
+        payload: { productoId: 'p1', cantidad: 2, tipo: 'rotura', motivo: 'Producto roto' },
         createdAt: new Date()
       }
       mockGetPendingOperations.mockResolvedValue([mockMermaOp])
@@ -588,9 +589,9 @@ describe('useOfflineSync Integration Tests', () => {
       // Agregar mermas
       await act(async () => {
         await result.current.guardarMermaOffline({
-          producto_id: 'p1',
+          productoId: 'p1',
           cantidad: 1,
-          tipo_merma: 'robo' as const,
+          tipo: 'robo' as const,
           motivo: 'Faltante'
         })
       })
@@ -628,9 +629,9 @@ describe('useOfflineSync Integration Tests', () => {
       let returnedMerma: Awaited<ReturnType<typeof result.current.guardarMermaOffline>> | undefined
       await act(async () => {
         returnedMerma = await result.current.guardarMermaOffline({
-          producto_id: 'p1',
+          productoId: 'p1',
           cantidad: 3,
-          tipo_merma: 'vencimiento' as const,
+          tipo: 'vencimiento' as const,
           motivo: 'Test regresión SYNC-07'
         })
       })
@@ -655,9 +656,9 @@ describe('useOfflineSync Integration Tests', () => {
       await expect(
         act(async () => {
           await result.current.guardarMermaOffline({
-            producto_id: 'p1',
+            productoId: 'p1',
             cantidad: 1,
-            tipo_merma: 'rotura' as const,
+            tipo: 'rotura' as const,
             motivo: 'Test rollback'
           })
         })

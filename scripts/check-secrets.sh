@@ -38,18 +38,34 @@ PATTERNS=(
   'mongodb(\+srv)?://[^"\s]+'
 )
 
-# Archivos a excluir de la verificación
+# Archivos a excluir de la verificación.
+#
+# *.test.* / *.spec.* y *.md NO están acá a propósito: excluirlos por patrón
+# dejaba sin chequear justo los lugares donde un secreto real es más fácil de
+# pegar sin querer (un token de prueba copiado de un .env real, un ejemplo con
+# una key real en la documentación). Un falso positivo puntual se resuelve
+# agregando el archivo a ALLOWLIST_FILES, no reabriendo el agujero para todos.
 EXCLUDE_PATTERNS=(
   "*.lock"
-  "*.test.*"
-  "*.spec.*"
-  "*.md"
   ".env.example"
   "check-secrets.sh"
   "node_modules/*"
   "dist/*"
   "coverage/*"
   ".git/*"
+)
+
+# Archivos con falsos positivos conocidos y ya revisados a mano. Cada entrada
+# necesita el motivo al lado: esto es una lista de excepciones, no un lugar
+# para silenciar lo que no se llegó a mirar.
+ALLOWLIST_FILES=(
+  # Google API key documentada en un audit report ya cerrado: la
+  # recomendación del propio hallazgo (rotarla) ya se aplicó; queda como
+  # registro histórico de qué se encontró y cuándo.
+  "docs/archive/2026-01-20-AUDIT_REPORT.md"
+  # Connection string de ejemplo con placeholders (<proj-ref>, <password>),
+  # no una credencial real.
+  "scripts/export-tp-export-dump.md"
 )
 
 # Construir el comando de exclusión
@@ -60,6 +76,11 @@ done
 
 # Obtener archivos staged para commit
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || echo "")
+
+# Sacar los de la allowlist antes de chequear nada.
+for allowed in "${ALLOWLIST_FILES[@]}"; do
+  STAGED_FILES=$(echo "$STAGED_FILES" | grep -v -F -x "$allowed" || true)
+done
 
 if [ -z "$STAGED_FILES" ]; then
   echo "✅ No hay archivos staged para verificar"
