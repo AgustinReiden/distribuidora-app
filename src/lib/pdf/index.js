@@ -11,8 +11,5 @@ export * from './constants'
 
 // Funciones de generación de PDF
 export { generarOrdenPreparacion } from './ordenPreparacion'
-export { generarHojaRuta } from './hojaRuta'
 export { generarHojaRutaOptimizada } from './hojaRutaOptimizada'
-export { generarReciboPago } from './reciboPago'
-export { generarEstadoCuenta } from './estadoCuenta'
 export { generarReciboPedido, generarComandasMultiples } from './reciboPedido'

@@ -24,6 +24,9 @@ import NumberInput from '../ui/NumberInput'
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
 import type { VencimientoLinea } from './ModalCompra.reducer'
 import { formatPrecio } from '../../utils/formatters'
+import { calcularTotalesCompra } from '../../utils/prorrateoCompra'
+import type { CargoCompra } from '../../utils/prorrateoCompra'
+import { validarVencimientosLineas } from '../../utils/vencimientos'
 import type { CompraCargoInput, CompraDBExtended, CondicionIva } from '../../types'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva'
@@ -51,6 +54,22 @@ interface ItemEdit {
    */
   vencimientos: VencimientoLinea[]
   marcadoParaEliminar: boolean
+}
+
+/**
+ * ¿Cambió la lista de vencimientos de una línea?
+ *
+ * Compara en orden y por par (fecha, cantidad): agregar, quitar, mover una fecha
+ * o cambiar una cantidad cuentan todos como edición sin guardar.
+ */
+function vencimientosDistintos(
+  a: VencimientoLinea[] | undefined,
+  b: VencimientoLinea[] | undefined,
+): boolean {
+  const x = a ?? []
+  const y = b ?? []
+  if (x.length !== y.length) return true
+  return x.some((v, i) => v.fecha !== y[i].fecha || Number(v.cantidad) !== Number(y[i].cantidad))
 }
 
 /** Clave del selector para el par (condición, alícuota) de la línea. */
@@ -121,6 +140,17 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
 
   const [errorValidacion, setErrorValidacion] = useState<string | null>(null)
 
+  /**
+   * Los vencimientos tal como se precargaron, por `compraItemId`.
+   *
+   * Es el espejo de `itemsIniciales` para los lotes, y hace falta porque no
+   * salen de `compra.items` sino de `lotesIniciales`, que llega después y en una
+   * query que se refresca. Se guarda la FOTO del momento de la precarga: leer
+   * `lotesIniciales` de nuevo diría "modificado" cada vez que se mueve un lote
+   * sin que el usuario haya tocado nada.
+   */
+  const [vencimientosIniciales, setVencimientosIniciales] = useState<Record<string, VencimientoLinea[]>>({})
+
   // --- Vencimientos (migs 223/224) ---
   // Se precargan una sola vez, con un ref y no con una dependencia: los lotes
   // llegan del container y cualquier movimiento de lote refresca esa query, así
@@ -133,18 +163,24 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
     vencimientosPrecargados.current = true
     if (lotesIniciales.length === 0) return
 
-    setItems((prev) =>
-      prev.map((it) => ({
-        ...it,
-        vencimientos: lotesIniciales
-          .filter((l) => String(l.producto_id) === String(it.productoId))
-          // `cantidad` y no `cantidad_restante`: lo que la compra cargó, no lo
-          // que queda. El contador lo lleva la base y se preserva del lado del
-          // servidor cuando la clave (producto, fecha) sobrevive a la edición.
-          .map((l) => ({ fecha: l.fecha_vencimiento, cantidad: l.cantidad })),
-      })),
+    const deLaLinea = (productoId: string): VencimientoLinea[] =>
+      lotesIniciales
+        .filter((l) => String(l.producto_id) === String(productoId))
+        // `cantidad` y no `cantidad_restante`: lo que la compra cargó, no lo
+        // que queda. El contador lo lleva la base y se preserva del lado del
+        // servidor cuando la clave (producto, fecha) sobrevive a la edición.
+        .map((l) => ({ fecha: l.fecha_vencimiento, cantidad: l.cantidad }))
+
+    // La foto se arma de `compra.items`, que es de donde salen los mismos pares
+    // (compraItemId, productoId) que tiene el state: así no hace falta un
+    // `setState` adentro del updater del otro.
+    setVencimientosIniciales(
+      Object.fromEntries(
+        (compra.items ?? []).map((it) => [String(it.id), deLaLinea(String(it.producto_id))]),
+      ),
     )
-  }, [lotesIniciales])
+    setItems((prev) => prev.map((it) => ({ ...it, vencimientos: deLaLinea(it.productoId) })))
+  }, [lotesIniciales, compra.items])
 
   // Items que efectivamente se persisten (los no eliminados).
   const itemsActivos = useMemo(() => items.filter((i) => !i.marcadoParaEliminar), [items])
@@ -173,6 +209,11 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
     return items.some((it) => {
       const orig = itemsIniciales.find((o) => o.productoId === it.productoId)
       if (!orig) return true
+      // Los vencimientos entran a la comparación: son lo único editable de la
+      // línea que no vive en `compra.items`, así que sin esto "Cambiar
+      // proveedor" quedaba habilitado con vencimientos tipeados y los
+      // descartaba —el flujo clona los items DE LA BD, que no los tienen—.
+      if (vencimientosDistintos(vencimientosIniciales[it.compraItemId], it.vencimientos)) return true
       return (
         orig.cantidad !== it.cantidad ||
         orig.costoUnitario !== it.costoUnitario ||
@@ -182,7 +223,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         orig.impuestosInternos !== it.impuestosInternos
       )
     })
-  }, [items, itemsIniciales])
+  }, [items, itemsIniciales, vencimientosIniciales])
 
   const puedeCambiarProveedor = Boolean(
     canCambiarProveedor && onCambiarProveedor && compra.estado !== 'cancelada',
@@ -228,26 +269,74 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
       })
   }, [cargosGuardados, itemsActivos])
 
-  // Totales calculados (incluye imp. internos por línea; percepciones y no
-  // gravado de la cabecera se conservan tal cual).
+  /**
+   * Totales de la edición, del MISMO motor que el alta (`calcularTotalesCompra`).
+   *
+   * Acá vivía un loop propio sobre las líneas, y es exactamente el loop que la
+   * mig 195 sacó del alta: no ve los cargos. Desde que una bonificación general
+   * es un cargo gravado, baja la base del IVA siempre y la del impuesto interno
+   * cuando es descuento de precio, y un loop que sólo mira renglones no la ve.
+   * Contra la factura testigo de esa migración, editar una línea subía
+   * `compras.iva` 64.424,66 y revertía el ×1,0496 del impuesto interno — o sea
+   * movía la posición fiscal, en silencio, por tocar una cantidad.
+   *
+   * Los `pesos` de un cargo van por `lineaId`, así que las líneas entran
+   * numeradas con el MISMO índice con el que `cargosPayload` ya tradujo los
+   * repartos (base 0). Son las dos puntas del mismo puente: si se numeraran
+   * distinto, el flete se repartiría contra líneas que no existen.
+   */
   const totales = useMemo(() => {
-    let subtotal = 0
-    let iva = 0
-    let impuestosInternos = 0
-    for (const it of itemsActivos) {
-      const netoUnitario = it.costoUnitario * (1 - it.bonificacion / 100)
-      const subtotalItem = it.cantidad * netoUnitario
-      subtotal += subtotalItem
-      if (!esZZ) {
-        // Solo las líneas gravadas generan IVA (mig 177); exento y no gravado
-        // suman al subtotal pero no al crédito fiscal.
-        if (it.condicionIva === 'gravado') iva += subtotalItem * (it.porcentajeIva / 100)
-        impuestosInternos += subtotalItem * ((it.impuestosInternos || 0) / 100)
-      }
+    const itemsCalculo = itemsActivos.map((it, i) => ({
+      lineaId: i,
+      cantidad: it.cantidad,
+      costoUnitario: it.costoUnitario,
+      bonificacion: it.bonificacion,
+      porcentajeIva: it.porcentajeIva,
+      condicionIva: it.condicionIva,
+      impuestosInternos: it.impuestosInternos,
+    }))
+    const cargosMotor: CargoCompra[] = cargosPayload.map((c, i) => ({
+      id: i,
+      concepto: c.concepto,
+      monto: c.monto,
+      condicionIva: c.condicionIva,
+      enFactura: c.enFactura,
+      prorrateaAlCosto: c.prorrateaAlCosto,
+      afectaBaseII: c.afectaBaseII,
+      pesos: c.pesos,
+    }))
+    const extras = {
+      percepcionIva: compra.percepcion_iva ?? 0,
+      percepcionIibb: compra.percepcion_iibb ?? 0,
+      noGravado,
+      otrosImpuestos,
     }
-    const total = subtotal + bonificaciones + iva + impuestosInternos + percepciones + noGravado + otrosImpuestos
-    return { subtotal, iva, impuestosInternos, total }
-  }, [itemsActivos, esZZ, otrosImpuestos, percepciones, noGravado, bonificaciones])
+    const tipo = esZZ ? ('ZZ' as const) : ('FC' as const)
+    // Sin el embed de cargos no hay con qué recalcular las bonificaciones de
+    // cabecera, y dejarlas en 0 bajaría el total por un dato que no llegó. Se usa
+    // el guardado. (Guardar en ese estado lo rechaza igual el guard de la mig
+    // 194: el modal no puede reenviar cargos que no leyó.)
+    const bonificacionesFaltantes = cargosGuardados === undefined ? bonificaciones : 0
+    // El motor lanza ante una cantidad corrupta —un campo a medio tipear
+    // alcanza—, así que la llamada va envuelta igual que en el alta: se cae a la
+    // aritmética sin cargos para no dejar el resumen en blanco. `validar` frena
+    // el guardado antes de que un número así llegue a la base.
+    let base
+    try {
+      base = calcularTotalesCompra(itemsCalculo, tipo, extras, cargosMotor, compra.ii_declarado ?? {})
+    } catch {
+      base = calcularTotalesCompra(itemsCalculo, tipo, extras)
+    }
+    return {
+      subtotal: base.subtotal,
+      iva: base.iva,
+      impuestosInternos: base.impuestosInternos,
+      total: base.total + bonificacionesFaltantes,
+    }
+  }, [
+    itemsActivos, cargosPayload, cargosGuardados, esZZ, otrosImpuestos,
+    noGravado, bonificaciones, compra.percepcion_iva, compra.percepcion_iibb, compra.ii_declarado,
+  ])
 
   function updateItem<K extends keyof ItemEdit>(productoId: string, field: K, value: ItemEdit[K]) {
     setItems((prev) =>
@@ -325,6 +414,11 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
         return `% IVA fuera de rango en "${it.nombre}".`
       }
     }
+    // Etiquetar menos unidades que la línea es legal —lo que sobra queda en la
+    // bolsa "sin vencimiento"—; etiquetar más no. Misma cuenta que el badge de la
+    // línea y que el submit del alta, del mismo lugar.
+    const errorVencimientos = validarVencimientosLineas(itemsActivos)
+    if (errorVencimientos) return errorVencimientos
     return null
   }
 

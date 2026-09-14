@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
 import { Check, X, AlertTriangle, Info } from 'lucide-react';
 import { getStorageItem, setStorageItem } from '../utils/storage';
 
@@ -166,7 +166,12 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     }
   }, [addToast, addNotification]);
 
-  const value: NotificationContextValue = {
+  // Memoizado a propósito: sin esto el value se recreaba en cada render y
+  // cualquier efecto que dependiera de `useNotification()` volvía a dispararse.
+  // Lo que rompió: el auto-sync offline dependía de `notify`, y cada
+  // `notify.error` del propio sync lo re-lanzaba sin espera — los 5 reintentos
+  // de un pedido encolado se consumían en segundos (ver useSyncManager).
+  const value = useMemo<NotificationContextValue>(() => ({
     // Toasts
     toasts,
     addToast,
@@ -185,7 +190,23 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     error,
     warning,
     info
-  };
+  }), [
+    toasts,
+    addToast,
+    removeToast,
+    notifications,
+    addNotification,
+    markAsRead,
+    markAllAsRead,
+    removeNotification,
+    clearAllNotifications,
+    unreadCount,
+    notify,
+    success,
+    error,
+    warning,
+    info
+  ]);
 
   return (
     <NotificationContext.Provider value={value}>

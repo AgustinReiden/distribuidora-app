@@ -11,9 +11,6 @@ import {
   cacheData,
   getCachedData,
   invalidateCache,
-  saveOptimizedRoute,
-  getSavedRoutes,
-  findMatchingRoute,
   clearAllData,
   getDbStats,
   retryFailedOperation,
@@ -85,6 +82,50 @@ describe('offlineDb', () => {
       const pending = await getPendingOperations()
       expect(pending).toHaveLength(0)
     })
+
+    /**
+     * TELÉFONO COMPARTIDO. IndexedDB es del dispositivo, no de la sesión, y el
+     * logout no la toca (a propósito: una cola borrada es un pedido perdido).
+     * Sin filtrar por dueño, el usuario B veía los pedidos encolados por A, los
+     * replayaba, el guard de la mig 219 se los rechazaba con 42501 y
+     * terminaban en `failed` sin que A se enterara.
+     */
+    describe('filtro por dueño (usuario y sucursal)', () => {
+      it('no devuelve las operaciones de otro usuario', async () => {
+        await queueOperation('CREATE_PEDIDO', { n: 'de A' }, 'user-A', 5, 1)
+        await queueOperation('CREATE_PEDIDO', { n: 'de B' }, 'user-B', 5, 1)
+
+        const deB = await getPendingOperations(10, 'user-B', 1)
+        expect(deB).toHaveLength(1)
+        expect(deB[0].payload).toEqual({ n: 'de B' })
+      })
+
+      it('no devuelve las operaciones de otra sucursal', async () => {
+        await queueOperation('CREATE_PEDIDO', { n: 'tucuman' }, 'user-A', 5, 1)
+        await queueOperation('CREATE_PEDIDO', { n: 'taco pozo' }, 'user-A', 5, 2)
+
+        const sucursal2 = await getPendingOperations(10, 'user-A', 2)
+        expect(sucursal2).toHaveLength(1)
+        expect(sucursal2[0].payload).toEqual({ n: 'taco pozo' })
+      })
+
+      it('sigue mostrando las que no tienen dueño anotado', async () => {
+        // Encoladas antes de que la cola registrara userId/sucursalId.
+        // Esconderlas las dejaría huérfanas para siempre; que se vean es lo que
+        // permite sincronizarlas o descartarlas.
+        await queueOperation('CREATE_MERMA', { n: 'vieja' })
+
+        const deB = await getPendingOperations(10, 'user-B', 1)
+        expect(deB).toHaveLength(1)
+      })
+
+      it('sin filtro devuelve todo, como antes', async () => {
+        await queueOperation('CREATE_PEDIDO', { n: 1 }, 'user-A', 5, 1)
+        await queueOperation('CREATE_PEDIDO', { n: 2 }, 'user-B', 5, 2)
+
+        expect(await getPendingOperations(10)).toHaveLength(2)
+      })
+    })
   })
 
   // ---------------------------------------------------------------------------
@@ -137,6 +178,19 @@ describe('offlineDb', () => {
       expect(op!.lastError).toBe('timeout')
       // Still pending because retryCount (1) < maxRetries (5)
       expect(op!.status).toBe('pending')
+    })
+
+    it('con terminal:true no gasta los reintentos que quedan', async () => {
+      // Para lo que reintentar no puede arreglar: la clave de idempotencia ya
+      // la tiene otro pedido. Queda en el panel de fallidas, que es donde
+      // alguien puede decidir qué hacer con ella.
+      const id = await queueOperation('CREATE_PEDIDO', { n: 1 }, undefined, 5)
+      await markAsFailed(id!, 'la clave ya la tiene otro pedido', { terminal: true })
+
+      const op = await db.pendingOperations.get(id!)
+      expect(op!.status).toBe('failed')
+      expect(op!.retryCount).toBe(5)
+      expect(await getPendingOperations()).toHaveLength(0)
     })
 
     it('sets status to failed permanently when maxRetries reached', async () => {
@@ -250,89 +304,6 @@ describe('offlineDb', () => {
   })
 
   // ---------------------------------------------------------------------------
-  // saveOptimizedRoute / getSavedRoutes / findMatchingRoute
-  // ---------------------------------------------------------------------------
-
-  describe('saveOptimizedRoute', () => {
-    it('creates a route record', async () => {
-      const id = await saveOptimizedRoute({
-        nombre: 'Ruta Norte',
-        transportistaId: 't1',
-        clienteIds: ['c1', 'c2', 'c3'],
-        ordenOptimizado: [0, 2, 1],
-        distanciaTotal: 15000,
-        duracionEstimada: 3600
-      })
-
-      expect(id).toBeTypeOf('number')
-      const route = await db.savedRoutes.get(id)
-      expect(route).toBeDefined()
-      expect(route!.nombre).toBe('Ruta Norte')
-      expect(route!.clienteIds).toEqual(['c1', 'c2', 'c3'])
-      expect(route!.createdAt).toBeInstanceOf(Date)
-    })
-  })
-
-  describe('getSavedRoutes', () => {
-    it('returns routes filtered by transportistaId', async () => {
-      await saveOptimizedRoute({
-        nombre: 'Ruta A',
-        transportistaId: 't1',
-        clienteIds: ['c1'],
-        ordenOptimizado: [0]
-      })
-      await saveOptimizedRoute({
-        nombre: 'Ruta B',
-        transportistaId: 't2',
-        clienteIds: ['c2'],
-        ordenOptimizado: [0]
-      })
-      await saveOptimizedRoute({
-        nombre: 'Ruta C',
-        transportistaId: 't1',
-        clienteIds: ['c3'],
-        ordenOptimizado: [0]
-      })
-
-      const routes = await getSavedRoutes('t1')
-      expect(routes).toHaveLength(2)
-      expect(routes.every(r => r.transportistaId === 't1')).toBe(true)
-    })
-  })
-
-  describe('findMatchingRoute', () => {
-    it('finds a route with high client-set similarity', async () => {
-      await saveOptimizedRoute({
-        nombre: 'Ruta Norte',
-        transportistaId: 't1',
-        clienteIds: ['c1', 'c2', 'c3', 'c4', 'c5'],
-        ordenOptimizado: [0, 1, 2, 3, 4],
-        distanciaTotal: 20000
-      })
-
-      // Search with 4/5 matching clients — Jaccard = 4/6 ≈ 66.7%
-      // Default tolerance is 20% so threshold = 80%, won't match
-      // Use tolerance 40% so threshold = 60%, should match
-      const match = await findMatchingRoute('t1', ['c1', 'c2', 'c3', 'c4', 'c6'], 40)
-      expect(match).not.toBeNull()
-      expect(match!.nombre).toBe('Ruta Norte')
-    })
-
-    it('returns null when no route has sufficient similarity', async () => {
-      await saveOptimizedRoute({
-        nombre: 'Ruta Norte',
-        transportistaId: 't1',
-        clienteIds: ['c1', 'c2', 'c3'],
-        ordenOptimizado: [0, 1, 2]
-      })
-
-      // Completely different clients — similarity = 0%
-      const match = await findMatchingRoute('t1', ['c10', 'c20', 'c30'])
-      expect(match).toBeNull()
-    })
-  })
-
-  // ---------------------------------------------------------------------------
   // clearAllData
   // ---------------------------------------------------------------------------
 
@@ -340,11 +311,13 @@ describe('offlineDb', () => {
     it('empties all tables', async () => {
       await queueOperation('CREATE_PEDIDO', { n: 1 })
       await cacheData('k', 'v')
-      await saveOptimizedRoute({
+      await db.savedRoutes.add({
         nombre: 'R',
         transportistaId: 't1',
         clienteIds: ['c1'],
-        ordenOptimizado: [0]
+        ordenOptimizado: [0],
+        createdAt: new Date(),
+        updatedAt: new Date()
       })
 
       await clearAllData()
@@ -366,11 +339,13 @@ describe('offlineDb', () => {
       await queueOperation('CREATE_PEDIDO', { n: 1 })
       await queueOperation('UPDATE_PEDIDO', { n: 2 })
       await cacheData('productos', [])
-      await saveOptimizedRoute({
+      await db.savedRoutes.add({
         nombre: 'R',
         transportistaId: 't1',
         clienteIds: ['c1'],
-        ordenOptimizado: [0]
+        ordenOptimizado: [0],
+        createdAt: new Date(),
+        updatedAt: new Date()
       })
 
       const stats = await getDbStats()

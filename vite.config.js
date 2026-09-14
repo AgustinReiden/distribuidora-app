@@ -317,8 +317,7 @@ export default defineConfig({
             return 'lib-excel'
           }
 
-          if (id.includes('node_modules/zod/') ||
-              id.includes('node_modules/dompurify/')) {
+          if (id.includes('node_modules/zod/')) {
             return 'lib-validation'
           }
 
@@ -346,8 +345,7 @@ export default defineConfig({
       'react-dom',
       '@supabase/supabase-js',
       'lucide-react',
-      'zod',
-      'dompurify'
+      'zod'
     ],
     exclude: [
       'jspdf',

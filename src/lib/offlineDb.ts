@@ -211,13 +211,50 @@ export async function queueOperation(
 }
 
 /**
- * Obtener operaciones pendientes ordenadas por prioridad (FIFO)
+ * ¿Esta operación es del usuario y la sucursal que están activos ahora?
+ *
+ * IndexedDB es del dispositivo, no de la sesión: el logout no la toca (a
+ * propósito — una cola borrada es un pedido perdido). En un teléfono
+ * compartido, sin este filtro el usuario B veía los pedidos de A, los
+ * replayaba, el guard de la mig 219 los rechazaba con 42501 y terminaban en
+ * `failed` sin que A se enterara.
+ *
+ * Las operaciones **sin dueño anotado** pasan el filtro: son las que se
+ * encolaron antes de que la cola registrara `userId` (y las mermas, que hasta
+ * ahora no lo llevaban). Esconderlas las dejaría huérfanas para siempre en vez
+ * de protegerlas; que se vean es lo que permite sincronizarlas o descartarlas.
+ * Mismo criterio con `sucursalId`: el replay ya las marca `failed` con un
+ * motivo explícito (ver sincronizarPedidos), y para eso tiene que poder verlas.
  */
-export async function getPendingOperations(limit = 10): Promise<PendingOperation[]> {
+function esDelUsuarioActivo(
+  op: PendingOperation,
+  userId?: string | null,
+  sucursalId?: number | null
+): boolean {
+  if (userId && op.userId != null && op.userId !== userId) return false
+  if (sucursalId != null && op.sucursalId != null && op.sucursalId !== sucursalId) return false
+  return true
+}
+
+/**
+ * Obtener operaciones pendientes ordenadas por prioridad (FIFO)
+ *
+ * `userId`/`sucursalId` acotan la cola a la sesión activa (ver
+ * `esDelUsuarioActivo`). Se filtran en memoria y no por índice a propósito: el
+ * índice de `status` ya recorta a lo pendiente, que son unidades o decenas de
+ * filas, y un índice compuesto obligaría a versionar el esquema de Dexie en
+ * todos los teléfonos instalados para no ganar nada medible.
+ */
+export async function getPendingOperations(
+  limit = 10,
+  userId?: string | null,
+  sucursalId?: number | null
+): Promise<PendingOperation[]> {
   return db.pendingOperations
     .where('status')
     .anyOf(['pending', 'failed'])
     .and(op => op.retryCount < op.maxRetries)
+    .and(op => esDelUsuarioActivo(op, userId, sucursalId))
     .sortBy('createdAt')
     .then(ops => ops.slice(0, limit))
 }
@@ -251,16 +288,26 @@ export async function markAsCompleted(id: number): Promise<void> {
 
 /**
  * Marcar operación como fallida (incrementa retry)
+ *
+ * `terminal: true` la deja en `failed` en el acto, sin gastar los reintentos
+ * que quedan: es para los fallos que reintentar no puede arreglar (la clave de
+ * idempotencia ya la tiene otro pedido, por ejemplo). Queda visible en el panel
+ * de fallidas, que es donde alguien puede decidir qué hacer con ella.
  */
-export async function markAsFailed(id: number, error: string): Promise<void> {
+export async function markAsFailed(
+  id: number,
+  error: string,
+  options: { terminal?: boolean } = {}
+): Promise<void> {
   const operation = await db.pendingOperations.get(id)
   if (!operation) return
 
-  const newRetryCount = operation.retryCount + 1
+  const newRetryCount = options.terminal ? operation.maxRetries : operation.retryCount + 1
+  const agotada = newRetryCount >= operation.maxRetries
   const now = new Date()
 
   await db.pendingOperations.update(id, {
-    status: newRetryCount >= operation.maxRetries ? 'failed' : 'pending',
+    status: agotada ? 'failed' : 'pending',
     retryCount: newRetryCount,
     lastError: error,
     updatedAt: now
@@ -268,7 +315,7 @@ export async function markAsFailed(id: number, error: string): Promise<void> {
 
   await db.syncEvents.add({
     operationId: id,
-    type: newRetryCount >= operation.maxRetries ? 'sync_failed' : 'operation_retried',
+    type: agotada ? 'sync_failed' : 'operation_retried',
     details: `Intento ${newRetryCount}/${operation.maxRetries}: ${error}`,
     createdAt: now
   })
@@ -393,58 +440,6 @@ export async function cleanupExpiredCache(): Promise<number> {
 // =============================================================================
 // FUNCIONES: Rutas guardadas
 // =============================================================================
-
-/**
- * Guardar ruta optimizada
- */
-export async function saveOptimizedRoute(route: Omit<SavedRoute, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
-  const now = new Date()
-  return db.savedRoutes.add({
-    ...route,
-    createdAt: now,
-    updatedAt: now
-  })
-}
-
-/**
- * Obtener rutas guardadas de un transportista
- */
-export async function getSavedRoutes(transportistaId: string): Promise<SavedRoute[]> {
-  return db.savedRoutes
-    .where('transportistaId')
-    .equals(transportistaId)
-    .reverse()
-    .sortBy('lastUsedAt')
-}
-
-/**
- * Buscar ruta por clientes (para reutilización)
- */
-export async function findMatchingRoute(
-  transportistaId: string,
-  clienteIds: string[],
-  tolerancePercent = 20
-): Promise<SavedRoute | null> {
-  const routes = await getSavedRoutes(transportistaId)
-
-  for (const route of routes) {
-    // Calcular similitud
-    const routeSet = new Set(route.clienteIds)
-    const inputSet = new Set(clienteIds)
-
-    const intersection = new Set([...routeSet].filter(x => inputSet.has(x)))
-    const union = new Set([...routeSet, ...inputSet])
-
-    const similarity = (intersection.size / union.size) * 100
-
-    // Si la similitud es mayor al umbral, usar esta ruta
-    if (similarity >= (100 - tolerancePercent)) {
-      return route
-    }
-  }
-
-  return null
-}
 
 /**
  * Actualizar última vez usada
@@ -640,9 +635,6 @@ if (typeof window !== 'undefined') {
     getCachedData,
     invalidateCache,
     cleanupExpiredCache,
-    saveOptimizedRoute,
-    getSavedRoutes,
-    findMatchingRoute,
     markRouteAsUsed,
     updateSavedRoute,
     deleteSavedRoute,

@@ -33,6 +33,7 @@ import type {
   VencimientoLinea,
 } from './ModalCompra.reducer'
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
+import { validarVencimientosLineas } from '../../utils/vencimientos'
 
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
@@ -421,6 +422,18 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         return
       }
     }
+    // Etiquetar menos unidades que la línea es legal (el resto queda en la bolsa
+    // "sin vencimiento"); etiquetar más no. Y nada lo frenaba: el badge de la
+    // línea se ponía rojo y el guardado seguía, porque `sincronizar_lotes_compra`
+    // sólo clampea contra el stock TOTAL del producto y no ve la línea. El
+    // sobrante entraba a un lote que la compra no trajo.
+    const errorVencimientos = validarVencimientosLineas(
+      state.items.map(it => ({ nombre: it.productoNombre, cantidad: it.cantidad, vencimientos: it.vencimientos })),
+    )
+    if (errorVencimientos) {
+      dispatch({ type: 'SET_ERROR', payload: errorVencimientos })
+      return
+    }
     // Lo que la RPC va a rechazar de los cargos, dicho antes de salir a la red.
     // La validación que manda sigue siendo la de la mig 194 —corre aunque el
     // cliente esté viejo— pero un round trip para enterarse de que el flete no
@@ -451,9 +464,16 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         total,
         // Líneas FC cuya tasa de II fue editada a mano: la alícuota nueva se
         // propaga al producto tras registrar la compra (con toast resumen).
+        //
+        // Las DOS condiciones son necesarias. `difiereII` sola alcanzaba cuando
+        // toda línea nacía con la tasa de la ficha, pero una línea que nace en 0
+        // por otro motivo —el escaneo lo hacía— también "difiere", y propagar eso
+        // le borra la alícuota al producto sin que nadie haya tocado el campo.
+        // `iiEditadoAMano` sola no alcanza tampoco: tipear la misma tasa que ya
+        // tenía la ficha no es un cambio que valga la pena escribir.
         cambiosImpuestosInternos: state.tipoFactura === 'FC'
           ? state.items
-              .filter(it => difiereII(it, iiMaster[String(it.productoId)]))
+              .filter(it => it.iiEditadoAMano && difiereII(it, iiMaster[String(it.productoId)]))
               .map(it => ({
                 productoId: it.productoId,
                 nombre: it.productoNombre,
