@@ -44,7 +44,7 @@ export interface ItemConUnidad {
  * Aplica a los 70 ítems anteriores a la primera medición de su promo, que
  * quedaron con el congelado en NULL a propósito.
  */
-function factorDeLaLinea(item: ItemConUnidad): number {
+export function factorDeLaLinea(item: ItemConUnidad): number {
   // `|| null` reproduce el NULLIF(unidades_por_bloque, 0) del SQL: un 0 cae al
   // neutro en vez de propagarse como divisor.
   const vivo = item.promocion?.regalo_mueve_stock === false

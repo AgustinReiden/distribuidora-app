@@ -165,17 +165,16 @@ export default function ModalActualizacionMasivaPrecios({
 
   const mensajeConfirmacion = `Vas a actualizar ${productosSeleccionados.length} producto(s) con un ${
     porcentaje > 0 ? '+' : ''
-  }${porcentaje}%. Esta acción modifica precio neto, final e impuestos internos. ¿Continuar?`
+  }${porcentaje}%. Esta acción modifica precio neto y precio final (los impuestos internos no se tocan). ¿Continuar?`
 
   return (
-    <>
-      <ModalBase
-        onClose={onClose}
-        title="Actualización masiva de precios"
-        description="Aplicá un porcentaje de aumento o rebaja a varios productos a la vez."
-        maxWidth="max-w-4xl"
-      >
-        <div className="flex flex-col">
+    <ModalBase
+      onClose={onClose}
+      title="Actualización masiva de precios"
+      description="Aplicá un porcentaje de aumento o rebaja a varios productos a la vez."
+      maxWidth="max-w-4xl"
+    >
+      <div className="flex flex-col">
           <div className="px-5 sm:px-6 py-5 space-y-5">
             {/* Input de porcentaje */}
             <div>
@@ -384,22 +383,21 @@ export default function ModalActualizacionMasivaPrecios({
             </button>
           </div>
         </div>
-      </ModalBase>
 
-      {confirmOpen && (
-        <Suspense fallback={null}>
-          <ModalConfirmacion
-            config={{
-              visible: true,
-              tipo: 'warning',
-              titulo: 'Confirmar actualización',
-              mensaje: mensajeConfirmacion,
-              onConfirm: handleConfirmar,
-            }}
-            onClose={() => setConfirmOpen(false)}
-          />
-        </Suspense>
-      )}
-    </>
+        {confirmOpen && (
+          <Suspense fallback={null}>
+            <ModalConfirmacion
+              config={{
+                visible: true,
+                tipo: 'warning',
+                titulo: 'Confirmar actualización',
+                mensaje: mensajeConfirmacion,
+                onConfirm: handleConfirmar,
+              }}
+              onClose={() => setConfirmOpen(false)}
+            />
+          </Suspense>
+        )}
+    </ModalBase>
   )
 }

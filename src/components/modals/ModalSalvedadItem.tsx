@@ -6,6 +6,7 @@ import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { useSimularSalvedadPromoImpactoQuery } from '../../hooks/queries'
+import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import NumberInput from '../ui/NumberInput'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
 
@@ -72,6 +73,7 @@ export interface ModalSalvedadItemProps {
     descripcion?: string;
     fotoUrl?: string;
     devolverStock: boolean;
+    clientRequestId?: string;
   }) => Promise<RegistrarSalvedadResult>;
   onClose: () => void;
 }
@@ -87,6 +89,12 @@ export default function ModalSalvedadItem({
   const [descripcion, setDescripcion] = useState<string>('')
   const [guardando, setGuardando] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+  // Idempotencia (mig 174): mientras la huella (pedido+item+cantidad+motivo) no
+  // cambie, reintentar el mismo submit reusa el mismo UUID y el servidor lo
+  // deduplica. Antes se acuñaba uno nuevo en cada intento y un reintento tras un
+  // timeout aplicaba la salvedad dos veces: el total bajaba dos veces, el stock
+  // volvía dos veces y, con la mig 167, el pago cobrado se recortaba dos veces.
+  const requestId = useRequestIdEstable()
 
   const productoNombre = item.producto?.nombre || 'Producto'
   const productoCodigo = item.producto?.codigo
@@ -128,7 +136,8 @@ export default function ModalSalvedadItem({
         cantidadAfectada: cantidadNum,
         motivo,
         descripcion: descripcion.trim() || undefined,
-        devolverStock: motivoSeleccionado?.devuelveStock ?? true
+        devolverStock: motivoSeleccionado?.devuelveStock ?? true,
+        clientRequestId: requestId(`salvedad|${pedidoId}|${item.id}|${cantidadNum}|${motivo}`),
       })
 
       if (!result.success) {

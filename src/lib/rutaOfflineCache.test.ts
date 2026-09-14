@@ -30,6 +30,19 @@ describe('rutaOfflineCache', () => {
     expect(leerRuta(1, 'chofer-a', HOY)).toBeNull();
   });
 
+  // El bug real: se guarda con `fecha: ayer` (la ruta que cruzó la medianoche)
+  // y se leía siempre con `hoy` a secas. `fechaDeRuta()` en la madrugada acepta
+  // las dos, así que `leerRuta` tiene que poder recibirlas juntas.
+  it('con una lista de fechas aceptadas, devuelve la ruta guardada con cualquiera de ellas', () => {
+    guardarRuta(1, 'chofer-a', AYER, ruta);
+    expect(leerRuta(1, 'chofer-a', [HOY, AYER])?.datos).toEqual(ruta);
+  });
+
+  it('con una lista de fechas aceptadas, sigue rechazando una fecha que no está en la lista', () => {
+    guardarRuta(1, 'chofer-a', '2026-08-17', ruta);
+    expect(leerRuta(1, 'chofer-a', [HOY, AYER])).toBeNull();
+  });
+
   // Multi-tenant: un chofer que opera en dos sucursales no puede ver la ruta de
   // la otra por compartir clave.
   it('no cruza sucursales ni choferes', () => {

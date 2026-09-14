@@ -11,6 +11,8 @@ import { clientesKeys } from './useClientesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import { traerTodo } from '../../utils/paginacion'
 
 // Query keys
 export const pedidosKeys = {
@@ -123,7 +125,14 @@ interface ActualizarPagoInput {
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
 const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
-const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id' as const
+// `descuento_porcentaje` + `descuentos_categoria` viajan porque ModalEditarPedido
+// re-resuelve los precios al editar: sin ellos un producto agregado en la edición
+// entraba a precio de lista y el cliente con descuento lo pagaba de más. El embed
+// va aliasado para que el shape coincida con ClienteDB (que ya usa
+// `descuentos_categoria`), igual que lo aplana `flattenClienteRow`.
+// SELECT de cliente_descuentos_categoria es `USING (true)` para authenticated
+// (mig 079): no hay rol que pierda la lista y quede re-cotizando sin descuento.
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id, descuento_porcentaje, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
@@ -174,6 +183,24 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
     }
   }
   return salvedadesMap
+}
+
+/**
+ * Ids de pedido con al menos una fila en `salvedades_items`, para el filtro
+ * "Con salvedad / Sin salvedad" (#524). Sin filtrar por `estado_resolucion`
+ * a propósito: `enrichWithSalvedades` tampoco lo hace, y el badge por pedido y
+ * este filtro tienen que estar de acuerdo en qué cuenta como "con salvedad".
+ *
+ * Paginado con `traerTodo`: la tabla crece con cada entrega con salvedad y no
+ * hay ninguna garantía de que se mantenga bajo las 1.000 filas que corta
+ * PostgREST.
+ */
+export async function fetchPedidoIdsConSalvedad(): Promise<number[]> {
+  const filas = await traerTodo<{ pedido_id: number }>(
+    () => supabase.from('salvedades_items').select('pedido_id').order('id'),
+    { etiqueta: 'los pedidos con salvedad' },
+  )
+  return Array.from(new Set(filas.map(f => f.pedido_id)))
 }
 
 // Fetch functions
@@ -257,48 +284,20 @@ async function fetchPedidosPaginated(
   // Use !inner join when searching so PostgREST filters parent rows by client fields
   const selectStr = hasSearch ? PEDIDO_SELECT_CLIENTE_INNER : PEDIDO_SELECT
 
+  // conSalvedad necesita un round-trip previo a salvedades_items (ver
+  // fetchPedidoIdsConSalvedad): no es un filtro que se pueda encadenar solo.
+  let idsConSalvedad: number[] | null = null
+  if (filters?.conSalvedad && filters.conSalvedad !== 'todos') {
+    idsConSalvedad = await fetchPedidoIdsConSalvedad()
+  }
+
   let query = supabase
     .from('pedidos')
     .select(selectStr, { count: 'exact' })
     .order('created_at', { ascending: false })
 
-  // Apply server-side filters
-  if (filters?.estado && filters.estado !== 'todos') {
-    query = query.eq('estado', filters.estado)
-  }
-  if (filters?.estadoPago && filters.estadoPago !== 'todos') {
-    query = query.eq('estado_pago', filters.estadoPago)
-  }
-  if (filters?.transportistaId && filters.transportistaId !== 'todos') {
-    query = query.eq('transportista_id', filters.transportistaId)
-  }
-  if (filters?.usuarioId && filters.usuarioId !== 'todos') {
-    query = query.eq('usuario_id', filters.usuarioId)
-  }
-  if (filters?.fechaDesde) {
-    query = query.gte('fecha', filters.fechaDesde)
-  }
-  if (filters?.fechaHasta) {
-    query = query.lte('fecha', filters.fechaHasta)
-  }
-  if (!filters?.verCancelados && filters?.estado !== 'cancelado') {
-    // Alineado con bot_ventas_periodo (mig029): excluye 'cancelado' y 'anulado',
-    // incluye estado IS NULL. `.neq` solo excluía 'cancelado' y descartaba NULL.
-    query = query.or('estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)')
-  }
-  if (filters?.fechaEntregaProgramada) {
-    query = query.eq('fecha_entrega_programada', filters.fechaEntregaProgramada)
-  }
-
-  // Search by client fields using referencedTable for related table filtering
-  if (hasSearch) {
-    const trimmed = search!.trim()
-    query = query.or(
-      `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
-      { referencedTable: 'clientes' }
-    )
-  }
-
+  query = construirFiltrosPedidos(query, filters, search)
+  query = aplicarFiltroConSalvedad(query, filters?.conSalvedad, idsConSalvedad)
   query = query.range(from, to)
 
   const { data, error, count } = await query
@@ -704,7 +703,7 @@ export function useCambiarTipoFacturaMutation() {
 }
 
 /**
- * Hook para cambiar estado de un pedido (optimistic update)
+ * Hook para cambiar estado de un pedido
  */
 export function useCambiarEstadoMutation() {
   const queryClient = useQueryClient()
@@ -712,27 +711,6 @@ export function useCambiarEstadoMutation() {
 
   return useMutation({
     mutationFn: actualizarEstado,
-    // Optimistic update
-    onMutate: async (input) => {
-      await queryClient.cancelQueries({ queryKey: pedidosKeys.lists(currentSucursalId) })
-
-      const previousPedidos = queryClient.getQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId))
-
-      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return old
-        return old.map(p =>
-          p.id === input.pedidoId ? { ...p, estado: input.nuevoEstado as PedidoDB['estado'] } : p
-        )
-      })
-
-      return { previousPedidos }
-    },
-    onError: (_, __, context) => {
-      // Rollback on error
-      if (context?.previousPedidos) {
-        queryClient.setQueryData(pedidosKeys.lists(currentSucursalId), context.previousPedidos)
-      }
-    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // La ruta del día del transportista lee pedido.estado vía el recorrido;
@@ -744,7 +722,7 @@ export function useCambiarEstadoMutation() {
 }
 
 /**
- * Hook para actualizar estado de pago (optimistic update)
+ * Hook para actualizar estado de pago
  */
 export function useActualizarPagoMutation() {
   const queryClient = useQueryClient()
@@ -752,27 +730,6 @@ export function useActualizarPagoMutation() {
 
   return useMutation({
     mutationFn: actualizarPago,
-    onMutate: async (input) => {
-      await queryClient.cancelQueries({ queryKey: pedidosKeys.lists(currentSucursalId) })
-
-      const previousPedidos = queryClient.getQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId))
-
-      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return old
-        return old.map(p =>
-          p.id === input.pedidoId
-            ? { ...p, estado_pago: input.estadoPago as PedidoDB['estado_pago'], monto_pagado: input.montoPagado ?? p.monto_pagado }
-            : p
-        )
-      })
-
-      return { previousPedidos }
-    },
-    onError: (_, __, context) => {
-      if (context?.previousPedidos) {
-        queryClient.setQueryData(pedidosKeys.lists(currentSucursalId), context.previousPedidos)
-      }
-    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
@@ -841,11 +798,6 @@ export function useEliminarPedidoMutation() {
     onSuccess: (_, { id }) => {
       // Remover de cache
       queryClient.removeQueries({ queryKey: pedidosKeys.detail(currentSucursalId, id) })
-      // Actualizar lista (optimistic for legacy query)
-      queryClient.setQueryData<PedidoDB[]>(pedidosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return []
-        return old.filter(p => p.id !== id)
-      })
       // Invalidar todas las queries de pedidos (list + paginated)
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // Invalidar productos (stock restaurado)
@@ -1275,6 +1227,18 @@ async function marcarEntregaYPagoMasivo(
   await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
 }
 
+export interface ResultadoEntregaYPagoMasivo {
+  /** Cuántos pedidos se entregaron con éxito (RPC marcar_entrega_y_pago_masivo). */
+  entregados: number;
+  /** Cuántos pedidos se cobraron con éxito (RPC marcar_pagos_masivo). */
+  cobrados: number;
+  /**
+   * Presente sólo si un paso falló. `paso` dice cuál RPC fue, para que el
+   * caller sepa qué SÍ entró y qué no — nunca "no se sabe qué pasó".
+   */
+  error?: { paso: 'entregar' | 'cobrar'; mensaje: string };
+}
+
 /**
  * Hook para entregar + cobrar multiples pedidos en un solo paso (con fecha opcional).
  * Invalida pedidos, clientes (cambia el saldo) y recorridos (la entrega puede
@@ -1297,17 +1261,33 @@ export function useEntregaYPagoMasivosMutation() {
       /** UUIDs de idempotencia (mig 167). Son dos RPCs distintas, un UUID cada una. */
       clientRequestIdCobrar?: string;
       clientRequestIdEntregar?: string;
-    }) => {
+    }): Promise<ResultadoEntregaYPagoMasivo> => {
+      // Entregar primero: es el paso que puede rechazar por el gate de
+      // rendición cerrada. Si se cobrara antes, un rechazo de la entrega
+      // dejaría esos cobros ya aplicados sin ninguna entrega — plata cobrada
+      // que el toast de error no mencionaría.
+      if (idsEntregar.length) {
+        try {
+          await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
+        } catch (e) {
+          return { entregados: 0, cobrados: 0, error: { paso: 'entregar', mensaje: (e as Error).message } }
+        }
+      }
       // Pedidos YA entregados (p.ej. entrega con salvedad impaga): solo se cobran,
       // sin re-entregar. marcar_pagos_masivo registra el pago real en `pagos` y no
       // toca estado / transportista_id / fecha_entrega.
-      if (idsCobrar.length) await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
-      // Pedidos NO entregados: entrega + cobro en un solo paso.
-      if (idsEntregar.length) {
-        await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
+      if (idsCobrar.length) {
+        try {
+          await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
+        } catch (e) {
+          return { entregados: idsEntregar.length, cobrados: 0, error: { paso: 'cobrar', mensaje: (e as Error).message } }
+        }
       }
+      return { entregados: idsEntregar.length, cobrados: idsCobrar.length }
     },
     onSuccess: () => {
+      // Corre siempre, incluso con resultado parcial: lo que sí entró tiene
+      // que reflejarse (saldo, stock, la parada cerrada en la ruta activa).
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
