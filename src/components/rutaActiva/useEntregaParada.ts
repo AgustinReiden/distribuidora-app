@@ -47,6 +47,7 @@ export interface DatosSalvedad {
   descripcion?: string;
   fotoUrl?: string;
   devolverStock: boolean;
+  clientRequestId?: string;
 }
 
 export interface UseEntregaParadaArgs {

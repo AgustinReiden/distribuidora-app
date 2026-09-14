@@ -4,6 +4,7 @@
  */
 import { jsPDF } from 'jspdf'
 import { TICKET } from './constants'
+import { lineaItemImpresion } from './utils/lineaItem'
 import {
   formatFecha,
   truncate,
@@ -15,6 +16,17 @@ import {
   setItalicStyle
 } from './utils'
 
+// Ancho util del ticket para los productos, en caracteres, a font 8. Se usa
+// solo para ESTIMAR el alto: el corte real lo hace splitTextToSize al dibujar.
+// Va corto a proposito (el ancho real entra ~44) para que la estimacion sobre y
+// no se dibuje fuera del papel, que es alto de pagina y no se imprime nunca.
+const CHARS_POR_LINEA = 38
+
+/** Lineas de producto de un pedido, en el mismo orden en que se dibujan. */
+function lineasProducto(pedido) {
+  return (pedido.items || []).map(item => lineaItemImpresion(item))
+}
+
 /**
  * Calcula la altura necesaria para el documento
  * @param {Array} pedidos - Lista de pedidos
@@ -25,7 +37,9 @@ function calcularAltura(pedidos) {
   pedidos.forEach(pedido => {
     totalHeight += 18 // Cabecera del pedido (cliente + direccion + telefono)
     if (pedido.cliente?.horarios_atencion) totalHeight += 3 // Horario
-    totalHeight += (pedido.items?.length || 0) * 5 // Productos
+    // Productos: un regalo de fraccion aclara la unidad y envuelve a 2-3 lineas.
+    totalHeight += lineasProducto(pedido)
+      .reduce((sum, linea) => sum + Math.max(Math.ceil(linea.length / CHARS_POR_LINEA), 1) * 4, 0)
     if (pedido.notas) totalHeight += 8
     totalHeight += 5 // Separador
   })
@@ -104,13 +118,17 @@ export function generarOrdenPreparacion(pedidos) {
 
     y += 2
 
-    // Lista de productos
+    // Lista de productos. La linea la arma lineaItemImpresion: marca el regalo,
+    // usa la descripcion de la promo y aclara la unidad (fardos vs sueltas) con
+    // el factor congelado del item. Sin eso el deposito prepara un regalo de
+    // 392 botellas como 392 unidades de venta.
     setNormalStyle(doc, 8)
-    pedido.items?.forEach((item) => {
-      const producto = item.producto?.nombre || 'Producto'
+    lineasProducto(pedido).forEach((linea) => {
       drawCheckbox(doc, margin, y - 2.5)
-      doc.text(`${item.cantidad}x ${truncate(producto, 25)}`, margin + 4, y)
-      y += 4
+      doc.splitTextToSize(linea, ticketWidth - margin * 2 - 4).forEach((line) => {
+        doc.text(line, margin + 4, y)
+        y += 4
+      })
     })
 
     y += 2
