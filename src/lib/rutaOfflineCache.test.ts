@@ -5,7 +5,7 @@
  * hoy es PEOR que no mostrar nada. El chofer sale a repartir con ella.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { guardarRuta, leerRuta, olvidarRuta } from './rutaOfflineCache';
+import { guardarRuta, leerRuta, olvidarRuta, olvidarTodasLasRutas } from './rutaOfflineCache';
 
 const HOY = '2026-08-19';
 const AYER = '2026-08-18';
@@ -92,5 +92,19 @@ describe('rutaOfflineCache', () => {
   it('sin transportista no escribe nada', () => {
     guardarRuta(1, '', HOY, ruta);
     expect(localStorage.length).toBe(0);
+  });
+
+  // Logout en un dispositivo compartido: puede quedar la ruta de un chofer
+  // anterior que ya cerró sesión sin pasar por acá.
+  it('olvidarTodasLasRutas borra las de cualquier sucursal o chofer', () => {
+    guardarRuta(1, 'chofer-a', HOY, ruta);
+    guardarRuta(2, 'chofer-b', HOY, ruta);
+    localStorage.setItem('otra-cosa', 'no tocar');
+
+    olvidarTodasLasRutas();
+
+    expect(leerRuta(1, 'chofer-a', HOY)).toBeNull();
+    expect(leerRuta(2, 'chofer-b', HOY)).toBeNull();
+    expect(localStorage.getItem('otra-cosa')).toBe('no tocar');
   });
 });

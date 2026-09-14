@@ -5,7 +5,8 @@ import type { UsuarioSucursalDB, RolUsuario } from '../types'
 import { logger } from '../utils/logger'
 import { esFalloDeRed } from '../utils/falloDeRed'
 
-const SUCURSAL_STORAGE_KEY = 'distribuidora_sucursal_activa'
+/** Exportada para que `useAuth` pueda leer la sucursal activa al hacer logout. */
+export const SUCURSAL_STORAGE_KEY = 'distribuidora_sucursal_activa'
 
 export interface SucursalInfo {
   id: number
