@@ -8,38 +8,12 @@ import {
   modalProveedorSchema,
   validateForm
 } from './schemas'
+import { normalizarNumero } from '../utils/normalizarNumero'
+import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 
 // ============================================
 // Tests para normalizarNumero (parseador regional)
 // ============================================
-
-// Reimplementar la función para tests
-const normalizarNumero = (valor) => {
-  if (valor === null || valor === undefined || valor === '') return 0
-  if (typeof valor === 'number') return isNaN(valor) ? 0 : valor
-
-  let str = String(valor).trim()
-  str = str.replace(/[$€£¥]/g, '').trim()
-
-  const ultimoPunto = str.lastIndexOf('.')
-  const ultimaComa = str.lastIndexOf(',')
-
-  // Formato europeo/argentino: 1.500,50
-  if (ultimaComa > ultimoPunto) {
-    str = str.replace(/\./g, '').replace(',', '.')
-  }
-  // Formato americano: 1,500.50
-  else if (ultimoPunto > ultimaComa && ultimaComa !== -1) {
-    str = str.replace(/,/g, '')
-  }
-  // Solo coma decimal: 1500,50
-  else if (ultimaComa !== -1 && ultimoPunto === -1) {
-    str = str.replace(',', '.')
-  }
-
-  const resultado = parseFloat(str)
-  return isNaN(resultado) ? 0 : resultado
-}
 
 describe('normalizarNumero - Parsing de números regionales', () => {
   describe('Formato europeo/argentino (coma decimal)', () => {
@@ -140,64 +114,18 @@ describe('Validación de stock offline', () => {
     { id: 'prod3', nombre: 'Producto 3', stock: 10 }
   ]
 
-  // Simular la lógica de validación de stock
-  const validarStockOffline = (items, productos, pedidosPendientes = []) => {
-    const itemsSinStock = []
-    const stockSnapshot = {}
-
-    // Calcular stock reservado por pedidos pendientes
-    const stockReservado = {}
-    pedidosPendientes.forEach(pedido => {
-      pedido.items?.forEach(item => {
-        stockReservado[item.productoId] = (stockReservado[item.productoId] || 0) + item.cantidad
-      })
-    })
-
-    for (const item of items) {
-      const producto = productos.find(p => p.id === item.productoId)
-      if (producto) {
-        const stockActual = producto.stock || 0
-        const reservado = stockReservado[item.productoId] || 0
-        const stockDisponible = stockActual - reservado
-
-        stockSnapshot[item.productoId] = {
-          stockAlMomento: stockActual,
-          reservadoOffline: reservado,
-          disponible: stockDisponible
-        }
-
-        if (item.cantidad > stockDisponible) {
-          itemsSinStock.push({
-            productoId: item.productoId,
-            nombre: producto.nombre,
-            solicitado: item.cantidad,
-            disponible: Math.max(0, stockDisponible)
-          })
-        }
-      }
-    }
-
-    return {
-      success: itemsSinStock.length === 0,
-      itemsSinStock,
-      stockSnapshot
-    }
-  }
-
   describe('Validación básica', () => {
     it('permite pedido con stock suficiente', () => {
       const items = [{ productoId: 'prod1', cantidad: 50 }]
-      const result = validarStockOffline(items, mockProductos)
+      const result = validarStockAntesDeEncolar(items, mockProductos)
 
-      expect(result.success).toBe(true)
       expect(result.itemsSinStock).toHaveLength(0)
     })
 
     it('rechaza pedido sin stock suficiente', () => {
       const items = [{ productoId: 'prod3', cantidad: 15 }]
-      const result = validarStockOffline(items, mockProductos)
+      const result = validarStockAntesDeEncolar(items, mockProductos)
 
-      expect(result.success).toBe(false)
       expect(result.itemsSinStock).toHaveLength(1)
       expect(result.itemsSinStock[0].solicitado).toBe(15)
       expect(result.itemsSinStock[0].disponible).toBe(10)
@@ -205,9 +133,9 @@ describe('Validación de stock offline', () => {
 
     it('permite pedido que usa exactamente todo el stock', () => {
       const items = [{ productoId: 'prod3', cantidad: 10 }]
-      const result = validarStockOffline(items, mockProductos)
+      const result = validarStockAntesDeEncolar(items, mockProductos)
 
-      expect(result.success).toBe(true)
+      expect(result.itemsSinStock).toHaveLength(0)
     })
   })
 
@@ -218,9 +146,9 @@ describe('Validación de stock offline', () => {
         { items: [{ productoId: 'prod2', cantidad: 25 }] }
       ]
 
-      const result = validarStockOffline(items, mockProductos, pedidosPendientes)
+      const result = validarStockAntesDeEncolar(items, mockProductos, pedidosPendientes)
 
-      expect(result.success).toBe(false)
+      expect(result.itemsSinStock).toHaveLength(1)
       expect(result.itemsSinStock[0].disponible).toBe(25) // 50 - 25 reservado
     })
 
@@ -231,9 +159,9 @@ describe('Validación de stock offline', () => {
         { items: [{ productoId: 'prod1', cantidad: 25 }] }
       ]
 
-      const result = validarStockOffline(items, mockProductos, pedidosPendientes)
+      const result = validarStockAntesDeEncolar(items, mockProductos, pedidosPendientes)
 
-      expect(result.success).toBe(false)
+      expect(result.itemsSinStock).toHaveLength(1)
       expect(result.stockSnapshot['prod1'].reservadoOffline).toBe(55)
       expect(result.stockSnapshot['prod1'].disponible).toBe(45)
     })
@@ -246,7 +174,7 @@ describe('Validación de stock offline', () => {
         { productoId: 'prod2', cantidad: 5 }
       ]
 
-      const result = validarStockOffline(items, mockProductos)
+      const result = validarStockAntesDeEncolar(items, mockProductos)
 
       expect(result.stockSnapshot['prod1']).toEqual({
         stockAlMomento: 100,

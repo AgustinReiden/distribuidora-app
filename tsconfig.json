@@ -50,8 +50,6 @@
   "exclude": [
     "node_modules",
     "dist",
-    "build",
-    "**/*.spec.ts",
-    "**/*.test.ts"
+    "build"
   ]
 }

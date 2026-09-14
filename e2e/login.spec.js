@@ -24,15 +24,24 @@ test.describe('Login', () => {
   })
 
   test('debe mostrar error con credenciales inválidas', async ({ page }) => {
-    // Ingresar credenciales inválidas
+    // Mockear el 400 de Supabase Auth en vez de pegarle a una red real: así
+    // el resultado es determinístico y no depende del timeout de 15s de
+    // AUTH_REQUEST_TIMEOUT_MS (useAuth.tsx) para asomar cualquier mensaje.
+    // LoginScreen.tsx sólo distingue "contiene 'perfil'" vs el resto, así que
+    // cualquier error de login que no sea ese cae siempre en el mismo texto:
+    // ese es el mensaje exacto que se puede afirmar acá.
+    await page.route('**/auth/v1/token**', route => route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid login credentials' })
+    }))
+
     await page.locator('#email').fill('test@invalid.com')
     await page.locator('#password').fill('wrongpassword')
 
-    // Intentar login
     await page.getByRole('button', { name: /ingresar/i }).click()
 
-    // Verificar mensaje de error (auth timeout is 15s, plus render time)
-    await expect(page.getByText(/incorrectos|inválido|error|timed out/i)).toBeVisible({ timeout: 20000 })
+    await expect(page.getByText('Email o contraseña incorrectos')).toBeVisible({ timeout: 5000 })
   })
 
   test('debe validar campo de email vacío', async ({ page }) => {

@@ -1,7 +1,17 @@
 name: Deploy
 
+# Coolify hace build del Dockerfile con `npm run build` (vite build, sin tsc):
+# el trigger de este workflow es el único gate real entre un push a `main` y
+# producción, así que tiene que esperar a que ci.yml termine en verde. Antes
+# corría en paralelo a ci.yml (mismo `on: push branches: [main]`, sin `needs`
+# ni `workflow_run`), así que un commit que rompía typecheck/lint/tests podía
+# llegar a Coolify de todos modos si el webhook respondía antes de que ci.yml
+# terminara.
+
 on:
-  push:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -13,6 +23,9 @@ on:
         options:
           - staging
           - production
+
+permissions:
+  contents: read
 
 env:
   NODE_VERSION: '20'
@@ -26,7 +39,7 @@ jobs:
   deploy-coolify:
     name: Deploy to Coolify
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production'
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: production
 

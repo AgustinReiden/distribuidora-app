@@ -9,6 +9,7 @@ import type { ChangeEvent, DragEvent } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download } from 'lucide-react';
 const loadExcelUtils = () => import('../../utils/excel');
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
+import { normalizarNumero } from '../../utils/normalizarNumero';
 import type { ProductoDB } from '../../types';
 import type { CompraItemForm } from './ModalCompra.reducer';
 
@@ -43,31 +44,6 @@ interface ColumnasMap {
   costoUnitario: string[];
   bonificacion: string[];
 }
-
-/**
- * Normaliza un valor numérico desde diferentes formatos regionales
- */
-const normalizarNumero = (valor: string | number | null | undefined): number => {
-  if (valor === null || valor === undefined || valor === '') return 0;
-  if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
-
-  let str = String(valor).trim();
-  str = str.replace(/[$€£¥]/g, '').trim();
-
-  const ultimoPunto = str.lastIndexOf('.');
-  const ultimaComa = str.lastIndexOf(',');
-
-  if (ultimaComa > ultimoPunto) {
-    str = str.replace(/\./g, '').replace(',', '.');
-  } else if (ultimoPunto > ultimaComa && ultimaComa !== -1) {
-    str = str.replace(/,/g, '');
-  } else if (ultimaComa !== -1 && ultimoPunto === -1) {
-    str = str.replace(',', '.');
-  }
-
-  const resultado = parseFloat(str);
-  return isNaN(resultado) ? 0 : resultado;
-};
 
 export default function ModalImportarCompra({ productos, onImportar, onClose }: ModalImportarCompraProps) {
   const [archivo, setArchivo] = useState<File | null>(null);

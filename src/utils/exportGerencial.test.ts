@@ -92,8 +92,8 @@ describe('hojasResumen — los KPIs van transpuestos', () => {
   it('usa los MISMOS fallbacks que la pantalla para los KPIs opcionales', () => {
     // `margen_real` y `venta_real` no vienen en respuestas cacheadas viejas.
     const sinOpcionales = reporte()
-    delete (sinOpcionales.kpis as Record<string, unknown>).margen_real
-    delete (sinOpcionales.kpis as Record<string, unknown>).venta_real
+    delete (sinOpcionales.kpis as unknown as Record<string, unknown>).margen_real
+    delete (sinOpcionales.kpis as unknown as Record<string, unknown>).venta_real
 
     const info = Object.fromEntries(
       hojasResumen(sinOpcionales)[1].data.map(f => [f.Indicador, f.Valor]),
@@ -214,7 +214,7 @@ describe('hojasBonificaciones — agrupadas por promoción, como en pantalla', (
 
   it('con bonif_promos ausente tampoco rompe', () => {
     const r = reporte()
-    delete (r as Record<string, unknown>).bonif_promos
+    delete (r as unknown as Record<string, unknown>).bonif_promos
     expect(hojasBonificaciones(r)).toEqual([])
   })
 })

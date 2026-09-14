@@ -56,9 +56,16 @@ export default defineConfig({
     }
   ],
 
-  /* Servidor de desarrollo */
+  /* Servidor de la app bajo test.
+   *
+   * En CI se sirve el dist/ ya buildeado (bajado como artifact del job
+   * `build`) con `vite preview`, no `vite dev`: el service worker sólo se
+   * registra en un build de producción (`registrarServiceWorker` corta en
+   * `!import.meta.env.PROD`, ver src/utils/serviceWorker.ts), así que un E2E
+   * contra el dev server nunca lo ejercita. Local sigue usando `npm run dev`
+   * para no exigir un build previo en cada corrida manual. */
   webServer: {
-    command: 'npm run dev',
+    command: process.env.CI ? 'npx vite preview --port 5173 --strictPort' : 'npm run dev',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120000

@@ -623,3 +623,42 @@ export async function discardFailedOperations(): Promise<number> {
 }
 
 export default db
+
+/**
+ * Puente para los E2E de Playwright.
+ *
+ * `page.evaluate(() => import('/src/lib/offlineDb.ts'))` sólo funciona
+ * contra `vite dev`, que sirve las fuentes por ruta. El job e2e de CI corre
+ * contra el `dist/` buildeado vía `vite preview` (playwright.config.ts) —
+ * necesario para que el service worker se registre — y ahí esa ruta no
+ * existe: el módulo está bundleado y minificado dentro de un chunk con hash.
+ * Exponerlo acá le da a los tests un punto de entrada estable sin importar
+ * qué server los sirve. No es una superficie nueva: cualquiera con devtools
+ * ya podía llamar a estas funciones importando el módulo a mano.
+ */
+if (typeof window !== 'undefined') {
+  (window as unknown as { __offlineDb?: Record<string, unknown> }).__offlineDb = {
+    queueOperation,
+    getPendingOperations,
+    markAsProcessing,
+    markAsCompleted,
+    markAsFailed,
+    getOperationCounts,
+    cleanupOldOperations,
+    cacheData,
+    getCachedData,
+    invalidateCache,
+    cleanupExpiredCache,
+    markRouteAsUsed,
+    updateSavedRoute,
+    deleteSavedRoute,
+    isDbAvailable,
+    getDbStats,
+    clearAllData,
+    getFailedOperations,
+    retryFailedOperation,
+    retryAllFailedOperations,
+    discardFailedOperations,
+    db,
+  }
+}

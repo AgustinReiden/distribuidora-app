@@ -13,6 +13,7 @@ import type { MermaFormInput, ProductoDB } from '../types'
 import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoMontoMinimo } from '../utils/montoMinimo'
+import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 import { leerMontoMinimoCacheado } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
 import { nuevoRequestId, idDeInstalacion } from '../utils/idempotencia'
@@ -451,42 +452,13 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     }
 
     // Validar stock si se proporciona lista de productos
+    // Usar ref para evitar dependencia en el array de callbacks
     if (validarStock && productos.length > 0 && pedidoData.items?.length > 0) {
-      const itemsSinStock: ItemSinStock[] = []
-      const stockSnapshot: StockSnapshot = {}
-
-      // Calcular stock considerando pedidos offline pendientes
-      // Usar ref para evitar dependencia en el array de callbacks
-      const stockReservado: Record<string, number> = {}
-      pedidosPendientesRef.current.forEach(pedido => {
-        pedido.items?.forEach(item => {
-          stockReservado[item.productoId] = (stockReservado[item.productoId] || 0) + item.cantidad
-        })
-      })
-
-      for (const item of pedidoData.items) {
-        const producto = productos.find(p => p.id === item.productoId)
-        if (producto) {
-          const stockActual = producto.stock || 0
-          const reservado = stockReservado[item.productoId] || 0
-          const stockDisponible = stockActual - reservado
-
-          stockSnapshot[item.productoId] = {
-            stockAlMomento: stockActual,
-            reservadoOffline: reservado,
-            disponible: stockDisponible
-          }
-
-          if (item.cantidad > stockDisponible) {
-            itemsSinStock.push({
-              productoId: item.productoId,
-              nombre: producto.nombre || item.nombre || 'Producto desconocido',
-              solicitado: item.cantidad,
-              disponible: Math.max(0, stockDisponible)
-            })
-          }
-        }
-      }
+      const { itemsSinStock, stockSnapshot } = validarStockAntesDeEncolar(
+        pedidoData.items,
+        productos,
+        pedidosPendientesRef.current
+      )
 
       if (itemsSinStock.length > 0) {
         return {

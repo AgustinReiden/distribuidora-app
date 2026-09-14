@@ -6,10 +6,10 @@ import { traerTodo, traerTodoVerificado, PAGINA_SUPABASE, TOPE_SEGURIDAD } from 
  * y es thenable. Cada llamada a la factory tiene que dar un builder nuevo,
  * igual que en la vida real.
  */
-function fakeTabla(filas: unknown[], opts: { error?: { message: string } } = {}) {
+function fakeTabla<T>(filas: T[], opts: { error?: { message: string } } = {}) {
   const rangos: Array<[number, number]> = []
   const factory = () => ({
-    range: (desde: number, hasta: number) => {
+    range: (desde: number, hasta: number): Promise<{ data: T[] | null; error: { message: string } | null }> => {
       rangos.push([desde, hasta])
       if (opts.error) return Promise.resolve({ data: null, error: opts.error })
       return Promise.resolve({ data: filas.slice(desde, hasta + 1), error: null })
