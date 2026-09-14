@@ -74,7 +74,7 @@ export default function ClientesContainer(): React.ReactElement {
   const [verInactivos, setVerInactivos] = useState(false)
 
   // Queries
-  const { data: clientes = [], isLoading } = useClientesQuery({ includeInactivos: verInactivos })
+  const { data: clientes = [], isLoading, isError, refetch } = useClientesQuery({ includeInactivos: verInactivos })
   // includeInactive: true para no perder el texto cuando una zona se desactiva
   // entre ediciones del cliente — el espejo legacy debe seguir resolviendo
   // aunque la zona ya no esté disponible en el selector activo.
@@ -511,6 +511,8 @@ export default function ClientesContainer(): React.ReactElement {
         <VistaClientes
           clientes={clientes}
           loading={isLoading}
+          error={isError}
+          onRetry={refetch}
           isAdmin={isAdmin}
           isPreventista={isPreventista}
           isEncargado={isEncargado}

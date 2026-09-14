@@ -200,6 +200,8 @@ export default function PedidosContainer(): React.ReactElement {
   const {
     data: paginatedResult,
     isLoading: loadingPedidos,
+    isError: errorPedidos,
+    refetch: refetchPedidos,
     dataUpdatedAt: pedidosActualizadosAt,
   } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
@@ -1978,6 +1980,8 @@ export default function PedidosContainer(): React.ReactElement {
           transportistas={transportistas}
           usuarios={usuarios}
           loading={loadingPedidos}
+          error={errorPedidos}
+          onRetry={refetchPedidos}
           exportando={exportando}
           onBusquedaChange={handleBusquedaChange}
           onFiltrosChange={handleFiltrosChange}
