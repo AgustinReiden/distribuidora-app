@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { supabase, setSucursalHeader } from '../lib/supabase'
 import type { UsuarioSucursalDB, RolUsuario } from '../types'
 import { logger } from '../utils/logger'
+import { esFalloDeRed } from '../utils/falloDeRed'
 
 /** Exportada para que `useAuth` pueda leer la sucursal activa al hacer logout. */
 export const SUCURSAL_STORAGE_KEY = 'distribuidora_sucursal_activa'
@@ -20,6 +21,13 @@ export interface SucursalInfo {
 }
 
 export interface SucursalContextValue {
+  /**
+   * Dueño de la sesión. Vive acá porque es el dato que necesita todo lo que
+   * está aislado por usuario **además** de por sucursal — hoy, la cola offline
+   * de IndexedDB, que es del teléfono y no de la sesión: sin saber quién está
+   * adentro, el usuario B veía y replayaba los pedidos encolados por A.
+   */
+  userId: string | null
   currentSucursalId: number | null
   currentSucursalNombre: string | null
   currentSucursalRol: RolUsuario | null
@@ -29,6 +37,42 @@ export interface SucursalContextValue {
   loading: boolean
   hasMultipleSucursales: boolean
   switchSucursal: (sucursalId: number) => Promise<void>
+}
+
+/**
+ * Últimas sucursales que el servidor confirmó para este usuario.
+ *
+ * Este contexto bloquea el arranque: si la consulta falla, `sucursales` queda
+ * vacío y la app muestra "sin sucursal asignada". Sin señal eso convertía un
+ * arranque offline en un cartel de error, con `MainApp` montado pero inservible
+ * — justo el escenario para el que existe toda la maquinaria offline.
+ *
+ * Solo se usa cuando la consulta falló por RED. Si el servidor contesta que el
+ * usuario no tiene sucursales, eso es una respuesta y se respeta: el cartel es
+ * correcto (ver C6, que reemplazó el fallback fantasma a la sucursal id=1).
+ */
+const CLAVE_SUCURSALES_CACHEADAS = 'distribuidora:ultimas-sucursales'
+
+function guardarSucursalesCacheadas(userId: string, sucursales: SucursalInfo[]): void {
+  try {
+    localStorage.setItem(CLAVE_SUCURSALES_CACHEADAS, JSON.stringify({ userId, sucursales }))
+  } catch {
+    // Sin storage se arranca sin caché: es una mejora, no un requisito.
+  }
+}
+
+function leerSucursalesCacheadas(userId: string): SucursalInfo[] | null {
+  try {
+    const crudo = localStorage.getItem(CLAVE_SUCURSALES_CACHEADAS)
+    if (!crudo) return null
+    const guardado = JSON.parse(crudo) as { userId?: string; sucursales?: SucursalInfo[] }
+    // De ESTE usuario y de nadie más: en un teléfono compartido, las sucursales
+    // del anterior le darían a este acceso a un tenant que no es suyo.
+    if (guardado?.userId !== userId || !Array.isArray(guardado.sucursales)) return null
+    return guardado.sucursales.length > 0 ? guardado.sucursales : null
+  } catch {
+    return null
+  }
 }
 
 const SIN_ROLES_EXTRA: RolUsuario[] = []
@@ -58,6 +102,32 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
     }
 
     let cancelled = false
+
+    /** Elige la sucursal activa de una lista ya resuelta y setea el header. */
+    const activar = (lista: SucursalInfo[], idPorDefecto?: number) => {
+      setSucursales(lista)
+      const storedId = localStorage.getItem(SUCURSAL_STORAGE_KEY)
+      const storedNum = storedId ? parseInt(storedId, 10) : null
+      const activeId = storedNum && lista.some(s => s.id === storedNum)
+        ? storedNum
+        : (idPorDefecto ?? lista[0].id)
+      setCurrentSucursalId(activeId)
+      setSucursalHeader(activeId)
+      localStorage.setItem(SUCURSAL_STORAGE_KEY, String(activeId))
+    }
+
+    /**
+     * Sin red: se sigue con las sucursales que el servidor confirmó la última
+     * vez. Si el fallo NO es de red, no se toca nada — que el usuario no tenga
+     * sucursales es una respuesta válida y el cartel que sigue es correcto.
+     */
+    const activarDesdeCache = (err: unknown) => {
+      if (!esFalloDeRed(err)) return
+      const cacheadas = leerSucursalesCacheadas(userId)
+      if (!cacheadas) return
+      logger.warn('[SucursalContext] Sin red: se usan las últimas sucursales conocidas')
+      activar(cacheadas)
+    }
 
     const loadSucursales = async () => {
       setLoading(true)
@@ -91,7 +161,10 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
 
         if (error) {
           logger.error('[SucursalContext] Error loading sucursales:', error)
-          if (!cancelled) setLoading(false)
+          if (!cancelled) {
+            activarDesdeCache(error)
+            setLoading(false)
+          }
           return
         }
 
@@ -119,27 +192,14 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
           }
         })
 
-        setSucursales(mapped)
+        guardarSucursalesCacheadas(userId, mapped)
 
         // Determine active sucursal: check localStorage first, then es_default, then first
-        const storedId = localStorage.getItem(SUCURSAL_STORAGE_KEY)
-        const storedNum = storedId ? parseInt(storedId, 10) : null
         const defaultEntry = (data as unknown as UsuarioSucursalDB[]).find(us => us.es_default)
-
-        let activeId: number
-        if (storedNum && mapped.some(s => s.id === storedNum)) {
-          activeId = storedNum
-        } else if (defaultEntry) {
-          activeId = defaultEntry.sucursal_id
-        } else {
-          activeId = mapped[0].id
-        }
-
-        setCurrentSucursalId(activeId)
-        setSucursalHeader(activeId)
-        localStorage.setItem(SUCURSAL_STORAGE_KEY, String(activeId))
+        activar(mapped, defaultEntry?.sucursal_id)
       } catch (err) {
         logger.error('[SucursalContext] Exception loading sucursales:', err)
+        if (!cancelled) activarDesdeCache(err)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -178,6 +238,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
   const value = useMemo<SucursalContextValue>(() => {
     const currentSucursal = sucursales.find(s => s.id === currentSucursalId)
     return {
+      userId,
       currentSucursalId,
       currentSucursalNombre: currentSucursal?.nombre ?? null,
       currentSucursalRol: currentSucursal?.rol ?? globalRol,
@@ -187,7 +248,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
       hasMultipleSucursales: sucursales.length > 1,
       switchSucursal,
     }
-  }, [currentSucursalId, sucursales, loading, globalRol, switchSucursal])
+  }, [userId, currentSucursalId, sucursales, loading, globalRol, switchSucursal])
 
   return (
     <SucursalContext.Provider value={value}>

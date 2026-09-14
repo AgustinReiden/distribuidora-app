@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { pedidosKeys } from './usePedidosQuery'
+import { fechaLocalISO } from '../../utils/formatters'
 
 /**
  * Días que un pedido puede estar `asignado` antes de considerarse trabado.
@@ -48,7 +49,10 @@ function diasDesde(fecha: string | null): number {
 async function fetchPedidosTrabados(sucursalId: number | null): Promise<PedidoTrabado[]> {
   const corte = new Date()
   corte.setDate(corte.getDate() - DIAS_PARA_CONSIDERAR_TRABADO)
-  const corteISO = corte.toISOString().slice(0, 10)
+  // fechaLocalISO, no toISOString(): el resto del área (fecha del pedido, del
+  // filtro, de la entrega) usa hora local. toISOString() es UTC y corre el
+  // corte hasta 3hs, moviendo pedidos de un lado al otro cerca de medianoche.
+  const corteISO = fechaLocalISO(corte)
 
   let query = supabase
     .from('pedidos')

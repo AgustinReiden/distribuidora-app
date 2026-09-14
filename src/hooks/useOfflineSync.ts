@@ -15,6 +15,10 @@ import { useSucursal } from '../contexts/SucursalContext'
 import { motivoMontoMinimo } from '../utils/montoMinimo'
 import { leerMontoMinimoCacheado } from './queries/usePoliticasComercialesQuery'
 import { setSucursalHeader, getSucursalHeader } from '../lib/supabase'
+import { nuevoRequestId, idDeInstalacion } from '../utils/idempotencia'
+import { retryWithBackoff, isTransientNetworkError } from '../utils/retryWithBackoff'
+import { pareceSesionVencida, renovarSesion } from '../utils/sesionVencida'
+import { getErrorMessage } from '../utils/errorHandling'
 
 /**
  * La cola vive en IndexedDB, pero `pedidosPendientes` es estado de React por
@@ -224,6 +228,69 @@ function operationToPedidoOffline(op: PendingOperation): PedidoOffline {
 }
 
 /**
+ * Clave de idempotencia con la que el replay le habla a
+ * `crear_pedido_idempotente` (mig 071).
+ *
+ * EL BUG QUE ARREGLA. Antes era `op_${op.id}`, y `op.id` es el autoincrement de
+ * Dexie: arranca en 1 en cada instalación. La RPC busca `offline_id` en TODA la
+ * tabla `pedidos` (índice único global, SECURITY DEFINER), así que el primer
+ * pedido offline de cualquier teléfono era `op_1`. El segundo teléfono que
+ * sincronizaba recibía el pedido AJENO con `idempotente: true`, lo daba por
+ * sincronizado y su pedido no quedaba en ningún lado. Lo mismo al purgar
+ * IndexedDB: el contador vuelve a 1 y choca con lo ya sincronizado.
+ *
+ * Ahora la cola acuña un UUID al encolar (`offlineUuid`). Para lo que ya estaba
+ * encolado sin UUID se usa el dueño como prefijo: el usuario si la operación lo
+ * registró, y si no la instalación, que también es única por dispositivo. Lo
+ * que no se puede cambiar es que sea ESTABLE entre reintentos: si cambiara,
+ * cada reintento crearía un pedido nuevo.
+ */
+export function claveIdempotencia(op: PendingOperation): string {
+  const uuid = (op.payload as { offlineUuid?: unknown }).offlineUuid
+  if (typeof uuid === 'string' && uuid.length > 0) return uuid
+  return `${op.userId || idDeInstalacion()}:op_${op.id}`
+}
+
+/**
+ * Segunda defensa: una respuesta `idempotente: true` dice "ya tenía un pedido
+ * con esa clave", pero no que ese pedido sea el nuestro. Antes de dar la
+ * operación por sincronizada se compara contra lo encolado.
+ *
+ * Devuelve el motivo por el que NO hay que marcarla completada, o null si el
+ * pedido del servidor es efectivamente este. `terminal` distingue el caso
+ * probado —es de otro, reintentar no lo va a cambiar— del no verificable, que
+ * puede ser una lectura que falló y sí merece otro intento.
+ */
+export function verificarRespuestaIdempotente(
+  resultado: unknown,
+  payload: Record<string, unknown>
+): { motivo: string; terminal: boolean } | null {
+  const r = resultado as {
+    idempotente?: boolean
+    clienteId?: string | number | null
+    total?: number | null
+  } | null
+
+  if (!r || r.idempotente !== true) return null
+
+  if (r.clienteId == null || typeof r.total !== 'number') {
+    return {
+      motivo: 'El servidor dice que este pedido ya existía, pero no se pudo leer para verificar que sea el mismo. No se marcó como sincronizado.',
+      terminal: false
+    }
+  }
+
+  const mismoCliente = String(r.clienteId) === String(payload.clienteId)
+  const mismoTotal = Math.abs(r.total - (Number(payload.total) || 0)) < 0.01
+  if (mismoCliente && mismoTotal) return null
+
+  return {
+    motivo: `La clave de sincronización de este pedido ya la tiene otro pedido en el servidor (cliente ${r.clienteId}, total ${r.total}). No se sincronizó para no pisarlo.`,
+    terminal: true
+  }
+}
+
+/**
  * Convierte una PendingOperation de IndexedDB a MermaOffline
  */
 function operationToMermaOffline(op: PendingOperation): MermaOffline {
@@ -254,9 +321,15 @@ export function useOfflineSync(): UseOfflineSyncReturn {
 
   // Multi-tenant: track the active sucursal so we can tag queued operations
   // and reset the X-Sucursal-ID header after per-op replay.
-  const { currentSucursalId } = useSucursal()
+  //
+  // `userId` es el dueño de la cola. IndexedDB es del teléfono, no de la
+  // sesión: en un teléfono compartido, sin esto el usuario B veía y replayaba
+  // los pedidos de A (y el guard de la mig 219 se los rechazaba con 42501).
+  const { currentSucursalId, userId } = useSucursal()
   const currentSucursalIdRef = useRef<number | null>(currentSucursalId)
   currentSucursalIdRef.current = currentSucursalId
+  const userIdRef = useRef<string | null>(userId ?? null)
+  userIdRef.current = userId ?? null
 
   // Ref para evitar race conditions en sincronización
   const sincronizandoRef = useRef<boolean>(false)
@@ -280,7 +353,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
    */
   const loadPendingOperations = useCallback(async (): Promise<void> => {
     try {
-      const operations = await getPendingOperations(100)
+      const operations = await getPendingOperations(100, userId ?? null, currentSucursalId)
 
       // Verificar si el componente sigue montado antes de actualizar estado
       if (!isMountedRef.current) return
@@ -298,12 +371,10 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     } catch (err) {
       logger.error('[useOfflineSync] Error cargando operaciones pendientes:', err)
     }
-  }, [])
+  }, [userId, currentSucursalId])
 
-  // Cargar operaciones pendientes al montar
   useEffect(() => {
     isMountedRef.current = true
-    void loadPendingOperations()
 
     // Limpieza periódica de operaciones antiguas (mayores a 7 días)
     cleanupOldOperations(7).catch(err => {
@@ -313,6 +384,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     return () => {
       isMountedRef.current = false
     }
+  }, [])
+
+  // Releer la cola al montar y cada vez que cambia de dueño (login, logout,
+  // cambio de sucursal): lo que se ve tiene que ser lo de la sesión de ahora.
+  useEffect(() => {
+    void loadPendingOperations()
   }, [loadPendingOperations])
 
   // Escuchar cambios de conexión
@@ -423,6 +500,11 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       pedidoData = { ...pedidoData, stockSnapshot }
     }
 
+    // Clave de idempotencia del alta, acuñada ACÁ y no en el replay: tiene que
+    // ser única en el mundo (la busca `crear_pedido_idempotente` en toda la
+    // tabla `pedidos`) y estable entre reintentos. Ver `claveIdempotencia`.
+    const offlineUuid = nuevoRequestId()
+
     // Generar offlineId temporal para el objeto de retorno
     const tempOfflineId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const nuevoPedido: PedidoOffline = {
@@ -440,10 +522,11 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         'CREATE_PEDIDO' as OperationType,
         {
           ...pedidoData,
+          offlineUuid,
           tempOfflineId,
           timestamp: Date.now()
         },
-        pedidoData.usuarioId,
+        pedidoData.usuarioId ?? userIdRef.current ?? undefined,
         undefined,
         currentSucursalIdRef.current ?? undefined
       )
@@ -485,6 +568,10 @@ export function useOfflineSync(): UseOfflineSyncReturn {
    */
   const guardarMermaOffline = useCallback(
     async (mermaData: MermaFormInput): Promise<MermaOffline> => {
+      // Misma identidad estable que el pedido (ver `claveIdempotencia`): hoy
+      // `mermas_stock` no tiene columna de idempotencia, pero la operación sí
+      // necesita una identidad propia que no dependa del autoincrement de Dexie.
+      const offlineUuid = nuevoRequestId()
       const tempOfflineId = `offline_merma_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       const nuevaMerma: MermaOffline = {
         ...mermaData,
@@ -504,10 +591,13 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           'CREATE_MERMA' as OperationType,
           {
             ...mermaData,
+            offlineUuid,
             tempOfflineId,
             timestamp: Date.now()
           },
-          undefined,
+          // Hasta ahora las mermas se encolaban sin dueño, así que quedaban
+          // visibles para cualquiera que entrara después en el mismo teléfono.
+          userIdRef.current ?? undefined,
           undefined,
           currentSucursalIdRef.current ?? undefined
         )
@@ -627,8 +717,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     sincronizandoRef.current = true
     setSincronizando(true)
 
-    // Obtener operaciones pendientes desde IndexedDB
-    const operations = await getPendingOperations(100)
+    // Obtener operaciones pendientes desde IndexedDB (solo las de esta sesión:
+    // usuario y sucursal activos)
+    const operations = await getPendingOperations(100, userIdRef.current, currentSucursalIdRef.current)
     const pedidoOps = operations.filter(op => op.type === 'CREATE_PEDIDO')
 
     if (pedidoOps.length === 0) {
@@ -679,37 +770,75 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           }
         }
 
+        const input = {
+          clienteId: payload.clienteId as string | number,
+          items: payload.items as PedidoOfflineItem[],
+          total: payload.total as number,
+          usuarioId: payload.usuarioId as string | undefined,
+          notas: payload.notas as string | undefined,
+          formaPago: payload.formaPago as string | undefined,
+          // Un pedido encolado nunca declara cobro (ver PedidoOffline.montoPagado):
+          // el replay no registra pagos, asi que 'pagado'/'parcial' entraria
+          // impago igual. Se fuerza el unico estado que no miente.
+          estadoPago: 'pendiente',
+          // Estos cuatro iban en `undefined` y por eso el pedido sincronizado
+          // se fechaba el dia del replay, caia siempre en ZZ, perdia el
+          // desglose fiscal y se le acreditaba a quien sincronizara.
+          fecha: payload.fecha as string | undefined,
+          fechaEntregaProgramada: payload.fechaEntregaProgramada as string | undefined,
+          tipoFactura: payload.tipoFactura as 'ZZ' | 'FC' | undefined,
+          totalNeto: payload.totalNeto as number | undefined,
+          totalIva: payload.totalIva as number | undefined,
+          preventistaId: payload.preventistaId as string | null | undefined,
+          origenes: payload.origenes as OrigenPrecioItem[] | undefined,
+          // Clave de idempotencia estable y única por operación encolada.
+          offlineId: claveIdempotencia(op),
+        }
+
         try {
-          await crearPedidoFn({
-            clienteId: payload.clienteId as string | number,
-            items: payload.items as PedidoOfflineItem[],
-            total: payload.total as number,
-            usuarioId: payload.usuarioId as string | undefined,
-            notas: payload.notas as string | undefined,
-            formaPago: payload.formaPago as string | undefined,
-            // Un pedido encolado nunca declara cobro (ver PedidoOffline.montoPagado):
-            // el replay no registra pagos, asi que 'pagado'/'parcial' entraria
-            // impago igual. Se fuerza el unico estado que no miente.
-            estadoPago: 'pendiente',
-            // Estos cuatro iban en `undefined` y por eso el pedido sincronizado
-            // se fechaba el dia del replay, caia siempre en ZZ, perdia el
-            // desglose fiscal y se le acreditaba a quien sincronizara.
-            fecha: payload.fecha as string | undefined,
-            fechaEntregaProgramada: payload.fechaEntregaProgramada as string | undefined,
-            tipoFactura: payload.tipoFactura as 'ZZ' | 'FC' | undefined,
-            totalNeto: payload.totalNeto as number | undefined,
-            totalIva: payload.totalIva as number | undefined,
-            preventistaId: payload.preventistaId as string | null | undefined,
-            origenes: payload.origenes as OrigenPrecioItem[] | undefined,
-            // Clave de idempotencia estable por operación encolada (P1-2)
-            offlineId: `op_${op.id}`,
-          })
+          // El primer pedido de la cola suele pegarle a un JWT vencido: al
+          // reconectar, el token se renovó recién o no llegó a renovarse, y el
+          // RPC contesta "No se pudo determinar la sucursal activa". Eso no es
+          // un fallo del pedido —el RPC valida la sucursal antes de escribir
+          // nada— así que se renueva la sesión y se reintenta sin gastar uno de
+          // los reintentos de la cola.
+          //
+          // Los fallos de red sí se reintentan con backoff acá adentro, que es
+          // donde corresponde: el alta es idempotente por `offlineId`, y un
+          // blip de señal —lo normal en la calle— no tiene que consumir los 5
+          // reintentos de la operación en un par de segundos.
+          let yaRenovo = false
+          const resultado = await retryWithBackoff(
+            async () => {
+              try {
+                return await crearPedidoFn(input)
+              } catch (error) {
+                if (!yaRenovo && pareceSesionVencida(getErrorMessage(error))) {
+                  yaRenovo = true
+                  if (await renovarSesion()) {
+                    return crearPedidoFn(input)
+                  }
+                }
+                throw error
+              }
+            },
+            { shouldRetry: isTransientNetworkError },
+          )
+
+          const sospecha = verificarRespuestaIdempotente(resultado, payload)
+          if (sospecha) {
+            await markAsFailed(op.id!, sospecha.motivo, { terminal: sospecha.terminal })
+            logger.error(`[useOfflineSync] Pedido ${pedido.offlineId}: ${sospecha.motivo}`)
+            errores.push({ pedido, error: sospecha.motivo })
+            continue
+          }
+
           await markAsCompleted(op.id!)
           sincronizados++
         } catch (error) {
-          const err = error as Error
-          await markAsFailed(op.id!, err.message)
-          errores.push({ pedido, error: err.message })
+          const mensaje = getErrorMessage(error)
+          await markAsFailed(op.id!, mensaje)
+          errores.push({ pedido, error: mensaje })
         }
       }
     } finally {
@@ -749,8 +878,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     sincronizandoRef.current = true
     setSincronizando(true)
 
-    // Obtener operaciones pendientes desde IndexedDB
-    const operations = await getPendingOperations(100)
+    // Obtener operaciones pendientes desde IndexedDB (solo las de esta sesión:
+    // usuario y sucursal activos)
+    const operations = await getPendingOperations(100, userIdRef.current, currentSucursalIdRef.current)
     const mermaOps = operations.filter(op => op.type === 'CREATE_MERMA')
 
     if (mermaOps.length === 0) {
@@ -780,13 +910,26 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         setSucursalHeader(op.sucursalId)
 
         try {
-          await registrarMermaFn(payload)
+          // Sin backoff por red, a diferencia del replay de pedidos: la merma
+          // NO es idempotente en el servidor (`mermas_stock` no tiene clave de
+          // request), así que un reintento cuya primera request llegó pero
+          // perdió la respuesta descontaría el stock dos veces. Lo único que se
+          // reintenta es la sesión vencida, donde el rechazo es de auth y el
+          // INSERT con seguridad no ocurrió.
+          try {
+            await registrarMermaFn(payload)
+          } catch (error) {
+            if (!pareceSesionVencida(getErrorMessage(error)) || !(await renovarSesion())) {
+              throw error
+            }
+            await registrarMermaFn(payload)
+          }
           await markAsCompleted(op.id!)
           sincronizados++
         } catch (error) {
-          const err = error as Error
-          await markAsFailed(op.id!, err.message)
-          errores.push({ merma, error: err.message })
+          const mensaje = getErrorMessage(error)
+          await markAsFailed(op.id!, mensaje)
+          errores.push({ merma, error: mensaje })
         }
       }
     } finally {

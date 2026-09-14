@@ -11,6 +11,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
+import { rangoArgentino } from '../../utils/rangoArgentino'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { CondicionIva } from '../../types'
 
@@ -101,6 +102,10 @@ interface FetchOpts {
 }
 
 async function fetchMovimientos(opts: FetchOpts): Promise<MovimientoSucursalDB[]> {
+  // `created_at` es timestamptz: el corte de día tiene que ir en hora
+  // Argentina (rangoArgentino, ex-useMermasQuery) o un movimiento cargado
+  // después de las 21hs se corre al día siguiente.
+  const rango = rangoArgentino({ desde: opts.desde, hasta: opts.hasta })
   let q = supabase
     .from('movimientos_sucursal')
     .select(`
@@ -111,10 +116,11 @@ async function fetchMovimientos(opts: FetchOpts): Promise<MovimientoSucursalDB[]
       resuelto:perfiles!resuelto_por(id, nombre),
       editor:perfiles!editado_por(id, nombre)
     `)
-    .gte('created_at', `${opts.desde}T00:00:00`)
-    .lte('created_at', `${opts.hasta}T23:59:59`)
     .order('created_at', { ascending: false })
     .range(opts.offset, opts.offset + opts.limit - 1)
+
+  if (rango.desde) q = q.gte('created_at', rango.desde)
+  if (rango.hasta) q = q.lte('created_at', rango.hasta)
 
   if (opts.estado && opts.estado !== 'todos') {
     q = q.eq('estado', opts.estado)

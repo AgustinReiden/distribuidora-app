@@ -60,6 +60,20 @@ export interface CompraItemForm {
    */
   lineaId?: number;
   /**
+   * `true` si la tasa de impuesto interno la tipeó el usuario en ESTA factura.
+   *
+   * Es la única llave que abre la propagación al maestro de productos: al
+   * registrar la compra, `ModalCompra` manda las líneas cuya tasa difiere de la
+   * de la ficha y el container hace `UPDATE productos.impuestos_internos`. Sin
+   * la marca, cualquier línea que naciera en 0 —y un escaneo entero nacía así—
+   * "difería" del maestro y le borraba la alícuota al producto, sin que nadie
+   * hubiera tocado el campo.
+   *
+   * Misma regla que los pesos de un cargo y que el no gravado de cabecera: lo
+   * escrito a mano gana, lo que sólo se pre-llenó no decide nada.
+   */
+  iiEditadoAMano?: boolean;
+  /**
    * Vencimientos de esta línea (migs 223/224). Opcional: cargarlos es opcional
    * y una línea sin vencimientos es perfectamente válida.
    *
@@ -196,7 +210,13 @@ export function construirCompraItemDesdeScan(
     cantidad: scanItem.cantidad || 1,
     bonificacion: scanItem.bonificacion || 0,
     costoUnitario: scanItem.costoUnitario || 0,
-    impuestosInternos: 0,
+    // De la ficha, igual que `AGREGAR_ITEM` y que el import de Excel: el escaneo
+    // NO trae la alícuota de impuesto interno (no está en `FacturaEscaneada`),
+    // así que un 0 acá no era "la factura dice 0" sino "no lo sabemos". Costaba
+    // dos veces: el costo de la compra salía sin la tasa entera —y con él el
+    // costo_real y el CPP— y además la línea "difería" del maestro, así que al
+    // registrar se le ponía `impuestos_internos = 0` al producto.
+    impuestosInternos: producto.impuestos_internos ?? 0,
     // `??`, no `||`: un 0 legítimo del escaneo (línea exenta) se convertía en 21.
     porcentajeIva: scanItem.iva ?? producto.porcentaje_iva ?? 21,
     condicionIva: producto.condicion_iva ?? 'gravado',
@@ -632,6 +652,49 @@ function pesoPorBase(base: BaseProrrateo, item: CompraItemForm): number {
   }
 }
 
+/**
+ * Suma un lote de líneas nuevas sobre las que ya hay, una sola línea por
+ * producto — la misma regla que `AGREGAR_ITEM`, que suma la cantidad en vez de
+ * apilar un renglón repetido.
+ *
+ * El import de Excel y el escaneo apilaban: dos renglones del mismo producto en
+ * la misma factura quedaban como dos `compra_items`, y todo lo que indexa los
+ * items por `producto_id` los pisaba o los contaba dos veces (la nota de crédito
+ * acreditaba el doble; el UNIQUE de `producto_lotes` de la mig 223 obliga a
+ * agrupar los vencimientos por producto igual).
+ *
+ * LO QUE GANA AL FUSIONAR es la línea que ya estaba: su costo, su bonificación y
+ * sus atributos fiscales. Si el segundo renglón traía otro precio, ese precio no
+ * entra —y el subtotal deja de cuadrar contra el papel, que es justo lo que el
+ * panel "Control contra factura" pinta en rojo—. Es la misma resolución que
+ * aplica `AGREGAR_ITEM` cuando se agrega dos veces el mismo producto.
+ */
+function fusionarItems(existentes: CompraItemForm[], nuevos: CompraItemForm[]): CompraItemForm[] {
+  const salida = [...existentes]
+  const indicePorProducto = new Map<string, number>()
+  salida.forEach((item, i) => indicePorProducto.set(String(item.productoId), i))
+
+  for (const nuevo of nuevos) {
+    const clave = String(nuevo.productoId)
+    const i = indicePorProducto.get(clave)
+    if (i === undefined) {
+      indicePorProducto.set(clave, salida.length)
+      salida.push(nuevo)
+      continue
+    }
+    const previo = salida[i]
+    const vencimientos = [...(previo.vencimientos ?? []), ...(nuevo.vencimientos ?? [])]
+    salida[i] = {
+      ...previo,
+      cantidad: (previo.cantidad || 0) + (nuevo.cantidad || 0),
+      // Sólo si alguno de los dos los traía: un `[]` donde antes había
+      // `undefined` significaría "esta línea no carga vencimientos".
+      ...(vencimientos.length > 0 ? { vencimientos } : {}),
+    }
+  }
+  return salida
+}
+
 /** Numera las líneas que llegaron sin id local (importadas, escaneadas). */
 function conLineaIds(items: CompraItemForm[]): CompraItemForm[] {
   if (items.every(i => i.lineaId !== undefined)) return items
@@ -779,7 +842,17 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         ...state,
         items: state.items.map((item, i) =>
           i === action.payload.index
-            ? { ...item, [action.payload.campo]: action.payload.valor }
+            ? {
+                ...item,
+                [action.payload.campo]: action.payload.valor,
+                // Se mira la CLAVE y no el valor, igual que el no gravado de
+                // cabecera: tipear un 0 sobre la tasa de la ficha es "esta
+                // factura no trae impuesto interno", que es un dato y tiene que
+                // propagarse al producto.
+                ...(action.payload.campo === 'impuestosInternos'
+                  ? { iiEditadoAMano: true }
+                  : {}),
+              }
             : item
         )
       }
@@ -844,7 +917,7 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
     case 'IMPORTAR_ITEMS':
       return {
         ...state,
-        items: [...state.items, ...action.payload]
+        items: fusionarItems(state.items, action.payload)
       }
 
     case 'SET_ESCANEANDO':
@@ -866,7 +939,10 @@ function aplicarAccion(state: CompraState, action: CompraActionType): CompraStat
         numeroFactura,
         fechaCompra: fechaCompra || state.fechaCompra,
         formaPago: formaPago || state.formaPago,
-        items,
+        // El escaneo REEMPLAZA las líneas, pero se fusiona igual: la fusión es
+        // dentro del lote escaneado, que puede traer el mismo producto en dos
+        // renglones de la misma factura.
+        items: fusionarItems([], items),
         itemsPendientesScan: pendientes,
         resultadoEscaneo: null,
         errorEscaneo: ''

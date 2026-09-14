@@ -216,12 +216,25 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   useRealtimeInvalidation({ enabled: isOnline })
 
   const handleLogout = useCallback(async (): Promise<void> => {
+    // La cola de IndexedDB no se borra al cerrar sesión: es del teléfono, y un
+    // pedido encolado es plata. Lo que sí pasa es que deja de verse y de
+    // replayarse hasta que ese mismo usuario vuelva a entrar (ver
+    // getPendingOperations), así que hay que decirlo — si no, el preventista se
+    // va creyendo que perdió los pedidos que cargó sin señal.
+    if (hasPendingSync) {
+      const cuantos = pedidosPendientes.length + mermasPendientes.length
+      notify.warning(
+        `Quedan ${cuantos} operación(es) sin sincronizar en este dispositivo. Se guardan y se van a sincronizar cuando vuelvas a entrar con este mismo usuario.`,
+        { persist: true }
+      )
+    }
+
     try {
       await logout()
     } catch (err) {
       console.error('Error during logout:', err)
     }
-  }, [logout])
+  }, [hasPendingSync, logout, mermasPendientes.length, notify, pedidosPendientes.length])
 
   // Use sucursal-resolved role for permissions
   const effectiveRol = currentSucursalRol ?? perfil?.rol

@@ -241,7 +241,9 @@ export default function VistaComisiones({
       {resultado && (
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Base: pedidos no cancelados del canal app, sin bonificaciones — la misma que usa el
-          reporte gerencial. Sin regla que aplique se comisiona al {resultado.comision_default}%.
+          reporte gerencial. Sin regla que aplique se comisiona con el default por rol
+          ({resultado.comision_pct_preventista ?? resultado.comision_default}% preventistas,{' '}
+          {resultado.comision_pct_otros ?? 0}% el resto).
         </p>
       )}
     </div>

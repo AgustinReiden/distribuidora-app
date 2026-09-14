@@ -64,13 +64,17 @@ export function useRealtimeInvalidation({
   const pedidosListTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const productosTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Invalida pedidosKeys.all(): pedidosKeys.lists() y .detail() son keys que
+  // ninguna query lee (la pantalla usa `paginated` y `stats`, ambas hijas de
+  // `.all()`), así que invalidarlas no refrescaba nada — el realtime de
+  // pedidos no actualizaba la pantalla ante cambios de otro usuario (#524).
   const invalidatePedido = useCallback((pedidoId: string) => {
     if (!enabled) return
     const existing = pedidoDetailTimersRef.current.get(pedidoId)
     if (existing) clearTimeout(existing)
     const t = setTimeout(() => {
       queryClient.invalidateQueries({
-        queryKey: pedidosKeys.detail(currentSucursalId, pedidoId)
+        queryKey: pedidosKeys.all(currentSucursalId)
       })
       pedidoDetailTimersRef.current.delete(pedidoId)
     }, debounceMs)
@@ -84,7 +88,7 @@ export function useRealtimeInvalidation({
     }
     pedidosListTimerRef.current = setTimeout(() => {
       queryClient.invalidateQueries({
-        queryKey: pedidosKeys.lists(currentSucursalId)
+        queryKey: pedidosKeys.all(currentSucursalId)
       })
       pedidosListTimerRef.current = null
     }, debounceMs)

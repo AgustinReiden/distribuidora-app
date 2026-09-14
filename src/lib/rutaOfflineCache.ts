@@ -76,21 +76,28 @@ export function guardarRuta<T>(
 
 /**
  * Lee la ruta guardada. Devuelve `null` si no hay, si está vencida, si es de
- * otra fecha o si el JSON quedó corrupto — en todos esos casos es preferible
- * "no tengo ruta" a mostrar una ruta que no es la de hoy.
+ * una fecha no aceptada o si el JSON quedó corrupto — en todos esos casos es
+ * preferible "no tengo ruta" a mostrar una que no corresponde.
+ *
+ * `fechasAceptadas` recibe una fecha o una lista: en la madrugada
+ * `fechaDeRuta()` acepta hoy Y ayer (la ruta puede seguir en curso cruzando la
+ * medianoche), y hay que leer con el mismo criterio con el que se guardó — si
+ * no, un `guardarRuta` con `fecha: ayer` nunca calza contra un `leerRuta` que
+ * sólo pide `hoy`. `MAX_EDAD_MS` ya cubre no revivir una ruta de anteayer.
  */
 export function leerRuta<T>(
   sucursalId: number | null,
   transportistaId: string,
-  fechaEsperada: string,
+  fechasAceptadas: string | string[],
 ): RutaCacheada<T> | null {
   if (!transportistaId) return null;
+  const fechas = Array.isArray(fechasAceptadas) ? fechasAceptadas : [fechasAceptadas];
   try {
     const crudo = localStorage.getItem(clave(sucursalId, transportistaId));
     if (!crudo) return null;
     const payload = JSON.parse(crudo) as RutaCacheada<T>;
     if (!payload?.datos || typeof payload.guardadoEn !== 'number') return null;
-    if (payload.fecha !== fechaEsperada) return null;
+    if (!fechas.includes(payload.fecha)) return null;
     if (Date.now() - payload.guardadoEn > MAX_EDAD_MS) return null;
     return payload;
   } catch (e) {
