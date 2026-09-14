@@ -442,58 +442,6 @@ export async function cleanupExpiredCache(): Promise<number> {
 // =============================================================================
 
 /**
- * Guardar ruta optimizada
- */
-export async function saveOptimizedRoute(route: Omit<SavedRoute, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
-  const now = new Date()
-  return db.savedRoutes.add({
-    ...route,
-    createdAt: now,
-    updatedAt: now
-  })
-}
-
-/**
- * Obtener rutas guardadas de un transportista
- */
-export async function getSavedRoutes(transportistaId: string): Promise<SavedRoute[]> {
-  return db.savedRoutes
-    .where('transportistaId')
-    .equals(transportistaId)
-    .reverse()
-    .sortBy('lastUsedAt')
-}
-
-/**
- * Buscar ruta por clientes (para reutilización)
- */
-export async function findMatchingRoute(
-  transportistaId: string,
-  clienteIds: string[],
-  tolerancePercent = 20
-): Promise<SavedRoute | null> {
-  const routes = await getSavedRoutes(transportistaId)
-
-  for (const route of routes) {
-    // Calcular similitud
-    const routeSet = new Set(route.clienteIds)
-    const inputSet = new Set(clienteIds)
-
-    const intersection = new Set([...routeSet].filter(x => inputSet.has(x)))
-    const union = new Set([...routeSet, ...inputSet])
-
-    const similarity = (intersection.size / union.size) * 100
-
-    // Si la similitud es mayor al umbral, usar esta ruta
-    if (similarity >= (100 - tolerancePercent)) {
-      return route
-    }
-  }
-
-  return null
-}
-
-/**
  * Actualizar última vez usada
  */
 export async function markRouteAsUsed(routeId: number): Promise<void> {

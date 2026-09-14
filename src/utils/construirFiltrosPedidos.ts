@@ -14,7 +14,7 @@
  * lista ya en mano.
  */
 import type { FiltrosPedidosState } from '../types'
-import { escapePostgrestFilter } from './sanitize'
+import { escapePostgrestFilter } from './postgrest'
 
 /** Lo mínimo que necesita un builder de supabase-js para poder filtrarse acá. */
 export interface QueryFiltrablePedidos {
