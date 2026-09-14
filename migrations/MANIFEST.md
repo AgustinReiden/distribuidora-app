@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-09-13** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-09-14** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 229.** El ledger de prod llega hasta
-`228_cada_uno_ve_lo_de_su_sucursal`.
+**La próxima migración es la 230.** El ledger de prod llega hasta
+`229_la_devolucion_dice_de_donde_viene`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -155,7 +155,7 @@ Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el 
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
 Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
 `main`. Van cinco veces.
-Última actualización: 228, el 2026-09-13.)
+Última actualización: 229, el 2026-09-14.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -591,6 +591,37 @@ es por donde se filtró `perfiles` durante meses sin que nada se pusiera rojo. E
 función de auditoría en SECURITY **INVOKER**: Postgres prohíbe `SET ROLE` dentro de un
 definer, y el permiso de `SET ROLE anon` se resuelve contra el session_user (`authenticator`,
 que sí es miembro de anon).
+
+---
+
+### 229 · La devolución dice de dónde viene
+
+Mapea 1:1 al ledger. Va acá por el método y por dos cosas que no se ven leyendo el SQL.
+
+**Se parchea por ancla sobre el cuerpo VIVO, no se reescribe el archivo.** Las nueve funciones
+que toca vienen de siete migraciones distintas y ninguna coincide con su archivo en
+`migrations/` — el cuerpo vivo de `sincronizar_lotes_stock`, por ejemplo, no tiene ni uno de
+los comentarios que sí tiene la 223. Se usa el andamio `_mig229_reemplazar_ancla` (el idiom
+de la 220): exige que el ancla aparezca **exactamente una vez** en `pg_get_functiondef` y si
+no, aborta. Leer el archivo en vez del cuerpo vivo habría producido anclas que no matchean.
+
+- **`set_config` es por transacción, no por función.** `revertir_bloques_auto_ajuste` la
+  llaman tres funciones (`actualizar_pedido_items`, `registrar_salvedad`,
+  `eliminar_pedido_completo`) y las tres ya declaran su propio origen antes. Etiquetarla sin
+  devolver el GUC le habría pisado la etiqueta al resto del cuerpo del caller — rompiendo de
+  rebote a `registrar_salvedad` y `eliminar_pedido_completo`, que hoy etiquetan bien. Por eso
+  guarda y restaura los cuatro GUCs alrededor de su `UPDATE`.
+- **El check STK-F arranca con dos excepciones listadas a mano**
+  (`registrar_compra_completa`, `registrar_ingreso_sucursal`). Las dos suben stock sin
+  etiquetar, pero lo que suben es mercadería **nueva**, que por diseño va a la bolsa "sin
+  vencimiento" y no a un lote: lo que les falta es trazabilidad del ledger (STK-D), no lotes.
+  Tocarlas era meterse con RPCs de compras, fuera del alcance. Están en la lista para que el
+  gate arranque en verde y lo que se ponga rojo sea siempre algo nuevo.
+
+`anular_compra_atomica` cambia de **orden**, no de lógica: cancela la compra (lo que dispara
+`borrar_lotes_compra_cancelada`) y recién después descuenta el stock. Al revés, el trigger de
+lotes consumía FEFO de un lote **ajeno** que venciera antes y después se borraban además los
+propios: doble descuento en el ledger de lotes.
 
 ## Mantenimiento
 

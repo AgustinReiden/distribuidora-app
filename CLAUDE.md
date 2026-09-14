@@ -93,7 +93,16 @@ suelta en `sucursales`.
   tocar `producto_lotes`: el trigger se encarga. Uno que lo **devuelva** —cancelación,
   salvedad, edición a la baja— sí tiene que etiquetarse con un origen de la lista blanca del
   trigger, o esas unidades vuelven a la bolsa "sin vencimiento" en vez de a su lote y el
-  contador miente para abajo sin que falle nada.
+  contador miente para abajo sin que falle nada. Dos corolarios que ya mordieron (mig 229):
+  - `set_config` es **por transacción, no por función**. Una función que setea el origen y la
+    llama otra que ya seteó el suyo le pisa la etiqueta al resto del cuerpo del caller. Si es
+    un helper con varios llamadores —`revertir_bloques_auto_ajuste` es el caso— tiene que
+    **guardar y restaurar** los cuatro GUCs alrededor de su `UPDATE`.
+  - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
+    sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
+    excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
+    suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
+    etiquetala o el gate se pone rojo.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
