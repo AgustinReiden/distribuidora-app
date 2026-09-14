@@ -32,7 +32,15 @@ export function SyncStatusBanner({
   const [failedOps, setFailedOps] = useState<PendingOperation[]>([])
   const [isExpanded, setIsExpanded] = useState(false)
   const [isRetrying, setIsRetrying] = useState(false)
-  const [isDismissed, setIsDismissed] = useState(false)
+  // Id más alto entre las fallidas que la usuaria ya cerró (con la X o con
+  // "Descartar"). Antes el cierre era un booleano (`isDismissed`) que cada
+  // poll de 10s volvía a pisar en `false` apenas `counts.failed > 0` -- que
+  // seguía siendo cierto para las MISMAS fallidas que se acababan de cerrar --
+  // así que el banner rojo no se podía cerrar de verdad y empujaba a
+  // "Descartar" (que borra los pedidos) para sacárselo de encima. Guardando el
+  // id máximo en vez de un booleano, el banner se queda cerrado hasta que
+  // aparece una fallida realmente nueva.
+  const [descartadoHastaId, setDescartadoHastaId] = useState(0)
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -43,7 +51,6 @@ export function SyncStatusBanner({
       if (counts.failed > 0) {
         const failed = await getFailedOperations(10)
         setFailedOps(failed)
-        setIsDismissed(false) // Mostrar si hay nuevos errores
       } else {
         setFailedOps([])
       }
@@ -75,19 +82,22 @@ export function SyncStatusBanner({
   const handleDiscardAll = async () => {
     try {
       const count = await discardFailedOperations()
-      logger.info(`[SyncStatusBanner] ${count} operaciones descartadas`)
+      logger.info(`[SyncStatusBanner] ${count} operaciones eliminadas`)
       await fetchStatus()
     } catch (error) {
       logger.error('[SyncStatusBanner] Error discarding operations:', error)
     }
   }
 
+  const maxIdActual = Math.max(0, ...failedOps.map(op => op.id ?? 0))
+
   const handleDismiss = () => {
-    setIsDismissed(true)
+    setDescartadoHastaId(maxIdActual)
   }
 
-  // No mostrar si no hay operaciones fallidas o fue descartado
-  if (failedCount === 0 || isDismissed) {
+  // No mostrar si no hay operaciones fallidas o si ya se cerró y no apareció
+  // ninguna fallida nueva desde entonces.
+  if (failedCount === 0 || maxIdActual <= descartadoHastaId) {
     return null
   }
 
@@ -178,8 +188,9 @@ export function SyncStatusBanner({
         <button
           onClick={handleDiscardAll}
           className="px-3 py-2 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800/50 rounded text-sm transition-colors"
+          title="Elimina estas operaciones; no se van a sincronizar"
         >
-          Descartar
+          Eliminar
         </button>
       </div>
     </div>
