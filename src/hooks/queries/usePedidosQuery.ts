@@ -1203,6 +1203,18 @@ async function marcarEntregaYPagoMasivo(
   await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
 }
 
+export interface ResultadoEntregaYPagoMasivo {
+  /** Cuántos pedidos se entregaron con éxito (RPC marcar_entrega_y_pago_masivo). */
+  entregados: number;
+  /** Cuántos pedidos se cobraron con éxito (RPC marcar_pagos_masivo). */
+  cobrados: number;
+  /**
+   * Presente sólo si un paso falló. `paso` dice cuál RPC fue, para que el
+   * caller sepa qué SÍ entró y qué no — nunca "no se sabe qué pasó".
+   */
+  error?: { paso: 'entregar' | 'cobrar'; mensaje: string };
+}
+
 /**
  * Hook para entregar + cobrar multiples pedidos en un solo paso (con fecha opcional).
  * Invalida pedidos, clientes (cambia el saldo) y recorridos (la entrega puede
@@ -1225,17 +1237,33 @@ export function useEntregaYPagoMasivosMutation() {
       /** UUIDs de idempotencia (mig 167). Son dos RPCs distintas, un UUID cada una. */
       clientRequestIdCobrar?: string;
       clientRequestIdEntregar?: string;
-    }) => {
+    }): Promise<ResultadoEntregaYPagoMasivo> => {
+      // Entregar primero: es el paso que puede rechazar por el gate de
+      // rendición cerrada. Si se cobrara antes, un rechazo de la entrega
+      // dejaría esos cobros ya aplicados sin ninguna entrega — plata cobrada
+      // que el toast de error no mencionaría.
+      if (idsEntregar.length) {
+        try {
+          await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
+        } catch (e) {
+          return { entregados: 0, cobrados: 0, error: { paso: 'entregar', mensaje: (e as Error).message } }
+        }
+      }
       // Pedidos YA entregados (p.ej. entrega con salvedad impaga): solo se cobran,
       // sin re-entregar. marcar_pagos_masivo registra el pago real en `pagos` y no
       // toca estado / transportista_id / fecha_entrega.
-      if (idsCobrar.length) await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
-      // Pedidos NO entregados: entrega + cobro en un solo paso.
-      if (idsEntregar.length) {
-        await marcarEntregaYPagoMasivo(idsEntregar, transportistaId, formaPago, fecha, clientRequestIdEntregar)
+      if (idsCobrar.length) {
+        try {
+          await marcarPagosMasivo(idsCobrar, formaPago, fecha, clientRequestIdCobrar)
+        } catch (e) {
+          return { entregados: idsEntregar.length, cobrados: 0, error: { paso: 'cobrar', mensaje: (e as Error).message } }
+        }
       }
+      return { entregados: idsEntregar.length, cobrados: idsCobrar.length }
     },
     onSuccess: () => {
+      // Corre siempre, incluso con resultado parcial: lo que sí entró tiene
+      // que reflejarse (saldo, stock, la parada cerrada en la ruta activa).
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
