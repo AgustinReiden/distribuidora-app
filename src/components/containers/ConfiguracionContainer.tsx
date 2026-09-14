@@ -4,7 +4,7 @@
  * Pantalla de políticas comerciales por sucursal (mig 204). Solo admin/encargado
  * — el gate real está en el RPC y en la RLS; esto es la UI que lo acompaña.
  */
-import { Suspense, useState, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   usePoliticasComercialesQuery,
@@ -39,6 +39,13 @@ export default function ConfiguracionContainer() {
   // guardar. Arranca en el valor vigente.
   const [montoTipeado, setMontoTipeado] = useState<number>(politicas.montoMinimoPedido)
   const { data: impacto, isFetching: impactoCargando } = useImpactoMinimoQuery(montoTipeado)
+
+  // El mínimo vigente llega después del primer render (y cambia al cambiar de
+  // sucursal): sin esto el impacto se calcula con el valor de la sucursal
+  // anterior, o no se calcula si arrancó en 0.
+  useEffect(() => {
+    setMontoTipeado(politicas.montoMinimoPedido)
+  }, [politicas.montoMinimoPedido])
 
   const handleGuardar = useCallback(async (monto: number) => {
     try {
