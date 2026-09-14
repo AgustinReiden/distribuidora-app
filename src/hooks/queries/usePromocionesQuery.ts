@@ -16,6 +16,7 @@ import type {
 } from '../../types'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 import { traerTodo } from '../../utils/paginacion'
+import { factorDeLaLinea } from '../../utils/unidadesRegalo'
 
 // Query keys
 export const promocionesKeys = {
@@ -277,28 +278,71 @@ async function updatePromocion(
 
   if (errorPromo) throw errorPromo
 
-  // Reemplazar productos
-  await supabase.from('promocion_productos').delete().eq('promocion_id', id)
-  if (input.productoIds.length > 0) {
+  // Productos y reglas: reconciliar contra lo existente (altas y bajas), como
+  // `updateGrupoPrecio`, en vez de barrer con un DELETE sin capturar el error
+  // y reinsertar. Sin esto, si el INSERT de después fallaba —red caída, RLS,
+  // lo que sea— la promo quedaba activa pero sin productos ni reglas, dejaba
+  // de bonificar y nadie se enteraba: el DELETE ya había pasado y su error,
+  // si lo había, se descartaba en silencio.
+
+  const { data: productosActuales, error: errorLeerProductos } = await supabase
+    .from('promocion_productos')
+    .select('id, producto_id')
+    .eq('promocion_id', id)
+  if (errorLeerProductos) throw errorLeerProductos
+
+  const filasProducto = (productosActuales || []) as Array<{ id: string; producto_id: string }>
+  const productoIdsDeseados = new Set(input.productoIds.map(String))
+  const productoIdsActuales = new Set(filasProducto.map(p => String(p.producto_id)))
+
+  const productosAQuitar = filasProducto.filter(p => !productoIdsDeseados.has(String(p.producto_id)))
+  if (productosAQuitar.length > 0) {
     const { error } = await supabase
       .from('promocion_productos')
-      .insert(input.productoIds.map(pid => ({
+      .delete()
+      .in('id', productosAQuitar.map(p => p.id))
+    if (error) throw error
+  }
+
+  const productosAAgregar = input.productoIds.filter(pid => !productoIdsActuales.has(String(pid)))
+  if (productosAAgregar.length > 0) {
+    const { error } = await supabase
+      .from('promocion_productos')
+      .insert(productosAAgregar.map(pid => ({
         promocion_id: parseInt(id),
         producto_id: parseInt(pid),
       })))
     if (error) throw error
   }
 
-  // Reemplazar reglas
-  await supabase.from('promocion_reglas').delete().eq('promocion_id', id)
+  // Reglas: reconciliar por `clave`, que es UNIQUE dentro de la promo
+  // (promocion_reglas_promocion_id_clave_key). Las bajas primero, después un
+  // upsert que cubre altas y cambios de valor en la misma llamada.
+  const { data: reglasActuales, error: errorLeerReglas } = await supabase
+    .from('promocion_reglas')
+    .select('id, clave')
+    .eq('promocion_id', id)
+  if (errorLeerReglas) throw errorLeerReglas
+
+  const filasRegla = (reglasActuales || []) as Array<{ id: string; clave: string }>
+  const clavesDeseadas = new Set(input.reglas.map(r => r.clave))
+
+  const reglasAQuitar = filasRegla.filter(r => !clavesDeseadas.has(r.clave))
+  if (reglasAQuitar.length > 0) {
+    const { error } = await supabase
+      .from('promocion_reglas')
+      .delete()
+      .in('id', reglasAQuitar.map(r => r.id))
+    if (error) throw error
+  }
+
   if (input.reglas.length > 0) {
     const { error } = await supabase
       .from('promocion_reglas')
-      .insert(input.reglas.map(r => ({
-        promocion_id: parseInt(id),
-        clave: r.clave,
-        valor: r.valor,
-      })))
+      .upsert(
+        input.reglas.map(r => ({ promocion_id: parseInt(id), clave: r.clave, valor: r.valor })),
+        { onConflict: 'promocion_id,clave' },
+      )
     if (error) throw error
   }
 
@@ -439,10 +483,27 @@ export function useTogglePromocionActivaMutation() {
   })
 }
 
+interface FilaUnidadesEntregadas {
+  promocion_id: string | number
+  cantidad: number
+  unidades_por_bloque_al_crear: number | null
+  promocion: { unidades_por_bloque: number | null; regalo_mueve_stock: boolean | null } | null
+}
+
 /**
- * Hook para obtener el total de unidades regaladas historicas por cada promo.
- * Suma de pedido_items.cantidad con es_bonificacion=true, EXCLUYENDO pedidos
- * cancelados (esas unidades ya fueron revertidas del contador/stock).
+ * Hook para obtener el total de unidades regaladas historicas por cada promo,
+ * en UNIDADES DE VENTA (fardos), EXCLUYENDO pedidos cancelados (esas unidades
+ * ya fueron revertidas del contador/stock).
+ *
+ * `pedido_items.cantidad` de un regalo de promo Fracción está en subunidades
+ * sueltas (botellas), no en fardos — ver `src/utils/unidadesRegalo.ts`. Sumar
+ * la cantidad cruda mostraba, por ejemplo, 392 "unidades regaladas" en vez de
+ * los 65 fardos reales (issues #534/#552, ya resueltos para la boleta y el
+ * reporte; acá faltaba el mismo ajuste). Se divide fila por fila por el factor
+ * CONGELADO de esa línea, no por el factor vivo de la promo: dos regalos de la
+ * misma promo pueden haberse creado con factores distintos si el factor
+ * cambió en el medio.
+ *
  * Multi-tenant: scoped por sucursal activa via RLS.
  */
 export function usePromoUnidadesEntregadasQuery() {
@@ -453,16 +514,21 @@ export function usePromoUnidadesEntregadasQuery() {
       // Paginado: hoy son ~1.207 filas, o sea que ya pasaba el tope de
       // PostgREST. Contar de menos las unidades ya entregadas hace que el tope
       // de cada promoción se alcance MÁS TARDE de lo que corresponde.
-      let data: { promocion_id: string | number; cantidad: number }[]
+      let data: FilaUnidadesEntregadas[]
       try {
-        data = await traerTodo<{ promocion_id: string | number; cantidad: number }>(
-          () => supabase
+        data = await traerTodo<FilaUnidadesEntregadas>(
+          // supabase-js tipa el embed `promocion:promociones(...)` como
+          // array porque no tiene el `Database` generado para saber que
+          // `promocion_id` es many-to-one: en runtime PostgREST devuelve un
+          // solo objeto, como en todo el resto del código que usa este mismo
+          // embed (ver `PEDIDO_SELECT` en usePedidosQuery.ts).
+          () => (supabase
             .from('pedido_items')
-            .select('promocion_id, cantidad, pedidos!inner(estado)')
+            .select('promocion_id, cantidad, unidades_por_bloque_al_crear, pedidos!inner(estado), promocion:promociones(unidades_por_bloque, regalo_mueve_stock)')
             .eq('es_bonificacion', true)
             .not('promocion_id', 'is', null)
             .neq('pedidos.estado', 'cancelado')
-            .order('id'),
+            .order('id') as unknown as { range: (desde: number, hasta: number) => PromiseLike<{ data: FilaUnidadesEntregadas[] | null; error: { message: string } | null }> }),
           { etiqueta: 'items bonificados' },
         )
       } catch (error) {
@@ -472,7 +538,8 @@ export function usePromoUnidadesEntregadasQuery() {
       const map = new Map<string, number>()
       for (const row of data) {
         const key = String(row.promocion_id)
-        map.set(key, (map.get(key) ?? 0) + Number(row.cantidad ?? 0))
+        const enUnidadesDeVenta = Number(row.cantidad ?? 0) / factorDeLaLinea(row)
+        map.set(key, (map.get(key) ?? 0) + enUnidadesDeVenta)
       }
       return map
     },

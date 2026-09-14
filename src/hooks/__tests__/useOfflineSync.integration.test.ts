@@ -23,6 +23,8 @@ const mockGetPendingOperations = vi.fn().mockResolvedValue([])
 const mockMarkAsCompleted = vi.fn().mockResolvedValue(undefined)
 const mockMarkAsFailed = vi.fn().mockResolvedValue(undefined)
 const mockCleanupOldOperations = vi.fn().mockResolvedValue(0)
+const mockDeletePendingOperation = vi.fn().mockResolvedValue(undefined)
+const mockDeletePendingOperations = vi.fn().mockResolvedValue(0)
 
 vi.mock('../../lib/offlineDb', () => ({
   queueOperation: (...args: unknown[]) => mockQueueOperation(...args),
@@ -30,6 +32,8 @@ vi.mock('../../lib/offlineDb', () => ({
   markAsCompleted: (...args: unknown[]) => mockMarkAsCompleted(...args),
   markAsFailed: (...args: unknown[]) => mockMarkAsFailed(...args),
   cleanupOldOperations: (...args: unknown[]) => mockCleanupOldOperations(...args),
+  deletePendingOperation: (...args: unknown[]) => mockDeletePendingOperation(...args),
+  deletePendingOperations: (...args: unknown[]) => mockDeletePendingOperations(...args),
 }))
 
 // Mock del cliente Supabase y el contexto de sucursal — necesario porque
@@ -95,6 +99,8 @@ describe('useOfflineSync Integration Tests', () => {
     mockMarkAsCompleted.mockResolvedValue(undefined)
     mockMarkAsFailed.mockResolvedValue(undefined)
     mockCleanupOldOperations.mockResolvedValue(0)
+    mockDeletePendingOperation.mockResolvedValue(undefined)
+    mockDeletePendingOperations.mockResolvedValue(0)
     mockRefreshSession.mockResolvedValue({ data: { session: { user: { id: 'user-A' } } }, error: null })
 
     // Reset mocks de API
@@ -762,45 +768,64 @@ describe('useOfflineSync Integration Tests', () => {
 
       expect(result.current.pedidosPendientes).toHaveLength(2)
 
+      // limpiarPedidosOffline relee IndexedDB (mismo alcance que el panel) y
+      // borra lo que encuentra ahí, no cleanupOldOperations(0) -- eso sólo
+      // borraba operaciones 'completed', así que lo pendiente y lo fallido
+      // nunca se iba de la cola.
+      const opsEnCola = [
+        { id: 10, type: 'CREATE_PEDIDO', status: 'pending', payload: { n: 1 }, createdAt: new Date() },
+        { id: 11, type: 'CREATE_PEDIDO', status: 'pending', payload: { n: 2 }, createdAt: new Date() },
+      ]
+      mockGetPendingOperations.mockResolvedValueOnce(opsEnCola)
+
       // Limpiar
       act(() => {
         result.current.limpiarPedidosOffline()
       })
 
       expect(result.current.pedidosPendientes).toHaveLength(0)
-      // Now uses cleanupOldOperations instead of removeSecureItem
+      expect(mockCleanupOldOperations).not.toHaveBeenCalledWith(0)
       await waitFor(() => {
-        expect(mockCleanupOldOperations).toHaveBeenCalledWith(0)
+        expect(mockDeletePendingOperations).toHaveBeenCalledWith([10, 11])
       })
     })
 
-    it('debe poder eliminar un pedido específico', async () => {
+    it('debe poder eliminar un pedido específico, borrándolo de IndexedDB (no marcándolo failed)', async () => {
+      // offlineId con forma `op_<id>`, como lo entrega la cola real (ver
+      // operationToPedidoOffline) -- no el `offline_<timestamp>_<rand>`
+      // temporal que devuelve guardarPedidoOffline antes de releer. El test
+      // viejo eliminaba por ese id temporal, para el que el regex de
+      // eliminarPedidoOffline nunca matchea: la llamada a IndexedDB quedaba
+      // sin ejercitar y el test sólo veía que React "olvidó" el pedido.
+      const opPedido1 = { id: 101, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '1', items: [], total: 100 }, createdAt: new Date() }
+      const opPedido2 = { id: 102, type: 'CREATE_PEDIDO', status: 'pending', payload: { clienteId: '2', items: [], total: 200 }, createdAt: new Date() }
+      mockGetPendingOperations.mockResolvedValue([opPedido1, opPedido2])
+
       const { result } = renderHook(() => useOfflineSync())
 
       await waitFor(() => {
-        expect(result.current.pedidosPendientes).toEqual([])
+        expect(result.current.pedidosPendientes).toHaveLength(2)
       })
 
-      // Guardar pedidos
-      let pedido1: PedidoOffline | undefined
-      let pedido2: PedidoOffline | undefined
-
-      await act(async () => {
-        const result1 = await result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
-        const result2 = await result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
-        pedido1 = result1.pedido
-        pedido2 = result2.pedido
-      })
-
-      expect(result.current.pedidosPendientes).toHaveLength(2)
+      const pedido1 = result.current.pedidosPendientes.find(p => p.offlineId === 'op_101')!
+      const pedido2 = result.current.pedidosPendientes.find(p => p.offlineId === 'op_102')!
+      expect(pedido1).toBeDefined()
+      expect(pedido2).toBeDefined()
 
       // Eliminar solo el primero
       act(() => {
-        result.current.eliminarPedidoOffline(pedido1!.offlineId)
+        result.current.eliminarPedidoOffline(pedido1.offlineId)
       })
 
       expect(result.current.pedidosPendientes).toHaveLength(1)
-      expect(result.current.pedidosPendientes[0].offlineId).toBe(pedido2!.offlineId)
+      expect(result.current.pedidosPendientes[0].offlineId).toBe(pedido2.offlineId)
+
+      // La eliminación real es un borrado en IndexedDB, no un markAsFailed
+      // (eso lo dejaba en la cola, visible en el panel de fallidas).
+      await waitFor(() => {
+        expect(mockDeletePendingOperation).toHaveBeenCalledWith(101)
+      })
+      expect(mockMarkAsFailed).not.toHaveBeenCalled()
     })
   })
 

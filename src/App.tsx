@@ -129,6 +129,7 @@ function PendingSyncRuntime({
       pedidosPendientes={pedidosPendientes.map(pedido => ({
         offlineId: pedido.offlineId,
         clienteId: String(pedido.clienteId),
+        clienteNombre: pedido.clienteNombre,
         items: pedido.items.map(item => ({
           producto_id: item.productoId,
           cantidad: item.cantidad

@@ -161,8 +161,12 @@ export function scopedCacheKey(key: string, sucursalId?: number | null): string 
 }
 
 /**
- * Agregar operación a la cola
- * Retorna el ID de la operación o null si ya existe (duplicado)
+ * Agregar operación a la cola. Retorna el ID de la operación.
+ *
+ * `hash` se guarda por si a futuro hace falta deduplicar por contenido (D-7 la
+ * dejó afuera por ahora), pero HOY nada la consulta: el hash lleva
+ * `Date.now()`/`performance.now()`, así que dos llamadas nunca chocan a
+ * propósito. No hay chequeo de duplicados acá.
  */
 export async function queueOperation(
   type: OperationType,
@@ -170,21 +174,8 @@ export async function queueOperation(
   userId?: string,
   maxRetries = 5,
   sucursalId?: number
-): Promise<number | null> {
+): Promise<number> {
   const hash = generateOperationHash(type, payload)
-
-  // Verificar si ya existe una operación idéntica pendiente
-  const existing = await db.pendingOperations
-    .where('hash')
-    .equals(hash)
-    .and(op => op.status === 'pending' || op.status === 'processing')
-    .first()
-
-  if (existing) {
-    console.warn('[OfflineQueue] Operación duplicada detectada, ignorando:', type)
-    return null
-  }
-
   const now = new Date()
   const id = await db.pendingOperations.add({
     type,
@@ -622,6 +613,24 @@ export async function discardFailedOperations(): Promise<number> {
   return ids.length
 }
 
+/**
+ * Elimina una operación puntual, sin importar su estado. A diferencia de
+ * `markAsFailed`, que la deja en la cola visible en el panel de fallidas, esto
+ * la saca de IndexedDB de verdad — lo que necesita un "Eliminar" que borra.
+ */
+export async function deletePendingOperation(id: number): Promise<void> {
+  await db.pendingOperations.delete(id)
+}
+
+/**
+ * Elimina varias operaciones puntuales por id.
+ */
+export async function deletePendingOperations(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0
+  await db.pendingOperations.bulkDelete(ids)
+  return ids.length
+}
+
 export default db
 
 /**
@@ -659,6 +668,8 @@ if (typeof window !== 'undefined') {
     retryFailedOperation,
     retryAllFailedOperations,
     discardFailedOperations,
+    deletePendingOperation,
+    deletePendingOperations,
     db,
   }
 }
