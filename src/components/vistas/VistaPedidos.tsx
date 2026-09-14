@@ -6,6 +6,7 @@
  */
 import { ShoppingCart } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import { PedidoCard, PedidoFilters, PedidoStats } from '../pedidos';
 import RutaActivaTransportista from '../rutaActiva/RutaActivaTransportista';
@@ -62,6 +63,9 @@ export interface VistaPedidosProps {
   transportistas?: PerfilDB[];
   usuarios?: PerfilDB[];
   loading: boolean;
+  /** La query de pedidos falló tras agotar los reintentos (isError). */
+  error?: boolean;
+  onRetry?: () => void;
   exportando: boolean;
   onBusquedaChange: (busqueda: string) => void;
   onFiltrosChange: (filtros: Partial<FiltrosPedidosState>) => void;
@@ -134,6 +138,8 @@ export default function VistaPedidos({
   transportistas = [],
   usuarios = [],
   loading,
+  error,
+  onRetry,
   exportando,
   onBusquedaChange,
   onFiltrosChange,
@@ -239,6 +245,8 @@ export default function VistaPedidos({
       {/* Lista de pedidos */}
       {loading ? (
         <LoadingSpinner />
+      ) : error ? (
+        <QueryErrorState onRetry={onRetry} />
       ) : pedidos.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
 import { Users, Plus, Edit2, Trash2, Search, MapPin, Phone, FileText, Tag, Building2, AlertTriangle, RotateCcw } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import ClientesViewHeader from '../clientes/ClientesViewHeader';
 import ClienteStats from '../clientes/ClienteStats';
@@ -29,6 +30,9 @@ const normalizeSearch = (s: string | null | undefined): string =>
 export interface VistaClientesProps {
   clientes: ClienteDB[];
   loading: boolean;
+  /** La query de clientes falló tras agotar los reintentos (isError). */
+  error?: boolean;
+  onRetry?: () => void;
   isAdmin: boolean;
   isPreventista: boolean;
   isEncargado: boolean;
@@ -56,6 +60,8 @@ export interface VistaClientesProps {
 export default function VistaClientes({
   clientes,
   loading,
+  error,
+  onRetry,
   isAdmin,
   isPreventista,
   isEncargado,
@@ -313,7 +319,7 @@ export default function VistaClientes({
       )}
 
       {/* Lista de clientes */}
-      {loading ? <LoadingSpinner /> : clientesFiltrados.length === 0 ? (
+      {loading ? <LoadingSpinner /> : error ? <QueryErrorState onRetry={onRetry} /> : clientesFiltrados.length === 0 ? (
         <div className="text-center py-12 text-stone-500">
           <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>{filtrosActivos ? 'No se encontraron clientes con esos criterios' : 'No hay clientes'}</p>

@@ -372,7 +372,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
                     Sin horario canonico el cliente cae en la barrida "sin horario". */}
                 <Route
                   path="/horarios-clientes"
-                  element={isAdmin ? <RevisionHorariosContainer /> : <Navigate to="/pedidos" replace />}
+                  element={isAdminOrEncargado ? <RevisionHorariosContainer /> : <Navigate to="/pedidos" replace />}
                 />
 
                 <Route

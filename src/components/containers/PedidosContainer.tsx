@@ -200,6 +200,8 @@ export default function PedidosContainer(): React.ReactElement {
   const {
     data: paginatedResult,
     isLoading: loadingPedidos,
+    isError: errorPedidos,
+    refetch: refetchPedidos,
     dataUpdatedAt: pedidosActualizadosAt,
   } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
@@ -1507,11 +1509,11 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
 
-  const handleExportarHojaRuta = useCallback(async (transportista: PerfilDB | undefined, pedidosExport: PedidoDB[]) => {
+  const handleExportarHojaRuta = useCallback(async (transportista: PerfilDB | undefined, pedidosExport: PedidoDB[], fechaRuta: string) => {
     if (!transportista) return
     try {
       const { generarHojaRutaOptimizada } = await importConRecarga(() => import('../../lib/pdfExport'))
-      generarHojaRutaOptimizada(transportista, pedidosExport)
+      generarHojaRutaOptimizada(transportista, pedidosExport, { fecha: fechaRuta })
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
 
@@ -1800,10 +1802,10 @@ export default function PedidosContainer(): React.ReactElement {
     }
   }, [crearCambioEnRutaMut, notify])
 
-  const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[]) => {
+  const handleExportarHojaRutaOptimizada = useCallback(async (transportista: PerfilDB | undefined, pedidosOrdenados: PedidoDB[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => {
     try {
       const { generarHojaRutaOptimizada } = await importConRecarga(() => import('../../lib/pdfExport'))
-      if (transportista) generarHojaRutaOptimizada(transportista, pedidosOrdenados)
+      if (transportista) generarHojaRutaOptimizada(transportista, pedidosOrdenados, infoRuta)
     } catch (e) { notify.error((e as Error).message) }
   }, [notify])
 
@@ -1982,6 +1984,8 @@ export default function PedidosContainer(): React.ReactElement {
           transportistas={transportistas}
           usuarios={usuarios}
           loading={loadingPedidos}
+          error={errorPedidos}
+          onRetry={refetchPedidos}
           exportando={exportando}
           onBusquedaChange={handleBusquedaChange}
           onFiltrosChange={handleFiltrosChange}

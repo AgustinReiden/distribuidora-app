@@ -45,7 +45,7 @@ function drawPageHeader(doc, transportista, pedidos, infoRuta, showSummary) {
   doc.text(transportista?.nombre || 'Transportista', PAGE_MARGIN, y + 5)
 
   doc.setFontSize(10)
-  doc.text(formatFecha(new Date()), PAGE_WIDTH - PAGE_MARGIN, y + 5, { align: 'right' })
+  doc.text(formatFecha(infoRuta?.fecha || new Date()), PAGE_WIDTH - PAGE_MARGIN, y + 5, { align: 'right' })
 
   y += 9
 
@@ -696,7 +696,7 @@ function drawCierreOps(doc, ops, x, yStart) {
  * Genera PDF de Hoja de Ruta en A4 horizontal con 3 columnas.
  * @param {Object} transportista - Datos del transportista
  * @param {Array} pedidos - Lista de pedidos
- * @param {Object} infoRuta - Informacion opcional de ruta (duracion, distancia)
+ * @param {Object} infoRuta - Informacion opcional de ruta (fecha, duracion, distancia)
  * @returns {void}
  */
 /** Alto que ocupa el separador de barrida, para el calculo de salto de columna. */
@@ -795,5 +795,5 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
     startY: y,
   })
 
-  doc.save(generateFilename('ruta', transportista?.nombre))
+  doc.save(generateFilename('ruta', transportista?.nombre, info.fecha))
 }

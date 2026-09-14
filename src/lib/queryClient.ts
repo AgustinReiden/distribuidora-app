@@ -6,9 +6,21 @@
  * `main.tsx` -- que renderiza `<App>`, que termina montando `useAuth` -- y
  * armar un ciclo de imports.
  */
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryCache } from '@tanstack/react-query'
+import { notifyQueryError } from './queryErrorNotifier'
 
 export const queryClient = new QueryClient({
+  // Una query que falla tras agotar los reintentos (ver `retry` abajo) hoy
+  // se mostraba en silencio: la vista caía al empty state ("No hay pedidos")
+  // como si la sucursal estuviera vacía. Este onError es la única alerta
+  // *global* — cada container además decide su propio estado de error inline
+  // (ver `QueryErrorState`); las dos cosas conviven a propósito.
+  queryCache: new QueryCache({
+    onError: (_error, query) => {
+      if (query.meta?.silentError) return
+      notifyQueryError('No se pudo cargar la información. Verificá tu conexión.')
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000, // 5 minutos antes de considerar datos "stale"

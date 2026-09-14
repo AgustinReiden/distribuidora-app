@@ -74,7 +74,7 @@ describe('estadoVencimiento', () => {
     expect(estadoVencimiento('2026-11-09', ALERTA, CRITICO, HOY)).toBe('ok')
   })
 
-  it('con los dos umbrales en 0 solo marca lo ya vencido', () => {
+  it('con los dos umbrales en 0, lo que vence hoy también es crítico (el inclusivo no distingue "hoy" de "vencido")', () => {
     expect(estadoVencimiento('2026-09-08', 0, 0, HOY)).toBe('vencido')
     expect(estadoVencimiento(HOY, 0, 0, HOY)).toBe('critico')
     expect(estadoVencimiento('2026-09-10', 0, 0, HOY)).toBe('ok')
