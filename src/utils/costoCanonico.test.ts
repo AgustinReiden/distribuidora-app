@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { costoCanonicoUnitario } from './costoCanonico'
+import { costoCanonicoUnitario, COLUMNAS_COSTO_CANONICO } from './costoCanonico'
 
 // Producto con TODOS los términos cargados y distintos entre sí: cada test
 // tapa un término y verifica cuál gana. Si el orden se rompe, el valor
@@ -94,6 +94,18 @@ describe('costoCanonicoUnitario', () => {
         typeof costoCanonicoUnitario
       >[1]
       expect(costoCanonicoUnitario(null, soloFinanciero)).toBe(0)
+    })
+  })
+
+  describe('COLUMNAS_COSTO_CANONICO', () => {
+    it('no incluye costo_con_iva y trae las cuatro columnas de la cascada', () => {
+      expect(COLUMNAS_COSTO_CANONICO).toEqual([
+        'costo_promedio',
+        'costo_real',
+        'costo_sin_iva',
+        'impuestos_internos',
+      ])
+      expect(COLUMNAS_COSTO_CANONICO).not.toContain('costo_con_iva')
     })
   })
 
