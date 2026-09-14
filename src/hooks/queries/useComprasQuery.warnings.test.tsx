@@ -164,4 +164,63 @@ describe('avisos de la base al editar una compra', () => {
     expect(res.warningIiDeclarado).toBeNull()
     expect(res.warningCostoPromedio).toEqual([])
   })
+
+  it('sube el motivo de cada aviso de costo promedio (mig 236)', async () => {
+    // Son dos causas distintas y la pantalla las dice distinto. Sin `motivo`
+    // las dos caerían en "la compra no es la última", que sobre una compra que
+    // SÍ es la última manda al usuario a buscar donde no hay nada.
+    rpc.mockResolvedValue({
+      data: {
+        success: true,
+        compra_id: '221',
+        warning_costo_promedio: [
+          { producto_id: 7, costo_real_anterior: 100, costo_real_nuevo: 120, motivo: 'no_es_la_ultima' },
+          { producto_id: 9, motivo: 'sin_cpp_previo' },
+        ],
+      },
+      error: null,
+    })
+    const { result } = setup(useActualizarCompraMutation)
+
+    const res = await result.current.mutateAsync(edicion)
+
+    expect(res.warningCostoPromedio.map(w => w.motivo)).toEqual(['no_es_la_ultima', 'sin_cpp_previo'])
+    // El del snapshot faltante no trae costos: no hay "antes" que mostrar.
+    expect(res.warningCostoPromedio[1].costo_real_anterior).toBeUndefined()
+  })
+})
+
+describe('el costo de reposicion que la factura vieja no piso (mig 236)', () => {
+  beforeEach(() => rpc.mockReset())
+
+  it('sube warning_costo_reposicion del alta', async () => {
+    // Una factura traspapelada suma stock y pesa en el promedio, pero NO
+    // devuelve el costo de reposición a su fecha. De ese costo salen los
+    // precios de venta: el silencio era lo peligroso.
+    rpc.mockResolvedValue({
+      data: {
+        success: true,
+        compra_id: '226',
+        warning_costo_reposicion: [
+          { producto_id: 7, fecha_compra: '2026-08-19', fecha_ultima_compra: '2026-09-10' },
+        ],
+      },
+      error: null,
+    })
+    const { result } = setup(useRegistrarCompraMutation)
+
+    const res = await result.current.mutateAsync(compra)
+
+    expect(res.warningCostoReposicion).toHaveLength(1)
+    expect(res.warningCostoReposicion?.[0].fecha_ultima_compra).toBe('2026-09-10')
+  })
+
+  it('sin compra posterior no hay aviso', async () => {
+    rpc.mockResolvedValue({ data: { success: true, compra_id: '226' }, error: null })
+    const { result } = setup(useRegistrarCompraMutation)
+
+    const res = await result.current.mutateAsync(compra)
+
+    expect(res.warningCostoReposicion).toEqual([])
+  })
 })

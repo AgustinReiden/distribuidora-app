@@ -113,6 +113,21 @@ suelta en `sucursales`.
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
+- **`productos.costo_promedio` no puede ser base de sí mismo.** El promedio vivo ya incluye la
+  compra que estás por recalcular; la base es `compra_items.costo_promedio_anterior`, el
+  snapshot que guardan `registrar_compra_completa` y `actualizar_compra_items` (mig 236). Sin
+  ese snapshot —líneas anteriores a la 236— no se toca el promedio y se avisa: moverlo sin
+  saber de dónde arranca lo corre hacia el costo de la última factura en **cada** edición (100
+  u. a 10 más 100 u. a 20 dan 15 al registrar y 17,50 tras una edición sin cambios). Y el costo
+  de **reposición** (`costo_real` / `costo_sin_iva` / `costo_con_iva`) es otra cosa: sólo lo
+  pisa la compra más nueva del producto (`v_es_mas_reciente`), mientras que el stock y el
+  promedio suman siempre, venga la factura con la fecha que venga.
+- **Cancelar una compra le borra los lotes** (`borrar_lotes_compra_cancelada`, mig 224). Todo
+  camino que cancele una compra decide **antes** qué hace con ellos: `anular_compra_atomica`
+  cancela primero, para que la bajada de stock no consuma FEFO de lotes ajenos y encima borre
+  los propios (229); `cambiar_proveedor_compra` los reapunta al clon antes de cancelar (236,
+  #566). Reapuntar y no clonar-y-borrar: `producto_lotes.compra_id` apunta a la compra, no a la
+  línea, y así se conserva `cantidad_restante` sin duplicar la suma ni por un instante.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y

@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 233.** El ledger de prod llega hasta
-`232_la_merma_baja_el_stock_en_una_transaccion`.
+**La próxima migración es la 237.** El ledger de prod llega hasta
+`236_la_compra_se_acuerda_del_promedio_que_habia`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -917,6 +917,69 @@ Post-aplicación: `VENTA-A`, `CC-A`, `CC-PAGOS-CANCEL`, `CC-B`, `VENTA-M` y `STK
 > El archivo del repo lleva además un encabezado de comentarios que no quedó en el `statements`
 > del ledger (se aplicó desde `BEGIN;`). El SQL ejecutable es idéntico: mismo md5 del texto sin
 > espacios, `86abc2a8bfd460091399bd5cf8cd2e2c`.
+
+### 236 · La compra se acuerda del promedio que había
+
+Cinco agujeros de la cadena de RPCs de compras (`000 → 046 → 048 → 104 → 111 → 114 → 115 → 125
+→ 126 → 127 → 128 → 177 → 178 → 192-196 → 224 → 227`), los cinco forward-only. Parche por ancla
+sobre el cuerpo vivo, con un helper extra que reemplaza una **región** delimitada por dos marcas
+cortas en vez de un ancla transcripta: el bloque del promedio son cuarenta líneas y alcanza con
+que un espacio no coincida para que el parche no entre.
+
+**El promedio se re-derivaba desde el promedio que ya incluía la compra.**
+`actualizar_compra_items` mezclaba `productos.costo_promedio` leído tal cual —el promedio de
+*después*— con `v_stock_previo_map`, que sí resta las unidades de la compra: un stock de *antes*.
+Medido en prod con `ROLLBACK`: 100 u. a CPP 10 más una compra de 100 u. a 20 dejan **15** al
+registrar y **17,50** después de una edición sin un solo cambio (la siguiente, 18,75).
+`reporte_gerencial` y `reporte_valuacion_inventario` leen esa columna. El promedio previo no se
+puede reconstruir después, así que se guarda cuando todavía se sabe:
+`compra_items.costo_promedio_anterior`, análoga a `stock_anterior`, escrita por las dos RPCs. Las
+compras ya cargadas no lo tienen: para esas la edición **no toca** el promedio y devuelve
+`warning_costo_promedio` con `motivo = 'sin_cpp_previo'` (el costo de reposición sí se actualiza,
+que no depende del promedio).
+
+**Una factura traspapelada pisaba el costo de reposición.** `registrar_compra_completa` escribía
+`costo_sin_iva` / `costo_con_iva` / `costo_real` / `ultimo_tipo_compra` sin mirar si había una
+compra posterior; una factura de tres semanas atrás cargada con su fecha real devolvía el costo
+de reposición a esa fecha, y de ahí salen los precios de venta. Se portó `v_es_mas_reciente`,
+que `actualizar_compra_items` ya tenía desde la 128: el stock y el promedio suman igual, el costo
+de reposición no se pisa, y vuelve `costo_actualizado = false` por ítem más un
+`warning_costo_reposicion` de cabecera.
+
+**La 227 había parcheado una sola de las dos.** El `#539` (la mercadería regalada diluye el
+promedio) entró sólo en el alta. Se aplica el mismo parche a la edición, con `v_stock_previo` de
+base, y el post-check de la 227 pasa a mirar las dos funciones. De paso, `v_stock_previo_map`
+ahora avanza en **todas** las ramas: un regalo seguido de una línea paga del mismo producto
+volvía a contar el mismo stock.
+
+**La nota de crédito no tenía tope en la base.** `registrar_nota_credito` (viva desde el
+baseline) no validaba que el `producto_id` perteneciera a la compra ni que la cantidad cupiera en
+lo comprado menos lo ya acreditado; el único tope vivía en `ModalNotaCredito` (`maxCreditable`,
+`staleTime` 5 min). El corte va **por producto**, igual que el del modal, y el `FOR UPDATE` sobre
+las líneas de la compra serializa las notas simultáneas.
+
+**issue #566 — el clon se quedaba sin lotes.** `cambiar_proveedor_compra` cancelaba la compra
+vieja con un `UPDATE` directo, que dispara `borrar_lotes_compra_cancelada` (224): el clon nacía
+sin un solo vencimiento y la mercadería que seguía en el depósito volvía a la bolsa "sin fecha".
+`producto_lotes.compra_id` apunta a la **compra**, no a la línea, así que no hay nada que clonar:
+se **reapuntan** antes de cancelar. Reapuntar y no `INSERT ... SELECT` + `DELETE` preserva
+`cantidad_restante` —lo que FEFO ya consumió— y no duplica la suma de lotes ni por un instante
+(invariante `LOTE-A`).
+
+No se tocó `src/utils/prorrateoCompra.ts` ni `calcular_costos_compra` / `prorratear_cargo`: son
+el motor de prorrateo de cargos, están espejados por `scripts/espejo-motor-compras.mjs` y ninguno
+menciona `costo_promedio` (el bloque de verificación lo vuelve a comprobar). El orden de
+`anular_compra_atomica` ya lo había arreglado la 229 —cancela antes de bajar el stock— y se
+verificó sobre el cuerpo vivo: no había nada que hacer, sólo quedó un guard de regresión.
+
+La migración **es su propia prueba de aceptación**: además de la verificación estática trae un
+ensayo funcional dentro de una subtransacción que se revierte siempre (las variables de plpgsql
+no son transaccionales, así que lo medido sobrevive al rollback). Antes de aplicar se corrió el
+mismo ensayo contra el código sin parchear y devolvió los cinco bugs: `A edicion=17,50`,
+`B costo_real=50` con `costo_actualizado=true`, las NC de 11 / de un producto ajeno / 6+6+4 sobre
+una compra de 10 **todas aceptadas**, y `lotes_clon=0`. Después de aplicar, el mismo ensayo pasa
+en verde. El md5 del archivo del repo es idéntico al `statements` del ledger:
+`61a71769eb68eeae99be8cfab99099b0`.
 
 ## Mantenimiento
 

@@ -1215,6 +1215,22 @@ export interface RegistrarCompraResult {
    * dejado en blanco, que es un estado soportado. Se avisa, no se rompe.
    */
   warningLotes?: string | null;
+  /**
+   * Productos cuyo costo de REPOSICIÓN no se tocó porque esta factura no es la
+   * última de ese producto (mig 236). El stock y el promedio suman igual: lo
+   * que no se pisa es `costo_real` / `costo_sin_iva` / `costo_con_iva`, que es
+   * de dónde salen los precios de venta. Pasa al cargar una factura
+   * traspapelada con su fecha real.
+   */
+  warningCostoReposicion?: WarningCostoReposicion[];
+}
+
+/** Una línea de {@link RegistrarCompraResult.warningCostoReposicion} (mig 236). */
+export interface WarningCostoReposicion {
+  producto_id: number;
+  fecha_compra: string;
+  /** La fecha de la compra más nueva de ese producto, que es la que manda. */
+  fecha_ultima_compra: string;
 }
 
 export interface UseComprasReturnExtended {
