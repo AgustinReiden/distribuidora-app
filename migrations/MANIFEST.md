@@ -841,6 +841,83 @@ queda con `total_facturado` = Σ `pedidos.total`; y el guard de anulación recha
 (`anulacion_toca_promociones`) y deja pasar la 28. Post-aplicación: `STK-F` en 0,
 `auditoria_integridad()` con `overall_ok = true` y 0 en rojo.
 
+### 235 · El total lo dice el servidor, y cancelar deja todo en cero
+
+Tres agujeros del alta y la baja de un pedido con la misma forma: el servidor le creía al
+caller un número que podía calcular solo. Parche por ancla sobre el cuerpo vivo (molde de la
+205), porque `crear_pedido_completo` es la mig 132 más los parches de 205/214/216 y copiarla
+del archivo habría borrado esos tres.
+
+**El total venía del cliente y nadie lo miraba.** `crear_pedido_completo` insertaba `p_total`
+tal cual en `pedidos.total` y `total_real`. Al cierre recalculaba `total_neto`, `total_iva` y
+`total_real` desde los items, pero `total` nunca se comparaba contra
+`SUM(cantidad × precio_unitario)`. Items por $80.000 con `p_total = 1` descontaban el stock de
+verdad, salteaban la compra mínima (la 205 validaba sobre ese mismo `p_total` sin verificar) y
+le dejaban al cliente una deuda de $1; `VENTA-A` lo veía recién en el gate del día siguiente.
+Ahora se compara, **no se pisa**: `p_total` sigue siendo el contrato y sigue siendo lo que se
+inserta, con la tolerancia de un centavo que ya usa `VENTA-A`. La compra mínima pasa a
+evaluarse contra el total calculado. Mismo tratamiento en `crear_pedido_completo_bot` con
+`v_pendiente.total`, respetando su contrato de error (`error` string, no `errores` array).
+
+**La idempotencia del replay offline no se serializaba.** `crear_pedido_idempotente` (071)
+buscaba el `offline_id` sin lock y lo sellaba *después* de crear. Dos llamadas solapadas —el
+reintento del PWA cuando vuelve la señal es exactamente eso— pasaban las dos por el lookup
+vacío: la segunda creaba el pedido entero y moría con `23505`, que PostgREST devuelve como 409
+y el front no reintenta. Ahora `pg_advisory_xact_lock(hashtextextended(p_offline_id, 0))` antes
+del lookup, mismo molde que `pago_solicitud_abrir` (230). El hit idempotente además sólo cuenta
+si la fila es de la sucursal activa; **el lookup sigue leyendo global a propósito**, porque
+`uq_pedidos_offline_id` también es global (índice parcial sobre `offline_id`, sin
+`sucursal_id`): filtrarlo de verdad haría que el caso cruzado volviera a crear el pedido y a
+morir con `23505` después de descontar stock. Se corta antes, con mensaje propio. Y
+`p_offline_id` nulo sigue siendo legal pero deja un `RAISE LOG`.
+
+**Cancelar dejaba tres cosas colgadas**, las tres medidas en prod antes de tocar nada:
+
+- El regalo no devolvía el fardo: había un `GREATEST(usos_pendientes - cantidad, 0)` a mano en
+  vez de `revertir_bloques_auto_ajuste`, y el clamp se comía el negativo, así que el bloque que
+  se mermó al completarse no volvía nunca. Los otros tres caminos ya la llamaban. 79 pedidos
+  cancelados con 396 unidades de regalo en promos con auto-ajuste. Ahora se llama **agrupado
+  por promoción**: dos renglones de la misma promo son un solo delta y un solo `promo_ajustes`.
+- El cobro se evaporaba: `monto_pagado = 0` sin tocar `pagos`, así que el pago quedaba imputado
+  a un pedido cancelado, no reducía ninguna boleta viva ni contaba como crédito.
+  `CC-PAGOS-CANCEL` daba 0 sólo porque todavía no había pasado. Ahora se desimputa
+  (`pedido_id = NULL`), que es la representación de saldo a favor que ya usan
+  `registrar_pago_cliente_fifo_impl` y `aplicar_credito_cliente` y la que `CC-A` cuenta como
+  crédito. El guard de caja cerrada es `BEFORE UPDATE OF fecha, monto` y no se dispara: está
+  bien, porque el monto, la fecha y la forma de pago no cambian — la caja de ese día cierra por
+  el mismo número, sólo cambia a qué boleta se imputa.
+- `total_real` no se cereaba: 113 pedidos cancelados con `total_real <> 0`, hasta $198.800, y
+  197 con `total_neto <> 0`. Es la base del margen y del CMV. Se agrega al `UPDATE`, se extiende
+  `VENTA-I` a las cuatro columnas y se backfillean las filas viejas.
+
+**`cambiar_cliente_pedido` necesitó el escape hatch, y no es cosmético.** Cancela el pedido
+viejo y *después* hace `UPDATE pagos SET pedido_id = <nuevo>` para que el cobro viaje con la
+venta. Con la desimputación puesta, ese `UPDATE` no encuentra nada: medido en prod, el cobro
+quedaba de crédito en el cliente **equivocado** y el pedido nuevo en `monto_pagado = 0`.
+`app.cancelacion_conserva_pagos` es el mismo GUC por transacción que `app.omitir_minimo_pedido`
+(205) y `app.omitir_minimo_venta` (174), por el mismo motivo: una reatribución es una
+corrección administrativa, no una cancelación.
+
+Los **4 pedidos de abril con `total <> 0`** que `VENTA-I` ya documentaba quedan con su total:
+son anteriores al camino actual de cancelación y tocarlos reescribiría la facturación de abril.
+Se les cerea neto/iva/real como a todos, así que `VENTA-I` sigue dando exactamente esos 4.
+
+Verificado contra prod en tres transacciones con `ROLLBACK` antes de aplicar: `p_total = 1` con
+items por $80.000 **rechazado** con los dos números en el mensaje y el mismo pedido con total
+correcto creado igual que antes; dos llamadas con el mismo `offline_id` devuelven el mismo
+`pedido_id` con `idempotente = true`, una sola fila con esa clave y el advisory lock presente en
+`pg_locks` con la clave exacta; cancelar un pedido con $30.000 imputados deja el pago en
+`pedido_id = NULL` y el `saldo_cuenta` del cliente $30.000 abajo (crédito), con las cuatro
+columnas del pedido en 0; cancelar un pedido con regalo de la promo 13 devuelve el contenedor
+`163 → 162 → 163` y los usos `4 → 0 → 4`; y el cambio de cliente, con el hatch, deja el pago en
+el pedido nuevo y en el cliente nuevo (sin el hatch, medido, el cobro se perdía).
+Post-aplicación: `VENTA-A`, `CC-A`, `CC-PAGOS-CANCEL`, `CC-B`, `VENTA-M` y `STK-F` en 0,
+`VENTA-I` en sus 4 de abril, `auditoria_integridad()` con `overall_ok = true` y 0 en rojo.
+
+> El archivo del repo lleva además un encabezado de comentarios que no quedó en el `statements`
+> del ledger (se aplicó desde `BEGIN;`). El SQL ejecutable es idéntico: mismo md5 del texto sin
+> espacios, `86abc2a8bfd460091399bd5cf8cd2e2c`.
+
 ## Mantenimiento
 
 - Toda migración nueva: archivo `migrations/NNN_descripcion.sql` **y** aplicar por
