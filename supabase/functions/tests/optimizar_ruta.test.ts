@@ -11,6 +11,8 @@ import {
   unirTramos,
 } from "../optimizar-ruta/tramos.ts";
 import { parseOptimizeTours, parseOptimizeToursMulti } from "../optimizar-ruta/route-optimization.ts";
+import { type AutorizarDeps, autorizarCaller } from "../optimizar-ruta/auth.ts";
+import { MAX_PEDIDOS, MAX_REPARTIDORES, validarLimites } from "../optimizar-ruta/limites.ts";
 
 const DEPOSITO = { latitude: -26.8241, longitude: -65.2226 };
 
@@ -266,4 +268,103 @@ Deno.test("parseOptimizeToursMulti devuelve los pedidos no asignados (skippedShi
   const { recorridos, skipped } = parseOptimizeToursMulti(data, pedidos, ["A"]);
   assertEquals(recorridos.length, 1);
   assertEquals(skipped, ["2"]);
+});
+
+// --- Autorización (auth.ts): los tres rechazos ---
+
+function depsFake(opts: {
+  usuario?: { id: string } | null;
+  rol?: string | null;
+}): AutorizarDeps {
+  return {
+    obtenerUsuario: () => Promise.resolve(opts.usuario ?? null),
+    obtenerRol: () => Promise.resolve(opts.rol ?? null),
+  };
+}
+
+Deno.test("autorizarCaller: sin header Authorization → 401 sin consultar usuario/rol", async () => {
+  let obtenerUsuarioLlamado = false;
+  const deps: AutorizarDeps = {
+    obtenerUsuario: () => {
+      obtenerUsuarioLlamado = true;
+      return Promise.resolve({ id: "u1" });
+    },
+    obtenerRol: () => Promise.resolve("admin"),
+  };
+  const req = new Request("https://x/optimizar-ruta", { method: "POST" });
+  const res = await autorizarCaller(req, deps);
+  assertEquals(res.ok, false);
+  if (!res.ok) {
+    assertEquals(res.status, 401);
+  }
+  assertEquals(obtenerUsuarioLlamado, false);
+});
+
+Deno.test("autorizarCaller: token inválido/expirado (anon key sin sesión) → 401", async () => {
+  // La anon key pública satisface verify_jwt de Supabase, pero
+  // auth.getUser() no resuelve ningún usuario real → obtenerUsuario null.
+  const deps = depsFake({ usuario: null });
+  const req = new Request("https://x/optimizar-ruta", {
+    method: "POST",
+    headers: { Authorization: "Bearer anon-key-o-jwt-invalido" },
+  });
+  const res = await autorizarCaller(req, deps);
+  assertEquals(res.ok, false);
+  if (!res.ok) {
+    assertEquals(res.status, 401);
+  }
+});
+
+Deno.test("autorizarCaller: usuario autenticado con rol preventista → 403", async () => {
+  const deps = depsFake({ usuario: { id: "u1" }, rol: "preventista" });
+  const req = new Request("https://x/optimizar-ruta", {
+    method: "POST",
+    headers: { Authorization: "Bearer jwt-de-preventista" },
+  });
+  const res = await autorizarCaller(req, deps);
+  assertEquals(res.ok, false);
+  if (!res.ok) {
+    assertEquals(res.status, 403);
+  }
+});
+
+Deno.test("autorizarCaller: acepta transportista, encargado y admin", async () => {
+  for (const rol of ["transportista", "encargado", "admin"]) {
+    const deps = depsFake({ usuario: { id: "u1" }, rol });
+    const req = new Request("https://x/optimizar-ruta", {
+      method: "POST",
+      headers: { Authorization: "Bearer jwt-valido" },
+    });
+    const res = await autorizarCaller(req, deps);
+    assertEquals(res.ok, true, `rol ${rol} debería estar permitido`);
+  }
+});
+
+Deno.test("autorizarCaller: perfil sin rol reconocido → 403 (fail-closed)", async () => {
+  const deps = depsFake({ usuario: { id: "u1" }, rol: null });
+  const req = new Request("https://x/optimizar-ruta", {
+    method: "POST",
+    headers: { Authorization: "Bearer jwt-valido" },
+  });
+  const res = await autorizarCaller(req, deps);
+  assertEquals(res.ok, false);
+  if (!res.ok) {
+    assertEquals(res.status, 403);
+  }
+});
+
+// --- Topes de tamaño (limites.ts) ---
+
+Deno.test("validarLimites acepta hasta el máximo de pedidos y repartidores", () => {
+  assertEquals(validarLimites(MAX_PEDIDOS, MAX_REPARTIDORES).ok, true);
+});
+
+Deno.test("validarLimites rechaza más de MAX_PEDIDOS pedidos", () => {
+  const r = validarLimites(MAX_PEDIDOS + 1, 0);
+  assertEquals(r.ok, false);
+});
+
+Deno.test("validarLimites rechaza más de MAX_REPARTIDORES repartidores", () => {
+  const r = validarLimites(0, MAX_REPARTIDORES + 1);
+  assertEquals(r.ok, false);
 });

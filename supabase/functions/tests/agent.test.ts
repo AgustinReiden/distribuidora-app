@@ -35,6 +35,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { runAgent } from "../_shared/gemini/agent.ts";
 import { dropToValidStart, truncateHistory } from "../_shared/gemini/memory.ts";
 import type { GeminiContent } from "../_shared/gemini/types.ts";
+import { toolsVisiblesParaModelo } from "../_shared/gemini/schema.ts";
 import {
   clearSystemPromptCache,
   setSystemPromptForTests,
@@ -42,6 +43,8 @@ import {
 import {
   _clearToolsForTests,
   _resetRegisterFlagForTests,
+  getTool,
+  registerAllTools,
   registerTool,
 } from "../_shared/tools/index.ts";
 import type { Tool } from "../_shared/tools/base.ts";
@@ -1009,6 +1012,66 @@ Deno.test("runAgent silent STOP devuelve mensaje accionable distinto al genéric
     assertEquals(meta.finishReason, "STOP");
     // malformed NO debe estar marcado.
     assertEquals(meta.malformed, undefined);
+  } finally {
+    fetchStub.restore();
+    teardownAgentEnv();
+  }
+});
+
+// ============================================================================
+// 8. crear_pedido: oculta a Gemini pero sigue invocable (registry / botón)
+// ============================================================================
+
+Deno.test("toolsVisiblesParaModelo filtra las tools con ocultaAlModelo", () => {
+  const base = {
+    description: "d",
+    parameters: { type: "object", properties: {} },
+    allowedRoles: ["admin"] as const,
+    handler: () => Promise.resolve({}),
+  };
+  const visible: Tool = { ...base, name: "visible_tool" };
+  const oculta: Tool = { ...base, name: "oculta_tool", ocultaAlModelo: true };
+
+  const result = toolsVisiblesParaModelo([visible, oculta]);
+  assertEquals(result.map((t) => t.name), ["visible_tool"]);
+});
+
+Deno.test("runAgent (preventista): crear_pedido no llega a las function_declarations de Gemini, previsualizar_pedido sí", async () => {
+  setupAgentEnv();
+  registerAllTools();
+  const { client } = createMockSupabase({ conversacionData: null });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installGeminiFetchStub([
+    {
+      candidates: [
+        { content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP" },
+      ],
+      usageMetadata: { totalTokenCount: 10 },
+    },
+  ]);
+
+  try {
+    await runAgent({
+      supabase: client,
+      user: makeUser("preventista"),
+      telegram_user_id: 42,
+      userMessage: "hola",
+    });
+
+    const reqBody = fetchStub.spy.calls[0].body as Record<string, unknown>;
+    const tools = reqBody.tools as Array<
+      { function_declarations: Array<{ name: string }> }
+    >;
+    const names = tools[0].function_declarations.map((d) => d.name);
+
+    assert(!names.includes("crear_pedido"), "crear_pedido no debe declararse a Gemini");
+    assert(names.includes("previsualizar_pedido"), "previsualizar_pedido sí debe declararse");
+
+    // Sigue registrada: el callback del botón "Confirmar" la invoca vía
+    // invokeTool()/getTool() directamente, sin pasar por Gemini.
+    assert(getTool("crear_pedido") !== undefined, "crear_pedido debe seguir en el registry");
   } finally {
     fetchStub.restore();
     teardownAgentEnv();
