@@ -95,6 +95,11 @@ async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoA
       ...pedido,
       cambio,
       orden_entrega: rp.orden_entrega ?? pedido?.orden_entrega ?? null,
+      // Se pierde tras `marcar_no_entregado`: el pedido vuelve a 'pendiente' y
+      // ese estado por sí solo no distingue "liberado sin visitar" de "no se
+      // pudo entregar" (ver RutaActivaTransportista, que usa esto para no
+      // contar una parada fallida como entrega completada).
+      estado_entrega: rp.estado_entrega ?? null,
     }
   }) as unknown as PedidoConCliente[]
 

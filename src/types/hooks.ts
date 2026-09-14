@@ -1829,18 +1829,11 @@ export interface EstadisticasSalvedades {
 export interface UseSalvedadesReturn {
   salvedades: SalvedadItemDBExtended[];
   loading: boolean;
-  // Transportista o admin puede registrar
-  registrarSalvedad: (input: RegistrarSalvedadInput) => Promise<RegistrarSalvedadResult>;
   // Admin
   resolverSalvedad: (input: ResolverSalvedadInput) => Promise<{ success: boolean; nuevoEstado: EstadoResolucionSalvedad }>;
-  anularSalvedad: (salvedadId: string, notas?: string) => Promise<{ success: boolean }>;
   // Consultas
-  fetchSalvedadesPorPedido: (pedidoId: string) => Promise<SalvedadItemDBExtended[]>;
-  fetchSalvedadesPendientes: () => Promise<SalvedadItemDBExtended[]>;
   fetchTodasSalvedades: () => Promise<SalvedadItemDBExtended[]>;
-  fetchSalvedadesPorFecha: (desde: string, hasta?: string) => Promise<SalvedadItemDBExtended[]>;
-  fetchSalvedadById: (id: string) => Promise<SalvedadItemDBExtended | null>;
-  getEstadisticas: (desde?: string, hasta?: string) => Promise<EstadisticasSalvedades>;
+  getEstadisticas: () => Promise<EstadisticasSalvedades>;
   refetch: () => Promise<void>;
 }
 

@@ -90,8 +90,9 @@ interface RequestBody {
     franjas: Array<{ inicio: string; fin: string }>;
   }>;
   /**
-   * Barrida de cada pedido (1 = cierra al mediodía, 2 = sin horario,
-   * 3 = corrido/abre tarde). Si viene, el orden ENTRE barridas es duro.
+   * Barrida de cada pedido (1 = madrugador y cierra al mediodía, 2 = cierra
+   * hasta las 13, 3 = cierra hasta las 14:30, 4 = sin horario cargado,
+   * 5 = corrido/abre tarde). Si viene, el orden ENTRE barridas es duro.
    * La clasificación la hace el cliente (src/utils/barridas.ts).
    */
   barridas?: Array<{ pedido_id: string | number; barrida: Barrida }>;
@@ -413,7 +414,7 @@ serve(async (req: Request) => {
       });
       return jsonResponse({
         success: true,
-        optimizado_por: `Google Route Optimization (${repartidores.length} vehículos${usarBarridas ? ", 3 barridas" : ""})`,
+        optimizado_por: `Google Route Optimization (${repartidores.length} vehículos${usarBarridas ? `, ${ORDEN_BARRIDAS.length} barridas` : ""})`,
         recorridos,
         pedidos_sin_coordenadas: sinCoords.length,
         pedidos_sin_coordenadas_ids: sinCoords.map((p) => String(p.pedido_id ?? "")),
@@ -451,7 +452,7 @@ serve(async (req: Request) => {
           });
           ruta = r;
           composicion = r.composicion;
-          optimizadoPor = "Google Route Optimization (3 barridas)";
+          optimizadoPor = `Google Route Optimization (${ORDEN_BARRIDAS.length} barridas)`;
         } else {
           ruta = await optimizeTours(saKey, deposito, conCoords, destino, {
             fecha: body.fecha,
