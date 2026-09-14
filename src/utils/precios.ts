@@ -27,6 +27,10 @@ export interface PreciosNuevos {
 
 /**
  * @param porcentajePct - 3 para +3%, -5 para -5%
+ *
+ * impuestos_internos es un porcentaje sobre el neto, no un precio: no se
+ * escala ni se redondea con el resto. Siempre devuelve null para que el
+ * RPC (COALESCE) preserve el valor existente en la tabla.
  */
 export function calcularNuevosPrecios(producto: PreciosBase, porcentajePct: number): PreciosNuevos {
   const factor = 1 + porcentajePct / 100
@@ -36,7 +40,7 @@ export function calcularNuevosPrecios(producto: PreciosBase, porcentajePct: numb
   }
   return {
     precio_neto: aplicar(producto.precio_sin_iva),
-    imp_internos: aplicar(producto.impuestos_internos),
+    imp_internos: null,
     precio_final: aplicar(producto.precio),
   }
 }
