@@ -19,6 +19,7 @@ vi.mock('../../utils/formatters', () => ({
 }))
 
 import ModalEditarCompra from './ModalEditarCompra'
+import { calcularTotalesCompra } from '../../utils/prorrateoCompra'
 
 const compraBase = (overrides = {}) => ({
   id: 500,
@@ -163,5 +164,159 @@ describe('ModalEditarCompra · cargos prorrateados', () => {
     // El total sigue siendo el de las líneas: los cargos van al costo unitario
     // de los productos, no a la cabecera de la compra.
     expect(screen.getByText('$2420.00')).toBeInTheDocument()
+  })
+})
+
+/**
+ * Los totales de la edición salen del MISMO motor que el alta.
+ *
+ * Acá había un loop propio sobre las líneas: el que la mig 195 sacó del alta
+ * justamente porque no ve los cargos. Desde que una bonificación general se carga
+ * como cargo gravado, baja la base del IVA siempre y la del impuesto interno
+ * cuando es descuento de precio, y un loop de renglones no la ve: contra la
+ * factura testigo de esa migración, editar una línea subía `compras.iva` 64.424,66
+ * y revertía el ×1,0496 del impuesto interno. Sin un solo error: lo que se movía
+ * era la posición fiscal.
+ *
+ * Las expectativas se comparan contra `calcularTotalesCompra` y no contra números
+ * escritos a mano a propósito — lo que se quiere clavar es que las dos pantallas
+ * digan lo mismo, no un valor puntual.
+ */
+describe('ModalEditarCompra · totales con cargo gravado e II declarado', () => {
+  const LINEAS = [
+    { id: 91, producto_id: 1, cantidad: 10, costo_unitario: 1000, bonificacion: 0,
+      porcentaje_iva: 21, condicion_iva: 'gravado', impuestos_internos: 8.6956,
+      producto: { nombre: 'Lima Limon 600' } },
+    { id: 92, producto_id: 2, cantidad: 5, costo_unitario: 2000, bonificacion: 10,
+      porcentaje_iva: 10.5, condicion_iva: 'gravado', impuestos_internos: 0,
+      producto: { nombre: 'Bidon 20L' } },
+  ]
+
+  // Bonificación comercial de cabecera: gravada, en factura, y prorrateada al
+  // costo. `afecta_base_ii: true` = descuento de precio, así que TAMBIÉN baja la
+  // base del impuesto interno. Es el cargo que el loop viejo no veía.
+  const BONIF = {
+    id: 9, orden: 0, concepto: 'Bonificacion comercial', monto: -1500,
+    condicion_iva: 'gravado', en_factura: true, prorratea_al_costo: true,
+    afecta_base_ii: true, base_prorrateo: 'monto',
+    repartos: [{ compra_item_id: 91, peso: 10000 }, { compra_item_id: 92, peso: 9000 }],
+  }
+
+  const II_DECLARADO = { 8.6956: 780 }
+
+  const compraConBonif = (overrides = {}) => compraBase({
+    items: LINEAS,
+    cargos: [BONIF],
+    bonificaciones: -1500,
+    ii_declarado: II_DECLARADO,
+    ...overrides,
+  })
+
+  /** Los mismos totales, pedidos directamente al motor. */
+  const delMotor = (lineas = LINEAS, cargos = [BONIF], iiDeclarado = II_DECLARADO) =>
+    calcularTotalesCompra(
+      lineas.map((it, i) => ({
+        lineaId: i,
+        cantidad: it.cantidad,
+        costoUnitario: it.costo_unitario,
+        bonificacion: it.bonificacion,
+        porcentajeIva: it.porcentaje_iva,
+        condicionIva: it.condicion_iva,
+        impuestosInternos: it.impuestos_internos,
+      })),
+      'FC',
+      { percepcionIva: 0, percepcionIibb: 0, noGravado: 0, otrosImpuestos: 0 },
+      cargos.map((c, i) => ({
+        id: i,
+        concepto: c.concepto,
+        monto: c.monto,
+        condicionIva: c.condicion_iva,
+        enFactura: c.en_factura,
+        prorrateaAlCosto: c.prorratea_al_costo,
+        afectaBaseII: c.afecta_base_ii,
+        // Los pesos van por índice de línea, igual que los traduce el modal.
+        pesos: Object.fromEntries(
+          c.repartos.map((r) => [lineas.findIndex((l) => l.id === r.compra_item_id), r.peso]),
+        ),
+      })),
+      iiDeclarado,
+    )
+
+  it('el IVA, el impuesto interno y el total son los del motor', () => {
+    render(<ModalEditarCompra {...props(compraConBonif())} />)
+    const esperado = delMotor()
+
+    expect(screen.getByText(`$${esperado.iva.toFixed(2)}`)).toBeInTheDocument()
+    expect(screen.getByText(`$${esperado.impuestosInternos.toFixed(2)}`)).toBeInTheDocument()
+    expect(screen.getByText(`$${esperado.total.toFixed(2)}`)).toBeInTheDocument()
+  })
+
+  it('la bonificación gravada baja la base del IVA: el loop de renglones no la veía', () => {
+    const esperado = delMotor()
+    // Lo que daba el loper viejo: Σ neto de línea × alícuota, sin mirar el cargo.
+    const ivaSinCargos = LINEAS.reduce((acc, it) => {
+      const neto = it.cantidad * it.costo_unitario * (1 - it.bonificacion / 100)
+      return acc + neto * (it.porcentaje_iva / 100)
+    }, 0)
+    expect(esperado.iva).toBeLessThan(ivaSinCargos)
+
+    render(<ModalEditarCompra {...props(compraConBonif())} />)
+    expect(screen.queryByText(`$${ivaSinCargos.toFixed(2)}`)).not.toBeInTheDocument()
+  })
+
+  it('el impuesto interno respeta el factor de ajuste del declarado', () => {
+    // Con `ii_declarado` la tasa se ajusta al monto del papel; sin él no. Si el
+    // modal no reenviara la apertura —o la ignorara al calcular— el factor se
+    // revertiría y el número de la cabecera volvería al calculado a secas.
+    const conDeclarado = delMotor()
+    const sinDeclarado = delMotor(LINEAS, [BONIF], {})
+    expect(conDeclarado.impuestosInternos).not.toBeCloseTo(sinDeclarado.impuestosInternos, 2)
+
+    render(<ModalEditarCompra {...props(compraConBonif())} />)
+    expect(screen.getByText(`$${conDeclarado.impuestosInternos.toFixed(2)}`)).toBeInTheDocument()
+    expect(screen.queryByText(`$${sinDeclarado.impuestosInternos.toFixed(2)}`)).not.toBeInTheDocument()
+  })
+
+  it('lo que se manda a la RPC es lo que se muestra', async () => {
+    const user = userEvent.setup()
+    const onGuardar = vi.fn().mockResolvedValue(undefined)
+    render(<ModalEditarCompra {...props(compraConBonif(), onGuardar)} />)
+
+    await guardar(user)
+
+    const esperado = delMotor()
+    const enviado = onGuardar.mock.calls[0][0]
+    expect(enviado.iva).toBeCloseTo(esperado.iva, 6)
+    expect(enviado.impuestosInternos).toBeCloseTo(esperado.impuestosInternos, 6)
+    expect(enviado.subtotal).toBeCloseTo(esperado.subtotal, 6)
+    expect(enviado.total).toBeCloseTo(esperado.total, 6)
+  })
+
+  it('borrar una línea recalcula contra el motor, no contra el loop', async () => {
+    const user = userEvent.setup()
+    const onGuardar = vi.fn().mockResolvedValue(undefined)
+    // La bonificación sigue teniendo peso en el bidón, así que borrar la primera
+    // línea no la deja huérfana.
+    render(<ModalEditarCompra {...props(compraConBonif(), onGuardar)} />)
+
+    await borrarLinea(user, 0)
+    await guardar(user)
+
+    const esperado = delMotor([LINEAS[1]], [{ ...BONIF, repartos: [{ compra_item_id: 92, peso: 9000 }] }])
+    const enviado = onGuardar.mock.calls[0][0]
+    expect(enviado.items).toHaveLength(1)
+    expect(enviado.iva).toBeCloseTo(esperado.iva, 6)
+    expect(enviado.total).toBeCloseTo(esperado.total, 6)
+  })
+
+  it('sin cargos leídos el total conserva las bonificaciones guardadas', () => {
+    // No hay con qué recalcularlas y dejarlas en 0 bajaría el total por un dato
+    // que no llegó. (Guardar así lo rechaza el guard de la mig 194.)
+    const compra = compraConBonif()
+    delete compra.cargos
+    render(<ModalEditarCompra {...props(compra)} />)
+
+    const sinCargos = delMotor(LINEAS, [], II_DECLARADO)
+    expect(screen.getByText(`$${(sinCargos.total - 1500).toFixed(2)}`)).toBeInTheDocument()
   })
 })

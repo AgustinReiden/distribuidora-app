@@ -12,7 +12,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useOfflineSync } from '../useOfflineSync'
+import { useOfflineSync, claveIdempotencia } from '../useOfflineSync'
+import { useSyncManager } from '../useSyncManager'
+import type { PendingOperation } from '../../lib/offlineDb'
 import type { PedidoOffline, ProductoDB } from '../../types'
 
 // Mock de offlineDb (ahora useOfflineSync usa IndexedDB via offlineDb)
@@ -34,19 +36,29 @@ vi.mock('../../lib/offlineDb', () => ({
 // useOfflineSync ahora importa setSucursalHeader de ../../lib/supabase y
 // useSucursal de ../../contexts/SucursalContext para etiquetar cada op con
 // el sucursal_id activo (ver commit 9181a66 / Task 5 multi-tenant).
+// `auth.refreshSession` lo usa el replay cuando el error huele a JWT vencido
+// (ver utils/sesionVencida), que es lo típico al reconectar.
+const mockRefreshSession = vi.fn().mockResolvedValue({ data: { session: { user: { id: 'user-A' } } }, error: null })
+
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     from: vi.fn(),
     rpc: vi.fn(),
     rest: { headers: {} },
+    auth: { refreshSession: (...args: unknown[]) => mockRefreshSession(...args) },
   },
   setSucursalHeader: vi.fn(),
   getSucursalHeader: vi.fn(() => null),
 }))
 
+// Mutable para poder cambiar de usuario/sucursal en los tests de teléfono
+// compartido. `useSucursal` lo lee en cada render, no al crear el mock.
+const sesionActiva = vi.hoisted(() => ({ userId: 'user-A' as string | null, sucursalId: 1 as number | null }))
+
 vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({
-    currentSucursalId: 1,
+    userId: sesionActiva.userId,
+    currentSucursalId: sesionActiva.sucursalId,
     sucursales: [{ id: 1, nombre: 'Test', rol: 'admin' }],
     loading: false,
     switchSucursal: vi.fn(),
@@ -67,6 +79,8 @@ describe('useOfflineSync Integration Tests', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    sesionActiva.userId = 'user-A'
+    sesionActiva.sucursalId = 1
 
     // Simular estado online por defecto
     Object.defineProperty(navigator, 'onLine', {
@@ -81,6 +95,7 @@ describe('useOfflineSync Integration Tests', () => {
     mockMarkAsCompleted.mockResolvedValue(undefined)
     mockMarkAsFailed.mockResolvedValue(undefined)
     mockCleanupOldOperations.mockResolvedValue(0)
+    mockRefreshSession.mockResolvedValue({ data: { session: { user: { id: 'user-A' } } }, error: null })
 
     // Reset mocks de API
     mockCrearPedido.mockResolvedValue({ id: 1, success: true })
@@ -856,13 +871,18 @@ describe('useOfflineSync Integration Tests', () => {
     })
 
     it('usa un offlineId estable para que el reintento no duplique', async () => {
+      // Estable, pero YA NO `op_42`: ese era el autoincrement de Dexie. Ver el
+      // bloque IDEM-01.
       mockGetPendingOperations.mockResolvedValue([opConPedidoCompleto])
       const { result } = renderHook(() => useOfflineSync())
       await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
 
       await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
 
-      expect(mockCrearPedido.mock.calls[0][0].offlineId).toBe('op_42')
+      const primera = mockCrearPedido.mock.calls[0][0].offlineId
+      expect(primera).toBeTruthy()
+      expect(mockCrearPedido.mock.calls[1][0].offlineId).toBe(primera)
     })
 
     // Sin red no se registra el cobro: el replay no inserta en `pagos`, asi que
@@ -878,6 +898,294 @@ describe('useOfflineSync Integration Tests', () => {
       await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
 
       expect(mockCrearPedido.mock.calls[0][0].estadoPago).toBe('pendiente')
+    })
+  })
+
+  // ===========================================================================
+  // IDEM-01: la clave de idempotencia tiene que ser única en el MUNDO
+  // ===========================================================================
+  /**
+   * EL INCIDENTE. El replay mandaba `op_<op.id>`, donde `op.id` es el
+   * autoincrement de Dexie: arranca en 1 en cada instalación.
+   * `crear_pedido_idempotente` (mig 071) busca `offline_id` en TODA la tabla
+   * `pedidos` — índice único global, SECURITY DEFINER. O sea que el primer
+   * pedido offline de cualquier teléfono era `op_1`: el segundo teléfono que
+   * sincronizaba recibía el pedido AJENO con `idempotente: true`, lo marcaba
+   * como sincronizado, avisaba "1 pedido(s) sincronizado(s)"... y su pedido no
+   * existía en ningún lado. Lo mismo al purgar IndexedDB.
+   */
+  describe('IDEM-01: clave de idempotencia por operación, no por autoincrement', () => {
+    it('el pedido encolado se lleva su propio UUID', async () => {
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toEqual([]))
+
+      await act(async () => {
+        await result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+        await result.current.guardarPedidoOffline({ clienteId: '2', items: [], total: 200 })
+      })
+
+      const uuids = mockQueueOperation.mock.calls.map(c => (c[1] as { offlineUuid?: string }).offlineUuid)
+      expect(uuids).toHaveLength(2)
+      uuids.forEach(uuid =>
+        expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i))
+      expect(uuids[0]).not.toBe(uuids[1])
+    })
+
+    it('el replay manda el UUID del payload, no el id de Dexie', async () => {
+      mockGetPendingOperations.mockResolvedValue([{
+        id: 1,
+        type: 'CREATE_PEDIDO',
+        status: 'pending',
+        sucursalId: 1,
+        userId: 'user-A',
+        payload: { clienteId: '1', items: [], total: 100, offlineUuid: '11111111-2222-4333-8444-555555555555' },
+        createdAt: new Date(),
+      }])
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockCrearPedido.mock.calls[0][0].offlineId).toBe('11111111-2222-4333-8444-555555555555')
+    })
+
+    it('dos instalaciones con op.id = 1 no comparten clave', () => {
+      // Operaciones viejas, encoladas antes de que la cola acuñara UUID: su
+      // única identidad es el autoincrement, que en las dos vale 1.
+      const enTelefonoDeA = { id: 1, userId: 'user-A', payload: {} } as unknown as PendingOperation
+      const enTelefonoDeB = { id: 1, userId: 'user-B', payload: {} } as unknown as PendingOperation
+
+      const claveA = claveIdempotencia(enTelefonoDeA)
+      const claveB = claveIdempotencia(enTelefonoDeB)
+
+      expect(claveA).not.toBe(claveB)
+      expect(claveA).not.toBe('op_1')
+      expect(claveB).not.toBe('op_1')
+    })
+
+    it('sin usuario anotado cae en la identidad de la instalación, y sigue siendo estable', () => {
+      const sinDueno = { id: 1, payload: {} } as unknown as PendingOperation
+
+      const primera = claveIdempotencia(sinDueno)
+      expect(primera).not.toBe('op_1')
+      // Estable: si cambiara entre reintentos, cada uno crearía un pedido nuevo.
+      expect(claveIdempotencia(sinDueno)).toBe(primera)
+    })
+  })
+
+  // ===========================================================================
+  // IDEM-02: "ya existía" no quiere decir "es tuyo"
+  // ===========================================================================
+  describe('IDEM-02: segunda defensa ante una respuesta idempotente', () => {
+    const opDeEsteTelefono = {
+      id: 7,
+      type: 'CREATE_PEDIDO',
+      status: 'pending',
+      sucursalId: 1,
+      userId: 'user-A',
+      payload: { clienteId: '123', items: [], total: 200, offlineUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' },
+      createdAt: new Date(),
+    }
+
+    it('no marca como sincronizado un pedido que es de otro', async () => {
+      mockGetPendingOperations.mockResolvedValue([opDeEsteTelefono])
+      mockCrearPedido.mockResolvedValue({ id: '9001', idempotente: true, clienteId: '999', total: 111 })
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => { syncResult = await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockMarkAsCompleted).not.toHaveBeenCalled()
+      expect(syncResult!.sincronizados).toBe(0)
+      expect(syncResult!.errores).toHaveLength(1)
+      // Reintentar no lo va a arreglar: la clave la tiene otro pedido.
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(
+        7,
+        expect.stringContaining('ya la tiene otro pedido'),
+        { terminal: true },
+      )
+    })
+
+    it('sí lo marca cuando el pedido que ya existía es este', async () => {
+      // Reintento legítimo: la primera request llegó y se perdió la respuesta.
+      mockGetPendingOperations.mockResolvedValue([opDeEsteTelefono])
+      mockCrearPedido.mockResolvedValue({ id: '9001', idempotente: true, clienteId: '123', total: 200 })
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => { syncResult = await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockMarkAsCompleted).toHaveBeenCalledWith(7)
+      expect(syncResult!.sincronizados).toBe(1)
+    })
+
+    it('si no se pudo verificar, no lo da por sincronizado pero deja reintentar', async () => {
+      mockGetPendingOperations.mockResolvedValue([opDeEsteTelefono])
+      mockCrearPedido.mockResolvedValue({ id: '9001', idempotente: true, clienteId: null, total: null })
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockMarkAsCompleted).not.toHaveBeenCalled()
+      expect(mockMarkAsFailed).toHaveBeenCalledWith(
+        7,
+        expect.stringContaining('no se pudo leer'),
+        { terminal: false },
+      )
+    })
+  })
+
+  // ===========================================================================
+  // SYNC-08: un blip de red no puede quemar los 5 reintentos
+  // ===========================================================================
+  describe('SYNC-08: reintentos ante fallo de red', () => {
+    const opPendiente = {
+      id: 3,
+      type: 'CREATE_PEDIDO',
+      status: 'pending',
+      sucursalId: 1,
+      userId: 'user-A',
+      payload: { clienteId: '1', items: [], total: 100, offlineUuid: 'ffffffff-1111-4222-8333-444444444444' },
+      createdAt: new Date(),
+    }
+
+    it('un fallo de red gasta un solo reintento de la cola', async () => {
+      mockGetPendingOperations.mockResolvedValue([opPendiente])
+      // Así vuelve un fallo de red de supabase-js: objeto plano, code vacío.
+      mockCrearPedido.mockRejectedValue({ message: 'TypeError: Failed to fetch', code: '' })
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      // El backoff reintenta adentro (la RPC es idempotente por offlineId)...
+      expect(mockCrearPedido.mock.calls.length).toBeGreaterThan(1)
+      // ...y la operación consume UN solo intento, no cinco.
+      expect(mockMarkAsFailed).toHaveBeenCalledTimes(1)
+    })
+
+    it('la sesión vencida se renueva y se reintenta sin gastar reintentos', async () => {
+      mockGetPendingOperations.mockResolvedValue([opPendiente])
+      mockCrearPedido
+        .mockRejectedValueOnce(new Error('No se pudo determinar la sucursal activa'))
+        .mockResolvedValueOnce({ id: '1' })
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarPedidos>>
+      await act(async () => { syncResult = await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockRefreshSession).toHaveBeenCalledTimes(1)
+      expect(syncResult!.sincronizados).toBe(1)
+      expect(mockMarkAsFailed).not.toHaveBeenCalled()
+      // El reintento usa la MISMA clave: si no, crearía un pedido nuevo.
+      expect(mockCrearPedido.mock.calls[1][0].offlineId).toBe(mockCrearPedido.mock.calls[0][0].offlineId)
+    })
+
+    it('el auto-sync no vuelve a intentar en cada render', async () => {
+      // EL BUG: el efecto dependía de `ejecutarSincronizacion`, que dependía de
+      // `notify`, y el value de NotificationContext se recreaba en cada render.
+      // Cada notify.error del propio sync lo re-disparaba: los 5 reintentos se
+      // consumían en segundos y el pedido quedaba en `failed`, fuera de la cola.
+      const sincronizarPedidos = vi.fn().mockResolvedValue({
+        sincronizados: 0,
+        errores: [{ error: 'Failed to fetch' }],
+      })
+      const deps = {
+        isOnline: true,
+        pedidosPendientes: [{ offlineId: 'op_1' }],
+        mermasPendientes: [],
+        sincronizando: false,
+        sincronizarPedidos,
+        sincronizarMermas: vi.fn().mockResolvedValue({ sincronizados: 0, errores: [] }),
+        crearPedido: vi.fn(),
+        registrarMerma: vi.fn(),
+        refetchPedidos: vi.fn().mockResolvedValue(undefined),
+        refetchProductos: vi.fn().mockResolvedValue(undefined),
+        refetchMermas: vi.fn().mockResolvedValue(undefined),
+        refetchMetricas: vi.fn().mockResolvedValue(undefined),
+      }
+      // Un `notify` nuevo en cada render, que es exactamente lo que hacía el
+      // provider sin useMemo.
+      const nuevoNotify = () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() })
+
+      const { rerender } = renderHook(
+        (props: { notify: ReturnType<typeof nuevoNotify> }) =>
+          useSyncManager({ ...deps, ...props } as unknown as Parameters<typeof useSyncManager>[0]),
+        { initialProps: { notify: nuevoNotify() } },
+      )
+
+      await waitFor(() => expect(sincronizarPedidos).toHaveBeenCalledTimes(1))
+
+      for (let i = 0; i < 5; i++) {
+        await act(async () => { rerender({ notify: nuevoNotify() }) })
+      }
+
+      expect(sincronizarPedidos).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // ===========================================================================
+  // SYNC-09: teléfono compartido
+  // ===========================================================================
+  /**
+   * IndexedDB es del teléfono, no de la sesión, y el logout no la borra a
+   * propósito: una cola borrada es un pedido perdido. Lo que corresponde es que
+   * la cola del otro no se vea ni se replaye hasta que su dueño vuelva a entrar.
+   *
+   * El filtro de verdad vive en `getPendingOperations` y se prueba contra Dexie
+   * en src/lib/offlineDb.test.ts; acá se fija la otra mitad, que es que el hook
+   * diga de quién es la sesión.
+   */
+  describe('SYNC-09: la cola es del usuario que está adentro', () => {
+    const colaDelTelefono = [
+      { id: 1, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, userId: 'user-A', payload: { clienteId: 'de A', items: [], total: 100 }, createdAt: new Date() },
+      { id: 2, type: 'CREATE_PEDIDO', status: 'pending', sucursalId: 1, userId: 'user-B', payload: { clienteId: 'de B', items: [], total: 200 }, createdAt: new Date() },
+    ]
+
+    beforeEach(() => {
+      // Stand-in de IndexedDB con la misma regla de pertenencia que
+      // getPendingOperations: lo del usuario activo y lo que no tiene dueño.
+      mockGetPendingOperations.mockImplementation(async (...args: unknown[]) => {
+        const userId = args[1] as string | null | undefined
+        return colaDelTelefono.filter(op => !userId || op.userId == null || op.userId === userId)
+      })
+    })
+
+    it('el usuario B no ve los pedidos de A', async () => {
+      sesionActiva.userId = 'user-B'
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      expect(result.current.pedidosPendientes[0].clienteId).toBe('de B')
+      expect(mockGetPendingOperations).toHaveBeenCalledWith(100, 'user-B', 1)
+    })
+
+    it('el usuario B tampoco los replaya', async () => {
+      sesionActiva.userId = 'user-B'
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+      await act(async () => { await result.current.sincronizarPedidos(mockCrearPedido) })
+
+      expect(mockCrearPedido).toHaveBeenCalledTimes(1)
+      expect(mockCrearPedido.mock.calls[0][0].clienteId).toBe('de B')
+    })
+
+    it('los pedidos de A siguen ahí cuando A vuelve a entrar', async () => {
+      sesionActiva.userId = 'user-A'
+
+      const { result } = renderHook(() => useOfflineSync())
+      await waitFor(() => expect(result.current.pedidosPendientes).toHaveLength(1))
+
+      expect(result.current.pedidosPendientes[0].clienteId).toBe('de A')
     })
   })
 })

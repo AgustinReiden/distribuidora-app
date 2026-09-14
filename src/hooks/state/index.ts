@@ -17,7 +17,3 @@ export type {
   ModalesApi,
   UseModalsStateReturn
 } from './useModalsState';
-
-// Formulario de pedido
-export { usePedidoFormState, calcularTotalPedido } from './usePedidoFormState';
-export type { NuevoPedidoItem, NuevoPedidoState, UsePedidoFormStateReturn } from './usePedidoFormState';

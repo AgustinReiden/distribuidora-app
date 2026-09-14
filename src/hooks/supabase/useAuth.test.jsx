@@ -200,20 +200,104 @@ describe('useAuth', () => {
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
   })
 
-  it('sale a login limpio si fetchPerfil expira durante bootstrap', async () => {
+  /**
+   * ARRANQUE SIN SEÑAL. Antes, abrir la PWA sin red cerraba la sesión: el token
+   * guardado era válido, pero `fetchPerfil` no llegaba, el refresh tampoco, y
+   * el bootstrap terminaba en signOut — se descartaba un token bueno por no
+   * poder leer una fila. El preventista quedaba en el login, sin señal para
+   * volver a entrar y con `MainApp` sin montar, o sea sin nada de la
+   * infraestructura offline que existe justamente para ese momento.
+   *
+   * Un timeout no es una respuesta: el servidor no dijo que no, no dijo nada.
+   */
+  it('sin señal mantiene la sesión y el último perfil conocido', async () => {
+    localStorage.setItem('distribuidora:ultimo-perfil', JSON.stringify(mockPerfil))
     vi.useFakeTimers()
     supabase.auth.getSession.mockResolvedValue({
       data: { session: { user: mockUser } }
     })
     maybeSingleMock.mockImplementation(() => new Promise(() => {}))
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    expect(result.current.loading).toBe(true)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15001)
+    })
+
+    expect(result.current.loading).toBe(false)
+    expect(result.current.user?.id).toBe(mockUser.id)
+    expect(result.current.perfil?.id).toBe(mockPerfil.id)
+    // Ni se intenta renovar el token (no hay a quién preguntarle) ni se lo tira.
+    expect(supabase.auth.refreshSession).not.toHaveBeenCalled()
+    expect(supabase.auth.signOut).not.toHaveBeenCalled()
+  })
+
+  it('sin señal y sin perfil cacheado tampoco descarta el token', async () => {
+    vi.useFakeTimers()
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockImplementation(() => new Promise(() => {}))
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15001)
+    })
+
+    expect(result.current.loading).toBe(false)
+    expect(result.current.perfil).toBeNull()
+    // Sin perfil no se puede entrar, pero la sesión sigue viva: al volver la
+    // red se rehidrata sola, sin pedirle la contraseña a nadie.
+    expect(result.current.user?.id).toBe(mockUser.id)
+    expect(supabase.auth.signOut).not.toHaveBeenCalled()
+  })
+
+  it('al volver la red rehidrata el perfil que venía del caché', async () => {
+    localStorage.setItem('distribuidora:ultimo-perfil', JSON.stringify({ ...mockPerfil, rol: 'preventista' }))
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    // Primero sin red; después del evento 'online', el servidor contesta.
+    maybeSingleMock.mockRejectedValueOnce(new Error('TypeError: Failed to fetch'))
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(result.current.perfil?.rol).toBe('preventista')
+    })
+
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+
+    act(() => {
+      window.dispatchEvent(new Event('online'))
+    })
+
+    await waitFor(() => {
+      expect(result.current.perfil?.rol).toBe('admin')
+    })
+  })
+
+  /**
+   * La contracara: acá el servidor SÍ contestó, y contestó que ese usuario no
+   * tiene perfil. Eso no es una sesión que se pueda usar, y el refresh es el
+   * último intento antes de mandar a login. Si el refresh también falla, se
+   * limpia — a diferencia del caso sin red, que es el test de arriba.
+   */
+  it('sale a login limpio si el servidor dice que no hay perfil y el refresh falla', async () => {
+    vi.useFakeTimers()
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: null, error: null })
     supabase.auth.refreshSession.mockResolvedValue({
       data: { session: null },
       error: new Error('refresh failed')
     })
 
     const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
-
-    expect(result.current.loading).toBe(true)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15001)
@@ -250,6 +334,9 @@ describe('useAuth', () => {
     expect(supabase.auth.signOut).not.toHaveBeenCalled()
   })
 
+  // El servidor contestó (data: null = no hay perfil) y el refresh no lo
+  // arregló: acá sí corresponde limpiar. Ver el test de arranque sin señal para
+  // el caso en que la respuesta nunca llega.
   it('limpia la sesion cuando el refresh falla', async () => {
     supabase.auth.getSession.mockResolvedValue({
       data: { session: { user: mockUser } }
@@ -382,6 +469,28 @@ describe('useAuth', () => {
 
       expect(result.current.user?.id).toBe(mockUser.id)
     })
+  })
+
+  it('el logout olvida el perfil cacheado', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: mockUser } }
+    })
+    maybeSingleMock.mockResolvedValue({ data: mockPerfil, error: null })
+
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper })
+
+    await waitFor(() => {
+      expect(result.current.perfil?.id).toBe(mockPerfil.id)
+    })
+    expect(localStorage.getItem('distribuidora:ultimo-perfil')).not.toBeNull()
+
+    await act(async () => {
+      await result.current.logout()
+    })
+
+    // En un teléfono compartido, el que entra después no tiene por qué
+    // arrancar con el rol del anterior.
+    expect(localStorage.getItem('distribuidora:ultimo-perfil')).toBeNull()
   })
 
   it('libera la suscripcion al desmontar', () => {

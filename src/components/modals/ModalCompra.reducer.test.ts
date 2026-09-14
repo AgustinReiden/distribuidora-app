@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest'
 import {
   compraReducer, initialState, lineasParaMotor, cargosParaMotor,
   cuadreImpuestoInterno, DESVIO_II_TOLERADO, cargosPlantillaNuevos,
-  cargosParaRPC, validarCargos, resolucionBasesII,
+  cargosParaRPC, validarCargos, resolucionBasesII, construirCompraItemDesdeScan,
 } from './ModalCompra.reducer'
 import type { CompraState } from './ModalCompra.reducer'
 import type { CargoPlantillaCompra } from '../../types'
@@ -611,5 +611,136 @@ describe('el declarado deduce que bonificaciones bajan la base', () => {
     ], conBonificacion())
     expect(s.cargos[0].afectaBaseII).toBe(false)
     expect(resolucionBasesII(s.items, s.cargos, s.iiDeclarado, 'ZZ')!.estado).toBe('sin_datos')
+  })
+})
+
+/**
+ * La tasa de impuesto interno de una línea escaneada, y qué se propaga al maestro.
+ *
+ * Se testea acá porque el fallo era doble y los dos lados son mudos. La línea
+ * nacía en 0, así que el costo de la compra salía sin la tasa entera —y con él el
+ * costo_real y el CPP—; y como la propagación al producto miraba sólo "difiere de
+ * la ficha", ese 0 viajaba como cambio y le borraba la alícuota al producto.
+ * Aplicar un escaneo destruía el II de todo lo que matcheara.
+ */
+describe('escaneo: la tasa de II sale de la ficha, no de un 0', () => {
+  const conII = (id: string, ii: number): ProductoDB => ({
+    ...producto(id, 1000),
+    impuestos_internos: ii,
+  } as unknown as ProductoDB)
+
+  const scan = (codigo: string, extra: Record<string, unknown> = {}) => ({
+    codigo,
+    descripcion: `Producto ${codigo}`,
+    cantidad: 3,
+    costoUnitario: 1000,
+    bonificacion: 0,
+    iva: 21,
+    ...extra,
+  })
+
+  it('la línea hereda la alícuota del producto', () => {
+    const item = construirCompraItemDesdeScan(conII('a', 8.6956), scan('a'))
+    expect(item.impuestosInternos).toBeCloseTo(8.6956, 4)
+    // Y no queda marcada como editada: nadie tipeó nada.
+    expect(item.iiEditadoAMano).toBeUndefined()
+  })
+
+  it('un producto sin impuesto interno sigue en 0', () => {
+    expect(construirCompraItemDesdeScan(conII('a', 0), scan('a')).impuestosInternos).toBe(0)
+  })
+
+  it('la línea escaneada no genera ningún cambio de II para el maestro', () => {
+    // Lo que `ModalCompra` manda como `cambiosImpuestosInternos`: la tasa tiene
+    // que coincidir con la ficha Y la línea no puede estar marcada a mano.
+    const p = conII('a', 8.6956)
+    const item = construirCompraItemDesdeScan(p, scan('a'))
+    const propagable =
+      Boolean(item.iiEditadoAMano) &&
+      Math.abs(item.impuestosInternos - Number(p.impuestos_internos)) > 0.0001
+    expect(propagable).toBe(false)
+  })
+
+  it('tipear la tasa a mano sí la marca, incluso si es un 0', () => {
+    // El 0 tipeado es un dato ("esta factura no trae II") y tiene que llegar al
+    // producto; el 0 heredado no lo es.
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: conII('a', 8.6956) },
+      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'impuestosInternos', valor: 0 } },
+    ])
+    expect(s.items[0].impuestosInternos).toBe(0)
+    expect(s.items[0].iiEditadoAMano).toBe(true)
+  })
+
+  it('tocar otro campo de la línea no marca la tasa', () => {
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: conII('a', 8.6956) },
+      { type: 'ACTUALIZAR_ITEM', payload: { index: 0, campo: 'cantidad', valor: 7 } },
+    ])
+    expect(s.items[0].iiEditadoAMano).toBeUndefined()
+  })
+})
+
+/**
+ * Dos renglones del mismo producto se fusionan, igual que al agregarlo dos veces
+ * desde el buscador. Apilarlos dejaba dos `compra_items` del mismo producto, y
+ * todo lo que los indexa por producto —la nota de crédito, el UNIQUE de
+ * `producto_lotes`— los contaba dos veces o los pisaba.
+ */
+describe('items repetidos: import y escaneo fusionan por producto', () => {
+  const linea = (productoId: string, cantidad: number, costo = 1000) => ({
+    productoId,
+    productoNombre: `Producto ${productoId}`,
+    productoCodigo: productoId,
+    cantidad,
+    bonificacion: 0,
+    costoUnitario: costo,
+    impuestosInternos: 0,
+    porcentajeIva: 21,
+    condicionIva: 'gravado' as const,
+    stockActual: 10,
+  })
+
+  it('IMPORTAR_ITEMS suma las cantidades del mismo producto', () => {
+    const s = correr([
+      { type: 'IMPORTAR_ITEMS', payload: [linea('a', 6), linea('b', 2), linea('a', 4)] },
+    ])
+    expect(s.items).toHaveLength(2)
+    expect(s.items.map(i => [i.productoId, i.cantidad])).toEqual([['a', 10], ['b', 2]])
+  })
+
+  it('IMPORTAR_ITEMS suma sobre una línea que ya estaba cargada a mano', () => {
+    const s = correr([
+      { type: 'AGREGAR_ITEM', payload: producto('a', 1000) },
+      { type: 'IMPORTAR_ITEMS', payload: [linea('a', 4)] },
+    ])
+    expect(s.items).toHaveLength(1)
+    expect(s.items[0].cantidad).toBe(5)
+  })
+
+  it('APLICAR_ESCANEO fusiona dentro del lote escaneado', () => {
+    const s = correr([{
+      type: 'APLICAR_ESCANEO',
+      payload: {
+        proveedorId: '', proveedorNombre: 'Manaos', numeroFactura: 'A-1',
+        fechaCompra: '2026-09-13', formaPago: 'efectivo',
+        items: [linea('a', 6), linea('a', 4), linea('b', 1)],
+        pendientes: [],
+      },
+    }])
+    expect(s.items).toHaveLength(2)
+    expect(s.items.map(i => [i.productoId, i.cantidad])).toEqual([['a', 10], ['b', 1]])
+    // Y quedan numeradas, que es de lo que dependen los pesos de los cargos.
+    expect(s.items.map(i => i.lineaId)).toEqual([1, 2])
+  })
+
+  it('una línea fusionada no deja un peso de cargo apuntando a nada', () => {
+    // El vector del cargo se sincroniza contra las líneas que quedaron: con dos
+    // renglones apilados, uno de los dos pesos quedaba huérfano.
+    const s = correr([
+      { type: 'IMPORTAR_ITEMS', payload: [linea('a', 6), linea('a', 4)] },
+      { type: 'AGREGAR_CARGO' },
+    ])
+    expect(Object.keys(s.cargos[0].pesos)).toEqual([String(s.items[0].lineaId)])
   })
 })

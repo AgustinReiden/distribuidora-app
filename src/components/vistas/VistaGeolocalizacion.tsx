@@ -16,7 +16,7 @@ import {
   type PedidoConGps,
   type VisitaConGps,
 } from '../../hooks/queries'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { ANOMALIA_DISTANCIA_METROS } from '../../utils/geo'
 import KpiCard from '../geolocalizacion/KpiCard'
 import SidebarPreventistas from '../geolocalizacion/SidebarPreventistas'
@@ -32,12 +32,6 @@ interface Rango {
   preset: RangoPreset
 }
 
-function diasAtras(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
-}
-
 function buildRangoDefault(): Rango {
   const hoy = fechaLocalISO()
   return { desde: hoy, hasta: hoy, preset: 'hoy' }
@@ -49,11 +43,13 @@ function rangoFromPreset(preset: Exclude<RangoPreset, 'custom'>): Rango {
     return { desde: hoy, hasta: hoy, preset }
   }
   if (preset === 'ayer') {
-    const ayer = diasAtras(1)
+    // fechaHaceDias resta días en TZ Argentina: con `new Date().toISOString()`
+    // (UTC) "ayer" a las 21:30 hora Argentina ya muestra hoy.
+    const ayer = fechaHaceDias(1)
     return { desde: ayer, hasta: ayer, preset }
   }
   // semana: últimos 7 días incluyendo hoy
-  return { desde: diasAtras(6), hasta: fechaLocalISO(), preset }
+  return { desde: fechaHaceDias(6), hasta: fechaLocalISO(), preset }
 }
 
 const PRESET_LABELS: Record<Exclude<RangoPreset, 'custom'>, string> = {

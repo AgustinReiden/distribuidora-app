@@ -108,6 +108,66 @@ export function bolsaSinVencimiento(stock: number, asignadoALotes: number): numb
 }
 
 /**
+ * Unidades etiquetadas con vencimiento en UNA línea de factura.
+ *
+ * Cuenta TODAS las entradas, también las que todavía no tienen fecha: es el
+ * número que el badge de la línea muestra mientras se tipea, y el que decide si
+ * la línea excede. `aplanarVencimientos` descarta las entradas a medio llenar
+ * —ésas no viajan a la RPC— pero para avisarle al usuario que se pasó, una fila
+ * con cantidad y sin fecha ya cuenta: si no, el badge se pone rojo y el guardado
+ * pasa igual.
+ */
+export function unidadesEtiquetadas(
+  vencimientos: { fecha: string; cantidad: number }[] | undefined,
+): number {
+  return (vencimientos ?? []).reduce((acc, v) => acc + (Number(v.cantidad) || 0), 0)
+}
+
+/**
+ * ¿La línea etiqueta más unidades de las que entraron?
+ *
+ * Etiquetar MENOS es legal —lo que sobra queda en la bolsa "sin vencimiento" del
+ * producto— y esto es lo único que no lo es. Vive acá y no en el componente
+ * porque lo tienen que contar igual tres lugares que no se conocen entre sí: el
+ * badge de la línea, el submit del alta y el de la edición. Si cada uno lo
+ * contara por su cuenta, el badge podría estar rojo y el guardado pasar.
+ *
+ * Del lado del servidor `sincronizar_lotes_compra` sólo clampea contra el stock
+ * TOTAL del producto, que es otra cuenta: no ve la línea, así que no puede
+ * rechazar esto.
+ */
+export function lineaExcedeVencimientos(
+  cantidadLinea: number,
+  vencimientos: { fecha: string; cantidad: number }[] | undefined,
+): boolean {
+  return unidadesEtiquetadas(vencimientos) > (Number(cantidadLinea) || 0)
+}
+
+/**
+ * El primer renglón que etiqueta más unidades de las que entraron, dicho como lo
+ * tiene que leer el usuario. `null` = se puede guardar.
+ *
+ * Lo llaman los submits del alta y de la edición de compra, que no se conocen
+ * entre sí. Antes no lo frenaba nadie: la línea se pintaba de rojo y el guardado
+ * seguía igual, porque `sincronizar_lotes_compra` sólo clampea contra el stock
+ * TOTAL del producto —no ve la línea— así que las unidades de más entraban a un
+ * lote que la factura no trajo y el contador del producto quedaba mintiendo para
+ * arriba.
+ */
+export function validarVencimientosLineas(
+  lineas: { nombre: string; cantidad: number; vencimientos?: { fecha: string; cantidad: number }[] }[],
+): string | null {
+  for (const linea of lineas) {
+    if (!lineaExcedeVencimientos(linea.cantidad, linea.vencimientos)) continue
+    return (
+      `"${linea.nombre}": etiquetaste ${unidadesEtiquetadas(linea.vencimientos)} u. con ` +
+      `vencimiento y la línea tiene ${linea.cantidad}. Quitá las que sobran o subí la cantidad.`
+    )
+  }
+  return null
+}
+
+/**
  * Aplana las líneas de una compra al payload de `sincronizar_lotes_compra`,
  * agrupando por (producto, fecha).
  *

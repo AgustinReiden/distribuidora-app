@@ -6,6 +6,8 @@ import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../ty
 import { calcularTotalesNotaCredito } from '../../utils/notaCredito'
 
 interface CompraItem {
+  /** `compra_items.id`: la clave de la línea. Ver `LineaCompraNC`. */
+  id: string
   producto_id: string
   producto?: { id: string; nombre: string } | null
   cantidad: number
@@ -38,15 +40,20 @@ export default function ModalNotaCredito({
   const [saving, setSaving] = useState(false)
   const [motivo, setMotivo] = useState('')
   const [numeroNota, setNumeroNota] = useState('')
+  // Todo lo que indexa las líneas va por `compra_items.id` y no por
+  // `producto_id`: la misma factura puede traer el mismo producto en dos
+  // renglones, y con el producto como clave las dos filas compartían cantidad
+  // —tipear 3 en una ponía 3 en la otra y la nota acreditaba 6—.
   const [cantidades, setCantidades] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {}
     for (const item of compra.items) {
-      initial[item.producto_id] = 0
+      initial[item.id] = 0
     }
     return initial
   })
 
-  // Calculate already-credited quantities per product from existing notas
+  // Lo ya acreditado sale de las notas existentes, que hablan de PRODUCTO:
+  // `nota_credito_items` no guarda de qué línea salió cada unidad.
   const yaAcreditado = useMemo(() => {
     const acreditado: Record<string, number> = {}
     for (const nota of notasExistentes) {
@@ -57,13 +64,28 @@ export default function ModalNotaCredito({
     return acreditado
   }, [notasExistentes])
 
-  // Calculate max creditable per product
-  const maxCreditable = useMemo(() => {
+  /**
+   * Cuánto queda por acreditar en CADA línea, y cuánto de lo ya acreditado le
+   * toca a cada una.
+   *
+   * Lo acreditado viene por producto y hay que bajarlo a las líneas: se consume
+   * en el orden de la factura, llenando una línea antes de pasar a la siguiente.
+   * El reparto es una convención —la base no sabe de qué renglón salió cada
+   * unidad— pero conserva el total: la suma de los máximos por línea sigue siendo
+   * lo comprado menos lo acreditado. Repetir el número del producto en las dos
+   * filas, en cambio, habilitaba acreditar el doble.
+   */
+  const { maxCreditable, yaAcreditadoPorLinea } = useMemo(() => {
     const max: Record<string, number> = {}
+    const yaPorLinea: Record<string, number> = {}
+    const pendiente = { ...yaAcreditado }
     for (const item of compra.items) {
-      max[item.producto_id] = item.cantidad - (yaAcreditado[item.producto_id] || 0)
+      const consumido = Math.min(pendiente[item.producto_id] || 0, item.cantidad)
+      pendiente[item.producto_id] = (pendiente[item.producto_id] || 0) - consumido
+      yaPorLinea[item.id] = consumido
+      max[item.id] = item.cantidad - consumido
     }
-    return max
+    return { maxCreditable: max, yaAcreditadoPorLinea: yaPorLinea }
   }, [compra.items, yaAcreditado])
 
   // Calculate subtotal from credited items
@@ -72,13 +94,13 @@ export default function ModalNotaCredito({
     [cantidades, compra.items],
   )
 
-  const handleCantidadChange = (productoId: string, value: string) => {
+  const handleCantidadChange = (lineaId: string, value: string) => {
     const num = parseInt(value, 10)
-    const max = maxCreditable[productoId] || 0
+    const max = maxCreditable[lineaId] || 0
     if (isNaN(num) || num < 0) {
-      setCantidades(prev => ({ ...prev, [productoId]: 0 }))
+      setCantidades(prev => ({ ...prev, [lineaId]: 0 }))
     } else {
-      setCantidades(prev => ({ ...prev, [productoId]: Math.min(num, max) }))
+      setCantidades(prev => ({ ...prev, [lineaId]: Math.min(num, max) }))
     }
   }
 
@@ -134,7 +156,7 @@ export default function ModalNotaCredito({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Warning if all items fully credited */}
-          {compra.items.every(item => (maxCreditable[item.producto_id] || 0) <= 0) && (
+          {compra.items.every(item => (maxCreditable[item.id] || 0) <= 0) && (
             <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
               <p className="text-sm text-yellow-700 dark:text-yellow-400">
@@ -157,13 +179,13 @@ export default function ModalNotaCredito({
               </thead>
               <tbody className="divide-y dark:divide-gray-700">
                 {compra.items.map((item) => {
-                  const ya = yaAcreditado[item.producto_id] || 0
-                  const max = maxCreditable[item.producto_id] || 0
-                  const cant = cantidades[item.producto_id] || 0
+                  const ya = yaAcreditadoPorLinea[item.id] || 0
+                  const max = maxCreditable[item.id] || 0
+                  const cant = cantidades[item.id] || 0
                   const itemSubtotal = cant * item.costo_unitario
 
                   return (
-                    <tr key={item.producto_id}>
+                    <tr key={item.id}>
                       <td className="px-4 py-3">
                         <p className="font-medium text-gray-800 dark:text-white">
                           {item.producto?.nombre || 'Producto'}
@@ -188,7 +210,7 @@ export default function ModalNotaCredito({
                           emptyValue={0}
                           commitOnChange
                           value={cant}
-                          onChange={(n) => handleCantidadChange(item.producto_id, String(n))}
+                          onChange={(n) => handleCantidadChange(item.id, String(n))}
                           disabled={max <= 0}
                           className="w-20 px-2 py-1 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
