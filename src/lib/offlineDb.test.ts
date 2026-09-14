@@ -15,7 +15,9 @@ import {
   limpiarCachesDeLectura,
   getDbStats,
   retryFailedOperation,
-  getFailedOperations
+  getFailedOperations,
+  deletePendingOperation,
+  deletePendingOperations
 } from './offlineDb'
 
 describe('offlineDb', () => {
@@ -46,15 +48,17 @@ describe('offlineDb', () => {
       expect(op!.updatedAt).toBeInstanceOf(Date)
     })
 
-    it('creates a unique operation each call (hash includes timestamp)', async () => {
+    it('always creates a new operation, even with an identical payload (no dedup)', async () => {
       const payload = { clienteId: 'c1', total: 100 }
       const id1 = await queueOperation('CREATE_PEDIDO', payload)
       const id2 = await queueOperation('CREATE_PEDIDO', payload)
 
-      // Both should succeed because the hash includes Date.now()
       expect(id1).toBeTypeOf('number')
       expect(id2).toBeTypeOf('number')
       expect(id1).not.toBe(id2)
+
+      const all = await getPendingOperations(10)
+      expect(all).toHaveLength(2)
     })
   })
 
@@ -425,6 +429,39 @@ describe('offlineDb', () => {
       expect(failed).toHaveLength(1)
       expect(failed[0].id).toBe(id1)
       expect(failed[0].status).toBe('failed')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // deletePendingOperation / deletePendingOperations
+  // ---------------------------------------------------------------------------
+
+  describe('deletePendingOperation', () => {
+    it('removes the operation from IndexedDB regardless of status', async () => {
+      const id = await queueOperation('CREATE_PEDIDO', { n: 1 })
+
+      await deletePendingOperation(id)
+
+      expect(await db.pendingOperations.get(id)).toBeUndefined()
+    })
+  })
+
+  describe('deletePendingOperations', () => {
+    it('removes every listed operation and returns the count', async () => {
+      const id1 = await queueOperation('CREATE_PEDIDO', { n: 1 })
+      const id2 = await queueOperation('CREATE_MERMA', { n: 2 })
+      const id3 = await queueOperation('CREATE_PEDIDO', { n: 3 }) // not deleted
+
+      const deletedCount = await deletePendingOperations([id1, id2])
+
+      expect(deletedCount).toBe(2)
+      expect(await db.pendingOperations.get(id1)).toBeUndefined()
+      expect(await db.pendingOperations.get(id2)).toBeUndefined()
+      expect(await db.pendingOperations.get(id3)).toBeDefined()
+    })
+
+    it('does nothing for an empty list', async () => {
+      expect(await deletePendingOperations([])).toBe(0)
     })
   })
 })

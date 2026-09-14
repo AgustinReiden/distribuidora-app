@@ -5,6 +5,8 @@ import {
   markAsCompleted,
   markAsFailed,
   cleanupOldOperations,
+  deletePendingOperation,
+  deletePendingOperations,
   type PendingOperation,
   type OperationType
 } from '../lib/offlineDb'
@@ -69,6 +71,15 @@ export interface StockSnapshot {
 export interface PedidoOffline {
   offlineId: string;
   clienteId: string | number;
+  /**
+   * Nombre a mostrar en el panel de pendientes (OfflineIndicator). Se acuña
+   * ACÁ, al encolar, porque el panel muestra la cola sin señal: pedirle la
+   * lista de clientes en ese momento no funciona, y comparar el `clienteId`
+   * de la cola contra un `clientes` cargado aparte mezcla un id `string` con
+   * un `id` que en runtime llega `number` (ver CLAUDE.md, "Los ids son
+   * bigint").
+   */
+  clienteNombre?: string;
   items: PedidoOfflineItem[];
   total: number;
   usuarioId?: string;
@@ -208,6 +219,7 @@ function operationToPedidoOffline(op: PendingOperation): PedidoOffline {
   return {
     offlineId: `op_${op.id}`,
     clienteId: payload.clienteId as string | number,
+    clienteNombre: payload.clienteNombre as string | undefined,
     items: payload.items as PedidoOfflineItem[],
     total: payload.total as number,
     usuarioId: payload.usuarioId as string | undefined,
@@ -503,11 +515,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         currentSucursalIdRef.current ?? undefined
       )
 
-      if (opId !== null) {
-        logger.info(`[useOfflineSync] Pedido encolado con ID: ${opId}`)
-      } else {
-        logger.warn('[useOfflineSync] Pedido duplicado detectado, no se encoló')
-      }
+      logger.info(`[useOfflineSync] Pedido encolado con ID: ${opId}`)
     } catch (err) {
       logger.error('[useOfflineSync] Error crítico al encolar pedido:', err)
       window.dispatchEvent(new CustomEvent('offline-storage-error', {
@@ -574,11 +582,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           currentSucursalIdRef.current ?? undefined
         )
 
-        if (opId !== null) {
-          logger.info(`[useOfflineSync] Merma encolada con ID: ${opId}`)
-        } else {
-          logger.warn('[useOfflineSync] Merma duplicada detectada, no se encoló')
-        }
+        logger.info(`[useOfflineSync] Merma encolada con ID: ${opId}`)
       } catch (err) {
         logger.error('[useOfflineSync] Error crítico al encolar merma:', err)
         // Rollback del optimistic update: la merma ya fue pintada como pendiente,
@@ -596,35 +600,36 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   )
 
   /**
-   * Elimina un pedido offline
+   * Elimina un pedido offline de verdad: lo saca de IndexedDB, no lo marca
+   * `failed` (eso lo dejaba en la cola, visible en el panel de fallidas, sin
+   * borrar nada).
    */
   const eliminarPedidoOffline = useCallback((offlineId: string): void => {
-    // Extraer ID de operación del offlineId
+    setPedidosPendientes(prev => prev.filter(p => p.offlineId !== offlineId))
+
     const opIdMatch = offlineId.match(/^op_(\d+)$/)
     if (opIdMatch) {
       const opId = parseInt(opIdMatch[1], 10)
-      markAsFailed(opId, 'Eliminado manualmente').catch(err => {
+      deletePendingOperation(opId).catch(err => {
         logger.error('[useOfflineSync] Error eliminando pedido:', err)
       })
     }
-
-    setPedidosPendientes(prev => prev.filter(p => p.offlineId !== offlineId))
   }, [])
 
   /**
-   * Elimina una merma offline
+   * Elimina una merma offline de verdad: mismo criterio que
+   * `eliminarPedidoOffline`.
    */
   const eliminarMermaOffline = useCallback((offlineId: string): void => {
-    // Extraer ID de operación del offlineId
+    setMermasPendientes(prev => prev.filter(m => m.offlineId !== offlineId))
+
     const opIdMatch = offlineId.match(/^op_(\d+)$/)
     if (opIdMatch) {
       const opId = parseInt(opIdMatch[1], 10)
-      markAsFailed(opId, 'Eliminado manualmente').catch(err => {
+      deletePendingOperation(opId).catch(err => {
         logger.error('[useOfflineSync] Error eliminando merma:', err)
       })
     }
-
-    setMermasPendientes(prev => prev.filter(m => m.offlineId !== offlineId))
   }, [])
 
   /**
@@ -917,15 +922,27 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   }, [isOnline, loadPendingOperations])
 
   /**
-   * Limpia todos los pedidos offline
+   * Limpia todos los pedidos y mermas offline de la sesión activa (usuario +
+   * sucursal). `cleanupOldOperations(0)` sólo borra `status: 'completed'`, así
+   * que lo pendiente y lo fallido nunca se iba: esto lee lo mismo que ve el
+   * panel (`getPendingOperations`, mismo alcance que `loadPendingOperations`)
+   * y lo borra de IndexedDB de verdad.
    */
   const limpiarPedidosOffline = useCallback((): void => {
     setPedidosPendientes([])
     setMermasPendientes([])
-    // Limpiar operaciones de más de 0 días (todas)
-    cleanupOldOperations(0).catch(err => {
-      logger.error('[useOfflineSync] Error limpiando operaciones:', err)
-    })
+
+    getPendingOperations(1000, userIdRef.current, currentSucursalIdRef.current)
+      .then(operations => {
+        const ids = operations
+          .filter(op => op.type === 'CREATE_PEDIDO' || op.type === 'CREATE_MERMA')
+          .map(op => op.id)
+          .filter((id): id is number => id != null)
+        return deletePendingOperations(ids)
+      })
+      .catch(err => {
+        logger.error('[useOfflineSync] Error limpiando operaciones:', err)
+      })
   }, [])
 
   return {

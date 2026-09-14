@@ -1,16 +1,22 @@
 /**
  * lazyWithReload / importConRecarga — resiliencia ante chunks obsoletos tras un deploy.
  *
- * Problema: el SW de la PWA usa skipWaiting + clientsClaim, así que una versión
- * nueva toma control a mitad de sesión. La app vieja en memoria sigue pidiendo
- * chunks con el hash viejo (`Container-<hashViejo>.js` / `pdfExport-<hashViejo>.js`)
- * que ya no existen en el server → el import() dinámico falla con "Failed to fetch
- * dynamically imported module". En React.lazy el <Suspense> queda colgado; en un
- * handler (ej. descargar comanda) el catch solo muestra el error y no se puede usar.
+ * Problema: la app vieja en memoria pide un chunk con el hash viejo
+ * (`Container-<hashViejo>.js` / `pdfExport-<hashViejo>.js`) que el server ya no
+ * tiene porque hubo un deploy nuevo → el import() dinámico falla con "Failed to
+ * fetch dynamically imported module". En React.lazy el <Suspense> queda
+ * colgado; en un handler (ej. descargar comanda) el catch solo muestra el
+ * error y no se puede usar.
  *
  * Solución: ante un fallo de carga de chunk, recargar UNA vez para traer el
  * index.html + chunks frescos. El guard por sessionStorage evita loops de
  * recarga (si tras recargar sigue fallando, propaga el error real).
+ *
+ * El service worker SÍ está registrado (ver `serviceWorker.ts`), con
+ * `skipWaiting: false` + `clientsClaim: false`: la sesión en curso sigue
+ * sirviéndose del precache de SU PROPIA versión hasta que la usuaria toca
+ * "Actualizar", así que ese precache siempre tiene los chunks que la app en
+ * memoria puede llegar a pedir — recargar funciona igual sin conexión.
  */
 import { lazy, type ComponentType, type LazyExoticComponent } from 'react'
 
@@ -29,20 +35,17 @@ const RELOAD_MAX_INTENTOS = 2
  * Recarga la página para traer index.html + chunks frescos. Devuelve true si
  * disparó la recarga; false si no corresponde recargar.
  *
- * NO recarga en dos casos, y los dos son el mismo usuario: el chofer en la calle.
+ * Recarga también sin conexión: el service worker precachea TODOS los
+ * archivos del build al instalar (`globPatterns` en vite.config) y no le saca
+ * la alfombra a la sesión en curso (`skipWaiting: false`), así que el chunk
+ * que la app vieja está pidiendo va a estar en el precache activo — recargar
+ * offline lo trae de ahí, no del server.
  *
- * 1. Sin conexión. La app NO registra service worker (`injectRegister: false` en
- *    vite.config, y PWAPrompt quedó sin montar), así que no hay app shell
- *    precacheado: recargar sin red deja la pantalla en blanco y el chofer sin
- *    app en medio del reparto. Con red, recargar es lo correcto — el chunk viejo
- *    no existe más en el server.
- * 2. Ya se recargó `RELOAD_MAX_INTENTOS` veces. El cooldown viejo era temporal,
- *    no un tope: pasados 15 s volvía a recargar, y si el chunk seguía sin estar
- *    la pestaña entraba en loop de recargas.
+ * NO recarga cuando ya se recargó `RELOAD_MAX_INTENTOS` veces: el cooldown
+ * viejo era temporal, no un tope; pasados 15 s volvía a recargar, y si el
+ * chunk seguía sin estar la pestaña entraba en loop de recargas.
  */
 function recargarUnaVezPorChunk(): boolean {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
-
   const [intentosRaw, lastRaw] = (sessionStorage.getItem(RELOAD_KEY) || '0|0').split('|')
   const intentos = Number(intentosRaw) || 0
   const last = Number(lastRaw) || 0
@@ -91,14 +94,10 @@ export async function importConRecarga<T>(factory: () => Promise<T>): Promise<T>
     if (esErrorDeChunk(err)) {
       const recargo = recargarUnaVezPorChunk()
       if (recargo) throw new Error('Hay una versión nueva de la app. Recargando…')
-      // Sin conexión NO hay que decirle "recargá": no hay service worker, así
-      // que recargar deja la pantalla en blanco. Es el chofer en la calle.
-      const sinRed = typeof navigator !== 'undefined' && navigator.onLine === false
-      throw new Error(
-        sinRed
-          ? 'No hay conexión. Volvé a intentar cuando tengas señal — no recargues la app.'
-          : 'No se pudo cargar el módulo. Recargá la página e intentá de nuevo.',
-      )
+      // Sólo llega acá tras agotar RELOAD_MAX_INTENTOS (recargarUnaVezPorChunk
+      // ya recarga igual sin conexión, ver su comentario): recargar de nuevo
+      // no va a arreglar nada.
+      throw new Error('No se pudo cargar el módulo. Recargá la página e intentá de nuevo.')
     }
     throw err
   }

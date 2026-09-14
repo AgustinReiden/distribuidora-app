@@ -1292,6 +1292,10 @@ export default function PedidosContainer(): React.ReactElement {
       if (!isOnline) {
         const resultado = await guardarPedidoOffline({
           clienteId: nuevoPedido.clienteId,
+          // El panel de pendientes (OfflineIndicator) no tiene forma de pedir
+          // la lista de clientes sin señal: se guarda el nombre acá, con el
+          // cliente ya resuelto, en vez de hacerlo buscar por id después.
+          clienteNombre: (clienteNuevoPedido as { nombre_fantasia?: string } | undefined)?.nombre_fantasia,
           items: itemsParaCrear.map(item => ({
             productoId: String(item.productoId),
             cantidad: item.cantidad,
@@ -1431,7 +1435,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, itemsConDescuentoCliente, totalConDescuentoCliente, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, itemsConDescuentoCliente, totalConDescuentoCliente, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
