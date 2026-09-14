@@ -119,7 +119,13 @@ async function fetchRecorridoActivo(transportistaId: string): Promise<RecorridoA
  */
 export function useRecorridoActivoQuery(transportistaId: string | null | undefined) {
   const { currentSucursalId } = useSucursal()
-  const { hoy } = fechaDeRuta()
+  const { hoy, ayer } = fechaDeRuta()
+
+  // Igual criterio que `fetchRecorridoActivo`: en la madrugada la ruta puede
+  // haberse guardado con `fecha: ayer` (la de anoche, cruzando la medianoche).
+  // Leer sólo con `hoy` perdía ese respaldo justo en la ventana para la que
+  // existe. `MAX_EDAD_MS` en `leerRuta` es lo que evita revivir una de anteayer.
+  const fechasAceptadas = useMemo(() => (ayer ? [hoy, ayer] : [hoy]), [hoy, ayer])
 
   // Memoizado por (sucursal, chofer, día) y NO por montaje. La diferencia
   // importa: leer una sola vez al montar dejaba el valor pegado al primer
@@ -128,8 +134,8 @@ export function useRecorridoActivoQuery(transportistaId: string | null | undefin
   // correctas, cambiar de sucursal relee el cache de la que corresponde.
   // Releer localStorage es idempotente y barato; el riesgo no era el costo.
   const cacheada = useMemo<RutaCacheada<RecorridoActivo> | null>(
-    () => (transportistaId ? leerRuta<RecorridoActivo>(currentSucursalId, transportistaId, hoy) : null),
-    [currentSucursalId, transportistaId, hoy],
+    () => (transportistaId ? leerRuta<RecorridoActivo>(currentSucursalId, transportistaId, fechasAceptadas) : null),
+    [currentSucursalId, transportistaId, fechasAceptadas],
   )
 
   const query = useQuery({
