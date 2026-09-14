@@ -123,7 +123,14 @@ interface ActualizarPagoInput {
 // inferencia de PostgREST: un string sin literal-type degradaria el resultado
 // a GenericStringError. Mantener sincronizado con el tipo PedidoDB.
 const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_por_fardo, etiqueta_bulto' as const
-const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id' as const
+// `descuento_porcentaje` + `descuentos_categoria` viajan porque ModalEditarPedido
+// re-resuelve los precios al editar: sin ellos un producto agregado en la edición
+// entraba a precio de lista y el cliente con descuento lo pagaba de más. El embed
+// va aliasado para que el shape coincida con ClienteDB (que ya usa
+// `descuentos_categoria`), igual que lo aplana `flattenClienteRow`.
+// SELECT de cliente_descuentos_categoria es `USING (true)` para authenticated
+// (mig 079): no hay rol que pierda la lista y quede re-cotizando sin descuento.
+const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id, descuento_porcentaje, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
 // como N filas en `pagos` (una por forma_pago); pedidos.forma_pago es el
