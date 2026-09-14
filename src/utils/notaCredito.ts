@@ -8,6 +8,14 @@ import type { CondicionIva } from './calculations';
 
 /** Línea de la factura original, con lo mínimo para liquidar el IVA de la NC. */
 export interface LineaCompraNC {
+  /**
+   * `compra_items.id`. Es la clave de la línea, y NO `producto_id`: la misma
+   * factura puede traer el mismo producto en dos renglones (el import de Excel y
+   * el escaneo los apilaban), y con el producto como clave las dos filas leían la
+   * misma cantidad — la nota acreditaba el doble, con su IVA al doble, y guardaba
+   * dos items.
+   */
+  id: string;
   producto_id: string;
   cantidad: number;
   costo_unitario: number;
@@ -20,6 +28,13 @@ export interface TotalesNotaCredito {
   subtotal: number;
   iva: number;
   total: number;
+  /**
+   * Una entrada por LÍNEA acreditada, no por producto: dos renglones del mismo
+   * producto acreditados en la misma nota son dos items, cada uno con su costo.
+   * La RPC no recibe el `compra_items.id` —`nota_credito_items` habla de
+   * producto y cantidad— pero el desglose tiene que salir de las líneas o el
+   * costo de una de las dos se pierde.
+   */
   itemsConCantidad: Array<{
     productoId: string;
     cantidad: number;
@@ -35,6 +50,8 @@ export interface TotalesNotaCredito {
  *
  * Nota: la base es `costo_unitario` (bruto, pre-bonificación), igual que antes.
  * Ese criterio es preexistente y queda sin cambios acá.
+ *
+ * @param cantidades - `compra_items.id` → unidades a acreditar de ESA línea.
  */
 export function calcularTotalesNotaCredito(
   items: LineaCompraNC[],
@@ -45,7 +62,7 @@ export function calcularTotalesNotaCredito(
   const itemsConCantidad: TotalesNotaCredito['itemsConCantidad'] = [];
 
   for (const item of items) {
-    const cant = cantidades[item.producto_id] || 0;
+    const cant = cantidades[item.id] || 0;
     if (cant <= 0) continue;
     const itemSub = cant * item.costo_unitario;
     subtotal += itemSub;

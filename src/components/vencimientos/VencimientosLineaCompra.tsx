@@ -25,7 +25,11 @@
 import { useState } from 'react'
 import { CalendarClock, Plus, X } from 'lucide-react'
 import type { VencimientoLinea } from '../modals/ModalCompra.reducer'
-import { formatearFechaVencimiento } from '../../utils/vencimientos'
+import {
+  formatearFechaVencimiento,
+  lineaExcedeVencimientos,
+  unidadesEtiquetadas,
+} from '../../utils/vencimientos'
 
 export interface VencimientosLineaCompraProps {
   /** Unidades de la línea: el techo de lo que se puede etiquetar. */
@@ -41,9 +45,12 @@ export default function VencimientosLineaCompra({
 }: VencimientosLineaCompraProps) {
   const [abierto, setAbierto] = useState(false)
 
-  const asignado = vencimientos.reduce((acc, v) => acc + (Number(v.cantidad) || 0), 0)
+  // La cuenta sale de `utils/vencimientos`: es la MISMA que usan los submits del
+  // alta y de la edición para frenar el guardado. Dos cuentas separadas dejarían
+  // este badge en rojo con el botón habilitado.
+  const asignado = unidadesEtiquetadas(vencimientos)
   const libre = Math.max(0, (Number(cantidadLinea) || 0) - asignado)
-  const excede = asignado > (Number(cantidadLinea) || 0)
+  const excede = lineaExcedeVencimientos(cantidadLinea, vencimientos)
 
   function actualizar(i: number, cambios: Partial<VencimientoLinea>) {
     onChange(vencimientos.map((v, j) => (j === i ? { ...v, ...cambios } : v)))
