@@ -72,11 +72,33 @@ function agruparItemsParaImpresion(items) {
 }
 
 /**
+ * Dibuja el pie de pagina del recibo A4 en la pagina actual del documento.
+ * Se llama una vez por cada hoja (ver generarReciboA4): sin esto, un recibo
+ * de varias paginas solo tenia pie en la ultima.
+ */
+function dibujarPieReciboA4(doc, pageWidth, margin, footerY) {
+  doc.setDrawColor(...COLORS.gray[200])
+  doc.setLineWidth(0.3)
+  doc.line(margin, footerY, pageWidth - margin, footerY)
+
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  setTextColor(doc, COLORS.gray[400])
+  doc.text('Crecer Distribuciones', margin, footerY + 5)
+  doc.text('Este documento es comprobante valido de la operacion realizada.', pageWidth / 2, footerY + 5, { align: 'center' })
+
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'italic')
+  doc.text(`Generado: ${formatFechaHora(new Date())}`, pageWidth - margin, footerY + 5, { align: 'right' })
+}
+
+/**
  * Genera recibo en formato A4 profesional
  */
 function generarReciboA4(pedido) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const { width: pageWidth, margin, contentWidth } = A4
+  const footerY = 270
   let y = margin
 
   // === HEADER EMPRESA ===
@@ -261,6 +283,16 @@ function generarReciboA4(pedido) {
     }
   })
 
+  // Si el bloque que sigue (alto `needed`) no entra antes del pie, salta de
+  // pagina. Sin esto, con 13-14 items el bloque de pago se pisaba con el pie
+  // (fijo en footerY) y con 15 "Saldo pendiente" caia fuera de la hoja A4.
+  const ensureSpace = (needed) => {
+    if (y + needed > footerY - 5) {
+      doc.addPage()
+      y = margin
+    }
+  }
+
   // Línea antes del total
   y += 3
   doc.setDrawColor(...COLORS.gray[200])
@@ -269,6 +301,7 @@ function generarReciboA4(pedido) {
   y += 8
 
   // === TOTAL ===
+  ensureSpace(20)
   setFillColor(doc, BRAND.dark)
   doc.roundedRect(margin + 90, y - 6, contentWidth - 90, 16, 3, 3, 'F')
   setTextColor(doc, COLORS.white)
@@ -282,6 +315,7 @@ function generarReciboA4(pedido) {
   y += 20
 
   // === INFORMACIÓN DE PAGO ===
+  ensureSpace(30)
   setFillColor(doc, BRAND.accent)
   doc.roundedRect(margin, y, contentWidth, 22, 3, 3, 'F')
   // Borde izquierdo verde
@@ -314,6 +348,7 @@ function generarReciboA4(pedido) {
 
   // === NOTAS ===
   if (pedido.notas) {
+    ensureSpace(24)
     setFillColor(doc, [255, 251, 235])
     doc.roundedRect(margin, y, contentWidth, 18, 3, 3, 'F')
     setFillColor(doc, COLORS.yellow[700])
@@ -333,6 +368,7 @@ function generarReciboA4(pedido) {
 
   // === TRANSPORTISTA ===
   if (pedido.transportista?.nombre) {
+    ensureSpace(8)
     doc.setFontSize(9)
     doc.setFont('helvetica', 'normal')
     setTextColor(doc, COLORS.gray[500])
@@ -340,21 +376,12 @@ function generarReciboA4(pedido) {
     y += 8
   }
 
-  // === PIE DE PÁGINA ===
-  const footerY = 270
-  doc.setDrawColor(...COLORS.gray[200])
-  doc.setLineWidth(0.3)
-  doc.line(margin, footerY, pageWidth - margin, footerY)
-
-  doc.setFontSize(8)
-  doc.setFont('helvetica', 'normal')
-  setTextColor(doc, COLORS.gray[400])
-  doc.text('Crecer Distribuciones', margin, footerY + 5)
-  doc.text('Este documento es comprobante valido de la operacion realizada.', pageWidth / 2, footerY + 5, { align: 'center' })
-
-  doc.setFontSize(7)
-  doc.setFont('helvetica', 'italic')
-  doc.text(`Generado: ${formatFechaHora(new Date())}`, pageWidth - margin, footerY + 5, { align: 'right' })
+  // === PIE DE PÁGINA (en cada hoja, no solo la ultima) ===
+  const totalPaginas = doc.internal.getNumberOfPages()
+  for (let pagina = 1; pagina <= totalPaginas; pagina++) {
+    doc.setPage(pagina)
+    dibujarPieReciboA4(doc, pageWidth, margin, footerY)
+  }
 
   doc.save(generateFilename('recibo-pedido', pedido.id?.toString()))
 }
@@ -374,7 +401,13 @@ function calcularAlturaComanda(pedido) {
   if (pedido.cliente?.horarios_atencion) height += 8 // horario (hasta 2 lineas)
   height += 10 // divider + header tabla productos
   height += items.length * 12 // productos (nombre puede envolver + detalle precio unit)
-  if (pedido.canal === 'cambio') height += 18 // banner CAMBIO/DEVOLUCION + retirar/entregar
+  // El banner (y su alto) solo aplica si el detalle del cambio esta disponible:
+  // sin el embed cambio:recorrido_cambios (ej. comanda individual desde
+  // PedidoCard, que usa PEDIDO_SELECT sin ese join) canal='cambio' solo, sin
+  // pedido.cambio, imprimia el cartel con 18mm de papel vacio.
+  if (pedido.canal === 'cambio' && (Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio)) {
+    height += 18
+  }
   height += 32 // total + forma pago + estado
   if (pedido.estado_pago === 'parcial') height += 6
   // Deuda anterior: titulo + una linea por boleta. El alto del ticket ES el
@@ -412,7 +445,10 @@ function dibujarComanda(doc, pedido) {
   doc.text(`Recibo #${pedido.id}`, ticketWidth / 2, y, { align: 'center' })
   y += 5
   setNormalStyle(doc, 9)
-  doc.text(formatFechaHora(pedido.fecha || pedido.created_at || new Date()), ticketWidth / 2, y, { align: 'center' })
+  // created_at primero: es timestamp real. pedido.fecha es date-only (columna
+  // date), y formatFechaHora mostraba las 12:00 inventadas por parseDateSafe
+  // en TODAS las comandas.
+  doc.text(formatFechaHora(pedido.created_at || pedido.fecha || new Date()), ticketWidth / 2, y, { align: 'center' })
   y += 4
 
   drawDivider(doc, y, margin, ticketWidth - margin, 0.5)
@@ -457,18 +493,18 @@ function dibujarComanda(doc, pedido) {
   y += 4
 
   // === CAMBIO / DEVOLUCIÓN (parada canal='cambio'): banner + qué retirar/entregar ===
-  if (pedido.canal === 'cambio') {
+  // Sin el detalle (pedido.cambio) no hay nada que imprimir: ni el cartel ni el
+  // alto que calcularAlturaComanda le reservó (ver ahí mismo el porqué).
+  const cambioDetalle = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
+  if (pedido.canal === 'cambio' && cambioDetalle) {
     setHeaderStyle(doc, 11)
     doc.text('CAMBIO / DEVOLUCION', ticketWidth / 2, y, { align: 'center' })
     y += 5
-    const c = Array.isArray(pedido.cambio) ? pedido.cambio[0] : pedido.cambio
     setNormalStyle(doc, 9)
-    if (c) {
-      doc.splitTextToSize(`Retirar: ${c.cantidad_devuelta ?? '?'}x ${c.producto_devuelto_nombre || 'producto'}`, contentWidth)
-        .forEach(line => { doc.text(line, margin, y); y += 4 })
-      doc.splitTextToSize(`Entregar: ${c.cantidad_entregada ?? '?'}x ${c.producto_entregado_nombre || 'producto'}`, contentWidth)
-        .forEach(line => { doc.text(line, margin, y); y += 4 })
-    }
+    doc.splitTextToSize(`Retirar: ${cambioDetalle.cantidad_devuelta ?? '?'}x ${cambioDetalle.producto_devuelto_nombre || 'producto'}`, contentWidth)
+      .forEach(line => { doc.text(line, margin, y); y += 4 })
+    doc.splitTextToSize(`Entregar: ${cambioDetalle.cantidad_entregada ?? '?'}x ${cambioDetalle.producto_entregado_nombre || 'producto'}`, contentWidth)
+      .forEach(line => { doc.text(line, margin, y); y += 4 })
     y += 1
   }
 
