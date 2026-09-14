@@ -11,6 +11,8 @@ import {
   drawCheckbox
 } from './utils'
 import { formatAclaracionBulto } from './utils/formatBulto'
+import { lineaItemImpresion, nombreSinConteo } from './utils/lineaItem'
+import { esCantidadEnSubunidades, factorDeLaLinea } from '../../utils/unidadesRegalo'
 import { clasificarBarrida, ETIQUETA_BARRIDA } from '../../utils/barridas'
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta'
 
@@ -82,7 +84,7 @@ function drawPageHeader(doc, transportista, pedidos, infoRuta, showSummary) {
  * Estructura las operaciones de layout de una card de pedido.
  * Produce lineas tipadas que tanto el dry-run (medir) como el draw aplican.
  */
-function buildCardOps(doc, pedido, orderNumber) {
+export function buildCardOps(doc, pedido, orderNumber) {
   const ops = []
 
   // Nombre cliente + numero
@@ -234,27 +236,15 @@ function buildCardOps(doc, pedido, orderNumber) {
       advance: 4
     })
     itemsBonificados.forEach((item) => {
-      // Regalo de tipo Fracción: cantidad en subunidades (botellas/paquetes)
-      // y descripcion_regalo describe la subunidad (ej: "botella Manaos 600cc").
-      // Regalo de unidad entera: cantidad en unidades de venta del producto,
-      // con la aclaración de fardos si aplica.
-      const esFraccion = !!(item.promocion?.unidades_por_bloque
-        && item.promocion.unidades_por_bloque > 1
-        && item.descripcion_regalo?.trim())
-      let linea
-      if (esFraccion) {
-        linea = `${item.cantidad}x ${item.descripcion_regalo.trim()} (SUELTAS, NO FARDO)`
-      } else {
-        const nombre = item.descripcion_regalo?.trim() || item.producto?.nombre || 'Producto'
-        const aclaracion = formatAclaracionBulto(
-          item.cantidad,
-          item.producto?.unidades_de_venta_por_fardo,
-          item.producto?.etiqueta_bulto,
-        )
-        linea = aclaracion
-          ? `${item.cantidad}x ${nombre} ${aclaracion}`
-          : `${item.cantidad}x ${nombre}`
-      }
+      // Regalo de tipo Fracción: cantidad en subunidades (botellas/paquetes).
+      // Regalo de unidad entera: cantidad en unidades de venta, con la
+      // aclaración de fardos si aplica. Cuál de los dos es lo decide la cascada
+      // de unidadesRegalo (factor congelado primero), no el factor vivo de la
+      // promo: con el vivo, subir el factor de 6 a 12 partía el manifiesto de
+      // un pedido viejo en la mitad de los fardos que hay que cargar.
+      // La lista ya va bajo "PRODUCTOS BONIFICADOS" y con "BONIF" en la columna
+      // de precio, así que no se repite el sufijo (REGALO).
+      const linea = lineaItemImpresion(item, { marcarRegalo: false })
       const itemLines = doc.splitTextToSize(linea, productWrapWidth)
       itemLines.forEach((line, idx) => {
         ops.push({
@@ -389,7 +379,7 @@ function buildCierreOps(pedidos) {
  * Las botellas sueltas se listan en una fila aparte usando descripcion_regalo,
  * para que el chofer sepa que carga 1 fardo + N botellas individuales.
  */
-function buildManifiestoOps(doc, pedidos) {
+export function buildManifiestoOps(doc, pedidos) {
   const totalesCompras = {} // por producto_id (items vendidos)
   const totalesCambios = {} // entregados de paradas de cambio (canal='cambio'), sección aparte
   const totalesBonifFardos = {} // por producto_id (bonifs en unidades de venta / fardos)
@@ -412,8 +402,11 @@ function buildManifiestoOps(doc, pedidos) {
 
       const key = item.producto_id ?? item.producto?.id ?? item.producto?.nombre ?? 'sin-id'
       const nombreProducto = item.producto?.nombre || 'Producto'
-      const upb = item.promocion?.unidades_por_bloque
-      const desc = item.descripcion_regalo?.trim()
+      // Factor de ESTA línea: congelado al crear → vivo (sólo si la promo no
+      // mueve stock) → 1. Con el vivo, subir el factor de una promo de 6 a 12
+      // convertía 392 botellas ya vendidas en 32 fardos en vez de 65.
+      const factor = factorDeLaLinea(item)
+      const desc = nombreSinConteo(item.descripcion_regalo)
 
       // Compras → lista principal, con aclaración (N FARDOS) si aplica.
       if (!item.es_bonificacion) {
@@ -429,10 +422,19 @@ function buildManifiestoOps(doc, pedidos) {
 
       // Bonificación de tipo Fracción: acumular en subunidades crudas. El split
       // a fardos+sueltas se hace al final sobre el total consolidado de la ruta.
-      if (upb && upb > 1 && desc) {
-        const fkey = `${key}|${desc}|${upb}`
+      if (esCantidadEnSubunidades(item)) {
+        // El factor entra en la clave: dos líneas del mismo producto con
+        // factores distintos (una promo que cambió) están en unidades distintas
+        // y sumarlas crudas daría cualquier cosa.
+        const fkey = `${key}|${desc}|${factor}`
         if (!totalesBonifFraccion[fkey]) {
-          totalesBonifFraccion[fkey] = { key, nombre: nombreProducto, desc, upb, subunidades: 0 }
+          totalesBonifFraccion[fkey] = {
+            key,
+            nombre: nombreProducto,
+            desc: desc || nombreProducto,
+            upb: factor,
+            subunidades: 0,
+          }
         }
         totalesBonifFraccion[fkey].subunidades += cantidad
         return
@@ -469,7 +471,11 @@ function buildManifiestoOps(doc, pedidos) {
     const fardos = Math.floor(f.subunidades / f.upb)
     const sueltas = f.subunidades % f.upb
     if (fardos > 0) {
-      const fila = acumular(totalesBonifFardos, f.key, f.nombre, fardos)
+      // Clave aparte: esta cantidad ya está en fardos completos del BLOQUE de la
+      // promo, mientras que una bonificación de unidad entera del mismo producto
+      // está en unidades de venta. Sumarlas en la misma fila imprimía "5x
+      // producto (FARDOS COMPLETOS)" mezclando 2 fardos con 3 unidades sueltas.
+      const fila = acumular(totalesBonifFardos, `${f.key}|fardos`, f.nombre, fardos)
       fila.preConvertidoAFardos = true
     }
     if (sueltas > 0) {
@@ -517,11 +523,16 @@ function buildManifiestoOps(doc, pedidos) {
       })
     })
   }
-  // Sueltos: "Nx botellas <producto>" — saca el conteo unitario del regalo
-  // ("1 Botella"/"2 Botellas") y deja la unidad en plural + el resto del nombre.
+  // Sueltos: "Nx botellas <producto>" — el conteo inicial del regalo ("1
+  // Botella"/"2 Botellas") describe UN bloque, no la cantidad de la ruta, así
+  // que siempre se descarta: dejarlo puesto imprimía "3x 2 Granadina" y el
+  // chofer cargaba 6. Con dos tokens ("2 Granadina") no hay palabra de unidad
+  // que pluralizar, sólo el nombre: se deja tal cual.
   const nombreSuelta = (desc) => {
-    const m = /^\s*\d+\s+(\S+)\s+(.+)$/.exec(desc || '')
-    if (!m) return `${desc} (SUELTAS, NO FARDO)`
+    const nombre = nombreSinConteo(desc)
+    if (!nombre) return '(SUELTAS, NO FARDO)'
+    const m = /^(\S+)\s+(.+)$/.exec(nombre)
+    if (!m) return `${nombre} (SUELTAS, NO FARDO)`
     const unidad = m[1].toLowerCase()
     const plural = unidad.endsWith('s') ? unidad : `${unidad}s`
     return `${plural} ${m[2]} (SUELTAS, NO FARDO)`

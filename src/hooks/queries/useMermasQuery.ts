@@ -11,6 +11,7 @@ import type {
   MermaRegistroResult
 } from '../../types'
 import { productosKeys } from './useProductosQuery'
+import { rangoArgentino, type FiltrosRangoFecha } from '../../utils/rangoArgentino'
 
 // Query keys
 export const mermasKeys = {
@@ -30,33 +31,12 @@ export const mermasKeys = {
  */
 export const LIMITE_MERMAS = 1000
 
-export interface FiltrosMermas {
-  /** 'YYYY-MM-DD' en hora de Argentina. */
-  desde?: string | null
-  /** 'YYYY-MM-DD' en hora de Argentina, inclusive. */
-  hasta?: string | null
-}
+export type FiltrosMermas = FiltrosRangoFecha
 
-/**
- * El corte por fecha va al SERVIDOR, no al cliente: sin filtro la consulta trae
- * todo y se come el tope de PostgREST. El índice `idx_mermas_fecha` sobre
- * created_at DESC ya existe, así que es gratis.
- *
- * `created_at` es timestamptz y el día que le importa al usuario es el día
- * ARGENTINO, que es el corte que usa el reporte gerencial
- * (`created_at AT TIME ZONE 'America/Argentina/Buenos_Aires'`). Comparar contra
- * un ISO sin offset cortaría en UTC y mandaría todo lo cargado después de las
- * 21hs al día siguiente. El offset va fijo en -03:00 porque Argentina no tiene
- * horario de verano desde 2009; la zona por nombre se usa en `fechaLocalISO`.
- */
-function rangoArgentino(filtros?: FiltrosMermas) {
-  return {
-    desde: filtros?.desde ? `${filtros.desde}T00:00:00-03:00` : null,
-    // Inclusive hasta el último microsegundo del día: es la precisión de
-    // timestamptz, así que no se pierde ninguna fila del borde.
-    hasta: filtros?.hasta ? `${filtros.hasta}T23:59:59.999999-03:00` : null,
-  }
-}
+// El corte por fecha va al SERVIDOR, no al cliente: sin filtro la consulta trae
+// todo y se come el tope de PostgREST. El índice `idx_mermas_fecha` sobre
+// created_at DESC ya existe, así que es gratis. `rangoArgentino` (utils/) es
+// la que resuelve el corte de día en hora Argentina contra el timestamptz.
 
 // Fetch functions
 async function fetchMermas(filtros?: FiltrosMermas): Promise<MermaDBExtended[]> {
