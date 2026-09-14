@@ -75,14 +75,37 @@ function safe(val: unknown, fallback: string | number = ''): string | number {
 }
 
 /**
- * Columnas de costo del embed de `productos` en Ventas_Detallado, armadas
- * desde `COLUMNAS_COSTO_CANONICO` (costoCanonico.ts) para que no se puedan
- * desincronizar de la cascada. Tipada como `string` (no literal) a propósito:
- * el parser de tipos de supabase-js no puede resolver un `select` armado con
- * interpolación, y sin este ensanchado el `.select()` de más abajo no tipa.
+ * `select` de pedidos para Ventas_Detallado, con las columnas de costo del
+ * embed de `productos` armadas desde `COLUMNAS_COSTO_CANONICO`
+ * (costoCanonico.ts) para que no se puedan desincronizar de la cascada.
+ *
+ * El parser de tipos de supabase-js no puede resolver un embed anidado
+ * (`productos(...)`) armado con interpolación: con el string inline tira
+ * `ParserError`, y hasta ensanchado a `string` cae al tipo `GenericStringError`
+ * — ninguno de los dos es un `Record<string, unknown>`. Por eso el `.select()`
+ * de abajo castea el resultado: la fila real la sigue determinando esta
+ * columna, el cast es sólo para que tsc no pelee con un `select` dinámico que
+ * supabase-js no soporta tipar.
  */
-const PRODUCTO_SELECT_VENTAS: string =
-  `id, nombre, codigo, categoria, ${COLUMNAS_COSTO_CANONICO.join(', ')}`
+const SELECT_VENTAS: string = `
+  id,
+  fecha,
+  estado,
+  estado_pago,
+  forma_pago,
+  total,
+  usuario_id,
+  transportista_id,
+  cliente:clientes(id, nombre_fantasia, razon_social, zona, cuit),
+  items:pedido_items(
+    id,
+    cantidad,
+    precio_unitario,
+    subtotal,
+    costo_unitario_al_crear,
+    producto:productos(id, nombre, codigo, categoria, ${COLUMNAS_COSTO_CANONICO.join(', ')})
+  )
+`
 
 // ---------------------------------------------------------------------------
 // Dataset 1: Ventas Detallado (fact table)
@@ -93,33 +116,15 @@ export async function fetchVentasDetallado(
   hasta: string
 ): Promise<Record<string, unknown>[]> {
   const pedidos = await traerTodo<Record<string, unknown>>(
-    () => supabase
-    .from('pedidos')
-    .select(`
-      id,
-      fecha,
-      estado,
-      estado_pago,
-      forma_pago,
-      total,
-      usuario_id,
-      transportista_id,
-      cliente:clientes(id, nombre_fantasia, razon_social, zona, cuit),
-      items:pedido_items(
-        id,
-        cantidad,
-        precio_unitario,
-        subtotal,
-        costo_unitario_al_crear,
-        producto:productos(${PRODUCTO_SELECT_VENTAS})
-      )
-    `)
-    // pedidos.fecha es la fecha de venta canónica; created_at es sólo de
-    // auditoría y puede quedar en otro día (carga al día siguiente) — mig 029.
-    .gte('fecha', desde)
-    .lte('fecha', hasta)
-    .order('fecha', { ascending: false })
-    .order('id'),
+    () => (supabase
+      .from('pedidos')
+      .select(SELECT_VENTAS)
+      // pedidos.fecha es la fecha de venta canónica; created_at es sólo de
+      // auditoría y puede quedar en otro día (carga al día siguiente) — mig 029.
+      .gte('fecha', desde)
+      .lte('fecha', hasta)
+      .order('fecha', { ascending: false })
+      .order('id')) as any,
     // Un mes típico ya son ~1.064 pedidos: sin paginar el export a BI salía
     // truncado y con forma de archivo oficial.
     { etiqueta: 'ventas' },
