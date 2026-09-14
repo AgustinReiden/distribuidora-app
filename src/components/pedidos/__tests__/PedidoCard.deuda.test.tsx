@@ -38,6 +38,7 @@ vi.mock('../../../contexts/SucursalContext', () => ({
 
 import PedidoCard from '../PedidoCard'
 import { AuthDataProvider, type AuthDataContextValue } from '../../../contexts/AuthDataContext'
+import { NotificationProvider } from '../../../contexts/NotificationContext'
 import type { PedidoDB, RolUsuario } from '../../../types'
 
 function hacerPedido(
@@ -85,7 +86,9 @@ function renderCard(
   function Wrapper({ children }: { children: ReactNode }): ReactElement {
     return (
       <QueryClientProvider client={qc}>
-        <AuthDataProvider value={auth}>{children}</AuthDataProvider>
+        <NotificationProvider>
+          <AuthDataProvider value={auth}>{children}</AuthDataProvider>
+        </NotificationProvider>
       </QueryClientProvider>
     )
   }

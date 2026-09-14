@@ -187,4 +187,57 @@ describe('VistaBotTelegram', () => {
     // Cambiar el filtro también resetea la paginación del audit log.
     expect(onAuditPageChange).toHaveBeenCalledWith(0);
   });
+
+  it('con el clamp de 200 filas y un total mayor, muestra "mostrando 200 de 350"', () => {
+    // bot_admin_audit_log clampea p_limit a 200 (mig 019): el array que llega
+    // nunca dice si hay más eventos que los traídos. auditSummary.total_eventos
+    // sí tiene el total real del rango.
+    const auditEvents: BotAuditEvent[] = Array.from({ length: 200 }, (_, i) => ({
+      id: i + 1,
+      telegram_user_id: 111,
+      perfil_id: 'perfil-uno',
+      perfil_nombre: 'Agustín Reiden',
+      rol: 'admin',
+      tipo: 'mensaje',
+      tool_name: null,
+      parametros: null,
+      resultado_meta: null,
+      texto_usuario: null,
+      texto_bot: null,
+      created_at: '2026-04-10T10:00:00Z',
+    }));
+    const props = buildProps({
+      auditEvents,
+      auditSummary: { ...summary, total_eventos: 350 },
+    });
+
+    render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
+
+    expect(screen.getByText('mostrando 200 de 350 eventos')).toBeInTheDocument();
+  });
+
+  it('sin clamp (todos los eventos entraron), muestra sólo el conteo', () => {
+    const auditEvents: BotAuditEvent[] = [{
+      id: 1,
+      telegram_user_id: 111,
+      perfil_id: 'perfil-uno',
+      perfil_nombre: 'Agustín Reiden',
+      rol: 'admin',
+      tipo: 'mensaje',
+      tool_name: null,
+      parametros: null,
+      resultado_meta: null,
+      texto_usuario: null,
+      texto_bot: null,
+      created_at: '2026-04-10T10:00:00Z',
+    }];
+    const props = buildProps({
+      auditEvents,
+      auditSummary: { ...summary, total_eventos: 1 },
+    });
+
+    render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
+
+    expect(screen.getByText('1 eventos')).toBeInTheDocument();
+  });
 });
