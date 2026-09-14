@@ -57,12 +57,20 @@ serve(async (req: Request) => {
   const fecha = ayerEnArgentina();
 
   // 3. Cargar admins activos vinculados al bot.
+  //    El rol y el alta/baja salen de `perfiles`, no del snapshot que
+  //    `bot_usuarios` guardó al vincular (mig 237): el digest le manda las
+  //    ventas del día al que HOY es admin. Antes seguía saliendo hacia quien
+  //    hubiera sido admin alguna vez, aunque lo hubieran bajado de rol o dado
+  //    de baja en la app.
+  //    `bot_usuarios` tiene una sola FK a `perfiles`, así que el embed no es
+  //    ambiguo (no hay PGRST201 posible acá).
   const sb = getServiceRoleClient();
   const { data: admins, error } = await sb
     .from("bot_usuarios")
-    .select("telegram_user_id, perfil_id, sucursal_id, rol, activo")
-    .eq("rol", "admin")
-    .eq("activo", true);
+    .select("telegram_user_id, perfil_id, sucursal_id, activo, perfiles!inner(rol, activo)")
+    .eq("activo", true)
+    .eq("perfiles.rol", "admin")
+    .eq("perfiles.activo", true);
 
   if (error) {
     console.error("[digest] error fetching admins:", error.message);

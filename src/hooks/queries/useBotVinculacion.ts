@@ -20,7 +20,7 @@ import { supabase } from '../supabase/base'
  * Resultado del RPC `generar_codigo_vinculacion_bot`, normalizado para la UI.
  */
 export interface CodigoVinculacionResult {
-  /** Código OTP de 6 chars en mayúsculas (ej: "ABC123"). */
+  /** Código OTP de 8 chars en mayúsculas (ej: "K7QX2M9P"). Lo arma la RPC (mig 237). */
   codigo: string
   /** Timestamp ISO de expiración (server-side: now() + 10 min en Postgres). */
   expira_at: string

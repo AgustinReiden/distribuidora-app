@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 237.** El ledger de prod llega hasta
-`236_la_compra_se_acuerda_del_promedio_que_habia`.
+**La próxima migración es la 238.** El ledger de prod llega hasta
+`237_el_bot_mira_el_perfil_en_vivo`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -155,7 +155,7 @@ Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el 
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
 Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
 `main`. Van cinco veces.
-Última actualización: 232, el 2026-09-14.)
+Última actualización: 237, el 2026-09-14.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -980,6 +980,70 @@ mismo ensayo contra el código sin parchear y devolvió los cinco bugs: `A edici
 una compra de 10 **todas aceptadas**, y `lotes_clon=0`. Después de aplicar, el mismo ensayo pasa
 en verde. El md5 del archivo del repo es idéntico al `statements` del ledger:
 `61a71769eb68eeae99be8cfab99099b0`.
+
+### 237 · El bot mira el perfil en vivo
+
+`canjear_codigo_vinculacion_bot` (014) copiaba `perfiles.rol` y la sucursal a `bot_usuarios` al
+vincular, y de ahí en adelante el bot no volvía a mirar `perfiles`: `resolveUserByTelegramId` era
+un SELECT plano con `activo = true` y sin un solo JOIN. La **206** cerró la puerta de la web con
+`perfiles.activo` y no tocó ésta, así que dar de baja a un empleado —o bajarlo de admin a
+preventista— no le cortaba ni le cambiaba nada por Telegram: seguía creando pedidos y viendo
+saldos con el rol del día que se vinculó, hasta que un admin se acordara del segundo interruptor,
+el del panel del bot.
+
+`bot_resolver_usuario(telegram_user_id)` resuelve ahora contra `perfiles` y `usuario_sucursales`
+**en cada mensaje**, y es lo único que el edge llama para saber quién le escribe. En
+`bot_usuarios` queda sólo lo que es del bot: el mapping, su propio interruptor (`activo`, el de
+`bot_admin_toggle_usuario` y `/desvincular`) y la **sucursal activa** que el usuario eligió con
+`/sucursal`. Esa sucursal es un override, no un snapshot: el resolver la valida contra
+`usuario_sucursales` y cae a la default si se la desasignaron o si la sucursal se desactivó —
+antes quedaba pegada para siempre.
+
+**`bot_usuarios.rol` no se dropea, y es a propósito.** La edge function desplegada sigue
+seleccionando esa columna y el deploy de las functions va al **mergear**, no al aplicar la
+migración: dropearla ahora deja el bot caído en esa ventana. Queda como dato histórico ("con qué
+rol se vinculó"), con el `COMMENT` que lo dice. Los dos lectores que decidían algo con ella pasan
+a leer `perfiles` en vivo: `bot_admin_listar_vinculados` (acá) y el cargador de admins de
+`telegram-digest` (en la edge function, con `perfiles!inner(rol, activo)` — `bot_usuarios` tiene
+una sola FK a `perfiles`, así que no hay `PGRST201` posible; verificado igual con `curl` + anon
+key antes de mergear). Ese digest le mandaba el resumen de ventas del día a quien hubiera sido
+admin alguna vez.
+
+**El OTP era hexadecimal.** `upper(substring(encode(gen_random_bytes(4),'hex') FROM 1 FOR 6))`
+tiene 16 símbolos de alfabeto, no 36: 16,8 millones de combinaciones, TTL de 10 minutos y un canje
+que no contaba los fallos. Y los mensajes del bot decían "letras mayúsculas y números" sobre un
+código que nunca tuvo una letra arriba de la F. Ahora son **8 caracteres de un alfabeto de 32**
+(`23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, sin 0/O ni 1/I para que no se lean mal al dictarlos): 32
+divide a 256, así que el `% 32` sobre cada byte del CSPRNG sale uniforme, sin sesgo de módulo. El
+regex del bot sigue aceptando `[A-Z0-9]{8}`: validar la forma es para no gastar un intento, no
+para adivinar el código.
+
+**El canje lleva contador**: `bot_intentos_vinculacion` (RLS sin policies, como las otras cuatro
+`bot_*`) cuenta fallos por `telegram_user_id` en una ventana de 15 minutos; al quinto fallo
+bloquea 15 minutos y el sexto intento no llega a mirar el código. Un canje bueno borra la fila.
+Todas las ramas de error pasan por un solo punto de salida para que ninguna se olvide de contar.
+Los códigos de 6 caracteres que estaban vivos se invalidaron en la migración (era 1): el bot nuevo
+no los acepta y dejarlos abiertos era hacerle gastar un intento a alguien.
+
+La migración **es su propia prueba de aceptación**: además de la verificación estática (ACLs,
+firma única, RLS de la tabla nueva) trae un ensayo funcional dentro de una subtransacción que se
+revierte siempre. Vincula dos chats inventados (`telegram_user_id` negativo) a perfiles reales y
+mide: el resolver devuelve el rol **vivo** y no el snapshot que se le puso distinto a propósito,
+un perfil con `activo = false` devuelve `motivo = perfil_inactivo`, `bot_usuarios.activo = false`
+devuelve `bot_desactivado`, un override de sucursal ajeno cae a la default, y los seis canjes
+seguidos dan `no_encontrado ×5` y `bloqueado` el sexto. Para el perfil dado de baja usa uno que ya
+esté inactivo si lo hay: tocar `perfiles.activo` dispara `perfiles_sync_acceso_auth` (206), que
+banea al usuario y le borra las sesiones.
+
+**La primera corrida salió roja y estuvo bien.** Una función nueva de `public` no nace sólo con
+`EXECUTE` para `PUBLIC` y `anon`: Supabase también se lo concede a **`authenticated`** por default
+privileges, y `REVOKE ... FROM PUBLIC, anon` no lo saca. La verificación estática lo cazó antes de
+que quedara aplicado (`bot_resolver_usuario quedo ejecutable por authenticated`), así que las dos
+`bot_*` que sólo llama el edge con la service_role key revocan las **tres** mitades y la
+verificación las mira a las dos. Post-aplicación: ACL de `bot_resolver_usuario` y
+`canjear_codigo_vinculacion_bot` en `postgres` + `service_role` y nada más, `auditoria_integridad()`
+con `overall_ok = true`, y cero filas del ensayo. El md5 del archivo del repo sin espacios es
+idéntico al `statements` del ledger: `30802b65fa32cd7ab44dc84eb6847ec6`.
 
 ## Mantenimiento
 
