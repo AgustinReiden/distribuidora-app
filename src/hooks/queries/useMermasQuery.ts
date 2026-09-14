@@ -212,7 +212,6 @@ export function useRegistrarMermaMutation() {
       queryClient.invalidateQueries({ queryKey: mermasKeys.byProducto(currentSucursalId, variables.productoId) })
       // Invalidar productos (stock actualizado)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }

@@ -10,7 +10,6 @@ export {
   productosKeys,
   useProductosQuery,
   useProductoQuery,
-  useProductosStockBajoQuery,
   useMinimosVentaQuery,
   useCrearProductoMutation,
   useActualizarProductoMutation,
