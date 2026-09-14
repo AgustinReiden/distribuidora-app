@@ -68,6 +68,13 @@ function makeWrapper(qc: QueryClient) {
   }
 }
 
+/**
+ * `pedidosKeys.lists()` y `.detail()` son keys que ninguna query lee — la
+ * pantalla de pedidos usa `paginated` y `stats`, ambas hijas de `.all()` —
+ * así que invalidarlas no refrescaba nada ante un cambio realtime de otro
+ * usuario (#524). Estos tests fijan que TODO evento de pedidos invalida
+ * `pedidosKeys.all()`, que sí cubre esas dos.
+ */
 describe('useRealtimeInvalidation', () => {
   beforeEach(() => {
     for (const k of Object.keys(subscriptionCallbacks)) {
@@ -75,7 +82,7 @@ describe('useRealtimeInvalidation', () => {
     }
   })
 
-  it('invalida solo el detail cuando se llama invalidatePedido(id)', async () => {
+  it('invalida pedidosKeys.all() cuando se llama invalidatePedido(id)', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     const { result } = renderHook(
@@ -89,15 +96,11 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).toHaveBeenCalledWith({
-      queryKey: pedidosKeys.detail(1, '42'),
-    })
-    // NO debe invalidar la lista completa
-    expect(spy).not.toHaveBeenCalledWith({
-      queryKey: pedidosKeys.lists(1),
+      queryKey: pedidosKeys.all(1),
     })
   })
 
-  it('invalida toda la lista con invalidatePedidosList()', async () => {
+  it('invalida pedidosKeys.all() con invalidatePedidosList()', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     const { result } = renderHook(
@@ -111,7 +114,7 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).toHaveBeenCalledWith({
-      queryKey: pedidosKeys.lists(1),
+      queryKey: pedidosKeys.all(1),
     })
   })
 
@@ -148,15 +151,15 @@ describe('useRealtimeInvalidation', () => {
       await new Promise(r => setTimeout(r, 100))
     })
 
-    const detailCalls = spy.mock.calls.filter(
+    const llamadasAll = spy.mock.calls.filter(
       c =>
         JSON.stringify((c[0] as { queryKey: unknown }).queryKey) ===
-        JSON.stringify(pedidosKeys.detail(1, '42'))
+        JSON.stringify(pedidosKeys.all(1))
     )
-    expect(detailCalls.length).toBe(1)
+    expect(llamadasAll.length).toBe(1)
   })
 
-  it('INSERT en pedidos dispara invalidación de la lista (no del detail)', async () => {
+  it('INSERT en pedidos dispara invalidación de pedidosKeys.all()', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
@@ -172,14 +175,11 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).toHaveBeenCalledWith({
-      queryKey: pedidosKeys.lists(1),
-    })
-    expect(spy).not.toHaveBeenCalledWith({
-      queryKey: pedidosKeys.detail(1, '99'),
+      queryKey: pedidosKeys.all(1),
     })
   })
 
-  it('UPDATE en pedidos dispara invalidación solo del detail (no de la lista)', async () => {
+  it('UPDATE en pedidos dispara invalidación de pedidosKeys.all()', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
@@ -195,14 +195,11 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).toHaveBeenCalledWith({
-      queryKey: pedidosKeys.detail(1, '7'),
-    })
-    expect(spy).not.toHaveBeenCalledWith({
-      queryKey: pedidosKeys.lists(1),
+      queryKey: pedidosKeys.all(1),
     })
   })
 
-  it('DELETE en pedidos invalida detail Y lista', async () => {
+  it('DELETE en pedidos invalida pedidosKeys.all()', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
@@ -218,14 +215,11 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).toHaveBeenCalledWith({
-      queryKey: pedidosKeys.detail(1, '13'),
-    })
-    expect(spy).toHaveBeenCalledWith({
-      queryKey: pedidosKeys.lists(1),
+      queryKey: pedidosKeys.all(1),
     })
   })
 
-  it('cambio en pedido_items invalida el detail del pedido padre', async () => {
+  it('cambio en pedido_items invalida pedidosKeys.all()', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
@@ -241,7 +235,7 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).toHaveBeenCalledWith({
-      queryKey: pedidosKeys.detail(1, '500'),
+      queryKey: pedidosKeys.all(1),
     })
   })
 })

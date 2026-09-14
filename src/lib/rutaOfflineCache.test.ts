@@ -5,7 +5,7 @@
  * hoy es PEOR que no mostrar nada. El chofer sale a repartir con ella.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { guardarRuta, leerRuta, olvidarRuta } from './rutaOfflineCache';
+import { guardarRuta, leerRuta, olvidarRuta, olvidarTodasLasRutas } from './rutaOfflineCache';
 
 const HOY = '2026-08-19';
 const AYER = '2026-08-18';
@@ -28,6 +28,19 @@ describe('rutaOfflineCache', () => {
   it('NO devuelve la ruta de otro día', () => {
     guardarRuta(1, 'chofer-a', AYER, ruta);
     expect(leerRuta(1, 'chofer-a', HOY)).toBeNull();
+  });
+
+  // El bug real: se guarda con `fecha: ayer` (la ruta que cruzó la medianoche)
+  // y se leía siempre con `hoy` a secas. `fechaDeRuta()` en la madrugada acepta
+  // las dos, así que `leerRuta` tiene que poder recibirlas juntas.
+  it('con una lista de fechas aceptadas, devuelve la ruta guardada con cualquiera de ellas', () => {
+    guardarRuta(1, 'chofer-a', AYER, ruta);
+    expect(leerRuta(1, 'chofer-a', [HOY, AYER])?.datos).toEqual(ruta);
+  });
+
+  it('con una lista de fechas aceptadas, sigue rechazando una fecha que no está en la lista', () => {
+    guardarRuta(1, 'chofer-a', '2026-08-17', ruta);
+    expect(leerRuta(1, 'chofer-a', [HOY, AYER])).toBeNull();
   });
 
   // Multi-tenant: un chofer que opera en dos sucursales no puede ver la ruta de
@@ -79,5 +92,19 @@ describe('rutaOfflineCache', () => {
   it('sin transportista no escribe nada', () => {
     guardarRuta(1, '', HOY, ruta);
     expect(localStorage.length).toBe(0);
+  });
+
+  // Logout en un dispositivo compartido: puede quedar la ruta de un chofer
+  // anterior que ya cerró sesión sin pasar por acá.
+  it('olvidarTodasLasRutas borra las de cualquier sucursal o chofer', () => {
+    guardarRuta(1, 'chofer-a', HOY, ruta);
+    guardarRuta(2, 'chofer-b', HOY, ruta);
+    localStorage.setItem('otra-cosa', 'no tocar');
+
+    olvidarTodasLasRutas();
+
+    expect(leerRuta(1, 'chofer-a', HOY)).toBeNull();
+    expect(leerRuta(2, 'chofer-b', HOY)).toBeNull();
+    expect(localStorage.getItem('otra-cosa')).toBe('no tocar');
   });
 });

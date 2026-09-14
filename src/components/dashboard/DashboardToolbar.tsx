@@ -18,7 +18,7 @@ export interface DashboardToolbarProps {
   exportando: boolean;
   isAdmin: boolean;
   onRefetch: () => void;
-  onDescargarBackup: (tipo: string) => void;
+  onDescargarBackup: (tipo: string) => Promise<void>;
 }
 
 const BUTTON_BASE = cn(

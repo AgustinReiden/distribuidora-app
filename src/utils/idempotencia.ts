@@ -33,3 +33,43 @@ export function nuevoRequestId(): string {
     return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
   })
 }
+
+/**
+ * Identidad de ESTA instalación del PWA. Sobrevive recargas y cierres de la
+ * app, y es distinta en cada teléfono.
+ *
+ * Existe para las operaciones que ya estaban encoladas en IndexedDB antes de
+ * que la cola acuñara un UUID propio: su única identidad es `op.id`, el
+ * autoincrement de Dexie, que **arranca en 1 en cada instalación**. Sin un
+ * prefijo por dispositivo, el primer pedido offline de dos teléfonos distintos
+ * comparte la clave `op_1`, y `crear_pedido_idempotente` (mig 071) —que busca
+ * `offline_id` en TODA la tabla `pedidos`— le devuelve al segundo el pedido del
+ * primero como si fuera suyo.
+ */
+const CLAVE_INSTALACION = 'distribuidora:instalacion-id'
+let idInstalacionEnMemoria: string | null = null
+
+export function idDeInstalacion(): string {
+  if (idInstalacionEnMemoria) return idInstalacionEnMemoria
+
+  try {
+    const guardado = localStorage.getItem(CLAVE_INSTALACION)
+    if (guardado) {
+      idInstalacionEnMemoria = guardado
+      return guardado
+    }
+  } catch {
+    // Safari en modo privado tira al leer storage. Se sigue con uno nuevo, que
+    // al menos queda estable en memoria mientras dure la sesión — que es la
+    // ventana en la que importa (los reintentos de una misma operación).
+  }
+
+  const nuevo = nuevoRequestId()
+  try {
+    localStorage.setItem(CLAVE_INSTALACION, nuevo)
+  } catch {
+    // Idem: sin persistencia, el valor en memoria alcanza para esta sesión.
+  }
+  idInstalacionEnMemoria = nuevo
+  return nuevo
+}

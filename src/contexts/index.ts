@@ -6,40 +6,6 @@
 export { AuthDataProvider, useAuthData, useUserPermissions } from './AuthDataContext'
 export type { AuthDataContextValue } from './AuthDataContext'
 
-// Clientes
-export { ClientesProvider, useClientes } from './ClientesContext'
-export type { ClientesContextValue } from './ClientesContext'
-
-// Productos
-export { ProductosProvider, useProductos } from './ProductosContext'
-export type { ProductosContextValue } from './ProductosContext'
-
-// Pedidos
-export { PedidosProvider, usePedidosContext } from './PedidosContext'
-export type { PedidosContextValue } from './PedidosContext'
-
-// Operations (compras, proveedores, mermas, recorridos, usuarios)
-export { OperationsProvider, useOperations, useUsuariosContext } from './OperationsContext'
-export type { OperationsContextValue } from './OperationsContext'
-
-// Legacy - AppDataContext (mantener para compatibilidad)
-export {
-  AppDataProvider,
-  useAppData,
-  useClientesData,
-  useProductosData,
-  usePedidosData,
-  useUsuariosData,
-  useComprasData,
-  useProveedoresData,
-  useMermasData,
-  useMetricasData,
-  useConnectionStatus,
-  useRutaOptimizada,
-  useRecorridosData
-} from './AppDataContext'
-export type { AppDataContextValue } from './AppDataContext'
-
 // Sucursal (multi-tenant)
 export { SucursalProvider, useSucursal } from './SucursalContext'
 export type { SucursalContextValue, SucursalInfo } from './SucursalContext'

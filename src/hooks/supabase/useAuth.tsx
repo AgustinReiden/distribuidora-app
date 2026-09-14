@@ -4,6 +4,11 @@ import { Session, User } from '@supabase/supabase-js'
 import { supabase } from './base'
 import { logger } from '../../utils/logger'
 import { beginAuthTrace, logAuthEvent, logAuthTiming, resetAuthTrace } from '../../utils/authPerformance'
+import { queryClient } from '../../lib/queryClient'
+import { olvidarRuta, olvidarTodasLasRutas } from '../../lib/rutaOfflineCache'
+import { limpiarCachesDeLectura } from '../../lib/offlineDb'
+import { SUCURSAL_STORAGE_KEY } from '../../contexts/SucursalContext'
+import { esFalloDeRed } from '../../utils/falloDeRed'
 import type { RolUsuario } from '../../types'
 
 /**
@@ -86,6 +91,40 @@ function now(): number {
     : Date.now()
 }
 
+function leerSucursalActiva(): number | null {
+  try {
+    const raw = localStorage.getItem(SUCURSAL_STORAGE_KEY)
+    if (!raw) return null
+    const id = Number(raw)
+    return Number.isFinite(id) ? id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Borra del dispositivo lo que no tiene que sobrevivir al logout: la ruta
+ * del chofer (nombres, direcciones, teléfonos y montos a cobrar en
+ * localStorage), el cache de TanStack Query (todo lo que se vio en pantalla:
+ * clientes, saldos, pedidos) y los caches de lectura de Dexie.
+ *
+ * NO toca `pendingOperations` (la cola offline): FE-1 decidió que sobrevive
+ * al logout y se oculta por usuario en la UI, no se descarta acá.
+ */
+function limpiarDatosSensiblesLocales(transportistaId: string | null): void {
+  if (transportistaId) {
+    olvidarRuta(leerSucursalActiva(), transportistaId)
+  }
+  // Barrido por si quedó la ruta de otro chofer en un dispositivo compartido.
+  olvidarTodasLasRutas()
+
+  queryClient.clear()
+
+  limpiarCachesDeLectura().catch(err => {
+    logger.warn('[useAuth] No se pudo limpiar el cache offline:', err)
+  })
+}
+
 function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
@@ -105,6 +144,51 @@ function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: strin
   })
 }
 
+/**
+ * Último perfil conocido, para arrancar sin señal.
+ *
+ * EL BUG QUE ARREGLA: abrir la PWA sin red cerraba la sesión. El token guardado
+ * era válido, pero `fetchPerfil` fallaba por red, el refresh también, y el
+ * bootstrap terminaba en `signOutLocal` — o sea, se descartaba un token bueno
+ * por no poder leer una fila. El preventista quedaba en la pantalla de login,
+ * sin señal para volver a entrar, con `MainApp` sin montar: ni la cola offline
+ * ni nada de lo que la app tiene para funcionar sin conexión.
+ *
+ * Mismo criterio que `leerMontoMinimoCacheado` con la política comercial: lo
+ * último que se supo es mejor que nada cuando no hay a quién preguntarle.
+ */
+const CLAVE_PERFIL_CACHEADO = 'distribuidora:ultimo-perfil'
+
+function guardarPerfilCacheado(perfil: Perfil): void {
+  try {
+    localStorage.setItem(CLAVE_PERFIL_CACHEADO, JSON.stringify(perfil))
+  } catch {
+    // Sin storage se arranca sin caché: es una mejora, no un requisito.
+  }
+}
+
+function leerPerfilCacheado(userId: string): Perfil | null {
+  try {
+    const crudo = localStorage.getItem(CLAVE_PERFIL_CACHEADO)
+    if (!crudo) return null
+    const perfil = JSON.parse(crudo) as Perfil
+    // Del usuario de ESTA sesión y de nadie más: en un teléfono compartido, el
+    // perfil cacheado del anterior le daría a este el rol del otro.
+    return perfil?.id === userId ? perfil : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resultado de resolver el perfil. `huboServidor: false` significa que la
+ * respuesta nunca llegó — ahí no se toca la sesión.
+ */
+interface ResultadoPerfil {
+  perfil: Perfil | null
+  huboServidor: boolean
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUserState] = useState<User | null>(null)
   const [perfil, setPerfilState] = useState<Perfil | null>(null)
@@ -115,7 +199,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const userIdRef = useRef<string | null>(null)
   const perfilRef = useRef<Perfil | null>(null)
   const bootstrapLoadingRef = useRef(true)
-  const perfilRequestsRef = useRef<Map<string, Promise<Perfil | null>>>(new Map())
+  const perfilRequestsRef = useRef<Map<string, Promise<ResultadoPerfil>>>(new Map())
+  /** El perfil que se está mostrando salió del caché y hay que rehidratarlo. */
+  const perfilDesdeCacheRef = useRef(false)
   const signOutPromiseRef = useRef<Promise<void> | null>(null)
   const authEventTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const authEventChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -162,7 +248,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return signOutPromise
   }, [clearLocalAuthState])
 
-  const fetchPerfil = useCallback(async (userId: string): Promise<Perfil | null> => {
+  const fetchPerfil = useCallback(async (userId: string): Promise<ResultadoPerfil> => {
     const existingRequest = perfilRequestsRef.current.get(userId)
     if (existingRequest) {
       return existingRequest
@@ -170,7 +256,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const startedAt = now()
 
-    const request = (async (): Promise<Perfil | null> => {
+    const request = (async (): Promise<ResultadoPerfil> => {
       try {
         const { data, error } = await withTimeout(
           supabase
@@ -184,22 +270,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         if (error) {
           logger.error('[useAuth] Error fetching perfil:', error)
-          return null
+          return { perfil: null, huboServidor: !esFalloDeRed(error) }
         }
 
         if (!data) {
           logger.warn('[useAuth] No perfil found for user:', userId)
-          return null
+          return { perfil: null, huboServidor: true }
         }
 
         const nextPerfil = data as Perfil
+        guardarPerfilCacheado(nextPerfil)
         if (mountedRef.current && userIdRef.current === userId) {
+          perfilDesdeCacheRef.current = false
           setPerfil(nextPerfil)
         }
-        return nextPerfil
+        return { perfil: nextPerfil, huboServidor: true }
       } catch (err) {
         logger.error('[useAuth] Exception fetching perfil:', err)
-        return null
+        // Un timeout tampoco es una respuesta: el servidor no dijo nada.
+        return { perfil: null, huboServidor: !esFalloDeRed(err) }
       } finally {
         perfilRequestsRef.current.delete(userId)
         logAuthTiming('fetchPerfil', now() - startedAt, { userId })
@@ -210,32 +299,53 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return request
   }, [setPerfil])
 
-  const hydrateAuthenticatedUser = useCallback(async (nextUser: User, source: string): Promise<Perfil | null> => {
+  const hydrateAuthenticatedUser = useCallback(async (nextUser: User, source: string): Promise<ResultadoPerfil> => {
     setUser(nextUser)
-    const nextPerfil = await fetchPerfil(nextUser.id)
-    if (nextPerfil) {
+    const resultado = await fetchPerfil(nextUser.id)
+    if (resultado.perfil) {
       logAuthEvent('perfil-loaded', {
         source,
         userId: nextUser.id,
-        rol: nextPerfil.rol
+        rol: resultado.perfil.rol
       })
     }
-    return nextPerfil
+    return resultado
   }, [fetchPerfil, setUser])
 
   const handleSessionResolved = useCallback(async (
     source: string,
     sessionUser: User | null,
     options: { allowRefresh?: boolean } = {}
-  ): Promise<Perfil | null> => {
+  ): Promise<ResultadoPerfil> => {
     if (!sessionUser) {
       clearLocalAuthState()
-      return null
+      return { perfil: null, huboServidor: true }
     }
 
-    const resolvedPerfil = await hydrateAuthenticatedUser(sessionUser, source)
-    if (resolvedPerfil || !options.allowRefresh) {
-      return resolvedPerfil
+    const resultado = await hydrateAuthenticatedUser(sessionUser, source)
+    if (resultado.perfil) {
+      return resultado
+    }
+
+    // SIN SERVIDOR: la sesión no se toca. Renovar el token tampoco va a llegar
+    // a ningún lado, y descartarlo dejaría al usuario en el login sin señal
+    // para volver a entrar. Se sigue con el último perfil conocido y se
+    // rehidrata cuando vuelve la red (ver el listener de 'online').
+    if (!resultado.huboServidor) {
+      const cacheado = leerPerfilCacheado(sessionUser.id)
+      if (cacheado) {
+        logger.warn('[useAuth] Sin red: se conserva la sesión con el último perfil conocido')
+        logAuthEvent('perfil-desde-cache', { source, userId: sessionUser.id, rol: cacheado.rol })
+        perfilDesdeCacheRef.current = true
+        setPerfil(cacheado)
+        return { perfil: cacheado, huboServidor: false }
+      }
+      logger.warn('[useAuth] Sin red y sin perfil cacheado; se conserva la sesión igual')
+      return { perfil: null, huboServidor: false }
+    }
+
+    if (!options.allowRefresh) {
+      return resultado
     }
 
     logger.warn('[useAuth] Perfil fetch failed, attempting session refresh...')
@@ -252,11 +362,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (refreshError || !refreshData.session?.user) {
       logger.warn('[useAuth] Session refresh failed, clearing auth state')
       await signOutLocal(`${source}:refresh-failed`)
-      return null
+      return { perfil: null, huboServidor: true }
     }
 
     return hydrateAuthenticatedUser(refreshData.session.user, `${source}:refresh`)
-  }, [clearLocalAuthState, hydrateAuthenticatedUser, signOutLocal])
+  }, [clearLocalAuthState, hydrateAuthenticatedUser, setPerfil, signOutLocal])
 
   const handleAuthStateChange = useCallback(async (event: string, session: Session | null) => {
     if (!mountedRef.current || event === 'INITIAL_SESSION') {
@@ -272,7 +382,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     if (event === 'SIGNED_OUT') {
       resetAuthTrace()
+      const transportistaId = userIdRef.current
       clearLocalAuthState()
+      limpiarDatosSensiblesLocales(transportistaId)
       if (mountedRef.current) {
         setAuthTransitionLoading(false)
         setBootstrapLoading(false)
@@ -298,8 +410,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
-      const resolvedPerfil = await handleSessionResolved(event, nextUser)
-      if (!resolvedPerfil) {
+      const { perfil: resolvedPerfil, huboServidor } = await handleSessionResolved(event, nextUser)
+      // Sin perfil Y con el servidor contestando: esta sesión no sirve. Si no
+      // hubo servidor, no se concluye nada — se espera a que vuelva la red.
+      if (!resolvedPerfil && huboServidor) {
         await signOutLocal(`${event}:missing-profile`)
       }
     } catch (err) {
@@ -416,7 +530,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (data.user) {
-        const resolvedPerfil = await handleSessionResolved('login', data.user)
+        const { perfil: resolvedPerfil } = await handleSessionResolved('login', data.user)
         if (!resolvedPerfil) {
           await signOutLocal('login:missing-profile')
           throw new Error('No se pudo cargar el perfil del usuario. Intenta de nuevo.')
@@ -439,9 +553,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = useCallback(async () => {
     logAuthEvent('logout-requested')
     resetAuthTrace()
+    const transportistaId = userIdRef.current
+    // El perfil cacheado es para arrancar sin señal, no para sobrevivir a un
+    // logout: en un teléfono compartido, el que entra después no tiene por qué
+    // ver el rol del anterior. La cola de IndexedDB SÍ sobrevive, a propósito
+    // (ver getPendingOperations): borrarla sería perder pedidos.
+    try {
+      localStorage.removeItem(CLAVE_PERFIL_CACHEADO)
+    } catch {
+      // Sin storage no hay nada que olvidar.
+    }
+    perfilDesdeCacheRef.current = false
     clearLocalAuthState()
     setBootstrapLoading(false)
     setAuthTransitionLoading(false)
+    limpiarDatosSensiblesLocales(transportistaId)
 
     try {
       await supabase.auth.signOut({ scope: 'local' })
@@ -449,6 +575,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       logger.error('[useAuth] Error during logout:', err)
     }
   }, [clearLocalAuthState])
+
+  // Vuelve la red: se rehidrata lo que se resolvió a ciegas. Solo si lo que hay
+  // es el perfil cacheado (o no hay ninguno): si el del servidor ya se cargó,
+  // no hay nada que arreglar y una consulta de más al reconectar es ruido en
+  // la peor conexión.
+  useEffect(() => {
+    if (!user) return
+
+    const rehidratar = (): void => {
+      if (!perfilDesdeCacheRef.current && perfilRef.current) return
+      void fetchPerfil(user.id)
+    }
+
+    window.addEventListener('online', rehidratar)
+    return () => window.removeEventListener('online', rehidratar)
+  }, [user, fetchPerfil])
 
   useEffect(() => {
     if (!user) return

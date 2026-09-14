@@ -10,8 +10,8 @@
 //   2. Validar cliente existe + sucursal correcta + scoping (asignado/huérfano para preventista).
 //   3. Cargar productos referenciados (precio, stock, IVA).
 //   4. Cargar pricingMap + promoMap (../pricing).
-//   5. Resolver promos (bonificaciones) + precios mayoristas usando los utils
-//      compartidos en _shared/utils/.
+//   5. Resolver precios con `orquestarPrecios` (_shared/utils/, sincronizado
+//      byte a byte con la app): promo -> mayorista -> descuento del cliente.
 //   6. Construir items finales (incluye items "regalo" como es_bonificacion=true).
 //   7. Calcular total, alertas (stock por item, crédito).
 //   8. INSERT en bot_pedidos_pendientes con items pre-computados (mismo shape
@@ -22,12 +22,21 @@ import type { Tool } from "../base.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadPricingContext } from "../../pricing/index.ts";
 import {
-  resolverPreciosMayorista,
   validarMOQPedido,
   type ItemPedido,
   type MinimosProducto,
+  type PrecioResuelto,
 } from "../../utils/precioMayorista.ts";
-import { resolverPromociones } from "../../utils/promociones.ts";
+import {
+  orquestarPrecios,
+  type ItemResuelto,
+  type OrquestacionPreciosResult,
+} from "../../utils/orquestacionPrecios.ts";
+import type {
+  ClienteConDescuentos,
+  DescuentoCategoriaCliente,
+  ProductoConCategoria,
+} from "../../utils/descuentoCliente.ts";
 
 export interface PrevisualizarPedidoParams {
   cliente_id: number;
@@ -41,7 +50,7 @@ export interface ResumenItem {
   cantidad: number;
   precio_unitario: number;
   subtotal: number;
-  regla_precio: "base" | "mayorista" | "promo_regalo";
+  regla_precio: "base" | "mayorista" | "desc_cliente" | "desc_categoria" | "promo_regalo";
   es_bonificacion: boolean;
   promo_nombre?: string | null;
   stock_disponible: number;
@@ -86,6 +95,8 @@ interface ProductoRow {
   nombre: string;
   precio: number | string;
   stock: number;
+  /** Texto libre. Es la clave del descuento por categoria del cliente (mig 079). */
+  categoria: string | null;
   porcentaje_iva: number | null;
   impuestos_internos: number | null;
   /** Mínimo de unidades por pedido (mig 147). null = sin mínimo. */
@@ -100,6 +111,8 @@ interface ClienteRow {
   razon_social: string | null;
   saldo_cuenta: number | string;
   limite_credito: number | string;
+  /** Descuento general del cliente (%). Lo pisa el descuento por categoria si hay. */
+  descuento_porcentaje: number | string | null;
   activo: boolean;
   sucursal_id: number;
   /** Reservado a administración (mig 214): ningún preventista le carga pedidos. */
@@ -112,8 +125,9 @@ export const previsualizarPedidoTool: Tool<
 > = {
   name: "previsualizar_pedido",
   description:
-    "Calcula el resumen de un pedido (cliente + items) aplicando precios " +
-    "mayoristas y promos automáticas, igual que la app web. Devuelve un " +
+    "Calcula el resumen de un pedido (cliente + items) aplicando promos " +
+    "automáticas, precios mayoristas y el descuento del cliente (general o " +
+    "por categoría), en ese orden y igual que la app web. Devuelve un " +
     "confirmacion_id con TTL 10 min que el botón 'Confirmar' usa para " +
     "crear el pedido real. NO crea el pedido — solo previsualiza. " +
     "Incluye alertas de stock por item y de crédito si el cliente excede el " +
@@ -249,38 +263,39 @@ export const previsualizarPedidoTool: Tool<
       throw new Error(`No se alcanza la compra mínima. ${detalle}`);
     }
 
-    const promoRes = resolverPromociones(itemsParaUtils, promoMap);
+    // ---- Resolver precios: promo -> mayorista -> descuento del cliente ----
+    // Una sola función, la misma que corre la app web (sincronizada byte a
+    // byte). Antes acá se llamaba a los utils sueltos y la SECUENCIA divergía:
+    // el mayorista se resolvía también sobre los productos con promo y el
+    // descuento del cliente no se aplicaba nunca. El mismo pedido daba un total
+    // por Telegram y otro por la app — y crear_pedido_completo_bot copia el
+    // total de la previsualización tal cual.
+    const productosParaDescuento: ProductoConCategoria[] = [...productosById.values()]
+      .map((p) => ({ id: String(p.id), categoria: p.categoria }));
+    const clienteConDescuentos: ClienteConDescuentos = {
+      descuento_porcentaje: Number(cliente.descuento_porcentaje ?? 0) || 0,
+      descuentos_categoria: await loadDescuentosCategoria(sb, cliente_id),
+    };
 
-    // ---- Resolver precios mayoristas ----
-    const precios = resolverPreciosMayorista(itemsParaUtils, pricingMap);
+    const orquestacion = orquestarPrecios({
+      items: itemsParaUtils,
+      promoMap,
+      pricingMap,
+      productos: productosParaDescuento,
+      cliente: clienteConDescuentos,
+    });
+    const precios = orquestacion.preciosResueltos;
+    const total = orquestacion.total;
 
     // ---- Construir items finales (los del usuario + las bonificaciones) ----
+    // orquestacion.items ya viene en orden: primero lo comprado, después los
+    // regalos. promoIdPorItem acompaña al resumen índice a índice porque un
+    // regalo cuyo producto no existe se saltea y correría la numeración.
     const resumen: ResumenItem[] = [];
-    let total = 0;
+    const promoIdPorItem: Array<number | null> = [];
 
-    for (const it of items) {
-      const p = productosById.get(it.producto_id)!;
-      const precioRes = precios.get(String(it.producto_id));
-      const precioUnitario = precioRes ? precioRes.precioResuelto : Number(p.precio);
-      const subtotal = precioUnitario * it.cantidad;
-      total += subtotal;
-
-      resumen.push({
-        producto_id: it.producto_id,
-        codigo: p.codigo,
-        nombre: p.nombre,
-        cantidad: it.cantidad,
-        precio_unitario: precioUnitario,
-        subtotal,
-        regla_precio: precioRes?.esMayorista ? "mayorista" : "base",
-        es_bonificacion: false,
-        stock_disponible: p.stock,
-      });
-    }
-
-    // Bonificaciones (regalos, no suman al total)
-    for (const bonif of promoRes.bonificaciones) {
-      const productoId = Number(bonif.productoId);
+    for (const item of orquestacion.items) {
+      const productoId = Number(item.productoId);
       // El producto regalo puede no estar entre los productos que pidió el user
       // — si no está, lo cargamos puntualmente.
       let p = productosById.get(productoId);
@@ -290,18 +305,24 @@ export const previsualizarPedidoTool: Tool<
       }
       if (!p) continue; // producto regalo no encontrado — skip silently
 
+      const esBonificacion = item.esBonificacion === true;
+      const subtotal = esBonificacion ? 0 : item.precioUnitario * item.cantidad;
+
       resumen.push({
         producto_id: productoId,
         codigo: p.codigo,
         nombre: p.nombre,
-        cantidad: bonif.cantidadBonificacion,
-        precio_unitario: 0,
-        subtotal: 0,
-        regla_precio: "promo_regalo",
-        es_bonificacion: true,
-        promo_nombre: bonif.promoNombre,
+        cantidad: item.cantidad,
+        precio_unitario: item.precioUnitario,
+        subtotal,
+        regla_precio: reglaPrecioDeItem(item, orquestacion),
+        es_bonificacion: esBonificacion,
+        ...(esBonificacion ? { promo_nombre: item.promoNombre ?? null } : {}),
         stock_disponible: p.stock,
       });
+      promoIdPorItem.push(
+        esBonificacion && item.promoId ? Number(item.promoId) : null,
+      );
     }
 
     // ---- Alertas de stock ----
@@ -357,7 +378,7 @@ export const previsualizarPedidoTool: Tool<
 
     // ---- Persistir en bot_pedidos_pendientes ----
     // El items shape coincide con el que crear_pedido_completo_bot lee.
-    const itemsParaPersistir = resumen.map((r) => {
+    const itemsParaPersistir = resumen.map((r, idx) => {
       const p = productosById.get(r.producto_id)!;
       const porcentajeIva = Number(p.porcentaje_iva ?? 0);
       const impInternos = Number(p.impuestos_internos ?? 0);
@@ -369,8 +390,6 @@ export const previsualizarPedidoTool: Tool<
         ? Number((r.precio_unitario - netoUnitario).toFixed(4))
         : 0;
 
-      const promoId = r.es_bonificacion ? findPromoIdByName(promoRes.bonificaciones, r.promo_nombre ?? "") : null;
-
       return {
         producto_id: r.producto_id,
         cantidad: r.cantidad,
@@ -380,15 +399,20 @@ export const previsualizarPedidoTool: Tool<
         impuestos_internos_unitario: impInternos,
         porcentaje_iva: porcentajeIva,
         es_bonificacion: r.es_bonificacion,
-        promocion_id: promoId,
+        promocion_id: promoIdPorItem[idx],
         // Por qué se cobró este precio (mig 148/149). `crear_pedido_completo_bot`
         // ignora las claves que no conoce, así que viaja de arriba: acá todavía
         // se sabe si el precio salió de una escala mayorista, y después de
         // crear el pedido ese contexto ya no existe. Lo lee `crear_pedido`.
         origen_precio: r.es_bonificacion
           ? "bonificacion"
-          : (r.regla_precio === "mayorista" ? "mayorista" : "lista"),
-        grupo_precio_escala_id: precios.get(String(r.producto_id))?.escalaId ?? null,
+          : (r.regla_precio === "base" ? "lista" : r.regla_precio),
+        // Solo cuando el precio lo fijó una escala: una escala que aplicó sin
+        // bajar el precio deja escalaId cargado igual, y atribuirle el descuento
+        // sería mentir sobre quién decidió el precio (mig 148).
+        grupo_precio_escala_id: r.regla_precio === "mayorista"
+          ? (precios.get(String(r.producto_id))?.escalaId ?? null)
+          : null,
       };
     });
 
@@ -452,7 +476,7 @@ async function loadCliente(
 ): Promise<ClienteRow | null> {
   const { data, error } = await sb
     .from("clientes")
-    .select("id, codigo, nombre_fantasia, razon_social, saldo_cuenta, limite_credito, activo, sucursal_id, reservado_admin")
+    .select("id, codigo, nombre_fantasia, razon_social, saldo_cuenta, limite_credito, descuento_porcentaje, activo, sucursal_id, reservado_admin")
     .eq("id", clienteId)
     .eq("sucursal_id", sucursalId)
     .eq("activo", true)
@@ -502,7 +526,7 @@ async function loadProductos(
   // "producto no encontrado" y no entendería por qué).
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, categoria, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
     .in("id", uniqIds)
     .eq("sucursal_id", sucursalId);
   if (error) {
@@ -522,7 +546,7 @@ async function loadProducto(
 ): Promise<ProductoRow | null> {
   const { data, error } = await sb
     .from("productos")
-    .select("id, codigo, nombre, precio, stock, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
+    .select("id, codigo, nombre, precio, stock, categoria, porcentaje_iva, impuestos_internos, cantidad_minima_venta, sucursal_id")
     .eq("id", id)
     .eq("sucursal_id", sucursalId)
     .maybeSingle();
@@ -532,11 +556,45 @@ async function loadProducto(
   return (data as ProductoRow | null);
 }
 
-function findPromoIdByName(
-  bonifs: Array<{ promoId: string; promoNombre: string }>,
-  nombre: string,
-): number | null {
-  if (!nombre) return null;
-  const match = bonifs.find((b) => b.promoNombre === nombre);
-  return match ? Number(match.promoId) : null;
+async function loadDescuentosCategoria(
+  sb: SupabaseClient,
+  clienteId: number,
+): Promise<DescuentoCategoriaCliente[]> {
+  const { data, error } = await sb
+    .from("cliente_descuentos_categoria")
+    .select("categoria, descuento_porcentaje")
+    .eq("cliente_id", clienteId);
+  if (error) {
+    throw new Error(`previsualizar_pedido: descuentos por categoría: ${error.message}`);
+  }
+  const rows = (data ?? []) as Array<
+    { categoria: string; descuento_porcentaje: number | string }
+  >;
+  return rows.map((d) => ({
+    categoria: d.categoria,
+    descuento_porcentaje: Number(d.descuento_porcentaje) || 0,
+  }));
+}
+
+/**
+ * Por qué se cobró este precio. Misma precedencia que resolverOrigenPrecio de
+ * la app (src/utils/origenPrecio.ts): bonificación -> mayorista -> descuento del
+ * cliente -> lista. El bot no toma precios tipeados a mano, así que no hay rama
+ * "manual".
+ */
+function reglaPrecioDeItem(
+  item: ItemResuelto,
+  orq: Pick<
+    OrquestacionPreciosResult,
+    "preciosResueltos" | "descuentoClientePct" | "descuentoPorCategoria"
+  >,
+): ResumenItem["regla_precio"] {
+  if (item.esBonificacion) return "promo_regalo";
+  const pid = String(item.productoId);
+  const mayorista: PrecioResuelto | undefined = orq.preciosResueltos.get(pid);
+  if (mayorista?.esMayorista) return "mayorista";
+  if ((orq.descuentoClientePct.get(pid) ?? 0) > 0) {
+    return orq.descuentoPorCategoria.has(pid) ? "desc_categoria" : "desc_cliente";
+  }
+  return "base";
 }

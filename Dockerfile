@@ -31,7 +31,7 @@ ARG VITE_N8N_FACTURA_WEBHOOK_URL
 # qué commit corre: pasarle el SHA hace que el dato sirva para soporte.
 ARG VITE_BUILD_ID
 
-RUN npm run build
+RUN npm run build:strict
 
 # =============================================================================
 # Stage 2: Serve

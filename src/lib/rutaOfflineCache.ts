@@ -76,21 +76,28 @@ export function guardarRuta<T>(
 
 /**
  * Lee la ruta guardada. Devuelve `null` si no hay, si está vencida, si es de
- * otra fecha o si el JSON quedó corrupto — en todos esos casos es preferible
- * "no tengo ruta" a mostrar una ruta que no es la de hoy.
+ * una fecha no aceptada o si el JSON quedó corrupto — en todos esos casos es
+ * preferible "no tengo ruta" a mostrar una que no corresponde.
+ *
+ * `fechasAceptadas` recibe una fecha o una lista: en la madrugada
+ * `fechaDeRuta()` acepta hoy Y ayer (la ruta puede seguir en curso cruzando la
+ * medianoche), y hay que leer con el mismo criterio con el que se guardó — si
+ * no, un `guardarRuta` con `fecha: ayer` nunca calza contra un `leerRuta` que
+ * sólo pide `hoy`. `MAX_EDAD_MS` ya cubre no revivir una ruta de anteayer.
  */
 export function leerRuta<T>(
   sucursalId: number | null,
   transportistaId: string,
-  fechaEsperada: string,
+  fechasAceptadas: string | string[],
 ): RutaCacheada<T> | null {
   if (!transportistaId) return null;
+  const fechas = Array.isArray(fechasAceptadas) ? fechasAceptadas : [fechasAceptadas];
   try {
     const crudo = localStorage.getItem(clave(sucursalId, transportistaId));
     if (!crudo) return null;
     const payload = JSON.parse(crudo) as RutaCacheada<T>;
     if (!payload?.datos || typeof payload.guardadoEn !== 'number') return null;
-    if (payload.fecha !== fechaEsperada) return null;
+    if (!fechas.includes(payload.fecha)) return null;
     if (Date.now() - payload.guardadoEn > MAX_EDAD_MS) return null;
     return payload;
   } catch (e) {
@@ -104,4 +111,27 @@ export function olvidarRuta(sucursalId: number | null, transportistaId: string):
   try {
     localStorage.removeItem(clave(sucursalId, transportistaId));
   } catch { /* nada que hacer */ }
+}
+
+/**
+ * Borra TODAS las rutas cacheadas, de cualquier sucursal o chofer.
+ *
+ * Para logout en un dispositivo compartido: `olvidarRuta` sólo conoce al
+ * chofer que se está yendo, pero puede haber quedado la de otro que ya cerró
+ * sesión antes sin pasar por acá (o cuya sucursal en ese momento no se puede
+ * reconstruir). Este barrido cubre eso.
+ */
+export function olvidarTodasLasRutas(): void {
+  try {
+    const claves: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(`${PREFIJO}:`)) {
+        claves.push(key);
+      }
+    }
+    claves.forEach(key => localStorage.removeItem(key));
+  } catch (e) {
+    logger.warn('[rutaOfflineCache] No se pudo barrer las rutas cacheadas:', e);
+  }
 }

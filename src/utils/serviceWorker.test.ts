@@ -196,7 +196,7 @@ describe('serviceWorker', () => {
       // Clave del arreglo: con el SW controlando, un reload pelado sirve el
       // index.html viejo del precache. La recarga la dispara el cambio de
       // controlador, no nosotros.
-      const { reg } = registroFalso({ waiting: { postMessage: vi.fn() } })
+      const { reg } = registroFalso({ waiting: { postMessage: vi.fn() } as unknown as ServiceWorker })
       const activar = registrarCon(reg)
 
       await aplicarActualizacionSW()

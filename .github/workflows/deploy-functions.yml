@@ -54,6 +54,9 @@ on:
           - telegram-digest
           - optimizar-ruta
 
+permissions:
+  contents: read
+
 env:
   # No es un secreto: ya está en migrations/MANIFEST.md y en la URL pública del
   # proyecto. Como secret sólo agregaría un lugar más donde puede desactualizarse.

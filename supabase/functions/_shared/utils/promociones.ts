@@ -10,8 +10,13 @@
  * La cantidad se acumula entre TODOS los productos de la misma promo.
  * Ejemplo: promo "Manaos 2+2" con 3 sabores → 1 de cada uno = 3 total → aplica 1 vez.
  *
- * Las promociones tienen prioridad sobre los precios mayoristas:
- * si un producto tiene promo activa, se usa la promo en vez del mayorista.
+ * Las promociones tienen prioridad sobre los precios mayoristas, pero SOLO
+ * cuando la promo efectivamente se usa: `productosConPromo` sale de las promos
+ * que DISPARAN (bloques >= 1 y, entre excluyentes, la ganadora), no de las que
+ * apenas tocan algún ítem del pedido. Un producto en una promo que no llega al
+ * umbral no reclama nada y sigue tomando su precio mayorista — y, como no sale
+ * del grupo, su cantidad le sigue sumando la escala a los demás sabores de la
+ * condición (fardo surtido).
  */
 
 // Deno requiere extensión .ts explícita en imports relativos.
@@ -92,10 +97,6 @@ export function resolverPromociones(
     for (const id of promosEliminadas) promosVistas.delete(id)
   }
 
-  for (const entry of promosVistas.values()) {
-    for (const pid of entry.productoIdsEnPedido) productosConPromo.add(pid)
-  }
-
   // 2. Filtrar solo las que DISPARAN (bloques >= 1) — clave para el fix del bug
   //    "2+2 con 2 fardos debe ganar sobre 3+1 con prio mayor si 3+1 no llega"
   const queDisparan: PromoEntry[] = []
@@ -118,6 +119,15 @@ export function resolverPromociones(
   const ganadoresExcluyentes = resolverConflictosExcluyentes(excluyentes)
 
   const finales = [...acumulables, ...ganadoresExcluyentes]
+
+  // 5. Recién acá se reclaman los productos para la promo. Sale de `finales`
+  //    (las que se aplican de verdad) y no de `promosVistas`: un producto en una
+  //    promo que no dispara —o en una excluyente que perdió— no tiene promo que
+  //    "tenga prioridad" sobre nada, así que debe seguir tomando precio
+  //    mayorista y seguir sumando al total de su grupo.
+  for (const entry of finales) {
+    for (const pid of entry.productoIdsEnPedido) productosConPromo.add(pid)
+  }
 
   for (const { promo, totalQty, primerProductoId } of finales) {
     const cantCompra = promo.reglas['cantidad_compra']
