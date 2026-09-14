@@ -771,6 +771,76 @@ la auto-asignación sobre cliente ajeno y sobre otra sucursal 42501, el `creado_
 de otro con su fila de historial, `crear_pedido_completo`, `registrar_merma_manual`, el
 guardado de `place_id` por un preventista y el movimiento de stock del depósito.
 
+### 234 · La salvedad devuelve antes de mermar
+
+Tres agujeros del mismo camino (la entrega con salvedad) más una convergencia de firmas.
+Parche por ancla sobre el cuerpo vivo, como la 227: el `174` del repo está **75 y 30
+caracteres atrás** de prod, así que un `CREATE OR REPLACE` desde el archivo habría borrado
+en silencio lo que le agregó la 227.
+
+**La merma descontaba el stock dos veces.** Las unidades ya salieron de `productos.stock` al
+crear el pedido. Para `producto_danado` y `producto_vencido`, `registrar_salvedad` **no** las
+devuelve (`v_stock_devuelto` sólo se prende con `cliente_rechaza`, `error_pedido` y
+`diferencia_precio`) pero igual inserta la merma y baja el stock: se descuentan de nuevo. En
+prod quedaron 19 unidades de stock fantasma (7 salvedades por dañado = 16 u., 2 por vencido =
+3 u.). Ahora devuelve primero y merma después: neto 0 sobre `productos.stock`, y la fila de
+`mermas_stock` se mide contra el stock **ya devuelto**, que es lo que pide `MERMA-B`.
+
+Lo que no era obvio: **la devolución previa a la merma queda a propósito fuera de la lista
+blanca de `trg_lotes_sincronizar`**, y usa su propio origen `salvedad_merma`. Con un origen
+whitelisteado la devolución vuelve al lote por FEFO, pero la bajada de la merma sale de la
+bolsa primero (el camino de bajada del trigger no mira el origen), así que el lote termina
+**+N** y la bolsa **−N** en cada rotura. Medido contra prod con un lote sintético (100
+cargadas, 50 vivas, bolsa 40): con `'salvedad'` el lote va 50 → 53 → **53**; con
+`'salvedad_merma'` va 50 → 50 → **50**. Estas unidades no vuelven a la góndola —se rompen en
+el mismo movimiento—, así que las dos patas tienen que caer del mismo lado del mostrador. La
+regla de `CLAUDE.md` (toda devolución va etiquetada con un origen de la lista) sigue valiendo
+para la devolución que **sí queda** devuelta. Hoy `producto_lotes` está vacía en prod, así que
+el desfase habría sido latente hasta el primer lote cargado.
+
+**`anular_salvedad` no revertía las promociones.** Al crear la salvedad se llama hasta dos
+veces a `revertir_bloques_auto_ajuste`, se recortan o borran las líneas de regalo y se
+devuelve el stock del contenedor; anular restituye la línea y los totales y **nada de eso**.
+Rehacerlo en sentido de alta es otra función (`aplicar_uso_promo_acumulador` con delta
+positivo más un re-sync hacia arriba). Hasta que exista, la anulación que tocaría una promo se
+**rechaza** con `codigo = 'anulacion_toca_promociones'`. La detección es la vía espejo: si
+restituir `cantidad_afectada` cambia la cantidad de **bloques** de alguna promo que incluye al
+producto, el regalo habría que reponerlo. Alcance medido: **38 de 251** salvedades (15%), y
+cuesta cero — nunca se anuló ninguna, y `anular_salvedad` **no tiene un solo caller en
+`src/`**: el botón "Anulada" de `ModalResolverSalvedad` va por `resolver_salvedad`, que sólo
+cambia la etiqueta y no revierte nada (issue aparte).
+
+**El recorrido no se enteraba de que bajaba el total.** `recorridos.total_facturado` lo
+escriben `aplicar_orden_ruta` (088) y `recalcular_recorrido` (180), y el trigger de entrega
+era `AFTER UPDATE OF estado, monto_pagado`: un `UPDATE` de `total` no lo despertaba (Trampa
+6). `/recorridos` mostraba "Pendiente" = facturado − cobrado inflado en **18 de 123** rutas.
+Ahora `total` está en la lista y el cuerpo recalcula `total_facturado` con la misma subconsulta
+que ya usaba. **No** llama a `recalcular_recorrido()` aunque calcule los cuatro contadores:
+esa función exige `es_encargado_o_admin()` y el trigger corre en la transacción del
+**transportista** que marca la entrega, así que la entrega entera reventaría con 42501.
+`total_pedidos` queda afuera por la misma lógica: lo mueve `recorrido_pedidos`, que este
+trigger no observa. Para las 18 rutas viejas hay ahora un botón de admin en `/recorridos` que
+llama a `recalcular_recorrido` (era la única RPC de esa familia sin ningún caller en el front).
+
+**Una sola firma.** La sobrecarga de 7 args de `registrar_salvedad` se dropea: rangos `[4,7]`
+y `[4,8]` superpuestos son `PGRST203` en runtime, invisible para `tsc` y para los tests
+(Trampa 5). En prod ya había una sola firma, así que el `DROP IF EXISTS` es convergencia, no
+fix — el único caller (`PedidosContainer.tsx`) pasa los 8.
+
+**Las 19 unidades históricas no se tocan, y es una decisión.** Un `UPDATE` a ciegas estaría mal
+en 13 de las 19: nueve (salvedades 77, 90, 91) tuvieron un **conteo físico posterior** que ya
+absorbió el desfase, y cuatro más (51, 228, 230) son de productos que hoy están en cero, donde
+sumar inventa mercadería que nadie tiene. Quedan para el próximo conteo, que es lo único que
+las puede separar del resto de la deriva. El detalle por salvedad está en el §6 del archivo.
+
+Verificado contra prod en cuatro transacciones con `ROLLBACK` antes de aplicar: los seis
+anclajes aparecen exactamente una vez; pedido de 6 con stock fijado en 90 y salvedad de 3
+dañadas deja **stock 90**, una merma **3 / 93 / 90** y el ledger en `salvedad_merma: 90→93`
+seguido de `merma: 93→90`; con un lote sintético el lote queda en **50** (neto 0); la ruta 130
+queda con `total_facturado` = Σ `pedidos.total`; y el guard de anulación rechaza la salvedad 43
+(`anulacion_toca_promociones`) y deja pasar la 28. Post-aplicación: `STK-F` en 0,
+`auditoria_integridad()` con `overall_ok = true` y 0 en rojo.
+
 ## Mantenimiento
 
 - Toda migración nueva: archivo `migrations/NNN_descripcion.sql` **y** aplicar por

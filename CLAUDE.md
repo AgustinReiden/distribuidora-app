@@ -93,7 +93,17 @@ suelta en `sucursales`.
   tocar `producto_lotes`: el trigger se encarga. Uno que lo **devuelva** —cancelación,
   salvedad, edición a la baja— sí tiene que etiquetarse con un origen de la lista blanca del
   trigger, o esas unidades vuelven a la bolsa "sin vencimiento" en vez de a su lote y el
-  contador miente para abajo sin que falle nada. Dos corolarios que ya mordieron (mig 229):
+  contador miente para abajo sin que falle nada. Tres corolarios que ya mordieron (migs 229 y
+  234):
+  - **La devolución que se cancela sola NO va etiquetada.** La salvedad por dañado o vencido
+    devuelve las unidades y las merma en el mismo movimiento (mig 234). Si esa devolución lleva
+    un origen de la lista blanca vuelve al lote por FEFO, pero la bajada de la merma sale de la
+    **bolsa** primero —el camino de bajada del trigger no mira el origen—, así que el lote queda
+    **+N** y la bolsa **−N** en cada rotura: el mismo contador mintiendo, para arriba. Medido
+    con un lote de 100 con 50 vivas y bolsa 40: con `'salvedad'` el lote termina en 53, con
+    `'salvedad_merma'` en 50. Las dos patas tienen que caer del mismo lado del mostrador. La
+    regla de arriba rige la devolución que **queda** devuelta; ésta no lo está ni un renglón
+    después.
   - `set_config` es **por transacción, no por función**. Una función que setea el origen y la
     llama otra que ya seteó el suyo le pisa la etiqueta al resto del cuerpo del caller. Si es
     un helper con varios llamadores —`revertir_bloques_auto_ajuste` es el caso— tiene que
