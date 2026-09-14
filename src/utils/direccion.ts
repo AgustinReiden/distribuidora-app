@@ -13,13 +13,17 @@
  *
  * Idempotente: no agrega el número si la línea de la calle ya lo contiene.
  *
+ * Toma el ÚLTIMO número del input, no el primero: una calle puede tener un
+ * número en el nombre ("Av. 25 de Mayo 1450", "9 de Julio 300") y la altura
+ * que tipeó el usuario siempre va al final.
+ *
  * @param direccion    dirección devuelta por Google (formatted_address o description)
  * @param inputOriginal lo que tipeó el usuario (de donde se extrae la altura)
  */
 export function preservarAlturaEnDireccion(direccion: string, inputOriginal: string): string {
-  const numberMatch = inputOriginal.match(/\b(\d{1,5})\b/);
-  if (!numberMatch) return direccion;
-  const altura = numberMatch[1];
+  const numberMatches = [...inputOriginal.matchAll(/\b(\d{1,5})\b/g)];
+  if (numberMatches.length === 0) return direccion;
+  const altura = numberMatches[numberMatches.length - 1][1];
   const partes = direccion.split(',');
   if (!partes[0]) return direccion;
   // Si la línea de la calle ya incluye esa altura, no duplicar.
