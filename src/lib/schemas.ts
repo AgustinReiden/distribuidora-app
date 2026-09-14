@@ -213,74 +213,19 @@ export const estadoResolucionSalvedadSchema = z.enum([
 
 export type EstadoResolucionSalvedadSchema = z.infer<typeof estadoResolucionSalvedadSchema>
 
-export const registrarSalvedadSchema = z.object({
-  pedidoItemId: z.string().min(1, { message: 'Debe seleccionar un item' }),
-  cantidadAfectada: z.coerce
-    .number({ error: 'La cantidad debe ser un número' })
-    .int({ message: 'La cantidad debe ser un número entero' })
-    .positive({ message: 'La cantidad debe ser mayor a 0' }),
-  motivo: motivoSalvedadSchema,
-  descripcion: z.string().optional(),
-  devolverStock: z.boolean().default(true)
-})
-
-export type RegistrarSalvedadFormData = z.infer<typeof registrarSalvedadSchema>
-
-export const resolverSalvedadSchema = z.object({
-  estadoResolucion: estadoResolucionSalvedadSchema,
-  notas: z.string().min(5, { message: 'Debe agregar notas de la resolución (mínimo 5 caracteres)' }),
-  pedidoReprogramadoId: z.string().optional()
-})
-
-export type ResolverSalvedadFormData = z.infer<typeof resolverSalvedadSchema>
-
 // ============================================
 // SCHEMAS PARA MODALES ADICIONALES
 // ============================================
 
 /**
- * Schema para ModalCompra (validación de formulario de compra)
+ * Schema para ModalEditarPedido.
+ * Pago se gestiona en ModalRegistrarPago (separate flow), no aqui.
  */
-export const modalCompraSchema = z.object({
-  proveedorId: z.string().optional(),
-  proveedorNombre: z.string().optional(),
-  usarProveedorNuevo: z.boolean(),
-  fechaCompra: z.string().min(1, { message: 'La fecha es obligatoria' }),
-  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'cuenta_corriente', 'tarjeta'], {
-    message: 'Forma de pago inválida'
-  }),
-  tipoFactura: z.enum(['ZZ', 'FC']).default('FC'),
-  items: z.array(z.object({
-    productoId: z.string(),
-    cantidad: z.number().positive({ message: 'La cantidad debe ser mayor a 0' }),
-    costoUnitario: z.number().nonnegative(),
-    bonificacion: z.number().int().nonnegative().default(0)
-  })).min(1, { message: 'Debe agregar al menos un producto' })
+export const modalEditarPedidoSchema = z.object({
+  notas: z.string().optional()
 })
 
-export type ModalCompraFormData = z.infer<typeof modalCompraSchema>
-
-/**
- * Schema para validar items de salvedad en ModalEntregaConSalvedad
- */
-export const itemSalvedadSchema = z.object({
-  itemId: z.string(),
-  cantidadAfectada: z.number()
-    .int({ message: 'La cantidad debe ser un número entero' })
-    .positive({ message: 'La cantidad debe ser mayor a 0' }),
-  motivo: motivoSalvedadSchema,
-  descripcion: z.string().optional()
-}).refine(
-  (data) => {
-    if (data.motivo === 'otro') {
-      return data.descripcion && data.descripcion.trim().length >= 10
-    }
-    return true
-  },
-  { message: 'Debe especificar una descripción (mínimo 10 caracteres)', path: ['descripcion'] }
-)
-
-export type ItemSalvedadFormData = z.infer<typeof itemSalvedadSchema>
+export type ModalEditarPedidoFormData = z.infer<typeof modalEditarPedidoSchema>
 
 // Etiquetas para mostrar en UI
 export const MOTIVOS_SALVEDAD_LABELS: Record<MotivoSalvedadSchema, string> = {
