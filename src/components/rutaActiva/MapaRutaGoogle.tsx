@@ -141,17 +141,19 @@ export default function MapaRutaGoogle({
       bounds.extend({ lat: deposito.lat, lng: deposito.lng });
     }
 
-    // Paradas: activa grande/destacada, completadas verdes atenuadas, pendientes azules
+    // Paradas: activa grande/destacada, completadas verdes atenuadas, no
+    // entregadas rojas (distintas de "pendiente": ya se intentó y no se pudo),
+    // pendientes azules.
     for (const p of ordenadas) {
       const activa = p.orden === paradaActivaOrden;
-      const color = p.entregado ? '#16a34a' : activa ? '#1d4ed8' : '#2563eb';
-      const scale = activa ? 13 : p.entregado ? 7 : 10;
+      const color = p.noEntregado ? '#dc2626' : p.entregado ? '#16a34a' : activa ? '#1d4ed8' : '#2563eb';
+      const scale = activa ? 13 : (p.entregado || p.noEntregado) ? 7 : 10;
       const marker = new g.Marker({
         position: { lat: p.lat, lng: p.lng },
         map,
-        title: `${p.orden}. ${p.titulo}`,
-        label: { text: p.entregado ? '✓' : String(p.orden), color: '#ffffff', fontWeight: '700', fontSize: activa ? '13px' : '11px' },
-        icon: circleSymbol(color, scale, p.entregado && !activa ? 0.7 : 1),
+        title: `${p.orden}. ${p.titulo}${p.noEntregado ? ' (no entregado)' : ''}`,
+        label: { text: p.entregado ? '✓' : p.noEntregado ? '!' : String(p.orden), color: '#ffffff', fontWeight: '700', fontSize: activa ? '13px' : '11px' },
+        icon: circleSymbol(color, scale, (p.entregado || p.noEntregado) && !activa ? 0.7 : 1),
         zIndex: activa ? 1000 : p.entregado ? 20 : 100 + p.orden,
       });
       if (onParadaTap) marker.addListener('click', () => onParadaTap(p.orden));

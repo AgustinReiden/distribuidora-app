@@ -1,11 +1,11 @@
 import { useState, memo, Suspense } from 'react';
 import type { ChangeEvent } from 'react';
+import { z } from 'zod';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import NumberInput from '../ui/NumberInput';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { useMarcasQuery } from '../../hooks/queries';
-import { modalProductoSchema } from '../../lib/schemas';
 import {
   calcularCostoFinanciero,
   calcularNetoDesdeTotal,
@@ -23,6 +23,79 @@ const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/
 
 // Lazy por lo mismo: solo hace falta al editar, y arrastra la query de lotes.
 const ProductoLotes = lazyWithReload(() => import('../productos/ProductoLotes'));
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
+// compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
+// desincronizarla de la UI de este modal (ver ModalCambioProducto.tsx para el
+// incidente que motivó la regla). Co-locado, la validación viaja siempre en
+// el mismo chunk que este componente.
+// mig 177: distingue "no gravado" de "0% gravado". La BD tiene un CHECK de
+// coherencia (si no es gravado, la alícuota debe ser 0). Duplicada de
+// lib/schemas.ts (condicionIvaSchema) a propósito, por la misma razón que el
+// resto del schema: nada de este modal puede depender del chunk compartido.
+const condicionIvaSchema = z
+  .enum(['gravado', 'exento', 'no_gravado'], { error: 'Condición de IVA inválida' })
+  .default('gravado')
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const modalProductoSchema = z.object({
+  nombre: z
+    .string()
+    .min(1, { message: 'El nombre es obligatorio' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
+
+  codigo: z.string().optional(),
+  categoria: z.string().optional(),
+
+  stock: z.coerce
+    .number({ error: 'El stock debe ser un número' })
+    .int({ message: 'El stock debe ser un número entero' })
+    .nonnegative({ message: 'El stock no puede ser negativo' }),
+
+  stock_minimo: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(10),
+
+  // Mínimo de venta del producto (mig 147). 0 / undefined = sin mínimo; el
+  // modal lo normaliza a null antes de guardar (la columna exige > 0).
+  cantidad_minima_venta: z.coerce
+    .number({ error: 'El mínimo de venta debe ser un número' })
+    .int({ message: 'El mínimo de venta debe ser un número entero' })
+    .nonnegative({ message: 'El mínimo de venta no puede ser negativo' })
+    .optional()
+    .nullable(),
+
+  porcentaje_iva: z.coerce.number().min(0).max(100).default(21),
+  condicion_iva: condicionIvaSchema,
+  costo_sin_iva: z.coerce.number().nonnegative().optional(),
+  costo_con_iva: z.coerce.number().nonnegative().optional(),
+  impuestos_internos: z.coerce.number().nonnegative().optional(),
+  precio_sin_iva: z.coerce.number().nonnegative().optional(),
+
+  precio: z.coerce
+    .number({ error: 'El precio debe ser un número' })
+    .positive({ message: 'El precio debe ser mayor a 0' }),
+
+  // Cuántas unidades de venta hacen 1 fardo/bulto.
+  // Ej: si vendés "medio fardo" como 1 unidad, acá poné 2.
+  // Permite decimales (0.5) por si alguien vende "doble fardo" como 1 unidad.
+  unidades_de_venta_por_fardo: z.coerce
+    .number({ error: 'Debe ser un número' })
+    .positive({ message: 'Debe ser mayor a 0' })
+    .optional(),
+
+  // Etiqueta del bulto: FARDO, CAJA, PACK, BULTO...
+  // Solo se persiste con valor cuando hay unidades_de_venta_por_fardo.
+  // Sin unidades, el form normaliza la etiqueta a undefined antes de mandar.
+  etiqueta_bulto: z
+    .string()
+    .trim()
+    .max(20, { message: 'Máximo 20 caracteres' })
+    .optional()
+})
 
 // =============================================================================
 // TYPES
