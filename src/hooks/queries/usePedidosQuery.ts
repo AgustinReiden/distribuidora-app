@@ -1220,16 +1220,17 @@ async function marcarEntregaYPagoMasivo(
   const { error } = await supabase.rpc('marcar_entrega_y_pago_masivo', rpcArgs)
   if (error) throw error
 
-  // Historial best-effort (no bloquea)
-  const fechaHistorial = fecha ? `${fecha}T12:00:00-03:00` : new Date().toISOString()
-  const historialEntries = pedidoIds.map(pedidoId => ({
-    pedido_id: pedidoId,
-    accion: 'entregado',
-    descripcion: `Entrega+pago masivo - Transportista: ${transportistaId} - Forma: ${formaPago}`,
-    fecha: fechaHistorial,
-  }))
-
-  await supabase.from('pedido_historial').insert(historialEntries).then(() => {})
+  // El historial NO se escribe desde acá — misma historia que en
+  // `entregarPedidosMasivo` (ver el comentario allá arriba): había un insert
+  // "best-effort" a `pedido_historial` cerrado con `.then(() => {})` que mandaba
+  // `accion`, `descripcion` y `fecha` —tres columnas que la tabla no tiene— y
+  // omitía `campo_modificado` y `sucursal_id`, que son NOT NULL. Fallaba el 100%
+  // de las veces y el `.then` vacío se comía el error.
+  //
+  // Ya no se puede reescribir: desde la mig 233 la policy de INSERT exige
+  // `pg_trigger_depth() > 0`, o sea que esta tabla la escriben SOLO los triggers
+  // de auditoría de `pedidos` (`registrar_cambio_pedido`), que es de donde salen
+  // las filas reales. No hace falta reemplazarlo por nada.
 }
 
 export interface ResultadoEntregaYPagoMasivo {

@@ -723,6 +723,54 @@ Verificado contra prod en una transacción con `ROLLBACK`: dos bajas de 10 sobre
 usuario, y los cuatro rechazos (motivo de promo, stock negativo, sucursal ajena, no-admin)
 cortan. `MERMA-B` y `STK-A` en verde.
 
+### 233 · Cada uno escribe lo suyo
+
+Issue #549 (los residuales que la 219 dejó anotados) más cinco agujeros de escritura de la
+misma familia. Todos son el mismo error: **la policy autoriza por rol y por sucursal, nunca
+por pertenencia**, y como `es_preventista()` incluye a admin y encargado, el rol casi no
+acota. Ninguno de estos caminos lo ofrece la UI; todos los habilita el token por PostgREST.
+
+- **`pedido_items`**: el SELECT ya miraba el pedido padre, el INSERT y el UPDATE no. Un
+  preventista podía editar `cantidad` y `precio_unitario` de items de pedidos entregados de
+  otro vendedor. Se acota la RLS con el molde de la 190 §4 y se agrega
+  `pedido_items_proteger_columnas` (INVOKER, deny-list) para que tampoco pueda reescribir el
+  precio de los suyos ya cerrados.
+- **`pedido_historial`**: el INSERT era `sucursal_id` a secas — cualquiera sembraba auditoría
+  a nombre de otro. **La primera versión de esta migración dropeaba la policy y estaba mal**:
+  `registrar_creacion_pedido` y `registrar_cambio_pedido` son SECURITY **INVOKER**, así que
+  pasan por la RLS y sin policy todo INSERT/UPDATE de `pedidos` desde el navegador se caía.
+  Lo detectó la corrida adversarial con ROLLBACK, no el repo. Queda acotada a
+  `pg_trigger_depth() > 0 AND usuario_id = auth.uid()`: por PostgREST la profundidad es 0. El
+  SELECT se acota como `mt_pedido_items_select`.
+- **`cliente_preventistas`**: `cp_insert` (mig 002) dejaba auto-asignarse *cualquier* cliente,
+  y desde ahí se pasaba el guard de la 216 y se veía la ficha. La 214 ya lo había dicho con
+  todas las letras y sólo tapó el caso `reservado_admin`. Trigger DEFINER nuevo
+  (`cliente_preventistas_no_ajeno`): rechaza el cliente que ya atiende otro y el de otra
+  sucursal; deja intacto el caso que motivó la 002 (auto-asignarse el cliente recién creado).
+- **`productos`**: el rol `deposito` era dueño de la fila entera — `precio`, `costo_promedio`,
+  `costo_real` incluidos. Hoy no hay usuarios `deposito` en prod: se abre solo el día que se
+  cree el primero. Lista blanca `stock`, `stock_minimo`, `etiqueta_bulto`, `updated_at`.
+- **`pedidos_proteger_columnas`**: los dos residuales de la 219. `creado_por` ajeno ahora se
+  rechaza también en el alta, y `usuario_id NULL` se **asigna** (molde de `pagos_forzar_usuario`,
+  190b) en vez de fallar. **No** se pone `usuario_id NOT NULL`: las 2 filas históricas de marzo
+  no tienen autor recuperable, y con la asignación el agujero ya no existe hacia adelante.
+- **`clientes`**: `place_id` (mig 151) faltaba en la lista blanca de la 157. No era un agujero
+  sino el guard mordiendo a quien tenía que dejar pasar: un preventista que corregía una
+  dirección con el autocompletado recibía 42501 y no podía guardar.
+- **`recorridos` / `recorrido_pedidos`**: el SELECT era `es_admin() OR transportista_id`, pero
+  la UI le habilita `/recorridos` y "Armar ruta del día" al encargado y `aplicar_orden_ruta`
+  (DEFINER) lo acepta. O sea que **podía escribir y no leer**: armaba una segunda ruta sin ver
+  la primera y `aplicar_orden_ruta` se la borraba, sin un error en pantalla. Sólo se extiende
+  el SELECT; la escritura sigue gobernada por la RPC.
+
+Verificado contra prod en tres transacciones con `ROLLBACK`, con JWT de preventista, de
+encargado, de admin y de un `deposito` temporal: el UPDATE a items ajenos devuelve 0 filas, el
+de columnas propias de plata 42501, el INSERT en `pedido_historial` 42501 aun a nombre propio,
+la auto-asignación sobre cliente ajeno y sobre otra sucursal 42501, el `creado_por` ajeno
+42501, y siguen pasando el alta sin `usuario_id` (queda atribuida), el alta del admin a nombre
+de otro con su fila de historial, `crear_pedido_completo`, `registrar_merma_manual`, el
+guardado de `place_id` por un preventista y el movimiento de stock del depósito.
+
 ## Mantenimiento
 
 - Toda migración nueva: archivo `migrations/NNN_descripcion.sql` **y** aplicar por
