@@ -6,6 +6,9 @@ import {
   estadoVencimiento,
   formatearFechaVencimiento,
   textoVencimiento,
+  unidadesEtiquetadas,
+  lineaExcedeVencimientos,
+  validarVencimientosLineas,
 } from './vencimientos'
 
 const HOY = '2026-09-09'
@@ -214,5 +217,75 @@ describe('formatearFechaVencimiento', () => {
 
   it('devuelve una raya con una fecha ilegible', () => {
     expect(formatearFechaVencimiento('')).toBe('—')
+  })
+})
+
+describe('unidadesEtiquetadas', () => {
+  it('suma las cantidades de la línea', () => {
+    expect(unidadesEtiquetadas([{ fecha: '2026-10-01', cantidad: 12 }, { fecha: '2026-12-01', cantidad: 8 }])).toBe(20)
+  })
+
+  it('cuenta también la fila a medio llenar', () => {
+    // `aplanarVencimientos` la descarta —no viaja a la RPC— pero para avisar que
+    // se pasó ya cuenta: si no, el badge se pone rojo y el guardado pasa.
+    expect(unidadesEtiquetadas([{ fecha: '', cantidad: 5 }])).toBe(5)
+  })
+
+  it('sin vencimientos es 0', () => {
+    expect(unidadesEtiquetadas(undefined)).toBe(0)
+    expect(unidadesEtiquetadas([])).toBe(0)
+  })
+})
+
+describe('lineaExcedeVencimientos', () => {
+  it('etiquetar menos que la cantidad es legal', () => {
+    // Lo que sobra queda en la bolsa "sin vencimiento" del producto.
+    expect(lineaExcedeVencimientos(20, [{ fecha: '2026-10-01', cantidad: 12 }])).toBe(false)
+  })
+
+  it('etiquetar exactamente la cantidad es legal', () => {
+    expect(lineaExcedeVencimientos(20, [{ fecha: '2026-10-01', cantidad: 20 }])).toBe(false)
+  })
+
+  it('etiquetar más no', () => {
+    expect(lineaExcedeVencimientos(20, [
+      { fecha: '2026-10-01', cantidad: 12 },
+      { fecha: '2026-12-01', cantidad: 9 },
+    ])).toBe(true)
+  })
+})
+
+/**
+ * El guard que frena el submit del alta y el de la edición de compra.
+ *
+ * Antes no lo frenaba nadie: la línea se pintaba de rojo y el guardado seguía,
+ * porque `sincronizar_lotes_compra` sólo clampea contra el stock TOTAL del
+ * producto —no ve la línea— así que las unidades de más entraban a un lote que la
+ * factura no trajo.
+ */
+describe('validarVencimientosLineas', () => {
+  it('deja pasar lo que no excede', () => {
+    expect(validarVencimientosLineas([
+      { nombre: 'Lima Limon 600', cantidad: 20, vencimientos: [{ fecha: '2026-10-01', cantidad: 20 }] },
+      { nombre: 'Bidon 20L', cantidad: 5, vencimientos: [] },
+      { nombre: 'Soda', cantidad: 3 },
+    ])).toBeNull()
+  })
+
+  it('nombra la línea, lo etiquetado y lo que entró', () => {
+    const error = validarVencimientosLineas([
+      { nombre: 'Bidon 20L', cantidad: 5, vencimientos: [] },
+      { nombre: 'Lima Limon 600', cantidad: 20, vencimientos: [
+        { fecha: '2026-10-01', cantidad: 12 },
+        { fecha: '2026-12-01', cantidad: 9 },
+      ] },
+    ])
+    expect(error).toContain('Lima Limon 600')
+    expect(error).toContain('21')
+    expect(error).toContain('20')
+  })
+
+  it('sin líneas no hay nada que rechazar', () => {
+    expect(validarVencimientosLineas([])).toBeNull()
   })
 })
