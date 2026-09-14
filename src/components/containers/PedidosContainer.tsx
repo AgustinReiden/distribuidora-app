@@ -698,15 +698,28 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       const huella = `${fecha}|${formaPago}|${transportistaId}`
-      await entregaYPagoMasivos.mutateAsync({
+      const resultado = await entregaYPagoMasivos.mutateAsync({
         ...ids, transportistaId, formaPago, fecha,
         // Son dos RPCs distintas dentro de la misma mutation: un UUID cada una.
         clientRequestIdCobrar: requestIdMasivo(`cobrar|${huella}|${[...ids.idsCobrar].sort().join(',')}`),
         clientRequestIdEntregar: requestIdMasivo(`entregar|${huella}|${[...ids.idsEntregar].sort().join(',')}`),
       })
       setModalEntregaYPagoMasivosOpen(false)
-      const total = ids.idsEntregar.length + ids.idsCobrar.length
-      notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
+      if (resultado.error) {
+        // No hay transacción común entre las dos RPCs: si la segunda falla, la
+        // primera ya entró. El toast tiene que decir qué SÍ se aplicó, no sólo
+        // que "algo" salió mal — la plata o la entrega ya en la base no puede
+        // quedar sin mención.
+        const hechos: string[] = []
+        if (resultado.entregados > 0) hechos.push(`se entregaron ${resultado.entregados} pedido${resultado.entregados !== 1 ? 's' : ''}`)
+        if (resultado.cobrados > 0) hechos.push(`se cobraron ${resultado.cobrados} boleta${resultado.cobrados !== 1 ? 's' : ''}`)
+        const prefijo = hechos.length ? `${hechos.join(' y ')}; ` : ''
+        const pasoLabel = resultado.error.paso === 'entregar' ? 'la entrega' : 'el cobro'
+        notify.error(`${prefijo}falló ${pasoLabel}: ${resultado.error.mensaje}`)
+      } else {
+        const total = resultado.entregados + resultado.cobrados
+        notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
+      }
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [entregaYPagoMasivos, notify, requestIdMasivo])
@@ -965,6 +978,14 @@ export default function PedidosContainer(): React.ReactElement {
     queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+    // Editar items mueve stock y saldo, y los dos se leen cacheados: productos
+    // tiene staleTime de 10 min, asi que `violacionesStock` del proximo alta
+    // bloqueaba de mas o dejaba pasar de mas con el stock de hace un rato, y la
+    // cuenta corriente mostraba el saldo anterior al cambio de total.
+    // Prefijo pelado (no `productosKeys.all(sucursalId)`) porque las claves son
+    // por sucursal y aca no hay una a mano: el prefijo las alcanza a todas.
+    queryClient.invalidateQueries({ queryKey: ['productos'] })
+    queryClient.invalidateQueries({ queryKey: ['clientes'] })
   }, [pedidoEditando, user, queryClient])
 
   // Reasignar el preventista del pedido en edicion. Solo admin (la UI ya
@@ -1857,6 +1878,7 @@ export default function PedidosContainer(): React.ReactElement {
     descripcion?: string;
     fotoUrl?: string;
     devolverStock: boolean;
+    clientRequestId?: string;
   }): Promise<RegistrarSalvedadResult> => {
     const results = await handleSaveSalvedades([data])
     return results[0] ?? { success: false, error: 'Sin respuesta del servidor' }

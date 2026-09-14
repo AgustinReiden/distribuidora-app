@@ -154,6 +154,13 @@ export interface PedidoItemDB {
   porcentaje_iva?: number;
   /** Ingreso REAL por unidad: FC = neto · ZZ = precio final (mig 123) */
   ingreso_real_unitario?: number;
+  /**
+   * Por qué se cobró este precio (mig 148). Es el dato con el que la edición
+   * decide si el precio se re-resuelve o se respeta tal cual: sólo 'manual'
+   * (y el 'desconocido'/NULL de los ítems que nadie etiquetó) queda congelado.
+   * NULL en ítems anteriores a la mig 148.
+   */
+  origen_precio?: 'lista' | 'mayorista' | 'desc_cliente' | 'desc_categoria' | 'manual' | 'bonificacion' | 'desconocido' | null;
 }
 
 export interface PerfilDB {
