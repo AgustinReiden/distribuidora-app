@@ -356,16 +356,21 @@ export default function ProductosContainer(): React.ReactElement {
     }
   }, [crearGrupoPrecio, notify])
 
+  // El error se RELANZA, como en handleGuardarProducto. Tragarlo y devolver
+  // {success:false} hacía que el modal cerrara igual: el usuario veía el toast
+  // rojo un segundo, la baja no se había registrado, y la única forma de
+  // enterarse era mirar el stock. Y el mensaje es el del servidor —"el stock es
+  // 3 y la baja es de 5", "se requiere rol admin"—, no un genérico.
   const handleGuardarMerma = useCallback(async (data: MermaFormInputExtended) => {
     try {
       await registrarMerma.mutateAsync(data)
       notify.success('Merma registrada')
       setModalMermaOpen(false)
       setProductoMerma(null)
-      return { success: true }
-    } catch {
-      notify.error('Error al registrar merma')
-      return { success: false, error: 'Error al registrar merma' }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al registrar merma'
+      notify.error(msg)
+      throw err
     }
   }, [registrarMerma, notify])
 

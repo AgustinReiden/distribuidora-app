@@ -931,20 +931,21 @@ export interface MermaDBExtended {
   costo_unitario?: number | null;
 }
 
+/**
+ * Lo que viaja a `registrar_merma_manual` (mig 232). NO lleva stockAnterior /
+ * stockNuevo: el saldo lo calcula el servidor con el producto lockeado, que es
+ * el arreglo de la concurrencia (#518). Tampoco usuarioId: es `auth.uid()`.
+ */
 export interface MermaFormInputExtended {
   productoId: string;
   cantidad: number;
   motivo: string;
   observaciones?: string | null;
-  stockAnterior: number;
-  stockNuevo: number;
-  usuarioId?: string | null;
 }
 
 export interface MermaRegistroResult {
   success: boolean;
   merma: MermaDBExtended | null;
-  soloStock?: boolean;
 }
 
 export interface ResumenMermasPorMotivo {

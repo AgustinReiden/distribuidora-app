@@ -88,6 +88,20 @@ async function fetchMermasByMotivo(motivo: string): Promise<MermaDBExtended[]> {
 }
 
 // Mutation functions
+
+/**
+ * Una sola RPC, una sola transacción (mig 232).
+ *
+ * Antes eran tres requests desde el navegador: INSERT de la merma, UPDATE de
+ * `productos.stock` con el valor ABSOLUTO que el modal había calculado sobre su
+ * snapshot, y un DELETE compensatorio a mano si el segundo fallaba. Dos mermas
+ * de 10 sobre stock 100 escribían las dos `stock = 90`. La RPC manda la
+ * CANTIDAD y el servidor hace `stock = stock - cantidad` con el producto
+ * lockeado, así que la segunda espera y lee lo que dejó la primera.
+ *
+ * Tampoco viaja el usuario: `usuario_id` es `auth.uid()` server-side (MERMA-I),
+ * que es lo único que no se puede falsificar desde el cliente.
+ */
 async function registrarMerma(
   mermaData: MermaFormInputExtended,
   sucursalId: number | null
@@ -96,55 +110,18 @@ async function registrarMerma(
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
 
-  // Primero intentar insertar la merma (para fallar antes de modificar stock)
-  const { data, error } = await supabase
-    .from('mermas_stock')
-    .insert([{
-      producto_id: mermaData.productoId,
-      cantidad: mermaData.cantidad,
-      motivo: mermaData.motivo,
-      observaciones: mermaData.observaciones || null,
-      stock_anterior: mermaData.stockAnterior,
-      stock_nuevo: mermaData.stockNuevo,
-      // El modal de carga nunca manda usuarioId, así que TODA merma manual
-      // entraba con usuario_id NULL y el historial no podía decir quién la
-      // registró. Es el invariante MERMA-I (mig 105). Se resuelve acá y no en
-      // el formulario: quien registra es siempre el que tiene la sesión, no
-      // algo que el usuario elija.
-      usuario_id: mermaData.usuarioId || (await supabase.auth.getUser()).data.user?.id || null,
-      sucursal_id: sucursalId
-    }])
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('registrar_merma_manual', {
+    p_producto_id: mermaData.productoId,
+    p_cantidad: mermaData.cantidad,
+    p_motivo: mermaData.motivo,
+    p_observaciones: mermaData.observaciones || null,
+    p_sucursal_id: sucursalId
+  })
 
-  if (error) {
-    // Si la tabla no existe, solo actualizar stock (modo fallback)
-    if (error.message.includes('does not exist')) {
-      const { error: stockError } = await supabase
-        .from('productos')
-        .update({ stock: mermaData.stockNuevo })
-        .eq('id', mermaData.productoId)
-      if (stockError) throw stockError
-      return { success: true, merma: null, soloStock: true }
-    }
-    throw error
-  }
+  if (error) throw error
 
-  const mermaCreada = data as MermaDBExtended
-
-  // La merma se insertó correctamente, ahora actualizar stock
-  const { error: stockError } = await supabase
-    .from('productos')
-    .update({ stock: mermaData.stockNuevo })
-    .eq('id', mermaData.productoId)
-
-  if (stockError) {
-    // Revertir: eliminar la merma si el stock falla
-    await supabase.from('mermas_stock').delete().eq('id', mermaCreada.id)
-    throw stockError
-  }
-
-  return { success: true, merma: mermaCreada }
+  const resultado = data as { ok: boolean; merma: MermaDBExtended } | null
+  return { success: true, merma: resultado?.merma ?? null }
 }
 
 // Hooks

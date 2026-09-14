@@ -46,6 +46,12 @@ const MOTIVOS_MERMA: MotivoMermaOption[] = [
   { value: 'otro', label: 'Otro motivo', icon: '?' }
 ]
 
+/**
+ * Viaja la CANTIDAD, no el saldo resultante. El `stockNuevo` que este modal
+ * calculaba salía de `producto.stock`, o sea de un snapshot que podía tener
+ * minutos: dos bajas simultáneas escribían el mismo absoluto y una se comía a
+ * la otra (#518). El stock lo resuelve ahora `registrar_merma_manual` (mig 232).
+ */
 interface MermaSaveData {
   productoId: string;
   productoNombre: string;
@@ -54,8 +60,6 @@ interface MermaSaveData {
   motivo: MotivoMermaValue;
   motivoLabel: string;
   observaciones: string;
-  stockAnterior: number;
-  stockNuevo: number;
 }
 
 export interface ModalMermaStockProps {
@@ -109,9 +113,7 @@ export default function ModalMermaStock({
         cantidad: result.data.cantidad,
         motivo: result.data.motivo as MotivoMermaValue,
         motivoLabel: MOTIVOS_MERMA.find(m => m.value === result.data.motivo)?.label || result.data.motivo,
-        observaciones: result.data.observaciones || '',
-        stockAnterior: producto.stock,
-        stockNuevo: producto.stock - result.data.cantidad
+        observaciones: result.data.observaciones || ''
       })
       onClose()
     } catch (err) {
