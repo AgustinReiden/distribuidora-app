@@ -15,7 +15,8 @@ import type {
   CompraFormInputExtended,
   CondicionIva,
   PlantillaCargosProveedor,
-  RegistrarCompraResult
+  RegistrarCompraResult,
+  WarningCostoReposicion
 } from '../../types'
 
 // Query keys
@@ -48,6 +49,8 @@ interface RPCResult {
   /** Avisos blandos: la compra se guardó igual. Ver RegistrarCompraResult. */
   warning_descuadre?: string | null
   warning_ii_declarado?: string | null
+  /** mig 236: la factura no es la última del producto, así que no pisó el costo de reposición. */
+  warning_costo_reposicion?: WarningCostoReposicion[] | null
 }
 
 /**
@@ -347,6 +350,7 @@ async function registrarCompra(compraData: CompraFormInputExtended): Promise<Reg
     warningDescuadre: result.warning_descuadre ?? null,
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
+    warningCostoReposicion: result.warning_costo_reposicion ?? [],
   }
 }
 
@@ -495,11 +499,28 @@ export interface ActualizarCompraItemsInput {
   bonificaciones?: number | null
 }
 
-/** Producto cuyo CPP puede haber quedado distorsionado al editar una compra vieja (mig 128). */
+/**
+ * Producto cuyo costo promedio NO se recalculó al editar la compra.
+ *
+ * Son dos causas distintas y la pantalla las dice distinto (mig 236):
+ *
+ * · `no_es_la_ultima` — la compra editada no es la última de ese producto, así
+ *   que el CPP es forward-only y no se retro-ajusta (mig 128). Trae el costo
+ *   real viejo y el nuevo para poder juzgar si el cambio importa.
+ * · `sin_cpp_previo` — la compra es anterior a la mig 236 y sus líneas no
+ *   guardaron `costo_promedio_anterior`, así que no hay base de la cual
+ *   arrancar. El costo de reposición sí se actualizó; el promedio quedó como
+ *   estaba.
+ *
+ * `motivo` es opcional porque un bundle del PWA puede estar hablando con la
+ * base de antes de la 236, donde el aviso venía sin él; en ese caso se trata
+ * como `no_es_la_ultima`, que es lo único que existía.
+ */
 export interface WarningCostoPromedio {
   producto_id: number
-  costo_real_anterior: number
-  costo_real_nuevo: number
+  motivo?: 'no_es_la_ultima' | 'sin_cpp_previo'
+  costo_real_anterior?: number
+  costo_real_nuevo?: number
 }
 
 async function actualizarCompraItems(

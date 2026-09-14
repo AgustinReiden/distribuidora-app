@@ -63,6 +63,22 @@ function avisosDeLaBase(
   }
 }
 
+/**
+ * Los ids de producto de un aviso de la base, en nombres legibles.
+ *
+ * La RPC devuelve ids porque no tiene por qué saber cómo se llaman las cosas en
+ * la pantalla; el fallback a `#id` es para el producto que se acaba de crear y
+ * todavía no está en la caché.
+ */
+function nombresDeProductos(
+  ids: Array<number | string>,
+  productos: Array<{ id: number | string; nombre: string }>,
+): string {
+  return ids
+    .map(id => productos.find(p => String(p.id) === String(id))?.nombre ?? `#${id}`)
+    .join(', ')
+}
+
 function LoadingState() {
   return (
     <div className="flex items-center justify-center py-20">
@@ -174,6 +190,17 @@ export default function ComprasContainer(): React.ReactElement {
       // en la pantalla y el descuadre de una factura es justo lo que hay que
       // poder releer después.
       avisosDeLaBase(notify, res.warningDescuadre, res.warningIiDeclarado, res.warningLotes)
+      // mig 236: una factura traspapelada suma el stock y pesa en el promedio,
+      // pero NO vuelve el costo de reposición a su fecha. De ese costo salen
+      // los precios de venta, así que el silencio era lo peligroso.
+      const reposicion = res.warningCostoReposicion ?? []
+      if (reposicion.length > 0) {
+        notify.warning(
+          `El costo de reposición de ${nombresDeProductos(reposicion.map(w => w.producto_id), productos)} ` +
+          'no se actualizó: hay una compra más nueva de esos productos. El stock y el costo promedio sí se sumaron.',
+          { persist: true }
+        )
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al registrar compra'
       notify.error(msg)
@@ -199,7 +226,7 @@ export default function ComprasContainer(): React.ReactElement {
       if (ok > 0) notify.success(`Alícuota de imp. internos actualizada en ${ok} producto${ok === 1 ? '' : 's'}`)
       if (fallidos.length > 0) notify.error(`No se pudo actualizar la alícuota de: ${fallidos.join(', ')}`)
     }
-  }, [registrarCompra, actualizarProducto, notify, user])
+  }, [registrarCompra, actualizarProducto, notify, user, productos])
 
   // Crear un producto sin salir de la factura. El catch no es decorativo: el
   // modal deja el formulario como estaba y sigue, así que si el error no se
@@ -242,15 +269,24 @@ export default function ComprasContainer(): React.ReactElement {
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
       avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes)
-      // CPP forward-only (mig 128): editar una compra que NO es la última del
-      // producto no re-promedia el costo — avisar para corregirlo en la ficha.
-      if (res.warningCostoPromedio.length > 0) {
-        const nombres = res.warningCostoPromedio
-          .map(w => productos.find(p => String(p.id) === String(w.producto_id))?.nombre ?? `#${w.producto_id}`)
-          .join(', ')
+      // El CPP no se recalculó, por una de dos razones que se dicen distinto
+      // (mig 236). Van en dos avisos y no en uno porque la acción que le queda
+      // al usuario es la misma pero el motivo no, y "no es la última" mandado
+      // sobre una compra que SÍ es la última manda a buscar donde no hay nada.
+      const sinBase = res.warningCostoPromedio.filter(w => w.motivo === 'sin_cpp_previo')
+      const noEsLaUltima = res.warningCostoPromedio.filter(w => w.motivo !== 'sin_cpp_previo')
+      if (noEsLaUltima.length > 0) {
         notify.warning(
-          `El costo promedio de ${nombres} no se recalculó (la compra editada no es la última). ` +
+          `El costo promedio de ${nombresDeProductos(noEsLaUltima.map(w => w.producto_id), productos)} ` +
+          'no se recalculó (la compra editada no es la última). ' +
           'Si el cambio de costo es relevante, corregilo desde la ficha del producto.'
+        )
+      }
+      if (sinBase.length > 0) {
+        notify.warning(
+          `El costo promedio de ${nombresDeProductos(sinBase.map(w => w.producto_id), productos)} ` +
+          'no se recalculó: esta compra es anterior a que se guardara el promedio previo, ' +
+          'así que no hay de dónde arrancar. El costo de reposición sí se actualizó.'
         )
       }
       setModalEditarOpen(false)

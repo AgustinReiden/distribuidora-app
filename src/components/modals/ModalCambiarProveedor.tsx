@@ -5,7 +5,9 @@
  * reescribir la fila, dispara el RPC cambiar_proveedor_compra (mig 125) que
  * ANULA la compra vieja y crea una NUEVA idéntica (mismos items, importes,
  * fecha, factura, tipo, forma de pago) con el proveedor nuevo. El stock y los
- * costos NO se modifican.
+ * costos NO se modifican, y desde la mig 236 los lotes de vencimiento tampoco:
+ * se reapuntan a la compra nueva antes de cancelar la vieja, porque cancelarla
+ * dispara el trigger que los borra (issue #566).
  *
  * Análogo a ModalCambiarCliente (pedidos) pero mucho más simple: en compras los
  * costos vienen de la factura, no de un motor de precios, así que no hay
@@ -152,8 +154,9 @@ const ModalCambiarProveedor = memo(function ModalCambiarProveedor({
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>
-            Se anulará la compra #{compra.id} y se creará una nueva idéntica con el proveedor nuevo. El stock y los
-            costos no se modifican.
+            Se anulará la compra #{compra.id} y se creará una nueva idéntica con el proveedor nuevo. El stock, los
+            costos y los vencimientos cargados no se modifican: los lotes pasan a la compra nueva con lo que les quede
+            (mig 236).
           </span>
         </div>
 
