@@ -91,6 +91,16 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-permisos.mjs
 
+      # El de arriba mira funciones; éste mira TABLAS. `perfiles` estuvo legible
+      # con la anon key durante meses sin que ningún gate lo viera. Ver
+      # migrations/228.
+      - name: Lectura anónima de tablas (nada abierto a anon)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-tablas-anon.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos

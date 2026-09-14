@@ -137,6 +137,24 @@ Falla si alguna función de `public` volvió a quedar ejecutable por `anon`. Cor
 
 Para mirar el estado sin aplicar nada: `scripts/auditoria-permisos.sql` (sólo lee el catálogo).
 
+### Y lo mismo para las TABLAS
+
+```bash
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-tablas-anon.mjs
+```
+
+Todo lo de arriba vale igual para las tablas —el baseline le hace `GRANT ALL ... TO anon` a
+cada una, así que lo único que las tapa es la RLS— y durante meses no hubo gate que lo
+mirara: `perfiles` fue legible sin loguearse porque su policy `perfiles_select_all` nació sin
+cláusula `TO` (⇒ PUBLIC) con `USING (true)`. Salían los 17 empleados con nombre, email y rol
+con la anon key que viaja en el bundle. Lo cerró la **228**, que además dejó este gate.
+
+Se apoya en `auditoria_tablas_anon()`, que **no** deduce nada del catálogo: se pone el
+sombrero de `anon` y hace el `SELECT`. Un check estático marcaría en rojo para siempre a
+policies como `USING (auth.uid() IS NOT NULL)`, que aplican a PUBLIC y sin embargo no dejan
+pasar una fila sin JWT. Cuando salte, el arreglo también son las **dos mitades**: sacar la
+policy permisiva **y** `REVOKE SELECT ON <tabla> FROM anon`.
+
 ## Regenerar el baseline
 
 Si el schema de prod cambia mucho fuera de banda y conviene re-sincronizar el punto de partida:

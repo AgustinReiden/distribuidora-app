@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-09-10** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-09-13** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 226.** El ledger de prod llega hasta
-`225_los_lotes_no_pueden_sumar_mas_que_el_stock`.
+**La próxima migración es la 229.** El ledger de prod llega hasta
+`228_cada_uno_ve_lo_de_su_sucursal`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -153,7 +153,9 @@ una ayuda, el ledger es la verdad. Si aplicás una migración, actualizá tambi�
 Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el ledger — la
 222 desde otra rama, sin archivo en el repo en ese momento. Quien fue a escribir las de
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
-Última actualización: 225, el 2026-09-10.)
+Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
+`main`. Van cinco veces.
+Última actualización: 228, el 2026-09-13.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -562,6 +564,33 @@ reservar algo que no se puede reservar, y el costo de renumerar después no es `
 la prosa, que ningún reemplazo mecánico agarra.
 
 ---
+
+### 228 · Cuatro policies que dejaban leer de más
+
+Mapea 1:1 al ledger; va acá por lo que **no** se ve leyendo el SQL. Las tres trampas que
+aparecieron al escribirla, las tres medidas en prod antes de aplicar:
+
+- **Las subconsultas de una policy corren con la RLS de la tabla que tocan.** El
+  `EXISTS (SELECT 1 FROM usuario_sucursales ...)` dentro de una policy de `perfiles` ve sólo
+  lo que el caller ve de `usuario_sucursales`, y un preventista sólo ve SU fila: devolvía
+  1 perfil en vez de los 11 de la sucursal. Por eso el chequeo vive en dos helpers
+  SECURITY DEFINER (`perfil_de_sucursal_activa`, `cliente_de_sucursal_activa`) y no inline.
+- **Y si la tabla referenciada te referencia a vos, recursa.** `mt_clientes_select` ya
+  subconsulta `cliente_preventistas`, así que una `cp_select` que mire `clientes` cierra el
+  ciclo: `42P17: infinite recursion detected in policy for relation "clientes"`, o sea toda
+  lectura de clientes caída. Mismo helper definer, mismo motivo.
+- **Restringir `cp_select` por preventista AFLOJA `clientes` en vez de apretarlo.**
+  `mt_clientes_select` decide "no es de nadie, lo ven todos" (mig 028) con un
+  `NOT EXISTS` sobre `cliente_preventistas`; si un preventista deja de ver las filas de sus
+  colegas, los clientes ajenos se le vuelven huérfanos. Medido: pasaba de ver 209 clientes a
+  588. El recorte quedó sólo por sucursal.
+
+Trae además el gate que faltaba: `auditoria_tablas_anon()` +
+`scripts/check-tablas-anon.mjs`. El de la 189 mira **funciones**; éste mira **tablas**, que
+es por donde se filtró `perfiles` durante meses sin que nada se pusiera rojo. Es la única
+función de auditoría en SECURITY **INVOKER**: Postgres prohíbe `SET ROLE` dentro de un
+definer, y el permiso de `SET ROLE anon` se resuelve contra el session_user (`authenticator`,
+que sí es miembro de anon).
 
 ## Mantenimiento
 
