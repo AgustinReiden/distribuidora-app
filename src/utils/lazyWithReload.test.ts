@@ -61,9 +61,10 @@ describe('importConRecarga', () => {
   })
 
   /**
-   * El chofer en la calle. La app NO registra service worker, así que no hay app
-   * shell precacheado: recargar sin red deja la pantalla en blanco y lo deja sin
-   * app en medio del reparto. Antes se recargaba igual.
+   * El service worker precachea TODOS los archivos del build al instalar y no
+   * le saca la alfombra a la sesión en curso (`skipWaiting: false`), así que
+   * el chunk que la app vieja pide va a estar en el precache activo: recargar
+   * sin conexión funciona igual que con conexión.
    */
   describe('sin conexión', () => {
     const setOnline = (v: boolean) =>
@@ -71,22 +72,10 @@ describe('importConRecarga', () => {
 
     afterEach(() => setOnline(true))
 
-    it('NO recarga y avisa que no recargue', async () => {
+    it('recarga igual que con conexión', async () => {
       setOnline(false)
       const factory = () => Promise.reject(new Error('Failed to fetch dynamically imported module: /assets/x.js'))
 
-      await expect(importConRecarga(factory)).rejects.toThrow(/no hay conexión/i)
-      await expect(importConRecarga(factory)).rejects.toThrow(/no recargues/i)
-      expect(reloadMock).not.toHaveBeenCalled()
-    })
-
-    it('con la red de vuelta sí recarga', async () => {
-      setOnline(false)
-      const factory = () => Promise.reject(new Error('Failed to fetch dynamically imported module: /assets/x.js'))
-      await expect(importConRecarga(factory)).rejects.toThrow(/no hay conexión/i)
-      expect(reloadMock).not.toHaveBeenCalled()
-
-      setOnline(true)
       await expect(importConRecarga(factory)).rejects.toThrow(/versión nueva/i)
       expect(reloadMock).toHaveBeenCalledTimes(1)
     })

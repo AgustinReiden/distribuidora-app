@@ -326,6 +326,14 @@ BEGIN
   -- bolsa. `pedido_creado` esta en la lista porque actualizar_pedido_items lo
   -- usa para las dos direcciones -- bajar la cantidad de un pedido devuelve
   -- stock.
+  --
+  -- CORRECCION (mig 229): lo de arriba describia una intencion, no el codigo.
+  -- Cuando se escribio esto actualizar_pedido_items NO seteaba ningun
+  -- app.stock_origen, asi que sus dos restituciones subian con 'auto' y nunca
+  -- entraban por aca. Lo mismo cancelar_pedido_con_stock,
+  -- revertir_bloques_auto_ajuste y restaurar_stock_atomico. La 229 las etiqueta
+  -- de verdad y recien ahi la frase pasa a ser cierta. El cuerpo VIVO de esta
+  -- funcion es el de la 229, no el de este archivo.
   ELSIF v_origen IN ('pedido_creado', 'pedido_creado_bot', 'pedido_cancelado',
                      'pedido_eliminado', 'salvedad', 'sustitucion_regalo',
                      'auto_ajuste_promo', 'movimiento_denegado',

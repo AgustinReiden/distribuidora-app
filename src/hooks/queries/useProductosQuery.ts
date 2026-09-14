@@ -14,7 +14,6 @@ export const productosKeys = {
   list: (sucursalId: number | null, filters: Record<string, unknown>) => [...productosKeys.lists(sucursalId), filters] as const,
   details: (sucursalId: number | null) => [...productosKeys.all(sucursalId), 'detail'] as const,
   detail: (sucursalId: number | null, id: string) => [...productosKeys.details(sucursalId), id] as const,
-  stockBajo: (sucursalId: number | null, umbral: number) => [...productosKeys.all(sucursalId), 'stockBajo', umbral] as const,
   minimosVenta: (sucursalId: number | null) => [...productosKeys.all(sucursalId), 'minimosVenta'] as const,
 }
 
@@ -60,17 +59,6 @@ async function fetchMinimosVenta(): Promise<Map<string, number>> {
     if (row.cantidad_minima_venta > 0) map.set(String(row.id), row.cantidad_minima_venta)
   }
   return map
-}
-
-async function fetchProductosStockBajo(umbral: number): Promise<ProductoDB[]> {
-  const { data, error } = await supabase
-    .from('productos')
-    .select('*')
-    .lt('stock', umbral)
-    .order('stock', { ascending: true })
-
-  if (error) throw error
-  return (data as ProductoDB[]) || []
 }
 
 /**
@@ -267,18 +255,6 @@ export function useProductoQuery(id: string) {
 }
 
 /**
- * Hook para obtener productos con stock bajo
- */
-export function useProductosStockBajoQuery(umbral = 10) {
-  const { currentSucursalId } = useSucursal()
-  return useQuery({
-    queryKey: productosKeys.stockBajo(currentSucursalId, umbral),
-    queryFn: () => fetchProductosStockBajo(umbral),
-    staleTime: 5 * 60 * 1000, // 5 minutos
-  })
-}
-
-/**
  * Hook con los mínimos de venta por producto (mig 147).
  *
  * Devuelve el `MinimosProducto` que consumen `obtenerMOQ`/`validarMOQPedido`.
@@ -309,7 +285,6 @@ export function useCrearProductoMutation() {
         return [...old, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre))
       })
       // Invalidar queries relacionadas
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
       queryClient.invalidateQueries({ queryKey: productosKeys.minimosVenta(currentSucursalId) })
     },
   })
@@ -357,7 +332,6 @@ export function useActualizarProductoMutation() {
     onSettled: () => {
       // Revalidar para asegurar consistencia
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
       queryClient.invalidateQueries({ queryKey: productosKeys.minimosVenta(currentSucursalId) })
     },
   })
@@ -416,8 +390,6 @@ export function useDescontarStockMutation() {
           return p
         })
       })
-      // Invalidar stock bajo
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }
@@ -448,8 +420,6 @@ export function useRestaurarStockMutation() {
           return p
         })
       })
-      // Invalidar stock bajo
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }
@@ -495,7 +465,6 @@ export function useActualizarPreciosMasivoMutation() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }

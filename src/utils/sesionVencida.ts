@@ -48,8 +48,11 @@ export function pareceSesionVencida(mensaje?: string | null): boolean {
  * para que el reintento del usuario funcione. Si el mensaje no es de sesión lo
  * devuelve tal cual.
  *
- * NO reintenta el pedido solo: la creación online no lleva clave de
- * idempotencia, así que un reintento automático podría duplicarlo.
+ * NO reintenta el pedido sola: el alta online sí lleva clave de idempotencia
+ * (`altaIdRef` en PedidosContainer, igual que el replay offline) así que un
+ * reintento automático no lo duplicaría, pero dispararía la escritura sin que
+ * la usuaria haya vuelto a tocar Confirmar sobre lo que tiene en pantalla —
+ * eso queda en sus manos.
  */
 export async function explicarErrorDeSesion(mensaje: string): Promise<string> {
   if (!pareceSesionVencida(mensaje)) return mensaje;

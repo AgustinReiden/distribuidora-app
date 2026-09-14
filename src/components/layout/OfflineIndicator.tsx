@@ -1,11 +1,13 @@
 import React, { useState } from 'react'
 import { Wifi, WifiOff, Cloud, CloudOff, RefreshCw, AlertTriangle, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
-import type { Cliente } from '../../types'
 
 interface PedidoOffline {
   offlineId: string;
   clienteId: string;
+  /** Se acuña al encolar (ver PedidoOffline en useOfflineSync); funciona sin
+   *  señal, a diferencia de buscar el cliente por id en una lista aparte. */
+  clienteNombre?: string;
   items?: Array<{ producto_id: string; cantidad: number }>;
   total: number;
   creadoOffline: string;
@@ -24,7 +26,6 @@ export interface OfflineIndicatorProps {
   mermasPendientes?: MermaOffline[];
   sincronizando?: boolean;
   onSincronizar?: () => void;
-  clientes?: Cliente[];
 }
 
 export default function OfflineIndicator({
@@ -32,19 +33,13 @@ export default function OfflineIndicator({
   pedidosPendientes = [],
   mermasPendientes = [],
   sincronizando = false,
-  onSincronizar,
-  clientes = []
+  onSincronizar
 }: OfflineIndicatorProps): React.ReactElement | null {
   const [expandido, setExpandido] = useState<boolean>(false)
   const cantidadTotal = pedidosPendientes.length + mermasPendientes.length
 
   // No mostrar nada si esta online y no hay pendientes
   if (isOnline && cantidadTotal === 0) return null
-
-  const getClienteNombre = (clienteId: string): string => {
-    const cliente = clientes.find(c => c.id === clienteId)
-    return (cliente as Cliente & { nombre_fantasia?: string })?.nombre_fantasia || 'Cliente desconocido'
-  }
 
   return (
     <div className={`fixed bottom-4 right-4 z-50 max-w-sm ${expandido ? 'w-80' : ''}`}>
@@ -117,7 +112,7 @@ export default function OfflineIndicator({
                   >
                     <div>
                       <p className="font-medium text-gray-700 dark:text-gray-300">
-                        {getClienteNombre(pedido.clienteId)}
+                        {pedido.clienteNombre || 'Cliente desconocido'}
                       </p>
                       <p className="text-xs text-gray-500">
                         {pedido.items?.length || 0} productos - {new Date(pedido.creadoOffline).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}

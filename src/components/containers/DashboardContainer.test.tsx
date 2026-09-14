@@ -18,6 +18,7 @@ vi.mock('../../hooks/queries', () => ({
   useMetricasQuery: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
   useClientesQuery: () => ({ data: [] }),
   useAvanceMetasQuery: () => ({ data: undefined }),
+  useProductosQuery: () => ({ data: [] }),
   periodoMensual: () => '2026-09',
 }))
 

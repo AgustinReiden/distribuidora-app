@@ -22,7 +22,12 @@ export interface VistaPromocionesProps {
   onToggleActivo: (promo: PromocionConDetalles) => void
   /** Map producto_id -> nombre (para render de chips de productos asignados) */
   productoNombres: Map<string, string>
-  /** Map promo_id -> total unidades regaladas historicas (suma de pedido_items.cantidad con es_bonificacion=true) */
+  /**
+   * Map promo_id -> total histórico de unidades regaladas, en unidades DE
+   * VENTA (fardos): en una promo Fracción, `pedido_items.cantidad` del regalo
+   * está en subunidades sueltas (botellas), y el hook ya lo convierte antes
+   * de llegar acá — ver `usePromoUnidadesEntregadasQuery`.
+   */
   unidadesEntregadas?: Map<string, number>
   /** Map promo_id -> acumuladores paralelos (mig 059). Si una promo tiene
    *  entries, renderizamos una barra por entry; si no, fallback a la barra
@@ -207,7 +212,7 @@ export default function VistaPromociones({
                       {mostrarHistorico && unidadesEntregadas && (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-full font-medium">
                           <History className="w-3 h-3" />
-                          {unidadesEntregadas.get(String(promo.id)) ?? 0} unidades regaladas
+                          {Math.round(unidadesEntregadas.get(String(promo.id)) ?? 0)} unidades regaladas
                         </span>
                       )}
                     </div>

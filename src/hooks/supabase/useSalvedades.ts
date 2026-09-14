@@ -4,14 +4,13 @@
  */
 import { useState, useCallback } from 'react'
 import { supabase, notifyError } from './base'
+import { traerTodo } from '../../utils/paginacion'
+import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
 import type {
   SalvedadItemDBExtended,
-  RegistrarSalvedadInput,
-  RegistrarSalvedadResult,
   ResolverSalvedadInput,
   EstadisticasSalvedades,
   EstadoResolucionSalvedad,
-  MotivoSalvedad,
   UseSalvedadesReturn
 } from '../../types'
 
@@ -52,16 +51,18 @@ export function useSalvedades(): UseSalvedadesReturn {
     resuelto_por_nombre: s.resuelto?.nombre
   })
 
-  // Fetch todas las salvedades (para análisis y métricas)
+  // Fetch todas las salvedades (para análisis y métricas). Paginado con
+  // `traerTodo`: la tabla crece con cada entrega con salvedad y no hay
+  // garantía de que se mantenga bajo las 1.000 filas que corta PostgREST.
   const fetchTodasSalvedades = useCallback(async (): Promise<SalvedadItemDBExtended[]> => {
     setLoading(true)
     try {
-      const { data, error } = await buildSalvedadesQuery()
-        .order('created_at', { ascending: false })
+      const data = await traerTodo(
+        () => buildSalvedadesQuery().order('created_at', { ascending: false }).order('id', { ascending: false }),
+        { etiqueta: 'las salvedades' },
+      )
 
-      if (error) throw error
-
-      const salvedadesData = (data || []).map(transformarSalvedad)
+      const salvedadesData = data.map(transformarSalvedad)
       setSalvedades(salvedadesData)
       return salvedadesData
     } catch (error) {
@@ -72,126 +73,6 @@ export function useSalvedades(): UseSalvedadesReturn {
       setLoading(false)
     }
   }, [])
-
-  // Fetch salvedades pendientes - usando tabla directa
-  const fetchSalvedadesPendientes = useCallback(async (): Promise<SalvedadItemDBExtended[]> => {
-    setLoading(true)
-    try {
-      const { data, error } = await buildSalvedadesQuery()
-        .eq('estado_resolucion', 'pendiente')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-
-      const salvedadesData = (data || []).map(transformarSalvedad)
-      setSalvedades(salvedadesData)
-      return salvedadesData
-    } catch (error) {
-      notifyError('Error al cargar salvedades: ' + (error as Error).message)
-      setSalvedades([])
-      return []
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // Fetch salvedades por pedido
-  const fetchSalvedadesPorPedido = useCallback(async (pedidoId: string): Promise<SalvedadItemDBExtended[]> => {
-    try {
-      const { data, error } = await buildSalvedadesQuery()
-        .eq('pedido_id', parseInt(pedidoId, 10))
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      return (data || []).map(transformarSalvedad)
-    } catch (error) {
-      notifyError('Error al cargar salvedades del pedido: ' + (error as Error).message)
-      return []
-    }
-  }, [])
-
-  // Fetch salvedades por fecha
-  const fetchSalvedadesPorFecha = useCallback(async (desde: string, hasta?: string): Promise<SalvedadItemDBExtended[]> => {
-    setLoading(true)
-    try {
-      let query = buildSalvedadesQuery()
-        .gte('created_at', desde + 'T00:00:00')
-        .order('created_at', { ascending: false })
-
-      if (hasta) {
-        query = query.lte('created_at', hasta + 'T23:59:59')
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-
-      const salvedadesData = (data || []).map(transformarSalvedad)
-      setSalvedades(salvedadesData)
-      return salvedadesData
-    } catch (error) {
-      notifyError('Error al cargar salvedades: ' + (error as Error).message)
-      setSalvedades([])
-      return []
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // Fetch salvedad por ID
-  const fetchSalvedadById = useCallback(async (id: string): Promise<SalvedadItemDBExtended | null> => {
-    try {
-      const { data, error } = await buildSalvedadesQuery()
-        .eq('id', parseInt(id, 10))
-        .single()
-
-      if (error) throw error
-      return transformarSalvedad(data)
-    } catch (error) {
-      notifyError('Error al cargar salvedad: ' + (error as Error).message)
-      return null
-    }
-  }, [])
-
-  // Registrar salvedad
-  const registrarSalvedad = async (input: RegistrarSalvedadInput): Promise<RegistrarSalvedadResult> => {
-    try {
-      const { data, error } = await supabase.rpc('registrar_salvedad', {
-        p_pedido_id: parseInt(input.pedidoId, 10),
-        p_pedido_item_id: parseInt(input.pedidoItemId, 10),
-        p_cantidad_afectada: input.cantidadAfectada,
-        p_motivo: input.motivo,
-        p_descripcion: input.descripcion || null,
-        p_foto_url: input.fotoUrl || null,
-        p_devolver_stock: input.devolverStock !== false
-      })
-
-      if (error) {
-        notifyError('Error al registrar salvedad: ' + error.message)
-        return { success: false, error: error.message }
-      }
-
-       
-      const result = data as any
-
-      if (!result?.success) {
-        notifyError(result?.error || 'Error al registrar salvedad')
-        return { success: false, error: result?.error, codigo: result?.codigo }
-      }
-
-      return {
-        success: true,
-        salvedad_id: result.salvedad_id ? String(result.salvedad_id) : undefined,
-        monto_afectado: result.monto_afectado,
-        cantidad_entregada: result.cantidad_entregada,
-        stock_devuelto: result.stock_devuelto,
-        nuevo_total_pedido: result.nuevo_total_pedido
-      }
-    } catch (error) {
-      const message = (error as Error).message
-      notifyError('Error al registrar salvedad: ' + message)
-      return { success: false, error: message }
-    }
-  }
 
   // Resolver salvedad (admin)
   const resolverSalvedad = async (input: ResolverSalvedadInput): Promise<{ success: boolean; nuevoEstado: EstadoResolucionSalvedad }> => {
@@ -224,43 +105,11 @@ export function useSalvedades(): UseSalvedadesReturn {
     }
   }
 
-  // Anular salvedad (admin)
-  const anularSalvedad = async (salvedadId: string, notas?: string): Promise<{ success: boolean }> => {
-    const { data, error } = await supabase.rpc('anular_salvedad', {
-      p_salvedad_id: parseInt(salvedadId, 10),
-      p_notas: notas || null
-    })
-
-    if (error) {
-      notifyError('Error al anular salvedad: ' + error.message)
-      throw error
-    }
-
-     
-    const result = data as any
-
-    if (!result?.success) {
-      notifyError(result?.error || 'Error al anular salvedad')
-      throw new Error(result?.error)
-    }
-
-    // Refrescar lista (todas, no solo pendientes)
-    await fetchTodasSalvedades()
-
-    return { success: true }
-  }
-
-  // Obtener estadísticas - cálculo directo desde datos locales
-  // (No usamos RPC porque puede no existir en Supabase)
+  // Obtener estadísticas del universo completo cargado. Para KPIs sobre un
+  // subconjunto filtrado, usar calcularEstadisticasSalvedades directamente
+  // (ver VistaSalvedades).
   const getEstadisticas = useCallback(async (): Promise<EstadisticasSalvedades> => {
-    return {
-      total: salvedades.length,
-      pendientes: salvedades.filter(s => s.estado_resolucion === 'pendiente').length,
-      resueltas: salvedades.filter(s => s.estado_resolucion !== 'pendiente' && s.estado_resolucion !== 'anulada').length,
-      anuladas: salvedades.filter(s => s.estado_resolucion === 'anulada').length,
-      monto_total_afectado: salvedades.reduce((sum, s) => sum + (s.monto_afectado || 0), 0),
-      monto_pendiente: salvedades.filter(s => s.estado_resolucion === 'pendiente').reduce((sum, s) => sum + (s.monto_afectado || 0), 0)
-    }
+    return calcularEstadisticasSalvedades(salvedades)
   }, [salvedades])
 
   // Refetch (carga todas las salvedades para análisis completo)
@@ -271,14 +120,8 @@ export function useSalvedades(): UseSalvedadesReturn {
   return {
     salvedades,
     loading,
-    registrarSalvedad,
     resolverSalvedad,
-    anularSalvedad,
-    fetchSalvedadesPorPedido,
-    fetchSalvedadesPendientes,
     fetchTodasSalvedades,
-    fetchSalvedadesPorFecha,
-    fetchSalvedadById,
     getEstadisticas,
     refetch
   }
