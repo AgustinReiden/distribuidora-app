@@ -102,6 +102,36 @@ describe('alta de pedido — contrato con la base', () => {
     )
   })
 
+  // Desde la mig 235 la base rechaza el alta si `p_total` no coincide con
+  // SUM(cantidad × precio_unitario) de `p_items`: antes insertaba el total que
+  // le mandaran, así que items por $80.000 con `p_total = 1` descontaban el
+  // stock de verdad y dejaban al cliente debiendo $1.
+  //
+  // El corolario para el front es que los dos números tienen que salir del
+  // mismo lugar. Si algún día un descuento baja el total sin bajar el precio de
+  // los renglones, no deja de entrar UN pedido: no entra NINGUNO.
+  it('manda p_total igual a la suma de p_items — lo que la base verifica', async () => {
+    const { result } = setup()
+    await result.current.mutateAsync({
+      ...input,
+      items: [
+        { productoId: '7', cantidad: 3, precioUnitario: 1200 },
+        { productoId: '9', cantidad: 2, precioUnitario: 500 },
+        // El regalo cuenta con precio 0, igual que su fila en pedido_items.
+        { productoId: '11', cantidad: 1, precioUnitario: 0, esBonificacion: true },
+      ],
+      total: 4600,
+      offlineId: 'uuid-alta-1',
+    })
+
+    const args = rpc.mock.calls[0][1] as {
+      p_total: number
+      p_items: { cantidad: number; precio_unitario: number }[]
+    }
+    const suma = args.p_items.reduce((acc, i) => acc + i.cantidad * i.precio_unitario, 0)
+    expect(args.p_total).toBeCloseTo(suma, 2)
+  })
+
   it('devuelve el id del pedido que la base reconoció como ya creado', async () => {
     // Lo que responde el short-circuit: el pedido de la PRIMERA vez.
     rpc.mockResolvedValueOnce({
