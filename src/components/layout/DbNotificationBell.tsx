@@ -10,6 +10,7 @@ import { memo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, Check, Loader2, CheckCheck } from 'lucide-react'
 import { formatDateTime } from '../../utils/formatters'
+import QueryErrorState from './QueryErrorState'
 import {
   useNotificacionesQuery,
   useMarcarNotificacionLeidaMutation,
@@ -28,7 +29,7 @@ function rutaDeNotificacion(n: NotificacionDB): string | null {
 const DbNotificationBell = memo(function DbNotificationBell() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
-  const { data: notificaciones = [], isLoading } = useNotificacionesQuery()
+  const { data: notificaciones = [], isLoading, isError, refetch } = useNotificacionesQuery()
   const marcarLeida = useMarcarNotificacionLeidaMutation()
   const marcarTodas = useMarcarTodasNotificacionesLeidasMutation()
 
@@ -77,6 +78,8 @@ const DbNotificationBell = memo(function DbNotificationBell() {
                 <div className="flex items-center justify-center py-6 text-gray-500">
                   <Loader2 className="w-5 h-5 animate-spin" />
                 </div>
+              ) : isError ? (
+                <QueryErrorState onRetry={() => refetch()} />
               ) : notificaciones.length === 0 ? (
                 <div className="text-center py-8 text-sm text-gray-500">Sin notificaciones</div>
               ) : (

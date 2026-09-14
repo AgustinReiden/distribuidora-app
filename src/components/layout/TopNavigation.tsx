@@ -95,7 +95,7 @@ const menuGroups: MenuGroup[] = [
       { id: 'rendiciones', icon: Banknote, label: 'Rendiciones', roles: ['admin', 'encargado'] },
       { id: 'salvedades', icon: AlertTriangle, label: 'Salvedades', roles: ['admin', 'encargado'] },
       { id: 'geolocalizacion', icon: MapPin, label: 'Geolocalización', roles: ['admin'] },
-      { id: 'horarios-clientes', icon: Clock, label: 'Horarios a revisar', roles: ['admin'] },
+      { id: 'horarios-clientes', icon: Clock, label: 'Horarios a revisar', roles: ['admin', 'encargado'] },
       { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
       { id: 'bot-telegram', icon: Send, label: 'Bot Telegram', roles: ['admin'] },
       { id: 'configuracion', icon: Settings, label: 'Configuración', roles: ['admin', 'encargado'] },
