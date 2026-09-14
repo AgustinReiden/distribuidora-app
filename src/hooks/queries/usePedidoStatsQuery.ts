@@ -9,7 +9,9 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { FiltrosPedidosState } from '../../types'
-import { pedidosKeys } from './usePedidosQuery'
+import { pedidosKeys, fetchPedidoIdsConSalvedad } from './usePedidosQuery'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import { PAGINA_SUPABASE } from '../../utils/paginacion'
 
 export interface PedidoStatsBucket {
   count: number
@@ -23,6 +25,11 @@ export interface PedidoStatsSummary {
   entregados: PedidoStatsBucket
   impagos: PedidoStatsBucket
   total: PedidoStatsBucket
+  /**
+   * true si se llegó al tope de páginas antes de agotar los pedidos que
+   * cumplen el filtro: los totales son un piso, no el número exacto (#524).
+   */
+  aproximado: boolean
 }
 
 const EMPTY_SUMMARY: PedidoStatsSummary = {
@@ -32,12 +39,48 @@ const EMPTY_SUMMARY: PedidoStatsSummary = {
   entregados: { count: 0, monto: 0 },
   impagos: { count: 0, monto: 0 },
   total: { count: 0, monto: 0 },
+  aproximado: false,
 }
 
 interface PedidoLiviano {
   estado: string | null
   estado_pago: string | null
   total: number | null
+}
+
+/**
+ * Freno de mano de las cards: son un resumen visible, no un backup que tenga
+ * que demostrar exactitud (para eso está `traerTodoVerificado`). Si se supera
+ * este tope, mejor mostrar un total parcial marcado como aproximado que
+ * colgar la pantalla trayendo la tabla entera.
+ */
+const STATS_TOPE_FILAS = 20_000
+
+interface QueryPaginablePedidos {
+  range(desde: number, hasta: number): PromiseLike<{ data: PedidoLiviano[] | null; error: { message: string } | null }>
+}
+
+/**
+ * Pagina hasta agotar los pedidos que cumplen el filtro, con orden estable
+ * por `id` (responsabilidad de quien arma `hacerQuery`). Antes esto pedía
+ * `range(0, 9999)` en una sola llamada creyendo que el tope era 10.000;
+ * PostgREST corta en 1.000 sin avisar, así que con la ventana por defecto
+ * (~1.064 pedidos) las seis cards sumaban un subconjunto silencioso (#524).
+ */
+async function paginarStats(
+  hacerQuery: () => QueryPaginablePedidos,
+): Promise<{ filas: PedidoLiviano[]; aproximado: boolean }> {
+  const filas: PedidoLiviano[] = []
+  for (let desde = 0; desde < STATS_TOPE_FILAS; desde += PAGINA_SUPABASE) {
+    const { data, error } = await hacerQuery().range(desde, desde + PAGINA_SUPABASE - 1)
+    if (error) throw new Error(`No se pudieron calcular los totales de pedidos: ${error.message}`)
+
+    const lote = data ?? []
+    filas.push(...lote)
+
+    if (lote.length < PAGINA_SUPABASE) return { filas, aproximado: false }
+  }
+  return { filas, aproximado: true }
 }
 
 async function fetchPedidoStats(
@@ -49,50 +92,22 @@ async function fetchPedidoStats(
     ? 'estado, estado_pago, total, cliente:clientes!inner(id)'
     : 'estado, estado_pago, total'
 
-  let query = supabase.from('pedidos').select(selectStr)
-
-  if (filters?.estado && filters.estado !== 'todos') {
-    query = query.eq('estado', filters.estado)
-  }
-  if (filters?.estadoPago && filters.estadoPago !== 'todos') {
-    query = query.eq('estado_pago', filters.estadoPago)
-  }
-  if (filters?.transportistaId && filters.transportistaId !== 'todos') {
-    query = query.eq('transportista_id', filters.transportistaId)
-  }
-  if (filters?.usuarioId && filters.usuarioId !== 'todos') {
-    query = query.eq('usuario_id', filters.usuarioId)
-  }
-  if (filters?.fechaDesde) {
-    query = query.gte('fecha', filters.fechaDesde)
-  }
-  if (filters?.fechaHasta) {
-    query = query.lte('fecha', filters.fechaHasta)
-  }
-  if (!filters?.verCancelados && filters?.estado !== 'cancelado') {
-    // Alineado con bot_ventas_periodo (mig029): excluye 'cancelado' y 'anulado',
-    // incluye estado IS NULL. `.neq` solo excluía 'cancelado' y descartaba NULL.
-    query = query.or('estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)')
-  }
-  if (filters?.fechaEntregaProgramada) {
-    query = query.eq('fecha_entrega_programada', filters.fechaEntregaProgramada)
-  }
-  if (hasSearch) {
-    const trimmed = search!.trim()
-    query = query.or(
-      `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
-      { referencedTable: 'clientes' },
-    )
+  // conSalvedad necesita un round-trip previo a salvedades_items: no es un
+  // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
+  let idsConSalvedad: number[] | null = null
+  if (filters?.conSalvedad && filters.conSalvedad !== 'todos') {
+    idsConSalvedad = await fetchPedidoIdsConSalvedad()
   }
 
-  // range amplio para cubrir filtros típicos sin paginación; si se supera,
-  // aceptamos el truncado — las cards son una aproximación útil igual.
-  query = query.range(0, 9999)
+  const armarQuery = () => {
+    let query = supabase.from('pedidos').select(selectStr).order('id', { ascending: true })
+    query = construirFiltrosPedidos(query, filters, search)
+    query = aplicarFiltroConSalvedad(query, filters?.conSalvedad, idsConSalvedad)
+    return query as unknown as QueryPaginablePedidos
+  }
 
-  const { data, error } = await query
-  if (error) throw error
+  const { filas, aproximado } = await paginarStats(armarQuery)
 
-  const filas = (data || []) as unknown as PedidoLiviano[]
   const summary: PedidoStatsSummary = {
     pendientes: { count: 0, monto: 0 },
     enPreparacion: { count: 0, monto: 0 },
@@ -100,6 +115,7 @@ async function fetchPedidoStats(
     entregados: { count: 0, monto: 0 },
     impagos: { count: 0, monto: 0 },
     total: { count: 0, monto: 0 },
+    aproximado,
   }
 
   for (const p of filas) {

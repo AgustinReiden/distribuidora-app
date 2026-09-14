@@ -77,7 +77,7 @@ export interface VistaDashboardProps {
   filtroPeriodo: string;
   onCambiarPeriodo: (periodo: FiltroPeriodo | string, fechaDesde?: string | null, fechaHasta?: string | null) => void;
   onRefetch: () => void;
-  onDescargarBackup: (tipo: string) => void;
+  onDescargarBackup: (tipo: string) => Promise<void>;
   exportando: boolean;
   productosStockBajo?: ProductoDB[];
   totalClientes?: number;

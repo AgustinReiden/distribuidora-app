@@ -49,8 +49,10 @@ import {
   useCrearPedidoCambioEnRutaMutation,
   useAplicarCambioParadaMutation,
   useZonasEstandarizadasQuery,
+  fetchPedidoIdsConSalvedad,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
@@ -735,7 +737,15 @@ export default function PedidosContainer(): React.ReactElement {
       ? '*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
       : '*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
 
-    // Los filtros se arman en UN solo lugar: el conteo y las páginas tienen que
+    // conSalvedad necesita un round-trip previo a salvedades_items: no es un
+    // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
+    let idsConSalvedad: number[] | null = null
+    if (filtros.conSalvedad && filtros.conSalvedad !== 'todos') {
+      idsConSalvedad = await fetchPedidoIdsConSalvedad()
+    }
+
+    // Los filtros se arman en `construirFiltrosPedidos`, EL MISMO armado que usan
+    // la lista paginada y las cards de stats: el conteo y las páginas tienen que
     // mirar exactamente el mismo universo, o la verificación no prueba nada.
     // El desempate por `id` hace falta porque `created_at` no es único y
     // paginar sin orden estable repite filas y saltea otras.
@@ -746,19 +756,8 @@ export default function PedidosContainer(): React.ReactElement {
         .order('created_at', { ascending: false })
         .order('id')
 
-      if (filtros.estado && filtros.estado !== 'todos') query = query.eq('estado', filtros.estado)
-      if (filtros.estadoPago && filtros.estadoPago !== 'todos') query = query.eq('estado_pago', filtros.estadoPago)
-      if (filtros.transportistaId && filtros.transportistaId !== 'todos') query = query.eq('transportista_id', filtros.transportistaId)
-      if (filtros.fechaDesde) query = query.gte('fecha', filtros.fechaDesde)
-      if (filtros.fechaHasta) query = query.lte('fecha', filtros.fechaHasta)
-      if (!filtros.verCancelados && filtros.estado !== 'cancelado') query = query.neq('estado', 'cancelado')
-      if (hasSearch) {
-        const trimmed = debouncedBusqueda!.trim()
-        query = query.or(
-          `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
-          { referencedTable: 'clientes' }
-        )
-      }
+      query = construirFiltrosPedidos(query, filtros, debouncedBusqueda)
+      query = aplicarFiltroConSalvedad(query, filtros.conSalvedad, idsConSalvedad)
       return query
     }
 

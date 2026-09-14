@@ -8,6 +8,7 @@ import React, { Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
+import { useNotification } from '../../contexts/NotificationContext'
 import { useBackup } from '../../hooks/supabase'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 
@@ -23,6 +24,7 @@ function LoadingState() {
 
 export default function DashboardContainer(): React.ReactElement {
   const { user, isAdmin, isPreventista, isEncargado, authReady } = useAuthData()
+  const notify = useNotification()
 
   // Determinar si debe filtrar por usuario (el preventista solo ve sus
   // propios datos)
@@ -55,6 +57,18 @@ export default function DashboardContainer(): React.ReactElement {
   // Backup
   const { exportando, descargarJSON } = useBackup()
 
+  // descargarJSON tira cuando el backup no cierra (traerTodoVerificado, #523):
+  // sin este catch, VistaDashboard tipaba onDescargarBackup como `() => void`
+  // y DashboardToolbar la llamaba sin await, así que el rechazo quedaba sin
+  // manejar y el botón "no hacía nada" ante los ojos de quien lo apretó (#524).
+  const handleDescargarBackup = async (tipo: string): Promise<void> => {
+    try {
+      await descargarJSON(tipo)
+    } catch (e) {
+      notify.error('No se pudo generar el backup: ' + (e as Error).message)
+    }
+  }
+
   const handleCambiarPeriodo = (nuevoPeriodo: string, nuevaFechaDesde?: string | null, nuevaFechaHasta?: string | null) => {
     setFiltroPeriodo(nuevoPeriodo)
     if (nuevoPeriodo === 'personalizado') {
@@ -84,7 +98,7 @@ export default function DashboardContainer(): React.ReactElement {
         filtroPeriodo={filtroPeriodo}
         onCambiarPeriodo={handleCambiarPeriodo}
         onRefetch={refetchMetricas}
-        onDescargarBackup={descargarJSON}
+        onDescargarBackup={handleDescargarBackup}
         exportando={exportando}
         isAdmin={isAdmin}
         isPreventista={isPreventista}
