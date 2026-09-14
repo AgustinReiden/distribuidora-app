@@ -317,8 +317,18 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
         throw uploadError
       }
 
-      const { data: urlData } = supabase.storage.from('facturas').getPublicUrl(fileName)
-      const imageUrl = urlData.publicUrl
+      // El bucket es privado (mig 228): una URL firmada de corta duración en
+      // vez de getPublicUrl, para que n8n pueda leer la imagen sin que quede
+      // accesible para siempre a cualquiera que la consiga.
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        .from('facturas')
+        .createSignedUrl(fileName, 300)
+
+      if (signedUrlError || !signedUrlData?.signedUrl) {
+        throw signedUrlError ?? new Error('No se pudo generar la URL de la factura')
+      }
+
+      const imageUrl = signedUrlData.signedUrl
 
       // 2. Enviar a n8n webhook
       const response = await fetch(N8N_FACTURA_WEBHOOK_URL, {

@@ -12,6 +12,7 @@ import {
   getCachedData,
   invalidateCache,
   clearAllData,
+  limpiarCachesDeLectura,
   getDbStats,
   retryFailedOperation,
   getFailedOperations
@@ -327,6 +328,33 @@ describe('offlineDb', () => {
       expect(stats.cacheEntries).toBe(0)
       expect(stats.savedRoutes).toBe(0)
       expect(stats.syncEvents).toBe(0)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // limpiarCachesDeLectura
+  // ---------------------------------------------------------------------------
+
+  describe('limpiarCachesDeLectura', () => {
+    it('vacía offlineCache y savedRoutes pero deja pendingOperations intacta', async () => {
+      const opId = await queueOperation('CREATE_PEDIDO', { n: 1 }, 'user-1')
+      await cacheData('productos', [{ id: 1 }])
+      await db.savedRoutes.add({
+        nombre: 'R',
+        transportistaId: 't1',
+        clienteIds: ['c1'],
+        ordenOptimizado: [0],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+
+      await limpiarCachesDeLectura()
+
+      const stats = await getDbStats()
+      expect(stats.cacheEntries).toBe(0)
+      expect(stats.savedRoutes).toBe(0)
+      expect(stats.pendingOperations).toBe(1)
+      expect(await db.pendingOperations.get(opId!)).toBeDefined()
     })
   })
 

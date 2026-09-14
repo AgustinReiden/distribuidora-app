@@ -1,18 +1,16 @@
 /**
  * Hook reactivo para resolución de promociones + precios mayoristas
  *
- * Orquesta:
- * 1. Promos activas (bonificación)
- * 2. Precios mayoristas (excluyendo productos con promo)
- * 3. Genera items finales con bonificaciones incluidas
- * 4. Calcula totales correctos
+ * La secuencia promo → mayorista → descuento del cliente NO vive acá: vive en
+ * `utils/orquestacionPrecios.ts`, que está sincronizado byte a byte con la copia
+ * del bot de Telegram. Este hook sólo conecta las queries (pricingMap, promoMap,
+ * mínimos de venta) con esa función pura y expone los nudges, que son de la app.
  */
 import { useMemo } from 'react'
 import { usePricingMapQuery } from './queries/useGruposPrecioQuery'
 import { usePromoMapQuery } from './queries/usePromocionesQuery'
 import { useMinimosVentaQuery } from './queries/useProductosQuery'
 import {
-  resolverPreciosMayorista,
   calcularFaltanteParaTier,
   construirMOQMap,
   validarMOQPedido,
@@ -23,18 +21,29 @@ import {
   type ViolacionMOQ,
 } from '../utils/precioMayorista'
 import {
-  resolverPromociones,
   calcularFaltanteParaBonificacion,
   type PromoResolucion,
-  type BonificacionResult,
 } from '../utils/promociones'
+import {
+  orquestarPrecios,
+  type ItemResuelto,
+  type RegaloOverride,
+} from '../utils/orquestacionPrecios'
+import type { ClienteConDescuentos, ProductoConCategoria } from '../utils/descuentoCliente'
 
-export interface ItemPedidoConPromo extends ItemPedido {
-  esBonificacion?: boolean
-  promoNombre?: string
-  promoId?: string
-  descripcionRegalo?: string
-  unidadesPorBloque?: number
+/** Item del pedido ya resuelto (compra o regalo). Alias del tipo de la orquestación. */
+export type ItemPedidoConPromo = ItemResuelto
+
+export type { RegaloOverride }
+
+/**
+ * Cliente + catálogo para la tercera capa (descuento general / por categoría).
+ * Es opcional: las pantallas que sólo muestran promo + mayorista (edición de un
+ * pedido ya guardado, por ejemplo) no lo pasan y el hook se queda en dos capas.
+ */
+export interface ContextoDescuentoCliente {
+  cliente?: ClienteConDescuentos | null
+  productos?: ProductoConCategoria[]
 }
 
 interface UsePromocionPedidoReturn {
@@ -46,16 +55,31 @@ interface UsePromocionPedidoReturn {
   promoResolucion: PromoResolucion
   /** Nudges de bonificación */
   faltantesBonificacion: Array<{ productoId: string; promoNombre: string; faltante: number; bonificacion: number }>
-  /** Items finales con bonificaciones añadidas */
+  /** Items finales con bonificaciones añadidas, SIN el descuento del cliente */
   itemsFinales: ItemPedidoConPromo[]
-  /** Total calculado correctamente con promos */
+  /** Total calculado correctamente con promos, SIN el descuento del cliente */
   totalFinal: number
   /** Total original sin ningún descuento */
   totalOriginal: number
-  /** Ahorro total */
+  /** Ahorro total (sin contar el descuento del cliente) */
   ahorro: number
   /** Si hay al menos un item con precio mayorista o promo */
   hayDescuento: boolean
+  /**
+   * Los mismos `itemsFinales` con el descuento del cliente ya aplicado. Es lo
+   * que hay que persistir. Sin `contextoDescuento`, es igual a `itemsFinales`.
+   */
+  itemsConDescuentoCliente: ItemPedidoConPromo[]
+  /** Total con las tres capas aplicadas. Es el total que se guarda. */
+  totalConDescuentoCliente: number
+  /** El descuento del cliente bajó al menos un precio */
+  hayDescuentoCliente: boolean
+  /** Promo/mayorista o descuento del cliente: alguno bajó un precio */
+  hayDescuentoTotal: boolean
+  /** % de descuento del cliente por productoId (para `construirOrigenPrecioItems`) */
+  descuentoClientePct: Map<string, number>
+  /** productoIds cuyo descuento salió de una regla por categoría, no del general */
+  descuentoPorCategoria: Set<string>
   /** Loading */
   isLoading: boolean
   /**
@@ -75,12 +99,6 @@ interface UsePromocionPedidoReturn {
   violacionesMOQ: ViolacionMOQ[]
 }
 
-/** Override del producto del regalo de una promo (admin lo elige al crear el pedido). */
-export interface RegaloOverride {
-  productoId: string
-  descripcionRegalo?: string
-}
-
 export function usePromocionPedido(
   items: ItemPedido[],
   fechaReferencia?: string,
@@ -91,6 +109,8 @@ export function usePromocionPedido(
   /** Ids de promos que el usuario quitó a mano (crear/editar). Se excluyen de la
    *  resolución: sin regalo y con los disparadores liberados para mayorista. */
   promosEliminadas?: ReadonlySet<string>,
+  /** Cliente + catálogo para aplicar la tercera capa de precio. */
+  contextoDescuento?: ContextoDescuentoCliente,
 ): UsePromocionPedidoReturn {
   const { data: pricingMap, isLoading: loadingPricing } = usePricingMapQuery()
   const { data: promoMap, isLoading: loadingPromos } = usePromoMapQuery(fechaReferencia)
@@ -98,119 +118,43 @@ export function usePromocionPedido(
   // condiciones mayoristas.
   const { data: minimosProducto } = useMinimosVentaQuery()
 
-  // 1. Resolver promociones
-  const promoResolucionRaw = useMemo((): PromoResolucion => {
-    if (!promoMap || promoMap.size === 0 || items.length === 0) {
-      return { bonificaciones: [], productosConPromo: new Set() }
-    }
-    return resolverPromociones(items, promoMap, promosEliminadas)
-  }, [items, promoMap, promosEliminadas])
+  // Se desestructura para depender de los valores y no de la identidad del
+  // objeto literal, que cambia en cada render del componente que llama.
+  const cliente = contextoDescuento?.cliente ?? null
+  const productos = contextoDescuento?.productos
 
-  // 1b. Aplicar override del regalo: solo cambia el producto/descripción de la
-  //     bonificación; los disparadores (productosConPromo) y reglas no se tocan.
-  //     Así itemsFinales y el display muestran/persisten el producto elegido.
-  const promoResolucion = useMemo((): PromoResolucion => {
-    if (!overridesRegalo || Object.keys(overridesRegalo).length === 0) return promoResolucionRaw
-    const bonificaciones = promoResolucionRaw.bonificaciones.map(b => {
-      const ov = overridesRegalo[String(b.promoId)]
-      return ov ? { ...b, productoId: ov.productoId, descripcionRegalo: ov.descripcionRegalo } : b
-    })
-    return { bonificaciones, productosConPromo: promoResolucionRaw.productosConPromo }
-  }, [promoResolucionRaw, overridesRegalo])
+  // Promo → mayorista → descuento del cliente, en una sola pasada y con la
+  // misma función que usa el bot.
+  const orquestacion = useMemo(
+    () => orquestarPrecios({
+      items,
+      promoMap,
+      pricingMap,
+      productos,
+      cliente,
+      promosEliminadas,
+      overridesRegalo,
+    }),
+    [items, promoMap, pricingMap, productos, cliente, promosEliminadas, overridesRegalo],
+  )
 
-  // 2. Resolver mayorista EXCLUYENDO productos con promo
-  const preciosResueltos = useMemo(() => {
-    if (!pricingMap || pricingMap.size === 0 || items.length === 0) {
-      return new Map<string, PrecioResuelto>()
-    }
-    const itemsSinPromo = items.filter(
-      i => !promoResolucion.productosConPromo.has(String(i.productoId))
-    )
-    if (itemsSinPromo.length === 0) return new Map<string, PrecioResuelto>()
-    return resolverPreciosMayorista(itemsSinPromo, pricingMap)
-  }, [items, pricingMap, promoResolucion.productosConPromo])
-
-  // 3. Nudges mayorista
+  // Nudges de mayorista: sobre los items que la promo no reclamó, igual que la
+  // resolución de precios.
   const faltantes = useMemo(() => {
     if (!pricingMap || pricingMap.size === 0 || items.length === 0) return []
     const itemsSinPromo = items.filter(
-      i => !promoResolucion.productosConPromo.has(String(i.productoId))
+      i => !orquestacion.promoResolucion.productosConPromo.has(String(i.productoId))
     )
     return calcularFaltanteParaTier(itemsSinPromo, pricingMap)
-  }, [items, pricingMap, promoResolucion.productosConPromo])
+  }, [items, pricingMap, orquestacion.promoResolucion.productosConPromo])
 
-  // 4. Nudges bonificación
   const faltantesBonificacion = useMemo(() => {
     if (!promoMap || promoMap.size === 0 || items.length === 0) return []
     return calcularFaltanteParaBonificacion(items, promoMap)
   }, [items, promoMap])
 
-  // 5. Construir items finales
-  const itemsFinales = useMemo((): ItemPedidoConPromo[] => {
-    const result: ItemPedidoConPromo[] = []
-
-    for (const item of items) {
-      const pid = String(item.productoId)
-      const precioMayorista = preciosResueltos.get(pid)
-
-      if (precioMayorista && precioMayorista.esMayorista && !item.precioOverride) {
-        result.push({
-          ...item,
-          precioUnitario: precioMayorista.precioResuelto,
-        })
-      } else {
-        result.push({ ...item })
-      }
-    }
-
-    // Agregar items de bonificación
-    for (const bonif of promoResolucion.bonificaciones) {
-      result.push({
-        productoId: bonif.productoId,
-        cantidad: bonif.cantidadBonificacion,
-        precioUnitario: 0,
-        esBonificacion: true,
-        promoNombre: bonif.promoNombre,
-        promoId: bonif.promoId,
-        descripcionRegalo: bonif.descripcionRegalo,
-        unidadesPorBloque: bonif.unidadesPorBloque,
-      })
-    }
-
-    return result
-  }, [items, promoResolucion, preciosResueltos])
-
-  // 6. Calcular totales
-  const { totalFinal, totalOriginal } = useMemo(() => {
-    let total = 0
-    let original = 0
-
-    for (const item of items) {
-      const pid = String(item.productoId)
-      original += item.precioUnitario * item.cantidad
-
-      const precioMayorista = preciosResueltos.get(pid)
-      if (precioMayorista) {
-        total += precioMayorista.precioResuelto * item.cantidad
-      } else {
-        total += item.precioUnitario * item.cantidad
-      }
-    }
-
-    return { totalFinal: total, totalOriginal: original }
-  }, [items, preciosResueltos])
-
-  // 7. Hay descuento?
-  const hayDescuento = useMemo(() => {
-    if (promoResolucion.productosConPromo.size > 0) return true
-    for (const [, r] of preciosResueltos) {
-      if (r.esMayorista) return true
-    }
-    return false
-  }, [promoResolucion.productosConPromo, preciosResueltos])
-
-  // 8. MOQ — el mínimo de venta es del producto (mig 147/169), independiente
-  //    de que tenga o no una condición mayorista.
+  // MOQ — el mínimo de venta es del producto (mig 147/169), independiente
+  // de que tenga o no una condición mayorista.
   const moqMap = useMemo(() => {
     if (items.length === 0) return new Map<string, number>()
     return construirMOQMap(items, minimosProducto)
@@ -222,15 +166,21 @@ export function usePromocionPedido(
   }, [items, minimosProducto])
 
   return {
-    preciosResueltos,
+    preciosResueltos: orquestacion.preciosResueltos,
     faltantes,
-    promoResolucion,
+    promoResolucion: orquestacion.promoResolucion,
     faltantesBonificacion,
-    itemsFinales,
-    totalFinal,
-    totalOriginal,
-    ahorro: totalOriginal - totalFinal,
-    hayDescuento,
+    itemsFinales: orquestacion.itemsSinDescuentoCliente,
+    totalFinal: orquestacion.totalSinDescuentoCliente,
+    totalOriginal: orquestacion.totalOriginal,
+    ahorro: orquestacion.totalOriginal - orquestacion.totalSinDescuentoCliente,
+    hayDescuento: orquestacion.hayDescuentoPrecios,
+    itemsConDescuentoCliente: orquestacion.items,
+    totalConDescuentoCliente: orquestacion.total,
+    hayDescuentoCliente: orquestacion.hayDescuentoCliente,
+    hayDescuentoTotal: orquestacion.hayDescuentoPrecios || orquestacion.hayDescuentoCliente,
+    descuentoClientePct: orquestacion.descuentoClientePct,
+    descuentoPorCategoria: orquestacion.descuentoPorCategoria,
     isLoading: loadingPricing || loadingPromos,
     moqMap,
     minimosProducto,

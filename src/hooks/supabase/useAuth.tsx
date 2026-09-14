@@ -4,6 +4,10 @@ import { Session, User } from '@supabase/supabase-js'
 import { supabase } from './base'
 import { logger } from '../../utils/logger'
 import { beginAuthTrace, logAuthEvent, logAuthTiming, resetAuthTrace } from '../../utils/authPerformance'
+import { queryClient } from '../../lib/queryClient'
+import { olvidarRuta, olvidarTodasLasRutas } from '../../lib/rutaOfflineCache'
+import { limpiarCachesDeLectura } from '../../lib/offlineDb'
+import { SUCURSAL_STORAGE_KEY } from '../../contexts/SucursalContext'
 import { esFalloDeRed } from '../../utils/falloDeRed'
 import type { RolUsuario } from '../../types'
 
@@ -85,6 +89,40 @@ function now(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
     : Date.now()
+}
+
+function leerSucursalActiva(): number | null {
+  try {
+    const raw = localStorage.getItem(SUCURSAL_STORAGE_KEY)
+    if (!raw) return null
+    const id = Number(raw)
+    return Number.isFinite(id) ? id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Borra del dispositivo lo que no tiene que sobrevivir al logout: la ruta
+ * del chofer (nombres, direcciones, teléfonos y montos a cobrar en
+ * localStorage), el cache de TanStack Query (todo lo que se vio en pantalla:
+ * clientes, saldos, pedidos) y los caches de lectura de Dexie.
+ *
+ * NO toca `pendingOperations` (la cola offline): FE-1 decidió que sobrevive
+ * al logout y se oculta por usuario en la UI, no se descarta acá.
+ */
+function limpiarDatosSensiblesLocales(transportistaId: string | null): void {
+  if (transportistaId) {
+    olvidarRuta(leerSucursalActiva(), transportistaId)
+  }
+  // Barrido por si quedó la ruta de otro chofer en un dispositivo compartido.
+  olvidarTodasLasRutas()
+
+  queryClient.clear()
+
+  limpiarCachesDeLectura().catch(err => {
+    logger.warn('[useAuth] No se pudo limpiar el cache offline:', err)
+  })
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
@@ -344,7 +382,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     if (event === 'SIGNED_OUT') {
       resetAuthTrace()
+      const transportistaId = userIdRef.current
       clearLocalAuthState()
+      limpiarDatosSensiblesLocales(transportistaId)
       if (mountedRef.current) {
         setAuthTransitionLoading(false)
         setBootstrapLoading(false)
@@ -513,6 +553,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = useCallback(async () => {
     logAuthEvent('logout-requested')
     resetAuthTrace()
+    const transportistaId = userIdRef.current
     // El perfil cacheado es para arrancar sin señal, no para sobrevivir a un
     // logout: en un teléfono compartido, el que entra después no tiene por qué
     // ver el rol del anterior. La cola de IndexedDB SÍ sobrevive, a propósito
@@ -526,6 +567,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     clearLocalAuthState()
     setBootstrapLoading(false)
     setAuthTransitionLoading(false)
+    limpiarDatosSensiblesLocales(transportistaId)
 
     try {
       await supabase.auth.signOut({ scope: 'local' })

@@ -17,6 +17,7 @@
  */
 
 import * as Sentry from '@sentry/react'
+import { redactSensitiveFields } from '../utils/redactSensitiveData'
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -187,17 +188,13 @@ export function initSentry(): void {
         delete event.user.ip_address
       }
 
-      // Redactar breadcrumbs con datos sensibles
+      // Redactar breadcrumbs con datos sensibles. Recursivo: un objeto
+      // anidado (ej. { cliente: { direccion, telefono } }) antes sólo se
+      // redactaba en su primer nivel.
       if (event.breadcrumbs) {
         event.breadcrumbs = event.breadcrumbs.map(crumb => {
           if (crumb.data) {
-            // Redactar contraseñas, tokens, etc.
-            const sensitiveKeys = ['password', 'token', 'api_key', 'secret', 'cuit', 'dni']
-            for (const key of sensitiveKeys) {
-              if (crumb.data[key]) {
-                crumb.data[key] = '[REDACTED]'
-              }
-            }
+            crumb.data = redactSensitiveFields(crumb.data)
           }
           return crumb
         })
@@ -244,11 +241,17 @@ export function initSentry(): void {
         // Capturar interacciones del usuario
         enableInp: true
       }),
-      // Replay de sesiones
+      // Replay de sesiones. Cuidado con relajar esto: hay razón social,
+      // dirección, teléfono y saldos de clientes en pantalla en casi toda la
+      // app, y el 10% de las sesiones (100% de las que tienen error) suben
+      // un video del DOM a Sentry.
       Sentry.replayIntegration({
-        // Enmascarar inputs de texto
-        maskAllText: false,
+        // Enmascara TODO el texto del DOM por defecto. Si hace falta
+        // legibilidad puntual para debug, agregar la clase `sentry-unmask`
+        // al elemento -- pero sólo en algo que no muestre datos de cliente.
+        maskAllText: true,
         maskAllInputs: true,
+        unmask: ['.sentry-unmask'],
         // No grabar elementos sensibles
         blockAllMedia: false,
         // Redactar selectores específicos
