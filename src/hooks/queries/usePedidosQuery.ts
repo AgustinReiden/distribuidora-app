@@ -247,21 +247,21 @@ async function fetchPedidosByCliente(clienteId: string): Promise<PedidoDB[]> {
 // del día" (RPC aplicar_orden_ruta, mig 088), no una acción aparte. Se trae sin
 // paginar porque la optimización necesita TODOS, no la página visible (15).
 // Las paradas de una ruta ya armada se cargan aparte (useRecorridoExistenteQuery).
-async function fetchPedidosAsignados(sucursalId: number | null): Promise<PedidoDB[]> {
-  let query = supabase
-    .from('pedidos')
-    .select(PEDIDO_SELECT)
-    .in('estado', ['pendiente', 'en_preparacion'])
+export async function fetchPedidosAsignados(sucursalId: number | null): Promise<PedidoDB[]> {
+  const construirQuery = () => {
+    let query = supabase
+      .from('pedidos')
+      .select(PEDIDO_SELECT)
+      .in('estado', ['pendiente', 'en_preparacion'])
 
-  if (sucursalId != null) {
-    query = query.eq('sucursal_id', sucursalId)
+    if (sucursalId != null) {
+      query = query.eq('sucursal_id', sucursalId)
+    }
+
+    return query.order('fecha', { ascending: true, nullsFirst: false }).order('id', { ascending: true })
   }
 
-  const { data, error } = await query.order('fecha', { ascending: true, nullsFirst: false })
-
-  if (error) throw error
-
-  return (data || []) as PedidoDB[]
+  return traerTodo<PedidoDB>(construirQuery, { etiqueta: 'los pedidos asignados' })
 }
 
 // Paginated fetch
@@ -810,23 +810,25 @@ export function useEliminarPedidoMutation() {
 // Entregas Masivas
 // =========================================================================
 
-async function fetchPedidosNoEntregados(sucursalId: number | null): Promise<PedidoDB[]> {
-  let query = supabase
-    .from('pedidos')
-    .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
-    .not('estado', 'in', '("entregado","cancelado")')
+export async function fetchPedidosNoEntregados(sucursalId: number | null): Promise<PedidoDB[]> {
+  const construirQuery = () => {
+    let query = supabase
+      .from('pedidos')
+      .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
+      .not('estado', 'in', '("entregado","cancelado")')
 
-  if (sucursalId != null) {
-    query = query.eq('sucursal_id', sucursalId)
+    if (sucursalId != null) {
+      query = query.eq('sucursal_id', sucursalId)
+    }
+
+    return query.order('created_at', { ascending: false }).order('id', { ascending: false })
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false })
-
-  if (error) throw error
+  const data = await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos no entregados' })
 
   // Enrich with transportista names
   const transportistaIds = new Set<string>()
-  for (const pedido of (data || [])) {
+  for (const pedido of data) {
     if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
   }
 
@@ -844,9 +846,9 @@ async function fetchPedidosNoEntregados(sucursalId: number | null): Promise<Pedi
     }
   }
 
-  return (data || []).map(pedido => ({
+  return data.map(pedido => ({
     ...pedido,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] : null,
   })) as PedidoDB[]
 }
 
@@ -870,24 +872,26 @@ export function usePedidosNoEntregadosQuery(enabled = false) {
 // saldo (p.ej. una "entrega con salvedad" que quedo impaga): en ese caso solo se
 // cobran, sin re-entregar. Preserva los prepagos-no-entregados (siguen necesitando
 // la entrega).
-async function fetchPedidosParaEntregaYPago(sucursalId: number | null): Promise<PedidoDB[]> {
-  let query = supabase
-    .from('pedidos')
-    .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
-    .neq('estado', 'cancelado')
-    .or('estado.neq.entregado,estado_pago.neq.pagado')
+export async function fetchPedidosParaEntregaYPago(sucursalId: number | null): Promise<PedidoDB[]> {
+  const construirQuery = () => {
+    let query = supabase
+      .from('pedidos')
+      .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
+      .neq('estado', 'cancelado')
+      .or('estado.neq.entregado,estado_pago.neq.pagado')
 
-  if (sucursalId != null) {
-    query = query.eq('sucursal_id', sucursalId)
+    if (sucursalId != null) {
+      query = query.eq('sucursal_id', sucursalId)
+    }
+
+    return query.order('created_at', { ascending: false }).order('id', { ascending: false })
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false })
-
-  if (error) throw error
+  const data = await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos para entrega y pago' })
 
   // Enrich with transportista names
   const transportistaIds = new Set<string>()
-  for (const pedido of (data || [])) {
+  for (const pedido of data) {
     if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
   }
 
@@ -905,9 +909,9 @@ async function fetchPedidosParaEntregaYPago(sucursalId: number | null): Promise<
     }
   }
 
-  return (data || []).map(pedido => ({
+  return data.map(pedido => ({
     ...pedido,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] : null,
   })) as PedidoDB[]
 }
 
@@ -1097,24 +1101,26 @@ export function useCambiarClientePedidoMutation() {
 // Pagos Masivos
 // =========================================================================
 
-async function fetchPedidosNoPagados(sucursalId: number | null): Promise<PedidoDB[]> {
-  let query = supabase
-    .from('pedidos')
-    .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
-    .neq('estado_pago', 'pagado')
-    .neq('estado', 'cancelado')
+export async function fetchPedidosNoPagados(sucursalId: number | null): Promise<PedidoDB[]> {
+  const construirQuery = () => {
+    let query = supabase
+      .from('pedidos')
+      .select('*, cliente:clientes(id, nombre_fantasia, direccion)')
+      .neq('estado_pago', 'pagado')
+      .neq('estado', 'cancelado')
 
-  if (sucursalId != null) {
-    query = query.eq('sucursal_id', sucursalId)
+    if (sucursalId != null) {
+      query = query.eq('sucursal_id', sucursalId)
+    }
+
+    return query.order('created_at', { ascending: false }).order('id', { ascending: false })
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false })
-
-  if (error) throw error
+  const data = await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos no pagados' })
 
   // Enrich with transportista names
   const transportistaIds = new Set<string>()
-  for (const pedido of (data || [])) {
+  for (const pedido of data) {
     if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
   }
 
@@ -1132,9 +1138,9 @@ async function fetchPedidosNoPagados(sucursalId: number | null): Promise<PedidoD
     }
   }
 
-  return (data || []).map(pedido => ({
+  return data.map(pedido => ({
     ...pedido,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
+    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] : null,
   })) as PedidoDB[]
 }
 

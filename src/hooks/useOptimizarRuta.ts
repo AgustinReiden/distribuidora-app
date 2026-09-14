@@ -87,7 +87,7 @@ export function horarioParaRutear(cliente?: Partial<ClienteDB> | null): string |
  * Deriva ventanas horarias y barridas de los pedidos a rutear.
  *
  * Los pedidos sin horario utilizable no aportan ventana (quedan flexibles) y
- * caen en la barrida 2.
+ * caen en la barrida 4 (ver src/utils/barridas.ts).
  */
 export function derivarVentanasYBarridas(
   pedidos: PedidoDB[],
@@ -284,7 +284,7 @@ export function useOptimizarRuta(): UseOptimizarRutaReturn {
       }));
 
     // Ventanas horarias + barrida por pedido, desde el horario del cliente.
-    // Sin horario utilizable: el pedido queda flexible y va a la barrida 2.
+    // Sin horario utilizable: el pedido queda flexible y va a la barrida 4.
     const { ventanas, barridas } = derivarVentanasYBarridas(pedidos);
 
     if (pedidosConCoordenadas.length === 0) {

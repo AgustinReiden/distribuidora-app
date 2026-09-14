@@ -2,7 +2,7 @@
  * Vista de salvedades para admin
  * Permite ver y resolver salvedades pendientes de items
  */
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   AlertTriangle,
   Calendar,
@@ -17,6 +17,7 @@ import {
   Image
 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
+import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
 import { useSalvedades } from '../../hooks/supabase'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import ModalResolverSalvedad from '../modals/ModalResolverSalvedad'
@@ -193,8 +194,7 @@ export default function VistaSalvedades(): React.ReactElement {
     salvedades,
     loading,
     fetchTodasSalvedades,
-    resolverSalvedad,
-    getEstadisticas
+    resolverSalvedad
   } = useSalvedades()
 
   const [filtroEstado, setFiltroEstado] = useState<'pendientes' | 'todas'>('pendientes')
@@ -207,28 +207,12 @@ export default function VistaSalvedades(): React.ReactElement {
   const [fechaHasta, setFechaHasta] = useState<string>(fechaLocalISO())
 
   const [salvedadResolver, setSalvedadResolver] = useState<SalvedadItemDBExtended | null>(null)
-  const [estadisticas, setEstadisticas] = useState<{
-    total: number;
-    pendientes: number;
-    resueltas: number;
-    monto_total_afectado: number;
-    monto_pendiente: number;
-  } | null>(null)
 
   // Siempre cargamos todas las salvedades y filtramos en el cliente
   // Esto permite que las salvedades resueltas permanezcan visibles para métricas
   const cargarDatos = useCallback(async () => {
     await fetchTodasSalvedades()
   }, [fetchTodasSalvedades])
-
-  // Calcular estadísticas cuando cambian los datos
-  useEffect(() => {
-    const calcular = async () => {
-      const stats = await getEstadisticas()
-      setEstadisticas(stats)
-    }
-    calcular()
-  }, [salvedades, getEstadisticas])
 
   useEffect(() => {
     cargarDatos()
@@ -263,6 +247,13 @@ export default function VistaSalvedades(): React.ReactElement {
 
     return true
   })
+
+  // Las 5 KPIs de abajo tienen que reflejar lo que se ve en pantalla, no todo
+  // el universo cargado: sobre `salvedadesFiltradas`, no sobre `salvedades`.
+  const estadisticas = useMemo(
+    () => calcularEstadisticasSalvedades(salvedadesFiltradas),
+    [salvedadesFiltradas]
+  )
 
   const formatMoney = (value: number | undefined): string => {
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)

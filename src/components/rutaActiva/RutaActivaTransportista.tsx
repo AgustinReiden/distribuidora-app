@@ -116,8 +116,17 @@ export default function RutaActivaTransportista({
 
   /**
    * Registra que no se pudo entregar. El RPC (mig 144) libera el pedido para
-   * re-rutearlo y le avisa al preventista con el motivo; acá solo hay que
-   * refrescar la ruta para que la parada desaparezca del recorrido del día.
+   * re-rutearlo (transportista_id NULL, estado vuelve a 'pendiente') y le
+   * avisa al preventista con el motivo.
+   *
+   * Para el chofer que la marcó, la parada desaparece del recorrido al
+   * refrescar: su RLS sobre `pedidos` exige `transportista_id = auth.uid()`,
+   * y ese campo ya quedó en NULL. Pero un admin/encargado —incluido uno con
+   * el rol extra de transportista mirando su propia ruta mixta— SÍ la sigue
+   * viendo, porque su RLS no filtra por transportista_id: para ellos la
+   * parada queda en la lista con `estado_entrega='no_entregado'` (ver
+   * `pedidosOrdenados`/`noEntregadas` más abajo, que la cuentan aparte de las
+   * entregadas en vez de tratarla como completada por descarte).
    */
   const onMarcarNoEntregado = useCallback(
     async (pedidoId: string, motivo: MotivoNoEntrega, nota: string): Promise<void> => {
@@ -150,7 +159,21 @@ export default function RutaActivaTransportista({
     () => pedidosOrdenados.filter(p => p.estado === 'asignado'),
     [pedidosOrdenados],
   );
-  const completadas = pedidosOrdenados.length - pendientes.length;
+  // No contar por diferencia (`total - pendientes`): eso mete en "completadas"
+  // a una parada que `marcar_no_entregado` liberó (vuelve a 'pendiente', no
+  // 'asignado') junto con las realmente entregadas. Para un chofer puro la fila
+  // desaparece del embed por RLS (transportista_id queda NULL) y ahí da lo
+  // mismo, pero un admin/encargado que mira la misma ruta SÍ la sigue viendo
+  // (su RLS no filtra por transportista_id), así que ahí "completadas" mentía.
+  const noEntregadas = useMemo(
+    () => pedidosOrdenados.filter(p => p.estado_entrega === 'no_entregado').length,
+    [pedidosOrdenados],
+  );
+  const entregadas = useMemo(
+    () => pedidosOrdenados.filter(p => p.estado === 'entregado').length,
+    [pedidosOrdenados],
+  );
+  const completadas = entregadas + noEntregadas;
   const porCobrar = pendientes
     .filter(p => p.estado_pago !== 'pagado')
     .reduce((sum, p) => sum + (p.total || 0), 0);
@@ -198,6 +221,7 @@ export default function RutaActivaTransportista({
         titulo: p.cliente?.nombre_fantasia || 'Cliente',
         subtitulo: p.cliente?.direccion || undefined,
         entregado: p.estado === 'entregado',
+        noEntregado: p.estado_entrega === 'no_entregado',
       })),
     [pedidosOrdenados],
   );
