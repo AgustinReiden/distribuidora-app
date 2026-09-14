@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 232.** El ledger de prod llega hasta
-`231_la_fecha_de_aca_en_las_siete_que_faltaban`.
+**La próxima migración es la 233.** El ledger de prod llega hasta
+`232_la_merma_baja_el_stock_en_una_transaccion`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -155,7 +155,7 @@ Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el 
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
 Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
 `main`. Van cinco veces.
-Última actualización: 231, el 2026-09-14.)
+Última actualización: 232, el 2026-09-14.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -682,6 +682,46 @@ la `230` el de los **parámetros de pago**, y estas siete quedaron porque nadie 
 
 La verificación de la migración es **global a propósito**: falla si queda *cualquier*
 `DEFAULT CURRENT_DATE` en `public`, no sólo en las siete. Hoy no queda ninguno.
+
+---
+
+### 232 · La merma baja el stock en una transacción
+
+Issue #518. La merma manual salía del navegador en **tres requests**: `INSERT` en
+`mermas_stock`, `UPDATE productos SET stock = <absoluto>` con el valor que el modal había
+calculado sobre su snapshot, y un `DELETE` compensatorio a mano si el segundo fallaba. Dos
+mermas de 10 sobre stock 100 escribían las dos `stock = 90` — dos filas por 20 unidades y el
+stock bajo 10, o sea `STK-A` roto. Es el mismo bug del incidente de la ficha de producto del
+19/08, en otro camino. Y había una **segunda copia idéntica** en `useMermas.ts`, la cableada
+al replay offline, donde el absoluto podía tener horas de viejo.
+
+`registrar_merma_manual(p_producto_id, p_cantidad, p_motivo, p_observaciones, p_sucursal_id)`
+hace lo que ya hacía `dar_de_baja_lote` (mig 224) al lado: `FOR UPDATE` sobre el producto,
+`INSERT` con `stock_anterior`/`stock_nuevo` calculados **server-side**, `usuario_id =
+auth.uid()`, y `UPDATE productos SET stock = stock - p_cantidad` etiquetado
+`app.stock_origen = 'merma'`. Los dos hooks del front llaman a esta única RPC.
+
+Tres cosas que no son obvias:
+
+- **No toca `producto_lotes`.** Una merma **baja** stock y `sincronizar_lotes_stock` (223)
+  consume FEFO en toda bajada, mire o no el origen; la lista blanca de orígenes es sólo para
+  el camino que **devuelve** unidades.
+- **El `app.stock_origen` igual va**, y es la otra mitad del arreglo: hasta acá toda merma
+  manual entraba al ledger como `origen = 'auto'` y sin usuario, porque el `UPDATE` salía
+  crudo desde el navegador.
+- **El gate es `admin`**, que es la intersección de las dos políticas que el camino viejo
+  tocaba (`mt_mermas_stock_insert` = admin/transportista ∩ `mt_productos_update` =
+  admin/depósito). Encargado queda afuera a propósito: hoy tampoco puede. Al ser
+  `SECURITY DEFINER` la función **es** el gate, así que ampliarlo es decisión de producto.
+
+También rechaza los motivos `promociones` y `promociones_reversion`, que los escribe el motor
+de promociones y el reporte gerencial excluye (130): cargados a mano hacen desaparecer una
+pérdida real de todos los KPIs. Eso vivía sólo en un comentario del modal.
+
+Verificado contra prod en una transacción con `ROLLBACK`: dos bajas de 10 sobre 100 dejan
+**80 y dos filas** (100→90, 90→80), el ledger queda `origen=merma ref=mermas_stock/<id>` con
+usuario, y los cuatro rechazos (motivo de promo, stock negativo, sucursal ajena, no-admin)
+cortan. `MERMA-B` y `STK-A` en verde.
 
 ## Mantenimiento
 

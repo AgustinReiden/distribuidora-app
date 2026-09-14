@@ -55,55 +55,33 @@ export function useMermas(): UseMermasReturnExtended {
 
   useEffect(() => { fetchMermas() }, [])
 
+  /**
+   * La MISMA RPC que useMermasQuery (mig 232), no una copia del INSERT + UPDATE.
+   *
+   * Esta es la que está cableada al replay offline (App.tsx → useSyncManager →
+   * sincronizarMermas), donde el valor absoluto era todavía peor: el payload
+   * encolado podía tener horas de viejo. Ahora viaja la cantidad y el stock lo
+   * resuelve el servidor contra el saldo del momento del replay.
+   */
   const registrarMerma = async (mermaData: MermaFormInputExtended): Promise<MermaRegistroResult> => {
     if (currentSucursalId == null) {
       throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
     }
 
-    // Primero intentar insertar la merma (para fallar antes de modificar stock)
-    const { data, error } = await supabase
-      .from('mermas_stock')
-      .insert([{
-        producto_id: mermaData.productoId,
-        cantidad: mermaData.cantidad,
-        motivo: mermaData.motivo,
-        observaciones: mermaData.observaciones || null,
-        stock_anterior: mermaData.stockAnterior,
-        stock_nuevo: mermaData.stockNuevo,
-        usuario_id: mermaData.usuarioId || null,
-        sucursal_id: currentSucursalId
-      }])
-      .select()
-      .single()
+    const { data, error } = await supabase.rpc('registrar_merma_manual', {
+      p_producto_id: mermaData.productoId,
+      p_cantidad: mermaData.cantidad,
+      p_motivo: mermaData.motivo,
+      p_observaciones: mermaData.observaciones || null,
+      p_sucursal_id: currentSucursalId
+    })
 
-    if (error) {
-      // Si la tabla no existe, solo actualizar stock (modo fallback)
-      if (error.message.includes('does not exist')) {
-        const { error: stockError } = await supabase
-          .from('productos')
-          .update({ stock: mermaData.stockNuevo })
-          .eq('id', mermaData.productoId)
-        if (stockError) throw stockError
-        return { success: true, merma: null, soloStock: true }
-      }
-      throw error
-    }
+    if (error) throw error
 
-    const mermaCreada = data as MermaDBExtended
+    const resultado = data as { ok: boolean; merma: MermaDBExtended } | null
+    const mermaCreada = resultado?.merma ?? null
 
-    // La merma se insertó correctamente, ahora actualizar stock
-    const { error: stockError } = await supabase
-      .from('productos')
-      .update({ stock: mermaData.stockNuevo })
-      .eq('id', mermaData.productoId)
-
-    if (stockError) {
-      // Revertir: eliminar la merma si el stock falla
-      await supabase.from('mermas_stock').delete().eq('id', mermaCreada.id)
-      throw stockError
-    }
-
-    setMermas(prev => [mermaCreada, ...prev])
+    if (mermaCreada) setMermas(prev => [mermaCreada, ...prev])
     return { success: true, merma: mermaCreada }
   }
 
