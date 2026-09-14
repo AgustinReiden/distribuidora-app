@@ -66,8 +66,10 @@ export function diasHasta(fecha: string, hoy: string = hoyISO()): number {
  * exactamente 15 días ya es crítico. Es lo que espera quien configuró "avisame
  * 15 días antes".
  *
- * Con umbrales en 0 solo se marca lo ya vencido, que es la forma de tener la
- * feature prendida sin que avise de nada por adelantado.
+ * Por el mismo motivo, con los dos umbrales en 0 no solo se marca lo ya
+ * vencido: lo que vence HOY (`dias === 0`) también cae en `critico`, porque
+ * `0 <= diasCritico` con `diasCritico = 0` sigue siendo cierto. Con umbrales
+ * en 0 la única forma de quedar en `ok` es una fecha estrictamente futura.
  */
 export function estadoVencimiento(
   fecha: string,

@@ -44,8 +44,10 @@ export const misVentasTool: Tool<MisVentasParams, MisVentasResult> = {
     "Resumen de las ventas del preventista actual en un rango de fechas. " +
     "Devuelve total facturado, cantidad de pedidos, ticket promedio, " +
     "clientes distintos y top clientes del período. Las fechas son " +
-    "inclusive en formato YYYY-MM-DD. Solo ve sus propias ventas (las que " +
-    "tiene como usuario_id en pedidos). Excluye pedidos cancelados/anulados.",
+    "inclusive en formato YYYY-MM-DD y filtran por pedidos.fecha. Solo ve " +
+    "sus propias ventas (las que tiene como usuario_id en pedidos). " +
+    "total_ventas cuenta SOLO ventas ENTREGADAS (estado='entregado', " +
+    "canal='app') — coincide con el reporte gerencial.",
   parameters: {
     type: "object",
     properties: {

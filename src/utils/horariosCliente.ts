@@ -24,7 +24,7 @@ export interface FranjaHoraria {
 const SEPARADOR_FRANJAS = ' y ';
 
 /** Regex de una franja "HH:MM-HH:MM" (el cierre admite 24:00). */
-const RE_FRANJA = /^([01]\d|2[0-3]):(00|30)-([01]\d|2[0-3]|24):(00|30)$/;
+const RE_FRANJA = /^([01]\d|2[0-3]):(00|30)-(?:([01]\d|2[0-3]):(00|30)|24:00)$/;
 
 /**
  * Etiquetas prefijadas que usaba la versión anterior del formulario. Se mapean
@@ -109,7 +109,11 @@ export function validarFranjas(franjas: FranjaHoraria[]): ResultadoValidacionFra
   // 1. apertura < cierre, por fila (solo filas completas).
   franjas.forEach((f, i) => {
     if (!f.apertura || !f.cierre) return;
-    if (horaAMinutos(f.apertura) >= horaAMinutos(f.cierre)) {
+    const inicio = horaAMinutos(f.apertura);
+    const fin = horaAMinutos(f.cierre);
+    // NaN >= NaN es false: sin este chequeo una hora inválida pasa la
+    // comparación como "sin error" y arrastra el NaN al solapamiento.
+    if (Number.isNaN(inicio) || Number.isNaN(fin) || inicio >= fin) {
       erroresPorFila[i] = 'La apertura debe ser anterior al cierre.';
     }
   });

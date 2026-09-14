@@ -93,7 +93,7 @@ export default function ProductosContainer(): React.ReactElement {
   }, [setSearchParams])
 
   // Queries
-  const { data: productos = [], isLoading } = useProductosQuery()
+  const { data: productos = [], isLoading, isError, refetch } = useProductosQuery()
   // Para poder decir QUIÉN registró cada merma: el prop nunca se pasaba y el
   // historial mostraba "Usuario desconocido" en todas las filas.
   const { data: proveedores = [] } = useProveedoresActivosQuery()
@@ -377,6 +377,8 @@ export default function ProductosContainer(): React.ReactElement {
           productosStockBajo={productosStockBajo}
           proveedores={proveedores}
           loading={isLoading}
+          error={isError}
+          onRetry={refetch}
           isAdmin={isAdmin}
           puedeControlarStock={puedeControlarStock}
           vista={vista}

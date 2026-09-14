@@ -4,9 +4,9 @@
  * Container que carga datos del dashboard bajo demanda usando TanStack Query.
  * Solo carga métricas cuando el usuario navega a esta vista.
  */
-import React, { Suspense } from 'react'
+import React, { Suspense, useMemo } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, periodoMensual } from '../../hooks/queries'
+import { useMetricasQuery, useClientesQuery, useAvanceMetasQuery, useProductosQuery, periodoMensual } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useBackup } from '../../hooks/supabase'
@@ -44,6 +44,15 @@ export default function DashboardContainer(): React.ReactElement {
 
   // Cargar clientes solo para el contador
   const { data: clientes = [] } = useClientesQuery()
+
+  // Productos con stock bajo, para la alerta. Mismo criterio que
+  // ProductosContainer (stock < stock_minimo || 10): dos umbrales distintos
+  // para la misma alerta hubieran confundido más de lo que hubieran ayudado.
+  const { data: productos = [] } = useProductosQuery()
+  const productosStockBajo = useMemo(
+    () => productos.filter(p => p.stock < (p.stock_minimo || 10)),
+    [productos],
+  )
 
   // Objetivos del mes (migs 159-161). Siempre del mes corriente: las metas son
   // mensuales y NO siguen al chip de período del dashboard. Se pide sin id, así
@@ -105,6 +114,7 @@ export default function DashboardContainer(): React.ReactElement {
         isEncargado={isEncargado}
         totalClientes={clientes.length}
         avanceMetas={avanceMetas}
+        productosStockBajo={productosStockBajo}
       />
     </Suspense>
   )

@@ -19,6 +19,7 @@ import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import AccionesDropdown from './PedidoActions';
 import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQuery';
 import { useAuthData } from '../../contexts/AuthDataContext';
+import { useNotification } from '../../contexts';
 import { haversineMeters, formatDistancia, clasificarDistancia, SEMAFORO_COLORS } from '../../utils/geo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
 import { puedeVerDeudaCliente } from '../../lib/permisos';
@@ -296,6 +297,7 @@ function PedidoCard({
   const tieneSalvedad = pedido.salvedades && pedido.salvedades.length > 0;
 
   const { user, perfil, isOnline } = useAuthData();
+  const notify = useNotification();
 
   // Deuda que el cliente ya tenia ANTES de este pedido. Viene calculada de la
   // base (`deuda_previa`, mig 215) y NO se deriva de `cliente.saldo_cuenta`:
@@ -325,8 +327,12 @@ function PedidoCard({
   // Impresión de comanda individual (ticket 75mm). Autocontenido: reusa la misma
   // utilidad que el ReciboDropdown del footer; solo necesita el pedido y su cliente.
   const handleImprimirComanda = React.useCallback(async (p: PedidoDB): Promise<void> => {
-    if (p.cliente) await generarReciboPedido(p, p.cliente, { formato: 'comanda' });
-  }, []);
+    if (p.cliente) {
+      await generarReciboPedido(p, p.cliente, { formato: 'comanda' });
+    } else {
+      notify.error('No se puede imprimir: el pedido no tiene cliente cargado.');
+    }
+  }, [notify]);
   const diasAntiguedad = calcularDiasAntiguedad(pedido.fecha || pedido.created_at);
   const fechaCreacionLabel = formatFecha(pedido.fecha || pedido.created_at);
   const horaCreacion = pedido.created_at ? formatHora(pedido.created_at) : null;
@@ -795,6 +801,7 @@ function PedidoCard({
 function ReciboDropdown({ pedido }: { pedido: PedidoDB }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
+  const notify = useNotification();
 
   React.useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -808,6 +815,8 @@ function ReciboDropdown({ pedido }: { pedido: PedidoDB }) {
     setOpen(false);
     if (pedido.cliente) {
       await generarReciboPedido(pedido, pedido.cliente, { formato });
+    } else {
+      notify.error('No se puede generar el recibo: el pedido no tiene cliente cargado.');
     }
   };
 

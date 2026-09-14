@@ -25,7 +25,7 @@ export interface ModalExportarPDFProps {
   pedidos: PedidoDB[];
   transportistas: PerfilDB[];
   onExportarOrdenPreparacion: (pedidos: PedidoDB[]) => void;
-  onExportarHojaRuta: (transportista: PerfilDB | undefined, pedidos: PedidoDB[]) => void;
+  onExportarHojaRuta: (transportista: PerfilDB | undefined, pedidos: PedidoDB[], fechaRuta: string) => void;
   onImprimirComandas?: (pedidos: PedidoDB[]) => void;
   /** Funcion para obtener TODOS los pedidos con los filtros actuales (sin paginacion) */
   fetchAllFilteredPedidos?: () => Promise<PedidoDB[]>;
@@ -199,7 +199,7 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
       if (paradas.length === 0) return;
       const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
       if (tipoExport === 'ruta') {
-        onExportarHojaRuta(transportista, paradas);
+        onExportarHojaRuta(transportista, paradas, fechaRuta);
       } else {
         onImprimirComandas?.(paradas);
       }

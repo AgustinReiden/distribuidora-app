@@ -11,7 +11,7 @@
  *     producto y minimo de productos distintos (activacion combinada).
  *   - Preview humano de cada escala.
  */
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { Plus, Trash2, Search, ChevronDown, ChevronRight, Layers } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { formatPrecio } from '../../utils/formatters'
@@ -122,6 +122,10 @@ export default function ModalGrupoPrecio({
   const [busquedaProducto, setBusquedaProducto] = useState('')
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
+  // Para poner el foco en el campo que falta cuando una escala queda
+  // incompleta (cantidad sin precio, o viceversa).
+  const cantidadRefs = useRef<Array<HTMLInputElement | null>>([])
+  const precioRefs = useRef<Array<HTMLInputElement | null>>([])
 
   const productosFiltrados = useMemo(() => {
     if (!busquedaProducto) return productos.filter(p => p.activo !== false)
@@ -235,37 +239,44 @@ export default function ModalGrupoPrecio({
       return
     }
 
-    // Una escala es valida si tiene cantidad Y (precio base o, si es combinada,
-    // todos los productos con minimo tienen precio override).
-    const escalasValidas = escalas.filter(e => {
-      if (!e.cantidadMinima) return false
-      if (e.precioUnitario && parsePrecio(e.precioUnitario) > 0) return true
-      if (!e.combinada) return false
-      const minimosActivos = Object.values(e.minimosPorProducto)
-        .filter(v => parseInt(v.cantidad) > 0)
-      if (minimosActivos.length === 0) return false
-      return minimosActivos.every(v => v.precio && parsePrecio(v.precio) > 0)
-    })
-    if (escalasValidas.length === 0) {
-      setError('Agrega al menos una escala de precio')
-      return
-    }
+    // Una fila vacía (sin cantidad ni precio: nunca se tocó, o era una escala
+    // existente que se borró por completo) se ignora en silencio. Cualquier
+    // otra fila no vacía tiene que validar entera: si le falta la cantidad o
+    // el precio es una fila INCOMPLETA, no una fila que no cuenta. Antes se
+    // validaba sobre `escalasValidas` —que ya había filtrado esas filas
+    // incompletas— así que una escala existente a la que se le borraba el
+    // precio se caía del array en silencio y `updateGrupoPrecio` borraba de la
+    // base un tramo de precio entero sin ningún aviso.
+    const escalasNoVacias: EscalaForm[] = []
+    for (let index = 0; index < escalas.length; index++) {
+      const e = escalas[index]
+      const esVacia = !e.cantidadMinima.trim() && !e.precioUnitario.trim() &&
+        Object.keys(e.minimosPorProducto).length === 0
+      if (esVacia) continue
+      escalasNoVacias.push(e)
 
-    for (const e of escalasValidas) {
+      if (!e.cantidadMinima.trim()) {
+        setError('Falta la cantidad mínima de una escala')
+        cantidadRefs.current[index]?.focus()
+        return
+      }
       const qty = parseInt(e.cantidadMinima)
       if (isNaN(qty) || qty <= 0) {
         setError('Las cantidades minimas deben ser mayores a 0')
+        cantidadRefs.current[index]?.focus()
         return
       }
       const tienePrecioBase = e.precioUnitario && parsePrecio(e.precioUnitario) > 0
       if (!tienePrecioBase && !e.combinada) {
         setError('Los precios deben ser mayores a 0')
+        precioRefs.current[index]?.focus()
         return
       }
       if (tienePrecioBase) {
         const price = parsePrecio(e.precioUnitario)
         if (isNaN(price) || price <= 0) {
           setError('Los precios deben ser mayores a 0')
+          precioRefs.current[index]?.focus()
           return
         }
       }
@@ -319,8 +330,13 @@ export default function ModalGrupoPrecio({
       }
     }
 
+    if (escalasNoVacias.length === 0) {
+      setError('Agrega al menos una escala de precio')
+      return
+    }
+
     // Check duplicates in cantidad_minima
-    const cantidades = escalasValidas.map(e => parseInt(e.cantidadMinima))
+    const cantidades = escalasNoVacias.map(e => parseInt(e.cantidadMinima))
     if (new Set(cantidades).size !== cantidades.length) {
       setError('No puede haber dos escalas con la misma cantidad minima')
       return
@@ -332,7 +348,7 @@ export default function ModalGrupoPrecio({
         nombre: nombre.trim(),
         descripcion: descripcion.trim() || null,
         productoIds: Array.from(productoIds),
-        escalas: escalasValidas.map(e => {
+        escalas: escalasNoVacias.map(e => {
           let precioBase = parsePrecio(e.precioUnitario)
           const sinPrecioBase = !e.precioUnitario || isNaN(precioBase) || precioBase <= 0
 
@@ -510,6 +526,7 @@ export default function ModalGrupoPrecio({
                   <div key={index} className="border dark:border-gray-700 rounded-lg p-2 space-y-2">
                     <div className="flex items-center gap-2">
                       <input
+                        ref={el => { cantidadRefs.current[index] = el }}
                         type="number"
                         inputMode="numeric"
                         step="1"
@@ -522,6 +539,7 @@ export default function ModalGrupoPrecio({
                       <div className="flex-1 relative">
                         <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm">$</span>
                         <input
+                          ref={el => { precioRefs.current[index] = el }}
                           type="number"
                           inputMode="decimal"
                           min="0.01"
