@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 231.** El ledger de prod llega hasta
-`230_el_cobro_se_serializa_y_la_fecha_es_de_aca`.
+**La próxima migración es la 232.** El ledger de prod llega hasta
+`231_la_fecha_de_aca_en_las_siete_que_faltaban`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -155,7 +155,7 @@ Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el 
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
 Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
 `main`. Van cinco veces.
-Última actualización: 230, el 2026-09-14.)
+Última actualización: 231, el 2026-09-14.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -659,6 +659,29 @@ El test de concurrencia de las dos sesiones vive en `scripts/test-concurrencia-p
 **no corre en CI**: necesita dos conexiones simultáneas, y ni el MCP (una conexión por llamada),
 ni `dblink` (pide password, el rol no es superuser), ni 2PC (`max_prepared_transactions = 0`)
 lo permiten desde un agente. Se corre a mano contra una branch, nunca contra prod.
+
+---
+
+### 231 · La fecha de acá, en las siete que faltaban
+
+Cola de la `230`. Censo completo con `pg_get_function_arguments` sobre `public`: quedaban **siete**
+funciones con `DEFAULT CURRENT_DATE`, que en una base en UTC devuelve la fecha de mañana entre las
+21:00 y las 24:00 ART. Ninguna lo tenía en el cuerpo — sólo en la firma, verificado.
+
+**El único bug vivo demostrado era `marcar_entregas_masivo`**: `usePedidosQuery` hace
+`if (fecha) rpcArgs.p_fecha = fecha`, así que cuando el usuario no elige fecha el argumento se
+**omite**, el default se evalúa y la entrega queda fechada mañana al mediodía. De las otras seis,
+tres tienen callers que siempre mandan la fecha (`bot_mi_recorrido` manda `hoyEnArgentina()`,
+`obtener_resumen_rendiciones` manda las dos, `bot_recorrido_resumen` manda `null` explícito) y
+tres no tienen caller vivo en el front.
+
+Se tocaron **las siete igual**, porque un default sólo se evalúa cuando el argumento se **omite**:
+para las que hoy nunca lo omiten el cambio es un no-op comprobable, y les saca la trampa de encima.
+Es exactamente así como este bug llegó hasta acá — la `182` arregló el default de la **columna**,
+la `230` el de los **parámetros de pago**, y estas siete quedaron porque nadie había hecho el censo.
+
+La verificación de la migración es **global a propósito**: falla si queda *cualquier*
+`DEFAULT CURRENT_DATE` en `public`, no sólo en las siete. Hoy no queda ninguno.
 
 ## Mantenimiento
 
