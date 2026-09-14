@@ -1,4 +1,5 @@
 import { useState, memo, useRef, useMemo } from 'react';
+import { z } from 'zod';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2, Lock } from 'lucide-react';
 import ModalBase from './ModalBase';
 import NumberInput from '../ui/NumberInput';
@@ -6,7 +7,6 @@ import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
 import DiasAtencionSelector from '../ui/DiasAtencionSelector';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
-import { modalClienteSchema } from '../../lib/schemas';
 import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery, useClientesQuery } from '../../hooks/queries';
 import { chequearCoordenadaEnZona } from '../../utils/zonaCentroide';
 import { formatDistancia } from '../../utils/geo';
@@ -26,6 +26,76 @@ import {
 } from '../../utils/horariosCliente';
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ClienteDB } from '../../types';
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
+// compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
+// desincronizarla de la UI de este modal (ver ModalCambioProducto.tsx para el
+// incidente que motivó la regla). Co-locado, la validación viaja siempre en
+// el mismo chunk que este componente.
+// eslint-disable-next-line react-refresh/only-export-components
+export const modalClienteSchema = z.object({
+  tipo_documento: z.enum(['CUIT', 'DNI']).default('CUIT'),
+
+  numero_documento: z
+    .string()
+    .transform(val => val.replace(/\D/g, ''))
+    .refine(
+      (val) => {
+        // La validación depende del tipo_documento que no está disponible aquí
+        // Se valida por longitud: 11 para CUIT, 7-8 para DNI
+        return val.length === 0 || val.length === 11 || (val.length >= 7 && val.length <= 8)
+      },
+      { message: 'Documento inválido' }
+    ),
+
+  razonSocial: z
+    .string()
+    .min(1, { message: 'La razón social es obligatoria' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'La razón social debe tener al menos 2 caracteres' }),
+
+  nombreFantasia: z
+    .string()
+    .min(1, { message: 'El nombre de fantasía es obligatorio' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'El nombre de fantasía debe tener al menos 2 caracteres' }),
+
+  direccion: z
+    .string()
+    .min(1, { message: 'La dirección es obligatoria' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 5, { message: 'La dirección debe tener al menos 5 caracteres' }),
+
+  aclaracionDireccion: z.string().optional(),
+
+  telefono: z
+    .string()
+    .refine(val => !val || val.replace(/\D/g, '').length >= 8, {
+      message: 'El teléfono debe tener al menos 8 dígitos'
+    })
+    .optional(),
+
+  latitud: z.number()
+    .min(-90, { message: 'La latitud debe estar entre -90 y 90' })
+    .max(90, { message: 'La latitud debe estar entre -90 y 90' })
+    .nullable()
+    .optional(),
+  longitud: z.number()
+    .min(-180, { message: 'La longitud debe estar entre -180 y 180' })
+    .max(180, { message: 'La longitud debe estar entre -180 y 180' })
+    .nullable()
+    .optional(),
+  contacto: z.string().optional(),
+  /** @deprecated usar zona_id. Se mantiene para compat. */
+  zona: z.string().optional(),
+  zona_id: z.string().optional().nullable(),
+  horarios_atencion: z.string().optional(),
+  rubro: z.string().optional(),
+  notas: z.string().optional(),
+  limiteCredito: z.coerce.number().nonnegative().default(0),
+  diasCredito: z.coerce.number().int().nonnegative().default(30),
+  descuentoPorcentaje: z.coerce.number().min(0).max(100).default(0)
+})
 
 /** Tipo de documento del cliente */
 export type TipoDocumento = 'CUIT' | 'DNI';

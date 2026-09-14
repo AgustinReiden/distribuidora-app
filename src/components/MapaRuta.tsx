@@ -26,6 +26,8 @@ export interface ParadaMapa {
   titulo: string;
   subtitulo?: string;
   entregado?: boolean;
+  /** `marcar_no_entregado`: liberada sin visitar, no confundir con `entregado`. */
+  noEntregado?: boolean;
 }
 
 export interface PosicionMapa {

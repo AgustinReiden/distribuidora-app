@@ -125,6 +125,12 @@ export default function ModalMarcarVisita({
   const handleMarcar = async (cliente: ClienteDB) => {
     if (pendienteId || motivoPending) return
     setPendienteId(cliente.id)
+    // `motivoPending` en el `finally` es el de este closure (el de cuando se
+    // llamó a handleMarcar), no el que acaba de setear `setMotivoPending`:
+    // React no lo actualiza sincrónicamente. Sin esta bandera local, el
+    // `finally` siempre veía `null` y liberaba `pendienteId` aunque se
+    // hubiera abierto ModalMotivoSinGps, dejando el listado clickeable de nuevo.
+    let esperandoMotivo = false
     try {
       const gps = await capturarGps()
 
@@ -146,10 +152,11 @@ export default function ModalMarcarVisita({
         return
       }
       // Pasamos a ModalMotivoSinGps (permanece pendienteId hasta que confirme/cancele).
+      esperandoMotivo = true
       setMotivoPending({ cliente, status: gps.status })
     } finally {
       // Si quedó esperando motivo, no liberamos aún para que el listado no quede clickeable.
-      if (!motivoPending) setPendienteId(null)
+      if (!esperandoMotivo) setPendienteId(null)
     }
   }
 

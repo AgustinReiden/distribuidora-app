@@ -1,11 +1,52 @@
 import React, { useState, useEffect, FormEvent, ChangeEvent } from 'react';
+import { z } from 'zod';
 import { X, Building2, Phone, Mail, MapPin, FileText, User, Hash, CheckCircle } from 'lucide-react';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { useZodValidation } from '../../hooks/useZodValidation';
-import { modalProveedorSchema } from '../../lib/schemas';
 import { formatCuitInput } from '../../utils/formatters';
 import { useZonasEstandarizadasQuery } from '../../hooks/queries';
 import type { Proveedor } from '../../types';
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
+// para el incidente de chunk desincronizado que motivó la regla.
+// eslint-disable-next-line react-refresh/only-export-components
+export const modalProveedorSchema = z.object({
+  nombre: z
+    .string()
+    .min(1, { message: 'El nombre es obligatorio' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
+
+  cuit: z
+    .string()
+    .transform(val => val.replace(/\D/g, ''))
+    .refine(val => val.length === 0 || val.length === 11, {
+      message: 'El CUIT debe tener 11 dígitos'
+    })
+    .optional(),
+
+  direccion: z.string().optional(),
+  latitud: z.number()
+    .min(-90, { message: 'La latitud debe estar entre -90 y 90' })
+    .max(90, { message: 'La latitud debe estar entre -90 y 90' })
+    .nullable()
+    .optional(),
+  longitud: z.number()
+    .min(-180, { message: 'La longitud debe estar entre -180 y 180' })
+    .max(180, { message: 'La longitud debe estar entre -180 y 180' })
+    .nullable()
+    .optional(),
+  telefono: z.string().optional(),
+
+  email: z
+    .string()
+    .email({ message: 'El email no es válido' })
+    .or(z.literal(''))
+    .optional(),
+
+  contacto: z.string().optional(),
+  notas: z.string().optional()
+})
 
 interface AddressResult {
   direccion: string;

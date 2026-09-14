@@ -27,6 +27,13 @@ import type { MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 export interface PedidoConCliente extends PedidoDB {
   cliente?: ClienteDB;
   items: Array<PedidoItemDB & { producto?: ProductoDB }>;
+  /**
+   * Estado de la parada en `recorrido_pedidos` (no confundir con
+   * `estado` del pedido). `marcar_no_entregado` deja el pedido de nuevo en
+   * 'pendiente' — sin esto no hay forma de distinguir esa parada de una que
+   * simplemente nunca se visitó.
+   */
+  estado_entrega?: string | null;
 }
 
 export interface DatosPago {
