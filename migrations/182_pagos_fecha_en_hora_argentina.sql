@@ -18,6 +18,26 @@
 -- es lo natural, porque "es hoy"— el bug entra en silencio y se descubre en
 -- una rendicion que no cierra.
 --
+-- CORRECCION (mig 230)
+-- --------------------
+-- Lo de arriba es cierto de la COLUMNA y solo de la columna. El agujero seguia
+-- abierto un nivel mas arriba y esta migracion no lo toco:
+--
+--  · Las 4 RPCs de pago tienen su PROPIO default de parametro,
+--    `p_fecha date DEFAULT CURRENT_DATE`, que es otro CURRENT_DATE distinto del
+--    de la columna y sigue siendo el de UTC.
+--  · El default de la columna que se arregla aca NO se alcanza NUNCA desde esas
+--    RPCs: siempre mandan `fecha` explicita en el INSERT, asi que el valor que
+--    aterriza es el del parametro.
+--  · "las RPC masivas pasan fecha explicita" es verdad del INSERT, no del
+--    caller: `usePedidosQuery` OMITE `p_fecha` cuando no se elige fecha, y ahi
+--    entra el default del parametro.
+--  · Y ademas los 4 guards del encargado comparaban `p_fecha <> CURRENT_DATE`,
+--    o sea que de noche rechazaban justo la fecha correcta.
+--
+-- La 230 cambia los 8 defaults de parametro y los 4 guards a
+-- `(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`.
+--
 -- ALCANCE: SOLO `pagos`
 -- ----------------------
 -- El mismo `CURRENT_DATE` esta en otras 7 columnas date. Se dejan afuera a

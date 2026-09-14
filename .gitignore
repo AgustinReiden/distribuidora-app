@@ -54,6 +54,7 @@ backups/
 !scripts/verify-multi-tenant.sql
 !scripts/fix-pedido-3602-pagos-duplicados.sql
 !scripts/auditoria-permisos.sql
+!scripts/test-concurrencia-pago-fifo.sql
 !migrations/*.sql
 !migrations/**/*.sql
 
