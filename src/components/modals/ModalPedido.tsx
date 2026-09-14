@@ -4,7 +4,7 @@ import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters
 import { parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
-import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
+import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
@@ -386,16 +386,17 @@ const ModalPedido = memo(function ModalPedido({
   );
 
   // Precios mayoristas, promociones y cantidades mínimas
-  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, itemsFinales, totalOriginal, hayDescuento, moqMap, minimosProducto, violacionesMOQ } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet);
-
-  // Descuento del cliente (general + por categoría) aplicado en vivo sobre los
-  // items ya resueltos (mayorista/promo). La categoría prevalece sobre el general.
-  const descuentoCliente = useMemo(
-    () => aplicarDescuentoClienteItems(itemsFinales, productos, clienteSeleccionado),
-    [itemsFinales, productos, clienteSeleccionado]
+  // Las tres capas de precio (promo → mayorista → descuento del cliente) las
+  // resuelve `orquestarPrecios` adentro del hook, con la misma función que usa
+  // el bot de Telegram: así el total que ve el preventista acá y el que ve por
+  // Telegram para el mismo pedido son el mismo número.
+  const { preciosResueltos, faltantes, faltantesBonificacion, promoResolucion, totalOriginal, moqMap, minimosProducto, violacionesMOQ, totalConDescuentoCliente, hayDescuentoTotal } = usePromocionPedido(
+    nuevoPedido.items,
+    undefined,
+    regalosOverride,
+    promosEliminadasSet,
+    { cliente: clienteSeleccionado, productos },
   );
-  const totalConDescuentoCliente = descuentoCliente.total;
-  const hayDescuentoTotal = hayDescuento || descuentoCliente.hayDescuento;
 
   const totalItemsCarrito = nuevoPedido.items.reduce((t, i) => t + i.cantidad, 0);
   const totalParaMostrar = hayDescuentoTotal ? totalConDescuentoCliente : calcularTotal();
