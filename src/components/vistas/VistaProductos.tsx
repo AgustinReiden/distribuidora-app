@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import ProductosViewHeader from '../productos/ProductosViewHeader';
 import ProductoToolbar from '../productos/ProductoToolbar';
@@ -26,6 +27,9 @@ export interface VistaProductosProps {
   productosStockBajo: ProductoDB[];
   proveedores?: ProveedorDBExtended[];
   loading: boolean;
+  /** La query de productos falló tras agotar los reintentos (isError). */
+  error?: boolean;
+  onRetry?: () => void;
   isAdmin: boolean;
   /** admin o encargado: habilita stock bajo + control de stock (Excel). */
   puedeControlarStock?: boolean;
@@ -126,6 +130,8 @@ export default function VistaProductos({
   productosStockBajo,
   proveedores = [],
   loading,
+  error,
+  onRetry,
   isAdmin,
   puedeControlarStock = false,
   vista = 'productos',
@@ -396,7 +402,7 @@ export default function VistaProductos({
       )}
 
       {/* Tabla de productos */}
-      {loading ? <LoadingSpinner /> : productosFiltrados.length === 0 ? (
+      {loading ? <LoadingSpinner /> : error ? <QueryErrorState onRetry={onRetry} /> : productosFiltrados.length === 0 ? (
         <div className="text-center py-12 text-stone-500 dark:text-gray-400">
           <Package className="w-12 h-12 mx-auto mb-3 opacity-50" aria-hidden="true" />
           <p>{busqueda || filtroCategoria !== 'todas' ? 'No se encontraron productos' : 'No hay productos'}</p>

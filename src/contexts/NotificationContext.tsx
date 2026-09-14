@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
 import { Check, X, AlertTriangle, Info } from 'lucide-react';
 import { getStorageItem, setStorageItem } from '../utils/storage';
+import { setQueryErrorNotifier } from '../lib/queryErrorNotifier';
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
@@ -165,6 +166,14 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       addNotification({ type: 'info', title: 'Información', message });
     }
   }, [addToast, addNotification]);
+
+  // Registra `error()` para que `queryClient` (fuera de React) pueda avisar
+  // de una query fallida. Se desregistra al desmontar para no llamar a un
+  // `error` obsoleto tras un logout que remonte el provider.
+  useEffect(() => {
+    setQueryErrorNotifier(message => error(message));
+    return () => setQueryErrorNotifier(null);
+  }, [error]);
 
   // Memoizado a propósito: sin esto el value se recreaba en cada render y
   // cualquier efecto que dependiera de `useNotification()` volvía a dispararse.

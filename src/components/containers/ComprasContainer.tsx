@@ -84,7 +84,7 @@ export default function ComprasContainer(): React.ReactElement {
   const notify = useNotification()
 
   // Queries
-  const { data: compras = [], isLoading } = useComprasQuery()
+  const { data: compras = [], isLoading, isError, refetch } = useComprasQuery()
   const { data: proveedores = [] } = useProveedoresQuery()
   const { data: productos = [] } = useProductosQuery()
 
@@ -320,6 +320,8 @@ export default function ComprasContainer(): React.ReactElement {
           compras={compras as any}
           proveedores={proveedores as any}
           loading={isLoading}
+          error={isError}
+          onRetry={refetch}
           isAdmin={isAdmin}
           onNuevaCompra={handleNuevaCompra}
           onVerDetalle={handleVerDetalle}
