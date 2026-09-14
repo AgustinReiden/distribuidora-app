@@ -7,10 +7,28 @@
  * - Sincronización manual
  * - Notificaciones de resultado
  */
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NotifyApi } from '../types/ui'
 import type { ProductoDB } from '../types/hooks'
 import type { StockConflict } from './useOfflineSync'
+import { useLatestRef } from './useLatestRef'
+
+/**
+ * Ventana mínima entre dos auto-sincronizaciones.
+ *
+ * EL BUG QUE ARREGLA. El efecto de auto-sync depende de
+ * `ejecutarSincronizacion`, que dependía de `notify`, y el value de
+ * NotificationContext se recreaba en cada render. Cada `notify.error` del
+ * propio sync volvía a disparar el efecto, sin espera: los 5 reintentos de la
+ * operación se consumían en segundos y el pedido quedaba en `failed`, fuera de
+ * `getPendingOperations`. Pasaba justo al reconectar con el JWT vencido.
+ *
+ * `notify` ya no está en las dependencias, pero la ventana queda igual: el
+ * efecto depende de cosas que la app puede recrear en cualquier render, y la
+ * garantía que importa —un fallo no gasta más de un reintento por ventana— no
+ * tiene que depender de que ninguna de ellas se desestabilice nunca más.
+ */
+export const VENTANA_AUTOSYNC_MS = 30_000
 
 export interface SyncDependencies {
   // Estado de conexión y pendientes
@@ -70,6 +88,10 @@ export function useSyncManager({
   // Ref para evitar doble sincronización
   const isSyncingRef = useRef(false)
 
+  // `notify` fuera de las dependencias: su identidad cambia en cada render del
+  // provider y re-disparaba el efecto de auto-sync (ver VENTANA_AUTOSYNC_MS).
+  const notifyRef = useLatestRef(notify)
+
   /**
    * Ejecuta la sincronización de pedidos y mermas pendientes
    * Valida stock actual antes de sincronizar para evitar overselling
@@ -87,7 +109,7 @@ export function useSyncManager({
         )
 
         if (resultadoPedidos.sincronizados > 0) {
-          notify.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`)
+          notifyRef.current.success(`${resultadoPedidos.sincronizados} pedido(s) sincronizado(s)`)
           await refetchPedidos()
           await refetchProductos()
           refetchMetricas()
@@ -96,14 +118,14 @@ export function useSyncManager({
         // Notificar conflictos de stock (overselling prevenido)
         if (resultadoPedidos.conflictos && resultadoPedidos.conflictos.length > 0) {
           const totalConflictos = resultadoPedidos.conflictos.length
-          notify.warning(
+          notifyRef.current.warning(
             `${totalConflictos} pedido(s) con stock insuficiente. Revise los pedidos fallidos.`,
             { persist: true }
           )
         }
 
         if (resultadoPedidos.errores.length > 0) {
-          notify.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`)
+          notifyRef.current.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`)
         }
       }
 
@@ -114,17 +136,17 @@ export function useSyncManager({
         )
 
         if (resultadoMermas.sincronizados > 0) {
-          notify.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`)
+          notifyRef.current.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`)
           await refetchMermas()
         }
 
         if (resultadoMermas.errores.length > 0) {
-          notify.error(`${resultadoMermas.errores.length} merma(s) no se pudieron sincronizar`)
+          notifyRef.current.error(`${resultadoMermas.errores.length} merma(s) no se pudieron sincronizar`)
         }
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Error desconocido'
-      notify.error('Error durante la sincronizacion: ' + errorMessage)
+      notifyRef.current.error('Error durante la sincronizacion: ' + errorMessage)
     } finally {
       isSyncingRef.current = false
     }
@@ -140,18 +162,38 @@ export function useSyncManager({
     refetchProductos,
     refetchMermas,
     refetchMetricas,
-    notify
+    notifyRef
   ])
 
-  // Auto-sincronizar cuando vuelve la conexión
+  // Auto-sincronizar cuando vuelve la conexión, como mucho una vez por ventana.
+  // `reintento` es lo que despierta al efecto cuando la ventana se cumple: sin
+  // él, un fallo dejaría la cola esperando al próximo render que pase por acá.
+  const ultimoAutoSyncRef = useRef(0)
+  const [reintento, setReintento] = useState(0)
+
   useEffect(() => {
-    if (isOnline && (pedidosPendientes.length > 0 || mermasPendientes.length > 0)) {
-      ejecutarSincronizacion()
+    if (!isOnline) return
+    if (pedidosPendientes.length === 0 && mermasPendientes.length === 0) return
+
+    const restante = VENTANA_AUTOSYNC_MS - (Date.now() - ultimoAutoSyncRef.current)
+    if (restante > 0) {
+      const timer = setTimeout(() => setReintento(n => n + 1), restante)
+      return () => clearTimeout(timer)
     }
-  }, [isOnline, ejecutarSincronizacion, pedidosPendientes.length, mermasPendientes.length])
+
+    ultimoAutoSyncRef.current = Date.now()
+    void ejecutarSincronizacion().finally(() => {
+      // Reprograma la próxima ventana si algo quedó pendiente. Si la cola se
+      // vació, el efecto sale por el guard de arriba y no vuelve a correr.
+      setReintento(n => n + 1)
+    })
+  }, [isOnline, ejecutarSincronizacion, pedidosPendientes.length, mermasPendientes.length, reintento])
 
   // Handler para sincronización manual
   const handleSincronizar = useCallback(async (): Promise<void> => {
+    // El botón no espera ninguna ventana: lo tocó una persona. Pero sí la
+    // reinicia, para que el automático no dispare atrás del manual.
+    ultimoAutoSyncRef.current = Date.now()
     await ejecutarSincronizacion()
   }, [ejecutarSincronizacion])
 

@@ -82,6 +82,50 @@ describe('offlineDb', () => {
       const pending = await getPendingOperations()
       expect(pending).toHaveLength(0)
     })
+
+    /**
+     * TELÉFONO COMPARTIDO. IndexedDB es del dispositivo, no de la sesión, y el
+     * logout no la toca (a propósito: una cola borrada es un pedido perdido).
+     * Sin filtrar por dueño, el usuario B veía los pedidos encolados por A, los
+     * replayaba, el guard de la mig 219 se los rechazaba con 42501 y
+     * terminaban en `failed` sin que A se enterara.
+     */
+    describe('filtro por dueño (usuario y sucursal)', () => {
+      it('no devuelve las operaciones de otro usuario', async () => {
+        await queueOperation('CREATE_PEDIDO', { n: 'de A' }, 'user-A', 5, 1)
+        await queueOperation('CREATE_PEDIDO', { n: 'de B' }, 'user-B', 5, 1)
+
+        const deB = await getPendingOperations(10, 'user-B', 1)
+        expect(deB).toHaveLength(1)
+        expect(deB[0].payload).toEqual({ n: 'de B' })
+      })
+
+      it('no devuelve las operaciones de otra sucursal', async () => {
+        await queueOperation('CREATE_PEDIDO', { n: 'tucuman' }, 'user-A', 5, 1)
+        await queueOperation('CREATE_PEDIDO', { n: 'taco pozo' }, 'user-A', 5, 2)
+
+        const sucursal2 = await getPendingOperations(10, 'user-A', 2)
+        expect(sucursal2).toHaveLength(1)
+        expect(sucursal2[0].payload).toEqual({ n: 'taco pozo' })
+      })
+
+      it('sigue mostrando las que no tienen dueño anotado', async () => {
+        // Encoladas antes de que la cola registrara userId/sucursalId.
+        // Esconderlas las dejaría huérfanas para siempre; que se vean es lo que
+        // permite sincronizarlas o descartarlas.
+        await queueOperation('CREATE_MERMA', { n: 'vieja' })
+
+        const deB = await getPendingOperations(10, 'user-B', 1)
+        expect(deB).toHaveLength(1)
+      })
+
+      it('sin filtro devuelve todo, como antes', async () => {
+        await queueOperation('CREATE_PEDIDO', { n: 1 }, 'user-A', 5, 1)
+        await queueOperation('CREATE_PEDIDO', { n: 2 }, 'user-B', 5, 2)
+
+        expect(await getPendingOperations(10)).toHaveLength(2)
+      })
+    })
   })
 
   // ---------------------------------------------------------------------------
@@ -134,6 +178,19 @@ describe('offlineDb', () => {
       expect(op!.lastError).toBe('timeout')
       // Still pending because retryCount (1) < maxRetries (5)
       expect(op!.status).toBe('pending')
+    })
+
+    it('con terminal:true no gasta los reintentos que quedan', async () => {
+      // Para lo que reintentar no puede arreglar: la clave de idempotencia ya
+      // la tiene otro pedido. Queda en el panel de fallidas, que es donde
+      // alguien puede decidir qué hacer con ella.
+      const id = await queueOperation('CREATE_PEDIDO', { n: 1 }, undefined, 5)
+      await markAsFailed(id!, 'la clave ya la tiene otro pedido', { terminal: true })
+
+      const op = await db.pendingOperations.get(id!)
+      expect(op!.status).toBe('failed')
+      expect(op!.retryCount).toBe(5)
+      expect(await getPendingOperations()).toHaveLength(0)
     })
 
     it('sets status to failed permanently when maxRetries reached', async () => {
