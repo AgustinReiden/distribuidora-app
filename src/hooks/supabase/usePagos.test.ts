@@ -282,6 +282,71 @@ describe('usePagos', () => {
     })
   })
 
+  // mig 230. Mandar `p_fecha: null` NO aplica el DEFAULT de la RPC: los defaults
+  // de Postgres sólo valen cuando el argumento se OMITE. Llegaba p_fecha NULL y
+  // el INSERT chocaba contra el NOT NULL de pagos.fecha.
+  describe('registrarPagoFIFO / Combinado — p_fecha nunca viaja null', () => {
+    const esFechaISO = expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)
+
+    it('sin fecha, manda la fecha local de Argentina en vez de null', async () => {
+      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: { pago_ids: [1], sobrante: 0, monto_total: 500, aplicaciones: [], credito_aplicado: 0 },
+        error: null,
+      })
+
+      const { result } = renderHook(() => usePagos())
+      await act(async () => {
+        await result.current.registrarPagoFIFO({
+          clienteId: 'c1', monto: 500, formaPago: 'efectivo',
+        })
+      })
+
+      expect(supabase.rpc).toHaveBeenCalledWith(
+        'registrar_pago_cliente_fifo',
+        expect.objectContaining({ p_fecha: esFechaISO }),
+      )
+    })
+
+    it('respeta la fecha elegida cuando viene', async () => {
+      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: { pago_ids: [1], sobrante: 0, monto_total: 500, aplicaciones: [], credito_aplicado: 0 },
+        error: null,
+      })
+
+      const { result } = renderHook(() => usePagos())
+      await act(async () => {
+        await result.current.registrarPagoFIFO({
+          clienteId: 'c1', monto: 500, formaPago: 'efectivo', fecha: '2026-03-01',
+        })
+      })
+
+      expect(supabase.rpc).toHaveBeenCalledWith(
+        'registrar_pago_cliente_fifo',
+        expect.objectContaining({ p_fecha: '2026-03-01' }),
+      )
+    })
+
+    it('el combinado tampoco manda null', async () => {
+      ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        data: { pago_ids: [1], sobrante: 0, monto_total: 500, aplicaciones: [], credito_aplicado: 0 },
+        error: null,
+      })
+
+      const { result } = renderHook(() => usePagos())
+      await act(async () => {
+        await result.current.registrarPagoCombinadoFIFO({
+          clienteId: 'c1',
+          metodos: [{ monto: 300, formaPago: 'efectivo' }, { monto: 200, formaPago: 'transferencia' }],
+        })
+      })
+
+      expect(supabase.rpc).toHaveBeenCalledWith(
+        'registrar_pago_combinado_cliente_fifo',
+        expect.objectContaining({ p_fecha: esFechaISO }),
+      )
+    })
+  })
+
   describe('eliminarPago', () => {
     it('debe eliminar un pago y actualizar estado local', async () => {
       // First load pagos

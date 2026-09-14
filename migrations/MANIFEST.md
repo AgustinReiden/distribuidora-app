@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 230.** El ledger de prod llega hasta
-`229_la_devolucion_dice_de_donde_viene`.
+**La próxima migración es la 231.** El ledger de prod llega hasta
+`230_el_cobro_se_serializa_y_la_fecha_es_de_aca`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -155,7 +155,7 @@ Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el 
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
 Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
 `main`. Van cinco veces.
-Última actualización: 229, el 2026-09-14.)
+Última actualización: 230, el 2026-09-14.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -622,6 +622,43 @@ no, aborta. Leer el archivo en vez del cuerpo vivo habría producido anclas que 
 `borrar_lotes_compra_cancelada`) y recién después descuenta el stock. Al revés, el trigger de
 lotes consumía FEFO de un lote **ajeno** que venciera antes y después se borraban además los
 propios: doble descuento en el ledger de lotes.
+
+---
+
+### 230 · El cobro se serializa y la fecha es de acá
+
+Mapea 1:1 al ledger. Tres cosas que no se ven leyendo el SQL:
+
+- **`CREATE OR REPLACE` SÍ cambia el default de un parámetro.** La creencia de que hace falta
+  `DROP` + `CREATE` es falsa: Postgres sólo prohíbe cambiar nombre, tipos y tipo de retorno.
+  Probado en prod dentro de una transacción con `ROLLBACK` antes de escribir la migración —
+  queda **una sola** firma, con el default nuevo. Importa porque el `DROP` era el camino
+  peligroso: dejaba una ventana sin la función y, si algo salía mal, dos firmas conviviendo
+  (`PGRST203`, Trampa 5). Como la identidad de los argumentos no cambia, la Trampa 5 ni siquiera
+  aplica.
+- **Eran cuatro guards, no tres.** Además de los dos de la `165` y el de la `100`,
+  `marcar_pagos_masivo_impl` también comparaba `p_fecha <> CURRENT_DATE`. Arreglar tres dejaba
+  el camino de cobro masivo —el más usado— rechazando la fecha correcta entre las 21:00 y las
+  24:00 ART. El barrido se hizo con `pg_get_functiondef` sobre las 4, no leyendo los archivos.
+- **`p_fecha: null` desde el front NO aplica el default.** Un default de parámetro sólo vale
+  cuando el argumento se **omite**; mandarlo explícitamente en `null` lo pone en NULL y el
+  `INSERT` choca contra el `NOT NULL` de `pagos.fecha`. `usePagos` mandaba `input.fecha ?? null`.
+  Los callers masivos de `usePedidosQuery`, en cambio, **omiten** `p_fecha`, y por eso sí caían
+  en el default —y por eso les pegaba el bug de UTC—.
+
+El check nuevo **CC-B** es un centinela de 30 días, no de 2 horas: el gate corre una vez por
+día, así que una ventana de 2 h sólo ve lo creado en las 2 h previas a la corrida y se le escapa
+casi cualquier regresión. Se midió antes de elegirla: el último pedido divergente es del
+2026-05-05 y las ventanas de 7, 30, 60, 90 y 120 días dan todas 0, así que 30 días deja 100 días
+de margen contra la cohorte histórica y aun así mantiene una regresión visible un mes entero.
+
+Los **69 pedidos** con `monto_pagado` por encima de sus pagos (abril–mayo 2026, $2.459.670,02)
+**no se tocaron**: corregirlos es una decisión de negocio, no de esquema.
+
+El test de concurrencia de las dos sesiones vive en `scripts/test-concurrencia-pago-fifo.sql` y
+**no corre en CI**: necesita dos conexiones simultáneas, y ni el MCP (una conexión por llamada),
+ni `dblink` (pide password, el rol no es superuser), ni 2PC (`max_prepared_transactions = 0`)
+lo permiten desde un agente. Se corre a mano contra una branch, nunca contra prod.
 
 ## Mantenimiento
 

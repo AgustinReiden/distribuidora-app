@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { supabase, notifyError } from './base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { retryWithBackoff, isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { fechaLocalISO } from '../../utils/formatters'
 import type {
   PagoDBWithUsuario,
   PagoFormInput,
@@ -236,7 +237,12 @@ export function usePagos(): UsePagosReturnExtended {
           p_cliente_id: input.clienteId,
           p_monto: input.monto,
           p_forma_pago: input.formaPago,
-          p_fecha: input.fecha ?? null,
+          // mig 230: nunca `null`. Mandar null NO aplica el DEFAULT de la RPC
+          // (los defaults sólo valen cuando el argumento se OMITE), así que
+          // llegaba p_fecha NULL y el INSERT chocaba contra el NOT NULL de
+          // pagos.fecha. La fecha se calcula acá, en TZ Argentina, que es la
+          // misma que usa ahora el DEFAULT de la RPC.
+          p_fecha: input.fecha ?? fechaLocalISO(),
           p_referencia: input.referencia ?? null,
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
@@ -293,7 +299,8 @@ export function usePagos(): UsePagosReturnExtended {
         const { data, error } = await supabase.rpc('registrar_pago_combinado_cliente_fifo', {
           p_cliente_id: input.clienteId,
           p_metodos: input.metodos.map(m => ({ monto: m.monto, forma_pago: m.formaPago })),
-          p_fecha: input.fecha ?? null,
+          // mig 230: ver registrarPagoFIFO. Nunca `null`.
+          p_fecha: input.fecha ?? fechaLocalISO(),
           p_referencia: input.referencia ?? null,
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
