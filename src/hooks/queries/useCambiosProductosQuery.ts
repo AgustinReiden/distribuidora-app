@@ -56,7 +56,6 @@ export function useRegistrarCambioProductoMutation() {
     mutationFn: registrarCambio,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.listsPrefix(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: cambiosProductosKeys.lists(currentSucursalId) })
     },
@@ -129,7 +128,6 @@ export function useAplicarCambioParadaMutation() {
     mutationFn: aplicarCambioDeParada,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.listsPrefix(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: cambiosProductosKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })

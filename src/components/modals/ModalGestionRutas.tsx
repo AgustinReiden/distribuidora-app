@@ -117,7 +117,7 @@ export interface ModalGestionRutasProps {
    * Cada repartidor puede traer máx paradas y zonas preferidas.
    */
   onArmarRutaMulti?: (repartidores: RepartidorParam[], pedidos: PedidoDB[], fecha: string, horaInicio: string, horaFin: string) => void;
-  onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[]) => void;
+  onExportarPDF: (transportista: PerfilDB | undefined, pedidos: PedidoOrdenado[], infoRuta: { fecha: string; distancia_formato?: string; duracion_formato?: string }) => void;
   /** Imprime las comandas (duplicado por pedido) de la ruta recién armada. */
   onImprimirComandas?: (pedidos: PedidoOrdenado[]) => void;
   onClose: () => void;
@@ -748,7 +748,11 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   const handleExportarPDF = (): void => {
     const transportista = transportistas.find(t => t.id === transportistaSeleccionado);
-    onExportarPDF(transportista, pedidosOrdenados);
+    onExportarPDF(transportista, pedidosOrdenados, {
+      fecha: fechaEntrega,
+      distancia_formato: rutaOptimizada?.distancia_formato,
+      duracion_formato: rutaOptimizada?.duracion_formato,
+    });
   };
 
   const handleImprimirComandas = (): void => {

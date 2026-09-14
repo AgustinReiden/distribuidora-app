@@ -8,12 +8,20 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ModalGrupoPrecio from './ModalGrupoPrecio'
-import type { ProductoDB } from '../../types'
+import type { GrupoPrecioConDetalles, ProductoDB } from '../../types'
 
 const PRODUCTOS = [
   { id: 'p1', nombre: 'CODITO COTELLA 500GRS', precio: 920, stock: 10 },
   { id: 'p2', nombre: 'MOSTACHO COTELLA 500GRS', precio: 920, stock: 10 },
 ] as unknown as ProductoDB[]
+
+const GRUPO_EXISTENTE = {
+  id: 'g1',
+  nombre: 'Fideos Cotella',
+  descripcion: null,
+  productos: [{ id: 'gp1', grupo_precio_id: 'g1', producto_id: 'p1' }],
+  escalas: [{ id: 'e1', grupo_precio_id: 'g1', cantidad_minima: 12, precio_unitario: 850, etiqueta: null, min_productos_distintos: 1 }],
+} as unknown as GrupoPrecioConDetalles
 
 function renderModal(onSave = vi.fn().mockResolvedValue({ success: true })) {
   const onClose = vi.fn()
@@ -28,7 +36,24 @@ function renderModal(onSave = vi.fn().mockResolvedValue({ success: true })) {
   return { onSave, onClose }
 }
 
+function renderModalEditando(
+  grupo: GrupoPrecioConDetalles = GRUPO_EXISTENTE,
+  onSave = vi.fn().mockResolvedValue({ success: true }),
+) {
+  const onClose = vi.fn()
+  render(
+    <ModalGrupoPrecio
+      grupo={grupo}
+      productos={PRODUCTOS}
+      onSave={onSave}
+      onClose={onClose}
+    />,
+  )
+  return { onSave, onClose }
+}
+
 const guardar = () => screen.getByRole('button', { name: /Crear condición/ })
+const guardarCambios = () => screen.getByRole('button', { name: /Guardar cambios/ })
 
 describe('ModalGrupoPrecio', () => {
   it('exige nombre', async () => {
@@ -113,5 +138,38 @@ describe('ModalGrupoPrecio', () => {
     const { onClose } = renderModal()
     await userEvent.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('una escala con cantidad pero sin precio bloquea el guardado (no se cae en silencio)', async () => {
+    const { onSave } = renderModalEditando()
+    // La escala ya trae cantidad=12 y precio=850 cargados desde `grupo`.
+    // Se borra el precio, como pasaría si alguien lo limpia por error.
+    await userEvent.clear(screen.getByPlaceholderText('Precio c/u'))
+    await userEvent.click(guardarCambios())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/precios deben ser mayores a 0/i)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('una escala con precio pero sin cantidad también bloquea el guardado', async () => {
+    const { onSave } = renderModalEditando()
+    await userEvent.clear(screen.getByPlaceholderText('Cant. minima total'))
+    await userEvent.click(guardarCambios())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/falta la cantidad mínima/i)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('una fila totalmente vacía (agregada de más) se ignora en vez de bloquear', async () => {
+    const { onSave } = renderModalEditando()
+    // Agrega una segunda escala y la deja sin tocar: cantidad y precio vacíos.
+    await userEvent.click(screen.getByRole('button', { name: /Agregar escala/ }))
+    await userEvent.click(guardarCambios())
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        escalas: [expect.objectContaining({ cantidadMinima: 12, precioUnitario: 850 })],
+      }),
+    )
   })
 })

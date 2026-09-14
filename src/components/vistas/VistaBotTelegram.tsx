@@ -138,6 +138,10 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
   const mensajesEnRango =
     auditSummary?.por_tipo?.find((t) => t.tipo === 'mensaje')?.count ?? 0;
   const digestsEnviados = digests.length;
+  // bot_admin_audit_log clampea p_limit a 200 (mig 019): auditEvents.length
+  // por sí solo no dice si hay más eventos que los traídos. El summary sí
+  // tiene el total real del rango — se usa para el "mostrando X de N".
+  const totalEventos = auditSummary?.total_eventos ?? auditEvents.length;
 
   const digestsTotalPages = Math.max(1, Math.ceil(digests.length / PAGE_SIZE_DIGESTS));
   const auditTotalPages = Math.max(1, Math.ceil(auditEvents.length / PAGE_SIZE_AUDIT));
@@ -417,7 +421,9 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
             Audit log
           </h2>
           <span className="text-sm text-gray-500 dark:text-gray-400">
-            {auditEvents.length} eventos
+            {totalEventos > auditEvents.length
+              ? `mostrando ${auditEvents.length} de ${totalEventos} eventos`
+              : `${auditEvents.length} eventos`}
           </span>
         </div>
 

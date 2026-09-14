@@ -669,7 +669,6 @@ export function useCrearPedidoMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // Invalidar productos (por cambio de stock)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: productosKeys.stockBajo(currentSucursalId, 10) })
     },
   })
 }

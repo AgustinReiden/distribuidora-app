@@ -4,9 +4,10 @@
 // rango de fechas. Permite responder "ventas de ayer por preventista", "quién
 // vendió más esta semana", "ventas del mes por vendedor", etc.
 //
-// Delega 100% a la RPC bot_ventas_por_preventista (migration 025). Mismas
-// convenciones que ventas_periodo: filtro por created_at, excluye estados
-// 'cancelado' / 'anulado', filtra por sucursal del bot user.
+// Delega 100% a la RPC bot_ventas_por_preventista (migration 025, redefinida
+// en la 099). Mismas convenciones que ventas_periodo: cuenta SOLO ventas
+// entregadas (estado='entregado', canal='app'), filtro por pedidos.fecha (no
+// created_at), filtra por sucursal del bot user.
 
 import type { Tool } from "../base.ts";
 
@@ -54,8 +55,9 @@ export const ventasPorPreventistaTool: Tool<
     "fechas (admin/encargado). Devuelve total vendido, cantidad de pedidos y " +
     "ticket promedio por cada preventista. Útil para 'ventas de ayer por " +
     "preventista', 'quién vendió más esta semana', etc. Las fechas son " +
-    "inclusive en formato YYYY-MM-DD. Filtra por sucursal del bot user. " +
-    "Excluye pedidos cancelados/anulados.",
+    "inclusive en formato YYYY-MM-DD y filtran por pedidos.fecha. Filtra por " +
+    "sucursal del bot user. total_ventas cuenta SOLO ventas ENTREGADAS " +
+    "(estado='entregado', canal='app') — coincide con el reporte gerencial.",
   parameters: {
     type: "object",
     properties: {

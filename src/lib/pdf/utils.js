@@ -31,15 +31,19 @@ export const formatFecha = (fecha) =>
  * @param {Date|string} fecha - Fecha a formatear
  * @returns {string} Fecha y hora formateadas
  */
-export const formatFechaHora = (fecha) =>
-  parseDateSafe(fecha || new Date()).toLocaleString('es-AR', {
+export const formatFechaHora = (fecha) => {
+  // Date-only ('YYYY-MM-DD', ej. pedidos.fecha) no tiene hora real que mostrar:
+  // parseDateSafe le clava T12:00:00 para evitar el corrimiento de dia UTC, y
+  // mostrar esa hora inventada como si fuera la hora real es el bug.
+  const esDateOnly = typeof fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+  return parseDateSafe(fecha || new Date()).toLocaleString('es-AR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: AR_TZ
+    timeZone: AR_TZ,
+    ...(esDateOnly ? {} : { hour: '2-digit', minute: '2-digit' })
   })
+}
 
 /**
  * Trunca un texto a una longitud máxima
@@ -57,12 +61,13 @@ export const truncate = (text, maxLength, suffix = '..') => {
  * Genera un nombre de archivo seguro para el PDF
  * @param {string} prefix - Prefijo del archivo
  * @param {string} name - Nombre opcional
+ * @param {Date|string} fecha - Fecha a estampar en el nombre (default: hoy)
  * @returns {string} Nombre de archivo
  */
-export const generateFilename = (prefix, name = '') => {
-  const fecha = formatFecha(new Date()).replace(/\//g, '-')
+export const generateFilename = (prefix, name = '', fecha = new Date()) => {
+  const fechaStr = formatFecha(fecha).replace(/\//g, '-')
   const safeName = name ? `-${name.replace(/\s+/g, '-').toLowerCase().substring(0, 20)}` : ''
-  return `${prefix}${safeName}-${fecha}.pdf`
+  return `${prefix}${safeName}-${fechaStr}.pdf`
 }
 
 /**
