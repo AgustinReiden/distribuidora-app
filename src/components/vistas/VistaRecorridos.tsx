@@ -29,6 +29,11 @@ export interface VistaRecorridosProps {
   onFechaChange: (fecha: string) => void;
   fechaSeleccionada: string;
   estadisticas?: EstadisticasRecorridos | null;
+  /**
+   * Sólo lo pasa el container cuando el usuario es admin. Sin él la tarjeta no
+   * dibuja el botón de recalcular.
+   */
+  onRecalcular?: (recorridoId: string) => void | Promise<void>;
 }
 
 interface PedidoRecorrido {
@@ -77,6 +82,11 @@ interface PedidoRecorridoCardProps {
 interface RecorridoCardProps {
   recorrido: RecorridoConPedidos;
   defaultExpanded?: boolean;
+  /**
+   * Recalcula los contadores del recorrido desde sus paradas. Sólo se pasa
+   * para admin: el RPC exige encargado o admin y sin él no hay botón.
+   */
+  onRecalcular?: (recorridoId: string) => void | Promise<void>;
 }
 
 // =============================================================================
@@ -213,9 +223,20 @@ function PedidoRecorridoCard({ pedido, orden }: PedidoRecorridoCardProps): React
 // COMPONENTE: RecorridoCard
 // =============================================================================
 
-function RecorridoCard({ recorrido, defaultExpanded = false }: RecorridoCardProps): React.ReactElement {
+function RecorridoCard({ recorrido, defaultExpanded = false, onRecalcular }: RecorridoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(defaultExpanded);
+  const [recalculando, setRecalculando] = useState<boolean>(false);
   const deposito = useDepositoCoords();
+
+  const handleRecalcular = async (): Promise<void> => {
+    if (!onRecalcular || !recorrido.id || recalculando) return;
+    setRecalculando(true);
+    try {
+      await onRecalcular(String(recorrido.id));
+    } finally {
+      setRecalculando(false);
+    }
+  };
 
   const pedidosOrdenados = useMemo<PedidoRecorrido[]>(() => {
     if (!recorrido.pedidos) return [];
@@ -251,9 +272,29 @@ function RecorridoCard({ recorrido, defaultExpanded = false }: RecorridoCardProp
               </p>
             </div>
           </div>
-          <span className={`px-3 py-1 rounded-full border text-sm font-medium ${estadoRecorrido.color}`}>
-            {estadoRecorrido.label}
-          </span>
+          <div className="flex items-center gap-2">
+            {/*
+              Reparar una ruta vieja: hasta la mig 234 `total_facturado` no se
+              enteraba de que una salvedad bajaba `pedidos.total`, asi que las
+              rutas anteriores siguen mostrando "Pendiente" inflado. El RPC
+              recalcula los cuatro contadores desde las paradas y es idempotente.
+            */}
+            {onRecalcular && (
+              <button
+                type="button"
+                onClick={() => void handleRecalcular()}
+                disabled={recalculando}
+                title="Recalcular los totales de esta ruta desde sus paradas"
+                aria-label="Recalcular totales del recorrido"
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/60 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${recalculando ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+            <span className={`px-3 py-1 rounded-full border text-sm font-medium ${estadoRecorrido.color}`}>
+              {estadoRecorrido.label}
+            </span>
+          </div>
         </div>
 
         {/* Barra de progreso */}
@@ -365,7 +406,8 @@ export default function VistaRecorridos({
   onRefresh,
   onFechaChange,
   fechaSeleccionada,
-  estadisticas = null
+  estadisticas = null,
+  onRecalcular
 }: VistaRecorridosProps): React.ReactElement {
   const [vistaEstadisticas, setVistaEstadisticas] = useState<boolean>(false);
   const [fechaDesde, setFechaDesde] = useState<string>(() => {
@@ -644,6 +686,7 @@ export default function VistaRecorridos({
               key={recorrido.id || index}
               recorrido={recorrido as RecorridoConPedidos}
               defaultExpanded={recorridos.length === 1}
+              onRecalcular={onRecalcular}
             />
           ))}
         </div>
