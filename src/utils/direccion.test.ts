@@ -49,4 +49,16 @@ describe('preservarAlturaEnDireccion', () => {
   it('no rompe con dirección vacía', () => {
     expect(preservarAlturaEnDireccion('', 'Calle 123')).toBe('');
   });
+
+  it('toma la altura y no el número en el nombre de la calle (25 de Mayo)', () => {
+    expect(
+      preservarAlturaEnDireccion('Av. 25 de Mayo, San Miguel de Tucumán', 'Av. 25 de Mayo 1450'),
+    ).toBe('Av. 25 de Mayo 1450, San Miguel de Tucumán');
+  });
+
+  it('toma la altura y no el número en el nombre de la calle (9 de Julio)', () => {
+    expect(
+      preservarAlturaEnDireccion('9 de Julio, San Miguel de Tucumán', '9 de Julio 300'),
+    ).toBe('9 de Julio 300, San Miguel de Tucumán');
+  });
 });

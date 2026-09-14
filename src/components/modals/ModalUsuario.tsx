@@ -1,12 +1,9 @@
 import { useState, useEffect, memo, useRef } from 'react';
 import { z } from 'zod';
-import { Loader2, MapPin, Truck } from 'lucide-react';
+import { Loader2, Truck } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import {
-  useZonasEstandarizadasQuery,
-  usePreventistaZonasQuery,
-  useAsignarZonasPrevMutation,
   usePerfilRolesQuery,
   useAsignarPerfilRolesMutation,
 } from '../../hooks/queries';
@@ -79,11 +76,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit, getAriaProps, getErrorMessageProps } = useZodValidation(usuarioSchema);
 
-  // Zonas queries
-  const { data: zonas } = useZonasEstandarizadasQuery();
-  const { data: prevZonaIds } = usePreventistaZonasQuery(usuario?.id);
-  const asignarZonasMut = useAsignarZonasPrevMutation();
-
   // Capacidades extra en la sucursal activa (mig 155)
   const { currentSucursalNombre } = useSucursal();
   const { data: rolesExtraGuardados } = usePerfilRolesQuery(usuario?.id);
@@ -98,16 +90,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     zona: usuario.zona || ''
   } : { nombre: '', rol: 'preventista', activo: true, zona: '' });
 
-  // Estado local para zonas seleccionadas (tabla pivot, separado del perfil)
-  const [zonaIds, setZonaIds] = useState<string[]>([]);
-
-  // Cargar zonas del preventista cuando llegan de la query
-  useEffect(() => {
-    if (prevZonaIds) {
-      setZonaIds(prevZonaIds);
-    }
-  }, [prevZonaIds]);
-
   // Estado local para las capacidades extra (tabla perfil_roles, mig 155)
   const [puedeLlevarRuta, setPuedeLlevarRuta] = useState<boolean>(false);
 
@@ -116,9 +98,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
       setPuedeLlevarRuta(rolesExtraGuardados.includes('transportista'));
     }
   }, [rolesExtraGuardados]);
-
-  // Mostrar campo de zona solo para preventistas
-  const mostrarZona = form.rol === 'preventista';
 
   // El bloque de capacidades extra no aplica a quien ya las tiene por su rol:
   // el transportista lleva la ruta por definicion y el admin puede todo.
@@ -131,14 +110,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
     if (hasAttemptedSubmit && errors[field]) {
       clearFieldError(field);
     }
-  };
-
-  const toggleZona = (zonaId: string): void => {
-    setZonaIds(prev =>
-      prev.includes(zonaId)
-        ? prev.filter(id => id !== zonaId)
-        : [...prev, zonaId]
-    );
   };
 
   const handleSubmit = async (): Promise<void> => {
@@ -160,15 +131,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
 
     // Guardar perfil
     await onSave({ ...form, id: usuario?.id });
-
-    // Guardar zonas del preventista en tabla pivot
-    if (usuario?.id && form.rol === 'preventista') {
-      try {
-        await asignarZonasMut.mutateAsync({ perfilId: usuario.id, zonaIds });
-      } catch {
-        // Si falla la asignación de zonas, el perfil ya se guardó
-      }
-    }
 
     // Guardar capacidades extra de la sucursal activa. Si el rol paso a ser
     // transportista o admin, se limpian: ya las tiene por rol y dejarlas seria
@@ -233,41 +195,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           {errors.rol && <p {...getErrorMessageProps('rol')} className="text-red-500 text-xs mt-1">{errors.rol}</p>}
         </div>
 
-        {/* Zonas asignadas — solo para preventistas */}
-        {mostrarZona && (
-          <div>
-            <label className="block text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-1">
-              <MapPin className="w-4 h-4" />
-              Zonas Asignadas
-            </label>
-            {zonas && zonas.length > 0 ? (
-              <div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-700">
-                {zonas.map(z => (
-                  <label key={z.id} className="flex items-center gap-2 text-sm dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 rounded px-1 py-0.5">
-                    <input
-                      type="checkbox"
-                      checked={zonaIds.includes(String(z.id))}
-                      onChange={() => toggleZona(String(z.id))}
-                      className="w-4 h-4 rounded"
-                    />
-                    {z.nombre}
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400 italic">No hay zonas configuradas. Crealas desde el modal de clientes.</p>
-            )}
-            {zonaIds.length > 0 && (
-              <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                {zonaIds.length} zona{zonaIds.length !== 1 ? 's' : ''} seleccionada{zonaIds.length !== 1 ? 's' : ''}
-              </p>
-            )}
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              El preventista solo vera clientes de las zonas seleccionadas
-            </p>
-          </div>
-        )}
-
         {/* Capacidades extra en la sucursal activa (mig 155). Se SUMAN al rol,
             no lo reemplazan: el preventista que acompaña al camion sigue
             vendiendo y ademas reparte. */}
@@ -329,10 +256,10 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
         </button>
         <button
           onClick={handleSubmit}
-          disabled={guardando || asignarZonasMut.isPending || asignarRolesMut.isPending}
+          disabled={guardando || asignarRolesMut.isPending}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
-          {(guardando || asignarZonasMut.isPending || asignarRolesMut.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          {(guardando || asignarRolesMut.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           Guardar
         </button>
       </div>

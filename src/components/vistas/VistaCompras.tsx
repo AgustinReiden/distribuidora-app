@@ -4,6 +4,7 @@ import type { NCResumen } from '../../hooks/queries';
 import { formatPrecio } from '../../utils/formatters';
 import { adminPuedeEditarCompra } from '../../utils/permisosCompra';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from '../../types';
 
@@ -36,6 +37,9 @@ export interface VistaComprasProps {
   compras: CompraDBExtended[];
   proveedores: ProveedorDBExtended[];
   loading: boolean;
+  /** La query de compras falló tras agotar los reintentos (isError). */
+  error?: boolean;
+  onRetry?: () => void;
   isAdmin: boolean;
   onNuevaCompra: () => void;
   onVerDetalle: (compra: CompraDBExtended) => void;
@@ -68,6 +72,8 @@ export default function VistaCompras({
   compras,
   proveedores,
   loading,
+  error,
+  onRetry,
   isAdmin,
   onNuevaCompra,
   onVerDetalle,
@@ -325,7 +331,7 @@ export default function VistaCompras({
       )}
 
       {/* Lista de compras */}
-      {loading ? <LoadingSpinner /> : comprasFiltradas.length === 0 ? (
+      {loading ? <LoadingSpinner /> : error ? <QueryErrorState onRetry={onRetry} /> : comprasFiltradas.length === 0 ? (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
           <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>{hayFiltrosActivos ? 'No se encontraron compras con los filtros aplicados' : 'No hay compras registradas'}</p>
