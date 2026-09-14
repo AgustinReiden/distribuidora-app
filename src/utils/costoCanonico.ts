@@ -37,6 +37,20 @@ export interface ProductoCosto {
 }
 
 /**
+ * Las mismas columnas, para armar un `select` de PostgREST. Cualquier embed de
+ * `productos` que vaya a pasar por `costoCanonicoUnitario` tiene que pedir
+ * exactamente esta lista: si falta una, la cascada cae más abajo de lo que
+ * debería (o a 0) sin que ningún tipo lo marque, porque el `select` es un
+ * string. `costo_con_iva` a propósito NO está: no participa de la cascada.
+ */
+export const COLUMNAS_COSTO_CANONICO = [
+  'costo_promedio',
+  'costo_real',
+  'costo_sin_iva',
+  'impuestos_internos',
+] as const;
+
+/**
  * Como en SQL, sólo NULL/ausente pasa al siguiente término: un costo de 0 es un
  * valor y corta la cascada, igual que `COALESCE`.
  */

@@ -60,3 +60,25 @@ export async function explicarErrorDeSesion(mensaje: string): Promise<string> {
     return MENSAJE_SESION_CAIDA;
   }
 }
+
+/**
+ * Renueva el token en el acto. `true` si quedó una sesión válida.
+ *
+ * Lo usa el replay offline: al reconectar, el primer pedido de la cola suele
+ * pegarle a un JWT vencido y volver con "No se pudo determinar la sucursal
+ * activa". Ese reintento no es un fallo de la operación —el RPC valida la
+ * sucursal antes de escribir nada, así que el pedido no se creó— y por eso no
+ * tiene que gastar uno de los reintentos de la cola.
+ *
+ * El try/catch cubre al cliente sin `auth` (los tests lo mockean así) y a
+ * cualquier excepción del SDK: acá una renovación fallida es "no se pudo", no
+ * un error que deba propagarse.
+ */
+export async function renovarSesion(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.auth.refreshSession();
+    return !error && Boolean(data?.session);
+  } catch {
+    return false;
+  }
+}

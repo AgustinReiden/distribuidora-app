@@ -8,11 +8,6 @@
 import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
-import {
-  aplicarDescuentoClienteItems,
-  esDescuentoDeCategoria,
-  resolverDescuentoPctCliente,
-} from '../../utils/descuentoCliente'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
 import PanelPedidosTrabados from '../pedidos/PanelPedidosTrabados'
@@ -49,8 +44,10 @@ import {
   useCrearPedidoCambioEnRutaMutation,
   useAplicarCambioParadaMutation,
   useZonasEstandarizadasQuery,
+  fetchPedidoIdsConSalvedad,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
@@ -418,12 +415,31 @@ export default function PedidosContainer(): React.ReactElement {
     setPromosEliminadas(prev => prev.filter(p => p.promoId !== promoId))
   }, [])
 
-  // Resolve wholesale prices + promos (con override del regalo elegido por admin
-  // y las promos que el usuario haya quitado a mano)
-  // `preciosResueltos` se usa además para etiquetar el origen del precio de cada
-  // ítem al guardar (mig 148/149): es lo único que sabe si el precio lo fijó una
-  // escala mayorista y cuál.
-  const { itemsFinales, preciosResueltos } = usePromocionPedido(nuevoPedido.items, undefined, regalosOverride, promosEliminadasSet)
+  // El cliente del pedido en armado: el hook lo necesita para la tercera capa
+  // de precio (descuento general / por categoría), que antes se aplicaba suelta
+  // recién al confirmar.
+  const clienteNuevoPedido = useMemo(
+    () => clientes.find(c => String(c.id) === String(nuevoPedido.clienteId)),
+    [clientes, nuevoPedido.clienteId],
+  )
+  const {
+    itemsFinales,
+    preciosResueltos,
+    itemsConDescuentoCliente,
+    totalConDescuentoCliente,
+    descuentoClientePct,
+    descuentoPorCategoria,
+  } = usePromocionPedido(
+    // Con override del regalo elegido por el admin y las promos que el usuario
+    // haya quitado a mano. `preciosResueltos` se usa además para etiquetar el
+    // origen del precio de cada ítem al guardar (mig 148/149): es lo único que
+    // sabe si el precio lo fijó una escala mayorista y cuál.
+    nuevoPedido.items,
+    undefined,
+    regalosOverride,
+    promosEliminadasSet,
+    { cliente: clienteNuevoPedido, productos },
+  )
 
   // =========================================================================
   // VistaPedidos handlers
@@ -696,15 +712,28 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       const huella = `${fecha}|${formaPago}|${transportistaId}`
-      await entregaYPagoMasivos.mutateAsync({
+      const resultado = await entregaYPagoMasivos.mutateAsync({
         ...ids, transportistaId, formaPago, fecha,
         // Son dos RPCs distintas dentro de la misma mutation: un UUID cada una.
         clientRequestIdCobrar: requestIdMasivo(`cobrar|${huella}|${[...ids.idsCobrar].sort().join(',')}`),
         clientRequestIdEntregar: requestIdMasivo(`entregar|${huella}|${[...ids.idsEntregar].sort().join(',')}`),
       })
       setModalEntregaYPagoMasivosOpen(false)
-      const total = ids.idsEntregar.length + ids.idsCobrar.length
-      notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
+      if (resultado.error) {
+        // No hay transacción común entre las dos RPCs: si la segunda falla, la
+        // primera ya entró. El toast tiene que decir qué SÍ se aplicó, no sólo
+        // que "algo" salió mal — la plata o la entrega ya en la base no puede
+        // quedar sin mención.
+        const hechos: string[] = []
+        if (resultado.entregados > 0) hechos.push(`se entregaron ${resultado.entregados} pedido${resultado.entregados !== 1 ? 's' : ''}`)
+        if (resultado.cobrados > 0) hechos.push(`se cobraron ${resultado.cobrados} boleta${resultado.cobrados !== 1 ? 's' : ''}`)
+        const prefijo = hechos.length ? `${hechos.join(' y ')}; ` : ''
+        const pasoLabel = resultado.error.paso === 'entregar' ? 'la entrega' : 'el cobro'
+        notify.error(`${prefijo}falló ${pasoLabel}: ${resultado.error.mensaje}`)
+      } else {
+        const total = resultado.entregados + resultado.cobrados
+        notify.success(`${total} pedido${total !== 1 ? 's' : ''} procesado${total !== 1 ? 's' : ''}`)
+      }
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [entregaYPagoMasivos, notify, requestIdMasivo])
@@ -722,7 +751,15 @@ export default function PedidosContainer(): React.ReactElement {
       ? '*, cliente:clientes!inner(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
       : '*, cliente:clientes(*), items:pedido_items(*, producto:productos(*)), pagos(forma_pago, monto)'
 
-    // Los filtros se arman en UN solo lugar: el conteo y las páginas tienen que
+    // conSalvedad necesita un round-trip previo a salvedades_items: no es un
+    // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
+    let idsConSalvedad: number[] | null = null
+    if (filtros.conSalvedad && filtros.conSalvedad !== 'todos') {
+      idsConSalvedad = await fetchPedidoIdsConSalvedad()
+    }
+
+    // Los filtros se arman en `construirFiltrosPedidos`, EL MISMO armado que usan
+    // la lista paginada y las cards de stats: el conteo y las páginas tienen que
     // mirar exactamente el mismo universo, o la verificación no prueba nada.
     // El desempate por `id` hace falta porque `created_at` no es único y
     // paginar sin orden estable repite filas y saltea otras.
@@ -733,19 +770,8 @@ export default function PedidosContainer(): React.ReactElement {
         .order('created_at', { ascending: false })
         .order('id')
 
-      if (filtros.estado && filtros.estado !== 'todos') query = query.eq('estado', filtros.estado)
-      if (filtros.estadoPago && filtros.estadoPago !== 'todos') query = query.eq('estado_pago', filtros.estadoPago)
-      if (filtros.transportistaId && filtros.transportistaId !== 'todos') query = query.eq('transportista_id', filtros.transportistaId)
-      if (filtros.fechaDesde) query = query.gte('fecha', filtros.fechaDesde)
-      if (filtros.fechaHasta) query = query.lte('fecha', filtros.fechaHasta)
-      if (!filtros.verCancelados && filtros.estado !== 'cancelado') query = query.neq('estado', 'cancelado')
-      if (hasSearch) {
-        const trimmed = debouncedBusqueda!.trim()
-        query = query.or(
-          `nombre_fantasia.ilike.%${trimmed}%,razon_social.ilike.%${trimmed}%,cuit.ilike.%${trimmed}%,direccion.ilike.%${trimmed}%`,
-          { referencedTable: 'clientes' }
-        )
-      }
+      query = construirFiltrosPedidos(query, filtros, debouncedBusqueda)
+      query = aplicarFiltroConSalvedad(query, filtros.conSalvedad, idsConSalvedad)
       return query
     }
 
@@ -966,6 +992,14 @@ export default function PedidosContainer(): React.ReactElement {
     queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+    // Editar items mueve stock y saldo, y los dos se leen cacheados: productos
+    // tiene staleTime de 10 min, asi que `violacionesStock` del proximo alta
+    // bloqueaba de mas o dejaba pasar de mas con el stock de hace un rato, y la
+    // cuenta corriente mostraba el saldo anterior al cambio de total.
+    // Prefijo pelado (no `productosKeys.all(sucursalId)`) porque las claves son
+    // por sucursal y aca no hay una a mano: el prefijo las alcanza a todas.
+    queryClient.invalidateQueries({ queryKey: ['productos'] })
+    queryClient.invalidateQueries({ queryKey: ['clientes'] })
   }, [pedidoEditando, user, queryClient])
 
   // Reasignar el preventista del pedido en edicion. Solo admin (la UI ya
@@ -1186,12 +1220,12 @@ export default function PedidosContainer(): React.ReactElement {
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
-      // Descuento del cliente: general + por categoría (la categoría prevalece).
-      // Se aplica DESPUES de promociones/precio mayorista. Mismo helper que usa
-      // ModalPedido, para que el total guardado == el total mostrado en vivo.
-      // Items bonificacion / precioOverride / precio<=0 no se tocan.
-      const clienteSel = clientes.find(c => String(c.id) === String(nuevoPedido.clienteId))
-      const { items: itemsConDescuento, total: totalConDescuento } = aplicarDescuentoClienteItems(itemsFinales, productos, clienteSel)
+      // Promo → mayorista → descuento del cliente ya vienen resueltos por
+      // `orquestarPrecios` (adentro de usePromocionPedido), que es la misma
+      // función que corre el bot de Telegram. Acá no se recalcula nada: el total
+      // que se guarda es exactamente el que ModalPedido viene mostrando.
+      const itemsConDescuento = itemsConDescuentoCliente
+      const totalConDescuento = totalConDescuentoCliente
       let totalNeto = 0
       let totalIva = 0
       const itemsParaCrear = itemsConDescuento.map(item => {
@@ -1234,23 +1268,7 @@ export default function PedidosContainer(): React.ReactElement {
           esBonificacion: item.esBonificacion,
           precioOverride: item.precioOverride,
         })),
-        {
-          preciosResueltos,
-          descuentoClientePct: new Map(
-            itemsFinales.map(item => {
-              const prod = productos.find(p => String(p.id) === String(item.productoId))
-              return [String(item.productoId), resolverDescuentoPctCliente(clienteSel, prod?.categoria)]
-            }),
-          ),
-          descuentoPorCategoria: new Set(
-            itemsFinales
-              .filter(item => {
-                const prod = productos.find(p => String(p.id) === String(item.productoId))
-                return esDescuentoDeCategoria(clienteSel, prod?.categoria)
-              })
-              .map(item => String(item.productoId)),
-          ),
-        },
+        { preciosResueltos, descuentoClientePct, descuentoPorCategoria },
       )
 
       // Se acuña en el primer intento y sobrevive a los reintentos: es lo que
@@ -1413,7 +1431,7 @@ export default function PedidosContainer(): React.ReactElement {
       notify.error(mensaje === crudo ? 'Error al crear pedido: ' + crudo : mensaje)
     }
     setGuardando(false)
-  }, [nuevoPedido, itemsFinales, preciosResueltos, crearPedido, user, resetNuevoPedido, notify, productos, clientes, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline])
+  }, [nuevoPedido, itemsFinales, preciosResueltos, itemsConDescuentoCliente, totalConDescuentoCliente, descuentoClientePct, descuentoPorCategoria, crearPedido, user, resetNuevoPedido, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -1858,6 +1876,7 @@ export default function PedidosContainer(): React.ReactElement {
     descripcion?: string;
     fotoUrl?: string;
     devolverStock: boolean;
+    clientRequestId?: string;
   }): Promise<RegistrarSalvedadResult> => {
     const results = await handleSaveSalvedades([data])
     return results[0] ?? { success: false, error: 'Sin respuesta del servidor' }

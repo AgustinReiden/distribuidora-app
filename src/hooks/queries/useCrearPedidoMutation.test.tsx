@@ -26,10 +26,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const rpc = vi.fn()
 
+// `from` lo usa la verificación del alta idempotente: cuando la RPC contesta
+// "ya existía", el front lee ese pedido para saber si es el suyo.
+const maybeSingle = vi.fn()
+
 vi.mock('../supabase/base', () => ({
   supabase: {
     rpc: (...args: unknown[]) => rpc(...args),
-    from: vi.fn(),
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle }) }) }),
   },
 }))
 
@@ -60,8 +64,10 @@ const input = {
 describe('alta de pedido — contrato con la base', () => {
   beforeEach(() => {
     rpc.mockReset()
+    maybeSingle.mockReset()
     // El segundo rpc (registrar_origen_precio_items) también pasa por acá.
     rpc.mockResolvedValue({ data: { success: true, pedido_id: '5001' }, error: null })
+    maybeSingle.mockResolvedValue({ data: { cliente_id: '42', total: 3600 }, error: null })
   })
 
   it('usa crear_pedido_idempotente, no la RPC cruda', async () => {
@@ -106,7 +112,52 @@ describe('alta de pedido — contrato con la base', () => {
     const { result } = setup()
     const creado = await result.current.mutateAsync({ ...input, offlineId: 'uuid-alta-1' })
 
-    expect(creado).toEqual({ id: '5001' })
+    // Viaja con qué pedido es, no solo con el id: `idempotente` significa "ya
+    // había uno con esa clave", no "ese pedido es tuyo". Quien reintenta tiene
+    // que poder verificarlo antes de darlo por sincronizado.
+    expect(creado).toEqual({ id: '5001', idempotente: true, clienteId: '42', total: 3600 })
+  })
+
+  /**
+   * La clave de idempotencia vieja era `op_<autoincrement de Dexie>`, que
+   * arranca en 1 en cada instalación: dos teléfonos podían mandar `op_1` y el
+   * segundo recibía el pedido del primero. Lo que no puede pasar nunca es que
+   * el metadato de precios de un pedido se escriba encima del de otro.
+   */
+  it('no le registra los orígenes de precio a un pedido que no es este', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: true, pedido_id: '5001', idempotente: true },
+      error: null,
+    })
+    maybeSingle.mockResolvedValue({ data: { cliente_id: '999', total: 111 }, error: null })
+
+    const { result } = setup()
+    const creado = await result.current.mutateAsync({
+      ...input,
+      offlineId: 'uuid-alta-1',
+      origenes: [{ producto_id: '7', es_bonificacion: false, origen_precio: 'mayorista' as const }],
+    })
+
+    expect(creado).toMatchObject({ idempotente: true, clienteId: '999', total: 111 })
+    const llamadasOrigen = rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')
+    expect(llamadasOrigen).toHaveLength(0)
+  })
+
+  it('sí les registra los orígenes cuando el pedido que ya existía es este', async () => {
+    rpc.mockResolvedValueOnce({
+      data: { success: true, pedido_id: '5001', idempotente: true },
+      error: null,
+    })
+
+    const { result } = setup()
+    await result.current.mutateAsync({
+      ...input,
+      offlineId: 'uuid-alta-1',
+      origenes: [{ producto_id: '7', es_bonificacion: false, origen_precio: 'mayorista' as const }],
+    })
+
+    const llamadasOrigen = rpc.mock.calls.filter(c => c[0] === 'registrar_origen_precio_items')
+    expect(llamadasOrigen).toHaveLength(1)
   })
 
   it('propaga el error de negocio de la RPC', async () => {

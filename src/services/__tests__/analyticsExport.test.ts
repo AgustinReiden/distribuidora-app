@@ -35,6 +35,9 @@ function createChainableMock(finalData: { data: unknown; error: unknown }) {
     select: vi.fn(),
     gte: vi.fn(),
     lte: vi.fn(),
+    eq: vi.fn(),
+    neq: vi.fn(),
+    or: vi.fn(),
     is: vi.fn(),
     order: vi.fn(),
     in: vi.fn(),
@@ -66,7 +69,7 @@ describe('analyticsExport', () => {
       const mockPedidos = [
         {
           id: 'p1',
-          created_at: '2026-01-15T10:30:00',
+          fecha: '2026-01-15',
           estado: 'entregado',
           estado_pago: 'pagado',
           forma_pago: 'efectivo',
@@ -139,6 +142,10 @@ describe('analyticsExport', () => {
 
       expect(supabase.from).toHaveBeenCalledWith('pedidos')
       expect(supabase.from).toHaveBeenCalledWith('perfiles')
+      // mig 029: pedidos.fecha es la fecha de venta canónica, no created_at
+      // (que es sólo de auditoría y puede quedar en el día siguiente).
+      expect(pedidosChain.gte).toHaveBeenCalledWith('fecha', '2026-01-01')
+      expect(pedidosChain.lte).toHaveBeenCalledWith('fecha', '2026-01-31')
 
       expect(result).toHaveLength(2)
 
@@ -188,7 +195,7 @@ describe('analyticsExport', () => {
       const mockPedidos = [
         {
           id: 'p1',
-          created_at: '2026-01-15T10:30:00',
+          fecha: '2026-01-15',
           estado: 'pendiente',
           estado_pago: null,
           forma_pago: null,
@@ -221,7 +228,7 @@ describe('analyticsExport', () => {
       const mockPedidos = [
         {
           id: 'p1',
-          created_at: '2026-01-15T10:30:00',
+          fecha: '2026-01-15',
           estado: 'pendiente',
           usuario_id: null,
           transportista_id: null,
@@ -253,7 +260,7 @@ describe('analyticsExport', () => {
       const mockPedidos = [
         {
           id: 'p1',
-          created_at: '2026-01-15T10:30:00',
+          fecha: '2026-01-15',
           estado: 'entregado',
           usuario_id: null,
           transportista_id: null,
@@ -300,9 +307,9 @@ describe('analyticsExport', () => {
       ]
 
       const mockPedidos = [
-        { id: 'p1', cliente_id: 'c1', total: 120000, created_at: '2026-01-15T10:00:00' },
-        { id: 'p2', cliente_id: 'c2', total: 60000, created_at: '2026-01-16T10:00:00' },
-        { id: 'p3', cliente_id: 'c3', total: 30000, created_at: '2026-01-17T10:00:00' },
+        { id: 'p1', cliente_id: 'c1', total: 120000, fecha: '2026-01-15' },
+        { id: 'p2', cliente_id: 'c2', total: 60000, fecha: '2026-01-16' },
+        { id: 'p3', cliente_id: 'c3', total: 30000, fecha: '2026-01-17' },
       ]
 
       const clientesChain = createChainableMock({ data: mockClientes, error: null })
@@ -323,9 +330,9 @@ describe('analyticsExport', () => {
 
     it('should calculate activity states correctly', async () => {
       const now = new Date()
-      const recentDate = new Date(now.getTime() - 10 * 86400000).toISOString() // 10 days ago
-      const midDate = new Date(now.getTime() - 45 * 86400000).toISOString() // 45 days ago
-      const oldDate = new Date(now.getTime() - 100 * 86400000).toISOString() // 100 days ago
+      const recentDate = new Date(now.getTime() - 10 * 86400000).toISOString().slice(0, 10) // 10 days ago
+      const midDate = new Date(now.getTime() - 45 * 86400000).toISOString().slice(0, 10) // 45 days ago
+      const oldDate = new Date(now.getTime() - 100 * 86400000).toISOString().slice(0, 10) // 100 days ago
 
       const mockClientes = [
         { id: 'c1', nombre_fantasia: 'Activo' },
@@ -335,9 +342,9 @@ describe('analyticsExport', () => {
       ]
 
       const mockPedidos = [
-        { id: 'p1', cliente_id: 'c1', total: 1000, created_at: recentDate },
-        { id: 'p2', cliente_id: 'c2', total: 1000, created_at: midDate },
-        { id: 'p3', cliente_id: 'c3', total: 1000, created_at: oldDate },
+        { id: 'p1', cliente_id: 'c1', total: 1000, fecha: recentDate },
+        { id: 'p2', cliente_id: 'c2', total: 1000, fecha: midDate },
+        { id: 'p3', cliente_id: 'c3', total: 1000, fecha: oldDate },
       ]
 
       const clientesChain = createChainableMock({ data: mockClientes, error: null })
@@ -382,14 +389,14 @@ describe('analyticsExport', () => {
           cantidad: 55,
           precio_unitario: 100,
           subtotal: 5500,
-          pedido: { created_at: '2026-01-15T10:00:00' },
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
         },
         {
           producto_id: 'p1',
           cantidad: 55,
           precio_unitario: 100,
           subtotal: 5500,
-          pedido: { created_at: '2026-01-16T10:00:00' },
+          pedido: { fecha: '2026-01-16', estado: 'entregado' },
         },
         // p2: 8 units over 2 days = 4 per day -> Media (> 3 but <= 10)
         {
@@ -397,14 +404,14 @@ describe('analyticsExport', () => {
           cantidad: 4,
           precio_unitario: 60,
           subtotal: 240,
-          pedido: { created_at: '2026-01-15T10:00:00' },
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
         },
         {
           producto_id: 'p2',
           cantidad: 4,
           precio_unitario: 60,
           subtotal: 240,
-          pedido: { created_at: '2026-01-16T10:00:00' },
+          pedido: { fecha: '2026-01-16', estado: 'entregado' },
         },
         // p3: 2 units over 1 day = 2 per day -> Lenta (<= 3)
         {
@@ -412,7 +419,7 @@ describe('analyticsExport', () => {
           cantidad: 2,
           precio_unitario: 40,
           subtotal: 80,
-          pedido: { created_at: '2026-01-15T10:00:00' },
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
         },
       ]
 
@@ -444,7 +451,7 @@ describe('analyticsExport', () => {
           cantidad: 10,
           precio_unitario: 100,
           subtotal: 1000,
-          pedido: { created_at: '2026-01-15T10:00:00' },
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
         },
       ]
 
@@ -494,14 +501,14 @@ describe('analyticsExport', () => {
           cantidad: 10,
           precio_unitario: 100,
           subtotal: 1000,
-          pedido: { created_at: '2026-01-15T10:00:00' },
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
         },
         {
           producto_id: 'p2',
           cantidad: 10,
           precio_unitario: 100,
           subtotal: 1000,
-          pedido: { created_at: '2026-01-15T10:00:00' },
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
         },
       ]
 
@@ -550,6 +557,84 @@ describe('analyticsExport', () => {
       expect(result[0]).toMatchObject({ costo_promedio: 42, costo_real: 50, costo_unitario_usado: 42 })
     })
 
+    // cancelar_pedido (mig 175) deja los items intactos: sin filtro, ingresos,
+    // margen y rotación quedaban inflados con pedidos que nunca se cobraron.
+    it('un pedido cancelado no suma ingresos ni cantidad', async () => {
+      const mockProductos = [
+        { id: 'p1', nombre: 'Producto', stock: 10, costo_promedio: 50, activo: true },
+      ]
+      const mockItems = [
+        {
+          producto_id: 'p1',
+          cantidad: 10,
+          precio_unitario: 100,
+          subtotal: 1000,
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
+        },
+        {
+          producto_id: 'p1',
+          cantidad: 99,
+          precio_unitario: 100,
+          subtotal: 9900,
+          pedido: { fecha: '2026-01-16', estado: 'cancelado' },
+        },
+      ]
+
+      const productosChain = createChainableMock({ data: mockProductos, error: null })
+      const itemsChain = createChainableMock({ data: mockItems, error: null })
+
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? productosChain : itemsChain) as never
+      })
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      expect(itemsChain.neq).toHaveBeenCalledWith('pedido.estado', 'cancelado')
+      expect(result[0]).toMatchObject({ total_vendido: 10, total_ingresos: 1000 })
+    })
+
+    // Un regalo de promoción (es_bonificacion) no es venta y viene en otra
+    // unidad (fracción, no fardo): sumarlo infla unidades e ingresos.
+    it('un regalo (es_bonificacion) no suma ingresos ni cantidad', async () => {
+      const mockProductos = [
+        { id: 'p1', nombre: 'Producto', stock: 10, costo_promedio: 50, activo: true },
+      ]
+      const mockItems = [
+        {
+          producto_id: 'p1',
+          cantidad: 10,
+          precio_unitario: 100,
+          subtotal: 1000,
+          es_bonificacion: false,
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
+        },
+        {
+          producto_id: 'p1',
+          cantidad: 96,
+          precio_unitario: 0,
+          subtotal: 0,
+          es_bonificacion: true,
+          pedido: { fecha: '2026-01-15', estado: 'entregado' },
+        },
+      ]
+
+      const productosChain = createChainableMock({ data: mockProductos, error: null })
+      const itemsChain = createChainableMock({ data: mockItems, error: null })
+
+      let callCount = 0
+      vi.mocked(supabase.from).mockImplementation(() => {
+        callCount++
+        return (callCount === 1 ? productosChain : itemsChain) as never
+      })
+
+      const result = await fetchProductosDimension('2026-01-01', '2026-01-31')
+
+      expect(itemsChain.or).toHaveBeenCalledWith('es_bonificacion.is.null,es_bonificacion.eq.false')
+      expect(result[0]).toMatchObject({ total_vendido: 10, total_ingresos: 1000 })
+    })
+
     it('should throw error on productos fetch error', async () => {
       const errorChain = createChainableMock({ data: null, error: { message: 'DB error' } })
       vi.mocked(supabase.from).mockReturnValue(errorChain as never)
@@ -565,7 +650,7 @@ describe('analyticsExport', () => {
       const mockCompras = [
         {
           id: 'comp1',
-          created_at: '2026-01-15T10:00:00',
+          fecha_compra: '2026-01-15',
           total: 5000,
           estado: 'recibida',
           proveedor: { nombre: 'Proveedor A', cuit: '30-12345678-9' },
@@ -596,6 +681,10 @@ describe('analyticsExport', () => {
       const result = await fetchComprasFact('2026-01-01', '2026-01-31')
 
       expect(supabase.from).toHaveBeenCalledWith('compras')
+      // compras.fecha_compra es la fecha de la compra; created_at es sólo
+      // de auditoría y no la que usa el resto de la app (mig 029).
+      expect(chain.gte).toHaveBeenCalledWith('fecha_compra', '2026-01-01')
+      expect(chain.lte).toHaveBeenCalledWith('fecha_compra', '2026-01-31')
       expect(result).toHaveLength(2)
       expect(result[0]).toMatchObject({
         compra_id: 'comp1',
@@ -614,7 +703,7 @@ describe('analyticsExport', () => {
       const mockCompras = [
         {
           id: 'comp1',
-          created_at: '2026-01-15T10:00:00',
+          fecha_compra: '2026-01-15',
           total: 3610,
           estado: 'recibida',
           proveedor: { nombre: 'Proveedor A', cuit: '30-12345678-9' },

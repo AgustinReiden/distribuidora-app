@@ -5,6 +5,7 @@
  * Provee API simplificada para lectura y escritura de Excel
  */
 import ExcelJS from 'exceljs'
+import { fechaLocalISO } from './formatters'
 
 export interface ExcelOptions {
   columnWidth?: number;
@@ -403,7 +404,7 @@ export async function exportControlStock(
   totalRow.getCell(6).font = { bold: true }
   totalRow.getCell(6).alignment = { horizontal: 'center' }
 
-  const fecha = new Date().toISOString().slice(0, 10)
+  const fecha = fechaLocalISO()
   const buffer = await workbook.xlsx.writeBuffer()
   downloadBuffer(buffer as ArrayBuffer, `Control_Stock_${fecha}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 }

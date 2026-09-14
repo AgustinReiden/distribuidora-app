@@ -127,7 +127,9 @@ export default function ModalDetalleCompra({
   if (!compra) return null
 
   const estado = ESTADOS_COMPRA[compra.estado] || ESTADOS_COMPRA.pendiente
-  const totalUnidades = (compra.items || []).reduce((sum, i) => sum + i.cantidad + (i.bonificacion || 0), 0)
+  // `bonificacion` es un PORCENTAJE (mig 113), no unidades bonificadas: sumarlo
+  // acá le agregaba "5" unidades a una línea con 5% de descuento.
+  const totalUnidades = (compra.items || []).reduce((sum, i) => sum + i.cantidad, 0)
   // En ZZ no hay comprobante que clasificar: la etiqueta fiscal sobra.
   const esFC = (compra.tipo_factura ?? 'FC') === 'FC'
 
@@ -270,7 +272,7 @@ export default function ModalDetalleCompra({
                         {item.cantidad}
                       </td>
                       <td className="px-4 py-3 text-center text-gray-800 dark:text-white">
-                        {item.bonificacion || 0}
+                        {item.bonificacion || 0}%
                       </td>
                       <td className="px-4 py-3 text-right text-gray-800 dark:text-white">
                         {formatPrecio(item.costo_unitario)}

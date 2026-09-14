@@ -12,6 +12,8 @@ import { useRendiciones } from '../../hooks/supabase/useRendiciones';
 import { usePromocionesListQuery, usePedidoSustitucionesQuery } from '../../hooks/queries/usePromocionesQuery';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
+import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
+import { obtenerMOQ } from '../../utils/precioMayorista';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
@@ -228,13 +230,25 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       const itemsFormateados = pedido.items
         .filter(item => !item.es_bonificacion)
         .map(item => {
-          // Marcar precioOverride cuando el precio guardado difiere del de lista
-          // (precio negociado o regalo manual). Sin esto, al reabrir el modal el
-          // precio se recalculaba a lista/mayorista y se "perdía" el manual.
+          // Marcar precioOverride SOLO cuando el precio lo puso una persona
+          // (mig 148). Antes se infería comparando contra el precio de lista de
+          // hoy, y eso metía en la misma bolsa a todo lo vendido con escala
+          // mayorista o con descuento del cliente: el override congelaba la
+          // escala (bajar de 50 a 5 fardos dejaba el precio de 50) y, al
+          // guardar, `construirOrigenPrecioItems` etiquetaba el ítem como
+          // 'manual' y pisaba el origen real, así que la venta se comisionaba
+          // con otra regla.
+          //
+          // 'desconocido' y NULL sí congelan: son precios que difieren de lista
+          // sin que nadie haya dicho por qué (el NULL es pre-mig-148). Ahí no
+          // hay nada que re-resolver y re-cotizar sería inventar.
           const producto = productos.find(p => p.id === item.producto_id);
           const base = producto?.precio;
-          const override = base != null
-            && Math.abs(Number(item.precio_unitario) - Number(base)) > 0.001;
+          const origen = item.origen_precio;
+          const override = origen === 'manual'
+            || ((origen == null || origen === 'desconocido')
+              && base != null
+              && Math.abs(Number(item.precio_unitario) - Number(base)) > 0.001);
           return {
             productoId: item.producto_id,
             nombre: item.producto?.nombre || 'Producto desconocido',
@@ -302,13 +316,56 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   const {
     itemsFinales,
-    totalFinal,
     moqMap,
+    minimosProducto,
+    violacionesMOQ,
     preciosResueltos,
     isLoading: promosLoading,
   } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, overridesRegaloDelPedido, promosEliminadasSet);
 
+  // El cliente del pedido, con sus descuentos. Viene del embed de
+  // `PEDIDO_CLIENT_COLS`; el alta (PedidosContainer) y el cambio de cliente ya
+  // aplicaban el descuento y la edición no, así que un producto agregado acá
+  // entraba a lista y el cliente lo pagaba de más.
+  const clienteDelPedido = pedido?.cliente ?? null;
+
+  // Descuento del cliente (general + por categoría) sobre los items ya resueltos
+  // (mayorista/promo), igual que en ModalPedido. No toca overrides ni regalos.
+  const descuentoCliente = useMemo(
+    () => aplicarDescuentoClienteItems(itemsFinales, productos, clienteDelPedido),
+    [itemsFinales, productos, clienteDelPedido],
+  );
+  const totalFinal = descuentoCliente.total;
+
+  // Qué % de descuento del cliente le tocó a cada producto y si salió de una
+  // regla por categoría. Es el contexto que `construirOrigenPrecioItems` necesita
+  // para distinguir 'desc_cliente' de 'desc_categoria' en vez de caer a 'lista'.
+  const { descuentoClientePct, descuentoPorCategoria } = useMemo(() => {
+    const pct = new Map<string, number>();
+    const porCategoria = new Set<string>();
+    if (clienteDelPedido) {
+      for (const item of items) {
+        const pid = String(item.productoId);
+        const producto = productos.find(p => String(p.id) === pid);
+        const p = resolverDescuentoPctCliente(clienteDelPedido, producto?.categoria);
+        if (p > 0) {
+          pct.set(pid, p);
+          if (esDescuentoDeCategoria(clienteDelPedido, producto?.categoria)) porCategoria.add(pid);
+        }
+      }
+    }
+    return { descuentoClientePct: pct, descuentoPorCategoria: porCategoria };
+  }, [items, productos, clienteDelPedido]);
+
   const hayPromosQuitadas = promosEliminadas.length > 0;
+
+  // Mínimos de venta incumplidos (mig 147/169). Bloquean Guardar como en
+  // ModalPedido: sin esto el trigger `validar_minimo_venta_item` aborta el
+  // guardado ENTERO —fechas y notas incluidas— del lado del server.
+  // Sólo aplica donde los items son editables: un pedido entregado puede tener
+  // líneas por debajo de un mínimo que subió después, y eso no puede impedir
+  // corregirle la fecha de entrega.
+  const bloqueoMOQ = puedeEditarItems && !pedidoEntregado ? violacionesMOQ : [];
 
   // Quitar una promo del pedido (con alerta). Se aplica al guardar: la promo
   // excluida no genera bonificación y el RPC borra su regalo + restaura stock.
@@ -331,10 +388,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setPromosEliminadas(prev => prev.filter(p => p.promoId !== promoId));
   };
 
-  // Mapa de precios resueltos para mostrar en cada item no-bonif
+  // Mapa de precios resueltos para mostrar en cada item no-bonif. Se arma sobre
+  // los items YA descontados: es el precio que se muestra y el que se persiste.
   const preciosResueltosMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (const item of itemsFinales) {
+    for (const item of descuentoCliente.items) {
       if (item.esBonificacion) continue;
       const originalItem = items.find(i => i.productoId === item.productoId);
       if (originalItem?.precioOverride) {
@@ -344,7 +402,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       }
     }
     return map;
-  }, [itemsFinales, items]);
+  }, [descuentoCliente, items]);
 
   // Bonificaciones calculadas para mostrar como filas read-only.
   // IMPORTANTE: aplicamos el mapping de sustituciones para que las
@@ -379,6 +437,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // el user vea el nuevo total y pueda guardar (arregla pedidos con promos
   // obsoletas por edición previa sin recálculo).
   const bonifDifierenDeDB = useMemo(() => {
+    // En un pedido entregado los items son de sólo lectura, así que una promo
+    // que se desactivó DESPUÉS de la entrega hacía que las bonificaciones
+    // recalculadas (ninguna) difirieran de las guardadas: se prendía
+    // `itemsModificados`, `doGuardar` llamaba a actualizar_pedido_items, el
+    // server contestaba "No se puede editar un pedido ya entregado" y el cambio
+    // de fecha_entrega o de notas se perdía con él.
+    if (pedidoEntregado) return false;
     if (promosLoading || !pedido?.items || items.length === 0) return false;
     const originales = pedido.items.filter(i => i.es_bonificacion);
     if (originales.length !== bonificacionesCalculadas.length) return true;
@@ -387,7 +452,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       if (mapOrig.get(String(b.productoId)) !== b.cantidad) return true;
     }
     return false;
-  }, [promosLoading, pedido, items, bonificacionesCalculadas]);
+  }, [pedidoEntregado, promosLoading, pedido, items, bonificacionesCalculadas]);
 
   const total = itemsModificados ? totalFinal : (pedido?.total || 0);
 
@@ -493,8 +558,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   };
 
   const handleAgregarProducto = (producto: ProductoDB): void => {
-    const moq = moqMap.get(String(producto.id));
-    const cantidadInicial = moq && moq > 1 ? moq : 1;
+    // Del catálogo completo (`minimosProducto`), NO de `moqMap`: ese sólo cubre
+    // lo que ya está en el carrito, así que un producto todavía no agregado daba
+    // undefined y entraba con cantidad 1 — en violación de su propio mínimo y
+    // reventando el guardado entero contra `validar_minimo_venta_item`.
+    // Mismo criterio que ModalPedido.
+    const cantidadInicial = obtenerMOQ(String(producto.id), minimosProducto);
+    // El precio entra a lista a propósito: el descuento del cliente y la escala
+    // mayorista los aplica el pipeline (usePromocionPedido →
+    // aplicarDescuentoClienteItems → preciosResueltosMap), que es lo que se
+    // muestra y lo que se persiste. Fijarlo acá lo congelaría.
     setItems(prev => [...prev, {
       productoId: producto.id,
       nombre: producto.nombre,
@@ -566,7 +639,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       // bonificaciones recalculadas (que ya excluyen las promos quitadas). Quitar
       // una promo no requiere permiso de edición de ítems: el RPC
       // actualizar_pedido_items autoriza admin/encargado/preventista.
-      if (((itemsModificados && puedeEditarItems) || hayPromosQuitadas) && onSaveItems) {
+      // `&& !pedidoEntregado`: el server rechaza el UPDATE de un pedido
+      // entregado y ese throw se llevaba puesto el `onSave` de fecha/notas, que
+      // sí es legal. La UI ya es de sólo lectura ahí; esto cierra el camino.
+      if (((itemsModificados && puedeEditarItems) || hayPromosQuitadas) && !pedidoEntregado && onSaveItems) {
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
 
         // Items no-bonif del estado → con precio resuelto + desglose fiscal
@@ -613,7 +689,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             esBonificacion: it.esBonificacion,
             precioOverride: it.precioOverride,
           })),
-          { preciosResueltos },
+          { preciosResueltos, descuentoClientePct, descuentoPorCategoria },
         );
         await onSaveItems(todosLosItems, origenes);
       }
@@ -1192,6 +1268,23 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </div>
       )}
 
+      {/* Mínimos de venta incumplidos (bloquean guardar) */}
+      {bloqueoMOQ.length > 0 && (
+        <div role="alert" className="mx-4 mb-2 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600 rounded-lg text-sm text-amber-900 dark:text-amber-200">
+          <strong>No se puede guardar:</strong> los siguientes productos no cumplen el mínimo de compra:
+          <ul className="list-disc ml-5 mt-1">
+            {bloqueoMOQ.map(v => {
+              const producto = productos.find(p => String(p.id) === String(v.productoId));
+              return (
+                <li key={v.productoId}>
+                  {producto?.nombre || v.productoId}: mínimo {v.cantidadMinima}, cargaste {v.cantidadActual}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       {/* Error de validación */}
       {errorValidacion && (
         <div className="mx-4 mb-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -1208,7 +1301,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </button>
         <button
           onClick={handleGuardar}
-          disabled={guardando || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
+          disabled={guardando || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
         >
           {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
