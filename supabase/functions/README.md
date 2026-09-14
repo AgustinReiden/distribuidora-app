@@ -105,7 +105,7 @@ curl -i -X POST http://localhost:54321/functions/v1/telegram-webhook \
   }'
 ```
 
-Ejemplo `/vincular ABC123` (requiere que primero hayas generado el código
+Ejemplo `/vincular K7QX2M9P` (requiere que primero hayas generado el código
 desde la app web con `generar_codigo_vinculacion_bot`):
 
 ```bash
@@ -119,7 +119,7 @@ curl -i -X POST http://localhost:54321/functions/v1/telegram-webhook \
       "date": 1700000000,
       "chat": { "id": 999, "type": "private" },
       "from": { "id": 999, "is_bot": false, "first_name": "Tito", "username": "tito" },
-      "text": "/vincular ABC123"
+      "text": "/vincular K7QX2M9P"
     }
   }'
 ```

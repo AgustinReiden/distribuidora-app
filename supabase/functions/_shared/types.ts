@@ -98,7 +98,16 @@ export interface CanjearCodigoOk {
 
 export interface CanjearCodigoFail {
   ok: false;
-  error: "no_encontrado" | "expirado" | "ya_usado" | "perfil_invalido" | "rpc_error";
+  error:
+    | "no_encontrado"
+    | "expirado"
+    | "ya_usado"
+    | "perfil_invalido"
+    /** Lockout del canje: 5 fallos en 15 minutos (mig 237). */
+    | "bloqueado"
+    | "rpc_error";
+  /** Solo viene con `bloqueado`: cuánto falta para poder reintentar. */
+  segundos_restantes?: number;
 }
 
 export type CanjearCodigoResult = CanjearCodigoOk | CanjearCodigoFail;

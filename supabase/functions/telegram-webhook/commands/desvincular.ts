@@ -54,7 +54,7 @@ export const desvincularCommand: CommandSpec = {
       "✅ Te desvinculé del bot.\n\n" +
         "Si querés volver a usarlo, generá un nuevo código en la app web " +
         "(Perfil > Vincular Telegram) y mandalo así:\n" +
-        "/vincular ABC123",
+        "/vincular K7QX2M9P",
     );
   },
 };

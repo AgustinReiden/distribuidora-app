@@ -6,6 +6,8 @@
 //   2. escapeMarkdownV2 escapa todos los caracteres especiales
 //   3. sendMessage POSTea correctamente (mock de fetch)
 //   4. handleVincular se integra con el RPC (mock del cliente Supabase)
+//   4 bis/ter. resolveUserByTelegramId contra bot_resolver_usuario, OTP de 8
+//      caracteres y lockout del canje (mig 237)
 //   5. parseCommand: extracción de nombre + args (con / sin @bot)
 //   6. /cliente, /saldo: flow integrado (router → tool → formatter → sendMessage)
 //   7. Scope checks: /misclientes con admin, /recorrido con preventista
@@ -20,6 +22,7 @@ import {
   timingSafeEqual,
 } from "../_shared/telegram.ts";
 import { _setServiceRoleClientForTests } from "../_shared/supabase.ts";
+import { resolveUserByTelegramId } from "../_shared/auth.ts";
 import { _resetRegisterFlagForTests, _clearToolsForTests } from "../_shared/tools/index.ts";
 import { parseCommand } from "../telegram-webhook/commands/parser.ts";
 import { clearCommandsForTests } from "../telegram-webhook/commands/router.ts";
@@ -265,6 +268,31 @@ interface MockSupabase {
   __inserts: Array<{ table: string; row: Record<string, unknown> }>;
 }
 
+/**
+ * Lo que devuelve `bot_resolver_usuario` (mig 237) para un usuario dado, o
+ * para nadie. Desde la 237 el bot no lee `bot_usuarios` de prepo: cada mensaje
+ * pasa por esa RPC, que resuelve rol, alta/baja y sucursal contra `perfiles` y
+ * `usuario_sucursales` en vivo.
+ */
+function resolverPayload(
+  user: Record<string, unknown> | null,
+): { data: unknown; error: { message: string } | null } {
+  if (!user) {
+    return { data: { ok: false, motivo: "no_vinculado" }, error: null };
+  }
+  return {
+    data: {
+      ok: true,
+      perfil_id: user.perfil_id,
+      rol: user.rol,
+      nombre: user.nombre ?? "Tito",
+      sucursal_id: user.sucursal_id ?? null,
+      activo: true,
+    },
+    error: null,
+  };
+}
+
 interface MockTable {
   insert: (
     row: Record<string, unknown>,
@@ -282,12 +310,19 @@ interface MockQuery {
 function createMockSupabase(opts: {
   rpcResponse?: { data: unknown; error: { message: string } | null };
   resolveUserData?: Record<string, unknown> | null;
+  /** Payload crudo de `bot_resolver_usuario`; pisa a `resolveUserData`. */
+  resolverResponse?: { data: unknown; error: { message: string } | null };
 }): MockSupabase {
   const calls: MockSupabase = {
     __rpcCalls: [],
     __inserts: [],
     rpc(fn, params) {
       calls.__rpcCalls.push({ fn, params });
+      if (fn === "bot_resolver_usuario") {
+        return Promise.resolve(
+          opts.resolverResponse ?? resolverPayload(opts.resolveUserData ?? null),
+        );
+      }
       return Promise.resolve(opts.rpcResponse ?? { data: null, error: null });
     },
     from(table) {
@@ -302,10 +337,7 @@ function createMockSupabase(opts: {
               return query;
             },
             maybeSingle() {
-              return Promise.resolve({
-                data: opts.resolveUserData ?? null,
-                error: null,
-              });
+              return Promise.resolve({ data: null, error: null });
             },
           };
           return query;
@@ -366,7 +398,7 @@ Deno.test("handleUpdate /vincular OK llama al RPC y manda mensaje de éxito", as
         date: 1700000000,
         chat: { id: 555, type: "private" },
         from: { id: 999, is_bot: false, first_name: "Tito", username: "tito" },
-        text: "/vincular ABC123",
+        text: "/vincular K7QX2M9P",
       },
     });
 
@@ -375,7 +407,7 @@ Deno.test("handleUpdate /vincular OK llama al RPC y manda mensaje de éxito", as
       c.fn === "canjear_codigo_vinculacion_bot"
     );
     assert(rpcCall, "no se llamó al RPC canjear_codigo_vinculacion_bot");
-    assertEquals(rpcCall!.params.p_codigo, "ABC123");
+    assertEquals(rpcCall!.params.p_codigo, "K7QX2M9P");
     assertEquals(rpcCall!.params.p_telegram_user_id, 999);
     assertEquals(rpcCall!.params.p_telegram_username, "tito");
 
@@ -422,7 +454,7 @@ Deno.test("handleUpdate /vincular código expirado manda mensaje de error", asyn
         date: 1700000000,
         chat: { id: 555, type: "private" },
         from: { id: 999, is_bot: false, first_name: "Tito" },
-        text: "/vincular ABC123",
+        text: "/vincular K7QX2M9P",
       },
     });
 
@@ -533,6 +565,208 @@ Deno.test("handleUpdate /vincular código con formato inválido no llama al RPC"
 });
 
 // ============================================================================
+// 4 bis. resolveUserByTelegramId contra bot_resolver_usuario (mig 237)
+// ============================================================================
+//
+// El contrato nuevo: el bot no lee `bot_usuarios` para saber quién sos. Llama a
+// `bot_resolver_usuario`, que mira `perfiles` y `usuario_sucursales` en vivo.
+// Acá probamos el mapeo del jsonb; que el SQL devuelva lo que tiene que
+// devolver lo prueba el ensayo funcional de la migración 237.
+
+Deno.test("resolveUserByTelegramId llama a bot_resolver_usuario con el chat", async () => {
+  const mockSupabase = createMockSupabase({
+    resolveUserData: {
+      telegram_user_id: 999,
+      perfil_id: "44444444-4444-4444-4444-444444444444",
+      rol: "admin",
+      sucursal_id: 2,
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(mockSupabase as any);
+
+  try {
+    const user = await resolveUserByTelegramId(999);
+    assert(user, "tenía que resolver el usuario");
+    // El rol sale del resolver (o sea, de perfiles), no de un SELECT a
+    // bot_usuarios: si alguien vuelve a leer la columna vieja, este test no lo
+    // ve, pero el que sigue sí.
+    assertEquals(user!.rol, "admin");
+    assertEquals(user!.sucursal_id, 2);
+    assertEquals(user!.perfil_id, "44444444-4444-4444-4444-444444444444");
+
+    const rpcCall = mockSupabase.__rpcCalls.find((c) => c.fn === "bot_resolver_usuario");
+    assert(rpcCall, "no se llamó a bot_resolver_usuario");
+    assertEquals(rpcCall!.params.p_telegram_user_id, 999);
+  } finally {
+    _setServiceRoleClientForTests(null);
+  }
+});
+
+Deno.test("resolveUserByTelegramId: un perfil con activo=false no resuelve usuario", async () => {
+  // Lo que devuelve la RPC cuando el empleado está dado de baja en la app: el
+  // chat sigue vinculado y bot_usuarios.activo sigue en true, y aun así no hay
+  // usuario. Antes de la 237 este caso devolvía al usuario con su rol viejo.
+  const mockSupabase = createMockSupabase({
+    resolverResponse: { data: { ok: false, motivo: "perfil_inactivo" }, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(mockSupabase as any);
+
+  try {
+    assertEquals(await resolveUserByTelegramId(999), null);
+  } finally {
+    _setServiceRoleClientForTests(null);
+  }
+});
+
+Deno.test("resolveUserByTelegramId: sin vincular tampoco resuelve", async () => {
+  const mockSupabase = createMockSupabase({ resolveUserData: null });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(mockSupabase as any);
+
+  try {
+    assertEquals(await resolveUserByTelegramId(12345), null);
+  } finally {
+    _setServiceRoleClientForTests(null);
+  }
+});
+
+Deno.test("handleUpdate usa el rol que devuelve el resolver, no el de bot_usuarios", async () => {
+  const handleUpdate = await freshHandleUpdate();
+
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  // Vinculado como preventista; hoy es admin en perfiles. El audit del mensaje
+  // tiene que decir admin.
+  const { client, spy } = createRouterMockSupabase({
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "55555555-5555-5555-5555-555555555555",
+      rol: "admin",
+      sucursal_id: 1,
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 237,
+      message: {
+        message_id: 237,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "/ayuda",
+      },
+    });
+
+    const auditMensaje = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tipo === "mensaje"
+    );
+    assert(auditMensaje, "no se logueó audit del mensaje");
+    assertEquals(auditMensaje!.row.rol, "admin");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+// ============================================================================
+// 4 ter. OTP de 8 caracteres y lockout del canje (mig 237)
+// ============================================================================
+
+Deno.test("handleUpdate /vincular con un código de 6 chars no llama al RPC", async () => {
+  const handleUpdate = await freshHandleUpdate();
+
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  const { client, spy } = createRouterMockSupabase({});
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 4,
+      message: {
+        message_id: 4,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "/vincular ABC123", // el formato viejo: 6 chars
+      },
+    });
+
+    const rpcCalls = spy.rpcCalls.filter((c) => c.fn === "canjear_codigo_vinculacion_bot");
+    assertEquals(rpcCalls.length, 0, "un código de 6 chars no tiene que llegar al canje");
+
+    const errorMsg = fetchMock.sent.find((s) => {
+      const sBody = (s as { body?: string }).body ?? "";
+      return sBody.includes("8 caracteres");
+    });
+    assert(errorMsg, "se debió avisar que ahora son 8 caracteres");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+Deno.test("handleUpdate /vincular bloqueado avisa cuántos minutos faltan", async () => {
+  const handleUpdate = await freshHandleUpdate();
+
+  Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
+  // El sexto intento fallido dentro de la ventana: la RPC ya no mira el código
+  // y devuelve el lockout con lo que falta.
+  const { client, spy } = createRouterMockSupabase({
+    rpcByFn: {
+      canjear_codigo_vinculacion_bot: {
+        data: {
+          success: false,
+          error: "bloqueado",
+          segundos_restantes: 540,
+        },
+        error: null,
+      },
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+  const fetchMock = mockTelegramFetch();
+
+  try {
+    await handleUpdate({
+      update_id: 5,
+      message: {
+        message_id: 5,
+        date: 1700000000,
+        chat: { id: 555, type: "private" },
+        from: { id: 999, is_bot: false, first_name: "Tito" },
+        text: "/vincular K7QX2M9P",
+      },
+    });
+
+    const aviso = fetchMock.sent.find((s) => {
+      const sBody = (s as { body?: string }).body ?? "";
+      return sBody.includes("Demasiados intentos") && sBody.includes("9 minutos");
+    });
+    assert(aviso, "no se avisó del bloqueo con los minutos que faltan");
+
+    const auditFail = spy.inserts.find((i) =>
+      i.table === "bot_audit_log" && i.row.tool_name === "vincular" &&
+      (i.row.resultado_meta as { error?: string })?.error === "bloqueado"
+    );
+    assert(auditFail, "no se auditó el intento bloqueado");
+  } finally {
+    fetchMock.restore();
+    _setServiceRoleClientForTests(null);
+    Deno.env.delete("TELEGRAM_BOT_TOKEN");
+  }
+});
+
+// ============================================================================
 // 5. parseCommand
 // ============================================================================
 
@@ -608,6 +842,11 @@ interface RouterMockOpts {
     data: Record<string, unknown> | null;
     error: { message: string } | null;
   }>;
+  /**
+   * Usuario que `bot_resolver_usuario` devuelve para el chat del update;
+   * null o ausente = chat sin vincular.
+   */
+  resolverUser?: Record<string, unknown> | null;
 }
 
 // deno-lint-ignore no-explicit-any
@@ -698,6 +937,9 @@ function createRouterMockSupabase(opts: RouterMockOpts = {}): { client: any; spy
     },
     rpc(fn: string, params: Record<string, unknown>) {
       spy.rpcCalls.push({ fn, params });
+      if (fn === "bot_resolver_usuario" && !opts.rpcByFn?.[fn]) {
+        return Promise.resolve(resolverPayload(opts.resolverUser ?? null));
+      }
       const r = opts.rpcByFn?.[fn] ?? { data: null, error: null };
       return Promise.resolve(r);
     },
@@ -725,6 +967,13 @@ Deno.test("/cliente Pe flow: invoca buscar_cliente y manda mensaje MarkdownV2", 
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "preventista",
+      sucursal_id: 1,
+      activo: true,
+    },
     rpcByFn: {
       bot_buscar_cliente: {
         data: [
@@ -739,18 +988,6 @@ Deno.test("/cliente Pe flow: invoca buscar_cliente y manda mensaje MarkdownV2", 
             sucursal_id: 1,
           },
         ],
-        error: null,
-      },
-    },
-    maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "preventista",
-          sucursal_id: 1,
-          activo: true,
-        },
         error: null,
       },
     },
@@ -823,6 +1060,13 @@ Deno.test("/saldo 42 flow: invoca ficha_cliente con cliente_id=42", async () => 
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "preventista",
+      sucursal_id: 1,
+      activo: true,
+    },
     rpcByFn: {
       obtener_resumen_cuenta_cliente_bot: {
         data: {
@@ -840,16 +1084,6 @@ Deno.test("/saldo 42 flow: invoca ficha_cliente con cliente_id=42", async () => 
       },
     },
     maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "preventista",
-          sucursal_id: 1,
-          activo: true,
-        },
-        error: null,
-      },
       clientes: {
         data: {
           id: 42,
@@ -915,17 +1149,12 @@ Deno.test("/misclientes con rol admin: bloqueado por scope", async () => {
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "admin",
-          sucursal_id: null,
-          activo: true,
-        },
-        error: null,
-      },
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "admin",
+      sucursal_id: null,
+      activo: true,
     },
   });
   // deno-lint-ignore no-explicit-any
@@ -975,17 +1204,12 @@ Deno.test("/recorrido con rol preventista: bloqueado por scope", async () => {
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "preventista",
-          sucursal_id: 1,
-          activo: true,
-        },
-        error: null,
-      },
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "preventista",
+      sucursal_id: 1,
+      activo: true,
     },
   });
   // deno-lint-ignore no-explicit-any
@@ -1026,17 +1250,12 @@ Deno.test("/comando_desconocido manda 'no reconocido'", async () => {
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client } = createRouterMockSupabase({
-    maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "preventista",
-          sucursal_id: 1,
-          activo: true,
-        },
-        error: null,
-      },
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "preventista",
+      sucursal_id: 1,
+      activo: true,
     },
   });
   // deno-lint-ignore no-explicit-any
@@ -1077,6 +1296,13 @@ Deno.test("/sugerencias con preventista invoca tool con limit default 10", async
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "preventista",
+      sucursal_id: 1,
+      activo: true,
+    },
     rpcByFn: {
       bot_sugerir_visitas_rfm: {
         data: {
@@ -1098,18 +1324,6 @@ Deno.test("/sugerencias con preventista invoca tool con limit default 10", async
               motivo: "Cliente top por frecuencia",
             },
           ],
-        },
-        error: null,
-      },
-    },
-    maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "preventista",
-          sucursal_id: 1,
-          activo: true,
         },
         error: null,
       },
@@ -1163,21 +1377,16 @@ Deno.test("/sugerencias 5 con preventista invoca tool con limit=5", async () => 
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "preventista",
+      sucursal_id: 1,
+      activo: true,
+    },
     rpcByFn: {
       bot_sugerir_visitas_rfm: {
         data: { total: 0, sugerencias: [] },
-        error: null,
-      },
-    },
-    maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "preventista",
-          sucursal_id: 1,
-          activo: true,
-        },
         error: null,
       },
     },
@@ -1215,17 +1424,12 @@ Deno.test("/sugerencias con rol admin: bloqueado por scope", async () => {
 
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: {
-      bot_usuarios: {
-        data: {
-          telegram_user_id: 999,
-          perfil_id: "33333333-3333-3333-3333-333333333333",
-          rol: "admin",
-          sucursal_id: null,
-          activo: true,
-        },
-        error: null,
-      },
+    resolverUser: {
+      telegram_user_id: 999,
+      perfil_id: "33333333-3333-3333-3333-333333333333",
+      rol: "admin",
+      sucursal_id: null,
+      activo: true,
     },
   });
   // deno-lint-ignore no-explicit-any
@@ -1293,7 +1497,7 @@ Deno.test("/menu (admin) manda keyboard con opciones para admin", async () => {
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    resolverUser: linkedAdmin,
   });
   // deno-lint-ignore no-explicit-any
   _setServiceRoleClientForTests(client as any);
@@ -1332,7 +1536,7 @@ Deno.test("/menu (preventista) keyboard incluye Mis clientes y Sugerencias", asy
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedPreventista, error: null } },
+    resolverUser: linkedPreventista,
   });
   // deno-lint-ignore no-explicit-any
   _setServiceRoleClientForTests(client as any);
@@ -1368,7 +1572,7 @@ Deno.test("/reset borra bot_conversaciones y manda confirmación", async () => {
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    resolverUser: linkedAdmin,
   });
   // deno-lint-ignore no-explicit-any
   _setServiceRoleClientForTests(client as any);
@@ -1408,7 +1612,7 @@ Deno.test("/desvincular hace soft delete (activo=false) y confirma", async () =>
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    resolverUser: linkedAdmin,
   });
   // deno-lint-ignore no-explicit-any
   _setServiceRoleClientForTests(client as any);
@@ -1486,7 +1690,7 @@ Deno.test("/sucursal sin args lista las asignadas con la activa marcada", async 
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    resolverUser: linkedAdmin,
     selectResponseByTable: {
       usuario_sucursales: {
         data: dosSucursalesAdmin,
@@ -1537,7 +1741,7 @@ Deno.test("/sucursal 2 cambia la activa y confirma", async () => {
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    resolverUser: linkedAdmin,
     selectResponseByTable: {
       usuario_sucursales: {
         data: dosSucursalesAdmin,
@@ -1587,7 +1791,7 @@ Deno.test("/sucursal con id no asignado rechaza sin update", async () => {
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedAdmin, error: null } },
+    resolverUser: linkedAdmin,
     selectResponseByTable: {
       usuario_sucursales: {
         data: dosSucursalesAdmin,
@@ -1631,7 +1835,7 @@ Deno.test("/sucursal con rol preventista es bloqueado por scope", async () => {
   const handleUpdate = await freshHandleUpdate();
   Deno.env.set("TELEGRAM_BOT_TOKEN", "test-token");
   const { client, spy } = createRouterMockSupabase({
-    maybeSingleByTable: { bot_usuarios: { data: linkedPreventista, error: null } },
+    resolverUser: linkedPreventista,
   });
   // deno-lint-ignore no-explicit-any
   _setServiceRoleClientForTests(client as any);

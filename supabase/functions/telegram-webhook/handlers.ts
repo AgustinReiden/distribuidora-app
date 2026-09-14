@@ -36,6 +36,7 @@ import { runAgent } from "../_shared/gemini/agent.ts";
 import type {
   BotRol,
   BotUser,
+  CanjearCodigoFail,
   TelegramCallbackQuery,
   TelegramUpdate,
   TelegramUser,
@@ -59,7 +60,12 @@ import { resetCommand } from "./commands/reset.ts";
 import { desvincularCommand } from "./commands/desvincular.ts";
 import { handleSucursalSwitch, sucursalCommand } from "./commands/sucursal.ts";
 
-const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
+// El generador usa un alfabeto de 32 símbolos (sin 0/O ni 1/I, mig 237); acá
+// aceptamos alfanumérico completo a propósito: validar la forma es para no
+// gastar un intento del lockout en algo que no puede ser un código, no para
+// adivinar cuál era. Si el usuario escribe una O donde había un 0, no matchea
+// ningún código y cae en "no existe", que es la verdad.
+const CODIGO_REGEX = /^[A-Z0-9]{8}$/;
 
 // ----------------------------------------------------------------------------
 // Boot del registry. Idempotente — se llama al inicio de cada handleUpdate.
@@ -284,7 +290,7 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
       chatId,
       "Hola! Todavía no estás vinculado al sistema.\n\n" +
         "Pedí un código en la app web (Perfil > Vincular Telegram) y mandalo así:\n" +
-        "/vincular ABC123",
+        "/vincular K7QX2M9P",
     );
     return;
   }
@@ -398,8 +404,8 @@ async function handleStart(
         "Para empezar necesito vincularte a tu cuenta:\n" +
         "1\\. Entrá a la app web\n" +
         "2\\. Andá a tu perfil \\> 'Vincular Telegram'\n" +
-        "3\\. Copiá el código de 6 caracteres\n" +
-        "4\\. Mandame: /vincular ABC123\n\n" +
+        "3\\. Copiá el código de 8 caracteres\n" +
+        "4\\. Mandame: /vincular K7QX2M9P\n\n" +
         "Comandos disponibles: /ayuda\n\n" +
         privacyMv2,
       { parse_mode: "MarkdownV2" },
@@ -429,7 +435,7 @@ async function handleAyuda(
   if (!user) {
     texto = "Todavía no estás vinculado.\n\n" +
       "Generá un código en la app web (Perfil > Vincular Telegram) y mandalo:\n" +
-      "/vincular ABC123";
+      "/vincular K7QX2M9P";
   } else {
     texto = ayudaPorRol(user.rol);
   }
@@ -503,9 +509,9 @@ function ayudaPorRol(rol: BotRol): string {
       ];
       break;
     default:
-      // Defensivo: si bot_usuarios.rol tuviera un valor fuera del union (por
-      // ej. un rol nuevo agregado en perfiles que todavía no contemplamos
-      // acá), no queremos un TypeError por hacer spread de undefined.
+      // Defensivo: si perfiles.rol tuviera un valor fuera del union (por
+      // ej. un rol nuevo que todavía no contemplamos acá), no queremos un
+      // TypeError por hacer spread de undefined.
       // Logueamos warning y mostramos solo los comandos comunes.
       console.warn(`ayudaPorRol: rol no esperado "${rol as string}"`);
       extras = [];
@@ -528,7 +534,7 @@ async function handleVincular(
 ): Promise<void> {
   // Tomamos el primer token como código — preservamos el comportamiento
   // original (`text.split(/\s+/)` / partes[1]). Si alguien manda
-  // `/vincular ABC123 basura` tomamos "ABC123" e ignoramos lo demás.
+  // `/vincular K7QX2M9P basura` tomamos "K7QX2M9P" e ignoramos lo demás.
   const trimmed = rawArgs.trim();
   const firstToken = trimmed.length > 0 ? trimmed.split(/\s+/)[0] : "";
   const codigo = firstToken.toUpperCase();
@@ -538,7 +544,7 @@ async function handleVincular(
       chatId,
       "Uso: /vincular CODIGO\n\n" +
         "Generá un código en la app web (Perfil > Vincular Telegram) y mandalo así:\n" +
-        "/vincular ABC123",
+        "/vincular K7QX2M9P",
     );
     // No auditamos el "uso vacío" como error: es información inválida cero,
     // no hay codigo_redacted que loguear.
@@ -548,8 +554,8 @@ async function handleVincular(
   if (!CODIGO_REGEX.test(codigo)) {
     await sendMessage(
       chatId,
-      "Código inválido. Deben ser 6 caracteres (letras mayúsculas y números).\n\n" +
-        "Ejemplo: /vincular ABC123",
+      "Código inválido. Deben ser 8 caracteres (letras mayúsculas y números).\n\n" +
+        "Ejemplo: /vincular K7QX2M9P",
     );
     await logEvent({
       telegram_user_id: tgUser.id,
@@ -590,7 +596,7 @@ async function handleVincular(
   }
 
   // result.ok === false → mapear error a mensaje claro.
-  const mensaje = mensajeErrorVincular(result.error);
+  const mensaje = mensajeErrorVincular(result.error, result.segundos_restantes);
   await sendMessage(chatId, mensaje);
   await logEvent({
     telegram_user_id: tgUser.id,
@@ -608,11 +614,12 @@ async function handleVincular(
  * plaintext.
  */
 function redactCodigo(codigo: string): string {
-  return codigo.length === 6 ? `${codigo.slice(0, 2)}****` : "****";
+  return codigo.length === 8 ? `${codigo.slice(0, 2)}******` : "******";
 }
 
 function mensajeErrorVincular(
-  error: "no_encontrado" | "expirado" | "ya_usado" | "perfil_invalido" | "rpc_error",
+  error: CanjearCodigoFail["error"],
+  segundosRestantes?: number,
 ): string {
   switch (error) {
     case "no_encontrado":
@@ -627,6 +634,16 @@ function mensajeErrorVincular(
     case "perfil_invalido":
       return "❌ El perfil asociado al código está desactivado. " +
         "Hablá con un administrador.";
+    case "bloqueado": {
+      // El lockout del canje (mig 237). Decimos cuánto falta: el que se
+      // equivocó cinco veces de buena fe necesita saber cuándo reintentar, y
+      // al que está probando códigos el minuto redondeado no le sirve de nada.
+      const minutos = segundosRestantes != null
+        ? Math.max(1, Math.ceil(segundosRestantes / 60))
+        : 15;
+      return "❌ Demasiados intentos fallidos.\n\n" +
+        `Probá de nuevo en ${minutos} ${minutos === 1 ? "minuto" : "minutos"}.`;
+    }
     case "rpc_error":
       return "❌ Hubo un error procesando tu código. Probá de nuevo en un momento.";
   }
@@ -705,7 +722,7 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
       chatId,
       "Para usar los botones necesito que estés vinculado.\n\n" +
         "Pedí un código en la app web (Perfil > Vincular Telegram) y mandalo " +
-        "así: /vincular ABC123",
+        "así: /vincular K7QX2M9P",
     );
     await logEvent({
       telegram_user_id: tgUser.id,
