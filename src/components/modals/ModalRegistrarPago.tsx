@@ -1,4 +1,5 @@
 import React, { useState, useRef, FormEvent, ChangeEvent } from 'react'
+import { z } from 'zod'
 import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
@@ -6,8 +7,32 @@ import NumberInput from '../ui/NumberInput'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
-import { modalPagoSchema } from '../../lib/schemas'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
+// para el incidente de chunk desincronizado que motivó la regla.
+// eslint-disable-next-line react-refresh/only-export-components
+export const modalPagoSchema = z.object({
+  monto: z.coerce
+    .number({ error: 'El monto debe ser un número' })
+    .positive({ message: 'El monto debe ser mayor a $0' }),
+
+  formaPago: z.enum(['efectivo', 'transferencia', 'cheque', 'tarjeta', 'cuenta_corriente', 'vale_blanco'], {
+    error: 'Forma de pago inválida'
+  }),
+
+  referencia: z.string().optional(),
+  notas: z.string().optional(),
+  pedidoSeleccionado: z.string().optional()
+}).refine(
+  (data) => {
+    if (data.formaPago === 'cheque') {
+      return data.referencia && data.referencia.trim().length > 0
+    }
+    return true
+  },
+  { message: 'El número de cheque es obligatorio', path: ['referencia'] }
+)
 
 // Alias for the Cliente type used in this component
 type Cliente = ClienteDB;

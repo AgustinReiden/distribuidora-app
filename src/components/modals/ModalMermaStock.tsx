@@ -1,9 +1,25 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
+import { z } from 'zod'
 import { X, AlertTriangle, Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
-import { modalMermaSchema } from '../../lib/schemas'
 import NumberInput from '../ui/NumberInput'
 import type { Producto } from '../../types'
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
+// para el incidente de chunk desincronizado que motivó la regla.
+// eslint-disable-next-line react-refresh/only-export-components
+export const modalMermaSchema = z.object({
+  cantidad: z.coerce
+    .number({ error: 'La cantidad debe ser un número' })
+    .int({ message: 'La cantidad debe ser un número entero' })
+    .positive({ message: 'La cantidad debe ser mayor a 0' }),
+
+  motivo: z
+    .string()
+    .min(1, { message: 'Debe seleccionar un motivo' }),
+
+  observaciones: z.string().optional()
+})
 
 type MotivoMermaValue = 'rotura' | 'vencimiento' | 'robo' | 'decomiso' | 'devolucion' | 'error_inventario' | 'muestra' | 'promociones' | 'otro';
 

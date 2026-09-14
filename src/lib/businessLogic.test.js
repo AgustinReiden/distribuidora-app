@@ -1,13 +1,22 @@
 /* eslint-disable no-unused-vars */
-import { describe, it, expect } from 'vitest'
-import {
-  modalClienteSchema,
-  modalProductoSchema,
-  modalPagoSchema,
-  modalMermaSchema,
-  modalProveedorSchema,
-  validateForm
-} from './schemas'
+import { describe, it, expect, vi } from 'vitest'
+import { validateForm } from './schemas'
+
+// Los schemas de estos modales viven co-locados en su propio componente (ver
+// CLAUDE.md). Importarlos arrastra los hooks de datos del modal, que en
+// runtime abren un cliente Supabase real: se mockea acá porque estos tests
+// solo ejercitan el schema, no la UI.
+vi.mock('./supabase', () => ({
+  supabase: {},
+  setSucursalHeader: vi.fn(),
+  getSucursalHeader: vi.fn()
+}))
+
+import { modalClienteSchema } from '../components/modals/ModalCliente'
+import { modalProductoSchema } from '../components/modals/ModalProducto'
+import { modalPagoSchema } from '../components/modals/ModalRegistrarPago'
+import { modalMermaSchema } from '../components/modals/ModalMermaStock'
+import { modalProveedorSchema } from '../components/modals/ModalProveedor'
 import { normalizarNumero } from '../utils/normalizarNumero'
 import { validarStockAntesDeEncolar } from '../utils/validarStockAntesDeEncolar'
 

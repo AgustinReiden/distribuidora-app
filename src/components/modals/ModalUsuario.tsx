@@ -1,14 +1,47 @@
 import { useState, useEffect, memo, useRef } from 'react';
+import { z } from 'zod';
 import { Loader2, Truck } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { useZodValidation } from '../../hooks/useZodValidation';
-import { usuarioSchema } from '../../lib/schemas';
 import {
   usePerfilRolesQuery,
   useAsignarPerfilRolesMutation,
 } from '../../hooks/queries';
 import { useSucursal } from '../../contexts/SucursalContext';
 import type { PerfilDB } from '../../types';
+
+// Validación de teléfono. Duplicada de lib/schemas.ts (telefonoSchema) a
+// propósito, por la misma razón que el resto del schema: nada de este modal
+// puede depender del chunk compartido.
+const telefonoSchema = z
+  .string()
+  .min(8, { message: 'El teléfono debe tener al menos 8 dígitos' })
+  .or(z.literal(''))
+  .optional()
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
+// para el incidente de chunk desincronizado que motivó la regla.
+// eslint-disable-next-line react-refresh/only-export-components
+export const usuarioSchema = z.object({
+  nombre: z
+    .string()
+    .min(1, { message: 'El nombre es obligatorio' })
+    .transform(val => val.trim())
+    .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
+
+  email: z
+    .string()
+    .email({ message: 'Email inválido' })
+    .min(1, { message: 'El email es obligatorio' }),
+
+  rol: z.enum(['admin', 'preventista', 'transportista', 'deposito', 'encargado'], {
+    error: 'Rol invalido'
+  }),
+
+  zona: z.string().optional(),
+
+  telefono: telefonoSchema
+})
 
 /** Roles disponibles para usuarios */
 export type RolUsuario = 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';

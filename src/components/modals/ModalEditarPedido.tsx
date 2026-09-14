@@ -1,11 +1,11 @@
 import { Suspense, useState, memo, useEffect, useMemo } from 'react';
+import { z } from 'zod';
 import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck, Check } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import NumberInput from '../ui/NumberInput';
 import { formatPrecio, parseDateSafe, fechaHaceDias } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
-import { modalEditarPedidoSchema } from '../../lib/schemas';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
 import { useRendiciones } from '../../hooks/supabase/useRendiciones';
@@ -20,6 +20,14 @@ import { lazyWithReload } from '../../utils/lazyWithReload';
 
 const ModalSustituirRegalo = lazyWithReload(() => import('./ModalSustituirRegalo'));
 const ModalCambiarCliente = lazyWithReload(() => import('./ModalCambiarCliente'));
+
+// Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
+// para el incidente de chunk desincronizado que motivó la regla.
+// Pago se gestiona en ModalRegistrarPago (separate flow), no aqui.
+// eslint-disable-next-line react-refresh/only-export-components
+export const modalEditarPedidoSchema = z.object({
+  notas: z.string().optional()
+})
 
 /** Item del pedido para edición. Incluye fiscales opcionales que se pueblan al guardar. */
 export interface PedidoEditItem {
