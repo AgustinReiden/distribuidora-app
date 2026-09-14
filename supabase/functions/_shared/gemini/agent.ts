@@ -34,8 +34,8 @@ import { isFunctionCallPart, isTextPart } from "./types.ts";
 import { callGemini } from "./client.ts";
 import { getSystemPrompt } from "./prompts/base.ts";
 import type { SucursalContext } from "./prompts/base.ts";
-import { toolsToGeminiDeclarations } from "./schema.ts";
-import { getToolsForRole, invokeTool } from "../tools/registry.ts";
+import { toolsToGeminiDeclarations, toolsVisiblesParaModelo } from "./schema.ts";
+import { getTool, getToolsForRole, invokeTool } from "../tools/registry.ts";
 import { logEvent } from "../audit.ts";
 import { loadConversation, saveConversation } from "./memory.ts";
 import {
@@ -43,7 +43,7 @@ import {
   appendModelParts,
   appendUserText,
 } from "./history-mapper.ts";
-import type { ToolContext } from "../tools/base.ts";
+import type { ToolContext, ToolResult } from "../tools/base.ts";
 
 /**
  * Cap del loop de tool-calls. Configurable via env var `BOT_MAX_TOOL_ITERATIONS`
@@ -263,7 +263,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     await resolverContextoSucursal(supabase, user),
   );
   const allTools = getToolsForRole(user.rol);
-  const toolDecls = toolsToGeminiDeclarations(allTools);
+  // crear_pedido (y cualquier otra write tool con ocultaAlModelo) queda
+  // registrada para invokeTool() pero no se ofrece como opción a Gemini: el
+  // único disparador válido es el callback del botón "Confirmar".
+  const toolDecls = toolsToGeminiDeclarations(toolsVisiblesParaModelo(allTools));
 
   // 3. ToolContext para invokeTool.
   const toolCtx: ToolContext = {
@@ -430,8 +433,16 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     // aborta los otros. El orden del map preserva el orden del append al
     // history para coherencia con el orden en que Gemini las emitió.
     const results = await Promise.all(
-      fnCalls.map(async (fc) => {
+      fnCalls.map(async (fc): Promise<{ name: string; result: ToolResult }> => {
         const { name, args } = fc.functionCall;
+        // Defensa en profundidad: aunque no se declaró a Gemini (ver
+        // toolsVisiblesParaModelo), si el modelo igual emite el nombre de
+        // una tool ocultaAlModelo, no la ejecutamos desde acá — su único
+        // disparador válido es el callback de un botón (invokeTool directo).
+        const tool = getTool(name);
+        if (tool?.ocultaAlModelo) {
+          return { name, result: { ok: false, error: "tool_no_invocable_por_el_modelo" } };
+        }
         const result = await invokeTool(name, args, toolCtx);
         return { name, result };
       }),

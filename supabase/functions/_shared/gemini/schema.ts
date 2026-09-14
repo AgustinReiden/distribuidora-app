@@ -41,3 +41,14 @@ export function toolsToGeminiDeclarations(
 ): GeminiFunctionDeclaration[] {
   return tools.map(toolToGeminiDeclaration);
 }
+
+/**
+ * Filtra las tools marcadas `ocultaAlModelo` ANTES de convertirlas a
+ * declarations. Llamar siempre antes de `toolsToGeminiDeclarations` en el
+ * loop del agente — la tool sigue en el registry y es invocable vía
+ * `invokeTool()` (p.ej. desde el callback de un botón), solo deja de ser una
+ * opción que Gemini puede elegir por su cuenta.
+ */
+export function toolsVisiblesParaModelo(tools: Tool[]): Tool[] {
+  return tools.filter((t) => !t.ocultaAlModelo);
+}

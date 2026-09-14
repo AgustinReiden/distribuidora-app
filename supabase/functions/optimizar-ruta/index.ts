@@ -14,6 +14,18 @@
 // Variables de entorno:
 //   - GOOGLE_SA_KEY  (secret) — JSON del service account (Route Optimization)
 //   - GOOGLE_API_KEY (secret) — key de Maps Platform (fallback computeRoutes)
+//   - APP_ORIGIN     (secret) — origen exacto del front (p.ej.
+//     "https://app.midistribuidora.com"), para Access-Control-Allow-Origin.
+//     Sin setear, cae a "*" (soportado pero desaconsejado en prod).
+//   - SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY
+//     (auto-inyectadas) — usadas por auth.ts para resolver al caller y su rol.
+//
+// Autorización: la función no está en supabase/config.toml, así que corre
+// con verify_jwt = true (Supabase exige un JWT firmado por el proyecto —
+// la anon key pública lo cumple). Eso NO alcanza: cada tramo optimizado es
+// una llamada facturable a Google, así que además exigimos rol transportista,
+// encargado o admin (ver auth.ts) y un tope de tamaño de request (ver
+// limites.ts), ambos ANTES de tocar Google.
 
 import { serve } from "std/http/server.ts";
 import {
@@ -37,9 +49,11 @@ import {
   type PedidoRutaZona,
 } from "./route-optimization.ts";
 import { navegarTramo } from "./navegar-tramo.ts";
+import { autorizarCaller, crearDepsAutorizacion } from "./auth.ts";
+import { validarLimites } from "./limites.ts";
 
 const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": Deno.env.get("APP_ORIGIN") ?? "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-sucursal-id",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -222,6 +236,13 @@ serve(async (req: Request) => {
     return jsonResponse({ success: false, error: "Método no permitido" }, 405);
   }
 
+  // Autorización: rechazar ANTES de tocar Google. Un JWT válido (aun de la
+  // anon key) no alcanza — se exige un rol operativo real.
+  const auth = await autorizarCaller(req, crearDepsAutorizacion());
+  if (!auth.ok) {
+    return jsonResponse({ success: false, error: auth.error, mensaje: auth.mensaje }, auth.status);
+  }
+
   const saKey = Deno.env.get("GOOGLE_SA_KEY") ?? "";
   const apiKey = Deno.env.get("GOOGLE_API_KEY") ?? "";
   if (!saKey && !apiKey) {
@@ -238,6 +259,11 @@ serve(async (req: Request) => {
     body = await req.json();
   } catch {
     return jsonResponse({ success: false, error: "Body inválido", mensaje: "Se esperaba JSON" });
+  }
+
+  const limites = validarLimites(body.pedidos?.length ?? 0, body.repartidores?.length ?? 0);
+  if (!limites.ok) {
+    return jsonResponse({ success: false, error: "Solicitud demasiado grande", mensaje: limites.mensaje }, 400);
   }
 
   // --- Modo navegación asistida: guía giro-a-giro de un solo tramo ---

@@ -48,6 +48,15 @@ export interface Tool<TParams = Record<string, unknown>, TResult = unknown> {
   parameters: Record<string, unknown>;
   /** Roles autorizados a invocar esta tool. Se enforza en invokeTool(). */
   allowedRoles: ReadonlyArray<BotRol>;
+  /**
+   * true si esta tool NO debe ofrecerse a Gemini como function declaration —
+   * sigue registrada y es invocable vía invokeTool() (p.ej. desde el callback
+   * de un botón), pero el LLM no puede elegir llamarla por su cuenta. Es
+   * para tools de escritura sensibles cuyo único gate real es una acción de
+   * UI explícita (tap en "Confirmar"), no un texto del system prompt que el
+   * usuario puede persuadir al modelo a ignorar. Ver crear_pedido.
+   */
+  ocultaAlModelo?: boolean;
   /** Handler async. Debe validar params adicionalmente (el JSON Schema en
    *  Phase 3 lo hará Gemini, pero acá NO confiamos en eso) y throw para
    *  errores controlados con mensajes en español visibles al usuario. */

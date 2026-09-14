@@ -49,6 +49,12 @@ export const crearPedidoTool: Tool<CrearPedidoParams, CrearPedidoResult> = {
     required: ["confirmacion_id"],
   },
   allowedRoles: ["admin", "encargado", "preventista"],
+  // El texto de la description de arriba es el único freno para el LLM, y un
+  // usuario puede pedirle que "confirme ya" en el mismo turno en que aparece
+  // el confirmacion_id en el history. ocultaAlModelo la saca de las function
+  // declarations que ve Gemini — sigue registrada para que el callback del
+  // botón "Confirmar" la invoque vía invokeTool().
+  ocultaAlModelo: true,
   handler: async ({ confirmacion_id }, ctx) => {
     if (!UUID_REGEX.test(confirmacion_id)) {
       throw new Error("confirmacion_id no es un UUID válido");
