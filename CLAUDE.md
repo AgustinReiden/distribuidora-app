@@ -138,6 +138,18 @@ suelta en `sucursales`.
   predicado `sin_costo`** — no mires `costo_sin_iva` por tu cuenta, que fue justo el bug de
   #511. Un reporte nuevo que valorice mermas o decida "sin costo" llama a estas dos; si
   reescribís el criterio, el gate `scripts/check-integridad.mjs` se pone rojo.
+  **Y no son sólo los reportes: el que ESCRIBE `pedido_items.costo_unitario_al_crear` también
+  la llama** (migs 257/258, #673). Eran seis caminos con seis copias inline —y una,
+  `sustituir_regalo_pedido`, con `costo_real` pelado, que es un número distinto: 80 de 295
+  productos de prod tienen `costo_real <> costo_promedio`—. El gate es el check **COSTO-D** de
+  `auditoria_integridad()`: cuenta funciones de `public` que escriben esa columna sin mencionar
+  `costo_valuacion`. Corolario del mismo issue: en `actualizar_pedido_items` el costo se
+  calcula **después** del `INSERT ... RETURNING producto_id`, con el producto que quedó, porque
+  `aplicar_sustituciones_regalo_pre_insert` puede haberlo reescrito al sustituto —la misma
+  regla que la 252 le aplicó al stock y al contenedor—.
+  Y al agregar un check a `auditoria_integridad()`, **mirá qué ids ya están tomados**: la
+  salida es una lista y no un mapa, así que un id repetido no falla ni se nota. La familia
+  `COSTO-*` ya iba por la `D` cuando parecía libre desde la `A`.
 
 - **`productos.costo_promedio` no puede ser base de sí mismo.** El promedio vivo ya incluye la
   compra que estás por recalcular; la base es `compra_items.costo_promedio_anterior`, el
