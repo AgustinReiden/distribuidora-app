@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 239.** El ledger de prod llega hasta
-`238_el_criterio_de_merma_vive_en_un_solo_lugar`.
+**La próxima migración es la 240.** El ledger de prod llega hasta
+`239_el_bucket_de_facturas_deja_de_ser_publico`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -155,7 +155,12 @@ Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el 
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
 Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
 `main`. Van cinco veces.
-Última actualización: 238, el 2026-09-15.)
+Y una sexta vez, de otra forma, con la 239: el archivo se escribió el 2026-09-13 como
+`228_...` confirmando el ledger (iba por la 227) y se **mergeó sin aplicar**. Dos días
+después el 228 ya era de otra migración y la cadena iba por la 238, así que hubo que
+renumerarlo al aplicarlo. Moraleja adicional: un archivo que espera en `main` no reserva
+nada. Si no lo vas a aplicar ahora, no le pongas número todavía.
+Última actualización: 239, el 2026-09-15.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -1118,6 +1123,41 @@ Es un camino de **escritura**, no de lectura —las dos funciones de reporte lee
 `m.costo_unitario` ya escrito—, así que la invariante no depende de él; unificarlo cambiaría los
 snapshots futuros y va por issue aparte. Tampoco se tocaron los criterios de venta por vendedor
 ni el filtro de canal (SQL-13 / D-1).
+
+### 239 · El bucket de facturas deja de ser público (nació como 228)
+
+Archivo escrito el 2026-09-13 y mergeado a `main` **sin aplicar**, con `[SQL - NO APLICADA]`
+en el mensaje del commit (`4780a58`). Para cuando se aplicó, el 2026-09-15, el número 228 ya
+se lo había llevado `228_cada_uno_ve_lo_de_su_sucursal` (ledger `20260913212201`, ese mismo
+día a las 21:22) y la cadena iba por la 238 — así que se renumeró a **239**. Es la trampa 3
+de CLAUDE.md en su versión menos obvia: no chocaron dos sesiones escribiendo a la vez, chocó
+un archivo con su propio yo de dos días antes.
+
+**Lo encontró el drift-check, no una persona.** `scripts/check-migrations.mjs` venía rojo en
+`main` desde el 2026-09-14 con "archivo en `migrations/` pero NO aplicado en prod"; el último
+verde de `integridad.yml` fue el 2026-09-13, justo antes de ese commit. Vale la pena anotarlo
+porque es exactamente para esto que existe el gate: un archivo sin aplicar es invisible en
+code review y no lo ve ni `tsc` ni los tests.
+
+**La mitad del código ya estaba en producción.** `ModalCompra.tsx` usa
+`createSignedUrl(fileName, 300)` desde el 2026-09-13. Las signed URLs funcionan igual sobre un
+bucket público, así que nada se rompió — pero el beneficio de seguridad no existió hasta esta
+migración: el front estuvo dos días listo para un bucket privado que seguía siendo público, y
+las 17 facturas ya subidas seguían servibles por URL a cualquiera que la tuviera, sin login.
+
+Qué cambió: bucket privado, tope de 8 MB (el `MAX_IMAGE_SIZE` del modal) y sólo imagen o PDF;
+INSERT pasa de "cualquier `authenticated`" a `es_encargado_o_admin()`; SELECT **también** a
+`es_encargado_o_admin()` —no sólo admin— porque `createSignedUrl` corre bajo la RLS de quien
+acaba de subir la foto, y si sólo admin tuviera SELECT el escaneo se le rompería a un
+encargado; DELETE sólo admin.
+
+Verificado después de aplicar: `storage.buckets` con `public=false`, `file_size_limit=8388608`
+y los cinco mime types; las tres policies nuevas vivas y la vieja `Allow authenticated uploads`
+dropeada (lo chequea el propio `DO $verif$` de la migración). Y la prueba que importa, con
+`curl` sobre una factura real ya subida: la ruta pública devuelve `NoSuchBucket` tanto para el
+objeto que existe como para uno inventado —indistinguibles desde afuera, sin enumeración—
+cuando antes devolvía el PNG. El md5 del archivo del repo sin espacios es idéntico al
+`statements` del ledger: `daf6602e97c368b445f1d5aa72f2f2bb`.
 
 ## Mantenimiento
 
