@@ -1815,11 +1815,24 @@ export interface RegistrarSalvedadResult {
   nuevo_total_pedido?: number;
 }
 
+/**
+ * `anulada` NO entra (mig 244, #621): anular restituye la linea del pedido,
+ * recalcula los totales y revierte la merma, y `resolver_salvedad` sólo escribe
+ * un estado. El RPC rechaza 'anulada' desde la 244; el tipo lo dice acá para
+ * que no llegue a viajar.
+ */
 export interface ResolverSalvedadInput {
   salvedadId: string;
-  estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente'>;
+  estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente' | 'anulada'>;
   notas?: string | null;
   pedidoReprogramadoId?: string | null;
+}
+
+/** Entrada del RPC `anular_salvedad` (mig 244). Las notas son obligatorias: es
+ *  una accion que mueve stock y plata y tiene que quedar dicho por que. */
+export interface AnularSalvedadInput {
+  salvedadId: string;
+  notas: string;
 }
 
 export interface EstadisticasSalvedades {

@@ -6,7 +6,15 @@ import { X, CheckCircle, Package, User, Truck, Calendar, FileText, AlertCircle }
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import type { SalvedadItemDBExtended, EstadoResolucionSalvedad } from '../../types'
 
-type ResolucionOption = Exclude<EstadoResolucionSalvedad, 'pendiente'>;
+/**
+ * `anulada` NO es una opcion de este picker (mig 244, #621). Las seis que
+ * quedan sólo dicen quien se hace cargo del monto; anular deshace la salvedad
+ * entera --restituye la linea, recalcula los totales y revierte la merma-- y
+ * vive en su propia accion, con su propia confirmacion
+ * (ModalAnularSalvedad). El RPC `resolver_salvedad` rechaza 'anulada' desde la
+ * mig 244: el tipo lo dice acá para que ni se arme la opcion.
+ */
+type ResolucionOption = Exclude<EstadoResolucionSalvedad, 'pendiente' | 'anulada'>;
 
 interface ResolucionOptionInfo {
   value: ResolucionOption;
@@ -45,12 +53,6 @@ const RESOLUCIONES: ResolucionOptionInfo[] = [
     label: ESTADOS_RESOLUCION_LABELS.resuelto_otro,
     descripcion: 'Otra forma de resolucion (especificar en notas)',
     color: 'gray'
-  },
-  {
-    value: 'anulada',
-    label: ESTADOS_RESOLUCION_LABELS.anulada,
-    descripcion: 'Se anula la salvedad (error en el registro)',
-    color: 'slate'
   }
 ]
 
