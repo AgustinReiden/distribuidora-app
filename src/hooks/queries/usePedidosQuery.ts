@@ -10,6 +10,7 @@ import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
 import { fechaLocalISO } from '../../utils/formatters'
 import { nuevoRequestId } from '../../utils/idempotencia'
+import { isTransientNetworkError } from '../../utils/retryWithBackoff'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { traerTodo } from '../../utils/paginacion'
@@ -664,6 +665,12 @@ export function useCrearPedidoMutation() {
 
   return useMutation({
     mutationFn: crearPedido,
+    // `crear_pedido_idempotente` es idempotente por `p_offline_id` (mig 071):
+    // un reintento no duplica el pedido. Pero sólo vale la pena reintentar un
+    // blip de red — un error de negocio (stock insuficiente, etc.) va a fallar
+    // igual la segunda vez, y retrasarlo 1-2s no ayuda a nadie.
+    retry: (failureCount, error) => failureCount < 2 && isTransientNetworkError(error),
+    retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 10000),
     onSuccess: () => {
       // Invalidar todas las queries de pedidos (list + paginated)
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
@@ -1184,12 +1191,24 @@ export function usePagosMasivosMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: ({ pedidoIds, formaPago, fecha, clientRequestId }: {
+    mutationFn: (variables: {
       pedidoIds: string[];
       formaPago: string;
       fecha?: string | null;
       clientRequestId?: string
-    }) => marcarPagosMasivo(pedidoIds, formaPago, fecha, clientRequestId),
+    }) => {
+      // Mismo UUID en todo reintento automático: react-query re-ejecuta este
+      // `mutationFn` con el MISMO objeto `variables` (no uno nuevo por
+      // intento), así que fijarlo acá si falta -en vez de dejar que
+      // `marcarPagosMasivo` genere uno nuevo cada vez con `??`- es lo que hace
+      // que el reintento dedupee en vez de cobrar dos veces.
+      variables.clientRequestId ??= nuevoRequestId()
+      return marcarPagosMasivo(variables.pedidoIds, variables.formaPago, variables.fecha, variables.clientRequestId)
+    },
+    // `marcar_pagos_masivo` es idempotente por `p_client_request_id` (mig 167),
+    // pero sólo vale la pena reintentar un blip de red.
+    retry: (failureCount, error) => failureCount < 2 && isTransientNetworkError(error),
+    retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 10000),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
     },
@@ -1291,6 +1310,11 @@ export function useEntregaYPagoMasivosMutation() {
       }
       return { entregados: idsEntregar.length, cobrados: idsCobrar.length }
     },
+    // Sin `retry`: el `mutationFn` nunca rechaza (atrapa el error de cada paso
+    // y lo devuelve como dato — ver el comentario de la interfaz arriba), así
+    // que un retry acá no tendría nada que reintentar. Los dos pasos que
+    // llama SÍ son idempotentes (`p_client_request_id`, mig 167); eso importa
+    // para un reintento manual del usuario, no para éste.
     onSuccess: () => {
       // Corre siempre, incluso con resultado parcial: lo que sí entró tiene
       // que reflejarse (saldo, stock, la parada cerrada en la ruta activa).
