@@ -131,8 +131,12 @@ const PEDIDO_PRODUCT_COLS = 'id, nombre, codigo, categoria, unidades_de_venta_po
 // entraba a precio de lista y el cliente con descuento lo pagaba de más. El embed
 // va aliasado para que el shape coincida con ClienteDB (que ya usa
 // `descuentos_categoria`), igual que lo aplana `flattenClienteRow`.
-// SELECT de cliente_descuentos_categoria es `USING (true)` para authenticated
-// (mig 079): no hay rol que pierda la lista y quede re-cotizando sin descuento.
+// `cdc_select` se acotó dos veces: por sucursal en la mig 228 y por rol en la
+// 243 (`es_encargado_o_admin() OR es_preventista()`). Para el transportista el
+// embed viene `[]` — no pasa nada, porque la comanda y la hoja de ruta imprimen
+// los precios guardados en `pedido_items` y no los recotizan. Quien SÍ recotiza
+// (ModalPedido, ModalEditarPedido, ModalCambiarCliente) es siempre preventista,
+// encargado o admin, que son justo los que la policy deja pasar.
 const PEDIDO_CLIENT_COLS = 'id, nombre_fantasia, razon_social, cuit, direccion, aclaracion_direccion, telefono, contacto, latitud, longitud, horarios_atencion, dias_atencion, horario_entrega, zona, zona_id, descuento_porcentaje, descuentos_categoria:cliente_descuentos_categoria(categoria, descuento_porcentaje)' as const
 // pagos(forma_pago, monto): permite a la card derivar la forma de pago real
 // (incluido "Combinado") sin queries extra. Los pagos combinados se guardan
