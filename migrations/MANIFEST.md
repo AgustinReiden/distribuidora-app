@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 244.** El ledger de prod llega hasta
-`243_un_pedido_cerrado_no_se_reabre_ni_se_escribe`.
+**La próxima migración es la 249.** El ledger de prod llega hasta
+`248_el_mismo_update_no_entra_dos_veces`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -160,7 +160,13 @@ Y una sexta vez, de otra forma, con la 239: el archivo se escribió el 2026-09-1
 después el 228 ya era de otra migración y la cadena iba por la 238, así que hubo que
 renumerarlo al aplicarlo. Moraleja adicional: un archivo que espera en `main` no reserva
 nada. Si no lo vas a aplicar ahora, no le pongas número todavía.
-Última actualización: 243, el 2026-09-15.)
+Y una séptima vez el 2026-09-15, en vivo y dos veces seguidas: la 248 se escribió como
+246 confirmando el ledger, y al ir a aplicarla el 246 ya estaba tomado por otra rama; se
+renumeró a 247 y en el minuto que llevó renumerar, el 247 también se lo llevó otra rama.
+Salió como 248. Es exactamente el escenario de la tercera fuente que no se puede consultar:
+las ramas abiertas de otras sesiones. Lo único que lo evitó fue reconfirmar el ledger
+**inmediatamente** antes de aplicar, no al empezar.
+Última actualización: 248, el 2026-09-15.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -1259,6 +1265,43 @@ Cierra #613, #633 y #639. Lo que hay que saber sin abrir el SQL:
 
 Aparte, sin migración: se corrigió `migrations/022_bot_ventas_compras_rpcs.sql` para que
 coincida con el ledger. Ver **§F**.
+
+### 248 · El mismo update de Telegram no entra dos veces
+
+Mapea 1:1 al ledger. Cierra #640 (OPS-2 de la auditoría). Lo que hay que saber sin abrir el SQL:
+
+- **El webhook nunca leía `update.update_id`.** Telegram reintenta cuando no recibe 200 a
+  tiempo —una respuesta lenta del LLM alcanza— y cada reintento se reprocesaba entero: el
+  mismo mensaje pasaba dos veces por el agente y un callback de "confirmar pedido" podía
+  intentar crear el pedido dos veces, porque `crear_pedido_completo_bot` **no** es idempotente
+  por update. Esta migración no la toca: la idempotencia es del webhook.
+- **`bot_updates_procesados` (PK `update_id`) + `bot_marcar_update(bigint)`.** La función hace
+  `INSERT ... ON CONFLICT DO NOTHING` y devuelve si insertó: TRUE = procesalo, FALSE =
+  descartalo. Atómica, así que dos reintentos concurrentes en isolates distintos no ganan los
+  dos. RLS habilitada sin policies y `EXECUTE` sólo a `service_role`, como el resto de las
+  `bot_*`.
+- **La retención va adentro de la función, no en un pg_cron, y es a propósito**: pg_cron NO
+  está instalado en este cluster. Los `cron.schedule` de la **016** (retención de
+  `bot_audit_log`) y de la **018** (digest diario) están envueltos en un
+  `IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron')` que nunca dio verdadero,
+  así que **nunca se schedularon**: medido al aplicar esta migración, `bot_audit_log` tenía
+  filas de abril (la retención es de 90 días) y `bot_digests_enviados` estaba **vacía** — el
+  digest diario nunca corrió. Un job que no corre no es retención. El mecanismo que sí
+  funciona acá es el de la **073**: la tabla se recorta sola en el write, con un `DELETE` por
+  rango de índice que en régimen borra 0 filas.
+- **`bot_audit_log` acepta `tipo = 'duplicado'`**, el renglón que deja el webhook por cada
+  reintento descartado. El CHECK sólo ensancha el dominio.
+
+Verificado después de aplicar: `bot_marcar_update` da `true/false/true` sobre
+`(-999001, -999001, -999002)`, una fila sembrada con `recibido_at` de hace 8 días desaparece
+en la llamada siguiente y las recientes quedan, `proacl` es
+`{postgres=X/postgres,service_role=X/postgres}` y el CHECK lista los seis tipos. Las filas
+del ensayo se borraron.
+
+Del lado de la edge function, el cuerpo del `serve()` de `telegram-webhook/index.ts` se movió
+a `telegram-webhook/request.ts` (`handleWebhookRequest`) con los handlers inyectables: sin eso
+el test tendría que levantar un servidor para ejercitar el flujo. `index.ts` quedó en el
+binding HTTP y nada más.
 
 ---
 

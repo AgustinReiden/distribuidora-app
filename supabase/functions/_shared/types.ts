@@ -89,7 +89,14 @@ export interface BotUser {
   activo: boolean;
 }
 
-export type BotAuditTipo = "mensaje" | "tool_call" | "respuesta" | "error" | "comando";
+export type BotAuditTipo =
+  | "mensaje"
+  | "tool_call"
+  | "respuesta"
+  | "error"
+  | "comando"
+  /** Reintento de Telegram descartado por el dedup de update_id (mig 248). */
+  | "duplicado";
 
 export interface CanjearCodigoOk {
   ok: true;
