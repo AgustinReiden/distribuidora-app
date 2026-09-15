@@ -1,4 +1,4 @@
-import { useState, memo, useRef, useMemo } from 'react';
+import { useState, memo, useRef, useMemo, Suspense } from 'react';
 import { z } from 'zod';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2, Lock } from 'lucide-react';
 import ModalBase from './ModalBase';
@@ -10,6 +10,13 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePreventistasQuery, useZonasEstandarizadasQuery, useCategoriasQuery, useProductosQuery, useClientesQuery } from '../../hooks/queries';
 import { chequearCoordenadaEnZona } from '../../utils/zonaCentroide';
 import { formatDistancia } from '../../utils/geo';
+import { mensajeDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
+import { lazyWithReload } from '../../utils/lazyWithReload';
+
+// La confirmación del aviso de duplicado se renderiza ADENTRO de este modal:
+// como hermano en el container quedaría detrás del overlay de Radix y fallaría
+// en silencio.
+const ModalConfirmacion = lazyWithReload(() => import('./ModalConfirmacion'));
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { useReverseGeocoding } from '../../hooks/useReverseGeocoding';
 import {
@@ -148,6 +155,11 @@ export interface ClienteFormData {
 export interface ClienteSaveData extends ClienteFormData {
   id?: string;
   cuit: string;
+  /**
+   * El usuario vio el aviso de duplicado y confirmó que es otro comercio
+   * (mig 250). Sólo levanta los AVISOS; un bloqueo duro no se confirma.
+   */
+  duplicadoConfirmado?: boolean;
 }
 
 /** Resultado de selección de dirección */
@@ -166,6 +178,17 @@ export interface ModalClienteProps {
   cliente: (ClienteDB & { tipo_documento?: TipoDocumento }) | null;
   /** Callback al guardar */
   onSave: (data: ClienteSaveData) => void | Promise<void>;
+  /**
+   * Guard de duplicados (mig 250). Se llama antes de `onSave`: si bloquea, el
+   * modal muestra el motivo y no guarda; si avisa, pide confirmación explícita
+   * acá adentro y recién entonces guarda con `duplicadoConfirmado`.
+   *
+   * Es opcional para no romper a los callers que todavía no lo pasan, pero el
+   * alta real siempre lo trae: `createCliente` vuelve a llamar al guard como
+   * última línea de defensa, así que sin esto un aviso frena el alta con un
+   * mensaje en vez de una pregunta.
+   */
+  onVerificarDuplicado?: (data: ClienteSaveData) => Promise<VeredictoDuplicadoRPC>;
   /** Callback al cerrar */
   onClose: () => void;
   /** Indica si está guardando */
@@ -198,9 +221,16 @@ const RUBROS_OPCIONES = [
   'Otro'
 ];
 
-const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guardando, isAdmin = false, edicionRestringida = false }: ModalClienteProps) {
+const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDuplicado, onClose, guardando, isAdmin = false, edicionRestringida = false }: ModalClienteProps) {
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
+  // Guard de duplicados (mig 250): `bloqueo` es el motivo que impide guardar,
+  // `confirmacion` es el aviso que el usuario puede levantar.
+  const [verificandoDuplicado, setVerificandoDuplicado] = useState(false);
+  const [bloqueoDuplicado, setBloqueoDuplicado] = useState<MensajeDuplicado | null>(null);
+  const [confirmacionDuplicado, setConfirmacionDuplicado] = useState<
+    { texto: MensajeDuplicado; datos: ClienteSaveData } | null
+  >(null);
   const { data: preventistas = [] } = usePreventistasQuery();
   const { data: zonas = [] } = useZonasEstandarizadasQuery({ includeInactive: true });
   const { data: categoriasTabla = [] } = useCategoriasQuery();
@@ -466,7 +496,16 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
     if (errores.direccion) clearFieldError('direccion');
   };
 
-  const handleSubmit = (): void => {
+  /** El aviso de duplicado se pinta arriba de todo: hay que subir a verlo. */
+  const scrollAlTopeDelFormulario = (): void => {
+    // `scrollTo` no existe en jsdom; en el navegador siempre está.
+    formRef.current?.scrollTo?.({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSubmit = async (): Promise<void> => {
+    // Un intento nuevo empieza sin el bloqueo del anterior: el usuario acaba de
+    // cambiar la dirección o el nombre justamente para destrabarlo.
+    setBloqueoDuplicado(null);
     // Validar con Zod
     const result = validate(form);
 
@@ -523,12 +562,54 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       cuitFinal = form.numero_documento;
     }
 
-    onSave({
+    const datos: ClienteSaveData = {
       ...form,
       cuit: cuitFinal,
       tipo_documento: form.tipo_documento,
       id: cliente?.id
-    });
+    };
+
+    // Guard de duplicados (mig 250). Fail-closed: si la RPC tira, no se guarda
+    // y el motivo queda arriba del formulario. `createCliente` lo vuelve a
+    // preguntar del otro lado, así que saltearlo acá no crearía nada igual.
+    if (onVerificarDuplicado) {
+      setVerificandoDuplicado(true);
+      let veredicto: VeredictoDuplicadoRPC;
+      try {
+        veredicto = await onVerificarDuplicado(datos);
+      } catch (err) {
+        setBloqueoDuplicado({
+          titulo: 'No se pudo verificar',
+          mensaje: (err as Error).message ||
+            'No se pudo verificar si ya existe un cliente igual. No se guardó nada; probá de nuevo.'
+        });
+        setVerificandoDuplicado(false);
+        scrollAlTopeDelFormulario();
+        return;
+      }
+      setVerificandoDuplicado(false);
+
+      if (veredicto.bloquea) {
+        setBloqueoDuplicado(mensajeDuplicado(veredicto));
+        scrollAlTopeDelFormulario();
+        return;
+      }
+      if (veredicto.avisa) {
+        // La confirmación se renderiza adentro de este modal, al final del JSX.
+        setConfirmacionDuplicado({ texto: mensajeDuplicado(veredicto), datos });
+        return;
+      }
+    }
+
+    onSave(datos);
+  };
+
+  /** El usuario confirmó el aviso: se guarda con la marca puesta. */
+  const handleConfirmarDuplicado = (): void => {
+    if (!confirmacionDuplicado) return;
+    const { datos } = confirmacionDuplicado;
+    setConfirmacionDuplicado(null);
+    onSave({ ...datos, duplicadoConfirmado: true });
   };
 
   const handleTipoDocumentoChange = (nuevoTipo: string): void => {
@@ -565,6 +646,18 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
   return (
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
       <div ref={formRef} className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        {bloqueoDuplicado && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm"
+          >
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>
+              <strong className="block">{bloqueoDuplicado.titulo}</strong>
+              {bloqueoDuplicado.mensaje}
+            </span>
+          </div>
+        )}
         {edicionRestringida && (
           <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs">
             <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -1109,10 +1202,28 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onClose, guar
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">Cancelar</button>
-        <button onClick={handleSubmit} disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
-          {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar
+        <button onClick={() => { void handleSubmit(); }} disabled={guardando || verificandoDuplicado} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
+          {(guardando || verificandoDuplicado) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          {verificandoDuplicado ? 'Verificando...' : 'Guardar'}
         </button>
       </div>
+
+      {/* Confirmación del aviso de duplicado. Va ACÁ ADENTRO: como hermano en
+          el container queda detrás del overlay de Radix y falla en silencio. */}
+      {confirmacionDuplicado && (
+        <Suspense fallback={null}>
+          <ModalConfirmacion
+            config={{
+              visible: true,
+              tipo: 'warning',
+              titulo: confirmacionDuplicado.texto.titulo,
+              mensaje: confirmacionDuplicado.texto.mensaje,
+              onConfirm: handleConfirmarDuplicado,
+            }}
+            onClose={() => setConfirmacionDuplicado(null)}
+          />
+        </Suspense>
+      )}
     </ModalBase>
   );
 });

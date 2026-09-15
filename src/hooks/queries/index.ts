@@ -90,7 +90,7 @@ export {
   useActualizarClienteMutation,
   useEliminarClienteMutation,
   contarReferenciasDeCliente,
-  buscarClientePorRazonSocial,
+  verificarDuplicadoCliente,
 } from './useClientesQuery'
 
 // Politica comercial por sucursal (mig 204)

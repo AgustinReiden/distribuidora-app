@@ -3,6 +3,7 @@
  * Formato: Ticket comandera de 75mm de ancho
  */
 import { jsPDF } from 'jspdf'
+import type { PedidoDB } from '../../types/hooks'
 import { TICKET } from './constants'
 import { lineaItemImpresion } from './utils/lineaItem'
 import {
@@ -23,16 +24,14 @@ import {
 const CHARS_POR_LINEA = 38
 
 /** Lineas de producto de un pedido, en el mismo orden en que se dibujan. */
-function lineasProducto(pedido) {
+function lineasProducto(pedido: PedidoDB): string[] {
   return (pedido.items || []).map(item => lineaItemImpresion(item))
 }
 
 /**
  * Calcula la altura necesaria para el documento
- * @param {Array} pedidos - Lista de pedidos
- * @returns {number} Altura calculada en mm
  */
-function calcularAltura(pedidos) {
+function calcularAltura(pedidos: PedidoDB[]): number {
   let totalHeight = 25 // Encabezado inicial
   pedidos.forEach(pedido => {
     totalHeight += 18 // Cabecera del pedido (cliente + direccion + telefono)
@@ -49,10 +48,9 @@ function calcularAltura(pedidos) {
 
 /**
  * Genera PDF de Orden de Preparación
- * @param {Array} pedidos - Lista de pedidos a incluir
- * @returns {void} - Descarga el PDF
+ * @returns Descarga el PDF
  */
-export function generarOrdenPreparacion(pedidos) {
+export function generarOrdenPreparacion(pedidos: PedidoDB[]): void {
   const { width: ticketWidth, margin } = TICKET
 
   const doc = new jsPDF({
@@ -125,7 +123,7 @@ export function generarOrdenPreparacion(pedidos) {
     setNormalStyle(doc, 8)
     lineasProducto(pedido).forEach((linea) => {
       drawCheckbox(doc, margin, y - 2.5)
-      doc.splitTextToSize(linea, ticketWidth - margin * 2 - 4).forEach((line) => {
+      doc.splitTextToSize(linea, ticketWidth - margin * 2 - 4).forEach((line: string) => {
         doc.text(line, margin + 4, y)
         y += 4
       })

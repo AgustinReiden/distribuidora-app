@@ -4,7 +4,7 @@
 
 import type { PedidoDB, PerfilDB, ClienteDB } from '../types/hooks';
 
-/** Info opcional de ruta para el encabezado de la Hoja de Ruta (ver lib/pdf/hojaRutaOptimizada.js). */
+/** Info opcional de ruta para el encabezado de la Hoja de Ruta (ver lib/pdf/hojaRutaOptimizada.ts). */
 export interface InfoRuta {
   fecha?: string | Date;
   distancia_formato?: string;

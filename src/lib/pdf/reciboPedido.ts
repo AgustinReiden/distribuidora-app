@@ -4,6 +4,7 @@
  * Branding: Crecer Distribuciones
  */
 import { jsPDF } from 'jspdf'
+import type { PedidoDB, PedidoItemDB } from '../../types/hooks'
 import { A4, TICKET, COLORS, FORMAS_PAGO_LABELS } from './constants'
 import {
   formatPrecio,
@@ -13,12 +14,17 @@ import {
   drawDivider,
   setFillColor,
   setTextColor,
+  setDrawColor,
   setHeaderStyle,
   setNormalStyle,
   setItalicStyle
 } from './utils'
 import { formatAclaracionBulto } from './utils/formatBulto'
 import { bloqueDeudaComanda } from '../../utils/deudaCliente'
+
+// jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
+// pero el .d.ts de jspdf no lo declara en el tipo de `internal`.
+type InternalConPaginas = jsPDF['internal'] & { getNumberOfPages: () => number }
 
 // Colores de marca Crecer Distribuciones
 const BRAND = {
@@ -41,14 +47,11 @@ const BRAND = {
  *
  * Los items NO bonificacion se mantienen sin cambios (el reducer del pedido
  * ya garantiza una fila por producto en pedidos cargados desde la app).
- *
- * @param {Array} items - items del pedido (pedido_items)
- * @returns {Array} items con bonificaciones agrupadas
  */
-function agruparItemsParaImpresion(items) {
+function agruparItemsParaImpresion(items: PedidoItemDB[] | undefined): PedidoItemDB[] {
   if (!items || items.length === 0) return []
-  const noBonif = []
-  const bonifMap = new Map()
+  const noBonif: PedidoItemDB[] = []
+  const bonifMap = new Map<string, PedidoItemDB>()
   items.forEach(item => {
     if (!item.es_bonificacion) {
       noBonif.push(item)
@@ -76,8 +79,8 @@ function agruparItemsParaImpresion(items) {
  * Se llama una vez por cada hoja (ver generarReciboA4): sin esto, un recibo
  * de varias paginas solo tenia pie en la ultima.
  */
-function dibujarPieReciboA4(doc, pageWidth, margin, footerY) {
-  doc.setDrawColor(...COLORS.gray[200])
+function dibujarPieReciboA4(doc: jsPDF, pageWidth: number, margin: number, footerY: number): void {
+  setDrawColor(doc, COLORS.gray[200])
   doc.setLineWidth(0.3)
   doc.line(margin, footerY, pageWidth - margin, footerY)
 
@@ -95,7 +98,7 @@ function dibujarPieReciboA4(doc, pageWidth, margin, footerY) {
 /**
  * Genera recibo en formato A4 profesional
  */
-function generarReciboA4(pedido) {
+function generarReciboA4(pedido: PedidoDB): void {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const { width: pageWidth, margin, contentWidth } = A4
   const footerY = 270
@@ -219,7 +222,7 @@ function generarReciboA4(pedido) {
   y += 6
 
   // Filas de productos (bonificaciones repetidas se agrupan en una sola linea)
-  const items = agruparItemsParaImpresion(pedido.items || [])
+  const items = agruparItemsParaImpresion(pedido.items)
   items.forEach((item, index) => {
     // Alternar color de fila
     if (index % 2 === 0) {
@@ -234,7 +237,7 @@ function generarReciboA4(pedido) {
     // Nombre completo del producto (sin truncar, con wrap si necesario).
     // Para regalos usa descripcion_regalo en lugar del nombre del producto contenedor.
     const productoNombre = item.producto?.nombre || 'Producto'
-    let nombreCompleto
+    let nombreCompleto: string
     if (item.es_bonificacion) {
       const desc = item.descripcion_regalo?.trim()
       if (desc) {
@@ -286,7 +289,7 @@ function generarReciboA4(pedido) {
   // Si el bloque que sigue (alto `needed`) no entra antes del pie, salta de
   // pagina. Sin esto, con 13-14 items el bloque de pago se pisaba con el pie
   // (fijo en footerY) y con 15 "Saldo pendiente" caia fuera de la hoja A4.
-  const ensureSpace = (needed) => {
+  const ensureSpace = (needed: number): void => {
     if (y + needed > footerY - 5) {
       doc.addPage()
       y = margin
@@ -295,7 +298,7 @@ function generarReciboA4(pedido) {
 
   // Línea antes del total
   y += 3
-  doc.setDrawColor(...COLORS.gray[200])
+  setDrawColor(doc, COLORS.gray[200])
   doc.setLineWidth(0.5)
   doc.line(margin + 80, y, margin + contentWidth, y)
   y += 8
@@ -331,7 +334,7 @@ function generarReciboA4(pedido) {
   setTextColor(doc, COLORS.gray[700])
   doc.setFontSize(9)
 
-  const formaPagoLabel = FORMAS_PAGO_LABELS[pedido.forma_pago] || pedido.forma_pago || 'Efectivo'
+  const formaPagoLabel = FORMAS_PAGO_LABELS[pedido.forma_pago ?? ''] || pedido.forma_pago || 'Efectivo'
   doc.text(`Forma de pago: ${formaPagoLabel}`, margin + 8, y + 13)
 
   const montoPagado = pedido.monto_pagado ?? (pedido.estado_pago === 'pagado' ? pedido.total : 0)
@@ -377,7 +380,7 @@ function generarReciboA4(pedido) {
   }
 
   // === PIE DE PÁGINA (en cada hoja, no solo la ultima) ===
-  const totalPaginas = doc.internal.getNumberOfPages()
+  const totalPaginas = (doc.internal as InternalConPaginas).getNumberOfPages()
   for (let pagina = 1; pagina <= totalPaginas; pagina++) {
     doc.setPage(pagina)
     dibujarPieReciboA4(doc, pageWidth, margin, footerY)
@@ -389,10 +392,10 @@ function generarReciboA4(pedido) {
 /**
  * Calcula la altura dinamica de una comanda para un pedido
  */
-function calcularAlturaComanda(pedido) {
+function calcularAlturaComanda(pedido: PedidoDB): number {
   // Usamos la misma agrupacion de bonificaciones que dibujarComanda para que
   // el alto refleje las lineas reales (sino sobra papel en blanco).
-  const items = agruparItemsParaImpresion(pedido.items || [])
+  const items = agruparItemsParaImpresion(pedido.items)
   let height = 40 // header empresa + nro recibo + fecha
   height += 28 // cliente (nombre + direccion 2 lineas + telefono)
   // Reserva extra cuando el nombre puede partirse a 2 lineas (>30 chars
@@ -422,11 +425,8 @@ function calcularAlturaComanda(pedido) {
 
 /**
  * Dibuja el contenido de una comanda en el documento jsPDF actual
- * @param {jsPDF} doc - Documento jsPDF
- * @param {Object} pedido - Datos del pedido
- * @returns {void}
  */
-function dibujarComanda(doc, pedido) {
+function dibujarComanda(doc: jsPDF, pedido: PedidoDB): void {
   const { width: ticketWidth, margin, contentWidth } = TICKET
   let y = margin
 
@@ -457,21 +457,21 @@ function dibujarComanda(doc, pedido) {
   // === CLIENTE ===
   setHeaderStyle(doc, 12)
   const nombreLines = doc.splitTextToSize(pedido.cliente?.nombre_fantasia || 'Cliente', contentWidth)
-  nombreLines.forEach(line => {
+  nombreLines.forEach((line: string) => {
     doc.text(line, margin, y)
     y += 5
   })
   setNormalStyle(doc, 9)
   if (pedido.cliente?.razon_social && pedido.cliente.razon_social !== pedido.cliente.nombre_fantasia) {
     const razonLines = doc.splitTextToSize(pedido.cliente.razon_social, contentWidth)
-    razonLines.slice(0, 2).forEach(line => {
+    razonLines.slice(0, 2).forEach((line: string) => {
       doc.text(line, margin, y)
       y += 4
     })
   }
   if (pedido.cliente?.direccion) {
     const dirLines = doc.splitTextToSize(pedido.cliente.direccion, contentWidth)
-    dirLines.slice(0, 2).forEach(line => {
+    dirLines.slice(0, 2).forEach((line: string) => {
       doc.text(line, margin, y)
       y += 4
     })
@@ -482,7 +482,7 @@ function dibujarComanda(doc, pedido) {
   }
   if (pedido.cliente?.horarios_atencion) {
     const horLines = doc.splitTextToSize(`Hor: ${pedido.cliente.horarios_atencion}`, contentWidth)
-    horLines.slice(0, 2).forEach(line => {
+    horLines.slice(0, 2).forEach((line: string) => {
       doc.text(line, margin, y)
       y += 4
     })
@@ -502,16 +502,16 @@ function dibujarComanda(doc, pedido) {
     y += 5
     setNormalStyle(doc, 9)
     doc.splitTextToSize(`Retirar: ${cambioDetalle.cantidad_devuelta ?? '?'}x ${cambioDetalle.producto_devuelto_nombre || 'producto'}`, contentWidth)
-      .forEach(line => { doc.text(line, margin, y); y += 4 })
+      .forEach((line: string) => { doc.text(line, margin, y); y += 4 })
     doc.splitTextToSize(`Entregar: ${cambioDetalle.cantidad_entregada ?? '?'}x ${cambioDetalle.producto_entregado_nombre || 'producto'}`, contentWidth)
-      .forEach(line => { doc.text(line, margin, y); y += 4 })
+      .forEach((line: string) => { doc.text(line, margin, y); y += 4 })
     y += 1
   }
 
   // === PRODUCTOS ===
   // Agrupamos bonificaciones repetidas: 3 filas de 2 unidades de la misma
   // promo -> una sola linea de 6 unidades.
-  const items = agruparItemsParaImpresion(pedido.items || [])
+  const items = agruparItemsParaImpresion(pedido.items)
   setHeaderStyle(doc, 9)
   doc.text('PRODUCTO', margin, y)
   doc.text('SUBT.', ticketWidth - margin, y, { align: 'right' })
@@ -523,7 +523,7 @@ function dibujarComanda(doc, pedido) {
     const subtotal = item.subtotal || item.precio_unitario * item.cantidad
     const esBonif = !!item.es_bonificacion
 
-    let lineaProducto
+    let lineaProducto: string
     if (esBonif) {
       // Para regalos: usar descripcion_regalo (texto manual de la promo) en lugar
       // del nombre del producto contenedor + aclaracion de bulto. Si la descripcion
@@ -550,7 +550,7 @@ function dibujarComanda(doc, pedido) {
     }
 
     const nombreLines = doc.splitTextToSize(lineaProducto, contentWidth - 26)
-    nombreLines.forEach((line, idx) => {
+    nombreLines.forEach((line: string, idx: number) => {
       doc.text(line, margin, y)
       if (idx === 0) {
         doc.text(formatPrecio(subtotal), ticketWidth - margin, y, { align: 'right' })
@@ -583,7 +583,7 @@ function dibujarComanda(doc, pedido) {
 
   // Estado de pago
   setNormalStyle(doc, 10)
-  const formaPagoLabel = FORMAS_PAGO_LABELS[pedido.forma_pago] || pedido.forma_pago || 'Efectivo'
+  const formaPagoLabel = FORMAS_PAGO_LABELS[pedido.forma_pago ?? ''] || pedido.forma_pago || 'Efectivo'
   doc.text(`${formaPagoLabel}`, margin, y)
 
   const estadoPagoLabel = pedido.estado_pago === 'pagado' ? 'PAGADO' :
@@ -629,7 +629,7 @@ function dibujarComanda(doc, pedido) {
     y += 3
     setItalicStyle(doc, 9)
     const notasLines = doc.splitTextToSize(pedido.notas, contentWidth)
-    notasLines.slice(0, 3).forEach(line => {
+    notasLines.slice(0, 3).forEach((line: string) => {
       doc.text(line, margin, y)
       y += 3.5
     })
@@ -648,7 +648,7 @@ function dibujarComanda(doc, pedido) {
 /**
  * Genera recibo en formato Comanda (75mm ticket) - pedido individual
  */
-function generarReciboComanda(pedido) {
+function generarReciboComanda(pedido: PedidoDB): void {
   const { width: ticketWidth } = TICKET
   const height = calcularAlturaComanda(pedido)
 
@@ -661,16 +661,15 @@ function generarReciboComanda(pedido) {
  * Genera multiples comandas para impresion en comandera con corte automatico.
  * Cada pedido se imprime por duplicado, cada copia en pagina separada.
  * La impresora termica corta en cada salto de pagina.
- * @param {Array} pedidos - Array de pedidos con items y cliente
  */
-export function generarComandasMultiples(pedidos) {
+export function generarComandasMultiples(pedidos: PedidoDB[]): void {
   if (!pedidos || pedidos.length === 0) return
 
   const { width: ticketWidth } = TICKET
   let isFirstPage = true
-  let doc = null
+  let doc: jsPDF | null = null
 
-  pedidos.forEach(pedido => {
+  for (const pedido of pedidos) {
     const height = calcularAlturaComanda(pedido)
 
     // Cada pedido se imprime 2 veces (duplicado)
@@ -679,11 +678,11 @@ export function generarComandasMultiples(pedidos) {
         doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [ticketWidth, height] })
         isFirstPage = false
       } else {
-        doc.addPage([ticketWidth, height])
+        doc!.addPage([ticketWidth, height])
       }
-      dibujarComanda(doc, pedido)
+      dibujarComanda(doc!, pedido)
     }
-  })
+  }
 
   if (doc) {
     doc.autoPrint()
@@ -693,13 +692,12 @@ export function generarComandasMultiples(pedidos) {
 
 /**
  * Genera PDF de Recibo de Pedido
- * @param {Object} pedido - Datos del pedido completo (con items y cliente)
- * @param {Object} _empresa - (deprecated) No se usa, branding hardcodeado
- * @param {Object} options - Opciones de generación
- * @param {'a4'|'comanda'} options.formato - Formato de salida (default: 'a4')
- * @returns {void} - Descarga el PDF
+ * @param pedido - Datos del pedido completo (con items y cliente)
+ * @param _empresa - (deprecated) No se usa, branding hardcodeado
+ * @param options.formato - Formato de salida (default: 'a4')
+ * @returns Descarga el PDF
  */
-export function generarReciboPedido(pedido, _empresa = {}, options = {}) {
+export function generarReciboPedido(pedido: PedidoDB, _empresa: unknown = {}, options: { formato?: 'a4' | 'comanda' } = {}): void {
   const formato = options.formato || 'a4'
   if (formato === 'comanda') {
     generarReciboComanda(pedido)
