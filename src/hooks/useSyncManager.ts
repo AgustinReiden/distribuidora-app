@@ -34,7 +34,6 @@ export interface SyncDependencies {
   // Estado de conexión y pendientes
   isOnline: boolean
   pedidosPendientes: Array<{ offlineId: string }>
-  mermasPendientes: Array<{ offlineId: string }>
   sincronizando: boolean
 
   // Productos actuales para validación de stock
@@ -45,18 +44,13 @@ export interface SyncDependencies {
     crearPedidoFn: (...args: unknown[]) => Promise<unknown>,
     productosActuales?: ProductoDB[]
   ) => Promise<{ sincronizados: number; errores: Array<{ error: string }>; conflictos?: StockConflict[] }>
-  sincronizarMermas: (
-    registrarMermaFn: (...args: unknown[]) => Promise<unknown>
-  ) => Promise<{ sincronizados: number; errores: Array<{ error: string }> }>
 
   // Funciones de API
   crearPedido: (...args: unknown[]) => Promise<unknown>
-  registrarMerma: (...args: unknown[]) => Promise<unknown>
 
   // Funciones de refresh
   refetchPedidos: () => Promise<void>
   refetchProductos: () => Promise<void>
-  refetchMermas: () => Promise<void>
   refetchMetricas: () => Promise<void>
 
   // Notificaciones
@@ -73,15 +67,11 @@ export interface UseSyncManagerReturn {
 export function useSyncManager({
   isOnline,
   pedidosPendientes,
-  mermasPendientes,
   productos,
   sincronizarPedidos,
-  sincronizarMermas,
   crearPedido,
-  registrarMerma,
   refetchPedidos,
   refetchProductos,
-  refetchMermas,
   refetchMetricas,
   notify
 }: SyncDependencies): UseSyncManagerReturn {
@@ -93,7 +83,7 @@ export function useSyncManager({
   const notifyRef = useLatestRef(notify)
 
   /**
-   * Ejecuta la sincronización de pedidos y mermas pendientes
+   * Ejecuta la sincronización de pedidos pendientes
    * Valida stock actual antes de sincronizar para evitar overselling
    */
   const ejecutarSincronizacion = useCallback(async (): Promise<void> => {
@@ -128,22 +118,6 @@ export function useSyncManager({
           notifyRef.current.error(`${resultadoPedidos.errores.length} pedido(s) no se pudieron sincronizar`)
         }
       }
-
-      // Sincronizar mermas
-      if (mermasPendientes.length > 0) {
-        const resultadoMermas = await sincronizarMermas(
-          registrarMerma as (...args: unknown[]) => Promise<unknown>
-        )
-
-        if (resultadoMermas.sincronizados > 0) {
-          notifyRef.current.success(`${resultadoMermas.sincronizados} merma(s) sincronizada(s)`)
-          await refetchMermas()
-        }
-
-        if (resultadoMermas.errores.length > 0) {
-          notifyRef.current.error(`${resultadoMermas.errores.length} merma(s) no se pudieron sincronizar`)
-        }
-      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Error desconocido'
       notifyRef.current.error('Error durante la sincronizacion: ' + errorMessage)
@@ -152,15 +126,11 @@ export function useSyncManager({
     }
   }, [
     pedidosPendientes.length,
-    mermasPendientes.length,
     productos,
     sincronizarPedidos,
-    sincronizarMermas,
     crearPedido,
-    registrarMerma,
     refetchPedidos,
     refetchProductos,
-    refetchMermas,
     refetchMetricas,
     notifyRef
   ])
@@ -173,7 +143,7 @@ export function useSyncManager({
 
   useEffect(() => {
     if (!isOnline) return
-    if (pedidosPendientes.length === 0 && mermasPendientes.length === 0) return
+    if (pedidosPendientes.length === 0) return
 
     const restante = VENTANA_AUTOSYNC_MS - (Date.now() - ultimoAutoSyncRef.current)
     if (restante > 0) {
@@ -187,7 +157,7 @@ export function useSyncManager({
       // vació, el efecto sale por el guard de arriba y no vuelve a correr.
       setReintento(n => n + 1)
     })
-  }, [isOnline, ejecutarSincronizacion, pedidosPendientes.length, mermasPendientes.length, reintento])
+  }, [isOnline, ejecutarSincronizacion, pedidosPendientes.length, reintento])
 
   // Handler para sincronización manual
   const handleSincronizar = useCallback(async (): Promise<void> => {

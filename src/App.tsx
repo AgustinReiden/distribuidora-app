@@ -5,7 +5,6 @@ import {
   AuthProvider,
   setErrorNotifier,
   useAuth,
-  useMermas,
   useProductos
 } from './hooks/supabase'
 import { useInvalidateMetricas } from './hooks/queries'
@@ -66,20 +65,17 @@ function LoadingVista(): ReactElement {
 
 type PendingSyncRuntimeProps = Pick<
   UseOfflineSyncReturn,
-  'isOnline' | 'pedidosPendientes' | 'mermasPendientes' | 'sincronizando' | 'sincronizarPedidos' | 'sincronizarMermas'
+  'isOnline' | 'pedidosPendientes' | 'sincronizando' | 'sincronizarPedidos'
 >
 
 function PendingSyncRuntime({
   isOnline,
   pedidosPendientes,
-  mermasPendientes,
   sincronizando,
-  sincronizarPedidos,
-  sincronizarMermas
+  sincronizarPedidos
 }: PendingSyncRuntimeProps): ReactElement {
   const notify = useNotification()
   const { productos, refetch: refetchProductos } = useProductos()
-  const { registrarMerma, refetch: refetchMermas } = useMermas()
   const invalidateMetricas = useInvalidateMetricas()
   // Antes esto era `usePedidos()`, cuyo `useEffect` de montaje traia TODOS los
   // pedidos (4.800+) con sus items y el producto entero embebido en cada linea,
@@ -109,16 +105,12 @@ function PendingSyncRuntime({
   const { handleSincronizar } = useSyncManager({
     isOnline,
     pedidosPendientes,
-    mermasPendientes,
     sincronizando,
     productos,
     sincronizarPedidos,
-    sincronizarMermas,
     crearPedido: crearPedido as SyncDependencies['crearPedido'],
-    registrarMerma: registrarMerma as SyncDependencies['registrarMerma'],
     refetchPedidos,
     refetchProductos,
-    refetchMermas,
     refetchMetricas,
     notify: notify as SyncDependencies['notify']
   })
@@ -136,12 +128,6 @@ function PendingSyncRuntime({
         })),
         total: pedido.total,
         creadoOffline: pedido.creadoOffline
-      }))}
-      mermasPendientes={mermasPendientes.map(merma => ({
-        offlineId: merma.offlineId,
-        productoNombre: productos.find(producto => producto.id === merma.productoId)?.nombre,
-        cantidad: merma.cantidad,
-        motivo: merma.motivo
       }))}
       sincronizando={sincronizando}
       onSincronizar={handleSincronizar}
@@ -185,14 +171,12 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const {
     isOnline,
     pedidosPendientes,
-    mermasPendientes,
     sincronizando,
     refreshPendingOperations,
-    sincronizarPedidos,
-    sincronizarMermas
+    sincronizarPedidos
   } = offlineSync
 
-  const hasPendingSync = pedidosPendientes.length > 0 || mermasPendientes.length > 0
+  const hasPendingSync = pedidosPendientes.length > 0
 
   useEffect(() => {
     setErrorNotifier((message: string) => notify.error(message))
@@ -223,7 +207,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     // getPendingOperations), así que hay que decirlo — si no, el preventista se
     // va creyendo que perdió los pedidos que cargó sin señal.
     if (hasPendingSync) {
-      const cuantos = pedidosPendientes.length + mermasPendientes.length
+      const cuantos = pedidosPendientes.length
       notify.warning(
         `Quedan ${cuantos} operación(es) sin sincronizar en este dispositivo. Se guardan y se van a sincronizar cuando vuelvas a entrar con este mismo usuario.`,
         { persist: true }
@@ -235,7 +219,7 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     } catch (err) {
       console.error('Error during logout:', err)
     }
-  }, [hasPendingSync, logout, mermasPendientes.length, notify, pedidosPendientes.length])
+  }, [hasPendingSync, logout, notify, pedidosPendientes.length])
 
   // Use sucursal-resolved role for permissions
   const effectiveRol = currentSucursalRol ?? perfil?.rol
@@ -435,10 +419,8 @@ function MainAppInner({ user, perfil, logout, authReady }: {
           <PendingSyncRuntime
             isOnline={isOnline}
             pedidosPendientes={pedidosPendientes}
-            mermasPendientes={mermasPendientes}
             sincronizando={sincronizando}
             sincronizarPedidos={sincronizarPedidos}
-            sincronizarMermas={sincronizarMermas}
           />
         ) : (
           !isOnline && <OfflineIndicator isOnline={isOnline} />
