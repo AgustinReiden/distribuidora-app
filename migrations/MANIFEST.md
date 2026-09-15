@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 240.** El ledger de prod llega hasta
-`239_el_bucket_de_facturas_deja_de_ser_publico`.
+**La próxima migración es la 241.** El ledger de prod llega hasta
+`240_una_fila_por_movimiento_y_con_nombre`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
