@@ -25,6 +25,7 @@ import { sendMessage } from "../_shared/telegram.ts";
 import { logEvent } from "../_shared/audit.ts";
 import { isTextPart } from "../_shared/gemini/types.ts";
 import digestAdminPrompt from "../_shared/gemini/prompts/digest_admin.ts";
+import { fetchLotesCriticos, formatVencimientosTexto } from "./vencimientos.ts";
 
 export interface DigestArgs {
   telegram_user_id: number;
@@ -124,11 +125,31 @@ export async function runDigestForAdmin(
     return { status: "error", reason: msg };
   }
 
+  // 3b. Sección de lotes críticos (#565), best-effort: si falla la lectura
+  // no rompemos el digest — el admin igual recibe su resumen. No pasa por
+  // Gemini ni toca el tono del texto anterior, se pega al final.
+  let vencimientosSuffix = "";
+  if (sucursal_id != null) {
+    try {
+      const lotes = await fetchLotesCriticos(sb, sucursal_id);
+      const textoVencimientos = formatVencimientosTexto(lotes);
+      if (textoVencimientos) {
+        vencimientosSuffix = `\n\n${textoVencimientos}`;
+      }
+    } catch (err) {
+      console.error(
+        "[digest] fetchLotesCriticos failed (non-fatal):",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   // 4. Telegram (plain text, sin parse_mode).
   // Header con emoji + fecha legible ("lun 27/04/2026" en vez de
-  // "2026-04-27"), después divider, después el texto del LLM.
+  // "2026-04-27"), después divider, después el texto del LLM, después (si
+  // hay) la sección de vencimientos críticos.
   const mensaje = `🌅 Resumen ${formatFechaLegible(fecha)}\n` +
-    `━━━━━━━━━━━━━━\n\n${texto}`;
+    `━━━━━━━━━━━━━━\n\n${texto}${vencimientosSuffix}`;
   try {
     await sendMessage(telegram_user_id, mensaje);
   } catch (err) {

@@ -43,6 +43,8 @@ interface MockOpts {
   rpcResponse?: { data: unknown; error: { message: string } | null };
   /** Forzar error en upsert. Default: ok. */
   upsertError?: { message: string } | null;
+  /** Respuesta del rpc bot_reporte_vencimientos (#565, sección de admin). Default: sin filas. */
+  vencimientosRpcResponse?: { data: unknown; error: { message: string } | null };
 }
 
 function createMockSupabase(opts: MockOpts = {}): {
@@ -96,6 +98,13 @@ function createMockSupabase(opts: MockOpts = {}): {
     },
     rpc(fn: string, params: Record<string, unknown>) {
       spy.rpcCalls.push({ fn, params });
+      // bot_reporte_vencimientos (#565, sección de lotes críticos del digest
+      // de admin) es una RPC distinta de bot_metricas_admin_dia — sin filas
+      // por default, así el happy path no manda una sección de vencimientos
+      // que estos tests no cubren.
+      if (fn === "bot_reporte_vencimientos") {
+        return Promise.resolve(opts.vencimientosRpcResponse ?? { data: [], error: null });
+      }
       return Promise.resolve(
         opts.rpcResponse ?? { data: null, error: null },
       );
@@ -513,6 +522,137 @@ Deno.test("runDigestForAdmin reintenta si la fila previa es status=error", async
     const upsert = spy.upserts.find((u) => u.table === "bot_digests_enviados");
     assert(upsert);
     assertEquals(upsert!.row.status, "ok");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+// ============================================================================
+// 8. Sección de vencimientos críticos (#565)
+// ============================================================================
+
+Deno.test("runDigestForAdmin: con lotes críticos → agrega la sección al mismo mensaje", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+    vencimientosRpcResponse: {
+      data: [
+        {
+          producto_nombre: "Leche 1L",
+          producto_codigo: "LEC-1L",
+          cantidad_restante: 12,
+          fecha_vencimiento: "2026-04-28",
+          dias_restantes: 2,
+        },
+      ],
+      error: null,
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () => geminiOK("Ayer +18% vs promedio."),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    const result = await runDigestForAdmin(client, makeArgs());
+    assertEquals(result.status, "ok");
+
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    assert(tgCall, "debió llamar a Telegram");
+    const tgBody = tgCall!.body as { text: string };
+    // El texto del LLM sigue intacto, y la sección de vencimientos va después,
+    // en el mismo mensaje (no un segundo sendMessage).
+    assertStringIncludes(tgBody.text, "Ayer +18% vs promedio.");
+    assertStringIncludes(tgBody.text, "Lotes en vencimiento crítico");
+    assertStringIncludes(tgBody.text, "Leche 1L");
+    assertEquals(
+      fetchStub.spy.calls.filter((c) => c.url.includes("api.telegram.org")).length,
+      1,
+      "un solo sendMessage, no dos",
+    );
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: sin lotes críticos → no agrega sección", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+    vencimientosRpcResponse: { data: [], error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () => geminiOK("Ayer +18% vs promedio."),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    await runDigestForAdmin(client, makeArgs());
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    const tgBody = tgCall!.body as { text: string };
+    assertEquals(tgBody.text.includes("vencimiento crítico"), false);
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: falla la lectura de vencimientos → digest igual sale ok (best-effort)", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+    vencimientosRpcResponse: { data: null, error: { message: "rpc caída" } },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () => geminiOK("Ayer +18% vs promedio."),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    const result = await runDigestForAdmin(client, makeArgs());
+    assertEquals(result.status, "ok");
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    assert(tgCall, "el digest debió mandarse igual");
+    const tgBody = tgCall!.body as { text: string };
+    assertStringIncludes(tgBody.text, "Ayer +18% vs promedio.");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: admin sin sucursal (null) → no consulta vencimientos", async () => {
+  setupEnv();
+  const { client, spy } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () => geminiOK("Ayer +18% vs promedio."),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    await runDigestForAdmin(client, { ...makeArgs(), sucursal_id: null });
+    const vencimientosCall = spy.rpcCalls.find((c) => c.fn === "bot_reporte_vencimientos");
+    assertEquals(vencimientosCall, undefined, "sin sucursal no hay a quién consultarle vencimientos");
   } finally {
     fetchStub.restore();
     teardownEnv();
