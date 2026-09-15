@@ -4,10 +4,13 @@
  * Se calculan contra la fecha de hoy en hora local, no hardcodeados: el mes en
  * curso y los dos anteriores, más el acumulado del año.
  *
- * Todo en componentes locales (getFullYear/getMonth/getDate) a propósito. Usar
- * toISOString() acá correría la fecha un día para atrás en Argentina (UTC-3)
- * durante las primeras 3 horas del día.
+ * La aritmética pura (fin de mes, restar N meses, formatear YYYY-MM-DD en
+ * componentes locales) vive en fechaLocal.ts, compartida con
+ * ReportesGerencialesContainer.tsx.
  */
+import { ymdLocal, ultimoDiaDelMes, primerDiaMesAtras } from './fechaLocal'
+
+export { ultimoDiaDelMes }
 
 export interface PeriodoPreset {
   /** Estable, sirve de key de React y de valor del <select>. */
@@ -25,17 +28,6 @@ const MESES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ]
 
-function iso(anio: number, mes0: number, dia: number): string {
-  return `${anio}-${String(mes0 + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
-}
-
-/** Último día del mes `mes0` (0-11) de `anio`. */
-export function ultimoDiaDelMes(anio: number, mes0: number): number {
-  // El día 0 del mes siguiente es el último del actual, y el constructor
-  // normaliza mes0 = 12 al enero del año siguiente.
-  return new Date(anio, mes0 + 1, 0).getDate()
-}
-
 /**
  * Preset del mes calendario que está `atras` meses antes del de `hoy`
  * (0 = mes en curso). El mes en curso corta en el día de hoy, no a fin de mes:
@@ -43,7 +35,7 @@ export function ultimoDiaDelMes(anio: number, mes0: number): number {
  * el período está cerrado.
  */
 export function presetMes(atras: number, hoy: Date = new Date()): PeriodoPreset {
-  const ref = new Date(hoy.getFullYear(), hoy.getMonth() - atras, 1)
+  const ref = primerDiaMesAtras(hoy, atras)
   const anio = ref.getFullYear()
   const mes0 = ref.getMonth()
   const enCurso = atras === 0
@@ -51,8 +43,8 @@ export function presetMes(atras: number, hoy: Date = new Date()): PeriodoPreset 
   return {
     id: `mes-${anio}-${String(mes0 + 1).padStart(2, '0')}`,
     label: `${MESES[mes0]} ${anio}${enCurso ? ' (en curso)' : ''}`,
-    desde: iso(anio, mes0, 1),
-    hasta: enCurso ? iso(anio, mes0, hoy.getDate()) : iso(anio, mes0, ultimoDiaDelMes(anio, mes0)),
+    desde: ymdLocal(anio, mes0, 1),
+    hasta: enCurso ? ymdLocal(anio, mes0, hoy.getDate()) : ymdLocal(anio, mes0, ultimoDiaDelMes(anio, mes0)),
   }
 }
 
@@ -62,8 +54,8 @@ export function presetAnio(hoy: Date = new Date()): PeriodoPreset {
   return {
     id: `anio-${anio}`,
     label: `Año ${anio}`,
-    desde: iso(anio, 0, 1),
-    hasta: iso(anio, hoy.getMonth(), hoy.getDate()),
+    desde: ymdLocal(anio, 0, 1),
+    hasta: ymdLocal(anio, hoy.getMonth(), hoy.getDate()),
   }
 }
 

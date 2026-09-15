@@ -61,6 +61,10 @@ function FilaParada({ parada, numero, activa, onSelect }: {
   onSelect: () => void;
 }) {
   const entregado = parada.estado === 'entregado';
+  // Mismo rojo + "!" que el marcador del mapa (MapaRutaGoogle): una parada que
+  // ya se intentó y no se pudo entregar no es "pendiente", y acá se dibujaba
+  // igual que una (círculo azul con número).
+  const noEntregado = parada.estado_entrega === 'no_entregado';
   return (
     <button
       onClick={onSelect}
@@ -70,8 +74,8 @@ function FilaParada({ parada, numero, activa, onSelect }: {
           : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
       }`}
     >
-      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-500' : 'bg-blue-500'}`}>
-        {entregado ? <Check className="h-4 w-4" /> : numero}
+      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${entregado ? 'bg-green-500' : noEntregado ? 'bg-red-600' : 'bg-blue-500'}`}>
+        {entregado ? <Check className="h-4 w-4" /> : noEntregado ? '!' : numero}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">
