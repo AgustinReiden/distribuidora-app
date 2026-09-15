@@ -11,6 +11,8 @@ const loadExcelUtils = () => import('../../utils/excel');
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import { normalizarNumero } from '../../utils/normalizarNumero';
 import { parsearCantidadExcel } from '../../utils/parsearCantidadExcel';
+import { parsearFechaVencimientoExcel } from '../../utils/parsearFechaVencimientoExcel';
+import { formatearFechaVencimiento } from '../../utils/vencimientos';
 import type { ProductoDB } from '../../types';
 import type { CompraItemForm } from './ModalCompra.reducer';
 
@@ -26,6 +28,7 @@ export interface CompraImportPreviewItem {
   bonificacion: number;
   productoId: string | null;
   productoNombre: string | null;
+  vencimientoFecha: string | null;
   estado: 'encontrado' | 'no_encontrado';
 }
 
@@ -44,6 +47,7 @@ interface ColumnasMap {
   cantidad: string[];
   costoUnitario: string[];
   bonificacion: string[];
+  vencimiento: string[];
 }
 
 export default function ModalImportarCompra({ productos, onImportar, onClose }: ModalImportarCompraProps) {
@@ -55,7 +59,8 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
     codigo: ['codigo', 'code', 'sku', 'cod', 'articulo'],
     cantidad: ['cantidad', 'cant', 'qty', 'unidades'],
     costoUnitario: ['costo', 'precio', 'neto', 'costo_unitario', 'costo unitario', 'precio_neto', 'precio neto'],
-    bonificacion: ['bonificacion', 'bonif', 'gratis', 'bonus']
+    bonificacion: ['bonificacion', 'bonif', 'gratis', 'bonus'],
+    vencimiento: ['vencimiento', 'vto', 'fecha_vencimiento', 'fecha vencimiento', 'vence']
   };
 
   const encontrarValor = (fila: ExcelRow, posiblesNombres: string[]): string | number | null | undefined => {
@@ -113,6 +118,12 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
       const costoUnitario = normalizarNumero(encontrarValor(fila, COLUMNAS.costoUnitario));
       const bonificacion = Math.max(0, normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion)));
 
+      const vencimientoCrudo = encontrarValor(fila, COLUMNAS.vencimiento);
+      const vencimientoFecha = parsearFechaVencimientoExcel(vencimientoCrudo);
+      if (vencimientoCrudo && !vencimientoFecha) {
+        erroresTemp.push(`Fila ${index + 2} (${codigo}): vencimiento inválido, ignorado`);
+      }
+
       resultados.push({
         fila: index + 2,
         codigo: codigo.toString(),
@@ -121,6 +132,7 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         bonificacion,
         productoId: productoExistente?.id || null,
         productoNombre: productoExistente?.nombre || null,
+        vencimientoFecha,
         estado: productoExistente ? 'encontrado' : 'no_encontrado'
       });
     });
@@ -178,7 +190,10 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         // no los trae y hardcodearlos gravaba productos exentos.
         porcentajeIva: producto?.porcentaje_iva ?? 21,
         condicionIva: producto?.condicion_iva ?? 'gravado',
-        stockActual: producto?.stock || 0
+        stockActual: producto?.stock || 0,
+        vencimientos: item.vencimientoFecha
+          ? [{ fecha: item.vencimientoFecha, cantidad: item.cantidad }]
+          : undefined
       };
     });
 
@@ -188,8 +203,8 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
   const descargarPlantilla = async (): Promise<void> => {
     try {
       const plantilla = [
-        { Codigo: 'EJEMPLO001', Cantidad: 10, Costo: 500, 'Bonificacion%': 5.5 },
-        { Codigo: 'EJEMPLO002', Cantidad: 5, Costo: 1200, 'Bonificacion%': 0 }
+        { Codigo: 'EJEMPLO001', Cantidad: 10, Costo: 500, 'Bonificacion%': 5.5, Vencimiento: '01/10/2026' },
+        { Codigo: 'EJEMPLO002', Cantidad: 5, Costo: 1200, 'Bonificacion%': 0, Vencimiento: '' }
       ];
       const { createTemplate } = await loadExcelUtils();
       await createTemplate(plantilla, 'plantilla_compra', 'Compra');
@@ -340,6 +355,7 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
                         <th className="px-3 py-2 text-right">Cant.</th>
                         <th className="px-3 py-2 text-right">Costo</th>
                         <th className="px-3 py-2 text-right">Bonif.%</th>
+                        <th className="px-3 py-2 text-right">Vencimiento</th>
                         <th className="px-3 py-2 text-center">Estado</th>
                       </tr>
                     </thead>
@@ -355,6 +371,9 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
                             ${item.costoUnitario.toLocaleString()}
                           </td>
                           <td className="px-3 py-2 text-right dark:text-gray-300">{item.bonificacion ? `${item.bonificacion}%` : '-'}</td>
+                          <td className="px-3 py-2 text-right dark:text-gray-300">
+                            {item.vencimientoFecha ? formatearFechaVencimiento(item.vencimientoFecha) : '-'}
+                          </td>
                           <td className="px-3 py-2 text-center">
                             {item.estado === 'encontrado' ? (
                               <CheckCircle className="w-4 h-4 text-green-500 mx-auto" />

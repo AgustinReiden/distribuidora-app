@@ -13,7 +13,7 @@ import {
   useActualizarClienteMutation,
   useEliminarClienteMutation,
   contarReferenciasDeCliente,
-  buscarClientePorRazonSocial,
+  verificarDuplicadoCliente,
   useZonasEstandarizadasQuery,
   useProductosQuery,
   useCrearPedidoCambioEnRutaMutation,
@@ -343,38 +343,28 @@ export default function ClientesContainer(): React.ReactElement {
     setModalZonasOpen(true)
   }, [])
 
-  const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
-    // Bloqueo de nombre duplicado dentro de la sucursal (ignora mayúsculas y
-    // espacios extremos). Solo aplica a altas o cuando el nombre cambió, para no
-    // romper la edición de clientes homónimos ya existentes (se los respeta).
-    // `clientes` ya viene scopeado a la sucursal activa por useClientesQuery.
-    const nombreNuevo = (data.razonSocial || data.nombreFantasia || '').trim()
-    const nombreNuevoNorm = nombreNuevo.toLowerCase()
-    const nombreOriginalNorm = (clienteEditando?.razon_social || '').trim().toLowerCase()
-    if (nombreNuevoNorm && nombreNuevoNorm !== nombreOriginalNorm) {
-      // Se consulta la BASE, no el array `clientes`: por defecto ese array no
-      // trae inactivos, asi que mirarlo dejaba crear un clon exacto del cliente
-      // recien desactivado -- la forma mas facil de partirle el historial al
-      // medio, y justo el movimiento que origino los 9 pedidos huerfanos.
-      // Cuando el que choca esta inactivo, el mensaje ofrece reactivarlo.
-      let choque: Awaited<ReturnType<typeof buscarClientePorRazonSocial>> = null
-      try {
-        choque = await buscarClientePorRazonSocial(nombreNuevo, clienteEditando?.id)
-      } catch {
-        notify.error('No se pudo verificar si el nombre ya existe. No se guardó nada.')
-        return
-      }
-      if (choque) {
-        notify.error(
-          choque.activo === false
-            ? `Ya existe "${nombreNuevo}" en esta sucursal, pero está inactivo. ` +
-              `Activá "Ver inactivos" y reactivalo, así conserva su historial.`
-            : `Ya existe un cliente con el nombre "${nombreNuevo}" en esta sucursal.`
-        )
-        return
-      }
-    }
+  /**
+   * El guard de duplicados, la única puerta (mig 250). Se lo pasamos al modal
+   * para que la confirmación se renderice ADENTRO: como hermano acá quedaría
+   * detrás del overlay de Radix y fallaría en silencio.
+   *
+   * Reemplaza al chequeo de nombre que vivía en handleGuardarCliente, que era
+   * igualdad exacta sólo contra razon_social con trim + toLowerCase. Ahora el
+   * criterio es uno solo y mira dirección, distancia y nombre por tokens contra
+   * los dos campos.
+   */
+  const handleVerificarDuplicado = useCallback(async (data: ClienteSaveData) => {
+    return verificarDuplicadoCliente({
+      latitud: data.latitud ?? null,
+      longitud: data.longitud ?? null,
+      direccion: data.direccion ?? null,
+      razon_social: data.razonSocial || data.nombreFantasia || null,
+      nombre_fantasia: data.nombreFantasia || null,
+      excluir_id: clienteEditando?.id ?? null,
+    })
+  }, [clienteEditando])
 
+  const handleGuardarCliente = useCallback(async (data: ClienteSaveData) => {
     // Transform from camelCase (form) to snake_case (database)
     // preventista_ids (N-a-N) es la fuente de verdad; preventista_id (legado)
     // se espeja con el primer asignado para no romper lecturas en otros modulos
@@ -445,6 +435,10 @@ export default function ClientesContainer(): React.ReactElement {
     }
 
     const dbData = {
+      // El usuario ya confirmó el aviso adentro del modal. `createCliente`
+      // vuelve a llamar al guard como última línea de defensa y sin esto un
+      // aviso confirmado lo frenaría igual.
+      duplicado_confirmado: data.duplicadoConfirmado ?? false,
       razon_social: data.razonSocial || data.nombreFantasia,
       nombre_fantasia: data.nombreFantasia,
       direccion: data.direccion,
@@ -535,6 +529,7 @@ export default function ClientesContainer(): React.ReactElement {
           <ModalCliente
             cliente={clienteEditando}
             onSave={handleGuardarCliente}
+            onVerificarDuplicado={handleVerificarDuplicado}
             onClose={() => {
               setModalClienteOpen(false)
               setClienteEditando(null)
