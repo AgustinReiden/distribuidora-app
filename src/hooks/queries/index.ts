@@ -178,11 +178,7 @@ export {
 // Mermas
 export {
   mermasKeys,
-  useMermasQuery,
-  useMermasByProductoQuery,
-  useMermasByMotivoQuery,
   useRegistrarMermaMutation,
-  useMermasResumen,
 } from './useMermasQuery'
 
 // Reporte de mermas agregado en la base (mig 226)
@@ -433,12 +429,13 @@ export {
   usePromoAcumuladoresMapQuery,
   usePromoAcumuladorQuery,
   usePedidoSustitucionesQuery,
+  contarReferenciasDePromocion,
 } from './usePromocionesQuery'
 export { useSimularSalvedadPromoImpactoQuery } from './useSimularSalvedadQuery'
 export type { PromoImpactoSalvedad } from './useSimularSalvedadQuery'
 export { useSimularSalvedadesPromoImpactoQuery } from './useSimularSalvedadesQuery'
 export type { RegaloSimulado, SalvedadSimulada } from './useSimularSalvedadesQuery'
-export type { PromocionConDetalles, PromocionFormInput } from './usePromocionesQuery'
+export type { PromocionConDetalles, PromocionFormInput, ReferenciasPromocionCount } from './usePromocionesQuery'
 
 // Notas de Crédito
 export {
