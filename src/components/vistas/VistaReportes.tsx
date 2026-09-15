@@ -322,10 +322,11 @@ export default function VistaReportes({
       {activeTab === 'preventistas' && (
         <>
           <Criterio className="mb-3">
-            Venta = suma del <strong>total</strong> de los pedidos <strong>no cancelados</strong>, por fecha
-            del pedido, atribuidos a quien lo cargó. Incluye pendientes y en camino, y no filtra por canal:
-            por eso da más que "Equipo comercial" del reporte gerencial, que cuenta sólo los entregados del
-            canal app.
+            Venta = pedidos <strong>entregados</strong>, de cualquier canal de venta (app o bot), por fecha
+            del pedido, atribuidos a quien lo cargó. Un pedido tomado y todavía no entregado{' '}
+            <strong>no</strong> cuenta: la venta se reconoce cuando sale la mercadería. Es la misma
+            definición que "Equipo comercial" del reporte gerencial, que la comisión y que el bot, así que
+            los cuatro dan el mismo número.
           </Criterio>
           <ReportePreventistas
             reportePreventistas={reportePreventistas}
@@ -357,10 +358,9 @@ export default function VistaReportes({
       {activeTab === 'rentabilidad' && (
         <>
           <Criterio className="mb-3">
-            Margen por producto de los pedidos <strong>no cancelados</strong>, filtrados por{' '}
-            <strong>fecha de carga</strong> (<code>created_at</code>) y <strong>no</strong> por fecha del
-            pedido, que es lo que usa el resto de los reportes: por eso no cierra contra "Por Cliente".
-            Ingreso = ingreso real (FC neto · ZZ final); costo = cascada canónica.
+            Margen por producto de los pedidos <strong>entregados</strong>, por <strong>fecha del
+            pedido</strong> igual que el resto de los reportes, así que cierra contra "Por Cliente" y contra
+            el gerencial. Ingreso = ingreso real (FC neto · ZZ final); costo = cascada canónica.
           </Criterio>
           <ReporteRentabilidadSection
             reporte={reporteRentabilidad}

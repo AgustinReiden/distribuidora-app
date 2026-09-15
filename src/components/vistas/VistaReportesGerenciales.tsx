@@ -242,9 +242,10 @@ export default function VistaReportesGerenciales({
   }, [reporte?.kpis?.comision_pct_default])
 
   const k = reporte?.kpis
-  // La comision calculada solo aplica sobre la base 'no cancelado', que es la
-  // que usa calcular_comisiones. Con base 'entregado' se sigue estimando con el
-  // % manual, porque son dos universos distintos de pedidos.
+  // Desde la mig 241 `base_comision` y `venta` son el MISMO universo —la venta
+  // canonica, #568—, asi que este selector ya no elige entre dos bases sino
+  // entre dos CUENTAS sobre la misma: 'nc' usa `calcular_comisiones` (las reglas
+  // vigentes, lo que se liquida) y 'ent' simula un % plano para todos.
   const usaComisionReglas = comBase === 'nc' && comisionCalculada != null
   const derived = useMemo(() => {
     if (!k) return null
@@ -481,7 +482,7 @@ export default function VistaReportesGerenciales({
                 {cmp && <Delta cur={k.margen_neto} prev={kp!.margen_neto} />}
                 {metasOn && metas?.margen_neto != null && <Semaforo cur={k.margen_neto} meta={metas.margen_neto} factor={metaFactor} />}
               </div>} />
-            <KpiCard label={usaComisionReglas ? 'Comisión (reglas)' : `Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={usaComisionReglas ? 'según reglas vigentes · igual que /comisiones' : `base ${comBase === 'nc' ? 'no cancelado' : 'entregado'}`} accent={ACCENTS.slate}
+            <KpiCard label={usaComisionReglas ? 'Comisión (reglas)' : `Comisión ${String(comPct).replace('.', ',')}%`} value={moneyC(derived.comision)} sub={usaComisionReglas ? 'según reglas vigentes · igual que /comisiones' : 'simulación: % plano, sin mirar rol ni reglas'} accent={ACCENTS.slate}
               delta={cmp && derivedPrev ? <Delta cur={derived.comision} prev={derivedPrev.comision} invert /> : undefined} />
             <KpiCard label="Mermas" value={moneyC(k.mermas)}
               sub={k.mermas_perdida != null
@@ -636,17 +637,23 @@ export default function VistaReportesGerenciales({
                       className="w-14 px-2 py-1 border rounded text-center text-sm font-semibold dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
                     <span className="text-sm font-medium text-gray-600 dark:text-gray-300">%</span>
                   </div>
+                  {/* Desde la mig 241 las dos bases son la MISMA venta canonica, asi que
+                      este selector ya no elige base: elige COMO se calcula la comision
+                      sobre ella. Los values siguen siendo 'nc'/'ent' por compatibilidad
+                      con el resto del archivo; lo que cambia es que 'nc' usa las reglas
+                      vigentes y 'ent' simula un % plano. */}
                   <select value={comBase} onChange={(e) => setComBase(e.target.value as 'nc' | 'ent')}
+                    aria-label="Como calcular la comision"
                     className="text-xs font-medium bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1 text-gray-700 dark:text-gray-200">
-                    <option value="nc">No cancelado</option>
-                    <option value="ent">Entregado</option>
+                    <option value="nc">Reglas vigentes</option>
+                    <option value="ent">% plano</option>
                   </select>
                 </div>
                 </div>
               }
             />
             <div className="grid lg:grid-cols-3 gap-5">
-            <Criterio className="mb-3">Venta por vendedor = suma de los <strong>subtotales de los ítems</strong> de pedidos <strong>entregados</strong> del canal <strong>app</strong>. <strong>No coincide con "Por Preventista" de Reportes</strong>, que suma el total del pedido de los <strong>no cancelados</strong> y no filtra por canal. Las dos son correctas: miden cosas distintas.</Criterio>
+            <Criterio className="mb-3">Venta por vendedor = pedidos <strong>entregados</strong>, de cualquier canal de venta (app o bot), por fecha del pedido. Es la misma definición que "Por Preventista" de Reportes, que la comisión y que el bot: los cuatro tienen que dar el mismo número.</Criterio>
               <div className="lg:col-span-2 overflow-x-auto">
                 <table className="w-full">
                   <thead><tr className="border-b dark:border-gray-700">
@@ -758,7 +765,7 @@ export default function VistaReportesGerenciales({
             </Card>
             <Card id="sec-clientes" className="p-5">
               <SectionTitle icon={TrendingUp} title="Top 10 clientes" hint="Por facturación entregada." right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'top-clientes')!)}<VerDetalle tab="clientes" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} /></div>} />
-              <Criterio className="mb-3">Suma de los ítems de pedidos <strong>entregados</strong> del canal app, por fecha del pedido. Son los 10 primeros: el listado completo está en Reportes.</Criterio>
+              <Criterio className="mb-3">Suma de los ítems de pedidos <strong>entregados</strong>, de cualquier canal de venta, por fecha del pedido. Son los 10 primeros: el listado completo está en Reportes.</Criterio>
               <table className="w-full">
                 <thead><tr className="border-b dark:border-gray-700">
                   <th className={`${th} text-left`}>Cliente</th><th className={`${th} text-right`}>Ped.</th><th className={`${th} text-right`}>Venta</th>

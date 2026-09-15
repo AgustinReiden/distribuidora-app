@@ -158,6 +158,11 @@ BEGIN
     FROM pedidos p
     WHERE p.usuario_id  = v_target
       AND p.sucursal_id = v_sucursal
+      -- `<> 'cambio'` y no `= 'app'`: el canal de VENTA cuenta, venga de la app
+      -- o del bot. No es un descuido que esta función sea agnóstica al canal
+      -- mientras el gerencial y la comisión filtraban `canal = 'app'`: era al
+      -- revés, esta era la única del lado correcto, y la mig 241 alineó a las
+      -- otras once con esta forma al fijar la venta canónica (#568).
       AND p.canal <> 'cambio'          -- devoluciones: logística, no venta
       AND p.estado IN ('entregado','cancelado')
       -- El desenlace nunca es anterior a la carga, así que nada con

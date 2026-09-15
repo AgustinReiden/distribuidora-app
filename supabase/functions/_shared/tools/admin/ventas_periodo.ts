@@ -5,7 +5,9 @@
 // Pensada para que el LLM responda preguntas tipo "¿cuánto vendí este
 // mes?", "¿qué productos vendo más?", "¿qué clientes me compraron más?".
 //
-// Delega 100% a la RPC bot_ventas_periodo (migration 022).
+// Delega 100% a la RPC bot_ventas_periodo (migration 022, redefinida en la
+// 099 y alineada a la venta canónica en la 241): cuenta SOLO entregados, de
+// cualquier canal de venta (app o bot), por pedidos.fecha.
 
 import type { Tool } from "../base.ts";
 
@@ -59,8 +61,10 @@ export const ventasPeriodoTool: Tool<VentasPeriodoParams, VentasPeriodoResult> =
     "(consulta_realizada_at) para que el usuario pueda contrastar contra el " +
     "panel sabiendo cuándo se tomó el dato. Las fechas son inclusive en " +
     "formato YYYY-MM-DD. Filtra por sucursal del bot user. total_ventas cuenta " +
-    "SOLO ventas ENTREGADAS (estado='entregado', canal='app') — coincide con el " +
-    "reporte gerencial. Los pedidos cargados pero todavía no entregados " +
+    "SOLO ventas ENTREGADAS (estado='entregado'), de cualquier canal de venta " +
+    "—app o bot—, por pedidos.fecha. Es la definición canónica (mig 241): da el " +
+    "mismo número que el reporte gerencial, que 'Por Preventista' de /reportes " +
+    "y que la comisión. Los pedidos cargados pero todavía no entregados " +
     "(asignado/pendiente) se devuelven aparte en en_curso_monto/en_curso_pedidos " +
     "y NO deben sumarse a la venta.",
   parameters: {

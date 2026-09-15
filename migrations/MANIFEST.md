@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 241.** El ledger de prod llega hasta
-`240_una_fila_por_movimiento_y_con_nombre`.
+**La próxima migración es la 242.** El ledger de prod llega hasta
+`241_la_venta_del_vendedor_tiene_una_sola_definicion`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -160,7 +160,7 @@ Y una sexta vez, de otra forma, con la 239: el archivo se escribió el 2026-09-1
 después el 228 ya era de otra migración y la cadena iba por la 238, así que hubo que
 renumerarlo al aplicarlo. Moraleja adicional: un archivo que espera en `main` no reserva
 nada. Si no lo vas a aplicar ahora, no le pongas número todavía.
-Última actualización: 239, el 2026-09-15.)
+Última actualización: 241, el 2026-09-15.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -1158,6 +1158,59 @@ dropeada (lo chequea el propio `DO $verif$` de la migración). Y la prueba que i
 objeto que existe como para uno inventado —indistinguibles desde afuera, sin enumeración—
 cuando antes devolvía el PNG. El md5 del archivo del repo sin espacios es idéntico al
 `statements` del ledger: `daf6602e97c368b445f1d5aa72f2f2bb`.
+
+### 241 · La venta del vendedor tiene una sola definición
+
+Cierra #568 y #569. Hasta acá "cuánto vendió Fulano" tenía **cuatro** respuestas —una por
+pantalla— y el canal partía el universo en dos: un pedido del bot de Telegram (`canal='bot'`)
+no sumaba al gerencial, no comisionaba y ni siquiera `bot_mis_ventas` se lo contaba al
+preventista que lo había cargado, mientras que `/reportes` y `jornadas_preventista` sí.
+
+**La decisión (D-1 del plan de auditoría, tomada por el dueño):** venta = `estado='entregado'`
+· `canal <> 'cambio'` (todo canal de venta: `app` y `bot`) · por `pedidos.fecha` · atribuida a
+`pedidos.usuario_id`.
+
+**Se escribe en negativo a propósito.** El dominio de `canal` es `('app','cambio','bot')` —lo
+fija el check `VENTA-D`— y `'cambio'` no es una venta: es la comanda de un canje, con `total=0`
+por el invariante `CAMBIO-01`. Con `canal <> 'cambio'`, el canal que venga después cuenta solo;
+con `canal = 'app'` habría que acordarse de agregarlo en once lugares, que es exactamente cómo
+nació este bug.
+
+**No cambió ningún número pasado.** Medido contra prod antes de aplicar: en los ocho meses
+cerrados de 2026 "comprometida" y "entregada" dan diferencia **exacta 0.00** (un pedido termina
+entregado o cancelado, y `cancelar_pedido` pone `total = 0`, mig 175), y no existe ni un pedido
+con `canal='bot'` en la base. Lo único que se mueve es el período **abierto**, que es justo
+donde la venta todavía no es venta. Ninguna comisión ya liquidada cambia, así que no hizo falta
+fecha de corte.
+
+**Once funciones, parcheadas por ancla sobre el cuerpo vivo.** Ocho son las del issue
+(`reporte_ventas_por_preventista`, `reporte_gerencial`, `calcular_comisiones`, las tres
+`bot_ventas_*`/`bot_mis_ventas`, `bot_ranking_preventistas_por_producto` y
+`reporte_rentabilidad`); las otras tres entran porque contestan la misma pregunta con otro
+nombre y dejarlas afuera haría falsa la premisa: `avance_metas_preventista` y
+`rendimiento_preventistas` son venta por vendedor, y `reporte_alerta_detalle` dice en su propio
+comentario que usa "mismos estados, mismo canal y mismo predicado que el KPI" —moverle el KPI y
+no el detalle es el bug que la 238 acababa de arreglar para mermas—.
+
+`reporte_ventas_por_preventista` además dejó de devolver `pedidosPendientes`, `pedidosAsignados`
+y `pedidosEntregados`: con el universo acotado a entregados quedaban en 0, 0 y "todos", y un
+cero que significa "no aplica" se lee como "no hay ninguno". No los renderizaba ninguna
+pantalla.
+
+**Lo que NO se tocó, a propósito:** `jornadas_preventista` (179) ya usaba `canal <> 'cambio'` —
+era la única del lado correcto—; `posicion_fiscal` sigue en `canal='app'` porque la posición
+fiscal es otra pregunta (qué se facturó, no quién vendió) y moverla es una decisión impositiva;
+y cuatro checks de `auditoria_integridad()` siguen acotados a `canal='app'`. Los dos últimos van
+por issue.
+
+**El gate es el propio `DO $ensayo$` de la migración**, que corre contra los datos reales del
+último mes cerrado, por sucursal, y compara vendedor por vendedor las cuatro definiciones más
+`reporte_rentabilidad.ventasBrutas` contra `reporte_gerencial.kpis.venta`. Si alguna se despega,
+la migración no entra — y de hecho frenó el primer intento, por otra razón (el ensayo pedía un
+admin con *todas* las sucursales y la 4, "TACO POZO", está inactiva y sin asignar). Verificado
+después de aplicar sobre agosto 2026: los 10 vendedores de las dos sucursales dan el mismo
+número en las cuatro. El md5 del archivo del repo sin espacios es idéntico al `statements`
+del ledger: `6ad2a998987385aa001b409528a22330`.
 
 ## Mantenimiento
 

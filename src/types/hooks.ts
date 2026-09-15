@@ -724,15 +724,18 @@ export interface DashboardMetricasExtended {
   ventasPorDia: VentaPorDia[];
 }
 
+/**
+ * Venta por vendedor, definición canónica (mig 241): pedidos `entregado`, de
+ * cualquier canal de venta, por `pedidos.fecha`. Ya no trae contadores de
+ * pipeline —pendientes/asignados/entregados—: con el universo acotado a
+ * entregados valían 0, 0 y "todos".
+ */
 export interface ReportePreventista {
   id: string;
   nombre: string;
   email: string;
   totalVentas: number;
   cantidadPedidos: number;
-  pedidosPendientes: number;
-  pedidosAsignados: number;
-  pedidosEntregados: number;
   totalPagado: number;
   totalPendiente: number;
 }

@@ -71,7 +71,9 @@ export const rankingPreventistasPorProductoTool: Tool<
     "sabores), conseguí los IDs antes con productos_por_categoria y pasalos " +
     "todos juntos. La respuesta agrupa unidades + facturado por preventista " +
     "y devuelve la lista de productos considerados. Filtra por sucursal del " +
-    "bot user. Excluye pedidos cancelados/anulados.",
+    "bot user. Cuenta SOLO pedidos ENTREGADOS, de cualquier canal de venta " +
+    "—app o bot—, por pedidos.fecha: la misma definición de venta que el resto " +
+    "de los reportes (mig 241).",
   parameters: {
     type: "object",
     properties: {

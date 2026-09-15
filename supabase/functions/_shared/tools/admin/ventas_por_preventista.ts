@@ -5,8 +5,9 @@
 // vendió más esta semana", "ventas del mes por vendedor", etc.
 //
 // Delega 100% a la RPC bot_ventas_por_preventista (migration 025, redefinida
-// en la 099). Mismas convenciones que ventas_periodo: cuenta SOLO ventas
-// entregadas (estado='entregado', canal='app'), filtro por pedidos.fecha (no
+// en la 099 y alineada a la venta canónica en la 241). Mismas convenciones que
+// ventas_periodo: cuenta SOLO ventas entregadas (estado='entregado'), de
+// cualquier canal de venta —app o bot—, filtro por pedidos.fecha (no
 // created_at), filtra por sucursal del bot user.
 
 import type { Tool } from "../base.ts";
@@ -57,7 +58,9 @@ export const ventasPorPreventistaTool: Tool<
     "preventista', 'quién vendió más esta semana', etc. Las fechas son " +
     "inclusive en formato YYYY-MM-DD y filtran por pedidos.fecha. Filtra por " +
     "sucursal del bot user. total_ventas cuenta SOLO ventas ENTREGADAS " +
-    "(estado='entregado', canal='app') — coincide con el reporte gerencial.",
+    "(estado='entregado'), de cualquier canal de venta —app o bot—, por " +
+    "pedidos.fecha. Es la definición canónica (mig 241): da el mismo número que " +
+    "el reporte gerencial, que 'Por Preventista' de /reportes y que la comisión.",
   parameters: {
     type: "object",
     properties: {
