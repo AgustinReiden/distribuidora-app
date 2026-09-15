@@ -8,15 +8,10 @@ test.describe('Seguridad', () => {
   // Los cuatro de abajo leían el <meta http-equiv="..."> de index.html, pero
   // X-Frame-Options, X-Content-Type-Options y CSP `frame-ancestors` son
   // directivas que los navegadores IGNORAN cuando vienen de un meta tag —
-  // sólo cuentan como header HTTP real. Lo único que protege de verdad es lo
-  // que agrega el servidor, y eso es nginx.conf del repo... salvo que no lo
-  // es: la config real vive en el panel de Coolify (ver CLAUDE.md § Correr y
-  // verificar), así que este archivo no puede saber si el header está puesto.
-  //
-  // `test.fixme` hasta verificar con `curl -I` contra el dominio real. Una
-  // vez confirmado, sacar el fixme (y si nginx.conf del repo estaba
-  // desactualizado respecto de Coolify, corregirlo ahí, no acá).
-  test.fixme('debe mandar Content-Security-Policy como header HTTP', async ({ page }) => {
+  // sólo cuentan como header HTTP real. La config real vive en el panel de
+  // Coolify (ver CLAUDE.md § Correr y verificar); verificado con `curl -I`
+  // contra el dominio real que las cinco rutas mandan CSP (#585).
+  test('debe mandar Content-Security-Policy como header HTTP', async ({ page }) => {
     const response = await page.goto('/')
     const csp = response?.headers()['content-security-policy']
     expect(csp).toBeDefined()
@@ -25,17 +20,17 @@ test.describe('Seguridad', () => {
     expect(csp).toContain('frame-ancestors')
   })
 
-  test.fixme('debe mandar X-Frame-Options como header HTTP', async ({ page }) => {
+  test('debe mandar X-Frame-Options como header HTTP', async ({ page }) => {
     const response = await page.goto('/')
     expect(response?.headers()['x-frame-options']).toBe('DENY')
   })
 
-  test.fixme('debe mandar X-Content-Type-Options como header HTTP', async ({ page }) => {
+  test('debe mandar X-Content-Type-Options como header HTTP', async ({ page }) => {
     const response = await page.goto('/')
     expect(response?.headers()['x-content-type-options']).toBe('nosniff')
   })
 
-  test.fixme('debe mandar Referrer-Policy como header HTTP', async ({ page }) => {
+  test('debe mandar Referrer-Policy como header HTTP', async ({ page }) => {
     const response = await page.goto('/')
     expect(response?.headers()['referrer-policy']).toBe('strict-origin-when-cross-origin')
   })
