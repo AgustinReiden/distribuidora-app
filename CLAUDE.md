@@ -66,6 +66,9 @@ suelta en `sucursales`.
 - Los schemas Zod de un modal lazy van **co-locados en el modal**, no importados de un
   chunk compartido: si no, un bundle viejo del PWA valida contra un schema desincronizado
   y tira "Invalid input" sin ningún error de chunk.
+- El cuerpo de un PR cierra issues con `Closes #N` (en inglés): GitHub no reconoce
+  `Cierra #N`, y un issue resuelto que queda abierto es un pendiente fantasma. Pasó con
+  el #640.
 - **Toda función nueva** de `public` nace con `EXECUTE` para `PUBLIC` — sea `SECURITY
   DEFINER` o no — y Supabase además se lo concede a `anon` por separado. Hay que
   **revocar las dos mitades en la misma migración** (`REVOKE ... FROM PUBLIC, anon`);
