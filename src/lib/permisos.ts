@@ -52,6 +52,20 @@ export function puedeAnularPago(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'
 }
 
+/**
+ * Si el rol puede ANULAR una salvedad (mig 244, #621). Anular no es resolver:
+ * restituye la linea del pedido, recalcula los totales --el cliente vuelve a
+ * pagar lo que la salvedad le habia sacado-- y revierte la merma.
+ *
+ * Espejo exacto de `es_admin_salvedades()`, que es el gate del RPC
+ * `anular_salvedad` y es `rol = 'admin'` a secas. La vista de salvedades la ven
+ * admin Y encargado (App.tsx), asi que sin este permiso el encargado veria un
+ * boton que el servidor rechaza con "Solo admin".
+ */
+export function puedeAnularSalvedad(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin'
+}
+
 export function puedeAccederDashboard(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin' || rol === 'preventista'
 }

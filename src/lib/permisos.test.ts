@@ -4,6 +4,7 @@ import {
   puedeEditarPreciosPedido,
   puedeCancelarPedido,
   puedeAnularPago,
+  puedeAnularSalvedad,
   puedeAccederDashboard,
   puedeAccederReportes,
   puedeAccederComisiones,
@@ -29,6 +30,9 @@ describe('permisos por rol', () => {
       ['puedeEditarPreciosPedido', puedeEditarPreciosPedido],
       ['puedeCancelarPedido', puedeCancelarPedido],
       ['puedeAnularPago', puedeAnularPago],
+      // Espejo de `es_admin_salvedades()`, el gate del RPC anular_salvedad
+      // (mig 244). La vista la ve tambien encargado: el permiso, no.
+      ['puedeAnularSalvedad', puedeAnularSalvedad],
       ['puedeAccederReportes', puedeAccederReportes],
       ['puedeAccederComisiones', puedeAccederComisiones],
       ['puedeAccederProveedores', puedeAccederProveedores],

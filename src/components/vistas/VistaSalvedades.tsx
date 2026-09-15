@@ -14,21 +14,28 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
-  Image
+  Image,
+  Undo2
 } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
 import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
 import { useSalvedades } from '../../hooks/supabase'
+import { useAnularSalvedadMutation } from '../../hooks/queries'
+import { useAuthData } from '../../contexts/AuthDataContext'
+import { puedeAnularSalvedad } from '../../lib/permisos'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import ModalResolverSalvedad from '../modals/ModalResolverSalvedad'
+import ModalAnularSalvedad from '../modals/ModalAnularSalvedad'
 import type { SalvedadItemDBExtended, MotivoSalvedad, EstadoResolucionSalvedad } from '../../types'
 
 interface SalvedadCardProps {
   salvedad: SalvedadItemDBExtended;
   onResolver: (salvedad: SalvedadItemDBExtended) => void;
+  onAnular: (salvedad: SalvedadItemDBExtended) => void;
+  puedeAnular: boolean;
 }
 
-function SalvedadCard({ salvedad, onResolver }: SalvedadCardProps) {
+function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular }: SalvedadCardProps) {
   const [expandido, setExpandido] = useState(false)
 
   const formatMoney = (value: number): string => {
@@ -183,6 +190,20 @@ function SalvedadCard({ salvedad, onResolver }: SalvedadCardProps) {
               Resolver Salvedad
             </button>
           )}
+
+          {/* Anular es otra cosa que resolver (mig 244, #621): deshace la
+              salvedad entera --linea, totales y merma--, asi que va aparte, con
+              su propia confirmacion, y sólo para quien el RPC deja anular. Una
+              ya anulada no se vuelve a anular: la RPC lo rechaza. */}
+          {puedeAnular && salvedad.estado_resolucion !== 'anulada' && (
+            <button
+              onClick={() => onAnular(salvedad)}
+              className="w-full px-4 py-2 border border-red-300 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center justify-center gap-2"
+            >
+              <Undo2 className="w-4 h-4" />
+              Anular salvedad
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -207,6 +228,13 @@ export default function VistaSalvedades(): React.ReactElement {
   const [fechaHasta, setFechaHasta] = useState<string>(fechaLocalISO())
 
   const [salvedadResolver, setSalvedadResolver] = useState<SalvedadItemDBExtended | null>(null)
+  const [salvedadAnular, setSalvedadAnular] = useState<SalvedadItemDBExtended | null>(null)
+
+  const { perfil } = useAuthData()
+  // Espejo de `es_admin_salvedades()`, el gate del RPC. La vista la ven admin y
+  // encargado (App.tsx); anular, sólo admin.
+  const puedeAnular = puedeAnularSalvedad(perfil?.rol)
+  const anularMutation = useAnularSalvedadMutation()
 
   // Siempre cargamos todas las salvedades y filtramos en el cliente
   // Esto permite que las salvedades resueltas permanezcan visibles para métricas
@@ -220,7 +248,7 @@ export default function VistaSalvedades(): React.ReactElement {
 
   const handleResolver = async (data: {
     salvedadId: string;
-    estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente'>;
+    estadoResolucion: Exclude<EstadoResolucionSalvedad, 'pendiente' | 'anulada'>;
     notas: string;
   }) => {
     await resolverSalvedad(data)
@@ -228,6 +256,15 @@ export default function VistaSalvedades(): React.ReactElement {
     // No llamamos cargarDatos() porque resolverSalvedad ya refresca los datos
     // y queremos que la salvedad resuelta permanezca visible
     return { success: true }
+  }
+
+  // La mutation invalida pedidos/productos/mermas; la lista de salvedades no
+  // vive en TanStack Query (useSalvedades tiene su propio estado), asi que se
+  // recarga a mano. Si la RPC rechaza --regalo de promo, merma no encontrada--
+  // el error sube al modal, que lo muestra y no se cierra.
+  const handleAnular = async (salvedadId: string, notas: string) => {
+    await anularMutation.mutateAsync({ salvedadId, notas })
+    await cargarDatos()
   }
 
   // Filtrado client-side para todas las condiciones
@@ -372,6 +409,8 @@ export default function VistaSalvedades(): React.ReactElement {
               key={salvedad.id}
               salvedad={salvedad}
               onResolver={setSalvedadResolver}
+              onAnular={setSalvedadAnular}
+              puedeAnular={puedeAnular}
             />
           ))}
         </div>
@@ -383,6 +422,15 @@ export default function VistaSalvedades(): React.ReactElement {
           salvedad={salvedadResolver}
           onResolver={handleResolver}
           onClose={() => setSalvedadResolver(null)}
+        />
+      )}
+
+      {/* Modal anular salvedad (mig 244, #621) */}
+      {salvedadAnular && (
+        <ModalAnularSalvedad
+          salvedad={salvedadAnular}
+          onAnular={(notas) => handleAnular(salvedadAnular.id, notas)}
+          onClose={() => setSalvedadAnular(null)}
         />
       )}
     </div>

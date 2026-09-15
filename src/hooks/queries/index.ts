@@ -359,6 +359,9 @@ export type { NotificacionDB } from './useNotificacionesQuery'
 // Sustitucion de regalos en promociones (mig 058)
 export { useSustituirRegaloMutation } from './useSustituirRegaloMutation'
 
+// Anulacion de salvedades (mig 244, #621)
+export { useAnularSalvedadMutation } from './useAnularSalvedadMutation'
+
 // Métricas
 export {
   metricasKeys,
