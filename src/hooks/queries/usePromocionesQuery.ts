@@ -17,6 +17,7 @@ import type {
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 import { traerTodo } from '../../utils/paginacion'
 import { factorDeLaLinea } from '../../utils/unidadesRegalo'
+import { tienePromocionUso, type ReferenciasPromocion } from '../../utils/promocionesEliminacion'
 
 // Query keys
 export const promocionesKeys = {
@@ -370,6 +371,32 @@ async function deletePromocion(id: string): Promise<void> {
     .delete()
     .eq('id', id)
   if (error) throw error
+}
+
+export interface ReferenciasPromocionCount extends ReferenciasPromocion {
+  tieneUso: boolean
+}
+
+/**
+ * Cuenta lo que colgaría de un DELETE de promociones, para poder avisar ANTES
+ * de borrarla. A diferencia de clientes (mig 200), acá las FKs no son
+ * RESTRICT: el DELETE nunca falla solo, así que no hay un 23503 del que
+ * enterarse después. Ver `tienePromocionUso` para el porqué.
+ */
+export async function contarReferenciasDePromocion(promocionId: string): Promise<ReferenciasPromocionCount> {
+  const [pedidosRes, ajustesRes] = await Promise.all([
+    supabase.from('pedido_items').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
+    supabase.from('promo_ajustes').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
+  ])
+  if (pedidosRes.error) throw pedidosRes.error
+  if (ajustesRes.error) throw ajustesRes.error
+
+  const referencias: ReferenciasPromocion = {
+    pedidos: pedidosRes.count ?? 0,
+    ajustes: ajustesRes.count ?? 0,
+  }
+
+  return { ...referencias, tieneUso: tienePromocionUso(referencias) }
 }
 
 async function togglePromocionActiva(id: string, activo: boolean): Promise<PromocionDB> {
