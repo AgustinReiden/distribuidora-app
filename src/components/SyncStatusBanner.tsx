@@ -108,7 +108,6 @@ export function SyncStatusBanner({
       DELETE_PEDIDO: 'Eliminar pedido',
       CREATE_CLIENTE: 'Crear cliente',
       UPDATE_CLIENTE: 'Actualizar cliente',
-      CREATE_MERMA: 'Registrar merma',
       UPDATE_PRODUCTO: 'Actualizar producto',
       SYNC_PAGO: 'Sincronizar pago'
     }

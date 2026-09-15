@@ -33,7 +33,6 @@ export type OperationType =
   | 'DELETE_PEDIDO'
   | 'CREATE_CLIENTE'
   | 'UPDATE_CLIENTE'
-  | 'CREATE_MERMA'
   | 'UPDATE_PRODUCTO'
   | 'SYNC_PAGO'
 

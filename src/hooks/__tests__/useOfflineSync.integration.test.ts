@@ -6,7 +6,6 @@
  * - SYNC-02: Conflicto de stock: pedido offline con stock insuficiente al sincronizar
  * - SYNC-03: Sincronización parcial: algunos pedidos fallan
  * - SYNC-04: Race condition: doble click en sincronizar
- * - SYNC-05: Guardar y sincronizar mermas
  * - SYNC-06: Migración de datos legacy
  */
 
@@ -79,7 +78,6 @@ describe('useOfflineSync Integration Tests', () => {
 
   // Mock de funciones de API
   const mockCrearPedido = vi.fn()
-  const mockRegistrarMerma = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -105,7 +103,6 @@ describe('useOfflineSync Integration Tests', () => {
 
     // Reset mocks de API
     mockCrearPedido.mockResolvedValue({ id: 1, success: true })
-    mockRegistrarMerma.mockResolvedValue({ id: 1, success: true })
   })
 
   afterEach(() => {
@@ -503,92 +500,6 @@ describe('useOfflineSync Integration Tests', () => {
   })
 
   // ===========================================================================
-  // SYNC-05: Sincronización de mermas
-  // ===========================================================================
-  describe('SYNC-05: Sincronización de mermas offline', () => {
-    it('debe guardar y sincronizar mermas offline', async () => {
-      // Start with no pending operations
-      mockGetPendingOperations.mockResolvedValue([])
-
-      const { result } = renderHook(() => useOfflineSync())
-
-      await waitFor(() => {
-        expect(result.current.mermasPendientes).toEqual([])
-      })
-
-      // Guardar merma offline (updates local state)
-      const mermaData = {
-        productoId: 'p1',
-        cantidad: 2,
-        tipo: 'vencimiento' as const,
-        motivo: 'Producto vencido'
-      }
-
-      await act(async () => {
-        await result.current.guardarMermaOffline(mermaData)
-      })
-
-      expect(result.current.mermasPendientes).toHaveLength(1)
-      expect(result.current.mermasPendientes[0]).toMatchObject({
-        productoId: 'p1',
-        cantidad: 2,
-        tipo: 'vencimiento'
-      })
-
-      // Mock pending merma for sync
-      const mockMermaOp = {
-        id: 1,
-        type: 'CREATE_MERMA',
-        status: 'pending', sucursalId: 1,
-        payload: mermaData,
-        createdAt: new Date()
-      }
-      mockGetPendingOperations.mockResolvedValue([mockMermaOp])
-
-      // Sincronizar mermas
-      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarMermas>>
-      await act(async () => {
-        syncResult = await result.current.sincronizarMermas(mockRegistrarMerma)
-        // Update mock to return empty after sync
-        mockGetPendingOperations.mockResolvedValue([])
-      })
-
-      expect(syncResult!.success).toBe(true)
-      expect(syncResult!.sincronizados).toBe(1)
-      expect(mockRegistrarMerma).toHaveBeenCalledTimes(1)
-    })
-
-    it('debe manejar errores de sincronización de mermas', async () => {
-      // Start with a pending merma
-      const mockMermaOp = {
-        id: 1,
-        type: 'CREATE_MERMA',
-        status: 'pending', sucursalId: 1,
-        payload: { productoId: 'p1', cantidad: 2, tipo: 'rotura', motivo: 'Producto roto' },
-        createdAt: new Date()
-      }
-      mockGetPendingOperations.mockResolvedValue([mockMermaOp])
-
-      const { result } = renderHook(() => useOfflineSync())
-
-      await waitFor(() => {
-        expect(result.current.mermasPendientes).toHaveLength(1)
-      })
-
-      // Mock falla
-      mockRegistrarMerma.mockRejectedValueOnce(new Error('Error al registrar merma'))
-
-      let syncResult: Awaited<ReturnType<typeof result.current.sincronizarMermas>>
-      await act(async () => {
-        syncResult = await result.current.sincronizarMermas(mockRegistrarMerma)
-      })
-
-      expect(syncResult!.success).toBe(false)
-      expect(syncResult!.errores).toHaveLength(1)
-    })
-  })
-
-  // ===========================================================================
   // SYNC-06: Contador de pendientes
   // ===========================================================================
   describe('SYNC-06: Contador de pendientes', () => {
@@ -606,87 +517,6 @@ describe('useOfflineSync Integration Tests', () => {
       })
 
       expect(result.current.cantidadPendientes).toBe(2)
-
-      // Agregar mermas
-      await act(async () => {
-        await result.current.guardarMermaOffline({
-          productoId: 'p1',
-          cantidad: 1,
-          tipo: 'robo' as const,
-          motivo: 'Faltante'
-        })
-      })
-
-      expect(result.current.cantidadPendientes).toBe(3)
-    })
-  })
-
-  // ===========================================================================
-  // SYNC-07: Regresión Task 1.5 — guardarMermaOffline espera queueOperation
-  // ===========================================================================
-  describe('SYNC-07: guardarMermaOffline await queueOperation (Task 1.5)', () => {
-    it('debe esperar a que queueOperation resuelva antes de retornar', async () => {
-      // Arrange: hacemos que queueOperation tarde en resolver y marcamos
-      // un flag cuando efectivamente se resolvió. Si guardarMermaOffline
-      // retorna ANTES de que queueOperation resuelva (bug original con
-      // .then()/.catch()), el flag estará en false en el momento del await.
-      let queueResolved = false
-      mockQueueOperation.mockImplementationOnce(() =>
-        new Promise<number>(resolve => {
-          setTimeout(() => {
-            queueResolved = true
-            resolve(42)
-          }, 50)
-        })
-      )
-
-      const { result } = renderHook(() => useOfflineSync())
-
-      await waitFor(() => {
-        expect(result.current.mermasPendientes).toEqual([])
-      })
-
-      // Act: await el guardarMermaOffline
-      let returnedMerma: Awaited<ReturnType<typeof result.current.guardarMermaOffline>> | undefined
-      await act(async () => {
-        returnedMerma = await result.current.guardarMermaOffline({
-          productoId: 'p1',
-          cantidad: 3,
-          tipo: 'vencimiento' as const,
-          motivo: 'Test regresión SYNC-07'
-        })
-      })
-
-      // Assert: queueOperation debió resolver ANTES de que guardarMermaOffline retornara.
-      expect(queueResolved).toBe(true)
-      expect(returnedMerma).toBeDefined()
-      expect(returnedMerma!.sincronizado).toBe(false)
-      expect(mockQueueOperation).toHaveBeenCalledTimes(1)
-    })
-
-    it('debe hacer rollback del optimistic update si queueOperation falla', async () => {
-      mockQueueOperation.mockRejectedValueOnce(new Error('IndexedDB quota exceeded'))
-
-      const { result } = renderHook(() => useOfflineSync())
-
-      await waitFor(() => {
-        expect(result.current.mermasPendientes).toEqual([])
-      })
-
-      // Act: esperamos que el await rethrow el error
-      await expect(
-        act(async () => {
-          await result.current.guardarMermaOffline({
-            productoId: 'p1',
-            cantidad: 1,
-            tipo: 'rotura' as const,
-            motivo: 'Test rollback'
-          })
-        })
-      ).rejects.toThrow('IndexedDB quota exceeded')
-
-      // Assert: el optimistic update fue revertido; la merma NO quedó en la lista.
-      expect(result.current.mermasPendientes).toHaveLength(0)
     })
   })
 
@@ -826,6 +656,47 @@ describe('useOfflineSync Integration Tests', () => {
         expect(mockDeletePendingOperation).toHaveBeenCalledWith(101)
       })
       expect(mockMarkAsFailed).not.toHaveBeenCalled()
+    })
+
+    /**
+     * H57. guardarPedidoOffline dejaba en estado el id temporal
+     * (`offline_<ts>_<rand>`) hasta el próximo loadPendingOperations, y la
+     * instancia que encoló no se relee sola (ver "la emisora ya se actualizo
+     * sola" en el listener de OFFLINE_QUEUE_CHANGED). Borrar ese pedido en la
+     * MISMA sesión llamaba a eliminarPedidoOffline con el id temporal, que el
+     * regex `/^op_(\d+)$/` nunca matchea: el pedido desaparecía de la UI pero
+     * quedaba vivo en IndexedDB y se sincronizaba igual. El fix hace que
+     * guardarPedidoOffline reemplace el id temporal por el real (`op_<id>`)
+     * apenas queueOperation resuelve, así que lo que ve la UI ya es borrable.
+     */
+    it('guardar y borrar un pedido en la misma sesión lo saca también de la cola', async () => {
+      mockQueueOperation.mockResolvedValueOnce(55)
+
+      const { result } = renderHook(() => useOfflineSync())
+
+      await waitFor(() => {
+        expect(result.current.pedidosPendientes).toEqual([])
+      })
+
+      let saveResult: Awaited<ReturnType<typeof result.current.guardarPedidoOffline>>
+      await act(async () => {
+        saveResult = await result.current.guardarPedidoOffline({ clienteId: '1', items: [], total: 100 })
+      })
+
+      // El id que queda en pantalla ya es el real de la cola, no el temporal.
+      expect(saveResult!.pedido!.offlineId).toBe('op_55')
+      expect(result.current.pedidosPendientes[0].offlineId).toBe('op_55')
+
+      act(() => {
+        result.current.eliminarPedidoOffline(saveResult!.pedido!.offlineId)
+      })
+
+      expect(result.current.pedidosPendientes).toHaveLength(0)
+      // El borrado le llega de verdad a IndexedDB con el id real de Dexie, no
+      // se queda en un filtro de estado que la deja viva en la cola.
+      await waitFor(() => {
+        expect(mockDeletePendingOperation).toHaveBeenCalledWith(55)
+      })
     })
   })
 
@@ -1126,15 +997,11 @@ describe('useOfflineSync Integration Tests', () => {
       const deps = {
         isOnline: true,
         pedidosPendientes: [{ offlineId: 'op_1' }],
-        mermasPendientes: [],
         sincronizando: false,
         sincronizarPedidos,
-        sincronizarMermas: vi.fn().mockResolvedValue({ sincronizados: 0, errores: [] }),
         crearPedido: vi.fn(),
-        registrarMerma: vi.fn(),
         refetchPedidos: vi.fn().mockResolvedValue(undefined),
         refetchProductos: vi.fn().mockResolvedValue(undefined),
-        refetchMermas: vi.fn().mockResolvedValue(undefined),
         refetchMetricas: vi.fn().mockResolvedValue(undefined),
       }
       // Un `notify` nuevo en cada render, que es exactamente lo que hacía el

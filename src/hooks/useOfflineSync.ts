@@ -11,7 +11,7 @@ import {
   type OperationType
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
-import type { MermaFormInput, ProductoDB } from '../types'
+import type { ProductoDB } from '../types'
 import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
 import { motivoMontoMinimo } from '../utils/montoMinimo'
@@ -110,12 +110,6 @@ export interface PedidoOffline {
   origenes?: OrigenPrecioItem[];
 }
 
-export interface MermaOffline extends MermaFormInput {
-  offlineId: string;
-  creadoOffline: string;
-  sincronizado: boolean;
-}
-
 export interface GuardarPedidoOptions {
   productos?: ProductoDB[];
   validarStock?: boolean;
@@ -149,7 +143,7 @@ export interface StockConflict {
 export interface SyncResult {
   success: boolean;
   sincronizados: number;
-  errores: Array<{ pedido?: PedidoOffline; merma?: MermaOffline; error: string }>;
+  errores: Array<{ pedido?: PedidoOffline; error: string }>;
   conflictos?: StockConflict[];
 }
 
@@ -181,27 +175,19 @@ export interface CrearPedidoFunction {
   }): Promise<unknown>;
 }
 
-export interface RegistrarMermaFunction {
-  (merma: MermaFormInput, usuarioId?: string): Promise<unknown>;
-}
-
 export interface UseOfflineSyncReturn {
   isOnline: boolean;
   pedidosPendientes: PedidoOffline[];
-  mermasPendientes: MermaOffline[];
   sincronizando: boolean;
   guardarPedidoOffline: (
     pedidoData: Omit<PedidoOffline, 'offlineId' | 'creadoOffline' | 'sincronizado'>,
     options?: GuardarPedidoOptions
   ) => Promise<GuardarPedidoResult>;
-  guardarMermaOffline: (mermaData: MermaFormInput) => Promise<MermaOffline>;
   eliminarPedidoOffline: (offlineId: string) => void;
-  eliminarMermaOffline: (offlineId: string) => void;
   sincronizarPedidos: (
     crearPedidoFn: CrearPedidoFunction,
     productosActuales?: ProductoDB[]
   ) => Promise<SyncResult>;
-  sincronizarMermas: (registrarMermaFn: RegistrarMermaFunction) => Promise<SyncResult>;
   limpiarPedidosOffline: () => void;
   refreshPendingOperations: () => Promise<void>;
   cantidadPendientes: number;
@@ -303,25 +289,12 @@ export function verificarRespuestaIdempotente(
   }
 }
 
-/**
- * Convierte una PendingOperation de IndexedDB a MermaOffline
- */
-function operationToMermaOffline(op: PendingOperation): MermaOffline {
-  const payload = op.payload as unknown as MermaFormInput & { offlineId?: string }
-  return {
-    ...payload,
-    offlineId: `op_${op.id}`,
-    creadoOffline: op.createdAt.toISOString(),
-    sincronizado: op.status === 'completed'
-  }
-}
-
 // ============================================================================
 // HOOK
 // ============================================================================
 
 /**
- * Hook para manejar sincronización offline de pedidos y mermas
+ * Hook para manejar sincronización offline de pedidos
  *
  * Ahora usa IndexedDB (via Dexie.js) para almacenamiento persistente
  * que soporta más de 5MB y sobrevive limpiezas de caché.
@@ -329,7 +302,6 @@ function operationToMermaOffline(op: PendingOperation): MermaOffline {
 export function useOfflineSync(): UseOfflineSyncReturn {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine)
   const [pedidosPendientes, setPedidosPendientes] = useState<PedidoOffline[]>([])
-  const [mermasPendientes, setMermasPendientes] = useState<MermaOffline[]>([])
   const [sincronizando, setSincronizando] = useState<boolean>(false)
 
   // Multi-tenant: track the active sucursal so we can tag queued operations
@@ -375,12 +347,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         .filter(op => op.type === 'CREATE_PEDIDO')
         .map(operationToPedidoOffline)
 
-      const mermas = operations
-        .filter(op => op.type === 'CREATE_MERMA')
-        .map(operationToMermaOffline)
-
       setPedidosPendientes(pedidos)
-      setMermasPendientes(mermas)
     } catch (err) {
       logger.error('[useOfflineSync] Error cargando operaciones pendientes:', err)
     }
@@ -501,6 +468,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     // Encolar en IndexedDB - await to ensure persistence before reporting success (BUG-11 fix)
     // Multi-tenant: persist the sucursal that originated the pedido so the replay
     // after reconnection can re-set X-Sucursal-ID to the same tenant (avoids C7).
+    let pedidoFinal: PedidoOffline
     try {
       const opId = await queueOperation(
         'CREATE_PEDIDO' as OperationType,
@@ -516,6 +484,13 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       )
 
       logger.info(`[useOfflineSync] Pedido encolado con ID: ${opId}`)
+      // El id real de la cola, no el temporal (H57): quien borre este pedido
+      // en la misma sesión llama a eliminarPedidoOffline con el offlineId que
+      // ve en pantalla, y ese sólo borra de IndexedDB si matchea `op_<id>`. Sin
+      // esto el id temporal sobrevivía hasta el próximo loadPendingOperations,
+      // la emisora no se relee (ver OFFLINE_QUEUE_CHANGED), y borrar "ya" sacaba
+      // el pedido de la UI dejándolo vivo en la cola para sincronizarse igual.
+      pedidoFinal = { ...nuevoPedido, offlineId: `op_${opId}` }
     } catch (err) {
       logger.error('[useOfflineSync] Error crítico al encolar pedido:', err)
       window.dispatchEvent(new CustomEvent('offline-storage-error', {
@@ -525,7 +500,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     }
 
     // Actualizar estado local after confirmed IndexedDB write
-    setPedidosPendientes(prev => [...prev, nuevoPedido])
+    setPedidosPendientes(prev => [...prev, pedidoFinal])
     // Avisarle a las demas instancias del hook (el badge de pendientes vive en
     // App.tsx, no aca) para que relean IndexedDB.
     window.dispatchEvent(
@@ -534,70 +509,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       }),
     )
 
-    return { success: true, pedido: nuevoPedido }
+    return { success: true, pedido: pedidoFinal }
   }, []) // pedidosPendientes removido, usamos ref
-
-  /**
-   * Guarda una merma en modo offline
-   * Ahora usa IndexedDB via queueOperation
-   *
-   * Async: espera a que queueOperation persista en IndexedDB antes de retornar
-   * (fix Task 1.5). Antes usaba .then()/.catch() y devolvía el objeto con
-   * sincronizado:false antes de que la op estuviera realmente encolada, lo que
-   * permitía que el caller actuara sobre un estado que aún no existía.
-   */
-  const guardarMermaOffline = useCallback(
-    async (mermaData: MermaFormInput): Promise<MermaOffline> => {
-      // Misma identidad estable que el pedido (ver `claveIdempotencia`): hoy
-      // `mermas_stock` no tiene columna de idempotencia, pero la operación sí
-      // necesita una identidad propia que no dependa del autoincrement de Dexie.
-      const offlineUuid = nuevoRequestId()
-      const tempOfflineId = `offline_merma_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      const nuevaMerma: MermaOffline = {
-        ...mermaData,
-        offlineId: tempOfflineId,
-        creadoOffline: new Date().toISOString(),
-        sincronizado: false
-      }
-
-      // Optimistic update: pintar la merma como pendiente antes del await para
-      // que la UI responda al instante. Si queueOperation falla, rollback abajo.
-      setMermasPendientes(prev => [...prev, nuevaMerma])
-
-      try {
-        // Encolar en IndexedDB - await para garantizar persistencia antes de retornar.
-        // Multi-tenant: persist sucursal so replay can set the right header (C7).
-        const opId = await queueOperation(
-          'CREATE_MERMA' as OperationType,
-          {
-            ...mermaData,
-            offlineUuid,
-            tempOfflineId,
-            timestamp: Date.now()
-          },
-          // Hasta ahora las mermas se encolaban sin dueño, así que quedaban
-          // visibles para cualquiera que entrara después en el mismo teléfono.
-          userIdRef.current ?? undefined,
-          undefined,
-          currentSucursalIdRef.current ?? undefined
-        )
-
-        logger.info(`[useOfflineSync] Merma encolada con ID: ${opId}`)
-      } catch (err) {
-        logger.error('[useOfflineSync] Error crítico al encolar merma:', err)
-        // Rollback del optimistic update: la merma ya fue pintada como pendiente,
-        // removerla para no engañar al usuario.
-        setMermasPendientes(prev => prev.filter(m => m.offlineId !== tempOfflineId))
-        window.dispatchEvent(new CustomEvent('offline-storage-error', {
-          detail: { type: 'merma', error: (err as Error).message }
-        }))
-        throw err
-      }
-
-      return nuevaMerma
-    },
-    []
-  )
 
   /**
    * Elimina un pedido offline de verdad: lo saca de IndexedDB, no lo marca
@@ -612,22 +525,6 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       const opId = parseInt(opIdMatch[1], 10)
       deletePendingOperation(opId).catch(err => {
         logger.error('[useOfflineSync] Error eliminando pedido:', err)
-      })
-    }
-  }, [])
-
-  /**
-   * Elimina una merma offline de verdad: mismo criterio que
-   * `eliminarPedidoOffline`.
-   */
-  const eliminarMermaOffline = useCallback((offlineId: string): void => {
-    setMermasPendientes(prev => prev.filter(m => m.offlineId !== offlineId))
-
-    const opIdMatch = offlineId.match(/^op_(\d+)$/)
-    if (opIdMatch) {
-      const opId = parseInt(opIdMatch[1], 10)
-      deletePendingOperation(opId).catch(err => {
-        logger.error('[useOfflineSync] Error eliminando merma:', err)
       })
     }
   }, [])
@@ -838,104 +735,19 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   }, [isOnline, loadPendingOperations, validarStockParaSincronizacion])
 
   /**
-   * Sincroniza todas las mermas pendientes con el servidor
-   */
-  const sincronizarMermas = useCallback(async (
-    registrarMermaFn: RegistrarMermaFunction
-  ): Promise<SyncResult> => {
-    if (!isOnline) {
-      return { success: false, sincronizados: 0, errores: [{ error: 'Sin conexión' }] }
-    }
-
-    // RACE CONDITION FIX: Verificar si ya está sincronizando usando ref BEFORE any async operations
-    if (sincronizandoRef.current) {
-      return { success: false, sincronizados: 0, errores: [{ error: 'Sincronización ya en progreso' }] }
-    }
-
-    sincronizandoRef.current = true
-    setSincronizando(true)
-
-    // Obtener operaciones pendientes desde IndexedDB (solo las de esta sesión:
-    // usuario y sucursal activos)
-    const operations = await getPendingOperations(100, userIdRef.current, currentSucursalIdRef.current)
-    const mermaOps = operations.filter(op => op.type === 'CREATE_MERMA')
-
-    if (mermaOps.length === 0) {
-      sincronizandoRef.current = false
-      setSincronizando(false)
-      return { success: true, sincronizados: 0, errores: [] }
-    }
-    const errores: SyncResult['errores'] = []
-    let sincronizados = 0
-
-    // Snapshot header to restore after the loop (same pattern as sincronizarPedidos).
-    const headerBeforeSync = getSucursalHeader()
-
-    try {
-      for (const op of mermaOps) {
-        const merma = operationToMermaOffline(op)
-        const payload = op.payload as unknown as MermaFormInput
-
-        // Multi-tenant (C7): reject ops without sucursalId to prevent cross-tenant writes.
-        if (op.sucursalId == null) {
-          await markAsFailed(op.id!, 'Operación pre-migración sin sucursal asignada; descartada para evitar corrupción cross-tenant')
-          logger.warn(`[useOfflineSync] Merma ${merma.offlineId} sin sucursalId, marcada como failed`)
-          errores.push({ merma, error: 'Operación sin sucursal asignada' })
-          continue
-        }
-
-        setSucursalHeader(op.sucursalId)
-
-        try {
-          // Sin backoff por red, a diferencia del replay de pedidos: la merma
-          // NO es idempotente en el servidor (`mermas_stock` no tiene clave de
-          // request), así que un reintento cuya primera request llegó pero
-          // perdió la respuesta descontaría el stock dos veces. Lo único que se
-          // reintenta es la sesión vencida, donde el rechazo es de auth y el
-          // INSERT con seguridad no ocurrió.
-          try {
-            await registrarMermaFn(payload)
-          } catch (error) {
-            if (!pareceSesionVencida(getErrorMessage(error)) || !(await renovarSesion())) {
-              throw error
-            }
-            await registrarMermaFn(payload)
-          }
-          await markAsCompleted(op.id!)
-          sincronizados++
-        } catch (error) {
-          const mensaje = getErrorMessage(error)
-          await markAsFailed(op.id!, mensaje)
-          errores.push({ merma, error: mensaje })
-        }
-      }
-    } finally {
-      const latestActive = currentSucursalIdRef.current
-      setSucursalHeader(latestActive ?? headerBeforeSync)
-      sincronizandoRef.current = false
-      setSincronizando(false)
-      // Recargar lista de pendientes
-      await loadPendingOperations()
-    }
-
-    return { success: errores.length === 0, sincronizados, errores }
-  }, [isOnline, loadPendingOperations])
-
-  /**
-   * Limpia todos los pedidos y mermas offline de la sesión activa (usuario +
-   * sucursal). `cleanupOldOperations(0)` sólo borra `status: 'completed'`, así
-   * que lo pendiente y lo fallido nunca se iba: esto lee lo mismo que ve el
-   * panel (`getPendingOperations`, mismo alcance que `loadPendingOperations`)
-   * y lo borra de IndexedDB de verdad.
+   * Limpia todos los pedidos offline de la sesión activa (usuario + sucursal).
+   * `cleanupOldOperations(0)` sólo borra `status: 'completed'`, así que lo
+   * pendiente y lo fallido nunca se iba: esto lee lo mismo que ve el panel
+   * (`getPendingOperations`, mismo alcance que `loadPendingOperations`) y lo
+   * borra de IndexedDB de verdad.
    */
   const limpiarPedidosOffline = useCallback((): void => {
     setPedidosPendientes([])
-    setMermasPendientes([])
 
     getPendingOperations(1000, userIdRef.current, currentSucursalIdRef.current)
       .then(operations => {
         const ids = operations
-          .filter(op => op.type === 'CREATE_PEDIDO' || op.type === 'CREATE_MERMA')
+          .filter(op => op.type === 'CREATE_PEDIDO')
           .map(op => op.id)
           .filter((id): id is number => id != null)
         return deletePendingOperations(ids)
@@ -948,16 +760,12 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   return {
     isOnline,
     pedidosPendientes,
-    mermasPendientes,
     sincronizando,
     guardarPedidoOffline,
-    guardarMermaOffline,
     eliminarPedidoOffline,
-    eliminarMermaOffline,
     sincronizarPedidos,
-    sincronizarMermas,
     limpiarPedidosOffline,
     refreshPendingOperations: loadPendingOperations,
-    cantidadPendientes: pedidosPendientes.length + mermasPendientes.length
+    cantidadPendientes: pedidosPendientes.length
   }
 }
