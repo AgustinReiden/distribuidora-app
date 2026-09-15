@@ -19,7 +19,7 @@ import {
   setNormalStyle,
   setItalicStyle
 } from './utils'
-import { formatAclaracionBulto } from './utils/formatBulto'
+import { lineaItemImpresion } from './utils/lineaItem'
 import { bloqueDeudaComanda } from '../../utils/deudaCliente'
 
 // jsPDF expone `internal.getNumberOfPages` en runtime (alias de getNumberOfPages),
@@ -235,27 +235,12 @@ function generarReciboA4(pedido: PedidoDB): void {
     doc.setFont('helvetica', 'normal')
 
     // Nombre completo del producto (sin truncar, con wrap si necesario).
-    // Para regalos usa descripcion_regalo en lugar del nombre del producto contenedor.
-    const productoNombre = item.producto?.nombre || 'Producto'
-    let nombreCompleto: string
-    if (item.es_bonificacion) {
-      const desc = item.descripcion_regalo?.trim()
-      if (desc) {
-        const match = desc.match(/^(\d+)\s+(.+)$/)
-        nombreCompleto = match ? `${match[2]} (REGALO)` : `${desc} (REGALO)`
-      } else {
-        nombreCompleto = `${productoNombre} (REGALO)`
-      }
-    } else {
-      const aclaracion = formatAclaracionBulto(
-        item.cantidad,
-        item.producto?.unidades_de_venta_por_fardo,
-        item.producto?.etiqueta_bulto,
-      )
-      nombreCompleto = aclaracion
-        ? `${productoNombre} ${aclaracion}`
-        : productoNombre
-    }
+    // La linea la arma lineaItemImpresion (misma unidad que hojaRutaOptimizada
+    // y ordenPreparacion): decide nombre, aclaracion de bulto y, para un
+    // regalo de fraccion, la unidad en subunidades con el factor CONGELADO al
+    // crear la linea (mig 212), no el vivo de la promo (#591/#592). La tabla
+    // ya tiene columna CANT. propia, asi que se descarta el prefijo "Nx ".
+    const nombreCompleto = lineaItemImpresion(item).replace(/^\d+x\s+/, '')
     const nombreLines = doc.splitTextToSize(nombreCompleto, 90)
     doc.text(nombreLines[0], margin + 5, y)
 
@@ -519,35 +504,13 @@ function dibujarComanda(doc: jsPDF, pedido: PedidoDB): void {
 
   setNormalStyle(doc, 9)
   items.forEach(item => {
-    const productoNombre = item.producto?.nombre || 'Producto'
     const subtotal = item.subtotal || item.precio_unitario * item.cantidad
     const esBonif = !!item.es_bonificacion
 
-    let lineaProducto: string
-    if (esBonif) {
-      // Para regalos: usar descripcion_regalo (texto manual de la promo) en lugar
-      // del nombre del producto contenedor + aclaracion de bulto. Si la descripcion
-      // empieza con un numero (ej "2 Botellas Manaos Pomelo Blanco 3L"), reemplaza
-      // ese numero con la cantidad total para que el ticket muestre "6 Botellas...".
-      const desc = item.descripcion_regalo?.trim()
-      if (desc) {
-        const match = desc.match(/^(\d+)\s+(.+)$/)
-        lineaProducto = match
-          ? `${item.cantidad} ${match[2]} (REGALO)`
-          : `${item.cantidad}x ${desc} (REGALO)`
-      } else {
-        lineaProducto = `${item.cantidad}x ${productoNombre} (REGALO)`
-      }
-    } else {
-      const aclaracion = formatAclaracionBulto(
-        item.cantidad,
-        item.producto?.unidades_de_venta_por_fardo,
-        item.producto?.etiqueta_bulto,
-      )
-      lineaProducto = aclaracion
-        ? `${item.cantidad}x ${productoNombre} ${aclaracion}`
-        : `${item.cantidad}x ${productoNombre}`
-    }
+    // La linea la arma lineaItemImpresion: mismo criterio que hojaRutaOptimizada
+    // y ordenPreparacion, con el factor congelado al crear la linea (mig 212)
+    // en vez del vivo de la promo (#591/#592).
+    const lineaProducto = lineaItemImpresion(item)
 
     const nombreLines = doc.splitTextToSize(lineaProducto, contentWidth - 26)
     nombreLines.forEach((line: string, idx: number) => {
