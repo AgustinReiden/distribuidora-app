@@ -8,14 +8,28 @@ export default function ModalAlertaDetalle({
   titulo,
   codigo,
   sucursalId,
+  desde,
+  hasta,
+  incluirNoEntregados,
   onClose,
 }: {
   titulo: string
   codigo: string
   sucursalId: number | null
+  /** El MISMO período y el mismo toggle del reporte: si no, la lista no cuadra
+   *  con el KPI que la abre (mig 238). */
+  desde: string
+  hasta: string
+  incluirNoEntregados: boolean
   onClose: () => void
 }): React.ReactElement {
-  const { data, isLoading, error } = useAlertaDetalleQuery(sucursalId, codigo)
+  const { data, isLoading, error } = useAlertaDetalleQuery(
+    sucursalId,
+    codigo,
+    desde,
+    hasta,
+    incluirNoEntregados,
+  )
   const items = data ?? []
 
   return (

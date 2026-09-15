@@ -1002,6 +1002,9 @@ export default function VistaReportesGerenciales({
           titulo={alertaDetalle.titulo}
           codigo={alertaDetalle.codigo}
           sucursalId={sucursalSel}
+          desde={periodoSel.desde}
+          hasta={periodoSel.hasta}
+          incluirNoEntregados={incluirNoEntregados}
           onClose={() => setAlertaDetalle(null)}
         />
       )}

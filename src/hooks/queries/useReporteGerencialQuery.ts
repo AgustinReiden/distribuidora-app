@@ -279,18 +279,34 @@ export interface AlertaDetalleItem {
   detalle: string
 }
 
-/** Lista detrás de una alerta (lazy: solo al hacer click). codigo = alerta.codigo. */
+/**
+ * Lista detrás de una alerta (lazy: solo al hacer click). codigo = alerta.codigo.
+ *
+ * `desde`/`hasta`/`incluirNoEntregados` son los MISMOS del reporte, y no son
+ * opcionales de adorno: `productos_sin_costo` suma la venta del período con los
+ * estados del toggle, igual que el KPI `ingreso_sin_costo`. Sin ellos la lista
+ * sumaba todo el histórico y sólo lo entregado, así que no podía cuadrar con el
+ * número de la alerta que la abre (mig 238, #511).
+ *
+ * Las otras dos alertas son contra CURRENT_DATE y el RPC las ignora a propósito.
+ */
 export function useAlertaDetalleQuery(
   sucursalId: number | null,
   codigo: string | null,
+  desde: string,
+  hasta: string,
+  incluirNoEntregados: boolean,
   enabled = true,
 ) {
   return useQuery({
-    queryKey: ['alerta-detalle', sucursalId, codigo] as const,
+    queryKey: ['alerta-detalle', sucursalId, codigo, desde, hasta, incluirNoEntregados] as const,
     queryFn: async (): Promise<AlertaDetalleItem[]> => {
       const { data, error } = await supabase.rpc('reporte_alerta_detalle', {
         p_sucursal_id: sucursalId,
         p_codigo: codigo,
+        p_desde: desde,
+        p_hasta: hasta,
+        p_incluir_no_entregados: incluirNoEntregados,
       })
       if (error) throw new Error(error.message)
       return (data as AlertaDetalleItem[] | null) ?? []
