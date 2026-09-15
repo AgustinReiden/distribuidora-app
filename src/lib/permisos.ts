@@ -57,13 +57,27 @@ export function puedeAnularPago(rol: RolUsuario | null | undefined): boolean {
  * restituye la linea del pedido, recalcula los totales --el cliente vuelve a
  * pagar lo que la salvedad le habia sacado-- y revierte la merma.
  *
- * Espejo exacto de `es_admin_salvedades()`, que es el gate del RPC
- * `anular_salvedad` y es `rol = 'admin'` a secas. La vista de salvedades la ven
- * admin Y encargado (App.tsx), asi que sin este permiso el encargado veria un
- * boton que el servidor rechaza con "Solo admin".
+ * Espejo exacto de `es_admin()`, que desde la mig 252 es el gate del RPC
+ * `anular_salvedad`. La vista de salvedades la ven admin Y encargado (App.tsx),
+ * asi que sin este permiso el encargado veria un boton que el servidor rechaza
+ * con "Solo admin".
  */
 export function puedeAnularSalvedad(rol: RolUsuario | null | undefined): boolean {
   return rol === 'admin'
+}
+
+/**
+ * Si el rol puede RESOLVER una salvedad (mig 252). Resolver no mueve stock ni
+ * plata: sólo escribe quien se hace cargo. Por eso lo puede el encargado, que
+ * es el que ya las registra (mig 065), mientras que anular --que si mueve las
+ * dos cosas-- sigue siendo de admin.
+ *
+ * Espejo exacto de `es_encargado_o_admin()`, el gate del RPC
+ * `resolver_salvedad`. Antes de la 252 el boton se le mostraba a los dos roles
+ * y el servidor le contestaba "Solo admin" al encargado.
+ */
+export function puedeResolverSalvedad(rol: RolUsuario | null | undefined): boolean {
+  return rol === 'admin' || rol === 'encargado'
 }
 
 export function puedeAccederDashboard(rol: RolUsuario | null | undefined): boolean {

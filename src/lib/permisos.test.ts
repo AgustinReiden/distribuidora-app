@@ -5,6 +5,7 @@ import {
   puedeCancelarPedido,
   puedeAnularPago,
   puedeAnularSalvedad,
+  puedeResolverSalvedad,
   puedeAccederDashboard,
   puedeAccederReportes,
   puedeAccederComisiones,
@@ -60,6 +61,30 @@ describe('permisos por rol', () => {
       expect(puedeAccederDashboard('transportista')).toBe(false)
       expect(puedeAccederDashboard('deposito')).toBe(false)
       expect(puedeAccederDashboard(null)).toBe(false)
+    })
+  })
+
+  describe('puedeResolverSalvedad', () => {
+    // Mig 252: resolver no mueve stock ni plata --sólo dice quien se hace
+    // cargo--, asi que lo puede el encargado, que es el que ya registra las
+    // salvedades (mig 065). Anularlas sigue siendo de admin: ese es el par de
+    // arriba. Espejo de `es_encargado_o_admin()`.
+    it('permite admin y encargado', () => {
+      expect(puedeResolverSalvedad('admin')).toBe(true)
+      expect(puedeResolverSalvedad('encargado')).toBe(true)
+    })
+
+    it('bloquea preventista, transportista, deposito y sin rol', () => {
+      expect(puedeResolverSalvedad('preventista')).toBe(false)
+      expect(puedeResolverSalvedad('transportista')).toBe(false)
+      expect(puedeResolverSalvedad('deposito')).toBe(false)
+      expect(puedeResolverSalvedad(null)).toBe(false)
+      expect(puedeResolverSalvedad(undefined)).toBe(false)
+    })
+
+    it('resolver es mas ancho que anular: el encargado resuelve pero no anula', () => {
+      expect(puedeResolverSalvedad('encargado')).toBe(true)
+      expect(puedeAnularSalvedad('encargado')).toBe(false)
     })
   })
 
