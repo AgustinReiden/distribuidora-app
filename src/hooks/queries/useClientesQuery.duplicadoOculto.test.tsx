@@ -290,3 +290,39 @@ describe('`duplicado_confirmado` no es una columna', () => {
     expect(Object.keys(updateSpy.mock.calls[0][0] as object)).not.toContain('duplicado_confirmado')
   })
 })
+
+describe('la edición pasa por el mismo guard cuando toca los campos del criterio', () => {
+  const editar = async (data: Record<string, unknown>) => {
+    const { result } = renderHook(() => useActualizarClienteMutation(), { wrapper })
+    return result.current.mutateAsync({ id: '77', data } as never)
+  }
+
+  it('bloquea si la edición mueve al cliente a la puerta de otro', async () => {
+    rpc.mockResolvedValue({ data: veredicto({ bloquea: true, motivo: 'direccion' }), error: null })
+    await expect(editar({ direccion: 'San Martín 100', latitud: -26.83, longitud: -65.22 })).rejects.toThrow()
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(rpc).toHaveBeenCalledWith('verificar_duplicado_cliente', expect.objectContaining({
+      p_excluir_id: '77',
+    }))
+  })
+
+  it('un aviso sin confirmar tampoco guarda', async () => {
+    rpc.mockResolvedValue({ data: veredicto({ avisa: true, motivo: 'distancia', distancia_m: 5 }), error: null })
+    await expect(editar({ direccion: 'Otra calle 200' })).rejects.toThrow(/volvé a guardar y confirmá/)
+    expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  it('confirmado, guarda', async () => {
+    rpc.mockResolvedValue({ data: veredicto({ avisa: true, motivo: 'distancia', distancia_m: 5 }), error: null })
+    await editar({ direccion: 'Otra calle 200', duplicado_confirmado: true })
+    expect(updateSpy).toHaveBeenCalled()
+  })
+
+  // Editar un campo que no entra en el criterio (ej. teléfono) no tiene por qué
+  // llamar al guard: no puede generar un duplicado nuevo.
+  it('no llama al guard si el patch no toca dirección, coordenadas ni nombre', async () => {
+    await editar({ telefono: '3811234567' })
+    expect(rpc).not.toHaveBeenCalled()
+    expect(updateSpy).toHaveBeenCalled()
+  })
+})
