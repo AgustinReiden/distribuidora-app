@@ -4,18 +4,21 @@
 --   1. Tabla bot_digests_enviados (idempotencia: 1 digest por admin × fecha).
 --   2. RPC bot_metricas_admin_dia(p_fecha, p_sucursal_id) → JSON con métricas
 --      operativas del día anterior + comparativos vs últimos 7 días.
---   3. pg_cron schedule a las 10:00 UTC (= 07:00 ART) que invoca via pg_net
---      la edge function `telegram-digest`.
+--   3. (HISTÓRICO, ver nota #661 abajo) pg_cron schedule a las 10:00 UTC
+--      (= 07:00 ART) que invoca via pg_net la edge function `telegram-digest`.
 --
 -- Como las otras RPCs `bot_*` (migrations 015, 017), la métrica RPC es
 -- service_role-only: el control de rol/sucursal del admin se hace en la
 -- edge function antes de invocar.
 --
--- pg_cron + pg_net deben estar habilitados en el cluster Supabase (Dashboard:
--- Database > Extensions). Si pg_cron no está, el cron schedule no se crea
--- (el bloque DO es no-op). Si pg_net no está, el cron está creado pero el
--- net.http_post falla en runtime — verificar con `SELECT * FROM cron.job;`
--- y `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 5;`.
+-- #661 (2026-09-15): pg_cron y pg_net NUNCA estuvieron habilitadas en prod, así
+-- que el bloque DO de más abajo fue no-op desde el día uno — el digest no
+-- corrió ni una vez (bot_digests_enviados estaba vacía). Decisión del dueño:
+-- no instalar pg_cron. El disparo diario real vive ahora en
+-- `.github/workflows/telegram-digest.yml` (schedule + workflow_dispatch,
+-- mismo horario 10:00 UTC / 07:00 ART), que además falla visible si algo se
+-- rompe. El bloque DO de esta migración queda tal cual por ser un archivo ya
+-- aplicado (ver migrations/MANIFEST.md) — no representa el disparo vigente.
 
 -- ============================================================================
 -- 1. Tabla bot_digests_enviados (idempotencia + auditoría)
