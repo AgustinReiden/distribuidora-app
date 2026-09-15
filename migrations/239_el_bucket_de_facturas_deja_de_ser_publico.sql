@@ -1,15 +1,28 @@
 -- El bucket "facturas" deja de ser público
 --
--- NO APLICADA TODAVIA. Este archivo fija en SQL una config que hasta ahora
--- sólo vivía armada a mano en el dashboard de Supabase (storage.buckets no
--- tenía ninguna migración previa). Antes de aplicar: confirmar el número
--- contra el ledger (`list_migrations` / `supabase_migrations.schema_migrations`)
--- y contra las ramas abiertas -- MISMA regla que toda migración nueva (ver
--- migrations/MANIFEST.md). Confirmado contra el ledger de prod el 2026-09-13:
--- la última aplicada es la 227. No aplicar en paralelo con otra sesión que
--- esté tocando la cadena de SQL.
+-- Este archivo fija en SQL una config que hasta ahora sólo vivía armada a mano
+-- en el dashboard de Supabase (storage.buckets no tenía ninguna migración
+-- previa).
 --
--- Estado verificado en prod el 2026-09-13 (hmuchlzmuqqxcldbzkgc):
+-- NACIO COMO 228 Y SE APLICO COMO 239. Se escribió el 2026-09-13 confirmando
+-- contra el ledger que la última aplicada era la 227 -- y se mergeó SIN
+-- aplicar, con `[SQL - NO APLICADA]` en el mensaje del commit. Para cuando se
+-- aplicó, el 228 ya se lo había llevado `228_cada_uno_ve_lo_de_su_sucursal`
+-- (ledger 20260913212201, ese mismo día a las 21:22) y la cadena iba por la
+-- 238. Es la trampa 3 de CLAUDE.md en vivo: **el número se reserva aplicando,
+-- no escribiendo el archivo**, así que un archivo que espera dos días en
+-- `main` llega con el número ocupado. El drift-check
+-- (`scripts/check-migrations.mjs`) fue el que lo cazó: venía rojo en `main`
+-- desde el 2026-09-14 con "archivo en migrations/ pero NO aplicado en prod".
+--
+-- La mitad del código YA estaba mergeada y en producción: `ModalCompra.tsx`
+-- usa `createSignedUrl(fileName, 300)` desde el 2026-09-13. Las signed URLs
+-- funcionan igual sobre un bucket público, así que nada se rompió -- pero el
+-- beneficio de seguridad no existió hasta esta migración. El front estuvo dos
+-- días listo para un bucket privado que seguía siendo público.
+--
+-- Estado verificado en prod el 2026-09-13 y RE-verificado sin cambios el
+-- 2026-09-15, justo antes de aplicar (hmuchlzmuqqxcldbzkgc):
 --   storage.buckets: id='facturas', public=true, file_size_limit=NULL,
 --     allowed_mime_types=NULL
 --   storage.objects policies sobre bucket_id='facturas': UNA sola,
@@ -90,13 +103,13 @@ BEGIN
   FROM storage.buckets WHERE id = 'facturas';
 
   IF v_bucket.public IS DISTINCT FROM false THEN
-    RAISE EXCEPTION 'mig 228: el bucket facturas sigue publico.';
+    RAISE EXCEPTION 'mig 239: el bucket facturas sigue publico.';
   END IF;
   IF v_bucket.file_size_limit IS DISTINCT FROM 8388608 THEN
-    RAISE EXCEPTION 'mig 228: file_size_limit no quedo en 8MB.';
+    RAISE EXCEPTION 'mig 239: file_size_limit no quedo en 8MB.';
   END IF;
   IF v_bucket.allowed_mime_types IS NULL THEN
-    RAISE EXCEPTION 'mig 228: allowed_mime_types sigue sin acotar.';
+    RAISE EXCEPTION 'mig 239: allowed_mime_types sigue sin acotar.';
   END IF;
 
   SELECT count(*) INTO v_policy_count
@@ -108,7 +121,7 @@ BEGIN
       'facturas_delete_admin'
     );
   IF v_policy_count <> 3 THEN
-    RAISE EXCEPTION 'mig 228: faltan policies de facturas (esperaba 3, hay %).', v_policy_count;
+    RAISE EXCEPTION 'mig 239: faltan policies de facturas (esperaba 3, hay %).', v_policy_count;
   END IF;
 
   IF EXISTS (
@@ -116,7 +129,7 @@ BEGIN
     WHERE schemaname = 'storage' AND tablename = 'objects'
       AND policyname = 'Allow authenticated uploads'
   ) THEN
-    RAISE EXCEPTION 'mig 228: la policy vieja sigue viva.';
+    RAISE EXCEPTION 'mig 239: la policy vieja sigue viva.';
   END IF;
 END
 $verif$;
