@@ -27,6 +27,8 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 import { mermasKeys } from './useMermasQuery'
+import { notasCreditoKeys } from './useNotasCreditoQuery'
+import { comprasKeys } from './useComprasQuery'
 
 /** Una fila de `producto_lotes`, como llega de la base. */
 export interface LoteDB {
@@ -286,5 +288,58 @@ export function useDarDeBajaLoteMutation() {
       }
     },
     onSuccess: invalidar,
+  })
+}
+
+/**
+ * Devuelve unidades de un lote al proveedor y las acredita.
+ *
+ * Es la otra puerta de la misma fila del panel: dar de baja registra una
+ * **pérdida** (merma por vencimiento), esto registra un **crédito** contra la
+ * factura de compra. La RPC no escribe en `mermas_stock` — si lo hiciera, la
+ * mercadería que el proveedor paga inflaría el costo de mermas del gerencial,
+ * que es justo lo que el issue #564 pedía separar.
+ *
+ * Invalida además las notas de crédito y las compras: la nota nueva cuelga de
+ * la compra de origen y aparece en su badge y en su detalle.
+ */
+export function useRegistrarNotaCreditoLoteMutation() {
+  const invalidar = useInvalidarLotes()
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (input: {
+      loteId: number
+      cantidad: number
+      numeroNota: string
+      motivo?: string
+    }) => {
+      const { data, error } = await supabase.rpc('registrar_nota_credito_lote', {
+        p_lote_id: input.loteId,
+        p_cantidad: input.cantidad,
+        p_numero_nota: input.numeroNota,
+        p_motivo: input.motivo ?? null,
+      })
+      if (error) throw error
+      return data as unknown as {
+        ok: boolean
+        lote_id: number
+        nota_credito_id: number
+        compra_id: number
+        cantidad: number
+        cantidad_restante: number
+        stock: number
+        costo_unitario: number
+        subtotal: number
+        iva: number
+        total: number
+      }
+    },
+    onSuccess: () => {
+      invalidar()
+      queryClient.invalidateQueries({ queryKey: notasCreditoKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+    },
   })
 }
