@@ -394,36 +394,6 @@ export function useDescontarStockMutation() {
   })
 }
 
-/**
- * Hook para restaurar stock atómicamente
- */
-export function useRestaurarStockMutation() {
-  const queryClient = useQueryClient()
-  const { currentSucursalId } = useSucursal()
-
-  return useMutation({
-    mutationFn: async (items: { producto_id: string; cantidad: number }[]) => {
-      const { error } = await supabase.rpc('restaurar_stock_atomico', {
-        p_items: items
-      })
-
-      if (error) throw error
-      return items
-    },
-    onSuccess: (items) => {
-      // Actualizar cache de lista optimistamente
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return old
-        return old.map(p => {
-          const item = items.find(i => i.producto_id === p.id)
-          if (item) return { ...p, stock: p.stock + item.cantidad }
-          return p
-        })
-      })
-    },
-  })
-}
-
 // ===========================================================================
 // Actualización masiva de precios
 // ===========================================================================
