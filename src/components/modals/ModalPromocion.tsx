@@ -201,6 +201,14 @@ export default function ModalPromocion({
       }
     }
 
+    // Sin esto, `guardar()` manda `productoRegaloId || null` y la columna cae
+    // en su default de "primer producto del pedido" (baseline:4044): la promo
+    // guarda y regala cualquier cosa, no lo que el admin eligió.
+    if (tipoRegalo === 'unidad_entera' && !productoRegaloId) {
+      setError('Seleccioná el producto de regalo')
+      return
+    }
+
     // El factor cambió: no se guarda sin que el admin vea qué le pasa a las
     // barras abiertas. La confirmación se renderiza DENTRO del modal, no como
     // hermano en el container, o queda atrás del overlay.

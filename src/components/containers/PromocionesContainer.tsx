@@ -14,6 +14,7 @@ import {
   useTogglePromocionActivaMutation,
   usePromoUnidadesEntregadasQuery,
   usePromoAcumuladoresMapQuery,
+  contarReferenciasDePromocion,
 } from '../../hooks/queries'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -75,12 +76,62 @@ export default function PromocionesContainer(): React.ReactElement {
     setModalOpen(true)
   }, [])
 
-  const handleEliminarPromocion = useCallback((id: string) => {
+  // Borrar una promo con historial NO es inocente: a diferencia de clientes
+  // (mig 200) las FKs de promociones no son RESTRICT -- pedido_items.promocion_id
+  // es SET NULL y promo_ajustes es CASCADE -- asi que el DELETE nunca falla
+  // solo, borra en silencio el historial de ajustes y desprende la promo de
+  // los pedidos ya facturados. Se cuenta primero y se ofrece desactivar.
+  const handleEliminarPromocion = useCallback(async (id: string) => {
     const promo = promociones.find(p => p.id === id)
     const nombre = promo?.nombre || 'esta promocion'
+
+    let referencias: Awaited<ReturnType<typeof contarReferenciasDePromocion>>
+    try {
+      referencias = await contarReferenciasDePromocion(id)
+    } catch {
+      notify.error('No se pudo verificar si la promoción tiene pedidos o ajustes. No se eliminó nada.')
+      return
+    }
+
+    if (referencias.tieneUso) {
+      const detalle: string[] = []
+      if (referencias.pedidos > 0) {
+        detalle.push(`${referencias.pedidos} ${referencias.pedidos === 1 ? 'pedido' : 'pedidos'} facturados`)
+      }
+      if (referencias.ajustes > 0) {
+        detalle.push(`${referencias.ajustes} ${referencias.ajustes === 1 ? 'ajuste' : 'ajustes'} de stock`)
+      }
+      const detalleTexto = detalle.join(' y ')
+
+      if (!promo?.activo) {
+        notify.error(
+          `"${nombre}" tiene ${detalleTexto} y ya está desactivada. No se puede eliminar sin perder ese historial.`
+        )
+        return
+      }
+
+      setConfirmConfig({
+        visible: true, tipo: 'warning', titulo: 'La promoción tiene historial',
+        mensaje:
+          `"${nombre}" tiene ${detalleTexto}. No se puede eliminar sin que los pedidos ya facturados ` +
+          'pierdan con qué promo se vendieron y sin borrar el historial de ajustes de stock. ' +
+          'Al confirmar se DESACTIVA: deja de aplicarse a pedidos nuevos, pero el historial queda intacto.',
+        onConfirm: async () => {
+          setConfirmConfig({ visible: false })
+          try {
+            await toggleActivo.mutateAsync({ id, activo: false })
+            notify.success(`"${nombre}" quedó desactivada`)
+          } catch {
+            notify.error('Error al desactivar la promoción')
+          }
+        },
+      })
+      return
+    }
+
     setConfirmConfig({
       visible: true, tipo: 'danger', titulo: 'Eliminar promoción',
-      mensaje: `¿Eliminar la promoción "${nombre}"? Se eliminarán la promo y sus reglas.`,
+      mensaje: `¿Eliminar la promoción "${nombre}"? Se eliminarán la promo, sus reglas, sus productos asignados y su historial de ajustes de stock.`,
       onConfirm: async () => {
         setConfirmConfig({ visible: false })
         try {
@@ -91,7 +142,7 @@ export default function PromocionesContainer(): React.ReactElement {
         }
       },
     })
-  }, [eliminarPromocion, notify, promociones])
+  }, [eliminarPromocion, toggleActivo, notify, promociones])
 
   const handleToggleActivo = useCallback(async (promo: PromocionConDetalles) => {
     try {
