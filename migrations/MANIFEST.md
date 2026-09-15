@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-09-14** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-09-15** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 238.** El ledger de prod llega hasta
-`237_el_bot_mira_el_perfil_en_vivo`.
+**La próxima migración es la 239.** El ledger de prod llega hasta
+`238_el_criterio_de_merma_vive_en_un_solo_lugar`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -155,7 +155,7 @@ Y pasó de nuevo el 2026-09-10: decía 220 con la 220, la 221 y la 222 ya en el 
 vencimientos leyó "escribí la 220" y habría pisado tres migraciones vivas.
 Y de nuevo el 2026-09-13: decía 226 con la 226 y la 227 ya aplicadas y sus archivos en
 `main`. Van cinco veces.
-Última actualización: 237, el 2026-09-14.)
+Última actualización: 238, el 2026-09-15.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -1044,6 +1044,80 @@ verificación las mira a las dos. Post-aplicación: ACL de `bot_resolver_usuario
 `canjear_codigo_vinculacion_bot` en `postgres` + `service_role` y nada más, `auditoria_integridad()`
 con `overall_ok = true`, y cero filas del ensayo. El md5 del archivo del repo sin espacios es
 idéntico al `statements` del ledger: `30802b65fa32cd7ab44dc84eb6847ec6`.
+
+### 238 · El criterio de merma vive en un solo lugar
+
+Tres síntomas, una sola causa: una regla de negocio escrita más de una vez sin nadie que
+verifique que las copias sigan diciendo lo mismo.
+
+**#570 — el criterio de merma estaba copiado verbatim.** La cascada de costo, el corte del día
+argentino y la exclusión de `promociones`/`promociones_reversion` vivían dos veces: en los CTEs
+`k_merma` / `m_merma` / `mermas_motivo` de `reporte_gerencial` (130) y en el CTE `base` de
+`reporte_mermas` (226). La 226 lo dice en su propia cabecera —"se copian VERBATIM de la 130"— y
+pide **a mano** que si tocás una toques la otra. La invariante que las une
+(`reporte_mermas.totales.costo == reporte_gerencial.kpis.mermas`) se sostenía sobre un
+comentario. Ahora hay **una** implementación, `mermas_valorizadas(desde, hasta, sucursales)`, y
+las dos la consumen: el gerencial filtrando `clasificacion <> 'promocion'` —que es exactamente el
+viejo `NOT IN ('promociones','promociones_reversion')`— y el reporte dejándolas entrar para
+informarlas aparte. El cruce pasa a cerrar **por construcción**, no por coincidencia.
+
+**#511 — `sin_costo` era tres predicados distintos.** El gerencial VALÚA con la cascada completa
+pero decidía `sin_costo` mirando una sola pata (`costo_sin_iva IS NULL OR = 0`): un producto con
+`costo_promedio` cargado se valuaba bien y encima disparaba la alerta "productos sin costo", que
+dice que el margen está inflado cuando no lo está. `reporte_alerta_detalle` repetía ese predicado
+a mano, **sin filtro de fecha y con `estado='entregado'` fijo**, así que la lista detrás de la
+alerta no podía cuadrar con el KPI ni por casualidad. Y `reporte_mermas` usaba
+`COALESCE(promedio, real, costo_sin_iva) IS NULL`, que no captura `costo_sin_iva = 0`. Ahora las
+tres preguntan lo mismo: `costo_valuacion(...) IS NULL`, con `NULLIF(costo_sin_iva, 0)` adentro
+—un cero no es un costo—. `reporte_alerta_detalle` **cambia de firma** (gana `p_desde`, `p_hasta`
+y `p_incluir_no_entregados`) y la de dos argumentos se dropea en la misma transacción: dejarlas
+conviviendo daba `PGRST203`.
+
+**Los números de mermas y de CMV no se movieron, y está medido.** El `NULLIF` hace que un costo
+de `0` pase a ser `NULL`, pero `SUM` ignora los NULL y `cantidad * 0` es 0: las dos formas suman
+igual. Verificado en seco (transacción revertida) sobre **todo** el historial antes de aplicar:
+107 filas de merma con costo idéntico al centavo (`1748511.5549`), 18.441 ítems de pedido con CMV
+idéntico (`134676364.6281`) e `ingreso_sin_costo` idéntico (`8600.00`). Después de aplicar, las 9
+combinaciones de 3 períodos × (2 sucursales + Red) dan exactamente los mismos números que antes y
+`kpis.mermas == totales.costo` en las 9. Lo que sí se mueve a propósito es a quién cuenta
+`ingreso_sin_costo`: hoy hay 3 productos sin ninguna pata de costo y **0** "rescatados" por el
+cambio, así que el número es el mismo — la diferencia aparece el día que se venda un producto con
+promedio y sin `costo_sin_iva`, que es cuando importa.
+
+**D-8 — el límite de usos miraba un pico intermedio.** `check_promo_limite_usos` apagaba la promo
+con `usos_pendientes >= limite_usos`. Desde las migs 220/221 `usos_pendientes` es el **resto** de
+la barra en `[0, N)` para las promos con fracción, y `crear_pedido_completo` lo sube en
+**subunidades** antes de que el auto-ajuste lo baje a ese resto. Una boleta con 392 subunidades de
+regalo pasaba por `392 >= 100` y desactivaba una promo de 100 usos un instante antes de que el
+mismo statement la dejara en 2. El trigger se acota a `regalo_mueve_stock` (las promos sin
+fracción, donde `usos_pendientes` sigue contando lo que el nombre dice) y el chip de
+`VistaPromociones` deja de mostrar "N/M usos" en las de fracción. Para las de fracción el tope
+real es el stock del producto de ajuste, que el auto-ajuste ya verifica.
+
+**La migración es su propia prueba de aceptación.** Verificación estática (una sola firma por
+función, ACLs) más un ensayo funcional en una subtransacción que se revierte siempre: los casos
+fijos de la cascada y de la clasificación, una grilla de 81 combinaciones que verifica que
+`costo_valuacion(...) IS NULL` sea exactamente `costo_valuacion_origen(...) = 'sin_costo'`,
+cuatro filas de merma sintéticas (una con `costo_promedio` y sin `costo_sin_iva` —el caso de
+#511—, una con **cantidad negativa**, una de promoción que no cuenta) con el cruce medido **con
+esas filas adentro**, y las dos mitades de D-8: 392 subunidades no apagan una promo con fracción,
+100 usos sí apagan una sin fracción. Cierra con el cruce sobre datos reales en 9 combinaciones.
+
+Las cuatro funciones nuevas (`costo_valuacion`, `costo_valuacion_origen`, `merma_clasificacion`,
+`mermas_valorizadas`) revocan las **tres** mitades —PUBLIC, `anon` y `authenticated`— y sólo
+tienen `service_role`: no las llama el front, las llaman las SECURITY DEFINER de `postgres`, que
+corren como su owner. `mermas_valorizadas` además es SECURITY INVOKER y recibe el array de
+sucursales **sin validar**, así que dejarla alcanzable por `authenticated` sería regalar el scope.
+Post-aplicación: `auditoria_permisos_execute()` con `expuestas_a_anon = 0` sobre 264 funciones, y
+las cinco RPCs responden `42501 permission denied` con la anon key. El md5 del archivo del repo
+sin espacios es idéntico al `statements` del ledger: `f6bbdaa945e98993a380895e0d339554`.
+
+**Lo que NO se tocó, a propósito:** `mermas_stock_snapshot_costo`, el trigger BEFORE INSERT que
+congela el costo de la merma, repite la cascada una cuarta vez y además redondea a 4 decimales.
+Es un camino de **escritura**, no de lectura —las dos funciones de reporte leen el mismo
+`m.costo_unitario` ya escrito—, así que la invariante no depende de él; unificarlo cambiaría los
+snapshots futuros y va por issue aparte. Tampoco se tocaron los criterios de venta por vendedor
+ni el filtro de canal (SQL-13 / D-1).
 
 ## Mantenimiento
 
