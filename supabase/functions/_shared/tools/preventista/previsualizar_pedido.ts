@@ -20,6 +20,7 @@
 
 import type { Tool } from "../base.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { formatCurrency } from "../formatters.ts";
 import { loadPricingContext } from "../../pricing/index.ts";
 import {
   validarMOQPedido,
@@ -64,10 +65,21 @@ export interface AlertaStock {
 }
 
 export interface AlertaCredito {
+  /**
+   * "limite": el cliente tiene `limite_credito` cargado y el pedido lo supera.
+   * "deuda": no tiene límite cargado (o no lo supera), pero ya arrastra saldo
+   * pendiente — el criterio que usa la app (mismo que `avisoDeudaCliente` en
+   * `src/utils/deudaCliente.ts`). En prod, de 718 clientes sólo 1 tiene
+   * límite cargado y 121 tienen saldo_cuenta > 0 (#531/#587): sin esta rama
+   * el bot no avisaba a casi nadie.
+   */
+  motivo: "limite" | "deuda";
   limite: number;
   saldo_actual: number;
   pedido_total: number;
   excedente: number;
+  /** Texto ya armado para mostrarle al preventista, mismo criterio que la app. */
+  mensaje: string;
 }
 
 export interface PrevisualizarPedidoResult {
@@ -364,15 +376,37 @@ export const previsualizarPedidoTool: Tool<
     }
 
     // ---- Alerta de crédito ----
+    // Dos ramas, mismo criterio que la app (#531/#587): la mayoría de los
+    // clientes no tiene límite de crédito cargado, así que basarse sólo en
+    // `limite_credito` deja al bot sin avisar de la deuda previa que sí
+    // muestra la app (mig 215, `saldo_cuenta`). Rama "límite" primero: si el
+    // pedido supera el límite explícito, esa es la alerta que importa.
     const limiteCredito = Number(cliente.limite_credito ?? 0);
     const saldoActual = Number(cliente.saldo_cuenta ?? 0);
     let alertaCredito: AlertaCredito | null = null;
     if (limiteCredito > 0 && (saldoActual + total) > limiteCredito) {
       alertaCredito = {
+        motivo: "limite",
         limite: limiteCredito,
         saldo_actual: saldoActual,
         pedido_total: total,
         excedente: (saldoActual + total) - limiteCredito,
+        mensaje:
+          `Este pedido supera el límite de crédito: ${
+            formatCurrency(saldoActual + total)
+          } de ${formatCurrency(limiteCredito)} disponibles.`,
+      };
+    } else if (saldoActual > 0) {
+      // Mismo texto que ve el preventista en la app (avisoDeudaCliente,
+      // src/utils/deudaCliente.ts).
+      alertaCredito = {
+        motivo: "deuda",
+        limite: limiteCredito,
+        saldo_actual: saldoActual,
+        pedido_total: total,
+        excedente: 0,
+        mensaje:
+          `Este cliente tiene una deuda previa de ${formatCurrency(saldoActual)}.`,
       };
     }
 
