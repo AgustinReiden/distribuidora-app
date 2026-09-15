@@ -96,7 +96,7 @@ interface ConfirmConfig {
 }
 
 export default function ComprasContainer(): React.ReactElement {
-  const { isAdmin, user } = useAuthData()
+  const { isAdmin, isEncargado, user } = useAuthData()
   const notify = useNotification()
 
   // Queries
@@ -332,7 +332,7 @@ export default function ComprasContainer(): React.ReactElement {
 
   const handleGuardarNC = useCallback(async (data: NotaCreditoFormInput) => {
     try {
-      await registrarNC.mutateAsync(data)
+      await registrarNC.mutateAsync({ ...data, usuarioId: user?.id ?? null })
       notify.success('Nota de credito registrada')
       setModalNotaCreditoOpen(false)
       setCompraParaNC(null)
@@ -341,7 +341,7 @@ export default function ComprasContainer(): React.ReactElement {
       notify.error(msg)
       throw err
     }
-  }, [registrarNC, notify])
+  }, [registrarNC, notify, user])
 
   const handleCrearProveedorDesdeCompra = useCallback(async (data: ProveedorFormInputExtended) => {
     const proveedor = await crearProveedor.mutateAsync(data)
@@ -359,6 +359,7 @@ export default function ComprasContainer(): React.ReactElement {
           error={isError}
           onRetry={refetch}
           isAdmin={isAdmin}
+          isEncargado={isEncargado}
           onNuevaCompra={handleNuevaCompra}
           onVerDetalle={handleVerDetalle}
           onAnularCompra={handleAnularCompra}

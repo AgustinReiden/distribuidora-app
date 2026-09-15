@@ -10,6 +10,7 @@ import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download } from '
 const loadExcelUtils = () => import('../../utils/excel');
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import { normalizarNumero } from '../../utils/normalizarNumero';
+import { parsearCantidadExcel } from '../../utils/parsearCantidadExcel';
 import type { ProductoDB } from '../../types';
 import type { CompraItemForm } from './ModalCompra.reducer';
 
@@ -103,7 +104,12 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
         p => p.codigo?.toLowerCase().trim() === codigo.toString().toLowerCase().trim()
       );
 
-      const cantidad = Math.max(1, Math.round(normalizarNumero(encontrarValor(fila, COLUMNAS.cantidad))));
+      const cantidad = parsearCantidadExcel(encontrarValor(fila, COLUMNAS.cantidad));
+      if (cantidad === null) {
+        erroresTemp.push(`Fila ${index + 2} (${codigo}): Cantidad vacia o invalida`);
+        return;
+      }
+
       const costoUnitario = normalizarNumero(encontrarValor(fila, COLUMNAS.costoUnitario));
       const bonificacion = Math.max(0, normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion)));
 
