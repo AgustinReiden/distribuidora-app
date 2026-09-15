@@ -741,7 +741,7 @@ describe('analyticsExport', () => {
       const mockPagos = [
         {
           id: 'pago1',
-          created_at: '2026-01-15T10:00:00',
+          fecha: '2026-01-15',
           monto: 5000,
           forma_pago: 'transferencia',
           referencia: 'REF123',
@@ -751,7 +751,7 @@ describe('analyticsExport', () => {
         },
         {
           id: 'pago2',
-          created_at: '2026-01-16T10:00:00',
+          fecha: '2026-01-16',
           monto: 3000,
           forma_pago: 'efectivo',
           referencia: null,
@@ -767,6 +767,10 @@ describe('analyticsExport', () => {
       const result = await fetchCobranzasFact('2026-01-01', '2026-01-31')
 
       expect(supabase.from).toHaveBeenCalledWith('pagos')
+      // migs 230/231: pagos.fecha es la fecha del pago en hora argentina, no
+      // created_at (que es sólo cuándo se cargó).
+      expect(chain.gte).toHaveBeenCalledWith('fecha', '2026-01-01')
+      expect(chain.lte).toHaveBeenCalledWith('fecha', '2026-01-31')
       expect(result).toHaveLength(2)
       expect(result[0]).toMatchObject({
         pago_id: 'pago1',

@@ -438,6 +438,11 @@ export default function RutaActivaTransportista({
             <div className="rounded-2xl bg-white/95 px-4 py-2.5 shadow-lg backdrop-blur dark:bg-gray-800/95">
               <p className="text-sm font-bold text-gray-900 dark:text-white">
                 {completadas}/{pedidosOrdenados.length} entregas
+                {noEntregadas > 0 && (
+                  <span className="font-normal text-red-600 dark:text-red-400">
+                    {' · '}{noEntregadas} no entregada{noEntregadas === 1 ? '' : 's'}
+                  </span>
+                )}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {formatPrecio(porCobrar)} por cobrar

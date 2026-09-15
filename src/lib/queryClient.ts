@@ -40,15 +40,15 @@ export const queryClient = new QueryClient({
       retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 30000),
     },
     mutations: {
-      // Mutations también con retry inteligente
-      retry: (failureCount, error) => {
-        const status = (error as { status?: number })?.status
-        if (status && status >= 400 && status < 500) {
-          return false
-        }
-        return failureCount < 2
-      },
-      retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 10000),
+      // Sin retry por default (#576): `error.status` no existe en un
+      // PostgrestError (viene con message/details/hint/code), así que esta
+      // guarda de 4xx nunca se activaba y toda mutation fallida se
+      // reintentaba — incluida una no idempotente cuyo error fue un timeout
+      // después de que el INSERT ya había entrado. Reintentar es seguro sólo
+      // para las RPCs con idempotencia propia (las 4 de pago, mig 167, y
+      // crear_pedido_idempotente): esas declaran su propio `retry` en su
+      // `useMutation`.
+      retry: false,
     },
   },
 })

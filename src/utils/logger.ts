@@ -58,13 +58,15 @@ const logger = {
 
     // En produccion, enviar a Sentry
     if (!isDevelopment) {
-      const firstArg = args[0]
-      if (firstArg instanceof Error) {
-        captureException(firstArg, {
-          extra: { additionalInfo: sanitizedArgs.slice(1) }
+      const errorIndex = args.findIndex(arg => arg instanceof Error)
+      if (errorIndex !== -1) {
+        const error = args[errorIndex] as Error
+        const resto = sanitizedArgs.filter((_, i) => i !== errorIndex)
+        captureException(error, {
+          extra: { message: String(args[0]), additionalInfo: resto }
         })
       } else {
-        captureMessage(String(firstArg), 'error')
+        captureMessage(String(args[0]), 'error')
       }
     }
   },

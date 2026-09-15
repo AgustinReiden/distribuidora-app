@@ -6,14 +6,11 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { escribirRango, escribirSucursal, leerRango, leerSucursal } from '../../utils/paramsReporte'
+import { ymdLocalDate as ymd, primerDiaMesAtras } from '../../utils/fechaLocal'
 
 const VistaReportesGerenciales = lazyWithReload(() => import('../vistas/VistaReportesGerenciales'))
 
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 /**
  * Presets de fecha tipo BI. El primero (Este mes) es el default — NO hay un
@@ -36,14 +33,14 @@ function generarPeriodos(): PeriodoOpt[] {
   }
 
   add('mes-actual', 'Este mes', new Date(y, m, 1), hoy, true, new Date(y, m, 1))
-  const pm = new Date(y, m - 1, 1)
+  const pm = primerDiaMesAtras(hoy, 1)
   add('mes-pasado', 'Mes pasado', pm, new Date(y, m, 0), true, pm)
   const qStart = Math.floor(m / 3) * 3
   add('trimestre', 'Trimestre en curso', new Date(y, qStart, 1), hoy)
   add('anio', 'Año en curso', new Date(y, 0, 1), hoy)
   // Meses anteriores (para el análisis narrativo guardado por mes).
   for (let i = 2; i < 12; i++) {
-    const d = new Date(y, m - i, 1)
+    const d = primerDiaMesAtras(hoy, i)
     const yy = d.getFullYear()
     const mm = d.getMonth()
     add(`${yy}-${String(mm + 1).padStart(2, '0')}`, `${MESES_ES[mm]} ${yy}`, new Date(yy, mm, 1), new Date(yy, mm + 1, 0), true, new Date(yy, mm, 1))
