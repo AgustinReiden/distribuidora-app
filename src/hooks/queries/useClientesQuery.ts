@@ -7,6 +7,7 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { ClienteDB } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
+import { mensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente'
 
 // Query keys
 export const clientesKeys = {
@@ -222,6 +223,12 @@ interface ClienteCreateInput {
   tipo_factura_default?: 'ZZ' | 'FC'
   /** place_id de Google del lugar elegido, para auditar direcciones (mig 151) */
   place_id?: string | null
+  /**
+   * El usuario ya vio el aviso de duplicado y confirmó que es otro comercio
+   * (mig 250). Sólo levanta los AVISOS; los bloqueos duros no se confirman.
+   * No es una columna: se descarta antes del INSERT.
+   */
+  duplicado_confirmado?: boolean
 }
 
 // Mutation functions
@@ -232,74 +239,34 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
 
-  // Detección de duplicados por ubicación (~0.2 metros de tolerancia).
+  // Guard de duplicados. Una sola puerta: `verificar_duplicado_cliente` (mig
+  // 250). Acá es la ULTIMA linea de defensa -- el modal ya preguntó y resolvió
+  // la confirmación --, así que un aviso sin confirmar tambien frena el alta.
+  //
   // Mira TAMBIEN a los inactivos, y a proposito: el caso que origino todo el
   // incidente de los huerfanos (mig 199) fue una deduplicacion -- alguien creaba
-  // el cliente nuevo y despues borraba el viejo. Si el de esa esquina esta
+  // el cliente nuevo y despues borraba el viejo. Si el de esa puerta esta
   // desactivado, lo que corresponde es reactivarlo, no crear un segundo cliente
   // con la misma direccion y partirle el historial al medio.
-  if (cliente.latitud != null && cliente.longitud != null) {
-    const TOLERANCE = 0.000002 // ~0.2 metros (6 decimales de precisión)
-    const { data: cercanos } = await supabase
-      .from('clientes')
-      .select('id, nombre_fantasia, razon_social, activo')
-      .gte('latitud', cliente.latitud - TOLERANCE)
-      .lte('latitud', cliente.latitud + TOLERANCE)
-      .gte('longitud', cliente.longitud - TOLERANCE)
-      .lte('longitud', cliente.longitud + TOLERANCE)
-      .limit(1)
+  const veredicto = await verificarDuplicadoCliente({
+    latitud: cliente.latitud ?? null,
+    longitud: cliente.longitud ?? null,
+    direccion: cliente.direccion ?? null,
+    razon_social: cliente.razon_social ?? null,
+    nombre_fantasia: cliente.nombre_fantasia ?? null,
+  })
 
-    if (cercanos && cercanos.length > 0) {
-      const encontrado = cercanos[0] as { nombre_fantasia?: string; razon_social?: string; activo?: boolean }
-      const nombre = encontrado.nombre_fantasia || encontrado.razon_social
-      if (encontrado.activo === false) {
-        throw new Error(
-          `Ya existe un cliente en esta ubicación, "${nombre}", pero está inactivo. ` +
-          `Activá "Ver inactivos" en el panel de clientes y reactivalo, así conserva su historial.`
-        )
-      }
-      throw new Error(
-        `Ya existe un cliente en esta ubicación: ${nombre}. ` +
-        `Si necesitás crear otro, modificá ligeramente la dirección.`
-      )
-    }
-
-    // Que la consulta de arriba no haya encontrado nada NO significa que no
-    // haya nadie: pasa por la RLS, que a un preventista le tapa los clientes de
-    // OTRO preventista y los reservados a administración (mig 214). Con 598 de
-    // 722 clientes asignados, el detector era ciego para la mayoría de la base
-    // y dejaba crear el clon sin avisar nada (#543).
-    //
-    // `existe_cliente_en_ubicacion` (mig 217) es SECURITY DEFINER y ve por
-    // encima de la policy. Devuelve un booleano pelado a propósito: si
-    // devolviera el nombre estaríamos filtrando por la ventana lo que la RLS
-    // tapa por la puerta. Por eso este mensaje no dice cuál es —no se puede— y
-    // la RPC le avisa a administración, que sí lo ve entero.
-    const { data: hayOculto, error: errorOculto } = await supabase
-      .rpc('existe_cliente_en_ubicacion', {
-        p_latitud: cliente.latitud,
-        p_longitud: cliente.longitud,
-      })
-
-    // Fail-closed, como el chequeo de nombre duplicado: si no se pudo
-    // verificar, no se crea. Seguir de largo ante el error es volver al bug —
-    // un guard que no puede mirar y aprueba igual.
-    if (errorOculto) {
-      throw new Error(
-        'No se pudo verificar si ya hay un cliente en esta ubicación. No se creó nada; probá de nuevo.'
-      )
-    }
-
-    if (hayOculto) {
-      throw new Error(
-        'Ya existe un cliente en esta ubicación, pero no está en tu cartera, así que no podemos mostrarte cuál. ' +
-        'Ya le avisamos a administración para que lo revise. ' +
-        'Si de verdad es otro comercio en la misma puerta, pediles que te lo habiliten.'
-      )
-    }
+  if (veredicto.bloquea) {
+    throw new Error(mensajeDuplicado(veredicto).mensaje)
+  }
+  if (veredicto.avisa && !cliente.duplicado_confirmado) {
+    throw new Error(
+      `${mensajeDuplicado(veredicto).mensaje} No se creó nada: volvé a guardar y confirmá.`
+    )
   }
 
-  const { preventista_ids, descuentos_categoria, ...clienteFields } = cliente
+  const { preventista_ids, descuentos_categoria, duplicado_confirmado: _confirmadoAlta, ...clienteFields } = cliente
+  void _confirmadoAlta
   const { data, error } = await supabase
     .from('clientes')
     .insert([{
@@ -353,7 +320,12 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
 }
 
 async function updateCliente({ id, data: cliente }: { id: string; data: Partial<ClienteCreateInput> }): Promise<ClienteDB> {
-  const { preventista_ids, descuentos_categoria, ...clienteFields } = cliente
+  // `duplicado_confirmado` NO es una columna: es la respuesta del usuario al
+  // aviso del guard (mig 250). Acá el payload se arma por spread, así que si no
+  // se descarta viaja como columna y PostgREST rechaza el UPDATE entero.
+  // `createCliente` no lo sufre porque su insert nombra las columnas una por una.
+  const { preventista_ids, descuentos_categoria, duplicado_confirmado: _confirmado, ...clienteFields } = cliente
+  void _confirmado
 
   // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
   // Solo aplicamos si el campo viene en el patch (Partial), preservando undefined
@@ -421,34 +393,47 @@ async function deleteCliente(id: string): Promise<void> {
 }
 
 /**
- * Busca un cliente por razon social exacta (case-insensitive), INCLUIDOS los
- * inactivos, dentro de la sucursal activa (la RLS la acota sola).
- *
- * No alcanza con mirar el array que ya tiene el container: por defecto ese array
- * NO trae inactivos, asi que el chequeo de duplicados no los veia y dejaba crear
- * un clon exacto del cliente recien desactivado.
- *
- * `ilike` sin comodines es igualdad case-insensitive. Se escapan `%` y `_`
- * porque en un nombre son literales, no comodines.
+ * Entrada del guard de duplicados. La decide `verificar_duplicado_cliente`
+ * (mig 250) y NO se puede replicar del lado del cliente: la RLS le tapa al
+ * preventista los clientes de otro preventista y los reservados a
+ * administración, así que una consulta desde acá es ciega para la mayoría de la
+ * base -- con 598 de 722 clientes asignados, el detector viejo dejaba crear el
+ * clon sin avisar nada (#543). La RPC es SECURITY DEFINER y ve por encima de la
+ * policy, pero no devuelve la identidad de lo que la policy tapa.
  */
-export async function buscarClientePorRazonSocial(
-  razonSocial: string,
-  excluirId?: string
-): Promise<{ id: string; nombre_fantasia?: string; razon_social?: string; activo?: boolean } | null> {
-  const patron = razonSocial.trim().replace(/[\\%_]/g, m => `\\${m}`)
-  if (!patron) return null
+export interface EntradaVerificacionDuplicado {
+  latitud: number | null
+  longitud: number | null
+  direccion: string | null
+  razon_social: string | null
+  nombre_fantasia: string | null
+  /** Id del cliente que se está editando, para que no choque consigo mismo. */
+  excluir_id?: string | null
+}
 
-  let query = supabase
-    .from('clientes')
-    .select('id, nombre_fantasia, razon_social, activo')
-    .ilike('razon_social', patron)
-    .limit(2)
+/**
+ * Llama al guard. FAIL-CLOSED: si no se pudo verificar, tira. Seguir de largo
+ * ante el error es volver al bug -- un guard que no puede mirar y aprueba igual.
+ */
+export async function verificarDuplicadoCliente(
+  entrada: EntradaVerificacionDuplicado
+): Promise<VeredictoDuplicadoRPC> {
+  const { data, error } = await supabase.rpc('verificar_duplicado_cliente', {
+    p_latitud: entrada.latitud,
+    p_longitud: entrada.longitud,
+    p_direccion: entrada.direccion,
+    p_razon_social: entrada.razon_social,
+    p_nombre_fantasia: entrada.nombre_fantasia,
+    p_excluir_id: entrada.excluir_id ?? null,
+  })
 
-  if (excluirId) query = query.neq('id', excluirId)
+  if (error || !data) {
+    throw new Error(
+      'No se pudo verificar si ya existe un cliente igual. No se guardó nada; probá de nuevo.'
+    )
+  }
 
-  const { data, error } = await query
-  if (error) throw error
-  return (data && data.length > 0) ? (data[0] as { id: string; nombre_fantasia?: string; razon_social?: string; activo?: boolean }) : null
+  return data as VeredictoDuplicadoRPC
 }
 
 export interface ReferenciasCliente {
