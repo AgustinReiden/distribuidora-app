@@ -74,7 +74,9 @@ export function useSalvedades(): UseSalvedadesReturn {
     }
   }, [])
 
-  // Resolver salvedad (admin)
+  // Resolver salvedad (admin o encargado desde la mig 252: resolver no mueve
+  // stock ni plata, sólo dice quien se hace cargo). El espejo en la UI es
+  // `puedeResolverSalvedad`.
   const resolverSalvedad = async (input: ResolverSalvedadInput): Promise<{ success: boolean; nuevoEstado: EstadoResolucionSalvedad }> => {
     const { data, error } = await supabase.rpc('resolver_salvedad', {
       p_salvedad_id: parseInt(input.salvedadId, 10),

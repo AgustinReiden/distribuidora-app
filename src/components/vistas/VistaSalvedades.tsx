@@ -22,7 +22,7 @@ import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
 import { useSalvedades } from '../../hooks/supabase'
 import { useAnularSalvedadMutation } from '../../hooks/queries'
 import { useAuthData } from '../../contexts/AuthDataContext'
-import { puedeAnularSalvedad } from '../../lib/permisos'
+import { puedeAnularSalvedad, puedeResolverSalvedad } from '../../lib/permisos'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import ModalResolverSalvedad from '../modals/ModalResolverSalvedad'
 import ModalAnularSalvedad from '../modals/ModalAnularSalvedad'
@@ -33,9 +33,10 @@ interface SalvedadCardProps {
   onResolver: (salvedad: SalvedadItemDBExtended) => void;
   onAnular: (salvedad: SalvedadItemDBExtended) => void;
   puedeAnular: boolean;
+  puedeResolver: boolean;
 }
 
-function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular }: SalvedadCardProps) {
+function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolver }: SalvedadCardProps) {
   const [expandido, setExpandido] = useState(false)
 
   const formatMoney = (value: number): string => {
@@ -180,8 +181,11 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular }: SalvedadC
             </div>
           )}
 
-          {/* Boton resolver (solo si esta pendiente) */}
-          {salvedad.estado_resolucion === 'pendiente' && (
+          {/* Boton resolver (solo si esta pendiente y el rol puede). El gate
+              es el espejo de `es_encargado_o_admin()`, que desde la mig 252 es
+              el de `resolver_salvedad`: antes el encargado veia el boton y el
+              servidor le contestaba "Solo admin". */}
+          {puedeResolver && salvedad.estado_resolucion === 'pendiente' && (
             <button
               onClick={() => onResolver(salvedad)}
               className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center gap-2"
@@ -231,9 +235,10 @@ export default function VistaSalvedades(): React.ReactElement {
   const [salvedadAnular, setSalvedadAnular] = useState<SalvedadItemDBExtended | null>(null)
 
   const { perfil } = useAuthData()
-  // Espejo de `es_admin_salvedades()`, el gate del RPC. La vista la ven admin y
-  // encargado (App.tsx); anular, sólo admin.
+  // Espejo de los gates de los RPCs (mig 252). La vista la ven admin y
+  // encargado (App.tsx); resolver, los dos; anular, sólo admin.
   const puedeAnular = puedeAnularSalvedad(perfil?.rol)
+  const puedeResolver = puedeResolverSalvedad(perfil?.rol)
   const anularMutation = useAnularSalvedadMutation()
 
   // Siempre cargamos todas las salvedades y filtramos en el cliente
@@ -411,6 +416,7 @@ export default function VistaSalvedades(): React.ReactElement {
               onResolver={setSalvedadResolver}
               onAnular={setSalvedadAnular}
               puedeAnular={puedeAnular}
+              puedeResolver={puedeResolver}
             />
           ))}
         </div>

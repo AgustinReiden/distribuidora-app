@@ -2,7 +2,7 @@
  * Hook mutation para ANULAR una salvedad.
  *
  * Backend: RPC `anular_salvedad` (mig 244, decision #621). Solo admin
- * (`es_admin_salvedades()`); el espejo en la UI es `puedeAnularSalvedad`.
+ * (`es_admin()` desde la mig 252); el espejo en la UI es `puedeAnularSalvedad`.
  *
  * Anular NO es resolver. `resolver_salvedad` sólo dice quien se hace cargo del
  * monto; anular deshace la salvedad entera: restituye la linea del pedido
