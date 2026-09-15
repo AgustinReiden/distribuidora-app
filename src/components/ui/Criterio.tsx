@@ -5,17 +5,20 @@
  * entregados, por fecha del pedido…"). Vive en `ui/` y no en `vistas/reportes/`
  * porque la usan las dos pantallas, y ese es justamente el punto.
  *
- * Por qué hace falta: /reportes y /reportes-gerenciales miden lo mismo distinto.
- * "Venta por vendedor" en Reportes suma `pedidos.total` de los NO CANCELADOS sin
- * mirar el canal; en Gerenciales suma los subtotales de los ítems de los
- * ENTREGADOS del canal app. Rentabilidad filtra por `created_at` y el resto por
- * `pedidos.fecha`. Los dos números son defendibles y ninguno está mal, pero un
- * admin que abre las dos pantallas ve dos "ventas por vendedor" distintas y no
- * tiene con qué explicarse la diferencia.
+ * Por qué nació: /reportes y /reportes-gerenciales medían lo mismo distinto.
+ * "Venta por vendedor" en Reportes sumaba `pedidos.total` de los NO CANCELADOS
+ * sin mirar el canal; en Gerenciales, los subtotales de los ítems de los
+ * ENTREGADOS del canal app. Rentabilidad filtraba por `created_at` y el resto
+ * por `pedidos.fecha`. Ninguno estaba mal, pero un admin que abría las dos
+ * pantallas veía dos "ventas por vendedor" y no tenía con qué explicarse la
+ * diferencia; que cada tabla dijera qué mide convertía una contradicción
+ * silenciosa en dos preguntas con respuesta.
  *
- * Unificar las definiciones es otra tarea (cambia números que la gente ya vio y
- * es migración de SQL). Mientras tanto, que cada tabla diga qué mide convierte
- * una contradicción silenciosa en dos preguntas distintas con dos respuestas.
+ * La mig 241 unificó las definiciones (#568, #569): venta = pedidos
+ * `entregado`, cualquier canal de venta, por `pedidos.fecha`. Así que estos
+ * carteles ya no explican una divergencia — la declaran, que es lo que los hace
+ * verificables: `ventaCanonica.criterio.test.tsx` los lee para que nadie mueva
+ * el SQL sin mover lo que la pantalla promete.
  *
  * Va SÓLO donde hay divergencia real o un criterio no obvio. Si se pone en cada
  * tabla del sistema se vuelve ruido gris que nadie lee, y entonces no sirve

@@ -46,8 +46,10 @@ export const misVentasTool: Tool<MisVentasParams, MisVentasResult> = {
     "clientes distintos y top clientes del período. Las fechas son " +
     "inclusive en formato YYYY-MM-DD y filtran por pedidos.fecha. Solo ve " +
     "sus propias ventas (las que tiene como usuario_id en pedidos). " +
-    "total_ventas cuenta SOLO ventas ENTREGADAS (estado='entregado', " +
-    "canal='app') — coincide con el reporte gerencial.",
+    "total_ventas cuenta SOLO ventas ENTREGADAS (estado='entregado'), de " +
+    "cualquier canal de venta —app o bot, así que un pedido que te tomaron por " +
+    "Telegram también suma—, por pedidos.fecha. Es la definición canónica (mig " +
+    "241): da el mismo número que el reporte gerencial y que tu comisión.",
   parameters: {
     type: "object",
     properties: {

@@ -113,6 +113,19 @@ suelta en `sucursales`.
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
+- **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (mig 241, #568):
+  `estado = 'entregado'` · `canal <> 'cambio'` · por `pedidos.fecha` · atribuida a
+  `pedidos.usuario_id`. Las cuatro partes importan. La venta se reconoce con la **entrega**,
+  no con la carga: un pedido tomado y todavía no entregado no es venta ni comisiona. El canal
+  se filtra **en negativo** —el dominio es `('app','cambio','bot')` y `'cambio'` es la comanda
+  de un canje, con `total = 0` por `CAMBIO-01`—: escrito `canal = 'app'` hay que acordarse de
+  agregar cada canal nuevo en once lugares, que es exactamente cómo nacieron las cuatro
+  definiciones que había. Y `created_at` no es fecha de venta: es fecha de carga, y encima
+  corta el día en UTC. Todo reporte, RPC del bot o cálculo nuevo que conteste "cuánto vendió
+  Fulano" copia esta línea; si la cambiás, el `DO $ensayo$` de la 241 es el molde para
+  verificar que las once sigan dando el mismo número. Dos excepciones **a propósito**:
+  `posicion_fiscal` sigue en `canal = 'app'` porque pregunta qué se facturó, no quién vendió, y
+  cuatro checks de `auditoria_integridad()` también.
 - **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
   `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
   corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la
