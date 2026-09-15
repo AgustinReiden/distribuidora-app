@@ -1,3 +1,5 @@
+import type { PedidoDB } from '../../../types/hooks'
+
 /**
  * Pedidos de ejemplo para los PDFs operativos.
  *
@@ -21,7 +23,7 @@ export const GRANADINA = {
 }
 
 /** Línea de venta común: la cantidad ya está en unidades de venta. */
-export const itemVenta = (over = {}) => ({
+export const itemVenta = (over: Record<string, unknown> = {}) => ({
   producto_id: GRANADINA.id,
   producto: GRANADINA,
   cantidad: 12,
@@ -35,7 +37,7 @@ export const itemVenta = (over = {}) => ({
  * (alguien subió la promo después de cerrar el pedido). Con el congelado son
  * 65 fardos + 2; con el vivo, 32 fardos + 8 — la mitad del camión.
  */
-export const itemRegaloFraccion = (over = {}) => ({
+export const itemRegaloFraccion = (over: Record<string, unknown> = {}) => ({
   producto_id: POMELO.id,
   producto: POMELO,
   cantidad: 392,
@@ -48,7 +50,7 @@ export const itemRegaloFraccion = (over = {}) => ({
 })
 
 /** Regalo de unidad entera del MISMO producto contenedor que el de fracción. */
-export const itemRegaloEnteroPomelo = (over = {}) => ({
+export const itemRegaloEnteroPomelo = (over: Record<string, unknown> = {}) => ({
   producto_id: POMELO.id,
   producto: POMELO,
   cantidad: 3,
@@ -61,7 +63,7 @@ export const itemRegaloEnteroPomelo = (over = {}) => ({
 })
 
 /** Regalo de unidad entera con aclaración de bulto (12 / 6 = 2 fardos). */
-export const itemRegaloEnteroGranadina = (over = {}) => ({
+export const itemRegaloEnteroGranadina = (over: Record<string, unknown> = {}) => ({
   producto_id: GRANADINA.id,
   producto: GRANADINA,
   cantidad: 12,
@@ -77,7 +79,7 @@ export const itemRegaloEnteroGranadina = (over = {}) => ({
  * Regalo de fracción con una descripción de DOS tokens ("2 Granadina"): 3
  * botellas sueltas con factor 4, o sea ni un bloque completo.
  */
-export const itemRegaloDosTokens = (over = {}) => ({
+export const itemRegaloDosTokens = (over: Record<string, unknown> = {}) => ({
   producto_id: GRANADINA.id,
   producto: GRANADINA,
   cantidad: 3,
@@ -89,11 +91,11 @@ export const itemRegaloDosTokens = (over = {}) => ({
   ...over,
 })
 
-export const pedido = (items, over = {}) => ({
+export const pedido = (items: unknown[], over: Record<string, unknown> = {}) => ({
   id: 13,
   total: 100000,
   canal: 'venta',
   cliente: { nombre_fantasia: 'Kiosco El Sol', direccion: 'Salta 100' },
   items,
   ...over,
-})
+} as unknown as PedidoDB)

@@ -4,6 +4,7 @@
  * Facilita la lectura al chofer: una sola hoja grande con varios pedidos
  */
 import { jsPDF } from 'jspdf'
+import type { PedidoDB, PerfilDB } from '../../types/hooks'
 import {
   formatPrecio,
   formatFecha,
@@ -13,8 +14,15 @@ import {
 import { formatAclaracionBulto } from './utils/formatBulto'
 import { lineaItemImpresion, nombreSinConteo } from './utils/lineaItem'
 import { esCantidadEnSubunidades, factorDeLaLinea } from '../../utils/unidadesRegalo'
-import { clasificarBarrida, ETIQUETA_BARRIDA } from '../../utils/barridas'
+import { clasificarBarrida, ETIQUETA_BARRIDA, type Barrida } from '../../utils/barridas'
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta'
+
+/** Info opcional de ruta para el encabezado (fecha, duracion, distancia). */
+export interface InfoRuta {
+  fecha?: string | Date
+  distancia_formato?: string
+  duracion_formato?: string
+}
 
 // === Layout A4 horizontal ===
 const PAGE_WIDTH = 297
@@ -28,11 +36,46 @@ const CARD_INNER_PADDING = 2
 const CARD_CONTENT_WIDTH = COLUMN_WIDTH - CARD_INNER_PADDING * 2
 const CARD_BOTTOM_SPACING = 3
 
+type CardOp =
+  | { kind: 'text'; text: string; fontSize: number; bold: boolean; advance: number }
+  | { kind: 'product'; text: string; subtotal: string | null; fontSize: number; advance: number }
+  | { kind: 'total'; label: string; value: string; fontSize: number; advance: number }
+  | { kind: 'italic'; text: string; fontSize: number; advance: number }
+  | { kind: 'entregado'; advance: number }
+  | { kind: 'divider'; advance: number }
+  | { kind: 'spacer'; advance: number }
+
+type ManifiestoOp =
+  | { kind: 'manifiesto-title'; text: string; advance: number }
+  | { kind: 'manifiesto-subtitle'; text: string; advance: number }
+  | { kind: 'manifiesto-line'; cantidad: string; nombre: string; advance: number }
+  | { kind: 'manifiesto-firma'; advance: number }
+  | { kind: 'spacer'; advance: number }
+
+type CierreOp =
+  | { kind: 'cierre-title'; text: string; advance: number }
+  | { kind: 'cierre-line'; text: string; advance: number }
+
+/** Contexto que drawManifiestoOps usa para fluir entre columnas/paginas. */
+interface ManifiestoCtx {
+  columnX: () => number
+  advanceColumn: () => void
+  readonly columnTop: number
+  columnBottom: number
+  startY: number
+}
+
 /**
  * Dibuja el encabezado de la pagina.
- * @returns {number} Posicion Y donde comienzan las columnas
+ * @returns Posicion Y donde comienzan las columnas
  */
-function drawPageHeader(doc, transportista, pedidos, infoRuta, showSummary) {
+function drawPageHeader(
+  doc: jsPDF,
+  transportista: PerfilDB | null | undefined,
+  pedidos: PedidoDB[],
+  infoRuta: InfoRuta,
+  showSummary: boolean
+): number {
   let y = PAGE_MARGIN
 
   doc.setTextColor(0, 0, 0)
@@ -84,15 +127,15 @@ function drawPageHeader(doc, transportista, pedidos, infoRuta, showSummary) {
  * Estructura las operaciones de layout de una card de pedido.
  * Produce lineas tipadas que tanto el dry-run (medir) como el draw aplican.
  */
-export function buildCardOps(doc, pedido, orderNumber) {
-  const ops = []
+export function buildCardOps(doc: jsPDF, pedido: PedidoDB, orderNumber: number): CardOp[] {
+  const ops: CardOp[] = []
 
   // Nombre cliente + numero
   const headerText = `${orderNumber}. ${pedido.cliente?.nombre_fantasia || 'Sin cliente'}`
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   const headerLines = doc.splitTextToSize(headerText, CARD_CONTENT_WIDTH)
-  headerLines.forEach((line) => {
+  headerLines.forEach((line: string) => {
     ops.push({ kind: 'text', text: line, fontSize: 11, bold: true, advance: 5 })
   })
 
@@ -108,14 +151,14 @@ export function buildCardOps(doc, pedido, orderNumber) {
       const entregar = `Entregar: ${c.cantidad_entregada ?? '?'}x ${c.producto_entregado_nombre || 'producto'}`
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(9)
-      doc.splitTextToSize(retirar, CARD_CONTENT_WIDTH).forEach((line) => {
+      doc.splitTextToSize(retirar, CARD_CONTENT_WIDTH).forEach((line: string) => {
         ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
       })
-      doc.splitTextToSize(entregar, CARD_CONTENT_WIDTH).forEach((line) => {
+      doc.splitTextToSize(entregar, CARD_CONTENT_WIDTH).forEach((line: string) => {
         ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
       })
       if (c.observaciones) {
-        doc.splitTextToSize(`* ${c.observaciones}`, CARD_CONTENT_WIDTH).slice(0, 2).forEach((line) => {
+        doc.splitTextToSize(`* ${c.observaciones}`, CARD_CONTENT_WIDTH).slice(0, 2).forEach((line: string) => {
           ops.push({ kind: 'italic', text: line, fontSize: 8, advance: 3.5 })
         })
       }
@@ -127,7 +170,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     const razonLines = doc.splitTextToSize(pedido.cliente.razon_social, CARD_CONTENT_WIDTH)
-    razonLines.slice(0, 2).forEach((line) => {
+    razonLines.slice(0, 2).forEach((line: string) => {
       ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
     })
   }
@@ -137,7 +180,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     const dirLines = doc.splitTextToSize(pedido.cliente.direccion, CARD_CONTENT_WIDTH)
-    dirLines.slice(0, 2).forEach((line) => {
+    dirLines.slice(0, 2).forEach((line: string) => {
       ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
     })
   }
@@ -147,7 +190,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
     doc.setFont('helvetica', 'italic')
     doc.setFontSize(8)
     const aclLines = doc.splitTextToSize(pedido.cliente.aclaracion_direccion, CARD_CONTENT_WIDTH)
-    aclLines.slice(0, 2).forEach((line) => {
+    aclLines.slice(0, 2).forEach((line: string) => {
       ops.push({ kind: 'italic', text: line, fontSize: 8, advance: 3.5 })
     })
   }
@@ -171,7 +214,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
       `Horario: ${pedido.cliente.horarios_atencion}`,
       CARD_CONTENT_WIDTH
     )
-    horLines.slice(0, 2).forEach((line) => {
+    horLines.slice(0, 2).forEach((line: string) => {
       ops.push({ kind: 'text', text: line, fontSize: 9, bold: false, advance: 4 })
     })
   }
@@ -184,7 +227,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
       `ENTREGAR: ${pedido.cliente.horario_entrega}`,
       CARD_CONTENT_WIDTH
     )
-    entLines.slice(0, 2).forEach((line) => {
+    entLines.slice(0, 2).forEach((line: string) => {
       ops.push({ kind: 'text', text: line, fontSize: 9, bold: true, advance: 4 })
     })
   }
@@ -215,7 +258,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
       ? `${item.cantidad}x ${nombre} ${aclaracion}`
       : `${item.cantidad}x ${nombre}`
     const itemLines = doc.splitTextToSize(linea, productWrapWidth)
-    itemLines.forEach((line, idx) => {
+    itemLines.forEach((line: string, idx: number) => {
       ops.push({
         kind: 'product',
         text: line,
@@ -246,7 +289,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
       // de precio, así que no se repite el sufijo (REGALO).
       const linea = lineaItemImpresion(item, { marcarRegalo: false })
       const itemLines = doc.splitTextToSize(linea, productWrapWidth)
-      itemLines.forEach((line, idx) => {
+      itemLines.forEach((line: string, idx: number) => {
         ops.push({
           kind: 'product',
           text: line,
@@ -275,7 +318,7 @@ export function buildCardOps(doc, pedido, orderNumber) {
     doc.setFont('helvetica', 'italic')
     doc.setFontSize(9)
     const notasLines = doc.splitTextToSize(`* ${pedido.notas}`, CARD_CONTENT_WIDTH)
-    notasLines.slice(0, 2).forEach((line) => {
+    notasLines.slice(0, 2).forEach((line: string) => {
       ops.push({ kind: 'italic', text: line, fontSize: 9, advance: 4 })
     })
   }
@@ -290,11 +333,11 @@ export function buildCardOps(doc, pedido, orderNumber) {
   return ops
 }
 
-function measureCardHeight(ops) {
+function measureCardHeight(ops: CardOp[]): number {
   return ops.reduce((sum, op) => sum + (op.advance || 0), 0)
 }
 
-function drawCardOps(doc, ops, x, yStart) {
+function drawCardOps(doc: jsPDF, ops: CardOp[], x: number, yStart: number): number {
   const innerX = x + CARD_INNER_PADDING
   const right = x + COLUMN_WIDTH - CARD_INNER_PADDING
   let y = yStart
@@ -359,14 +402,32 @@ function drawCardOps(doc, ops, x, yStart) {
   return y
 }
 
-function buildCierreOps(pedidos) {
-  const ops = []
+function buildCierreOps(pedidos: PedidoDB[]): CierreOp[] {
+  const ops: CierreOp[] = []
   ops.push({ kind: 'cierre-title', text: 'CIERRE DE JORNADA', advance: 6 })
   ops.push({ kind: 'cierre-line', text: 'Cobrado efectivo: ________________________', advance: 5.5 })
   ops.push({ kind: 'cierre-line', text: 'Cobrado transferencia: __________________', advance: 5.5 })
   ops.push({ kind: 'cierre-line', text: `Entregas: _____ de ${pedidos.length}`, advance: 5.5 })
   ops.push({ kind: 'cierre-line', text: 'Firma: ____________________________________', advance: 5.5 })
   return ops
+}
+
+/** Una fila acumulada del manifiesto (venta, bonif fardos/sueltas o cambio). */
+interface FilaTotal {
+  nombre: string
+  cantidad: number
+  unidades_de_venta_por_fardo?: number | null
+  etiqueta_bulto?: string | null
+  preConvertidoAFardos?: boolean
+}
+
+/** Bonif de tipo Fracción acumulada en subunidades crudas, antes de partir. */
+interface FilaFraccion {
+  key: string
+  nombre: string
+  desc: string
+  upb: number
+  subunidades: number
 }
 
 /**
@@ -379,17 +440,17 @@ function buildCierreOps(pedidos) {
  * Las botellas sueltas se listan en una fila aparte usando descripcion_regalo,
  * para que el chofer sepa que carga 1 fardo + N botellas individuales.
  */
-export function buildManifiestoOps(doc, pedidos) {
-  const totalesCompras = {} // por producto_id (items vendidos)
-  const totalesCambios = {} // entregados de paradas de cambio (canal='cambio'), sección aparte
-  const totalesBonifFardos = {} // por producto_id (bonifs en unidades de venta / fardos)
-  const totalesBonifSueltas = {} // por descripcion_regalo (botellas/paquetes sueltos)
+export function buildManifiestoOps(doc: jsPDF, pedidos: PedidoDB[]): ManifiestoOp[] {
+  const totalesCompras: Record<string, FilaTotal> = {} // por producto_id (items vendidos)
+  const totalesCambios: Record<string, FilaTotal> = {} // entregados de paradas de cambio (canal='cambio'), sección aparte
+  const totalesBonifFardos: Record<string, FilaTotal> = {} // por producto_id (bonifs en unidades de venta / fardos)
+  const totalesBonifSueltas: Record<string, FilaTotal> = {} // por descripcion_regalo (botellas/paquetes sueltos)
   // Bonifs de tipo Fracción: se acumulan en subunidades CRUDAS por producto y se
   // parten a fardos+sueltas UNA sola vez sobre el total de la ruta (ver abajo),
   // así no quedan más sueltas que un fardo por sumar restos pedido por pedido.
-  const totalesBonifFraccion = {} // `${id}|${desc}|${upb}` → { key, nombre, desc, upb, subunidades }
+  const totalesBonifFraccion: Record<string, FilaFraccion> = {} // `${id}|${desc}|${upb}` → { key, nombre, desc, upb, subunidades }
 
-  const acumular = (mapa, key, nombre, cantidad) => {
+  const acumular = (mapa: Record<string, FilaTotal>, key: string, nombre: string, cantidad: number): FilaTotal => {
     if (!mapa[key]) mapa[key] = { nombre, cantidad: 0 }
     mapa[key].cantidad += cantidad
     return mapa[key]
@@ -461,7 +522,7 @@ export function buildManifiestoOps(doc, pedidos) {
     if (!c) return
     const cantidad = Number(c.cantidad_entregada) || 0
     if (cantidad <= 0) return
-    const key = c.producto_entregado_id ?? c.producto_entregado_nombre ?? 'cambio-sin-id'
+    const key = String(c.producto_entregado_id ?? c.producto_entregado_nombre ?? 'cambio-sin-id')
     acumular(totalesCambios, key, c.producto_entregado_nombre || 'Producto', cantidad)
   })
 
@@ -483,7 +544,7 @@ export function buildManifiestoOps(doc, pedidos) {
     }
   })
 
-  const ordenar = (mapa) => Object.values(mapa)
+  const ordenar = (mapa: Record<string, FilaTotal>): FilaTotal[] => Object.values(mapa)
     .filter((t) => t.cantidad > 0)
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
 
@@ -492,7 +553,7 @@ export function buildManifiestoOps(doc, pedidos) {
   const filasBonifSueltas = ordenar(totalesBonifSueltas)
   const filasCambios = ordenar(totalesCambios)
 
-  const lineaConAclaracion = (f) => {
+  const lineaConAclaracion = (f: FilaTotal): string => {
     // preConvertidoAFardos: la cantidad ya está en fardos, la etiqueta va directa.
     if (f.preConvertidoAFardos) {
       return `${f.nombre} (${f.cantidad === 1 ? 'FARDO COMPLETO' : 'FARDOS COMPLETOS'})`
@@ -505,16 +566,16 @@ export function buildManifiestoOps(doc, pedidos) {
     return aclaracion ? `${f.nombre} ${aclaracion}` : f.nombre
   }
 
-  const ops = []
+  const ops: ManifiestoOp[] = []
   // Ancho reservado para la cantidad (alineado con drawManifiestoOps). Los
   // nombres se pre-cortan acá a líneas físicas (con doc) para que el manifiesto
   // NO trunque nombres largos como "… (SUELTAS, NO FARDO)".
   const cantidadWidth = 12
-  const pushLinea = (cantidad, nombre) => {
+  const pushLinea = (cantidad: string, nombre: string): void => {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     const lineas = doc.splitTextToSize(nombre, CARD_CONTENT_WIDTH - cantidadWidth)
-    lineas.forEach((ln, i) => {
+    lineas.forEach((ln: string, i: number) => {
       ops.push({
         kind: 'manifiesto-line',
         cantidad: i === 0 ? cantidad : '',
@@ -528,7 +589,7 @@ export function buildManifiestoOps(doc, pedidos) {
   // que siempre se descarta: dejarlo puesto imprimía "3x 2 Granadina" y el
   // chofer cargaba 6. Con dos tokens ("2 Granadina") no hay palabra de unidad
   // que pluralizar, sólo el nombre: se deja tal cual.
-  const nombreSuelta = (desc) => {
+  const nombreSuelta = (desc: string): string => {
     const nombre = nombreSinConteo(desc)
     if (!nombre) return '(SUELTAS, NO FARDO)'
     const m = /^(\S+)\s+(.+)$/.exec(nombre)
@@ -578,7 +639,7 @@ export function buildManifiestoOps(doc, pedidos) {
  * Cada fila chequea si entra antes de dibujarse, garantizando que la lista
  * completa quede visible aunque exceda una columna o una hoja.
  */
-function drawManifiestoOps(doc, ops, ctx) {
+function drawManifiestoOps(doc: jsPDF, ops: ManifiestoOp[], ctx: ManifiestoCtx): number {
   let x = ctx.columnX()
   let innerX = x + CARD_INNER_PADDING
   let y = ctx.startY
@@ -666,7 +727,7 @@ function drawManifiestoOps(doc, ops, ctx) {
   return y
 }
 
-function drawCierreOps(doc, ops, x, yStart) {
+function drawCierreOps(doc: jsPDF, ops: CierreOp[], x: number, yStart: number): number {
   const innerX = x + CARD_INNER_PADDING
   let y = yStart
 
@@ -692,18 +753,11 @@ function drawCierreOps(doc, ops, x, yStart) {
   return y
 }
 
-/**
- * Genera PDF de Hoja de Ruta en A4 horizontal con 3 columnas.
- * @param {Object} transportista - Datos del transportista
- * @param {Array} pedidos - Lista de pedidos
- * @param {Object} infoRuta - Informacion opcional de ruta (fecha, duracion, distancia)
- * @returns {void}
- */
 /** Alto que ocupa el separador de barrida, para el calculo de salto de columna. */
 const SEPARADOR_BARRIDA_ALTO = 7
 
 /** Titulo de tanda: linea + etiqueta ('Cierran al mediodia', etc.). */
-function drawSeparadorBarrida(doc, barrida, x, y) {
+function drawSeparadorBarrida(doc: jsPDF, barrida: Barrida, x: number, y: number): number {
   const ancho = COLUMN_WIDTH
   doc.setDrawColor(120, 120, 120)
   doc.setLineWidth(0.4)
@@ -716,7 +770,10 @@ function drawSeparadorBarrida(doc, barrida, x, y) {
   return y + SEPARADOR_BARRIDA_ALTO
 }
 
-export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {}) {
+/**
+ * Genera PDF de Hoja de Ruta en A4 horizontal con 3 columnas.
+ */
+export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: PedidoDB[], infoRuta: InfoRuta = {}): void {
   const doc = new jsPDF({
     orientation: 'landscape',
     unit: 'mm',
@@ -724,7 +781,7 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
   })
 
   // Normalizar infoRuta: si llega algo distinto a objeto, se ignora
-  const info = infoRuta && typeof infoRuta === 'object' ? infoRuta : {}
+  const info: InfoRuta = infoRuta && typeof infoRuta === 'object' ? infoRuta : {}
 
   let columnTop = drawPageHeader(doc, transportista, pedidos, info, true)
   const columnBottom = PAGE_HEIGHT - PAGE_MARGIN
@@ -750,7 +807,7 @@ export function generarHojaRutaOptimizada(transportista, pedidos, infoRuta = {})
   // esto el chofer ve una lista corrida y no sabe que los primeros son los que
   // cierran al mediodia. Se recalcula del horario del cliente en vez de leer
   // recorrido_pedidos.barrida para que valga tambien al exportar antes de armar.
-  let barridaPrevia = null
+  let barridaPrevia: Barrida | null = null
   pedidos.forEach((pedido, idx) => {
     const { barrida } = clasificarBarrida(horarioParaRutear(pedido?.cliente))
     const ops = buildCardOps(doc, pedido, idx + 1)

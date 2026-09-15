@@ -86,12 +86,46 @@ function cspConnectSrcPlugin() {
   }
 }
 
+// nginx.conf (y el panel de Coolify en prod) son los que mandan estos headers
+// de verdad; acá sólo se replican para que e2e/security.spec.js pueda
+// verificarlos contra `vite dev` / `vite preview`, que playwright.config.ts
+// usa como servidor de los tests (nunca contra nginx).
+function securityHeadersDevPlugin() {
+  const setHeaders = (res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('X-Frame-Options', 'DENY')
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+    res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(), microphone=(), payment=()')
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; script-src 'self' https://maps.googleapis.com blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+    )
+  }
+
+  return {
+    name: 'security-headers-dev',
+    configureServer(server) {
+      server.middlewares.use((_req, res, next) => {
+        setHeaders(res)
+        next()
+      })
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((_req, res, next) => {
+        setHeaders(res)
+        next()
+      })
+    }
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_BUILD_ID__: JSON.stringify(BUILD_ID),
   },
 
   plugins: [
+    securityHeadersDevPlugin(),
     cspConnectSrcPlugin(),
     versionJsonPlugin(),
     react(),

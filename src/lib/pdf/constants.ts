@@ -6,7 +6,7 @@
 export const TICKET = {
   width: 75,
   margin: 3,
-  get contentWidth() { return this.width - (this.margin * 2) }
+  get contentWidth(): number { return this.width - (this.margin * 2) }
 }
 
 // Dimensiones A4
@@ -14,7 +14,7 @@ export const A4 = {
   width: 210,
   height: 297,
   margin: 15,
-  get contentWidth() { return this.width - (this.margin * 2) }
+  get contentWidth(): number { return this.width - (this.margin * 2) }
 }
 
 // Colores
@@ -46,6 +46,13 @@ export const COLORS = {
     500: [239, 68, 68],
     700: [185, 28, 28]
   }
+} satisfies {
+  black: number[]
+  white: number[]
+  gray: Record<number, number[]>
+  green: Record<number, number[]>
+  yellow: Record<number, number[]>
+  red: Record<number, number[]>
 }
 
 // Fuentes
@@ -63,10 +70,10 @@ export const FONTS = {
     '6xl': 18,
     '7xl': 22
   }
-}
+} as const
 
 // Labels de formas de pago
-export const FORMAS_PAGO_LABELS = {
+export const FORMAS_PAGO_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',
   transferencia: 'Transferencia Bancaria',
   cheque: 'Cheque',
@@ -74,7 +81,7 @@ export const FORMAS_PAGO_LABELS = {
   cuenta_corriente: 'Cuenta Corriente'
 }
 
-export const FORMAS_PAGO_SHORT = {
+export const FORMAS_PAGO_SHORT: Record<string, string> = {
   efectivo: 'Efvo',
   transferencia: 'Transf',
   cheque: 'Cheque',
@@ -82,8 +89,13 @@ export const FORMAS_PAGO_SHORT = {
   tarjeta: 'Tarjeta'
 }
 
+interface EstadoPagoInfo {
+  label: string
+  symbol: string
+}
+
 // Estados de pago
-export const ESTADOS_PAGO = {
+export const ESTADOS_PAGO: Record<string, EstadoPagoInfo> = {
   pagado: { label: 'PAGADO', symbol: '[P]' },
   parcial: { label: 'PARCIAL', symbol: '[*]' },
   pendiente: { label: 'PEND', symbol: '[$]' }
