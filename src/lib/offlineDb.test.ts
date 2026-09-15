@@ -118,7 +118,7 @@ describe('offlineDb', () => {
         // Encoladas antes de que la cola registrara userId/sucursalId.
         // Esconderlas las dejaría huérfanas para siempre; que se vean es lo que
         // permite sincronizarlas o descartarlas.
-        await queueOperation('CREATE_MERMA', { n: 'vieja' })
+        await queueOperation('UPDATE_PRODUCTO', { n: 'vieja' })
 
         const deB = await getPendingOperations(10, 'user-B', 1)
         expect(deB).toHaveLength(1)
@@ -449,7 +449,7 @@ describe('offlineDb', () => {
   describe('deletePendingOperations', () => {
     it('removes every listed operation and returns the count', async () => {
       const id1 = await queueOperation('CREATE_PEDIDO', { n: 1 })
-      const id2 = await queueOperation('CREATE_MERMA', { n: 2 })
+      const id2 = await queueOperation('UPDATE_PRODUCTO', { n: 2 })
       const id3 = await queueOperation('CREATE_PEDIDO', { n: 3 }) // not deleted
 
       const deletedCount = await deletePendingOperations([id1, id2])

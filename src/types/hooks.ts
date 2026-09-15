@@ -590,11 +590,11 @@ export interface UseOptimizarRutaReturn {
   limpiarRuta: () => void;
 }
 
-// PedidoOffline / MermaOffline / UseOfflineSyncReturn viven en
-// `hooks/useOfflineSync.ts`, que es la implementacion real. Habia acá una copia
-// stale con OTRA forma (`{ id, data, timestamp }`) que no coincidia con nada:
-// quien la importara desde `../../types` tipaba contra una cola que no existe.
-export type { PedidoOffline, MermaOffline, UseOfflineSyncReturn } from '../hooks/useOfflineSync'
+// PedidoOffline / UseOfflineSyncReturn viven en `hooks/useOfflineSync.ts`, que
+// es la implementacion real. Habia acá una copia stale con OTRA forma
+// (`{ id, data, timestamp }`) que no coincidia con nada: quien la importara
+// desde `../../types` tipaba contra una cola que no existe.
+export type { PedidoOffline, UseOfflineSyncReturn } from '../hooks/useOfflineSync'
 
 // =============================================================================
 // APP STATE

@@ -45,14 +45,6 @@ async function _waitForSync(page: Page, timeout = 30000) {
     .toBeVisible({ timeout })
 }
 
-/**
- * Helper para contar pedidos en la UI
- */
-async function countPedidosInUI(page: Page): Promise<number> {
-  await page.waitForSelector('[data-testid="pedido-card"]', { timeout: 10000 }).catch(() => null)
-  return await page.locator('[data-testid="pedido-card"]').count()
-}
-
 // =============================================================================
 // TESTS DE CAOS - OFFLINE/ONLINE
 // =============================================================================
@@ -68,75 +60,12 @@ test.describe('Offline Sync - Chaos Tests', () => {
     })
   })
 
-  test('1. Crear pedido offline → reconectar → debe sincronizar sin duplicados', async ({
-    page,
-    context
-  }) => {
-    // 1. Navegar y hacer login
-    await page.goto('/login')
-
-    // Nota: Ajustar según credenciales de test
-    // await login(page, 'test@test.com', 'testpass123')
-
-    // Para este test, asumimos que ya hay una sesión o saltamos login
-    await page.goto('/pedidos')
-    await page.waitForLoadState('networkidle')
-
-    // 2. Guardar conteo inicial de pedidos
-    const initialCount = await countPedidosInUI(page)
-
-    // 3. CORTAR INTERNET
-    await context.setOffline(true)
-    await page.waitForTimeout(500) // Dar tiempo al listener
-
-    // Verificar que el indicador muestra offline
-    // (si existe el componente)
-    const offlineIndicator = page.locator('text=Offline')
-    if (await offlineIndicator.count() > 0) {
-      await expect(offlineIndicator).toBeVisible()
-    }
-
-    // 4. Intentar crear pedido offline
-    // Nota: Ajustar selectores según tu UI
-    const nuevoBtn = page.locator('[data-testid="nuevo-pedido-btn"], button:has-text("Nuevo Pedido")')
-    if (await nuevoBtn.count() > 0) {
-      await nuevoBtn.first().click()
-      await page.waitForTimeout(1000)
-
-      // Llenar formulario mínimo (ajustar según tu UI)
-      // await page.fill('[data-testid="cliente-select"]', 'Cliente Test')
-      // await page.click('[data-testid="guardar-pedido"]')
-
-      // El pedido debería guardarse localmente
-    }
-
-    // 5. SIMULAR CIERRE DE APP
-    // Guardamos la URL actual
-    const currentUrl = page.url()
-
-    // 6. RESTAURAR INTERNET (must be before goto)
-    await context.setOffline(false)
-
-    // 7. REABRIR APP
-    await page.goto(currentUrl)
-    await page.waitForLoadState('domcontentloaded')
-
-    // 8. Esperar sincronización automática
-    await page.waitForTimeout(3000) // Dar tiempo para sync
-
-    // 9. Verificar que no hay duplicados
-    const finalCount = await countPedidosInUI(page)
-
-    // El conteo debería ser máximo initialCount + 1
-    expect(finalCount).toBeLessThanOrEqual(initialCount + 1)
-
-    // Verificar que no hay errores visibles. Como el alta offline arriba está
-    // comentada (no hay credenciales de test para loguear), lo único que pasó
-    // fue navegar, cortar/restaurar la red y recargar: no debería quedar
-    // ningún error en pantalla de eso.
-    const errorMessages = page.locator('text=Error, text=error, [role="alert"]')
-    await expect(errorMessages).toHaveCount(0)
-  })
+  // H55: el test "crear pedido offline -> reconectar -> sincroniza sin
+  // duplicados" (con login real) se borró porque nunca corrió de verdad: no
+  // hay E2E_USER/E2E_PASS en ci.yml, así que el alta offline quedaba comentada
+  // y el test sólo probaba cortar/restaurar la red sin loguear. Para tenerlo
+  // hace falta un usuario de prueba con contraseña wireados como secrets de
+  // CI (E2E_USER/E2E_PASS) y pasados a este archivo.
 
   test('2. Múltiples operaciones offline → reconectar → la cola no pierde ni duplica nada', async ({
     page,

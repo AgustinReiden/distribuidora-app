@@ -178,11 +178,7 @@ export {
 // Mermas
 export {
   mermasKeys,
-  useMermasQuery,
-  useMermasByProductoQuery,
-  useMermasByMotivoQuery,
   useRegistrarMermaMutation,
-  useMermasResumen,
 } from './useMermasQuery'
 
 // Reporte de mermas agregado en la base (mig 226)
