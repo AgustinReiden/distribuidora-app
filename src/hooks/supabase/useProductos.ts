@@ -157,27 +157,6 @@ export function useProductos(): UseProductosReturn {
     }))
   }
 
-  const restaurarStock = async (items: StockItem[]): Promise<void> => {
-    const itemsParaRPC = items.map(item => ({
-      producto_id: item.producto_id || item.productoId,
-      cantidad: item.cantidad
-    }))
-
-    const { error } = await supabase.rpc('restaurar_stock_atomico', {
-      p_items: itemsParaRPC
-    })
-
-    if (error) {
-      throw error
-    }
-
-    setProductos(prev => prev.map(p => {
-      const item = items.find(i => (i.producto_id || i.productoId) === p.id)
-      if (item) return { ...p, stock: p.stock + item.cantidad }
-      return p
-    }))
-  }
-
   return {
     productos,
     loading,
@@ -186,7 +165,6 @@ export function useProductos(): UseProductosReturn {
     eliminarProducto,
     validarStock,
     descontarStock,
-    restaurarStock,
     refetch: fetchProductos
   }
 }
