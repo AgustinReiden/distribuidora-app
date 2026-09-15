@@ -15,11 +15,16 @@ name: Digest ejecutivo Telegram
 #
 # AUTENTICACIÓN
 # --------------
-# La edge function valida `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`
-# con comparación en tiempo constante (ver supabase/functions/telegram-digest/
-# index.ts) — no hace falta un secret nuevo, es la misma key que ya usan
-# `integridad.yml` y que el pg_cron original mandaba via
-# app.settings.service_role_key.
+# La edge function valida el header `X-Digest-Key` contra el secret
+# TELEGRAM_DIGEST_KEY (ver supabase/functions/telegram-digest/index.ts), con
+# comparación en tiempo constante. NO usa SUPABASE_SERVICE_ROLE_KEY: se probó
+# primero con esa key (igual que hace `integridad.yml`) y dio 403 siempre —
+# Supabase no deja setear a mano un secret de función con el prefijo
+# SUPABASE_ (está reservado para el auto-injection de la plataforma, que para
+# este proyecto no matcheaba lo que mandaba Actions y no había forma de
+# diagnosticarlo desde afuera). TELEGRAM_DIGEST_KEY es un secret propio,
+# cargado a mano tanto acá (GitHub) como en Supabase (Dashboard > Edge
+# Functions > telegram-digest > Secrets) — mismo valor en los dos lugares.
 #
 # CÓMO DETECTAR QUE DEJÓ DE CORRER
 # ---------------------------------
@@ -46,15 +51,15 @@ jobs:
     steps:
       - name: Disparar digest
         env:
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_DIGEST_KEY: ${{ secrets.TELEGRAM_DIGEST_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
-            echo "::error::Falta el secret SUPABASE_SERVICE_ROLE_KEY. Cargalo en Settings > Secrets and variables > Actions."
+          if [ -z "${TELEGRAM_DIGEST_KEY:-}" ]; then
+            echo "::error::Falta el secret TELEGRAM_DIGEST_KEY. Cargalo en Settings > Secrets and variables > Actions (mismo valor que en Supabase Dashboard > Edge Functions > telegram-digest > Secrets)."
             exit 1
           fi
           curl -fsS -X POST \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "X-Digest-Key: ${TELEGRAM_DIGEST_KEY}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-actions"}' \
             https://hmuchlzmuqqxcldbzkgc.supabase.co/functions/v1/telegram-digest \
