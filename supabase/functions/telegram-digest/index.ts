@@ -16,15 +16,20 @@
 // (admin_perfil_id, fecha) en bot_digests_enviados — un retry del cron en
 // el mismo día NO duplica mensajes.
 //
-// Auth: bearer token == SUPABASE_SERVICE_ROLE_KEY. Como el cron pasa esa
-// key en `Authorization`, no podemos basarnos en `verify_jwt = false` solo;
-// validamos manualmente. Cualquier otro caller (incluyendo el frontend)
-// debe usar la misma key — equivalente a "endpoint admin-only invocable
-// solo desde el server".
+// Auth: header `X-Digest-Key` == secret TELEGRAM_DIGEST_KEY. NO usamos
+// SUPABASE_SERVICE_ROLE_KEY para esto (se probó y se descartó, #661): ese
+// nombre está reservado por la plataforma — Supabase no deja setearlo a mano
+// como function secret ("Name must not start with the SUPABASE_ prefix"), y
+// depender del auto-injection dejó el endpoint devolviendo 403 sin forma de
+// diagnosticar cuál de las dos ramas (falta la key vs. no matchea) estaba
+// fallando. Un secret propio, cargado a mano, es verificable de punta a
+// punta. Cualquier otro caller (incluyendo el frontend) debe mandar el mismo
+// header — equivalente a "endpoint admin-only invocable solo desde el server".
 //
 // Variables de entorno:
 //   - SUPABASE_URL                  (auto-inyectada)
-//   - SUPABASE_SERVICE_ROLE_KEY     (auto-inyectada, también validada como bearer)
+//   - SUPABASE_SERVICE_ROLE_KEY     (auto-inyectada; usada para el client de datos, NO para auth del trigger)
+//   - TELEGRAM_DIGEST_KEY           (secret; valida el header X-Digest-Key)
 //   - GEMINI_API_KEY                (secret)
 //   - GEMINI_MODEL                  (opcional; default gemini-2.5-flash)
 //   - TELEGRAM_BOT_TOKEN            (secret)
@@ -41,18 +46,19 @@ interface AdminRow {
 }
 
 serve(async (req: Request) => {
-  // 1. Auth: bearer == SUPABASE_SERVICE_ROLE_KEY. Fail-closed si no está
-  //    configurado (mismo patrón que telegram-webhook con su SECRET).
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!serviceKey) {
-    console.error("[digest] SUPABASE_SERVICE_ROLE_KEY not set");
+  // 1. Auth: header X-Digest-Key == secret TELEGRAM_DIGEST_KEY. Fail-closed
+  //    si no está configurado (mismo patrón que telegram-webhook con su
+  //    SECRET).
+  const digestKey = Deno.env.get("TELEGRAM_DIGEST_KEY") ?? "";
+  if (!digestKey) {
+    console.error("[digest] TELEGRAM_DIGEST_KEY not set");
     return new Response("forbidden", { status: 403 });
   }
 
-  const auth = req.headers.get("Authorization") ?? "";
+  const headerKey = req.headers.get("X-Digest-Key") ?? "";
   // Comparación en tiempo constante (consistencia con telegram-webhook; evita
-  // timing attacks al validar el bearer). P2-6 de la auditoría 2026-05.
-  if (!timingSafeEqual(auth, `Bearer ${serviceKey}`)) {
+  // timing attacks al validar el secret). P2-6 de la auditoría 2026-05.
+  if (!timingSafeEqual(headerKey, digestKey)) {
     return new Response("forbidden", { status: 403 });
   }
 
