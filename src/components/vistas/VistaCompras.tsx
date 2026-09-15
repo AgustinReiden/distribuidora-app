@@ -41,6 +41,7 @@ export interface VistaComprasProps {
   error?: boolean;
   onRetry?: () => void;
   isAdmin: boolean;
+  isEncargado: boolean;
   onNuevaCompra: () => void;
   onVerDetalle: (compra: CompraDBExtended) => void;
   onAnularCompra: (compraId: string) => void;
@@ -75,6 +76,7 @@ export default function VistaCompras({
   error,
   onRetry,
   isAdmin,
+  isEncargado,
   onNuevaCompra,
   onVerDetalle,
   onAnularCompra,
@@ -448,7 +450,7 @@ export default function VistaCompras({
                               <Pencil className="w-4 h-4" />
                             </button>
                           )}
-                          {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
+                          {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && onNotaCredito && (
                             <button
                               onClick={() => onNotaCredito(compra)}
                               className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
@@ -457,7 +459,7 @@ export default function VistaCompras({
                               <FileText className="w-4 h-4" />
                             </button>
                           )}
-                          {isAdmin && compra.estado !== 'cancelada' && (
+                          {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && (
                             <button
                               onClick={() => onAnularCompra(compra.id)}
                               className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
@@ -552,7 +554,7 @@ export default function VistaCompras({
                         <Pencil className="w-4 h-4" />
                       </button>
                     )}
-                    {isAdmin && compra.estado !== 'cancelada' && onNotaCredito && (
+                    {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && onNotaCredito && (
                       <button
                         onClick={() => onNotaCredito(compra)}
                         className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
@@ -562,7 +564,7 @@ export default function VistaCompras({
                         <FileText className="w-4 h-4" />
                       </button>
                     )}
-                    {isAdmin && compra.estado !== 'cancelada' && (
+                    {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && (
                       <button
                         onClick={() => onAnularCompra(compra.id)}
                         className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
