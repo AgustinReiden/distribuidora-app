@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 249.** El ledger de prod llega hasta
-`248_el_mismo_update_no_entra_dos_veces`.
+**La próxima migración es la 252.** El ledger de prod llega hasta
+`251_el_guard_de_duplicados_contesta_rapido`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -160,13 +160,7 @@ Y una sexta vez, de otra forma, con la 239: el archivo se escribió el 2026-09-1
 después el 228 ya era de otra migración y la cadena iba por la 238, así que hubo que
 renumerarlo al aplicarlo. Moraleja adicional: un archivo que espera en `main` no reserva
 nada. Si no lo vas a aplicar ahora, no le pongas número todavía.
-Y una séptima vez el 2026-09-15, en vivo y dos veces seguidas: la 248 se escribió como
-246 confirmando el ledger, y al ir a aplicarla el 246 ya estaba tomado por otra rama; se
-renumeró a 247 y en el minuto que llevó renumerar, el 247 también se lo llevó otra rama.
-Salió como 248. Es exactamente el escenario de la tercera fuente que no se puede consultar:
-las ramas abiertas de otras sesiones. Lo único que lo evitó fue reconfirmar el ledger
-**inmediatamente** antes de aplicar, no al empezar.
-Última actualización: 248, el 2026-09-15.)
+Última actualización: 251, el 2026-09-15.)
 
 ### 223–225 · Vencimientos por lote
 
@@ -1266,42 +1260,59 @@ Cierra #613, #633 y #639. Lo que hay que saber sin abrir el SQL:
 Aparte, sin migración: se corrigió `migrations/022_bot_ventas_compras_rpcs.sql` para que
 coincida con el ledger. Ver **§F**.
 
-### 248 · El mismo update de Telegram no entra dos veces
+### 250–251 · Dos altas de la misma puerta no son dos clientes
 
-Mapea 1:1 al ledger. Cierra #640 (OPS-2 de la auditoría). Lo que hay que saber sin abrir el SQL:
+Las dos van juntas y en ese orden: la **250** pone el criterio y la RPC, la **251** la hace
+contestar rápido sin tocar ni un criterio. Cierran #663; la consolidación de los duplicados
+que ya existen es #664. Lo que hay que saber sin abrir el SQL:
 
-- **El webhook nunca leía `update.update_id`.** Telegram reintenta cuando no recibe 200 a
-  tiempo —una respuesta lenta del LLM alcanza— y cada reintento se reprocesaba entero: el
-  mismo mensaje pasaba dos veces por el agente y un callback de "confirmar pedido" podía
-  intentar crear el pedido dos veces, porque `crear_pedido_completo_bot` **no** es idempotente
-  por update. Esta migración no la toca: la idempotencia es del webhook.
-- **`bot_updates_procesados` (PK `update_id`) + `bot_marcar_update(bigint)`.** La función hace
-  `INSERT ... ON CONFLICT DO NOTHING` y devuelve si insertó: TRUE = procesalo, FALSE =
-  descartalo. Atómica, así que dos reintentos concurrentes en isolates distintos no ganan los
-  dos. RLS habilitada sin policies y `EXECUTE` sólo a `service_role`, como el resto de las
-  `bot_*`.
-- **La retención va adentro de la función, no en un pg_cron, y es a propósito**: pg_cron NO
-  está instalado en este cluster. Los `cron.schedule` de la **016** (retención de
-  `bot_audit_log`) y de la **018** (digest diario) están envueltos en un
-  `IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron')` que nunca dio verdadero,
-  así que **nunca se schedularon**: medido al aplicar esta migración, `bot_audit_log` tenía
-  filas de abril (la retención es de 90 días) y `bot_digests_enviados` estaba **vacía** — el
-  digest diario nunca corrió. Un job que no corre no es retención. El mecanismo que sí
-  funciona acá es el de la **073**: la tabla se recorta sola en el write, con un `DELETE` por
-  rango de índice que en régimen borra 0 filas.
-- **`bot_audit_log` acepta `tipo = 'duplicado'`**, el renglón que deja el webhook por cada
-  reintento descartado. El CHECK sólo ensancha el dominio.
+- **El detector medía 0,2 metros.** Desde el commit `4f5a6ee` (2026-03-31) la tolerancia es
+  `0.000002` grados, y las dos mitades del guard usaban ese criterio: el box en grados de
+  `createCliente` y `existe_cliente_en_ubicacion` (mig 217). Pero las coordenadas de un alta
+  salen de dos caminos que nunca dan el mismo punto —el autocomplete de Google Places y el
+  GPS del teléfono con reverse geocoding—, así que dos altas de la misma puerta caen a metros
+  de distancia. El par testigo, 382 y 938, quedó a **17,5 m**.
+- **Tres reglas, escritas una vez.** Dirección normalizada con altura → bloqueo duro;
+  distancia real en metros (< 1 m bloqueo, 1–30 m aviso con confirmación, > 30 nada); nombre
+  por tokens sin acentos contra razón social **y** fantasía, cruzados (igualdad = bloqueo,
+  subconjunto = aviso). La versión de referencia es `src/utils/duplicadoCliente.ts` con sus
+  tests; los bloques `DO` de las dos migraciones fijan los mismos casos en SQL.
+- **Los umbrales salen de los datos.** Medido sobre los 587 clientes con coordenadas de la
+  sucursal 1: 45 a menos de 5 m, 57 a menos de 10, 124 a menos de 30, mediana 84 m. Entre
+  1,4 y 8,6 m hay comercios distintos de verdad (kiosco y fiambrería a 1,4 m; panadería y
+  rotisería a 2,2 m). Por eso 1 metro de bloqueo y no 10 ni 22.
+- **La altura es obligatoria en la clave de dirección.** Sin exigirla, los 170 clientes de
+  barrios sin numeración se bloquearían entre sí ("b esperanza" ×25, "b sagrado" ×24).
+- **El índice de la regla 1 es NO ÚNICO y tiene que serlo.** Medido al aplicar: la clave de
+  dirección con altura ya se repite en **19 grupos (38 clientes)**, no en 2 como decía el
+  diagnóstico inicial, y varios de esos grupos son comercios distintos en la misma puerta
+  ("Panadería Nahuel" + "Panadería Rey" en Berutti 399; "Melani" + "Pollería M&G" en
+  Av. San Martín 1353). Un UNIQUE ni siquiera se podría crear. La regla rige el **alta**, no
+  retroactivamente.
+- **`verificar_duplicado_cliente` reemplaza a `existe_cliente_en_ubicacion`**, que se dropea
+  en la misma migración (Trampa 5). Conserva las tres invariantes de la 217: no le devuelve
+  la identidad de un cliente que la RLS le tapa al caller, sigue emitiendo
+  `cliente_duplicado_oculto` vía `_notificar_sucursal_roles` con el dedupe de 1 día mirando
+  `perfiles.rol` **crudo** (Trampa 4), y sigue fail-closed sin sesión o sin sucursal. Lo que
+  devuelve es un jsonb `{bloquea, avisa, motivo, distancia_m, cliente_visible}` en vez de un
+  booleano pelado, y mira también a los inactivos (migs 199/200).
+- **La 251 es sólo performance, y hacía falta.** Medido después de aplicar la 250: el peor
+  caso —un alta que no choca con nada— tardaba **7,25 s**, porque las dos sondas de nombre
+  llamaban `relacion_nombres_cliente` fila por fila sobre los ~740 clientes. Con el lado del
+  caller precalculado, `tokens_nombre_cliente` sin el `array_agg(DISTINCT)` y dos índices
+  funcionales sobre el nombre normalizado, el mismo caso da **302 ms** y los casos que
+  chocan, entre 3 y 6 ms. `relacion_nombres_cliente` queda como la forma legible del
+  criterio y el `DO` de la 251 verifica que la rápida y la legible coincidan.
 
-Verificado después de aplicar: `bot_marcar_update` da `true/false/true` sobre
-`(-999001, -999001, -999002)`, una fila sembrada con `recibido_at` de hace 8 días desaparece
-en la llamada siguiente y las recientes quedan, `proacl` es
-`{postgres=X/postgres,service_role=X/postgres}` y el CHECK lista los seis tipos. Las filas
-del ensayo se borraron.
-
-Del lado de la edge function, el cuerpo del `serve()` de `telegram-webhook/index.ts` se movió
-a `telegram-webhook/request.ts` (`handleWebhookRequest`) con los handlers inyectables: sin eso
-el test tendría que levantar un servidor para ejercitar el flujo. `index.ts` quedó en el
-binding HTTP y nada más.
+Verificado en prod después de aplicar, con sesión de admin: el alta del 938 da
+`{bloquea, motivo: "direccion", distancia_m: 17.5, cliente_visible: #382}`; un alta a 5 m del
+382 da `{avisa, motivo: "distancia", distancia_m: 5}`; `"López Ricardo "` contra el 382 da
+`nombre_igual`; `clave_direccion_cliente('B° Esperanza')` da `NULL`. Una sola sobrecarga de
+la RPC nueva, `has_function_privilege('anon', ...)` = false (y `curl` con la anon key da
+**401 permission denied**), `existe_cliente_en_ubicacion` ya no existe (`curl` da **404
+PGRST202**), y `auditoria_permisos_execute()` sigue en 0 funciones expuestas a anon. El
+cuerpo de `verificar_duplicado_cliente` en el archivo de la 251 y el `prosrc` vivo tienen el
+mismo md5 (`92191025cc0caed401ce2c3bb35bea27`).
 
 ---
 

@@ -33,10 +33,16 @@ const deleteSpy = vi.fn()
 const updateSpy = vi.fn()
 const from = vi.fn()
 
+// `createCliente` siempre pasa por el guard de duplicados (mig 250): la RPC
+// tiene que contestar algo con forma de veredicto o el alta ni empieza.
+const SIN_DUPLICADO = {
+  bloquea: false, avisa: false, motivo: null, distancia_m: null, cliente_visible: null,
+}
+
 vi.mock('../supabase/base', () => ({
   supabase: {
     from: (...args: unknown[]) => from(...args),
-    rpc: vi.fn(),
+    rpc: () => Promise.resolve({ data: SIN_DUPLICADO, error: null }),
   },
 }))
 
