@@ -113,6 +113,16 @@ suelta en `sucursales`.
     excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
     suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
+- **El criterio de merma y la cascada de costo viven en una función, no en cada reporte.**
+  `mermas_valorizadas(desde, hasta, sucursales)` (mig 238) es la única implementación del
+  corte por día argentino, la exclusión de `promociones`/`promociones_reversion` y la
+  valuación; `reporte_gerencial` y `reporte_mermas` la **consumen**, y por eso
+  `totales.costo == kpis.mermas` cierra por construcción. La cascada sola es
+  `costo_valuacion(snapshot, promedio, real, sin_iva, ii)`, y **`IS NULL` sobre ella ES el
+  predicado `sin_costo`** — no mires `costo_sin_iva` por tu cuenta, que fue justo el bug de
+  #511. Un reporte nuevo que valorice mermas o decida "sin costo" llama a estas dos; si
+  reescribís el criterio, el gate `scripts/check-integridad.mjs` se pone rojo.
+
 - **`productos.costo_promedio` no puede ser base de sí mismo.** El promedio vivo ya incluye la
   compra que estás por recalcular; la base es `compra_items.costo_promedio_anterior`, el
   snapshot que guardan `registrar_compra_completa` y `actualizar_compra_items` (mig 236). Sin

@@ -157,6 +157,11 @@ export default function VistaPromociones({
             const cantCompra = getReglaValor(promo, 'cantidad_compra')
             const cantBonif = getReglaValor(promo, 'cantidad_bonificacion')
             const vigente = isPromoVigente(promo)
+            // En una promo Fracción `usos_pendientes` NO cuenta usos: es el resto
+            // de la barra en [0, N) desde las migs 220/221. Mostrarlo como
+            // "2/100 usos" es leer otra cosa, y el límite tampoco rige ahí — el
+            // trigger que lo aplicaba se acotó a las promos sin fracción (mig 238).
+            const esFraccion = promo.regalo_mueve_stock === false && (promo.unidades_por_bloque ?? 0) > 0
 
             return (
               <div
@@ -183,7 +188,7 @@ export default function VistaPromociones({
                           Fuera de rango
                         </span>
                       )}
-                      {promo.limite_usos && (
+                      {promo.limite_usos && !esFraccion && (
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           promo.usos_pendientes >= promo.limite_usos
                             ? 'bg-red-100 text-red-700'

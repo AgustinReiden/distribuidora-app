@@ -12,7 +12,9 @@
  *     sólo `detalle` está acotado. Truncar acorta la lista, nunca mueve un
  *     total — que era justo el defecto del modal.
  *
- * `totales.costo` cierra EXACTO contra `reporte_gerencial.kpis.mermas`.
+ * `totales.costo` cierra EXACTO contra `reporte_gerencial.kpis.mermas`, y desde
+ * la mig 238 por construcción: los dos consumen `mermas_valorizadas()`, la única
+ * implementación del criterio. Antes eran dos copias verbatim del mismo SQL.
  */
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -36,6 +38,8 @@ export interface MermaDetalle {
   /** bigint en la base: llega como number, se tipa string para no comparar por identidad. */
   id: string
   created_at: string
+  /** Día argentino de carga: el que usa el corte del período (mig 238). */
+  fecha_local: string
   cantidad: number
   motivo: string
   clasificacion: ClasificacionMerma
