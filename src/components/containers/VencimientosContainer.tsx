@@ -1,19 +1,24 @@
 /**
  * VencimientosContainer
  *
- * Orquesta el panel de vencimientos (migs 223/224/225). Ver y dar de baja son
- * dos permisos distintos: depósito mira lo que se le vence, administración
- * decide qué se descarta. El gate real está en las RPCs — esto es la UI que lo
- * acompaña.
+ * Orquesta el panel de vencimientos (migs 223/224/225). Ver y sacar de
+ * circulación son dos permisos distintos: depósito mira lo que se le vence,
+ * administración decide qué se descarta y qué se devuelve. El gate real está en
+ * las RPCs — esto es la UI que lo acompaña.
  */
 import { Suspense, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useVencimientosQuery, useDarDeBajaLoteMutation } from '../../hooks/queries/useLotesQuery'
+import {
+  useVencimientosQuery,
+  useDarDeBajaLoteMutation,
+  useRegistrarNotaCreditoLoteMutation,
+} from '../../hooks/queries/useLotesQuery'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useAuth } from '../../hooks/supabase/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { formatPrecio } from '../../utils/formatters'
 
 const VistaVencimientos = lazyWithReload(() => import('../vistas/VistaVencimientos'))
 
@@ -31,6 +36,7 @@ export default function VencimientosContainer() {
   const { isAdminOrEncargado } = useAuth()
   const { politicas } = usePoliticasComercialesQuery()
   const darDeBaja = useDarDeBajaLoteMutation()
+  const devolver = useRegistrarNotaCreditoLoteMutation()
 
   // El horizonte es el umbral amarillo, no "todo": traer los lotes cargados a
   // dos años para mostrar los veinte que importan es tráfico puro. Lo ya
@@ -53,6 +59,27 @@ export default function VencimientosContainer() {
     }
   }, [darDeBaja, notify])
 
+  // Espejo de handleDarDeBaja, y a propósito por una RPC distinta: la
+  // devolución acredita contra la factura de compra y NO escribe en
+  // `mermas_stock` — contar como merma lo que el proveedor paga ensucia la
+  // valorización (issue #564).
+  const handleDevolverAlProveedor = useCallback(async (
+    loteId: number,
+    cantidad: number,
+    numeroNota: string,
+    motivo: string,
+  ) => {
+    try {
+      const res = await devolver.mutateAsync({ loteId, cantidad, numeroNota, motivo })
+      notify.success(
+        `${cantidad} u. devueltas al proveedor. Nota de crédito por ${formatPrecio(res.total)}. ` +
+        `Stock del producto: ${res.stock}.`
+      )
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo registrar la nota de crédito')
+    }
+  }, [devolver, notify])
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaVencimientos
@@ -63,8 +90,10 @@ export default function VencimientosContainer() {
         diasCritico={politicas.diasCriticoVencimiento}
         puedeDarDeBaja={isAdminOrEncargado}
         darDeBajaPendiente={darDeBaja.isPending}
+        devolucionPendiente={devolver.isPending}
         onRefrescar={() => void refetch()}
         onDarDeBaja={handleDarDeBaja}
+        onDevolverAlProveedor={handleDevolverAlProveedor}
         nombreSucursal={currentSucursalNombre}
       />
     </Suspense>
