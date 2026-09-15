@@ -482,12 +482,15 @@ export async function fetchCobranzasFact(
   hasta: string
 ): Promise<Record<string, unknown>[]> {
   // ~1.208 pagos en un solo mes: también pasaba el tope.
+  // `fecha` (DATE, en hora argentina — migs 230/231) es la fecha del pago;
+  // `created_at` es cuándo se cargó, que es otra cosa (mismo criterio que las
+  // otras hojas: ver el comentario de parseFechaSegura más arriba).
   const data = await traerTodo<Record<string, unknown>>(
     () => supabase
       .from('pagos')
       .select(`
         id,
-        created_at,
+        fecha,
         monto,
         forma_pago,
         referencia,
@@ -495,9 +498,9 @@ export async function fetchCobranzasFact(
         cliente:clientes(id, nombre_fantasia, zona),
         pedido_id
       `)
-      .gte('created_at', `${desde}T00:00:00`)
-      .lte('created_at', `${hasta}T23:59:59`)
-      .order('created_at', { ascending: false })
+      .gte('fecha', desde)
+      .lte('fecha', hasta)
+      .order('fecha', { ascending: false })
       .order('id'),
     { etiqueta: 'cobranzas' },
   )
@@ -506,7 +509,7 @@ export async function fetchCobranzasFact(
     const cliente = pago.cliente as unknown as Record<string, unknown> | null
     return {
       pago_id: pago.id,
-      fecha: new Date(String(pago.created_at)).toLocaleDateString('es-AR'),
+      fecha: parseFechaSegura(String(pago.fecha)).toLocaleDateString('es-AR'),
       cliente_id: safe(cliente?.id),
       cliente_nombre: safe(cliente?.nombre_fantasia),
       cliente_zona: safe(cliente?.zona),
@@ -590,8 +593,9 @@ export async function exportarBI(desde: string, hasta: string): Promise<void> {
     { Campo: 'Periodo hasta', Valor: hasta },
     {
       Campo: 'Criterio de fecha',
-      Valor: 'Ventas/Clientes/Productos/Canasta filtran por pedidos.fecha y Compras por '
-        + 'compras.fecha_compra (fecha de venta/compra, no de carga en el sistema)',
+      Valor: 'Ventas/Clientes/Productos/Canasta filtran por pedidos.fecha, Compras por '
+        + 'compras.fecha_compra y Cobranzas por pagos.fecha (fecha de venta/compra/cobro, '
+        + 'no de carga en el sistema)',
     },
     { Campo: 'Filas en Ventas_Detallado', Valor: ventas.length },
     { Campo: 'Total Clientes', Valor: clientes.length },
