@@ -568,6 +568,21 @@ la puede consultar de forma confiable. Por eso la regla ya no es a quién pregun
 reservar algo que no se puede reservar, y el costo de renumerar después no es `git mv` — es
 la prosa, que ningún reemplazo mecánico agarra.
 
+### F. El archivo dice una cosa y el ledger dice otra (correcciones de la vista curada)
+
+Acá van los casos donde el **archivo del repo nunca fue lo que se aplicó**, y se corrige el
+archivo para que coincida con el ledger. No es una excepción "viva" como las de arriba: una
+vez corregido el archivo, la fila deja de tener drift. Queda anotada igual, porque el archivo
+corregido difiere del commit original y eso confunde a quien mire el `git log`.
+
+| archivo | ledger | qué decía el archivo | qué se aplicó |
+|---|---|---|---|
+| `022_bot_ventas_compras_rpcs.sql` (`bot_pendientes_pago`) | `20260428210038` | `HAVING EXTRACT(DAY FROM now() - MIN(MIN(p.created_at))) >= p_dias_atraso OR p_dias_atraso = 0` | `HAVING p_dias_atraso = 0 OR EXTRACT(DAY FROM now() - MIN(p.created_at))::INT >= p_dias_atraso` |
+
+El del 022 ni siquiera compila: `MIN(MIN(...))` es un agregado anidado, error de Postgres.
+Alguien lo arregló mientras lo aplicaba y no volvió al archivo. Corregido en la **245**
+(2026-09-15) contra el cuerpo vivo de prod.
+
 ---
 
 ### 228 · Cuatro policies que dejaban leer de más
@@ -1211,6 +1226,41 @@ admin con *todas* las sucursales y la 4, "TACO POZO", está inactiva y sin asign
 después de aplicar sobre agosto 2026: los 10 vendedores de las dos sucursales dan el mismo
 número en las cuatro. El md5 del archivo del repo sin espacios es idéntico al `statements`
 del ledger: `6ad2a998987385aa001b409528a22330`.
+
+### 245 · El movimiento dice quién, y el día es de acá
+
+Mapea 1:1 al ledger. Seis correcciones mecánicas sobre cuerpos vivos, ninguna de criterio.
+Cierra #613, #633 y #639. Lo que hay que saber sin abrir el SQL:
+
+- **`registrar_ingreso_sucursal` era el último camino de stock sin etiquetar** (#613). Ahora
+  setea las cuatro GUCs (`app.stock_origen='ingreso_sucursal'`, `ref_tipo`, `ref_id`,
+  `user_id`) como la 240 hizo con `registrar_compra_completa`. `'ingreso_sucursal'` **no** va
+  a la lista blanca de `sincronizar_lotes_stock`: sube mercadería nueva, va a la bolsa sin
+  vencimiento. Con eso `auditoria_funciones_stock_sin_origen()` se queda **sin ninguna
+  excepción** y STK-F da 0 medido en prod.
+- **Los cuatro checks de `auditoria_integridad()` que seguían en `canal='app'`** (VENTA-E,
+  COSTO-B, COMIS-01, COMIS-05) pasan a `canal <> 'cambio'`, el filtro en negativo de la 241
+  (#633). Los cuatro se midieron con el filtro nuevo **antes** de aplicar y ninguno destapa
+  cohorte legacy, así que no hizo falta centinela: 0/0, 1/1, 2/2 y 0/0. COMIS-05 se amplió
+  porque se verificó el cuerpo vivo de `crear_pedido_completo_bot` y **sí** escribe
+  `creado_por` (`p_perfil_id`, el mismo valor que `usuario_id`); el hallazgo quedó escrito
+  al lado del check.
+- **`obtener_resumen_rendiciones`** suma `gastos_agg` al `UNION` de `fechas_activas`: un día
+  con gastos y sin cobros ni entregas ya no desaparece de la grilla (#639). `rendicion_gastos`
+  está vacía en prod, así que el ensayo de la migración lo prueba con una fila insertada y
+  borrada en la misma transacción.
+- **`reporte_vencimientos`** deja de usar `CURRENT_DATE` (UTC) y **las dos funciones de
+  auditoría del bot** dejan de comparar `DATE` crudo contra `timestamptz`: las tres cortan el
+  día en hora argentina, el mismo idioma de la 230/231/238 (#639). Las dos del bot siguen
+  siendo dos a propósito.
+- **Diez funciones** con `search_path` mutable reciben `ALTER FUNCTION ... SET search_path =
+  public`. El advisor `function_search_path_mutable` de Supabase desaparece por completo
+  (verificado después de aplicar).
+
+Aparte, sin migración: se corrigió `migrations/022_bot_ventas_compras_rpcs.sql` para que
+coincida con el ledger. Ver **§F**.
+
+---
 
 ## Mantenimiento
 

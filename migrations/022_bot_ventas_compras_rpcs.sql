@@ -123,8 +123,13 @@ BEGIN
       AND COALESCE(p.estado_pago, 'pendiente') <> 'pagado'
       AND COALESCE(p.estado, '') NOT IN ('cancelado', 'anulado')
     GROUP BY c.id, c.codigo, c.nombre_fantasia, c.razon_social
-    HAVING EXTRACT(DAY FROM now() - MIN(MIN(p.created_at))) >= p_dias_atraso
-        OR p_dias_atraso = 0
+    -- Alineación de la vista curada con el ledger (ver MANIFEST §F). El archivo
+    -- decía `EXTRACT(DAY FROM now() - MIN(MIN(p.created_at))) >= p_dias_atraso`,
+    -- que NO compila: MIN anidado dentro de MIN es un error de agregado. Lo que
+    -- se aplicó de verdad (ledger 20260428210038, y el cuerpo vivo de prod) es
+    -- esta línea.
+    HAVING p_dias_atraso = 0
+        OR EXTRACT(DAY FROM now() - MIN(p.created_at))::INT >= p_dias_atraso
   )
   SELECT json_build_object(
     'sucursal_id', p_sucursal_id,
