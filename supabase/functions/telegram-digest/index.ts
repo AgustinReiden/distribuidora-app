@@ -1,7 +1,10 @@
 // Edge Function: telegram-digest
 //
-// Disparada por pg_cron (configurado en migration 018) a las 10:00 UTC todos
-// los días, equivalente a 07:00 ART. Para cada admin vinculado al bot:
+// Disparada por .github/workflows/telegram-digest.yml (schedule 10:00 UTC =
+// 07:00 ART + workflow_dispatch). La migración 018 programaba el disparo con
+// pg_cron + pg_net, pero esas extensiones nunca estuvieron habilitadas en
+// prod y el digest no corrió ni una vez (#661) — ver el comentario de
+// cabecera de esa migración. Para cada admin vinculado al bot:
 //   * calcula métricas del día anterior (RPC bot_metricas_admin_dia),
 //   * pide a Gemini una narrativa ejecutiva,
 //   * envía el mensaje por Telegram,

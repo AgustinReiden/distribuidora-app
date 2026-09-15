@@ -1,0 +1,77 @@
+name: Digest ejecutivo Telegram
+
+# Dispara el digest ejecutivo diario para admins (edge function telegram-digest).
+#
+# POR QUÉ EXISTE
+# --------------
+# La migración 018 programaba el disparo con pg_cron + pg_net (SELECT
+# cron.schedule(...) a las 10:00 UTC). Esas dos extensiones nunca estuvieron
+# habilitadas en prod, así que el bloque quedó como no-op desde el día uno: el
+# digest jamás corrió, ni una vez (`bot_digests_enviados` vacía). Ver #661.
+#
+# Decisión: no instalar pg_cron. Este workflow reemplaza el cron de Postgres
+# usando infraestructura que ya existe y que sí falla visible — como
+# `backup.yml` e `integridad.yml`.
+#
+# AUTENTICACIÓN
+# --------------
+# La edge function valida `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`
+# con comparación en tiempo constante (ver supabase/functions/telegram-digest/
+# index.ts) — no hace falta un secret nuevo, es la misma key que ya usan
+# `integridad.yml` y que el pg_cron original mandaba via
+# app.settings.service_role_key.
+#
+# CÓMO DETECTAR QUE DEJÓ DE CORRER
+# ---------------------------------
+#   gh run list --workflow=telegram-digest.yml
+# Un run rojo o la ausencia de runs en el horario esperado (07:00 ART) es la
+# señal. También se puede confirmar contra la tabla `bot_digests_enviados`
+# (1 fila por admin × fecha si corrió bien).
+
+on:
+  schedule:
+    # 10:00 UTC = 07:00 ART (Argentina, UTC-3 sin DST). Mismo horario que
+    # documentaba el cron.schedule() de la migración 018.
+    - cron: '0 10 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  disparar-digest:
+    name: POST a telegram-digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Disparar digest
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::Falta el secret SUPABASE_SERVICE_ROLE_KEY. Cargalo en Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            --data '{"source":"github-actions"}' \
+            https://hmuchlzmuqqxcldbzkgc.supabase.co/functions/v1/telegram-digest \
+            -o response.json
+          echo "Respuesta:"
+          cat response.json
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "### Digest ejecutivo Telegram"
+            echo "- Resultado: **${{ job.status }}**"
+            if [ -f response.json ]; then
+              echo ""
+              echo '```json'
+              cat response.json
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
