@@ -137,8 +137,8 @@ funcional** y no se renombran los archivos: renombrarlos los desalinearía del l
 real lo da `version` y está en la sección A: en los dos casos el archivo de `main` quedó
 cronológicamente **fuera** del bloque 139–147 (uno antes, otro entre la 144 y la 145).
 
-**La próxima migración es la 242.** El ledger de prod llega hasta
-`241_la_venta_del_vendedor_tiene_una_sola_definicion`.
+**La próxima migración es la 244.** El ledger de prod llega hasta
+`243_un_pedido_cerrado_no_se_reabre_ni_se_escribe`.
 Confirmá el número contra las tres fuentes justo antes de aplicar: el número se
 reserva **aplicando**, no escribiendo el archivo.
 
@@ -160,7 +160,7 @@ Y una sexta vez, de otra forma, con la 239: el archivo se escribió el 2026-09-1
 después el 228 ya era de otra migración y la cadena iba por la 238, así que hubo que
 renumerarlo al aplicarlo. Moraleja adicional: un archivo que espera en `main` no reserva
 nada. Si no lo vas a aplicar ahora, no le pongas número todavía.
-Última actualización: 241, el 2026-09-15.)
+Última actualización: 243, el 2026-09-15.)
 
 ### 223–225 · Vencimientos por lote
 
