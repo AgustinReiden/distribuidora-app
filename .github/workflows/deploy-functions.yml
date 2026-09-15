@@ -33,7 +33,11 @@ name: Deploy Edge Functions
 # el `updated_at` de cada función en `list_edge_functions` (MCP de Supabase,
 # proyecto hmuchlzmuqqxcldbzkgc). Si el segundo es más viejo que el último push
 # a `main` que tocó `supabase/functions/`, el workflow no corrió o falló y
-# nadie se enteró — como pasó del 26/08 al 09/09.
+# nadie se enteró — como pasó del 26/08 al 09/09, y de nuevo el 14/09 y el
+# 15/09 cuando `supabase/setup-cli@v1` con `version: latest` empezó a fallar
+# con "Failed to resolve latest Supabase CLI release: rate limit exceeded"
+# (resuelve el último release contra la API de GitHub sin token). Por eso la
+# versión de la CLI está fijada más abajo en vez de "latest".
 
 on:
   push:
@@ -86,7 +90,12 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Fijo, no "latest": ese input hace que la action resuelva el
+          # último release contra la API de GitHub sin token, y sin token
+          # pega el rate limit ("Failed to resolve latest Supabase CLI
+          # release: rate limit exceeded") — pasó dos veces el 14/09 y el
+          # 15/09. Actualizar a mano cuando haga falta una CLI más nueva.
+          version: 2.117.0
 
       - name: Deploy
         env:
