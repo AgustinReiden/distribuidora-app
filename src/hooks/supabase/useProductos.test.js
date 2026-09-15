@@ -356,33 +356,6 @@ describe('useProductos', () => {
     })
   })
 
-  describe('restaurarStock', () => {
-    it('restaura stock con RPC exitoso', async () => {
-      supabase.rpc.mockResolvedValue({
-        data: { success: true },
-        error: null
-      })
-
-      const productosChain = createMockChain([mockProducto1])
-      supabase.from.mockReturnValue(productosChain)
-
-      const { result } = renderHook(() => useProductos())
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false)
-      })
-
-      const stockInicial = result.current.productos[0].stock
-
-      await act(async () => {
-        await result.current.restaurarStock([{ productoId: 'prod-1', cantidad: 5 }])
-      })
-
-      expect(result.current.productos[0].stock).toBe(stockInicial + 5)
-      expect(supabase.rpc).toHaveBeenCalledWith('restaurar_stock_atomico', expect.any(Object))
-    })
-  })
-
   describe('refetch', () => {
     it('permite refrescar productos manualmente', async () => {
       let callCount = 0

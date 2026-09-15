@@ -15,7 +15,6 @@ export {
   useActualizarProductoMutation,
   useEliminarProductoMutation,
   useDescontarStockMutation,
-  useRestaurarStockMutation,
   useActualizarPreciosMasivoMutation,
   useActualizarMinimoVentaMasivoMutation,
 } from './useProductosQuery'
