@@ -7,7 +7,12 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { ClienteDB } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
-import { mensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente'
+import {
+  cambiaIdentidadDuplicado,
+  mensajeDuplicado,
+  type IdentidadDuplicado,
+  type VeredictoDuplicadoRPC,
+} from '../../utils/duplicadoCliente'
 
 // Query keys
 export const clientesKeys = {
@@ -349,31 +354,52 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
     payload.zona_id = payload.zona_id ? payload.zona_id : null
   }
 
-  // Mismo guard que createCliente, para la edición. Sólo dispara si el patch
-  // toca alguno de los campos que la RPC compara -- moverlo a la puerta de
-  // otro cliente, o cambiarle la razón social/fantasía, tiene que pasar por
-  // la misma última línea de defensa que el alta. ModalCliente ya lo llama
+  // Mismo guard que createCliente, para la edición. ModalCliente ya lo llama
   // con excluir_id antes de guardar, pero cualquier otra mutation futura que
   // edite estos campos sin pasar por el modal entraría sin chequeo.
+  //
+  // Dispara si la edición CAMBIA alguno de los campos que la RPC compara, no si
+  // el patch los menciona: el patch que arma ClientesContainer los manda
+  // siempre, cambien o no, así que "está en el payload" daba true en TODA
+  // edición y el guard opinaba sobre vecinos con los que el cliente ya convivía.
+  // Ver `cambiaIdentidadDuplicado`.
   const tocaCamposDuplicado = ['direccion', 'latitud', 'longitud', 'razon_social', 'nombre_fantasia']
     .some((campo) => campo in payload)
   if (tocaCamposDuplicado) {
-    const veredicto = await verificarDuplicadoCliente({
-      latitud: payload.latitud ?? null,
-      longitud: payload.longitud ?? null,
-      direccion: payload.direccion ?? null,
-      razon_social: payload.razon_social ?? null,
-      nombre_fantasia: payload.nombre_fantasia ?? duplicado_nombre_fantasia ?? null,
-      excluir_id: id,
-    })
-
-    if (veredicto.bloquea) {
-      throw new Error(mensajeDuplicado(veredicto).mensaje)
+    // Lo que hay hoy en la base, para poder comparar. Si no se pudo leer, se
+    // verifica igual: fail-closed, un guard ciego no aprueba.
+    const actual = await leerIdentidadCliente(id)
+    // El "después" efectivo: lo que trae el patch, y lo de la base para lo que
+    // el patch no toca. Un patch acotado que sólo manda la dirección no deja al
+    // nombre en null -- eso evaluaba media identidad contra la otra media.
+    const despues: IdentidadDuplicado = {
+      latitud: 'latitud' in payload ? payload.latitud ?? null : actual?.latitud ?? null,
+      longitud: 'longitud' in payload ? payload.longitud ?? null : actual?.longitud ?? null,
+      direccion: 'direccion' in payload ? payload.direccion ?? null : actual?.direccion ?? null,
+      razon_social: 'razon_social' in payload ? payload.razon_social ?? null : actual?.razon_social ?? null,
+      nombre_fantasia: 'nombre_fantasia' in payload
+        ? payload.nombre_fantasia ?? null
+        : duplicado_nombre_fantasia ?? actual?.nombre_fantasia ?? null,
     }
-    if (veredicto.avisa && !cliente.duplicado_confirmado) {
-      throw new Error(
-        `${mensajeDuplicado(veredicto).mensaje} No se guardó nada: volvé a guardar y confirmá.`
-      )
+
+    if (!actual || cambiaIdentidadDuplicado(actual, despues)) {
+      const veredicto = await verificarDuplicadoCliente({
+        latitud: despues.latitud ?? null,
+        longitud: despues.longitud ?? null,
+        direccion: despues.direccion ?? null,
+        razon_social: despues.razon_social ?? null,
+        nombre_fantasia: despues.nombre_fantasia ?? null,
+        excluir_id: id,
+      })
+
+      if (veredicto.bloquea) {
+        throw new Error(mensajeDuplicado(veredicto).mensaje)
+      }
+      if (veredicto.avisa && !cliente.duplicado_confirmado) {
+        throw new Error(
+          `${mensajeDuplicado(veredicto).mensaje} No se guardó nada: volvé a guardar y confirmá.`
+        )
+      }
     }
   }
 
@@ -432,6 +458,31 @@ async function deleteCliente(id: string): Promise<void> {
   }
 
   throw error
+}
+
+/**
+ * Los cinco campos que el guard compara, como están HOY en la base.
+ *
+ * Existe para que la edición pueda preguntarse "¿esto cambia algo?" antes de
+ * llamar al guard. Sin la foto previa, la mutation sólo puede mirar qué campos
+ * vienen en el patch -- y el patch los trae siempre.
+ *
+ * Devuelve `null` si no se pudo leer (error, o la RLS tapa la fila). El caller
+ * verifica igual en ese caso: no saber si cambió no es lo mismo que saber que
+ * no cambió.
+ */
+async function leerIdentidadCliente(id: string): Promise<IdentidadDuplicado | null> {
+  try {
+    const { data, error } = await supabase
+      .from('clientes')
+      .select('razon_social, nombre_fantasia, direccion, latitud, longitud')
+      .eq('id', id)
+      .maybeSingle()
+    if (error || !data) return null
+    return data as IdentidadDuplicado
+  } catch {
+    return null
+  }
 }
 
 /**

@@ -84,6 +84,13 @@ function veredicto(over: Record<string, unknown> = {}): Record<string, unknown> 
   }
 }
 
+/**
+ * La fila que `updateCliente` lee para saber si la edición CAMBIA la identidad.
+ * Los tests que la dejan en null prueban el fail-closed: sin foto previa, se
+ * verifica igual.
+ */
+let identidadEnLaBase: Record<string, unknown> | null = null
+
 function montarSupabase(): void {
   from.mockImplementation((tabla: string) => {
     const builder: Record<string, unknown> = {}
@@ -94,6 +101,7 @@ function montarSupabase(): void {
       builder.eq = () => builder
       builder.limit = () => Promise.resolve({ data: [], error: null })
       builder.single = () => Promise.resolve({ data: { id: '99' }, error: null })
+      builder.maybeSingle = () => Promise.resolve({ data: identidadEnLaBase, error: null })
       return builder
     }
     builder.delete = () => builder
@@ -115,6 +123,7 @@ const crear = async (datos: Record<string, unknown> = CLIENTE_NUEVO) => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  identidadEnLaBase = null
   montarSupabase()
 })
 
@@ -359,5 +368,94 @@ describe('patch restringido de preventista: confirmación en un solo intento (#6
     rpc.mockResolvedValue({ data: veredicto(), error: null })
     await editar({ direccion: 'Otra calle 200', duplicado_nombre_fantasia: 'Kiosco Nuevo' })
     expect(Object.keys(updateSpy.mock.calls[0][0] as object)).not.toContain('duplicado_nombre_fantasia')
+  })
+})
+
+describe('editar sin tocar la identidad no vuelve a preguntar (#316: de un preventista a otro)', () => {
+  // El bug: `tocaCamposDuplicado` miraba si el campo venía EN EL PATCH, y el
+  // patch de ClientesContainer los manda todos, cambien o no. Reasignar el
+  // preventista del cliente #316 disparaba "Hay un cliente con un nombre
+  // parecido" contra un vecino con el que ya convivía, y un vecino que cayera
+  // en una regla de bloqueo lo habría dejado imposible de editar.
+  const EN_LA_BASE = {
+    razon_social: 'PUENTE CRISTIAN',
+    nombre_fantasia: 'CHICLANA 1895',
+    direccion: 'Chiclana 1895, T4000 San Miguel de Tucumán, Tucumán, Argentina',
+    latitud: -26.8355312,
+    longitud: -65.2223494,
+  }
+
+  const editar = async (data: Record<string, unknown>) => {
+    const { result } = renderHook(() => useActualizarClienteMutation(), { wrapper })
+    return result.current.mutateAsync({ id: '316', data } as never)
+  }
+
+  beforeEach(() => {
+    identidadEnLaBase = { ...EN_LA_BASE }
+    // Si el guard llegara a correr, avisaría: es lo que el test descarta.
+    rpc.mockResolvedValue({
+      data: veredicto({
+        avisa: true,
+        motivo: 'nombre_subconjunto',
+        cliente_visible: { id: 18, nombre: 'Cristian', activo: true },
+      }),
+      error: null,
+    })
+  })
+
+  it('no llama al guard cuando el patch repite los valores que ya están en la base', async () => {
+    await editar({ ...EN_LA_BASE, preventista_id: 'victor', telefono: '3811234567' })
+    expect(rpc).not.toHaveBeenCalled()
+    expect(updateSpy).toHaveBeenCalled()
+  })
+
+  // Lo más grave del bug: un BLOQUEO no se confirma, así que los 133 clientes de
+  // prod con un vecino de nombre idéntico o en la misma puerta no se podían
+  // editar en absoluto -- ni el teléfono, ni el horario, ni el preventista.
+  it('un bloqueo por un vecino preexistente tampoco frena una edición que no muda nada', async () => {
+    rpc.mockResolvedValue({ data: veredicto({ bloquea: true, motivo: 'nombre_igual' }), error: null })
+    await editar({ ...EN_LA_BASE, telefono: '3811234567' })
+    expect(rpc).not.toHaveBeenCalled()
+    expect(updateSpy).toHaveBeenCalled()
+  })
+
+  it('tampoco ante un cambio cosmético del nombre o la dirección', async () => {
+    await editar({ ...EN_LA_BASE, razon_social: '  puente   cristián ', direccion: 'CHICLANA 1895, Tucumán' })
+    expect(rpc).not.toHaveBeenCalled()
+    expect(updateSpy).toHaveBeenCalled()
+  })
+
+  it('pero sí en cuanto la edición lo muda de puerta', async () => {
+    await expect(editar({ ...EN_LA_BASE, direccion: 'San Martín 100, Tucumán' }))
+      .rejects.toThrow(/volvé a guardar y confirmá/)
+    expect(rpc).toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  it('y sí en cuanto le cambia el nombre', async () => {
+    await expect(editar({ ...EN_LA_BASE, razon_social: 'PUENTE CRISTIAN HIJO' }))
+      .rejects.toThrow(/volvé a guardar y confirmá/)
+    expect(rpc).toHaveBeenCalled()
+  })
+
+  // Fail-closed: no poder leer la foto previa no es saber que no cambió.
+  it('si no puede leer lo que hay en la base, verifica igual', async () => {
+    identidadEnLaBase = null
+    await expect(editar({ ...EN_LA_BASE })).rejects.toThrow(/volvé a guardar y confirmá/)
+    expect(rpc).toHaveBeenCalled()
+  })
+
+  // El patch acotado del preventista no manda nombre_fantasia ni coordenadas:
+  // sin completarlos con lo que hay en la base, el "después" quedaba a medias y
+  // toda edición parecía un cambio de identidad.
+  it('completa con la base los campos que el patch acotado no manda', async () => {
+    await editar({
+      razon_social: EN_LA_BASE.razon_social,
+      direccion: EN_LA_BASE.direccion,
+      duplicado_nombre_fantasia: EN_LA_BASE.nombre_fantasia,
+      telefono: '3811234567',
+    })
+    expect(rpc).not.toHaveBeenCalled()
+    expect(updateSpy).toHaveBeenCalled()
   })
 })

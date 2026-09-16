@@ -295,6 +295,78 @@ export function clasificarDuplicado(
 }
 
 // ---------------------------------------------------------------------------
+// El guard rige el alta y la mudanza, no cada edición
+// ---------------------------------------------------------------------------
+
+/**
+ * Los cinco campos que el criterio mira. Todo lo demás de un cliente
+ * —preventista, teléfono, horarios, crédito, zona— es invisible para el
+ * veredicto.
+ */
+export interface IdentidadDuplicado {
+  razon_social?: string | null
+  nombre_fantasia?: string | null
+  direccion?: string | null
+  latitud?: number | null
+  longitud?: number | null
+}
+
+/** Coordenada comparable: `undefined`, `null` y un número basura son lo mismo. */
+function coordenada(v: number | string | null | undefined): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Los nombres de un cliente como los ve el criterio: un CONJUNTO, no dos
+ * campos. `relacionEntre` cruza los cuatro pares y se queda con el más fuerte,
+ * así que el veredicto sólo depende de qué nombres hay, no de en qué casillero
+ * está cada uno. Intercambiar razón social y fantasía, o rellenar una razón
+ * social vacía con la fantasía —que es lo que hace el guardado—, no mueve nada.
+ */
+function nombresComparables(identidad: IdentidadDuplicado): string {
+  const nombres = [identidad.razon_social, identidad.nombre_fantasia]
+    .map(normalizarNombre)
+    .filter(n => n !== '')
+  return Array.from(new Set(nombres)).sort().join('|')
+}
+
+/**
+ * ¿La edición cambia algo que el criterio pueda ver?
+ *
+ * El guard rige el ALTA y la MUDANZA, no cada edición. Un cliente que convive
+ * con un vecino de nombre parecido ya convivía con él antes de que le tocaras
+ * el preventista: preguntar de nuevo ahí no evita ningún duplicado. Es la misma
+ * forma que la compra mínima (migs 204/205): la política se aplica al alta, no
+ * retroactivamente. La regla 1 ya lo decía de sí misma en la mig 250 —"la clave
+ * ya se repite en 19 grupos de la base, la regla rige el alta"—, pero sólo el
+ * alta la respetaba.
+ *
+ * Y no era sólo ruido: medido sobre prod, 375 clientes tenían al menos un vecino
+ * de nombre solapado —el aviso saltaba en CADA edición— y 133 caían en una regla
+ * de bloqueo (116 por nombre idéntico, 20 por compartir puerta). Esos 133 no se
+ * podían editar en absoluto: ni el teléfono, ni el horario, ni el preventista.
+ *
+ * Compara por lo que el criterio realmente mira —los nombres normalizados, la
+ * clave de dirección con altura y las coordenadas—, no por el texto crudo:
+ * escribir "CHICLANA 1895," donde decía "Chiclana 1895" no puede cambiar
+ * ningún veredicto. Una dirección sin altura no entra al criterio, así que
+ * cambiarla por otra sin altura tampoco cuenta.
+ */
+export function cambiaIdentidadDuplicado(
+  antes: IdentidadDuplicado,
+  despues: IdentidadDuplicado,
+): boolean {
+  return (
+    nombresComparables(antes) !== nombresComparables(despues) ||
+    claveDireccionConAltura(antes.direccion) !== claveDireccionConAltura(despues.direccion) ||
+    coordenada(antes.latitud) !== coordenada(despues.latitud) ||
+    coordenada(antes.longitud) !== coordenada(despues.longitud)
+  )
+}
+
+// ---------------------------------------------------------------------------
 // El veredicto tal como lo devuelve la RPC, y su texto
 // ---------------------------------------------------------------------------
 
@@ -312,6 +384,18 @@ export interface VeredictoDuplicadoRPC {
   motivo: MotivoDuplicado | null
   distancia_m: number | null
   cliente_visible: { id: number | string; nombre: string; activo: boolean } | null
+}
+
+/**
+ * "No hay nada que ver acá". Lo devuelve el caller que se ahorra la RPC porque
+ * la edición no toca nada que el criterio mire (`cambiaIdentidadDuplicado`).
+ */
+export const SIN_DUPLICADO_RPC: VeredictoDuplicadoRPC = {
+  bloquea: false,
+  avisa: false,
+  motivo: null,
+  distancia_m: null,
+  cliente_visible: null,
 }
 
 export interface MensajeDuplicado {
