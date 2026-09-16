@@ -132,16 +132,23 @@ describe('el alta siempre pasa por el guard', () => {
     rpc.mockResolvedValue({ data: veredicto(), error: null })
   })
 
-  it('llama a verificar_duplicado_cliente con los cinco campos del criterio', async () => {
+  it('llama a verificar_duplicado_cliente con los tres campos del criterio', async () => {
     await crear()
     expect(rpc).toHaveBeenCalledWith('verificar_duplicado_cliente', {
       p_latitud: CLIENTE_NUEVO.latitud,
       p_longitud: CLIENTE_NUEVO.longitud,
       p_direccion: CLIENTE_NUEVO.direccion,
-      p_razon_social: CLIENTE_NUEVO.razon_social,
-      p_nombre_fantasia: CLIENTE_NUEVO.nombre_fantasia,
       p_excluir_id: null,
     })
+  })
+
+  // El criterio mira donde esta el cliente, no como se llama (mig 260). Mandar
+  // el nombre a la RPC seria la mitad de volver a la regla que se saco.
+  it('no le manda el nombre a la RPC', async () => {
+    await crear()
+    const args = Object.keys(rpc.mock.calls[0][1] as object)
+    expect(args).not.toContain('p_razon_social')
+    expect(args).not.toContain('p_nombre_fantasia')
   })
 
   it('sin veredicto en contra, crea el cliente', async () => {
@@ -336,11 +343,7 @@ describe('la edición pasa por el mismo guard cuando toca los campos del criteri
   })
 })
 
-describe('patch restringido de preventista: confirmación en un solo intento (#680/#681)', () => {
-  // El patch acotado que ClientesContainer arma para edicionRestringida no
-  // manda nombre_fantasia (el preventista no lo puede editar), pero
-  // ModalCliente sí lo usó para armar su veredicto. duplicado_nombre_fantasia
-  // es la forma en que la mutation ve ese mismo dato sin persistirlo.
+describe('patch restringido de preventista: confirmacion en un solo intento (#680/#681)', () => {
   const editar = async (data: Record<string, unknown>) => {
     const { result } = renderHook(() => useActualizarClienteMutation(), { wrapper })
     return result.current.mutateAsync({ id: '77', data } as never)
@@ -348,25 +351,18 @@ describe('patch restringido de preventista: confirmación en un solo intento (#6
 
   it('con duplicado_confirmado en el patch restringido, guarda en un solo intento', async () => {
     rpc.mockResolvedValue({ data: veredicto({ avisa: true, motivo: 'distancia', distancia_m: 5 }), error: null })
-    await editar({
-      direccion: 'Otra calle 200',
-      duplicado_confirmado: true,
-      duplicado_nombre_fantasia: 'Kiosco Nuevo',
-    })
+    await editar({ direccion: 'Otra calle 200', duplicado_confirmado: true })
     expect(updateSpy).toHaveBeenCalled()
   })
 
-  it('usa duplicado_nombre_fantasia para el veredicto cuando nombre_fantasia no viaja en el patch', async () => {
+  // `duplicado_nombre_fantasia` quedo sin uso con la mig 260, pero se sigue
+  // DESCARTANDO a proposito: el container es un chunk lazy y un bundle viejo
+  // cacheado en el PWA lo puede seguir mandando. Si deja de descartarse viaja
+  // como columna y PostgREST rechaza el UPDATE entero.
+  it('un patch viejo que todavia manda duplicado_nombre_fantasia guarda igual', async () => {
     rpc.mockResolvedValue({ data: veredicto(), error: null })
     await editar({ direccion: 'Otra calle 200', duplicado_nombre_fantasia: 'Kiosco Nuevo' })
-    expect(rpc).toHaveBeenCalledWith('verificar_duplicado_cliente', expect.objectContaining({
-      p_nombre_fantasia: 'Kiosco Nuevo',
-    }))
-  })
-
-  it('duplicado_nombre_fantasia no viaja en el UPDATE', async () => {
-    rpc.mockResolvedValue({ data: veredicto(), error: null })
-    await editar({ direccion: 'Otra calle 200', duplicado_nombre_fantasia: 'Kiosco Nuevo' })
+    expect(updateSpy).toHaveBeenCalled()
     expect(Object.keys(updateSpy.mock.calls[0][0] as object)).not.toContain('duplicado_nombre_fantasia')
   })
 })
@@ -378,9 +374,7 @@ describe('editar sin tocar la identidad no vuelve a preguntar (#316: de un preve
   // parecido" contra un vecino con el que ya convivía, y un vecino que cayera
   // en una regla de bloqueo lo habría dejado imposible de editar.
   const EN_LA_BASE = {
-    razon_social: 'PUENTE CRISTIAN',
-    nombre_fantasia: 'CHICLANA 1895',
-    direccion: 'Chiclana 1895, T4000 San Miguel de Tucumán, Tucumán, Argentina',
+    direccion: 'Chiclana 1895, T4000 San Miguel de Tucuman, Tucuman, Argentina',
     latitud: -26.8355312,
     longitud: -65.2223494,
   }
@@ -419,8 +413,8 @@ describe('editar sin tocar la identidad no vuelve a preguntar (#316: de un preve
     expect(updateSpy).toHaveBeenCalled()
   })
 
-  it('tampoco ante un cambio cosmético del nombre o la dirección', async () => {
-    await editar({ ...EN_LA_BASE, razon_social: '  puente   cristián ', direccion: 'CHICLANA 1895, Tucumán' })
+  it('tampoco ante un cambio cosmético de la dirección', async () => {
+    await editar({ ...EN_LA_BASE, direccion: 'CHICLANA 1895, Tucumán' })
     expect(rpc).not.toHaveBeenCalled()
     expect(updateSpy).toHaveBeenCalled()
   })
@@ -432,10 +426,12 @@ describe('editar sin tocar la identidad no vuelve a preguntar (#316: de un preve
     expect(updateSpy).not.toHaveBeenCalled()
   })
 
-  it('y sí en cuanto le cambia el nombre', async () => {
-    await expect(editar({ ...EN_LA_BASE, razon_social: 'PUENTE CRISTIAN HIJO' }))
-      .rejects.toThrow(/volvé a guardar y confirmá/)
-    expect(rpc).toHaveBeenCalled()
+  // Desde la mig 260 el nombre no entra al criterio: renombrar al cliente no
+  // consulta nada, ni siquiera cuando el nombre queda igual al de un vecino.
+  it('renombrarlo NO llama al guard', async () => {
+    await editar({ ...EN_LA_BASE, razon_social: 'Cristian', nombre_fantasia: 'Cristian' })
+    expect(rpc).not.toHaveBeenCalled()
+    expect(updateSpy).toHaveBeenCalled()
   })
 
   // Fail-closed: no poder leer la foto previa no es saber que no cambió.
@@ -449,12 +445,7 @@ describe('editar sin tocar la identidad no vuelve a preguntar (#316: de un preve
   // sin completarlos con lo que hay en la base, el "después" quedaba a medias y
   // toda edición parecía un cambio de identidad.
   it('completa con la base los campos que el patch acotado no manda', async () => {
-    await editar({
-      razon_social: EN_LA_BASE.razon_social,
-      direccion: EN_LA_BASE.direccion,
-      duplicado_nombre_fantasia: EN_LA_BASE.nombre_fantasia,
-      telefono: '3811234567',
-    })
+    await editar({ direccion: EN_LA_BASE.direccion, telefono: '3811234567' })
     expect(rpc).not.toHaveBeenCalled()
     expect(updateSpy).toHaveBeenCalled()
   })

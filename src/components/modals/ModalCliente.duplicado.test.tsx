@@ -107,19 +107,20 @@ describe('ModalCliente — guard de duplicados', () => {
   it('cancelar el aviso no guarda nada', async () => {
     onVerificarDuplicado.mockResolvedValue(veredicto({
       avisa: true,
-      motivo: 'nombre_subconjunto',
-      cliente_visible: { id: 22, nombre: 'Kiosco', activo: true },
+      motivo: 'distancia',
+      distancia_m: 8.4,
+      cliente_visible: { id: 22, codigo: 14, nombre: 'Kiosco', activo: true },
     }))
     renderModal()
     await completarYGuardar()
 
     // El "Cancelar" del confirm, no el del formulario: el confirm se monta
     // después, así que es el último del documento.
-    expect(await screen.findByText(/nombre parecido/i)).toBeVisible()
+    expect(await screen.findByText(/cliente muy cerca/i)).toBeVisible()
     const cancelar = screen.getAllByRole('button', { name: /^cancelar$/i })
     fireEvent.click(cancelar[cancelar.length - 1])
 
-    await waitFor(() => expect(screen.queryByText(/nombre parecido/i)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/cliente muy cerca/i)).not.toBeInTheDocument())
     expect(onSave).not.toHaveBeenCalled()
   })
 

@@ -23,8 +23,11 @@
  * puede bloquear: se avisa.
  *
  * ---------------------------------------------------------------------------
- * Las tres reglas
+ * Las dos reglas
  * ---------------------------------------------------------------------------
+ * Un duplicado es un LUGAR cargado dos veces. Las dos reglas miran dónde está
+ * el cliente, nunca cómo se llama.
+ *
  * 1. DIRECCIÓN con altura → bloqueo duro. La clave normalizada del primer
  *    segmento de la dirección, aplicada sólo si tiene al menos un dígito. Sin
  *    exigir el dígito, los barrios sin numeración se bloquearían entre sí
@@ -33,13 +36,22 @@
  * 2. DISTANCIA real en metros (haversine, no un box en grados, que se deforma
  *    con la latitud). Menos de 1 m es "el mismo punto" → bloqueo duro. Entre 1
  *    y 30 m → aviso con confirmación explícita. Más de 30 → nada.
- * 3. NOMBRE por tokens sin acentos, contra razón social Y nombre de fantasía.
- *    Igualdad exacta normalizada → bloqueo. Un conjunto de tokens contenido en
- *    el otro ("ricardo" dentro de "lopez ricardo") → aviso, nunca bloqueo:
- *    "Kiosco" está dentro de "Kiosco Juan" y son dos comercios.
  *
- * Los bloqueos tienen prioridad sobre los avisos, y entre sí van en el orden de
- * arriba.
+ * Los bloqueos tienen prioridad sobre los avisos, y entre sí van en ese orden.
+ *
+ * ---------------------------------------------------------------------------
+ * Por qué NO hay una regla por nombre
+ * ---------------------------------------------------------------------------
+ * La hubo, de la mig 250 a la 260: igualdad normalizada → bloqueo, tokens de
+ * uno contenidos en el otro → aviso. Se sacó porque en esta base el nombre no
+ * distingue lugares. Medido sobre prod antes de sacarla: 375 de 730 clientes
+ * tenían al menos un vecino de nombre solapado y 116 uno de nombre IDÉNTICO
+ * —hay cuatro comercios distintos llamados "Cristian"—. La regla no marcaba
+ * duplicados: marcaba homónimos, que en un padrón de comercios de barrio son
+ * la norma y no la excepción.
+ *
+ * Un nombre repetido no es un duplicado; dos altas de la misma puerta sí. Si
+ * alguna vez vuelve, que sea con evidencia de que separa los dos casos.
  */
 
 import { haversineMeters } from './geo'
@@ -83,42 +95,6 @@ export function claveDireccionConAltura(direccion: string | null | undefined): s
   return clave
 }
 
-/** Nombre normalizado: sin acentos, minúsculas, sin puntuación, sin espacios de más. */
-export function normalizarNombre(nombre: string | null | undefined): string {
-  if (!nombre) return ''
-  return sinAcentos(nombre)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-/** Tokens del nombre normalizado, sin repetidos. */
-export function tokensNombre(nombre: string | null | undefined): string[] {
-  const norm = normalizarNombre(nombre)
-  if (!norm) return []
-  return Array.from(new Set(norm.split(' ')))
-}
-
-export type RelacionNombre = 'igual' | 'subconjunto' | 'distinto'
-
-/**
- * Compara dos nombres. `igual` = misma cadena normalizada (bloqueo).
- * `subconjunto` = todos los tokens de uno están en el otro (aviso).
- */
-export function compararNombres(a: string | null | undefined, b: string | null | undefined): RelacionNombre {
-  const na = normalizarNombre(a)
-  const nb = normalizarNombre(b)
-  if (!na || !nb) return 'distinto'
-  if (na === nb) return 'igual'
-
-  const ta = tokensNombre(na)
-  const tb = tokensNombre(nb)
-  const contiene = (grande: string[], chico: string[]): boolean =>
-    chico.length > 0 && chico.every(t => grande.includes(t))
-  if (contiene(tb, ta) || contiene(ta, tb)) return 'subconjunto'
-  return 'distinto'
-}
-
 /**
  * Semiejes en grados de un box que cubre `metros` alrededor de `lat`.
  *
@@ -136,8 +112,6 @@ export function boxParaRadio(lat: number, metros: number): { dlat: number; dlng:
 
 export interface CandidatoDuplicado {
   id: string
-  razon_social?: string | null
-  nombre_fantasia?: string | null
   direccion?: string | null
   latitud?: number | null
   longitud?: number | null
@@ -145,19 +119,12 @@ export interface CandidatoDuplicado {
 }
 
 export interface EntradaDuplicado {
-  razon_social?: string | null
-  nombre_fantasia?: string | null
   direccion?: string | null
   latitud?: number | null
   longitud?: number | null
 }
 
-export type MotivoDuplicado =
-  | 'direccion'
-  | 'punto'
-  | 'nombre_igual'
-  | 'distancia'
-  | 'nombre_subconjunto'
+export type MotivoDuplicado = 'direccion' | 'punto' | 'distancia'
 
 export interface VeredictoDuplicado {
   bloquea: boolean
@@ -188,25 +155,6 @@ function distanciaA(entrada: EntradaDuplicado, c: CandidatoDuplicado): number | 
     { lat: entrada.latitud, lng: entrada.longitud },
     { lat: c.latitud, lng: c.longitud },
   )
-}
-
-/**
- * Compara razón social y nombre de fantasía de los dos lados, todos contra
- * todos: el 938 tenía "Ricardo" de razón social y "López Ricardo " de fantasía,
- * y el 382 "Lopez Ricardo" de razón social. El par que bloquea es cruzado.
- */
-function relacionEntre(entrada: EntradaDuplicado, c: CandidatoDuplicado): RelacionNombre {
-  const izq = [entrada.razon_social, entrada.nombre_fantasia]
-  const der = [c.razon_social, c.nombre_fantasia]
-  let mejor: RelacionNombre = 'distinto'
-  for (const a of izq) {
-    for (const b of der) {
-      const r = compararNombres(a, b)
-      if (r === 'igual') return 'igual'
-      if (r === 'subconjunto') mejor = 'subconjunto'
-    }
-  }
-  return mejor
 }
 
 /**
@@ -254,20 +202,7 @@ export function clasificarDuplicado(
     }
   }
 
-  // --- Bloqueo 3: mismo nombre exacto ----------------------------------
-  const porNombre = candidatos.find(c => relacionEntre(entrada, c) === 'igual')
-  if (porNombre) {
-    const d = distanciaA(entrada, porNombre)
-    return {
-      bloquea: true,
-      avisa: false,
-      motivo: 'nombre_igual',
-      distancia_m: d == null ? null : redondearMetros(d),
-      candidato: porNombre,
-    }
-  }
-
-  // --- Aviso 1: hay alguien cerca --------------------------------------
+  // --- Aviso: hay alguien cerca ----------------------------------------
   if (mismoPunto && mismoPunto.d <= DUPLICADO_AVISO_METROS) {
     return {
       bloquea: false,
@@ -275,19 +210,6 @@ export function clasificarDuplicado(
       motivo: 'distancia',
       distancia_m: redondearMetros(mismoPunto.d),
       candidato: mismoPunto.c,
-    }
-  }
-
-  // --- Aviso 2: un nombre contenido en el otro -------------------------
-  const porTokens = candidatos.find(c => relacionEntre(entrada, c) === 'subconjunto')
-  if (porTokens) {
-    const d = distanciaA(entrada, porTokens)
-    return {
-      bloquea: false,
-      avisa: true,
-      motivo: 'nombre_subconjunto',
-      distancia_m: d == null ? null : redondearMetros(d),
-      candidato: porTokens,
     }
   }
 
@@ -299,13 +221,10 @@ export function clasificarDuplicado(
 // ---------------------------------------------------------------------------
 
 /**
- * Los cinco campos que el criterio mira. Todo lo demás de un cliente
- * —preventista, teléfono, horarios, crédito, zona— es invisible para el
- * veredicto.
+ * Los tres campos que el criterio mira: dónde está el cliente. Todo lo demás
+ * —el nombre incluido, desde la mig 260— es invisible para el veredicto.
  */
 export interface IdentidadDuplicado {
-  razon_social?: string | null
-  nombre_fantasia?: string | null
   direccion?: string | null
   latitud?: number | null
   longitud?: number | null
@@ -316,20 +235,6 @@ function coordenada(v: number | string | null | undefined): number | null {
   if (v == null || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
-}
-
-/**
- * Los nombres de un cliente como los ve el criterio: un CONJUNTO, no dos
- * campos. `relacionEntre` cruza los cuatro pares y se queda con el más fuerte,
- * así que el veredicto sólo depende de qué nombres hay, no de en qué casillero
- * está cada uno. Intercambiar razón social y fantasía, o rellenar una razón
- * social vacía con la fantasía —que es lo que hace el guardado—, no mueve nada.
- */
-function nombresComparables(identidad: IdentidadDuplicado): string {
-  const nombres = [identidad.razon_social, identidad.nombre_fantasia]
-    .map(normalizarNombre)
-    .filter(n => n !== '')
-  return Array.from(new Set(nombres)).sort().join('|')
 }
 
 /**
@@ -348,18 +253,18 @@ function nombresComparables(identidad: IdentidadDuplicado): string {
  * de bloqueo (116 por nombre idéntico, 20 por compartir puerta). Esos 133 no se
  * podían editar en absoluto: ni el teléfono, ni el horario, ni el preventista.
  *
- * Compara por lo que el criterio realmente mira —los nombres normalizados, la
- * clave de dirección con altura y las coordenadas—, no por el texto crudo:
- * escribir "CHICLANA 1895," donde decía "Chiclana 1895" no puede cambiar
- * ningún veredicto. Una dirección sin altura no entra al criterio, así que
- * cambiarla por otra sin altura tampoco cuenta.
+ * Compara por lo que el criterio realmente mira —la clave de dirección con
+ * altura y las coordenadas—, no por el texto crudo: escribir "CHICLANA 1895,"
+ * donde decía "Chiclana 1895" no puede cambiar ningún veredicto. Una dirección
+ * sin altura no entra al criterio, así que cambiarla por otra sin altura
+ * tampoco cuenta. Renombrar al cliente tampoco: desde la mig 260 el nombre no
+ * es parte del criterio.
  */
 export function cambiaIdentidadDuplicado(
   antes: IdentidadDuplicado,
   despues: IdentidadDuplicado,
 ): boolean {
   return (
-    nombresComparables(antes) !== nombresComparables(despues) ||
     claveDireccionConAltura(antes.direccion) !== claveDireccionConAltura(despues.direccion) ||
     coordenada(antes.latitud) !== coordenada(despues.latitud) ||
     coordenada(antes.longitud) !== coordenada(despues.longitud)
@@ -466,14 +371,6 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
           : `Ya hay un cliente en ese punto exacto. ${SIN_IDENTIDAD}`,
       }
 
-    case 'nombre_igual':
-      return {
-        titulo: 'Ese nombre ya existe en esta sucursal',
-        mensaje: nombre
-          ? `${nombre} ya está cargado con ese mismo nombre.`
-          : `Ya hay un cliente con ese mismo nombre. ${SIN_IDENTIDAD}`,
-      }
-
     case 'distancia':
       return {
         titulo: 'Hay un cliente muy cerca',
@@ -481,16 +378,6 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
           ? `${nombre} está a ${metros}. Puede ser el mismo comercio cargado dos veces. ` +
             '¿Seguro que es otro y querés crearlo igual?'
           : `Hay un cliente a ${metros}. ${SIN_IDENTIDAD} ` +
-            '¿Seguro que es otro y querés crearlo igual?',
-      }
-
-    case 'nombre_subconjunto':
-      return {
-        titulo: 'Hay un cliente con un nombre parecido',
-        mensaje: nombre
-          ? `${nombre} tiene un nombre que se solapa con el que estás cargando. ` +
-            '¿Seguro que es otro y querés crearlo igual?'
-          : `Hay un cliente con un nombre que se solapa. ${SIN_IDENTIDAD} ` +
             '¿Seguro que es otro y querés crearlo igual?',
       }
 

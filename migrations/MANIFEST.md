@@ -1315,6 +1315,44 @@ cuerpo de `verificar_duplicado_cliente` en el archivo de la 251 y el `prosrc` vi
 mismo md5 (`92191025cc0caed401ce2c3bb35bea27`) — **hasta la 259**, que lo reemplaza; desde
 entonces el archivo a comparar es el de la 259.
 
+### 260 · Un duplicado es un lugar, no un nombre
+
+El guard tenía tres reglas: dos sobre el LUGAR (dirección con altura, distancia en metros) y
+una sobre el NOMBRE (igualdad normalizada → bloqueo, tokens contenidos → aviso). Esta saca la
+tercera, a pedido del usuario. Cierra #688 parcialmente — el residuo de firma queda ahí.
+
+La regla no distinguía duplicados, distinguía **homónimos**. Medido sobre prod antes de
+sacarla: **375 de 730** clientes tenían al menos un vecino de nombre solapado (aviso en cada
+alta) y **116** uno con el nombre normalizado idéntico, que es bloqueo duro y no se confirma
+— hay **cuatro** comercios distintos llamados "Cristian" (ids 18, 358, 562, 773), que se
+bloqueaban entre sí. En un padrón de comercios de barrio cargados con el nombre de pila del
+dueño, el homónimo es la norma. Las dos reglas que quedan son las que atajaron el caso que
+originó todo (el par 382/938, misma puerta a 17,5 m — #663), y cubren a 20 clientes por
+puerta compartida y 91 por distancia, sobre 732.
+
+Consecuencia asumida y dicha: un cliente **sin coordenadas y con dirección sin altura** (los
+barrios sin numeración) ya no queda cubierto por ninguna regla.
+
+Se dropearon los dos índices funcionales sobre nombre normalizado y las cinco funciones del
+criterio por nombre (`normalizar_nombre_cliente`, `tokens_nombre_cliente`,
+`relacion_nombre_cliente`, `relacion_nombres_cliente`, `tokens_se_contienen`), que quedaban
+sin un solo llamador — verificado con `pg_proc.prosrc` y `pg_depend` antes de tocarlas, y el
+`DO` del final vuelve a contarlas. Los índices van **antes** que las funciones: cuelgan de
+`normalizar_nombre_cliente` y si no el DROP pediría CASCADE.
+
+`p_razon_social` y `p_nombre_fantasia` **siguen en la firma**, con `DEFAULT NULL` e ignorados.
+Dropearlos cambia la firma, y un bundle viejo del PWA que los manda se comería un `PGRST202`
+justo en el guard, que es fail-closed: no podría dar de alta ningún cliente hasta recargar.
+Se sacan en #688, junto con `duplicado_nombre_fantasia` del front.
+
+Verificado en prod después de aplicar, impersonando a un admin de la sucursal 1: el 332
+("PUENTE CRISTIAN", que avisaba contra los cuatro "Cristian") y el 358 (nombre idéntico al 18,
+que era bloqueo duro) ahora devuelven `{bloquea: false, avisa: false, motivo: null}`. Las dos
+reglas que quedan siguen enteras: misma puerta → `direccion`, mismo punto → `punto`, 7,8 m →
+`distancia`, y a 200 m nada. La RPC llamada como la llama el front nuevo —sin los dos
+parámetros de nombre— funciona. Cero funciones e índices de nombre vivos, los dos índices del
+lugar intactos, una sola sobrecarga y `has_function_privilege('anon', ...)` = false.
+
 ### 259 · El aviso de duplicado nombra al vecino por su código
 
 La RPC devolvía `cliente_visible.id` y el front lo imprimía: «"Cristian" (#18)». El id no

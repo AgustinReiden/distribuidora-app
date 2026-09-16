@@ -349,26 +349,19 @@ export default function ClientesContainer(): React.ReactElement {
    * para que la confirmación se renderice ADENTRO: como hermano acá quedaría
    * detrás del overlay de Radix y fallaría en silencio.
    *
-   * Reemplaza al chequeo de nombre que vivía en handleGuardarCliente, que era
-   * igualdad exacta sólo contra razon_social con trim + toLowerCase. Ahora el
-   * criterio es uno solo y mira dirección, distancia y nombre por tokens contra
-   * los dos campos.
+   * Mira dónde está el cliente —dirección y distancia—, nunca cómo se llama:
+   * la regla por nombre se sacó en la mig 260 porque marcaba homónimos, que en
+   * un padrón de comercios de barrio son la norma.
    */
   const handleVerificarDuplicado = useCallback(async (data: ClienteSaveData) => {
     const entrada = {
       latitud: data.latitud ?? null,
       longitud: data.longitud ?? null,
       direccion: data.direccion ?? null,
-      razon_social: data.razonSocial || data.nombreFantasia || null,
-      nombre_fantasia: data.nombreFantasia || null,
     }
 
-    // Editando y sin tocar nada de lo que el criterio mira: no hay duplicado
-    // nuevo que detectar. Reasignarle el preventista al 332 ("PUENTE CRISTIAN")
-    // disparaba igual "Hay un cliente con un nombre parecido" contra los cuatro
-    // "Cristian" con los que convive desde siempre, y los 133 clientes de prod
-    // que caen en una regla de bloqueo no se podían editar en absoluto. El
-    // guard rige el alta y la mudanza, no cada edición.
+    // Editando y sin tocar dónde está el cliente: no hay duplicado nuevo que
+    // detectar. El guard rige el alta y la mudanza, no cada edición (#684).
     if (clienteEditando && !cambiaIdentidadDuplicado(clienteEditando, entrada)) {
       return SIN_DUPLICADO_RPC
     }
@@ -424,10 +417,6 @@ export default function ClientesContainer(): React.ReactElement {
         // dbData más abajo); sin esto el guard de updateCliente vuelve a tirar
         // el error y el guardado queda en loop.
         duplicado_confirmado: data.duplicadoConfirmado ?? false,
-        // El preventista no puede editar nombre_fantasia (no viaja en este
-        // patch), pero el guard de duplicados sí lo necesita para evaluar lo
-        // mismo que evaluó ModalCliente. Se descarta antes del UPDATE.
-        duplicado_nombre_fantasia: data.nombreFantasia,
         razon_social: data.razonSocial || data.nombreFantasia,
         direccion: data.direccion,
         aclaracion_direccion: data.aclaracionDireccion?.trim() || null,

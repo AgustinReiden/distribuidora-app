@@ -235,11 +235,11 @@ interface ClienteCreateInput {
    */
   duplicado_confirmado?: boolean
   /**
-   * Solo para el guard de duplicados: el patch acotado del preventista no
-   * manda `nombre_fantasia` (no lo puede editar), pero ModalCliente sí lo usa
-   * para armar el veredicto. Sin esto, el guard de la mutation evalúa contra
-   * `null` mientras el modal evaluó contra el valor real, y pueden divergir.
-   * Se descarta antes del UPDATE igual que `duplicado_confirmado`.
+   * @deprecated Sin uso desde la mig 260, que sacó el nombre del criterio. Se
+   * sigue aceptando y DESCARTANDO a propósito: `ClientesContainer` es un chunk
+   * lazy, así que un bundle viejo cacheado en el PWA lo puede seguir mandando,
+   * y si la mutation deja de descartarlo viaja como columna y PostgREST
+   * rechaza el UPDATE entero. Se borra cuando no queden bundles viejos (#688).
    */
   duplicado_nombre_fantasia?: string | null
 }
@@ -265,8 +265,6 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     latitud: cliente.latitud ?? null,
     longitud: cliente.longitud ?? null,
     direccion: cliente.direccion ?? null,
-    razon_social: cliente.razon_social ?? null,
-    nombre_fantasia: cliente.nombre_fantasia ?? null,
   })
 
   if (veredicto.bloquea) {
@@ -337,14 +335,17 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   // aviso del guard (mig 250). Acá el payload se arma por spread, así que si no
   // se descarta viaja como columna y PostgREST rechaza el UPDATE entero.
   // `createCliente` no lo sufre porque su insert nombra las columnas una por una.
+  // `duplicado_nombre_fantasia` ya no se usa (mig 260) pero se sigue sacando por
+  // la misma razón: un bundle viejo del chunk lazy del container lo manda igual.
   const {
     preventista_ids,
     descuentos_categoria,
     duplicado_confirmado: _confirmado,
-    duplicado_nombre_fantasia,
+    duplicado_nombre_fantasia: _nombreFantasiaDelGuard,
     ...clienteFields
   } = cliente
   void _confirmado
+  void _nombreFantasiaDelGuard
 
   // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
   // Solo aplicamos si el campo viene en el patch (Partial), preservando undefined
@@ -363,7 +364,7 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   // siempre, cambien o no, así que "está en el payload" daba true en TODA
   // edición y el guard opinaba sobre vecinos con los que el cliente ya convivía.
   // Ver `cambiaIdentidadDuplicado`.
-  const tocaCamposDuplicado = ['direccion', 'latitud', 'longitud', 'razon_social', 'nombre_fantasia']
+  const tocaCamposDuplicado = ['direccion', 'latitud', 'longitud']
     .some((campo) => campo in payload)
   if (tocaCamposDuplicado) {
     // Lo que hay hoy en la base, para poder comparar. Si no se pudo leer, se
@@ -376,10 +377,6 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
       latitud: 'latitud' in payload ? payload.latitud ?? null : actual?.latitud ?? null,
       longitud: 'longitud' in payload ? payload.longitud ?? null : actual?.longitud ?? null,
       direccion: 'direccion' in payload ? payload.direccion ?? null : actual?.direccion ?? null,
-      razon_social: 'razon_social' in payload ? payload.razon_social ?? null : actual?.razon_social ?? null,
-      nombre_fantasia: 'nombre_fantasia' in payload
-        ? payload.nombre_fantasia ?? null
-        : duplicado_nombre_fantasia ?? actual?.nombre_fantasia ?? null,
     }
 
     if (!actual || cambiaIdentidadDuplicado(actual, despues)) {
@@ -387,8 +384,6 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
         latitud: despues.latitud ?? null,
         longitud: despues.longitud ?? null,
         direccion: despues.direccion ?? null,
-        razon_social: despues.razon_social ?? null,
-        nombre_fantasia: despues.nombre_fantasia ?? null,
         excluir_id: id,
       })
 
@@ -461,7 +456,7 @@ async function deleteCliente(id: string): Promise<void> {
 }
 
 /**
- * Los cinco campos que el guard compara, como están HOY en la base.
+ * Los tres campos que el guard compara, como están HOY en la base.
  *
  * Existe para que la edición pueda preguntarse "¿esto cambia algo?" antes de
  * llamar al guard. Sin la foto previa, la mutation sólo puede mirar qué campos
@@ -475,7 +470,7 @@ async function leerIdentidadCliente(id: string): Promise<IdentidadDuplicado | nu
   try {
     const { data, error } = await supabase
       .from('clientes')
-      .select('razon_social, nombre_fantasia, direccion, latitud, longitud')
+      .select('direccion, latitud, longitud')
       .eq('id', id)
       .maybeSingle()
     if (error || !data) return null
@@ -498,8 +493,6 @@ export interface EntradaVerificacionDuplicado {
   latitud: number | null
   longitud: number | null
   direccion: string | null
-  razon_social: string | null
-  nombre_fantasia: string | null
   /** Id del cliente que se está editando, para que no choque consigo mismo. */
   excluir_id?: string | null
 }
@@ -511,12 +504,14 @@ export interface EntradaVerificacionDuplicado {
 export async function verificarDuplicadoCliente(
   entrada: EntradaVerificacionDuplicado
 ): Promise<VeredictoDuplicadoRPC> {
+  // Los dos parámetros de nombre siguen existiendo en la RPC con DEFAULT NULL y
+  // no se mandan: la mig 260 los dejó sin uso pero no los dropeó, para que un
+  // bundle viejo del PWA —que sí los manda— no se encuentre con un PGRST202 y
+  // deje de poder dar de alta clientes. Se sacan de la firma en #688.
   const { data, error } = await supabase.rpc('verificar_duplicado_cliente', {
     p_latitud: entrada.latitud,
     p_longitud: entrada.longitud,
     p_direccion: entrada.direccion,
-    p_razon_social: entrada.razon_social,
-    p_nombre_fantasia: entrada.nombre_fantasia,
     p_excluir_id: entrada.excluir_id ?? null,
   })
 
