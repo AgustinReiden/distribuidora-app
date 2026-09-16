@@ -335,6 +335,34 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
     payload.zona_id = payload.zona_id ? payload.zona_id : null
   }
 
+  // Mismo guard que createCliente, para la edición. Sólo dispara si el patch
+  // toca alguno de los campos que la RPC compara -- moverlo a la puerta de
+  // otro cliente, o cambiarle la razón social/fantasía, tiene que pasar por
+  // la misma última línea de defensa que el alta. ModalCliente ya lo llama
+  // con excluir_id antes de guardar, pero cualquier otra mutation futura que
+  // edite estos campos sin pasar por el modal entraría sin chequeo.
+  const tocaCamposDuplicado = ['direccion', 'latitud', 'longitud', 'razon_social', 'nombre_fantasia']
+    .some((campo) => campo in payload)
+  if (tocaCamposDuplicado) {
+    const veredicto = await verificarDuplicadoCliente({
+      latitud: payload.latitud ?? null,
+      longitud: payload.longitud ?? null,
+      direccion: payload.direccion ?? null,
+      razon_social: payload.razon_social ?? null,
+      nombre_fantasia: payload.nombre_fantasia ?? null,
+      excluir_id: id,
+    })
+
+    if (veredicto.bloquea) {
+      throw new Error(mensajeDuplicado(veredicto).mensaje)
+    }
+    if (veredicto.avisa && !cliente.duplicado_confirmado) {
+      throw new Error(
+        `${mensajeDuplicado(veredicto).mensaje} No se guardó nada: volvé a guardar y confirmá.`
+      )
+    }
+  }
+
   const { data, error } = await supabase
     .from('clientes')
     .update(payload)
