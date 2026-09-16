@@ -12,6 +12,7 @@ import {
   DUPLICADO_AVISO_METROS,
   DUPLICADO_BLOQUEO_METROS,
   boxParaRadio,
+  cambiaIdentidadDuplicado,
   clasificarDuplicado,
   claveDireccionConAltura,
   compararNombres,
@@ -291,5 +292,92 @@ describe('clasificarDuplicado — sin hallazgo', () => {
     expect(v.bloquea).toBe(true)
     expect(v.motivo).toBe('direccion')
     expect(v.distancia_m).toBeNull()
+  })
+})
+
+
+describe('cambiaIdentidadDuplicado — el guard rige el alta y la mudanza', () => {
+  // El caso real: cliente #316, reasignado de un preventista a otro. El vecino
+  // "Cristian" (#18) tiene un nombre que se solapa con "PUENTE CRISTIAN" y el
+  // aviso saltaba en cada edición, aunque el cliente lleve años conviviendo
+  // con él.
+  const PUENTE_CRISTIAN = {
+    razon_social: 'PUENTE CRISTIAN',
+    nombre_fantasia: 'CHICLANA 1895',
+    direccion: 'Chiclana 1895, T4000 San Miguel de Tucumán, Tucumán, Argentina',
+    latitud: -26.8355312,
+    longitud: -65.2223494,
+  }
+
+  it('reasignar el preventista no cambia nada de lo que el criterio mira', () => {
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, { ...PUENTE_CRISTIAN })).toBe(false)
+  })
+
+  it('un cambio cosmético de nombre o dirección tampoco', () => {
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
+      ...PUENTE_CRISTIAN,
+      razon_social: '  puente   cristián  ',
+      direccion: 'CHICLANA 1895, Tucumán',
+    })).toBe(false)
+  })
+
+  it('`undefined` y `null` son lo mismo: un cliente sin coordenadas no "cambia"', () => {
+    expect(cambiaIdentidadDuplicado(
+      { razon_social: 'Kiosco', direccion: 'B° Esperanza', latitud: null, longitud: null },
+      { razon_social: 'Kiosco', direccion: 'B° Esperanza' },
+    )).toBe(false)
+  })
+
+  it('mudarlo a otra puerta sí', () => {
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
+      ...PUENTE_CRISTIAN,
+      direccion: 'Chiclana 1897, T4000 San Miguel de Tucumán, Tucumán, Argentina',
+    })).toBe(true)
+  })
+
+  it('moverle las coordenadas sí, aunque la dirección quede igual', () => {
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
+      ...PUENTE_CRISTIAN,
+      latitud: -26.8375488,
+    })).toBe(true)
+  })
+
+  // El criterio cruza los cuatro pares razón/fantasía, así que el veredicto sólo
+  // depende de QUÉ nombres hay. Un cliente con la razón social vacía la recibe
+  // de la fantasía al guardar (`razonSocial || nombreFantasia`): sin esto,
+  // parecería cambiar de nombre en cada edición.
+  it('los nombres son un conjunto: llenar una razón social vacía con la fantasía no cuenta', () => {
+    const sinRazonSocial = { razon_social: null, nombre_fantasia: 'CHICLANA 1895', direccion: 'Chiclana 1895' }
+    expect(cambiaIdentidadDuplicado(sinRazonSocial, {
+      ...sinRazonSocial,
+      razon_social: 'CHICLANA 1895',
+    })).toBe(false)
+  })
+
+  it('intercambiar razón social y fantasía tampoco: el criterio las cruza', () => {
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
+      ...PUENTE_CRISTIAN,
+      razon_social: PUENTE_CRISTIAN.nombre_fantasia,
+      nombre_fantasia: PUENTE_CRISTIAN.razon_social,
+    })).toBe(false)
+  })
+
+  it('cambiarle el nombre sí, en cualquiera de los dos campos', () => {
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
+      ...PUENTE_CRISTIAN,
+      razon_social: 'PUENTE CRISTIAN HIJO',
+    })).toBe(true)
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
+      ...PUENTE_CRISTIAN,
+      nombre_fantasia: 'Kiosco Chiclana',
+    })).toBe(true)
+  })
+
+  // Sin altura la dirección no entra al criterio, pero el nombre sí: el guard
+  // tiene que seguir corriendo cuando cambia lo único que puede ver.
+  it('con dirección sin altura, el nombre sigue mandando', () => {
+    const base = { razon_social: 'Kiosco', nombre_fantasia: 'Kiosco', direccion: 'B° Esperanza' }
+    expect(cambiaIdentidadDuplicado(base, { ...base, direccion: 'B° Sagrado Corazón' })).toBe(false)
+    expect(cambiaIdentidadDuplicado(base, { ...base, razon_social: 'Kiosco Juan' })).toBe(true)
   })
 })

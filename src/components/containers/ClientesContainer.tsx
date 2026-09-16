@@ -28,6 +28,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { puedeRegistrarPagoCliente, puedeDesactivarCliente, puedeEliminarCliente } from '../../lib/permisos'
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
+import { cambiaIdentidadDuplicado, SIN_DUPLICADO_RPC } from '../../utils/duplicadoCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { formatCurrency } from '../../utils/formatters'
 
@@ -354,12 +355,26 @@ export default function ClientesContainer(): React.ReactElement {
    * los dos campos.
    */
   const handleVerificarDuplicado = useCallback(async (data: ClienteSaveData) => {
-    return verificarDuplicadoCliente({
+    const entrada = {
       latitud: data.latitud ?? null,
       longitud: data.longitud ?? null,
       direccion: data.direccion ?? null,
       razon_social: data.razonSocial || data.nombreFantasia || null,
       nombre_fantasia: data.nombreFantasia || null,
+    }
+
+    // Editando y sin tocar nada de lo que el criterio mira: no hay duplicado
+    // nuevo que detectar. Reasignarle el preventista al 332 ("PUENTE CRISTIAN")
+    // disparaba igual "Hay un cliente con un nombre parecido" contra los cuatro
+    // "Cristian" con los que convive desde siempre, y los 133 clientes de prod
+    // que caen en una regla de bloqueo no se podían editar en absoluto. El
+    // guard rige el alta y la mudanza, no cada edición.
+    if (clienteEditando && !cambiaIdentidadDuplicado(clienteEditando, entrada)) {
+      return SIN_DUPLICADO_RPC
+    }
+
+    return verificarDuplicadoCliente({
+      ...entrada,
       excluir_id: clienteEditando?.id ?? null,
     })
   }, [clienteEditando])
