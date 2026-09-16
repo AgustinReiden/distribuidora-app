@@ -1,6 +1,6 @@
 # MANIFEST de migraciones — mapeo repo ↔ producción
 
-> **Fechado: 2026-09-15** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
+> **Fechado: 2026-09-16** · Proyecto prod `hmuchlzmuqqxcldbzkgc` (ManaosApp) · región `sa-east-1`.
 
 ## Regla de oro
 
@@ -1311,8 +1311,32 @@ Verificado en prod después de aplicar, con sesión de admin: el alta del 938 da
 la RPC nueva, `has_function_privilege('anon', ...)` = false (y `curl` con la anon key da
 **401 permission denied**), `existe_cliente_en_ubicacion` ya no existe (`curl` da **404
 PGRST202**), y `auditoria_permisos_execute()` sigue en 0 funciones expuestas a anon. El
-cuerpo de `verificar_duplicado_cliente` en el archivo de la 251 y el `prosrc` vivo tienen el
-mismo md5 (`92191025cc0caed401ce2c3bb35bea27`).
+cuerpo de `verificar_duplicado_cliente` en el archivo de la 251 y el `prosrc` vivo tenían el
+mismo md5 (`92191025cc0caed401ce2c3bb35bea27`) — **hasta la 259**, que lo reemplaza; desde
+entonces el archivo a comparar es el de la 259.
+
+### 259 · El aviso de duplicado nombra al vecino por su código
+
+La RPC devolvía `cliente_visible.id` y el front lo imprimía: «"Cristian" (#18)». El id no
+aparece en ninguna pantalla — la lista de clientes muestra `#codigo` y su buscador filtra por
+`codigo` —, así que el usuario leía ese número, lo buscaba y daba con otro comercio. No es un
+caso borde: `codigo` es `integer NOT NULL UNIQUE` con su propia secuencia, y en los 730
+clientes de prod **no coincide con el id ni una vez**. El caso testigo es el 332 ("PUENTE
+CRISTIAN", código 316), cuyo aviso nombraba al id 18 — que en la app es el #10. Cierra #685.
+
+Es la 251 con `c.codigo` agregado a las cuatro sondas y `'codigo', v_codigo` en el
+`cliente_visible`; el criterio, las tres reglas y la decisión de visibilidad no se tocan.
+`entidad_id` de la notificación sigue siendo el id: es la FK con la que se deduplica el aviso
+y con la que se abre la ficha, no un número para leer. El `DO` del final es estructural —la
+RPC exige sesión y no se la puede invocar desde una migración—: verifica que las dos salidas
+impriman `v_codigo`, que no quede ningún `(#' || v_id`, y que las cuatro sondas lo traigan.
+
+Verificado en prod después de aplicar, impersonando a un admin de la sucursal 1 con
+`request.jwt.claims`: los cuatro motivos devuelven el código del vecino y no el id —
+`nombre_subconjunto` del 332 da `{id: 18, codigo: 10, "Cristian"}`, `direccion` y `punto` dan
+`{id: 87, codigo: 75, "LAVALLE 2108"}`, `nombre_igual` del 358 da `{id: 18, codigo: 10}`—. Una
+sola sobrecarga, `has_function_privilege('anon', ...)` = false y `authenticated` = true, y
+ninguna función de `public` imprime ya un id como si fuera número de cliente.
 
 ---
 

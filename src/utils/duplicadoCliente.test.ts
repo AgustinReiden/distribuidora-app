@@ -16,6 +16,7 @@ import {
   clasificarDuplicado,
   claveDireccionConAltura,
   compararNombres,
+  mensajeDuplicado,
   normalizarNombre,
   tokensNombre,
   type CandidatoDuplicado,
@@ -379,5 +380,65 @@ describe('cambiaIdentidadDuplicado — el guard rige el alta y la mudanza', () =
     const base = { razon_social: 'Kiosco', nombre_fantasia: 'Kiosco', direccion: 'B° Esperanza' }
     expect(cambiaIdentidadDuplicado(base, { ...base, direccion: 'B° Sagrado Corazón' })).toBe(false)
     expect(cambiaIdentidadDuplicado(base, { ...base, razon_social: 'Kiosco Juan' })).toBe(true)
+  })
+})
+
+
+describe('mensajeDuplicado — el número que se muestra es el CÓDIGO, no el id', () => {
+  // El id de `clientes` no aparece en ninguna pantalla: la lista muestra
+  // `#codigo` y el buscador filtra por código. Son dos secuencias distintas y
+  // en los 730 clientes de prod no coinciden ni una vez, así que imprimir el id
+  // mandaba al usuario a buscar un número que da con OTRO comercio. El caso
+  // testigo: el aviso decía "(#18)" de un cliente que en la app es el #10.
+  const veredicto = (over: Record<string, unknown> = {}) => ({
+    bloquea: false,
+    avisa: true,
+    motivo: 'nombre_subconjunto' as const,
+    distancia_m: null,
+    cliente_visible: { id: 18, codigo: 10, nombre: 'Cristian', activo: true },
+    ...over,
+  })
+
+  it('imprime el código del vecino', () => {
+    expect(mensajeDuplicado(veredicto()).mensaje).toContain('"Cristian" (#10)')
+  })
+
+  it('no imprime el id por ningún lado', () => {
+    expect(mensajeDuplicado(veredicto()).mensaje).not.toContain('#18')
+  })
+
+  it('lo mismo en los cinco motivos', () => {
+    for (const motivo of ['direccion', 'punto', 'nombre_igual', 'distancia', 'nombre_subconjunto'] as const) {
+      const m = mensajeDuplicado(veredicto({ motivo, distancia_m: 5.2 })).mensaje
+      expect(m).toContain('(#10)')
+      expect(m).not.toContain('#18')
+    }
+  })
+
+  it('y en el mensaje del inactivo, que es el que manda a buscarlo a mano', () => {
+    const m = mensajeDuplicado(veredicto({
+      cliente_visible: { id: 18, codigo: 10, nombre: 'Cristian', activo: false },
+    }))
+    expect(m.titulo).toMatch(/inactivo/i)
+    expect(m.mensaje).toContain('(#10)')
+  })
+
+  // Un bundle nuevo contra la RPC vieja, en la ventana entre los dos deploys.
+  // Mejor sin número que con uno que lleva a otro cliente.
+  it('sin código, nombra al vecino y no inventa un número', () => {
+    const m = mensajeDuplicado(veredicto({
+      cliente_visible: { id: 18, nombre: 'Cristian', activo: true },
+    })).mensaje
+    expect(m).toContain('"Cristian"')
+    expect(m).not.toContain('#')
+  })
+
+  // La otra mitad de la regla, que ya fijaba el #543: si la RLS tapa al vecino,
+  // no se lo nombra ni con código ni con id.
+  it('si el vecino está tapado, no va ni el nombre ni ningún número', () => {
+    const m = mensajeDuplicado(veredicto({ cliente_visible: null })).mensaje
+    expect(m).not.toContain('Cristian')
+    expect(m).not.toContain('#')
+    expect(m).toMatch(/administración/)
   })
 })

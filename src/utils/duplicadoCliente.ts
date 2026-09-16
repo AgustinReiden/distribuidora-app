@@ -383,7 +383,19 @@ export interface VeredictoDuplicadoRPC {
   avisa: boolean
   motivo: MotivoDuplicado | null
   distancia_m: number | null
-  cliente_visible: { id: number | string; nombre: string; activo: boolean } | null
+  cliente_visible: {
+    id: number | string
+    /**
+     * `clientes.codigo`, que es el número que la app muestra y por el que
+     * busca -- NO `id`, que es interno y no aparece en ninguna pantalla. Son
+     * dos secuencias distintas: en los 730 clientes de prod no coinciden ni
+     * una vez. Opcional porque una RPC anterior a la mig que lo agrega no lo
+     * manda; ahí el mensaje va sin número (ver `mensajeDuplicado`).
+     */
+    codigo?: number | null
+    nombre: string
+    activo: boolean
+  } | null
 }
 
 /**
@@ -414,7 +426,14 @@ const SIN_IDENTIDAD =
  */
 export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
   const vecino = v.cliente_visible
-  const nombre = vecino ? `"${vecino.nombre}" (#${vecino.id})` : null
+  // El número es el CÓDIGO, nunca el id. El aviso decía "(#18)" de un cliente
+  // que en la app figura como #10, y el buscador de clientes filtra por código:
+  // el usuario buscaba ese número y encontraba otro comercio. Sin código —una
+  // RPC vieja— va sin número: el nombre alcanza para buscarlo, un número que
+  // lleva a otro cliente no.
+  const nombre = vecino
+    ? `"${vecino.nombre}"${vecino.codigo == null ? '' : ` (#${vecino.codigo})`}`
+    : null
   const metros = v.distancia_m == null ? null : `${v.distancia_m.toString().replace('.', ',')} m`
 
   // Un cliente inactivo en esa puerta se reactiva, no se clona: es lo que
