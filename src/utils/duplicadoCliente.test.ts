@@ -15,18 +15,13 @@ import {
   cambiaIdentidadDuplicado,
   clasificarDuplicado,
   claveDireccionConAltura,
-  compararNombres,
   mensajeDuplicado,
-  normalizarNombre,
-  tokensNombre,
   type CandidatoDuplicado,
 } from './duplicadoCliente'
 
 // Los dos clientes del incidente: misma puerta, dos altas, 17,5 m.
 const CLIENTE_382: CandidatoDuplicado = {
   id: '382',
-  razon_social: 'Lopez Ricardo',
-  nombre_fantasia: 'PASAJE VERA Y ARAGON 2551',
   direccion: 'Pje. Vera y Aragon 2551, T4002AFE San Miguel de Tucumán, Tucumán, Argentina',
   latitud: -26.8375488,
   longitud: -65.2396541,
@@ -34,8 +29,6 @@ const CLIENTE_382: CandidatoDuplicado = {
 }
 
 const ALTA_938 = {
-  razon_social: 'Ricardo',
-  nombre_fantasia: 'López Ricardo ',
   direccion: 'Pje. Vera y Aragon 2551, T4002AFE San Miguel de Tucumán, Tucumán, Argentina',
   latitud: -26.8375164,
   longitud: -65.2398268,
@@ -64,39 +57,6 @@ describe('claveDireccionConAltura', () => {
     expect(claveDireccionConAltura('  Av.   Benjamín   Aráoz  800 , Tucumán')).toBe(
       'av benjamin araoz 800',
     )
-  })
-})
-
-describe('normalizarNombre / tokensNombre', () => {
-  it('saca acentos, mayúsculas y el espacio final que traía el 938', () => {
-    expect(normalizarNombre('López Ricardo ')).toBe('lopez ricardo')
-  })
-
-  it('los tokens no se repiten', () => {
-    expect(tokensNombre('Kiosco kiosco JUAN')).toEqual(['kiosco', 'juan'])
-  })
-})
-
-describe('compararNombres', () => {
-  it('"López Ricardo " y "Lopez Ricardo" son el mismo nombre', () => {
-    expect(compararNombres('López Ricardo ', 'Lopez Ricardo')).toBe('igual')
-  })
-
-  it('"Ricardo" está contenido en "Lopez Ricardo": subconjunto, no igualdad', () => {
-    expect(compararNombres('Ricardo', 'Lopez Ricardo')).toBe('subconjunto')
-  })
-
-  it('"Kiosco" dentro de "Kiosco Juan" es subconjunto — por eso nunca bloquea', () => {
-    expect(compararNombres('Kiosco', 'Kiosco Juan')).toBe('subconjunto')
-  })
-
-  it('nombres sin relación son distintos', () => {
-    expect(compararNombres('Panadería Nahuel', 'Pollería M&G')).toBe('distinto')
-  })
-
-  it('un nombre vacío no relaciona con nada', () => {
-    expect(compararNombres('', 'Lopez Ricardo')).toBe('distinto')
-    expect(compararNombres(null, null)).toBe('distinto')
   })
 })
 
@@ -135,11 +95,10 @@ describe('clasificarDuplicado — el par 382/938', () => {
     expect(v.candidato?.id).toBe('382')
   })
 
-  it('la dirección gana sobre el nombre: el motivo es el que ataja el caso', () => {
-    // El nombre también daría bloqueo ("López Ricardo " = "Lopez Ricardo"),
-    // pero el motivo que se le muestra al usuario es el accionable.
-    const v = clasificarDuplicado(ALTA_938, [CLIENTE_382])
-    expect(v.motivo).toBe('direccion')
+  // Los dos se llamaban casi igual ("Ricardo" / "Lopez Ricardo") y eso ya no
+  // interviene: lo que los une es la puerta.
+  it('el motivo es la dirección, que es lo accionable', () => {
+    expect(clasificarDuplicado(ALTA_938, [CLIENTE_382]).motivo).toBe('direccion')
   })
 })
 
@@ -147,7 +106,6 @@ describe('clasificarDuplicado — dirección sin altura', () => {
   it('"B° Esperanza" contra otro "B° Esperanza" NO bloquea por dirección', () => {
     const vecino: CandidatoDuplicado = {
       id: '500',
-      razon_social: 'Kiosco Marta',
       direccion: 'B° Esperanza',
       latitud: -26.9,
       longitud: -65.3,
@@ -155,7 +113,6 @@ describe('clasificarDuplicado — dirección sin altura', () => {
     }
     const v = clasificarDuplicado(
       {
-        razon_social: 'Despensa Nélida',
         direccion: 'B° Esperanza',
         // A 200 m: fuera de la banda de aviso, así que el veredicto es limpio.
         latitud: -26.9018,
@@ -176,7 +133,6 @@ describe('clasificarDuplicado — distancia', () => {
     const { dlat } = boxParaRadio(base.lat, metros)
     return {
       id: '900',
-      razon_social: 'Fiambrería del Centro',
       direccion: 'Otra Calle 123',
       latitud: base.lat + dlat,
       longitud: base.lng,
@@ -233,44 +189,38 @@ describe('clasificarDuplicado — distancia', () => {
   })
 })
 
-describe('clasificarDuplicado — nombre', () => {
-  // Lejos, para que la distancia no tape el motivo del nombre.
+describe('clasificarDuplicado — el nombre no es parte del criterio (mig 260)', () => {
+  // Existió de la mig 250 a la 260 y se sacó porque marcaba homónimos: en prod
+  // había 375 clientes con un vecino de nombre solapado y 116 con uno idéntico
+  // —cuatro comercios distintos se llaman "Cristian"—. Un nombre repetido no es
+  // un duplicado. Estos tests fijan que no vuelva por la ventana.
   const lejano = { latitud: -26.9, longitud: -65.4 }
 
-  it('"López Ricardo " contra "Lopez Ricardo" BLOQUEA', () => {
+  it('dos clientes con el MISMO nombre en direcciones distintas no son duplicado', () => {
     const v = clasificarDuplicado(
-      { razon_social: 'López Ricardo ', direccion: 'Calle Nueva 45', ...lejano },
-      [{ ...CLIENTE_382, latitud: -26.8, longitud: -65.2 }],
-    )
-    expect(v.bloquea).toBe(true)
-    expect(v.motivo).toBe('nombre_igual')
-  })
-
-  it('"Ricardo" contra "Lopez Ricardo" AVISA, no bloquea', () => {
-    const v = clasificarDuplicado(
-      { razon_social: 'Ricardo', direccion: 'Calle Nueva 45', ...lejano },
-      [{ ...CLIENTE_382, nombre_fantasia: null, latitud: -26.8, longitud: -65.2 }],
+      { direccion: 'Calle Nueva 45', ...lejano },
+      [{ id: '18', direccion: 'Otra Calle 1', latitud: -26.8, longitud: -65.2 }],
     )
     expect(v.bloquea).toBe(false)
-    expect(v.avisa).toBe(true)
-    expect(v.motivo).toBe('nombre_subconjunto')
+    expect(v.avisa).toBe(false)
+    expect(v.motivo).toBeNull()
   })
 
-  it('"Kiosco" contra "Kiosco Juan" avisa: nunca bloqueo', () => {
+  it('tampoco un nombre contenido en el otro', () => {
     const v = clasificarDuplicado(
-      { razon_social: 'Kiosco', direccion: 'Calle Nueva 45', ...lejano },
-      [{ id: '77', razon_social: 'Kiosco Juan', direccion: 'Otra 1', latitud: -26.8, longitud: -65.2 }],
+      { direccion: 'Calle Nueva 45', ...lejano },
+      [{ id: '77', direccion: 'Otra 1', latitud: -26.8, longitud: -65.2 }],
     )
-    expect(v.bloquea).toBe(false)
-    expect(v.avisa).toBe(true)
+    expect(v.motivo).toBeNull()
   })
 
-  it('cruza razón social contra nombre de fantasía en los dos sentidos', () => {
-    const v = clasificarDuplicado(
-      { nombre_fantasia: 'Lopez Ricardo', direccion: 'Calle Nueva 45', ...lejano },
-      [{ id: '382', razon_social: 'López Ricardo', direccion: 'Otra 1', latitud: -26.8, longitud: -65.2 }],
-    )
-    expect(v.motivo).toBe('nombre_igual')
+  // La red de seguridad: si alguien vuelve a meter un campo de nombre en la
+  // entrada, el criterio lo ignora en vez de empezar a opinar de nuevo.
+  it('un nombre en la entrada no cambia el veredicto', () => {
+    const conNombre = { direccion: 'Calle Nueva 45', ...lejano, razon_social: 'Cristian' }
+    const sinNombre = { direccion: 'Calle Nueva 45', ...lejano }
+    const candidatos = [{ id: '18', direccion: 'Otra 1', latitud: -26.8, longitud: -65.2, razon_social: 'Cristian' }]
+    expect(clasificarDuplicado(conNombre, candidatos)).toEqual(clasificarDuplicado(sinNombre, candidatos))
   })
 
   it('ve a los inactivos: se reactiva, no se clona', () => {
@@ -287,7 +237,7 @@ describe('clasificarDuplicado — sin hallazgo', () => {
 
   it('un alta sin coordenadas sigue bloqueando por dirección', () => {
     const v = clasificarDuplicado(
-      { razon_social: 'Otro', direccion: 'Pje. Vera y Aragon 2551, Tucumán' },
+      { direccion: 'Pje. Vera y Aragon 2551, Tucumán' },
       [CLIENTE_382],
     )
     expect(v.bloquea).toBe(true)
@@ -303,8 +253,6 @@ describe('cambiaIdentidadDuplicado — el guard rige el alta y la mudanza', () =
   // aviso saltaba en cada edición, aunque el cliente lleve años conviviendo
   // con él.
   const PUENTE_CRISTIAN = {
-    razon_social: 'PUENTE CRISTIAN',
-    nombre_fantasia: 'CHICLANA 1895',
     direccion: 'Chiclana 1895, T4000 San Miguel de Tucumán, Tucumán, Argentina',
     latitud: -26.8355312,
     longitud: -65.2223494,
@@ -314,18 +262,17 @@ describe('cambiaIdentidadDuplicado — el guard rige el alta y la mudanza', () =
     expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, { ...PUENTE_CRISTIAN })).toBe(false)
   })
 
-  it('un cambio cosmético de nombre o dirección tampoco', () => {
+  it('un cambio cosmético de la dirección tampoco', () => {
     expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
       ...PUENTE_CRISTIAN,
-      razon_social: '  puente   cristián  ',
       direccion: 'CHICLANA 1895, Tucumán',
     })).toBe(false)
   })
 
   it('`undefined` y `null` son lo mismo: un cliente sin coordenadas no "cambia"', () => {
     expect(cambiaIdentidadDuplicado(
-      { razon_social: 'Kiosco', direccion: 'B° Esperanza', latitud: null, longitud: null },
-      { razon_social: 'Kiosco', direccion: 'B° Esperanza' },
+      { direccion: 'B° Esperanza', latitud: null, longitud: null },
+      { direccion: 'B° Esperanza' },
     )).toBe(false)
   })
 
@@ -343,43 +290,21 @@ describe('cambiaIdentidadDuplicado — el guard rige el alta y la mudanza', () =
     })).toBe(true)
   })
 
-  // El criterio cruza los cuatro pares razón/fantasía, así que el veredicto sólo
-  // depende de QUÉ nombres hay. Un cliente con la razón social vacía la recibe
-  // de la fantasía al guardar (`razonSocial || nombreFantasia`): sin esto,
-  // parecería cambiar de nombre en cada edición.
-  it('los nombres son un conjunto: llenar una razón social vacía con la fantasía no cuenta', () => {
-    const sinRazonSocial = { razon_social: null, nombre_fantasia: 'CHICLANA 1895', direccion: 'Chiclana 1895' }
-    expect(cambiaIdentidadDuplicado(sinRazonSocial, {
-      ...sinRazonSocial,
-      razon_social: 'CHICLANA 1895',
-    })).toBe(false)
+  // Desde la mig 260 el nombre no entra al criterio, así que renombrar a un
+  // cliente no puede cambiar ningún veredicto y no tiene por qué consultar.
+  it('renombrar al cliente no es un cambio de identidad', () => {
+    const renombrado = { ...PUENTE_CRISTIAN } as Record<string, unknown>
+    renombrado.razon_social = 'OTRO NOMBRE COMPLETAMENTE DISTINTO'
+    renombrado.nombre_fantasia = 'Y OTRA FANTASÍA'
+    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, renombrado)).toBe(false)
   })
 
-  it('intercambiar razón social y fantasía tampoco: el criterio las cruza', () => {
-    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
-      ...PUENTE_CRISTIAN,
-      razon_social: PUENTE_CRISTIAN.nombre_fantasia,
-      nombre_fantasia: PUENTE_CRISTIAN.razon_social,
-    })).toBe(false)
-  })
-
-  it('cambiarle el nombre sí, en cualquiera de los dos campos', () => {
-    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
-      ...PUENTE_CRISTIAN,
-      razon_social: 'PUENTE CRISTIAN HIJO',
-    })).toBe(true)
-    expect(cambiaIdentidadDuplicado(PUENTE_CRISTIAN, {
-      ...PUENTE_CRISTIAN,
-      nombre_fantasia: 'Kiosco Chiclana',
-    })).toBe(true)
-  })
-
-  // Sin altura la dirección no entra al criterio, pero el nombre sí: el guard
-  // tiene que seguir corriendo cuando cambia lo único que puede ver.
-  it('con dirección sin altura, el nombre sigue mandando', () => {
-    const base = { razon_social: 'Kiosco', nombre_fantasia: 'Kiosco', direccion: 'B° Esperanza' }
-    expect(cambiaIdentidadDuplicado(base, { ...base, direccion: 'B° Sagrado Corazón' })).toBe(false)
-    expect(cambiaIdentidadDuplicado(base, { ...base, razon_social: 'Kiosco Juan' })).toBe(true)
+  // Sin altura la dirección no entra al criterio: cambiarla por otra sin altura
+  // no mueve nada, y ya no queda ninguna otra regla que pueda mirar.
+  it('con dirección sin altura, cambiarla por otra sin altura no cuenta', () => {
+    const base = { direccion: 'B° Esperanza' }
+    expect(cambiaIdentidadDuplicado(base, { direccion: 'B° Sagrado Corazón' })).toBe(false)
+    expect(cambiaIdentidadDuplicado(base, { direccion: 'B° Esperanza 250' })).toBe(true)
   })
 })
 
@@ -393,7 +318,7 @@ describe('mensajeDuplicado — el número que se muestra es el CÓDIGO, no el id
   const veredicto = (over: Record<string, unknown> = {}) => ({
     bloquea: false,
     avisa: true,
-    motivo: 'nombre_subconjunto' as const,
+    motivo: 'distancia' as const,
     distancia_m: null,
     cliente_visible: { id: 18, codigo: 10, nombre: 'Cristian', activo: true },
     ...over,
@@ -407,8 +332,8 @@ describe('mensajeDuplicado — el número que se muestra es el CÓDIGO, no el id
     expect(mensajeDuplicado(veredicto()).mensaje).not.toContain('#18')
   })
 
-  it('lo mismo en los cinco motivos', () => {
-    for (const motivo of ['direccion', 'punto', 'nombre_igual', 'distancia', 'nombre_subconjunto'] as const) {
+  it('lo mismo en los tres motivos', () => {
+    for (const motivo of ['direccion', 'punto', 'distancia'] as const) {
       const m = mensajeDuplicado(veredicto({ motivo, distancia_m: 5.2 })).mensaje
       expect(m).toContain('(#10)')
       expect(m).not.toContain('#18')
