@@ -405,6 +405,14 @@ export default function ClientesContainer(): React.ReactElement {
     // fuera para que no se sobrescriban desde esta UI.
     if (!isCreating && edicionRestringida) {
       const patchRestringido = {
+        // El usuario ya confirmó el aviso adentro del modal (ver comentario en
+        // dbData más abajo); sin esto el guard de updateCliente vuelve a tirar
+        // el error y el guardado queda en loop.
+        duplicado_confirmado: data.duplicadoConfirmado ?? false,
+        // El preventista no puede editar nombre_fantasia (no viaja en este
+        // patch), pero el guard de duplicados sí lo necesita para evaluar lo
+        // mismo que evaluó ModalCliente. Se descarta antes del UPDATE.
+        duplicado_nombre_fantasia: data.nombreFantasia,
         razon_social: data.razonSocial || data.nombreFantasia,
         direccion: data.direccion,
         aclaracion_direccion: data.aclaracionDireccion?.trim() || null,
