@@ -326,3 +326,38 @@ describe('la edición pasa por el mismo guard cuando toca los campos del criteri
     expect(updateSpy).toHaveBeenCalled()
   })
 })
+
+describe('patch restringido de preventista: confirmación en un solo intento (#680/#681)', () => {
+  // El patch acotado que ClientesContainer arma para edicionRestringida no
+  // manda nombre_fantasia (el preventista no lo puede editar), pero
+  // ModalCliente sí lo usó para armar su veredicto. duplicado_nombre_fantasia
+  // es la forma en que la mutation ve ese mismo dato sin persistirlo.
+  const editar = async (data: Record<string, unknown>) => {
+    const { result } = renderHook(() => useActualizarClienteMutation(), { wrapper })
+    return result.current.mutateAsync({ id: '77', data } as never)
+  }
+
+  it('con duplicado_confirmado en el patch restringido, guarda en un solo intento', async () => {
+    rpc.mockResolvedValue({ data: veredicto({ avisa: true, motivo: 'distancia', distancia_m: 5 }), error: null })
+    await editar({
+      direccion: 'Otra calle 200',
+      duplicado_confirmado: true,
+      duplicado_nombre_fantasia: 'Kiosco Nuevo',
+    })
+    expect(updateSpy).toHaveBeenCalled()
+  })
+
+  it('usa duplicado_nombre_fantasia para el veredicto cuando nombre_fantasia no viaja en el patch', async () => {
+    rpc.mockResolvedValue({ data: veredicto(), error: null })
+    await editar({ direccion: 'Otra calle 200', duplicado_nombre_fantasia: 'Kiosco Nuevo' })
+    expect(rpc).toHaveBeenCalledWith('verificar_duplicado_cliente', expect.objectContaining({
+      p_nombre_fantasia: 'Kiosco Nuevo',
+    }))
+  })
+
+  it('duplicado_nombre_fantasia no viaja en el UPDATE', async () => {
+    rpc.mockResolvedValue({ data: veredicto(), error: null })
+    await editar({ direccion: 'Otra calle 200', duplicado_nombre_fantasia: 'Kiosco Nuevo' })
+    expect(Object.keys(updateSpy.mock.calls[0][0] as object)).not.toContain('duplicado_nombre_fantasia')
+  })
+})

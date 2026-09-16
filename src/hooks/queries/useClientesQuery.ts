@@ -229,6 +229,14 @@ interface ClienteCreateInput {
    * No es una columna: se descarta antes del INSERT.
    */
   duplicado_confirmado?: boolean
+  /**
+   * Solo para el guard de duplicados: el patch acotado del preventista no
+   * manda `nombre_fantasia` (no lo puede editar), pero ModalCliente sí lo usa
+   * para armar el veredicto. Sin esto, el guard de la mutation evalúa contra
+   * `null` mientras el modal evaluó contra el valor real, y pueden divergir.
+   * Se descarta antes del UPDATE igual que `duplicado_confirmado`.
+   */
+  duplicado_nombre_fantasia?: string | null
 }
 
 // Mutation functions
@@ -324,7 +332,13 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   // aviso del guard (mig 250). Acá el payload se arma por spread, así que si no
   // se descarta viaja como columna y PostgREST rechaza el UPDATE entero.
   // `createCliente` no lo sufre porque su insert nombra las columnas una por una.
-  const { preventista_ids, descuentos_categoria, duplicado_confirmado: _confirmado, ...clienteFields } = cliente
+  const {
+    preventista_ids,
+    descuentos_categoria,
+    duplicado_confirmado: _confirmado,
+    duplicado_nombre_fantasia,
+    ...clienteFields
+  } = cliente
   void _confirmado
 
   // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
@@ -349,7 +363,7 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
       longitud: payload.longitud ?? null,
       direccion: payload.direccion ?? null,
       razon_social: payload.razon_social ?? null,
-      nombre_fantasia: payload.nombre_fantasia ?? null,
+      nombre_fantasia: payload.nombre_fantasia ?? duplicado_nombre_fantasia ?? null,
       excluir_id: id,
     })
 
