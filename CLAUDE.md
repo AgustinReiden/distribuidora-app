@@ -215,6 +215,15 @@ superpuestos** hacen que PostgREST no sepa cuál llamar y tire `PGRST203`, tambi
 runtime y también invisible para `tsc` y para los tests. Al cambiarle la firma a una
 función, **dropeá la vieja** — no dejes las dos conviviendo "por compatibilidad".
 
+Y el tercero de la familia: **los parámetros de una función que se llama por PostgREST van
+en `INTEGER`, nunca en `SMALLINT`.** Todo lo que entra por ahí es un número de JSON, o sea
+`integer`, y Postgres **no** hace el downcast implícito al resolver una función:
+`bot_digest_destinatarios(7, 1)` contra una firma `(SMALLINT, SMALLINT)` da `42883 function
+does not exist`. El tipo de la **columna** y el del **parámetro** son decisiones separadas —
+la columna puede seguir en `SMALLINT` y el cast va adentro, en el `INSERT`—. Pasó en la 261,
+corregida en la 263: ni `tsc`, ni los tests (que mockean la RPC), ni `deno task check` lo ven,
+y el digest se habría quedado mudo sin que fallara nada.
+
 **6. Antes de una migración de datos, fijate qué más depende de esa columna.** Dos cosas
 que ya mordieron en la misma migración:
 - `trigger_actualizar_saldo_pedido` es `AFTER UPDATE **OF total, monto_pagado**`. Esa
