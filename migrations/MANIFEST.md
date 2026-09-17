@@ -1315,6 +1315,58 @@ cuerpo de `verificar_duplicado_cliente` en el archivo de la 251 y el `prosrc` vi
 mismo md5 (`92191025cc0caed401ce2c3bb35bea27`) — **hasta la 259**, que lo reemplaza; desde
 entonces el archivo a comparar es el de la 259.
 
+### 261 / 262 / 263 · El resumen del bot lo elige cada uno
+
+Las tres son una sola cosa partida en el orden en que se fueron encontrando los problemas.
+Se aplicaron seguidas y ninguna llegó a producir un envío con la forma intermedia.
+
+**261** crea `bot_digest_config` (una fila por perfil) y tres funciones:
+`bot_digest_destinatarios(hora, dow)` —a quién le toca el digest en esta hora— y el par
+`bot_admin_{listar,guardar}_config_digest` del panel. La fila es **opcional**: sin fila,
+los `COALESCE` de la función reproducen el digest previo (07:00, todos los días, las cinco
+secciones que fijaba el prompt). Por eso no hubo backfill y un admin que se vincule mañana
+arranca como arrancaba antes. La decisión de "a quién le toca" vive en SQL y no en la edge
+function para que se pueda verificar con un `SELECT`; la hora y el día ISO los calcula la
+edge function (que ya es dueña de la conversión a TZ Argentina) y los pasa como parámetros,
+así estas funciones quedan puras.
+
+**262** le saca a `bot_digest_destinatarios` el `EXECUTE` de `authenticated`. La 261 usó la
+receta de CLAUDE.md —`REVOKE ... FROM PUBLIC, anon`—, que está pensada para las RPCs que el
+frontend sí llama: deja viva la mitad `authenticated`. Ésta no la necesita (la llama sólo la
+edge function con service_role) y devuelve `telegram_user_id`, `perfil_id` y `sucursal_id` de
+todos los admins, así que cualquier preventista logueado podía enumerar las horas y sacar la
+lista. **`scripts/check-permisos.mjs` no lo habría visto**: ese gate falla ante lo alcanzable
+con la *anon key*, no con una sesión. La regla salió de acá y quedó escrita en CLAUDE.md: una
+función que sólo corre desde el server se revoca a las **tres**.
+
+**263** cambia las firmas de `SMALLINT` a `INTEGER`. La 261 las declaró `SMALLINT` para que
+coincidieran con las columnas, y ése fue el error: los tipos de las columnas y los de los
+parámetros son cosas distintas, y Postgres **no** hace el downcast implícito de integer a
+smallint al resolver una función —`select bot_digest_destinatarios(7, 1)` da `42883`—.
+Todo lo que entra por PostgREST es un número de JSON, o sea integer: la edge function manda
+`{p_hora: 7, p_dow: 1}` y el panel `{p_hora_local: 19, p_dias: [1,3,5]}`. Con las firmas en
+SMALLINT las dos llamadas fallaban en runtime, y no lo ve `tsc`, ni los tests (que mockean la
+RPC), ni `deno task check`: el digest se habría quedado mudo sin que fallara nada. Es el mismo
+género que la Trampa 5 de CLAUDE.md —una firma que sólo rompe por PostgREST— y por eso las
+viejas se **dropean** en vez de convivir, que daría `PGRST203`. Las columnas siguen SMALLINT;
+el cast va adentro del `INSERT`.
+
+Verificado en prod después de aplicar. Con la tabla vacía, `bot_digest_destinatarios(7, 1)`
+da los **4** admins y `(19, 1)` da **0**: el default es el comportamiento anterior, intacto.
+Impersonando a un admin, `bot_admin_listar_config_digest()` devuelve las 4 filas con
+`configurado: false`; impersonando a un no-admin, `Solo admin puede ver la configuración del
+digest`. Un `bot_admin_guardar_config_digest(<Julio>, true, 19, ARRAY[1,3,5], ARRAY['ventas','deuda'])`
+—el payload exacto del modal, con enteros pelados— devuelve `success: true` y deja
+`bot_digest_destinatarios(19, 3)` en **1**. Los dos ensayos corrieron dentro de un `DO` que
+termina en `RAISE`, así que se revirtieron solos: `bot_digest_config` quedó en **0 filas**.
+Una sola firma por función, y `has_function_privilege('authenticated', 'bot_digest_destinatarios')`
+= false.
+
+Del lado de la edge function, el disparo pasa de un cron diario a las 10:00 UTC a uno
+**horario** (`.github/workflows/telegram-digest.yml`), porque el horario ahora lo elige cada
+uno. La idempotencia sigue siendo `(admin_perfil_id, fecha)`, así que 24 corridas por día
+mandan un solo mensaje por persona.
+
 ### 260 · Un duplicado es un lugar, no un nombre
 
 El guard tenía tres reglas: dos sobre el LUGAR (dirección con altura, distancia en metros) y

@@ -212,6 +212,38 @@ function geminiOK(text: string): Response {
   );
 }
 
+/** Respuesta cortada por el techo de tokens: texto parcial + MAX_TOKENS. */
+function geminiTruncado(text: string): Response {
+  return new Response(
+    JSON.stringify({
+      candidates: [
+        {
+          content: { role: "model", parts: [{ text }] },
+          finishReason: "MAX_TOKENS",
+        },
+      ],
+      usageMetadata: { totalTokenCount: 2048 },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/** Respuesta partida en varias partes de texto (Gemini puede hacerlo). */
+function geminiMultiParte(...textos: string[]): Response {
+  return new Response(
+    JSON.stringify({
+      candidates: [
+        {
+          content: { role: "model", parts: textos.map((text) => ({ text })) },
+          finishReason: "STOP",
+        },
+      ],
+      usageMetadata: { totalTokenCount: 50 },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
 function telegramOK(): Response {
   return new Response(
     JSON.stringify({ ok: true, result: { message_id: 1 } }),
@@ -494,6 +526,260 @@ Deno.test("runDigestForAdmin texto vacío de Gemini → status=error y stage=gem
 });
 
 // ============================================================================
+// 6b. Mensaje truncado: el digest llegaba cortado a los ~70 caracteres
+// ============================================================================
+
+Deno.test("runDigestForAdmin: thinking apagado y techo de 2048 en el request a Gemini", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () => geminiOK("resumen completo"),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    await runDigestForAdmin(client, makeArgs());
+
+    const call = fetchStub.spy.calls.find((c) => c.url.includes("generativelanguage"));
+    assert(call, "debió llamar a Gemini");
+    const body = call!.body as {
+      generationConfig?: {
+        maxOutputTokens?: number;
+        thinkingConfig?: { thinkingBudget?: number };
+      };
+    };
+    // El thinking se descuenta de maxOutputTokens: sin apagarlo, el digest
+    // sale cortado a los ~70 caracteres.
+    assertEquals(body.generationConfig?.thinkingConfig?.thinkingBudget, 0);
+    assertEquals(body.generationConfig?.maxOutputTokens, 2048);
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: finishReason=MAX_TOKENS → error y NO se envía el mensaje cortado", async () => {
+  setupEnv();
+  const { client, spy } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    // El caso real: el monto cortado a mitad ($1.250 por $1.250.130).
+    gemini: () =>
+      geminiTruncado(
+        "Ventas +25.6% vs promedio\n\n📊 Ventas\n• $1.250.",
+      ),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    const result = await runDigestForAdmin(client, makeArgs());
+
+    assertEquals(result.status, "error");
+    assertStringIncludes(result.reason ?? "", "MAX_TOKENS");
+
+    // Lo importante: el mensaje cortado NO salió a Telegram.
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    assertEquals(tgCall, undefined);
+
+    const upsert = spy.upserts.find((u) => u.table === "bot_digests_enviados");
+    assert(upsert);
+    assertEquals(upsert!.row.status, "error");
+    const errMeta = upsert!.row.error_meta as Record<string, unknown>;
+    assertEquals(errMeta.stage, "gemini");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: respuesta en varias partes → se concatenan, no se manda solo la primera", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () =>
+      geminiMultiParte(
+        "Ventas +25.6%.\n\n",
+        "📊 Ventas\n• $1.250.130",
+      ),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    const result = await runDigestForAdmin(client, makeArgs());
+    assertEquals(result.status, "ok");
+
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    assert(tgCall, "debió enviar a Telegram");
+    const enviado = String((tgCall!.body as { text?: string }).text);
+    assertStringIncludes(enviado, "Ventas +25.6%.");
+    assertStringIncludes(enviado, "$1.250.130");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+// ============================================================================
+// 6c. Secciones configurables por admin
+// ============================================================================
+
+Deno.test("runDigestForAdmin: las secciones apagadas no llegan al JSON que ve Gemini", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () => geminiOK("solo ventas"),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    const result = await runDigestForAdmin(client, {
+      ...makeArgs(),
+      secciones: ["ventas"],
+    });
+    assertEquals(result.status, "ok");
+
+    const call = fetchStub.spy.calls.find((c) => c.url.includes("generativelanguage"));
+    assert(call, "debio llamar a Gemini");
+    const enviado = JSON.stringify(call!.body);
+    // La seccion pedida viaja...
+    assertStringIncludes(enviado, "ventas_dia");
+    // ...y las apagadas no aparecen ni como clave vacia.
+    assert(!enviado.includes("top_clientes"), "top_clientes no debia viajar");
+    assert(!enviado.includes("stock_critico"), "stock_critico no debia viajar");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: sin la seccion 'vencimientos' no se consultan los lotes", async () => {
+  setupEnv();
+  const { client, spy } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    gemini: () => geminiOK("resumen sin vencimientos"),
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    const result = await runDigestForAdmin(client, {
+      ...makeArgs(),
+      secciones: ["ventas"],
+    });
+    assertEquals(result.status, "ok");
+
+    const llamoVencimientos = spy.rpcCalls.some(
+      (c) => c.fn === "bot_reporte_vencimientos",
+    );
+    assert(!llamoVencimientos, "no debia consultar los lotes por vencer");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: con 'vencimientos' como unica seccion no llama a Gemini", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+    vencimientosRpcResponse: {
+      data: [
+        {
+          producto_id: 1,
+          producto_nombre: "Coca 2.25L",
+          lote_id: 9,
+          cantidad_restante: 24,
+          fecha_vencimiento: "2026-09-20",
+          dias_restantes: 4,
+        },
+      ],
+      error: null,
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({
+    telegram: () => telegramOK(),
+  });
+
+  try {
+    const result = await runDigestForAdmin(client, {
+      ...makeArgs(),
+      secciones: ["vencimientos"],
+    });
+    assertEquals(result.status, "ok");
+
+    // Nada de Gemini: el bloque de lotes se arma sin modelo.
+    const geminiCall = fetchStub.spy.calls.find((c) => c.url.includes("generativelanguage"));
+    assertEquals(geminiCall, undefined);
+
+    const tgCall = fetchStub.spy.calls.find((c) => c.url.includes("api.telegram.org"));
+    assert(tgCall, "debio enviar el mensaje igual");
+    assertStringIncludes(String((tgCall!.body as { text?: string }).text), "Coca 2.25L");
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+Deno.test("runDigestForAdmin: solo 'vencimientos' y sin lotes → skipped, no manda header solo", async () => {
+  setupEnv();
+  const { client } = createMockSupabase({
+    existenteData: null,
+    rpcResponse: { data: FAKE_METRICAS, error: null },
+    vencimientosRpcResponse: { data: [], error: null },
+  });
+  // deno-lint-ignore no-explicit-any
+  _setServiceRoleClientForTests(client as any);
+
+  const fetchStub = installFetchStub({});
+
+  try {
+    const result = await runDigestForAdmin(client, {
+      ...makeArgs(),
+      secciones: ["vencimientos"],
+    });
+
+    assertEquals(result.status, "skipped");
+    assertEquals(result.reason, "sin_contenido");
+    assertEquals(fetchStub.spy.calls.length, 0);
+  } finally {
+    fetchStub.restore();
+    teardownEnv();
+  }
+});
+
+// ============================================================================
 // 7. Idempotencia con status='error' previo: NO skipea, reintenta
 // ============================================================================
 
@@ -652,7 +938,11 @@ Deno.test("runDigestForAdmin: admin sin sucursal (null) → no consulta vencimie
   try {
     await runDigestForAdmin(client, { ...makeArgs(), sucursal_id: null });
     const vencimientosCall = spy.rpcCalls.find((c) => c.fn === "bot_reporte_vencimientos");
-    assertEquals(vencimientosCall, undefined, "sin sucursal no hay a quién consultarle vencimientos");
+    assertEquals(
+      vencimientosCall,
+      undefined,
+      "sin sucursal no hay a quién consultarle vencimientos",
+    );
   } finally {
     fetchStub.restore();
     teardownEnv();
