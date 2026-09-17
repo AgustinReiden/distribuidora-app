@@ -48,6 +48,7 @@ import type {
   BotToggleUsuarioResult,
   BotVinculado,
 } from '../../../hooks/queries/useBotAdmin';
+import type { BotDigestConfig } from '../../../hooks/queries/useBotDigestConfig';
 
 function Wrapper({ children }: { children: ReactNode }): ReactElement {
   return <MemoryRouter>{children}</MemoryRouter>;
@@ -94,6 +95,22 @@ const vinculadoInactivo: BotVinculado = {
   activo: false,
 };
 
+/** Config de digest de `vinculadoActivo`, con el default de la base. */
+const configDigestActivo: BotDigestConfig = {
+  perfil_id: 'perfil-uno',
+  perfil_nombre: 'Ana Gómez',
+  telegram_user_id: 111,
+  sucursal_id: 1,
+  sucursal_nombre: 'Central',
+  configurado: false,
+  activo: true,
+  hora_local: 7,
+  dias_semana: [1, 2, 3, 4, 5, 6, 7],
+  secciones: ['ventas', 'top_clientes', 'stock_critico', 'deuda', 'vencimientos'],
+  actualizado_at: null,
+  actualizado_por: null,
+};
+
 function buildProps(overrides: Partial<VistaBotTelegramProps> = {}): VistaBotTelegramProps {
   const onToggleUsuario = vi.fn(
     async (input: { telegram_user_id: number; activo: boolean }): Promise<BotToggleUsuarioResult> => ({
@@ -104,6 +121,7 @@ function buildProps(overrides: Partial<VistaBotTelegramProps> = {}): VistaBotTel
   );
   return {
     vinculados: [vinculadoActivo, vinculadoInactivo],
+    configDigest: [configDigestActivo],
     digests: [] as BotDigestEnviado[],
     auditEvents: [] as BotAuditEvent[],
     auditSummary: summary,
@@ -114,11 +132,13 @@ function buildProps(overrides: Partial<VistaBotTelegramProps> = {}): VistaBotTel
     digestsPage: 0,
     onDigestsPageChange: vi.fn(),
     loadingVinculados: false,
+    loadingConfigDigest: false,
     loadingDigests: false,
     loadingAudit: false,
     loadingSummary: false,
     onRefresh: vi.fn(),
     onToggleUsuario,
+    onGuardarConfigDigest: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -240,4 +260,41 @@ describe('VistaBotTelegram', () => {
 
     expect(screen.getByText('1 eventos')).toBeInTheDocument();
   });
+
+  describe('sección "Resumen automático"', () => {
+    it('muestra cuándo y qué recibe cada admin', () => {
+      render(<VistaBotTelegram {...buildProps()} />, { wrapper: Wrapper });
+
+      // La fila resume hora y días en una frase, no en siete casilleros.
+      expect(screen.getByText(/07:00 · todos los días/)).toBeInTheDocument();
+    });
+
+    it('marca "sin configurar" mientras la persona tenga el default', () => {
+      render(<VistaBotTelegram {...buildProps()} />, { wrapper: Wrapper });
+
+      // `configurado: false` — lo que se ve es el default, no una elección, y
+      // la diferencia tiene que estar a la vista.
+      expect(screen.getByText('sin configurar')).toBeInTheDocument();
+    });
+
+    it('un admin que se bajó no muestra horario ni secciones', () => {
+      const props = buildProps({
+        configDigest: [{ ...configDigestActivo, configurado: true, activo: false }],
+      });
+      render(<VistaBotTelegram {...props} />, { wrapper: Wrapper });
+
+      expect(screen.queryByText(/07:00 · todos los días/)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Configurar el resumen de Ana/i })).toBeInTheDocument();
+    });
+
+    it('abre el modal de configuración al tocar Configurar', async () => {
+      const user = userEvent.setup();
+      render(<VistaBotTelegram {...buildProps()} />, { wrapper: Wrapper });
+
+      await user.click(screen.getByRole('button', { name: /Configurar el resumen de Ana/i }));
+
+      expect(await screen.findByText(/Resumen de Ana Gómez/)).toBeInTheDocument();
+    });
+  });
+
 });
