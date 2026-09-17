@@ -77,9 +77,24 @@ export interface GeminiGenerateContentRequest {
   tool_config?: GeminiToolConfig;
   generationConfig?: {
     temperature?: number;
+    /**
+     * Techo de tokens de salida. OJO: en los modelos 2.5+ los tokens de
+     * *thinking* se descuentan de acá, no van aparte. Un budget chico con
+     * thinking on se lo come el razonamiento y el texto sale cortado con
+     * finishReason=MAX_TOKENS — ver `thinkingConfig` y el digest (#690).
+     */
     maxOutputTokens?: number;
     topP?: number;
     topK?: number;
+    /**
+     * Control del razonamiento interno (modelos 2.5+). `thinkingBudget: 0`
+     * lo apaga; omitirlo deja el budget *dinámico*, que es el default y
+     * puede consumir casi todo `maxOutputTokens`.
+     */
+    thinkingConfig?: {
+      thinkingBudget?: number;
+      includeThoughts?: boolean;
+    };
   };
 }
 

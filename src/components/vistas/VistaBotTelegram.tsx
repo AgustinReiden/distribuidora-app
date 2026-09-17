@@ -5,8 +5,9 @@
  *   - Header con icono Send + título + botón refresh.
  *   - 4 stats cards (mensajes hoy / errores 24h / usuarios activos / digests del mes).
  *   - Sección 1: usuarios vinculados con toggle activo.
- *   - Sección 2: digests recientes (último mes) paginados.
- *   - Sección 3: audit log con filtros (fecha, tipo, perfil), paginado, modal de detalle.
+ *   - Sección 2: qué resumen recibe cada admin y cuándo (bot_digest_config).
+ *   - Sección 3: digests recientes (último mes) paginados.
+ *   - Sección 4: audit log con filtros (fecha, tipo, perfil), paginado, modal de detalle.
  *
  * Gating: si !isAdmin → Navigate a /dashboard. La RPC también gatea por rol
  * desde la migración 019, así que es defensa en profundidad.
@@ -22,6 +23,8 @@ import {
   Mail,
   ChevronLeft,
   ChevronRight,
+  Clock,
+  Pencil,
   X,
 } from 'lucide-react';
 import { useAuthData } from '../../contexts/AuthDataContext';
@@ -36,6 +39,12 @@ import type {
   BotToggleUsuarioResult,
   BotVinculado,
 } from '../../hooks/queries/useBotAdmin';
+import { formatHora, labelSeccion, resumirDias } from '../../utils/digestSecciones';
+import type {
+  BotDigestConfig,
+  GuardarConfigDigestInput,
+} from '../../hooks/queries/useBotDigestConfig';
+import ModalConfigDigest from '../modals/ModalConfigDigest';
 
 const TIPO_OPCIONES: Array<{ value: string; label: string }> = [
   { value: '', label: 'Todos los tipos' },
@@ -60,6 +69,7 @@ const PAGE_SIZE_AUDIT = 50;
 export interface VistaBotTelegramProps {
   // Datos
   vinculados: BotVinculado[];
+  configDigest: BotDigestConfig[];
   digests: BotDigestEnviado[];
   auditEvents: BotAuditEvent[];
   auditSummary: BotAuditSummary | null;
@@ -74,6 +84,7 @@ export interface VistaBotTelegramProps {
 
   // Loading flags
   loadingVinculados: boolean;
+  loadingConfigDigest: boolean;
   loadingDigests: boolean;
   loadingAudit: boolean;
   loadingSummary: boolean;
@@ -81,6 +92,7 @@ export interface VistaBotTelegramProps {
   // Acciones
   onRefresh: () => void;
   onToggleUsuario: (input: BotToggleUsuarioInput) => Promise<BotToggleUsuarioResult>;
+  onGuardarConfigDigest: (input: GuardarConfigDigestInput) => Promise<void>;
 }
 
 export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactElement {
@@ -88,6 +100,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
 
   const {
     vinculados,
+    configDigest,
     digests,
     auditEvents,
     auditSummary,
@@ -98,17 +111,21 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
     digestsPage,
     onDigestsPageChange,
     loadingVinculados,
+    loadingConfigDigest,
     loadingDigests,
     loadingAudit,
     loadingSummary,
     onRefresh,
     onToggleUsuario,
+    onGuardarConfigDigest,
   } = props;
 
   // Modal con detalle de evento (JSON pretty).
   const [eventoDetalle, setEventoDetalle] = useState<BotAuditEvent | null>(null);
   // Toggle en curso (para deshabilitar el badge mientras corre la mutation).
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  // Fila de configuración que se está editando (null = modal cerrado).
+  const [configEditando, setConfigEditando] = useState<BotDigestConfig | null>(null);
 
   // ============================================================================
   // Paginación local — hooks ANTES del early return para respetar rules-of-hooks.
@@ -330,7 +347,110 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
         )}
       </section>
 
-      {/* Sección 2: digests recientes */}
+      {/* Sección 2: qué recibe cada admin y cuándo */}
+      <section
+        aria-labelledby="bot-config-digest-h"
+        className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm"
+      >
+        <div className="px-4 py-3 border-b dark:border-gray-700">
+          <h2
+            id="bot-config-digest-h"
+            className="text-lg font-semibold text-gray-800 dark:text-white"
+          >
+            Resumen automático
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Qué le llega a cada admin por Telegram y en qué momento. El resumen es
+            siempre del día anterior.
+          </p>
+        </div>
+        {loadingConfigDigest ? (
+          <LoadingSpinner />
+        ) : configDigest.length === 0 ? (
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <Clock className="w-10 h-10 mx-auto mb-2 opacity-50" aria-hidden="true" />
+            <p>No hay admins vinculados al bot.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full" role="table">
+              <thead className="bg-gray-50 dark:bg-gray-700/50">
+                <tr>
+                  <Th>Admin</Th>
+                  <Th>Recibe</Th>
+                  <Th>Cuándo</Th>
+                  <Th>Secciones</Th>
+                  <Th>Última edición</Th>
+                  <Th>&nbsp;</Th>
+                </tr>
+              </thead>
+              <tbody className="divide-y dark:divide-gray-700">
+                {configDigest.map((c) => (
+                  <tr
+                    key={c.perfil_id}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                  >
+                    <td className="px-4 py-3 font-medium text-gray-800 dark:text-white">
+                      {c.perfil_nombre ?? '(sin nombre)'}
+                      {c.sucursal_nombre && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {c.sucursal_nombre}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          c.activo
+                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                        }`}
+                      >
+                        {c.activo ? 'Sí' : 'No'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400 text-sm">
+                      {c.activo ? `${formatHora(c.hora_local)} · ${resumirDias(c.dias_semana)}` : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400 text-sm">
+                      {c.activo ? <ResumenSecciones secciones={c.secciones} /> : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400 text-sm">
+                      {c.configurado ? (
+                        <>
+                          {c.actualizado_at ? formatDateTime(c.actualizado_at) : '—'}
+                          {c.actualizado_por && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              por {c.actualizado_por}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="italic text-gray-400 dark:text-gray-500">
+                          sin configurar
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setConfigEditando(c)}
+                        className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-sm text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                        aria-label={`Configurar el resumen de ${c.perfil_nombre ?? ''}`}
+                      >
+                        <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                        Configurar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Sección 3: digests recientes */}
       <section
         aria-labelledby="bot-digests-h"
         className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm"
@@ -411,7 +531,7 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
         )}
       </section>
 
-      {/* Sección 3: audit log */}
+      {/* Sección 4: audit log */}
       <section
         aria-labelledby="bot-audit-h"
         className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-sm"
@@ -556,6 +676,14 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
       </section>
 
       {/* Modal detalle de evento */}
+      {configEditando && (
+        <ModalConfigDigest
+          config={configEditando}
+          onClose={() => setConfigEditando(null)}
+          onGuardar={onGuardarConfigDigest}
+        />
+      )}
+
       {eventoDetalle && (
         <DetalleEventoModal
           evento={eventoDetalle}
@@ -569,6 +697,24 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
 // =============================================================================
 // SUBCOMPONENTS
 // =============================================================================
+
+/**
+ * Las secciones prendidas, en una celda de tabla. Muestra las tres primeras y
+ * cuenta el resto: la lista completa son diez y no entra en una fila.
+ */
+function ResumenSecciones({ secciones }: { secciones: string[] }): ReactElement {
+  if (secciones.length === 0) {
+    return <span className="italic text-gray-400 dark:text-gray-500">ninguna</span>;
+  }
+  const visibles = secciones.slice(0, 3).map(labelSeccion);
+  const resto = secciones.length - visibles.length;
+  return (
+    <span title={secciones.map(labelSeccion).join(', ')}>
+      {visibles.join(', ')}
+      {resto > 0 && ` +${resto}`}
+    </span>
+  );
+}
 
 function Th({ children }: { children: ReactNode }): ReactElement {
   return (

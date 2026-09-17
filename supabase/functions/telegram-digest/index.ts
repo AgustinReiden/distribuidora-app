@@ -1,7 +1,11 @@
 // Edge Function: telegram-digest
 //
-// Disparada por .github/workflows/telegram-digest.yml (schedule 10:00 UTC =
-// 07:00 ART + workflow_dispatch). La migración 018 programaba el disparo con
+// Disparada por .github/workflows/telegram-digest.yml CADA HORA en punto (+
+// workflow_dispatch). Corre seguido porque el horario es por persona: cada
+// admin elige a qué hora y qué días quiere su resumen (`bot_digest_config`), y
+// en cada corrida la RPC `bot_digest_destinatarios` contesta a quién le toca
+// en esta hora. Antes era un solo disparo diario a las 07:00 para todos.
+// La migración 018 programaba el disparo con
 // pg_cron + pg_net, pero esas extensiones nunca estuvieron habilitadas en
 // prod y el digest no corrió ni una vez (#661) — ver el comentario de
 // cabecera de esa migración. Para cada admin vinculado al bot:
@@ -49,6 +53,8 @@ interface AdminRow {
   telegram_user_id: number;
   perfil_id: string;
   sucursal_id: number | null;
+  /** Secciones elegidas por esta persona. Ver telegram-digest/secciones.ts. */
+  secciones: string[];
 }
 
 serve(async (req: Request) => {
@@ -71,38 +77,49 @@ serve(async (req: Request) => {
   // 2. Resolver fecha del digest: ayer en TZ Argentina.
   const fecha = ayerEnArgentina();
 
-  // 3. Cargar admins activos vinculados al bot.
-  //    El rol y el alta/baja salen de `perfiles`, no del snapshot que
-  //    `bot_usuarios` guardó al vincular (mig 237): el digest le manda las
-  //    ventas del día al que HOY es admin. Antes seguía saliendo hacia quien
-  //    hubiera sido admin alguna vez, aunque lo hubieran bajado de rol o dado
-  //    de baja en la app.
-  //    `bot_usuarios` tiene una sola FK a `perfiles`, así que el embed no es
-  //    ambiguo (no hay PGRST201 posible acá).
+  // 3. A quién le toca el digest en ESTA hora.
+  //
+  // La decisión vive en `bot_digest_destinatarios` (SQL) y no acá: cruza
+  // `bot_usuarios` con `bot_digest_config` y aplica hora, días y secciones en
+  // un solo lugar verificable. El admin sin fila de config recibe el default,
+  // que es el digest de siempre — por eso no hubo backfill.
+  //
+  // La hora y el día se calculan acá, en TZ Argentina, porque este módulo ya
+  // es el dueño de esa conversión (ver `ayerEnArgentina`). La RPC los recibe
+  // como parámetros y queda pura: se la puede probar con cualquier hora.
   const sb = getServiceRoleClient();
-  const { data: admins, error } = await sb
-    .from("bot_usuarios")
-    .select("telegram_user_id, perfil_id, sucursal_id, activo, perfiles!inner(rol, activo)")
-    .eq("activo", true)
-    .eq("perfiles.rol", "admin")
-    .eq("perfiles.activo", true);
+  const hora = horaEnArgentina();
+  const dow = diaIsoEnArgentina();
+
+  const { data: destinatarios, error } = await sb.rpc(
+    "bot_digest_destinatarios",
+    { p_hora: hora, p_dow: dow },
+  );
 
   if (error) {
-    console.error("[digest] error fetching admins:", error.message);
+    console.error("[digest] error resolviendo destinatarios:", error.message);
     return jsonResponse({ ok: false, error: error.message }, 500);
   }
 
-  if (!admins || admins.length === 0) {
-    return jsonResponse({ ok: true, fecha, skipped: true, reason: "no admins" });
+  const admins = (destinatarios ?? []) as Array<Record<string, unknown>>;
+
+  if (admins.length === 0) {
+    return jsonResponse({
+      ok: true,
+      fecha,
+      hora,
+      dow,
+      skipped: true,
+      reason: "nadie configurado para esta hora",
+    });
   }
 
-  // 4. Procesar cada admin con allSettled — fallo de uno no rompe al resto.
-  const tasks = admins.map((a) => {
-    const row = a as Record<string, unknown>;
+  const tasks = admins.map((row) => {
     const admin: AdminRow = {
       telegram_user_id: Number(row.telegram_user_id),
       perfil_id: String(row.perfil_id),
       sucursal_id: row.sucursal_id == null ? null : Number(row.sucursal_id),
+      secciones: Array.isArray(row.secciones) ? row.secciones.map(String) : [],
     };
     return runDigestForAdmin(sb, { ...admin, fecha });
   });
@@ -110,7 +127,7 @@ serve(async (req: Request) => {
   const results = await Promise.allSettled(tasks);
 
   const summary = results.map((r, i) => {
-    const row = admins[i] as Record<string, unknown>;
+    const row = admins[i];
     const base = {
       admin_perfil_id: String(row.perfil_id),
       telegram_user_id: Number(row.telegram_user_id),
@@ -137,7 +154,14 @@ serve(async (req: Request) => {
   const hoy = hoyEnArgentina();
   const avisosVencimiento = await runAvisosVencimiento(sb, hoy);
 
-  return jsonResponse({ ok: true, fecha, results: summary, avisos_vencimiento: avisosVencimiento });
+  return jsonResponse({
+    ok: true,
+    fecha,
+    hora,
+    dow,
+    results: summary,
+    avisos_vencimiento: avisosVencimiento,
+  });
 });
 
 function ayerEnArgentina(): string {
@@ -153,6 +177,42 @@ function ayerEnArgentina(): string {
     day: "2-digit",
   });
   return fmt.format(ayer);
+}
+
+/**
+ * Hora (0..23) en TZ Argentina. `hour12: false` da "24" a medianoche en vez de
+ * "00" en algunos runtimes, asi que el 24 se normaliza a 0 — si no, nadie con
+ * `hora_local = 0` recibiria nunca su digest.
+ */
+function horaEnArgentina(): number {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    hour12: false,
+  });
+  const h = Number(fmt.format(new Date()));
+  return h % 24;
+}
+
+/**
+ * Dia de la semana ISO en TZ Argentina: 1 = lunes … 7 = domingo. Coincide con
+ * `EXTRACT(ISODOW)` de Postgres, que es contra lo que se guarda `dias_semana`.
+ */
+function diaIsoEnArgentina(): number {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    weekday: "short",
+  });
+  const dias: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+  return dias[fmt.format(new Date())] ?? 1;
 }
 
 /** YYYY-MM-DD para "hoy" en TZ ART. Ver `ayerEnArgentina` para el porqué de `Intl.DateTimeFormat`. */

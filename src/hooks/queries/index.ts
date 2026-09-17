@@ -483,6 +483,23 @@ export type {
   BotToggleUsuarioResult,
 } from './useBotAdmin'
 
+// Bot Telegram - Configuración del digest por admin
+export {
+  botDigestConfigKeys,
+  DIAS_SEMANA,
+  SECCIONES_DIGEST,
+  formatHora,
+  labelSeccion,
+  resumirDias,
+  useBotDigestConfigQuery,
+  useGuardarBotDigestConfigMutation,
+} from './useBotDigestConfig'
+export type {
+  BotDigestConfig,
+  GuardarConfigDigestInput,
+  SeccionDigestKey,
+} from './useBotDigestConfig'
+
 // Deudores en mora (cuenta corriente)
 export { useDeudoresMoraQuery } from './useDeudoresMoraQuery'
 export type { DeudorMora } from './useDeudoresMoraQuery'

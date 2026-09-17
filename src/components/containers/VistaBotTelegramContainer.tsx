@@ -3,7 +3,7 @@
  *
  * Container para la vista admin del bot Telegram (Phase 4 task 4.2).
  * Mantiene el estado de filtros del audit log + páginas locales y orquesta
- * los 4 query hooks + 1 mutation. La vista es presentational.
+ * los 5 query hooks + 2 mutations. La vista es presentational.
  */
 import { Suspense, useCallback, useMemo, useState, type ReactElement } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -13,7 +13,9 @@ import {
   useBotAuditLogQuery,
   useBotAuditSummaryQuery,
   useBotDigestsEnviadosQuery,
+  useBotDigestConfigQuery,
   useBotVinculadosQuery,
+  useGuardarBotDigestConfigMutation,
   useToggleBotUsuarioMutation,
 } from '../../hooks/queries';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -22,6 +24,8 @@ import type {
   BotToggleUsuarioInput,
   BotToggleUsuarioResult,
 } from '../../hooks/queries/useBotAdmin';
+import type { GuardarConfigDigestInput } from '../../hooks/queries/useBotDigestConfig';
+import { botDigestConfigKeys } from '../../hooks/queries';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 
 const VistaBotTelegram = lazyWithReload(() => import('../vistas/VistaBotTelegram'));
@@ -74,9 +78,11 @@ export default function VistaBotTelegramContainer(): ReactElement {
   const auditLogQuery = useBotAuditLogQuery(filters);
   const summaryQuery = useBotAuditSummaryQuery(filters.desde, filters.hasta);
   const digestsQuery = useBotDigestsEnviadosQuery(filters.desde, filters.hasta);
+  const configDigestQuery = useBotDigestConfigQuery();
 
-  // Mutation
+  // Mutations
   const toggleMutation = useToggleBotUsuarioMutation();
+  const guardarConfigMutation = useGuardarBotDigestConfigMutation();
 
   // ============================================================================
   // Handlers
@@ -95,8 +101,24 @@ export default function VistaBotTelegramContainer(): ReactElement {
     [toggleMutation, notify],
   );
 
+  const handleGuardarConfigDigest = useCallback(
+    async (input: GuardarConfigDigestInput): Promise<void> => {
+      try {
+        await guardarConfigMutation.mutateAsync(input);
+        notify.success('Configuración guardada');
+      } catch (err) {
+        // Se relanza: el modal lo muestra al lado del botón y NO se cierra, así
+        // no se pierde lo que el admin acababa de tildar.
+        notify.error((err as Error).message || 'No se pudo guardar la configuración');
+        throw err;
+      }
+    },
+    [guardarConfigMutation, notify],
+  );
+
   const handleRefresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: botAdminKeys.all });
+    queryClient.invalidateQueries({ queryKey: botDigestConfigKeys.all });
   }, [queryClient]);
 
   const handleFiltersChange = useCallback((next: BotAuditFilters) => {
@@ -108,11 +130,16 @@ export default function VistaBotTelegramContainer(): ReactElement {
   const vinculados = useMemo(() => vinculadosQuery.data ?? [], [vinculadosQuery.data]);
   const audit = useMemo(() => auditLogQuery.data ?? [], [auditLogQuery.data]);
   const digests = useMemo(() => digestsQuery.data ?? [], [digestsQuery.data]);
+  const configDigest = useMemo(
+    () => configDigestQuery.data ?? [],
+    [configDigestQuery.data],
+  );
 
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaBotTelegram
         vinculados={vinculados}
+        configDigest={configDigest}
         digests={digests}
         auditEvents={audit}
         auditSummary={summaryQuery.data ?? null}
@@ -123,11 +150,13 @@ export default function VistaBotTelegramContainer(): ReactElement {
         digestsPage={digestsPage}
         onDigestsPageChange={setDigestsPage}
         loadingVinculados={vinculadosQuery.isLoading}
+        loadingConfigDigest={configDigestQuery.isLoading}
         loadingDigests={digestsQuery.isLoading}
         loadingAudit={auditLogQuery.isLoading}
         loadingSummary={summaryQuery.isLoading}
         onRefresh={handleRefresh}
         onToggleUsuario={handleToggle}
+        onGuardarConfigDigest={handleGuardarConfigDigest}
       />
     </Suspense>
   );

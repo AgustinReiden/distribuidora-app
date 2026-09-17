@@ -77,6 +77,13 @@ suelta en `sucursales`.
   Una función de **trigger** no necesita `EXECUTE` para nadie: la invoca el executor como
   parte del DML, no el caller. Dejala en `postgres` + `service_role`, como
   `completar_origen_precio_item` (148) o `validar_precio_item_pedido`.
+  Y una función que **sólo corre desde el server** —una edge function, un cron— se revoca a
+  las **tres**: `REVOKE ... FROM PUBLIC, anon, authenticated`. La receta de dos mitades de
+  arriba es para las RPCs que el frontend sí llama; aplicada a una función de server deja el
+  `GRANT` default a `authenticated` en pie, y el gate **no lo ve** —`check-permisos.mjs`
+  falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
+  `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
+  todos los admins y cualquier preventista logueado podía enumerarlos.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
 - **Las 4 RPCs de pago son wrappers**: la lógica vive en `<nombre>_impl` (mig 167, por la
@@ -207,6 +214,15 @@ Pariente de la misma familia: **dos sobrecargas SQL con rangos `[obligatorios, t
 superpuestos** hacen que PostgREST no sepa cuál llamar y tire `PGRST203`, también en
 runtime y también invisible para `tsc` y para los tests. Al cambiarle la firma a una
 función, **dropeá la vieja** — no dejes las dos conviviendo "por compatibilidad".
+
+Y el tercero de la familia: **los parámetros de una función que se llama por PostgREST van
+en `INTEGER`, nunca en `SMALLINT`.** Todo lo que entra por ahí es un número de JSON, o sea
+`integer`, y Postgres **no** hace el downcast implícito al resolver una función:
+`bot_digest_destinatarios(7, 1)` contra una firma `(SMALLINT, SMALLINT)` da `42883 function
+does not exist`. El tipo de la **columna** y el del **parámetro** son decisiones separadas —
+la columna puede seguir en `SMALLINT` y el cast va adentro, en el `INSERT`—. Pasó en la 261,
+corregida en la 263: ni `tsc`, ni los tests (que mockean la RPC), ni `deno task check` lo ven,
+y el digest se habría quedado mudo sin que fallara nada.
 
 **6. Antes de una migración de datos, fijate qué más depende de esa columna.** Dos cosas
 que ya mordieron en la misma migración:

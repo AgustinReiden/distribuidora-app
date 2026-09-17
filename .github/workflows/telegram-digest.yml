@@ -29,15 +29,21 @@ name: Digest ejecutivo Telegram
 # CÓMO DETECTAR QUE DEJÓ DE CORRER
 # ---------------------------------
 #   gh run list --workflow=telegram-digest.yml
-# Un run rojo o la ausencia de runs en el horario esperado (07:00 ART) es la
-# señal. También se puede confirmar contra la tabla `bot_digests_enviados`
-# (1 fila por admin × fecha si corrió bien).
+# Un run rojo, o la ausencia de runs por varias horas, es la señal. También se
+# puede confirmar contra la tabla `bot_digests_enviados` (1 fila por admin ×
+# fecha si corrió bien — una sola, aunque el workflow corra 24 veces: la
+# idempotencia es (admin_perfil_id, fecha)).
 
 on:
   schedule:
-    # 10:00 UTC = 07:00 ART (Argentina, UTC-3 sin DST). Mismo horario que
-    # documentaba el cron.schedule() de la migración 018.
-    - cron: '0 10 * * *'
+    # CADA HORA en punto. El horario ya no lo fija este cron: lo elige cada
+    # admin en el panel (`bot_digest_config.hora_local` + `dias_semana`), y la
+    # edge function pregunta en cada corrida a quien le toca en esta hora. Una
+    # corrida en la que no le toca a nadie no manda nada y sale ok.
+    #
+    # Antes era '0 10 * * *' (07:00 ART) para todos. Bajar la frecuencia aca
+    # vuelve a hacer que el horario del panel no se respete.
+    - cron: '0 * * * *'
   workflow_dispatch: {}
 
 permissions:
