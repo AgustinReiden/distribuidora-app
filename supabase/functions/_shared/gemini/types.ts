@@ -81,7 +81,7 @@ export interface GeminiGenerateContentRequest {
      * Techo de tokens de salida. OJO: en los modelos 2.5+ los tokens de
      * *thinking* se descuentan de acá, no van aparte. Un budget chico con
      * thinking on se lo come el razonamiento y el texto sale cortado con
-     * finishReason=MAX_TOKENS — ver `thinkingConfig` y el digest.
+     * finishReason=MAX_TOKENS — ver `thinkingConfig` y el digest (#690).
      */
     maxOutputTokens?: number;
     topP?: number;

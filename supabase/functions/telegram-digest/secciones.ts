@@ -1,4 +1,4 @@
-// Catálogo de secciones del digest y el filtrado de métricas que las aplica.
+// Catálogo de secciones del digest y el filtrado de métricas que las aplica (#691).
 //
 // El mecanismo es deliberadamente tonto: en vez de explicarle a Gemini qué
 // secciones omitir, le sacamos los datos del JSON. El prompt ya tiene la regla

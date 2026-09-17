@@ -7,7 +7,7 @@
 //   3. Cargar el system prompt `digest_admin.txt` (cacheado en memoria).
 //   4. Llamar Gemini con el JSON serializado en un user message → texto
 //      narrativo. Con thinking apagado: ver el comentario al lado de la
-//      llamada — con thinking on el mensaje sale truncado.
+//      llamada — con thinking on el mensaje sale truncado (#690).
 //   5. Enviar el mensaje a Telegram (plain text, sin Markdown — el LLM puede
 //      emitir formato dudoso y no queremos que la falla de parseo descarte
 //      el digest entero).
@@ -37,7 +37,8 @@ export interface DigestArgs {
   /** YYYY-MM-DD — fecha del día a resumir (típicamente "ayer" en ART). */
   fecha: string;
   /**
-   * Secciones que este admin eligió recibir (`bot_digest_config.secciones`).
+   * Secciones que este admin eligió recibir (`bot_digest_config.secciones`,
+   * #691).
    * Ver `secciones.ts`. Si no viene, el default reproduce el digest previo a
    * que la configuración existiera — para que un caller viejo no cambie de
    * comportamiento por omisión.
@@ -219,7 +220,7 @@ async function narrarMetricas(
     }`;
 
     // `thinkingBudget: 0` NO es una optimización de costo: es lo que hace que
-    // el mensaje llegue entero. En los modelos 2.5+ el thinking se
+    // el mensaje llegue entero (#690). En los modelos 2.5+ el thinking se
     // descuenta de `maxOutputTokens`, y acá el budget dinámico se comía ~1000
     // de los 1024 que había: al admin le llegaban 70 caracteres cortados a
     // mitad de un número ("$1.250." por "$1.250.130"). El digest narra un JSON

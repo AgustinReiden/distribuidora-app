@@ -1,4 +1,4 @@
--- El digest deja de ser uno solo para todos: cada admin elige qué recibe y cuándo.
+-- El digest deja de ser uno solo para todos: cada admin elige qué recibe y cuándo (#691).
 --
 -- Hasta acá el digest ejecutivo salía igual para los cuatro admins vinculados,
 -- todos los días a las 07:00, con las mismas secciones fijas en el prompt. Esta

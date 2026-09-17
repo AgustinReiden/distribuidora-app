@@ -526,7 +526,7 @@ Deno.test("runDigestForAdmin texto vacío de Gemini → status=error y stage=gem
 });
 
 // ============================================================================
-// 6b. Mensaje truncado: el digest llegaba cortado a los ~70 caracteres
+// 6b. Mensaje truncado: el digest llegaba cortado a los ~70 caracteres (#690)
 // ============================================================================
 
 Deno.test("runDigestForAdmin: thinking apagado y techo de 2048 en el request a Gemini", async () => {
@@ -637,7 +637,7 @@ Deno.test("runDigestForAdmin: respuesta en varias partes → se concatenan, no s
 });
 
 // ============================================================================
-// 6c. Secciones configurables por admin
+// 6c. Secciones configurables por admin (#691)
 // ============================================================================
 
 Deno.test("runDigestForAdmin: las secciones apagadas no llegan al JSON que ve Gemini", async () => {

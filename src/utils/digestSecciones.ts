@@ -1,5 +1,5 @@
 /**
- * Catálogo de secciones del digest de Telegram y helpers de presentación.
+ * Catálogo de secciones del digest de Telegram y helpers de presentación (#691).
  *
  * Vive en `utils/` y no en el hook porque es lógica pura y así se testea sin
  * arrastrar el cliente de Supabase (los tests corren sin `.env`).
