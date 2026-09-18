@@ -1,3 +1,5 @@
+import colors from 'tailwindcss/colors'
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -8,6 +10,19 @@ export default {
   theme: {
     extend: {
       colors: {
+        /* Un solo neutro (#699). La app venía con dos: `gray` (5462 usos) y
+           `stone` (558, el "editorial cálido" de Pedidos, Clientes, Productos y
+           Dashboard), y esa mezcla es lo que la partía en dos generaciones
+           visuales. En vez de reescribir 5462 clases, `gray` pasa a tener los
+           VALORES de `stone`: los nombres de clase no cambian, así que ni los
+           tests que aseveran clases ni high-contrast.css se enteran, y
+           revertirlo es una línea. Contraste medido paso a paso contra blanco:
+           delta máximo 0,07; ninguna falla AA nueva. Efecto de segundo orden:
+           `borderColor.DEFAULT` y `divideColor.DEFAULT` pasan a stone-200.
+           Los hex escritos a mano fuera de Tailwind (inputs de index.css, splash
+           de index.html, manifest, theme-color, popups de mapas) se
+           sincronizaron en el mismo cambio. */
+        gray: colors.stone,
         /* Color de marca del rediseño de UI (#698): petróleo alrededor de #0E5A75.
            Es aditiva: ninguna clase la usa todavía. Los primitivos nuevos
            (Button, Badge, IconBadge) van a nacer con `brand-*`; el `blue-*` de

@@ -40,7 +40,7 @@ function useChartTheme() {
     tick: darkMode ? '#94a3b8' : '#64748b',
     grid: darkMode ? 'rgba(148,163,184,0.14)' : 'rgba(100,116,139,0.14)',
     border: darkMode ? 'rgba(148,163,184,0.3)' : 'rgba(100,116,139,0.3)',
-    surface: darkMode ? '#1f2937' : '#ffffff',
+    surface: darkMode ? '#292524' : '#ffffff',
     tooltipBg: darkMode ? '#0f172a' : '#1e293b',
   }), [darkMode])
 }

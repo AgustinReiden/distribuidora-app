@@ -82,7 +82,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     // Meta theme-color para móviles
     const metaThemeColor = document.querySelector('meta[name="theme-color"]');
     if (metaThemeColor) {
-      metaThemeColor.setAttribute('content', darkMode ? '#1f2937' : '#2563eb');
+      metaThemeColor.setAttribute('content', darkMode ? '#292524' : '#2563eb');
     }
   }, [darkMode, highContrast, reducedMotion]);
 
