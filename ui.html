@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Galería de UI · Distribuidora</title>
+    <!--
+      Sin <script> inline a propósito: el server de desarrollo manda
+      `script-src 'self' … blob:` sin 'unsafe-inline' (securityHeadersDevPlugin
+      en vite.config.js). El entry se carga igual que en index.html: un módulo
+      externo servido por Vite.
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/dev/gallery/main.tsx"></script>
+  </body>
+</html>
