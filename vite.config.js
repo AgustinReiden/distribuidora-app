@@ -149,7 +149,7 @@ export default defineConfig({
         short_name: 'Distribuidora',
         description: 'Sistema de gestion para distribuidora de alimentos',
         theme_color: '#2563eb',
-        background_color: '#f3f4f6',
+        background_color: '#f5f5f4',
         display: 'standalone',
         orientation: 'portrait-primary',
         scope: '/',

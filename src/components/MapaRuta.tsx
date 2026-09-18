@@ -112,7 +112,7 @@ const markerDeposito = divIcon({
   className: '',
   html: `<div style="
     width:28px;height:28px;border-radius:6px;
-    background:#1f2937;color:#fff;font-weight:700;font-size:12px;
+    background:#292524;color:#fff;font-weight:700;font-size:12px;
     display:flex;align-items:center;justify-content:center;
     border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);
   ">D</div>`,

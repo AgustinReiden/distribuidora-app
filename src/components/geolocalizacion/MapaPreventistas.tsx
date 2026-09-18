@@ -266,11 +266,11 @@ export default function MapaPreventistas({
       const cfg = SEMAFORO_COLORS[clasif]
       const html = `
         <div style="font-family: ui-sans-serif, system-ui; padding: 4px 2px; max-width: 260px;">
-          <div style="font-weight: 600; color: #111827; font-size: 13px;">${escapeHtml(p.cliente_nombre || 'Cliente sin nombre')}</div>
-          <div style="color: #6b7280; font-size: 11px; margin-top: 2px;">
+          <div style="font-weight: 600; color: #1c1917; font-size: 13px;">${escapeHtml(p.cliente_nombre || 'Cliente sin nombre')}</div>
+          <div style="color: #78716c; font-size: 11px; margin-top: 2px;">
             Pedido #${p.pedido_id} · ${formatHora(p.pedido_created_at ?? p.gps_capturado_at)}
           </div>
-          <div style="margin-top: 6px; font-size: 12px; color: #374151;">
+          <div style="margin-top: 6px; font-size: 12px; color: #44403c;">
             <strong>${formatPrecio(Number(p.total) || 0)}</strong>
             <span style="margin-left: 8px; padding: 1px 6px; border-radius: 9999px; font-size: 11px;"
                   class="${cfg.bg}">
@@ -289,8 +289,8 @@ export default function MapaPreventistas({
       const cfg = SEMAFORO_COLORS[clasif]
       const html = `
         <div style="font-family: ui-sans-serif, system-ui; padding: 4px 2px; max-width: 260px;">
-          <div style="font-weight: 600; color: #111827; font-size: 13px;">${escapeHtml(v.cliente_nombre || 'Cliente sin nombre')}</div>
-          <div style="color: #6b7280; font-size: 11px; margin-top: 2px;">
+          <div style="font-weight: 600; color: #1c1917; font-size: 13px;">${escapeHtml(v.cliente_nombre || 'Cliente sin nombre')}</div>
+          <div style="color: #78716c; font-size: 11px; margin-top: 2px;">
             Visita · ${formatHora(v.visita_created_at)}
           </div>
           <div style="margin-top: 6px; font-size: 12px;">

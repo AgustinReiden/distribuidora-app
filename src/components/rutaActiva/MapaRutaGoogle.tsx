@@ -135,7 +135,7 @@ export default function MapaRutaGoogle({
         map,
         title: 'Depósito',
         label: { text: 'D', color: '#ffffff', fontWeight: '700', fontSize: '11px' },
-        icon: circleSymbol('#1f2937', 9),
+        icon: circleSymbol('#292524', 9),
         zIndex: 50,
       });
       bounds.extend({ lat: deposito.lat, lng: deposito.lng });

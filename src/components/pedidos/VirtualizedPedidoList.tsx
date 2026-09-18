@@ -156,14 +156,14 @@ const VirtualizedListContent = memo(function VirtualizedListContent({
           width: 8px;
         }
         .virtualized-pedido-list > div::-webkit-scrollbar-thumb {
-          background-color: #d1d5db;
+          background-color: #d6d3d1;
           border-radius: 4px;
         }
         .virtualized-pedido-list > div::-webkit-scrollbar-track {
           background-color: transparent;
         }
         .dark .virtualized-pedido-list > div::-webkit-scrollbar-thumb {
-          background-color: #4b5563;
+          background-color: #57534e;
         }
       `}</style>
     </div>

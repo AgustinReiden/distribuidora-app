@@ -53,17 +53,17 @@ select {
   -webkit-appearance: none;
   appearance: none;
   background-color: #ffffff !important;
-  color: #111827 !important;
-  border-color: #d1d5db;
+  color: #1c1917 !important;
+  border-color: #d6d3d1;
 }
 
 /* Dark mode overrides */
 .dark input:not([type="checkbox"]):not([type="radio"]),
 .dark textarea,
 .dark select {
-  background-color: #374151 !important;
+  background-color: #44403c !important;
   color: #ffffff !important;
-  border-color: #4b5563;
+  border-color: #57534e;
 }
 
 /* Scrollbar personalizada */
