@@ -7,6 +7,37 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      colors: {
+        /* Color de marca del rediseño de UI (#698): petróleo alrededor de #0E5A75.
+           Es aditiva: ninguna clase la usa todavía. Los primitivos nuevos
+           (Button, Badge, IconBadge) van a nacer con `brand-*`; el `blue-*` de
+           la app se remapea a esta misma escala en un paquete aparte (#700),
+           para que lo migrado y lo no migrado se vean iguales.
+
+           Reglas que salen de los contrastes medidos (WCAG, sobre blanco y
+           sobre stone-800/900 para el modo oscuro):
+           - Relleno de marca: `bg-brand-600` en claro Y en oscuro (blanco
+             encima = 7,67). No bajar a `brand-500` en oscuro: blanco encima da
+             4,87, justo AA, y 400 no llega (2,68).
+           - Texto o ícono de marca sobre fondo oscuro: `dark:text-brand-300`
+             (9,38 sobre stone-900) o `brand-400` (6,51). `brand-600` sobre
+             stone-900 da 2,28: ilegible.
+           - Fondos suaves (chips, tiles, selección): `brand-50` / `brand-100`
+             con texto `brand-700` / `brand-800` (8,21 y 9,90 sobre 100). */
+        brand: {
+          50: '#F0F7FA',
+          100: '#E3EEF3',
+          200: '#C3DDE8',
+          300: '#8FC6DA',
+          400: '#57A8C6',
+          500: '#227A99',
+          600: '#0E5A75',
+          700: '#0B4A61',
+          800: '#0A3D50',
+          900: '#0A3342',
+          950: '#061F29',
+        },
+      },
       animation: {
         'slide-in': 'slide-in 0.2s ease-out',
         'fade-in': 'fade-in 0.2s ease-out',
