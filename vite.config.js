@@ -119,6 +119,68 @@ function securityHeadersDevPlugin() {
   }
 }
 
+// El preámbulo de React Refresh que @vitejs/plugin-react le agrega al
+// index.html de dev es un <script type="module"> INLINE, y el script-src de
+// arriba no lleva 'unsafe-inline': el navegador lo bloquea, `window.$RefreshReg$`
+// nunca se define, y el wrapper que el plugin le pega a todo módulo con
+// componentes tira "can't detect preamble". La app no monta y `npm run dev`
+// queda en pantalla blanca en cualquier navegador que respete el CSP.
+// (El <meta http-equiv="Content-Security-Policy"> de index.html no tiene nada
+// que ver: el preámbulo se inyecta antes que el meta. El que bloquea es el
+// header de securityHeadersDevPlugin, que no se toca: existe para que
+// e2e/security.spec.js pueda verificarlo contra `vite dev` / `vite preview`.)
+//
+// El mismo plugin publica ese preámbulo como módulo virtual, que se sirve
+// desde el propio origen y por lo tanto pasa el CSP. Acá se cambia uno por el
+// otro. El texto a reemplazar sale de `react.preambleCode` —la constante del
+// propio plugin, declarada en sus tipos—, no de un regex escrito a mano: si una
+// versión nueva lo cambia, no hay nada que se desincronice en silencio. El
+// <script> inline sobrevive y el chequeo del final corta el arranque.
+const PREAMBULO_VIRTUAL = '/@id/__x00__@vitejs/plugin-react/preamble'
+
+// Un <script> sin `src`. Bajo este CSP es código muerto, y se manifiesta como
+// una pantalla en blanco sin causa visible: mejor que no arranque. El mensaje
+// se lee en la terminal de `npm run dev`, no en el navegador: el overlay de
+// error de Vite es a su vez un script inline, así que este CSP también lo
+// bloquea y la pestaña queda igual de blanca.
+const SCRIPT_INLINE = /<script(?![^>]*\ssrc=)[^>]*>[\s\S]*?<\/script>/
+
+function preambuloReactSinInlinePlugin() {
+  let base = '/'
+
+  return {
+    name: 'react-preamble-sin-inline',
+    apply: 'serve',
+    configResolved(config) {
+      base = config.base
+    },
+    transformIndexHtml: {
+      // 'post': el tag lo inyecta @vitejs/plugin-react, que corre en 'pre'.
+      order: 'post',
+      handler(html) {
+        const inline = `<script type="module">${react.preambleCode.replace('__BASE__', base)}</script>`
+        const nuevo = html.replace(
+          inline,
+          `<script type="module" src="${PREAMBULO_VIRTUAL}"></script>`
+        )
+
+        const sobreviviente = nuevo.match(SCRIPT_INLINE)
+        if (sobreviviente) {
+          throw new Error(
+            'El index.html de dev quedó con un <script> inline, que el CSP del ' +
+            'dev server bloquea (pantalla en blanco, sin error de chunk):\n\n' +
+            `${sobreviviente[0].slice(0, 400)}\n\n` +
+            'Si es el preámbulo de React Refresh, @vitejs/plugin-react cambió ' +
+            'cómo lo emite: ver preambuloReactSinInlinePlugin en vite.config.js.'
+          )
+        }
+
+        return nuevo
+      },
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_BUILD_ID__: JSON.stringify(BUILD_ID),
@@ -127,6 +189,7 @@ export default defineConfig({
   plugins: [
     securityHeadersDevPlugin(),
     cspConnectSrcPlugin(),
+    preambuloReactSinInlinePlugin(),
     versionJsonPlugin(),
     react(),
     VitePWA({

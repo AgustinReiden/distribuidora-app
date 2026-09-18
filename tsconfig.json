@@ -45,7 +45,12 @@
   },
   "include": [
     "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.tsx",
+    // Galería de UI (issue #694). Entra al typecheck a propósito: un fixture que
+    // se desfasa de las props reales tiene que romper `npm run typecheck`, no
+    // quedar mostrando una versión vieja del componente.
+    "dev/gallery/**/*.ts",
+    "dev/gallery/**/*.tsx"
   ],
   "exclude": [
     "node_modules",

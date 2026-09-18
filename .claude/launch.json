@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "preview"],
       "port": 4173
+    },
+    {
+      "name": "gallery",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "gallery"],
+      "port": 5174
     }
   ]
 }
