@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "gallery": "vite --config vite.gallery.config.js",
     "build": "vite build",
     "build:strict": "tsc --noEmit && vite build",
     "lint": "eslint .",
