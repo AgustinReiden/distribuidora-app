@@ -90,7 +90,7 @@ export interface MapaRutaProps {
 // atenuado) para ceder protagonismo y desamontonar el centro.
 const markerParada = (orden: number, entregado: boolean, activa: boolean) => {
   const size = activa ? 40 : entregado ? 20 : 28;
-  const bg = entregado ? '#16a34a' : activa ? '#1d4ed8' : '#2563eb';
+  const bg = entregado ? '#16a34a' : activa ? '#0B4A61' : '#0E5A75';
   const fontSize = activa ? 15 : entregado ? 10 : 12;
   const border = activa ? 3 : 2;
   return divIcon({
@@ -125,7 +125,7 @@ const markerPosicion = divIcon({
   className: '',
   html: `<div style="
     width:18px;height:18px;border-radius:9999px;
-    background:#3b82f6;border:3px solid #fff;
+    background:#227A99;border:3px solid #fff;
     box-shadow:0 0 0 2px rgba(59,130,246,.35), 0 1px 4px rgba(0,0,0,.4);
   "></div>`,
   iconSize: [18, 18],
@@ -213,10 +213,10 @@ export default function MapaRuta({
         <VistaControlada objetivo={objetivo} />
         {hayRutaReal ? (
           // Ruta real sobre las calles: línea sólida.
-          <Polyline positions={rutaReal as LatLngExpression[]} pathOptions={{ color: '#2563eb', weight: 5, opacity: 0.85 }} />
+          <Polyline positions={rutaReal as LatLngExpression[]} pathOptions={{ color: '#0E5A75', weight: 5, opacity: 0.85 }} />
         ) : lineaFallback.length > 1 && (
           // Fallback recto punteado (sin polyline guardada).
-          <Polyline positions={lineaFallback} pathOptions={{ color: '#2563eb', weight: 3, dashArray: '6 8', opacity: 0.6 }} />
+          <Polyline positions={lineaFallback} pathOptions={{ color: '#0E5A75', weight: 3, dashArray: '6 8', opacity: 0.6 }} />
         )}
         {deposito && (
           <Marker position={[deposito.lat, deposito.lng]} icon={markerDeposito}>
@@ -229,7 +229,7 @@ export default function MapaRuta({
               <Circle
                 center={[posicion.lat, posicion.lng]}
                 radius={posicion.accuracy}
-                pathOptions={{ color: '#3b82f6', weight: 1, opacity: 0.4, fillOpacity: 0.1 }}
+                pathOptions={{ color: '#227A99', weight: 1, opacity: 0.4, fillOpacity: 0.1 }}
               />
             )}
             <Marker position={[posicion.lat, posicion.lng]} icon={markerPosicion} zIndexOffset={1000} />
