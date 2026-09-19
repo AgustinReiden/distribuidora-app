@@ -153,6 +153,7 @@ import ModalPedido, { type NuevoPedidoState } from './ModalPedido'
 import type { PatchHorarioCliente } from '../ui/BloqueHorarioRequerido'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ClienteDB, ProductoDB } from '../../types'
+import type { VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -210,6 +211,11 @@ interface HarnessProps {
   onActualizarPrecioSpy?: (productoId: string, precio: number) => void
   onCrearClienteSpy?: (cliente: Record<string, unknown>) => void
   onGuardarHorarioSpy?: (clienteId: string, patch: PatchHorarioCliente) => void
+  onVerificarDuplicado?: (data: {
+    direccion: string | null
+    latitud: number | null
+    longitud: number | null
+  }) => Promise<VeredictoDuplicadoRPC>
   isAdmin?: boolean
   guardando?: boolean
   isOffline?: boolean
@@ -242,6 +248,7 @@ function Harness({
   onActualizarPrecioSpy,
   onCrearClienteSpy,
   onGuardarHorarioSpy,
+  onVerificarDuplicado,
   isAdmin,
   guardando,
   isOffline,
@@ -344,6 +351,7 @@ function Harness({
           prev.map(c => (String(c.id) === clienteId ? { ...c, ...patch } : c)),
         )
       }}
+      onVerificarDuplicado={onVerificarDuplicado}
       onNotasChange={(notas) => setPedido(prev => ({ ...prev, notas }))}
       onFormaPagoChange={(formaPago) => setPedido(prev => ({ ...prev, formaPago }))}
       onEstadoPagoChange={(estadoPago) =>
@@ -1089,5 +1097,85 @@ describe('ModalPedido — alta rápida de cliente', () => {
     expect(screen.getByRole('button', { name: '+ Nuevo' })).toBeInTheDocument()
     expect(screen.getByText('Despensa Nueva')).toBeInTheDocument()
     expect(screen.getByText('Avellaneda 55')).toBeInTheDocument()
+  })
+})
+
+describe('ModalPedido — alta rápida de cliente, aviso de duplicado (#692)', () => {
+  // Veredicto tal como lo devuelve `verificar_duplicado_cliente` (mig 250):
+  // hay un vecino cerca, pero no es un bloqueo duro.
+  const veredictoAvisa: VeredictoDuplicadoRPC = {
+    bloquea: false,
+    avisa: true,
+    motivo: 'distancia',
+    distancia_m: 15.6,
+    cliente_visible: { id: 5, codigo: 5, nombre: 'Fulano', activo: true },
+  }
+
+  const veredictoBloquea: VeredictoDuplicadoRPC = {
+    bloquea: true,
+    avisa: false,
+    motivo: 'punto',
+    distancia_m: 0.5,
+    cliente_visible: { id: 5, codigo: 5, nombre: 'Fulano', activo: true },
+  }
+
+  async function cargarClienteRapidoValido(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: '+ Nuevo' }))
+    await user.type(screen.getByPlaceholderText('Nombre fantasia *'), 'Despensa Nueva')
+    await user.type(screen.getByPlaceholderText('Nombre completo *'), 'Nueva SRL')
+    await user.type(screen.getByPlaceholderText('Escribí la dirección...'), 'Avellaneda 55')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Hora de apertura' }), '09:00')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Hora de cierre' }), '13:00')
+  }
+
+  it('con un veredicto que avisa, el primer intento muestra el aviso y no crea nada', async () => {
+    const onVerificarDuplicado = vi.fn().mockResolvedValue(veredictoAvisa)
+    const { user, onCrearClienteSpy } = montar({ onVerificarDuplicado, isAdmin: true })
+
+    await cargarClienteRapidoValido(user)
+    await user.click(screen.getByRole('button', { name: 'Crear y seleccionar' }))
+
+    expect(await screen.findByText(/está a 15,6 m/)).toBeInTheDocument()
+    expect(onCrearClienteSpy).not.toHaveBeenCalled()
+  })
+
+  it('con el aviso en pantalla aparece el botón de confirmar, y al tocarlo crea con duplicadoConfirmado y deja el cliente elegido', async () => {
+    const onVerificarDuplicado = vi.fn().mockResolvedValue(veredictoAvisa)
+    const { user, onCrearClienteSpy } = montar({ onVerificarDuplicado, isAdmin: true })
+
+    await cargarClienteRapidoValido(user)
+    await user.click(screen.getByRole('button', { name: 'Crear y seleccionar' }))
+    await screen.findByText(/está a 15,6 m/)
+
+    const botonConfirmarDuplicado = screen.getByRole('button', {
+      name: 'Sí, es otro comercio: crear igual',
+    })
+    await user.click(botonConfirmarDuplicado)
+
+    expect(onCrearClienteSpy).toHaveBeenCalledTimes(1)
+    expect(onCrearClienteSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nombreFantasia: 'Despensa Nueva',
+        direccion: 'Avellaneda 55',
+        duplicadoConfirmado: true,
+      }),
+    )
+    // El formulario se cierra solo y el cliente recién creado queda elegido en el pedido.
+    expect(screen.getByRole('button', { name: '+ Nuevo' })).toBeInTheDocument()
+    expect(screen.getByText('Despensa Nueva')).toBeInTheDocument()
+  })
+
+  it('con un veredicto que bloquea, frena sin ofrecer botón de confirmar', async () => {
+    const onVerificarDuplicado = vi.fn().mockResolvedValue(veredictoBloquea)
+    const { user, onCrearClienteSpy } = montar({ onVerificarDuplicado, isAdmin: true })
+
+    await cargarClienteRapidoValido(user)
+    await user.click(screen.getByRole('button', { name: 'Crear y seleccionar' }))
+
+    expect(await screen.findByText(/es la misma puerta/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Sí, es otro comercio: crear igual' }),
+    ).not.toBeInTheDocument()
+    expect(onCrearClienteSpy).not.toHaveBeenCalled()
   })
 })
