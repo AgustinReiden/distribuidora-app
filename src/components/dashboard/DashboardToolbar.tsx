@@ -12,6 +12,7 @@
 import React from 'react';
 import { RefreshCw, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui/Button';
 
 export interface DashboardToolbarProps {
   loading: boolean;
@@ -58,20 +59,13 @@ export default function DashboardToolbar({
       </button>
 
       {isAdmin && (
-        <button
+        <Button
           type="button"
+          variant="hero"
+          size="lg"
           onClick={() => onDescargarBackup('completo')}
           disabled={exportando}
-          className={cn(
-            'group relative inline-flex items-center gap-2.5 h-11 px-6 rounded-lg text-[14px] font-semibold text-white',
-            'bg-gradient-to-br from-green-500 to-green-600',
-            'shadow-[0_2px_8px_-2px_rgb(34_197_94/0.45),inset_0_1px_0_rgb(255_255_255/0.12)]',
-            'hover:from-green-500 hover:to-green-700 hover:-translate-y-px hover:shadow-[0_6px_16px_-4px_rgb(34_197_94/0.55),inset_0_1px_0_rgb(255_255_255/0.18)]',
-            'active:translate-y-0 active:shadow-[0_2px_4px_-2px_rgb(34_197_94/0.4)]',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-gray-900',
-            'transition-[transform,box-shadow,background] duration-200',
-            'disabled:opacity-60 disabled:cursor-not-allowed',
-          )}
+          className="group relative gap-2.5 active:translate-y-0"
           aria-label="Descargar backup"
         >
           <span
@@ -83,7 +77,7 @@ export default function DashboardToolbar({
             <span className="hidden sm:inline">{exportando ? 'Generando…' : 'Backup'}</span>
             <span className="sm:hidden">{exportando ? '…' : 'Backup'}</span>
           </span>
-        </button>
+        </Button>
       )}
     </div>
   );

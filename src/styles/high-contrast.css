@@ -129,6 +129,12 @@
 .high-contrast [role="button"],
 .high-contrast .btn {
   background-color: var(--color-bg-primary) !important;
+  /* El degradé de un botón (`bg-gradient-to-br from-… to-…` del `hero` de
+     Button) es `background-image`, no `background-color`: si no se apaga acá,
+     sobrevive debajo del texto negro forzado y el rótulo queda negro sobre
+     petróleo (2,17:1 en el extremo oscuro). Con el degradé apagado el botón cae
+     en el tratamiento genérico de esta regla: fondo, texto y borde a 21:1. */
+  background-image: none !important;
   color: var(--color-text-primary) !important;
   border: 2px solid var(--color-text-primary) !important;
 }
