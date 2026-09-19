@@ -21,6 +21,7 @@
 import React, { type ChangeEvent } from 'react';
 import { Truck, User, X } from 'lucide-react';
 import BottomSheet from '../ui/BottomSheet';
+import { Button } from '../ui/Button';
 import { fechaLocalISO } from '../../utils/formatters';
 import { cn } from '../../lib/utils';
 import type { Usuario } from '../../types';
@@ -140,13 +141,14 @@ export default function ModalFiltrosPedidos({
           >
             Limpiar todo
           </button>
-          <button
+          <Button
             type="button"
+            variant="hero"
+            size="lg"
             onClick={onClose}
-            className="inline-flex items-center justify-center h-11 px-6 rounded-lg text-sm font-semibold text-white bg-gradient-to-br from-blue-500 to-blue-600 shadow-warm hover:from-blue-500 hover:to-blue-700 transition-colors"
           >
             Listo
-          </button>
+          </Button>
         </div>
       }
     >

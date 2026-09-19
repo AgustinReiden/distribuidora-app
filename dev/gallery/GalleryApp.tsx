@@ -21,6 +21,7 @@ import type { RolUsuario } from '../../src/types'
 import GalleryProviders from './GalleryProviders'
 import { ETIQUETA_ROL, ROLES_GALERIA } from './fixtures/auth'
 import SeccionPaleta from './sections/SeccionPaleta'
+import SeccionPrimitivos from './sections/SeccionPrimitivos'
 import SeccionPedidos from './sections/SeccionPedidos'
 import SeccionHeaders from './sections/SeccionHeaders'
 import SeccionCompartidos from './sections/SeccionCompartidos'
@@ -29,6 +30,7 @@ import SeccionNavegacion from './sections/SeccionNavegacion'
 
 const INDICE = [
   { id: 'paleta', titulo: 'Paleta' },
+  { id: 'primitivos', titulo: 'Primitivos' },
   { id: 'pedidos', titulo: 'Pedidos' },
   { id: 'headers', titulo: 'Headers' },
   { id: 'compartidos', titulo: 'Compartidos' },
@@ -155,6 +157,7 @@ function Contenido({
       />
       <main className="max-w-7xl mx-auto px-4 pb-24">
         <SeccionPaleta />
+        <SeccionPrimitivos />
         <SeccionPedidos />
         <SeccionHeaders />
         <SeccionCompartidos />
