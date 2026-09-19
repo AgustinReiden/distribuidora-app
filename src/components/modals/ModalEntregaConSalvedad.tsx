@@ -8,6 +8,7 @@ import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift }
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { useSimularSalvedadesPromoImpactoQuery } from '../../hooks/queries'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { formatPrecio } from '../../utils/formatters'
 import NumberInput from '../ui/NumberInput'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
@@ -197,10 +198,6 @@ export default function ModalEntregaConSalvedad({
     }
   }
 
-  const formatMoney = (value: number): string => {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value)
-  }
-
   const totalEntregado = itemsSinProblemas.reduce((sum, i) => sum + (i.item.precio_unitario * i.item.cantidad), 0) +
     itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * (i.item.cantidad - i.cantidadAfectada)), 0)
 
@@ -273,7 +270,7 @@ export default function ModalEntregaConSalvedad({
                           <p className="text-sm text-gray-500">
                             {esRegalo
                               ? `${itemSalv.item.cantidad} ud. de regalo - si cae la promo se ajusta solo`
-                              : `${itemSalv.item.cantidad} x ${formatMoney(itemSalv.item.precio_unitario)}`}
+                              : `${itemSalv.item.cantidad} x ${formatPrecio(itemSalv.item.precio_unitario)}`}
                           </p>
                         </div>
                         <div className="text-right shrink-0">
@@ -283,7 +280,7 @@ export default function ModalEntregaConSalvedad({
                             </span>
                           ) : (
                             <p className="font-bold text-gray-800 dark:text-white">
-                              {formatMoney(itemSalv.item.cantidad * itemSalv.item.precio_unitario)}
+                              {formatPrecio(itemSalv.item.cantidad * itemSalv.item.precio_unitario)}
                             </p>
                           )}
                         </div>
@@ -370,7 +367,7 @@ export default function ModalEntregaConSalvedad({
                     <ul className="text-sm text-gray-600 dark:text-gray-300 ml-5 space-y-1">
                       {entregadosCobrables.map(i => (
                         <li key={i.item.id}>
-                          {i.item.cantidad}x {i.item.producto?.nombre} - {formatMoney(i.item.cantidad * i.item.precio_unitario)}
+                          {i.item.cantidad}x {i.item.producto?.nombre} - {formatPrecio(i.item.cantidad * i.item.precio_unitario)}
                         </li>
                       ))}
                     </ul>
@@ -443,15 +440,15 @@ export default function ModalEntregaConSalvedad({
                 <div className="pt-3 border-t border-blue-200 dark:border-blue-700 space-y-1">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600 dark:text-gray-400">Total original:</span>
-                    <span className="font-medium">{formatMoney(pedido.total)}</span>
+                    <span className="font-medium">{formatPrecio(pedido.total)}</span>
                   </div>
                   <div className="flex justify-between text-sm text-red-600">
                     <span>Monto afectado por salvedades:</span>
-                    <span className="font-medium">-{formatMoney(totalSalvedades)}</span>
+                    <span className="font-medium">-{formatPrecio(totalSalvedades)}</span>
                   </div>
                   <div className="flex justify-between text-base font-bold text-green-700 dark:text-green-400">
                     <span>Total efectivo a cobrar:</span>
-                    <span>{formatMoney(totalEntregado)}</span>
+                    <span>{formatPrecio(totalEntregado)}</span>
                   </div>
                 </div>
               </div>

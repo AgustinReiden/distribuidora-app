@@ -40,6 +40,10 @@ describe('Formatters de Moneda', () => {
       const result = formatPrecio(-500)
       expect(result).toContain('500')
     })
+
+    it('maneja NaN como 0 (guard)', () => {
+      expect(formatPrecio(NaN)).toContain('0')
+    })
   })
 
   describe('formatCurrency', () => {

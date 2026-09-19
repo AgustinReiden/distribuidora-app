@@ -17,7 +17,7 @@ import {
   Image,
   Undo2
 } from 'lucide-react'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
 import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
 import { useSalvedades } from '../../hooks/supabase'
 import { useAnularSalvedadMutation } from '../../hooks/queries'
@@ -98,10 +98,6 @@ const ESTADO_RESOLUCION_STYLE_NEUTRAL: EstadoResolucionStyle = {
 function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolver }: SalvedadCardProps) {
   const [expandido, setExpandido] = useState(false)
 
-  const formatMoney = (value: number): string => {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value)
-  }
-
   const formatDate = (dateStr: string | undefined): string => {
     if (!dateStr) return '-'
     return new Date(dateStr).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })
@@ -160,7 +156,7 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
             </div>
             <div className="text-right">
               <p className="text-xs text-gray-500">Monto</p>
-              <p className="font-bold text-red-600">{formatMoney(salvedad.monto_afectado)}</p>
+              <p className="font-bold text-red-600">{formatPrecio(salvedad.monto_afectado)}</p>
             </div>
             {expandido ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
           </div>
@@ -355,10 +351,6 @@ export default function VistaSalvedades(): React.ReactElement {
     [salvedadesFiltradas]
   )
 
-  const formatMoney = (value: number | undefined): string => {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)
-  }
-
   return (
     <div className="p-4 md:p-6 space-y-6">
       {/* Header */}
@@ -444,11 +436,11 @@ export default function VistaSalvedades(): React.ReactElement {
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
             <p className="text-sm text-gray-500">Monto Total</p>
-            <p className="text-xl font-bold text-red-600">{formatMoney(estadisticas.monto_total_afectado)}</p>
+            <p className="text-xl font-bold text-red-600">{formatPrecio(estadisticas.monto_total_afectado)}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
             <p className="text-sm text-gray-500">Monto Pendiente</p>
-            <p className="text-xl font-bold text-amber-600">{formatMoney(estadisticas.monto_pendiente)}</p>
+            <p className="text-xl font-bold text-amber-600">{formatPrecio(estadisticas.monto_pendiente)}</p>
           </div>
         </div>
       )}

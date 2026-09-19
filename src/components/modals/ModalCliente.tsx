@@ -24,7 +24,8 @@ import {
   formatDniInput,
   dniToStorageFormat,
   extractDniFromStorage,
-  detectDocumentType
+  detectDocumentType,
+  formatPrecio
 } from '../../utils/formatters';
 import {
   serializarFranjas,
@@ -1184,7 +1185,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
                   <p className="text-gray-500">Límite de Crédito</p>
-                  <p className="font-medium">${form.limiteCredito.toLocaleString('es-AR')}</p>
+                  <p className="font-medium">{formatPrecio(form.limiteCredito)}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Días de Crédito</p>

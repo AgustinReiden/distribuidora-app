@@ -1,6 +1,7 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
 import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft, ToggleRight, ShoppingBag, FileText } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import { formatPrecio } from '../../utils/formatters';
 import type { ProveedorDBExtended, CompraDBExtended } from '../../types';
 
 // =============================================================================
@@ -91,10 +92,6 @@ export default function VistaProveedores({
     activos: proveedores.filter(p => p.activo !== false).length,
     inactivos: proveedores.filter(p => p.activo === false).length
   }), [proveedores]);
-
-  const formatPrecio = (precio: number): string => {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(precio || 0);
-  };
 
   const handleBusquedaChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setBusqueda(e.target.value);

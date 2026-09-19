@@ -16,6 +16,7 @@ import {
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { formatPrecio } from '../../utils/formatters'
 
 const VistaConfiguracion = lazyWithReload(() => import('../vistas/VistaConfiguracion'))
 
@@ -52,7 +53,7 @@ export default function ConfiguracionContainer() {
       await actualizar.mutateAsync(monto)
       notify.success(
         monto > 0
-          ? `Compra mínima fijada en $${monto.toLocaleString('es-AR')}`
+          ? `Compra mínima fijada en ${formatPrecio(monto)}`
           : 'Compra mínima desactivada'
       )
     } catch (err) {
