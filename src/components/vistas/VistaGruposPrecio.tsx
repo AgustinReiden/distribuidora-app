@@ -10,6 +10,7 @@ import { formatPrecio } from '../../utils/formatters'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
 import TablaCondiciones from '../productos/TablaCondiciones'
+import { Button } from '../ui/Button'
 import type { GrupoPrecioConDetalles, ProductoDB } from '../../types'
 
 export interface VistaGruposPrecioProps {
@@ -77,13 +78,15 @@ export default function VistaGruposPrecio({
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Precios por volumen. Cualquier mezcla de los productos de una condición suma para llegar al mínimo.
         </p>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={onNuevoGrupo}
-          className="shrink-0 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="shrink-0"
         >
           <Plus className="w-4 h-4" />
           Nueva condición
-        </button>
+        </Button>
       </div>
 
       {/* Buscador + filtro */}
@@ -131,12 +134,14 @@ export default function VistaGruposPrecio({
           <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
             Agrupá los productos que se venden juntos y definí el precio por cantidad
           </p>
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={onNuevoGrupo}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+            className="mt-4"
           >
             Crear la primera condición
-          </button>
+          </Button>
         </div>
       ) : gruposFiltrados.length === 0 ? (
         <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
@@ -175,9 +180,10 @@ export default function VistaGruposPrecio({
                   )}
                 </div>
                 <div className="flex items-center gap-1">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => onToggleActivo(grupo)}
-                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                     title={grupo.activo !== false ? 'Desactivar' : 'Activar'}
                   >
                     {grupo.activo !== false ? (
@@ -185,21 +191,24 @@ export default function VistaGruposPrecio({
                     ) : (
                       <ToggleLeft className="w-5 h-5 text-gray-400" />
                     )}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => onEditarGrupo(grupo)}
-                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                     title="Editar"
                   >
                     <Edit2 className="w-4 h-4 text-blue-600" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => onEliminarGrupo(grupo.id)}
-                    className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    className="hover:bg-red-50 dark:hover:bg-red-900/20"
                     title="Eliminar"
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />
-                  </button>
+                  </Button>
                 </div>
               </div>
 

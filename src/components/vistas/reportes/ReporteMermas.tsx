@@ -18,8 +18,9 @@
  * el mismo aspecto, es lo que hace que nadie confíe en el número.
  */
 import React, { useMemo, useState } from 'react';
-import { TrendingDown, AlertTriangle, Download, Loader2, Info, Search } from 'lucide-react';
+import { TrendingDown, AlertTriangle, Download, Info, Search } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import { Button } from '../../ui/Button';
 import { useSucursal } from '../../../contexts/SucursalContext';
 import {
   useMermasReporteQuery,
@@ -313,13 +314,16 @@ export function ReporteMermas({
                 Motivo: {labelMotivo(motivoParam)}
               </span>
             )}
-            <button
+            <Button
               onClick={exportar} disabled={exportando || data.detalle_total === 0}
-              className="ml-auto flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+              loading={exportando}
+              variant="success"
+              size="md"
+              className="ml-auto"
             >
-              {exportando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              {!exportando && <Download className="w-4 h-4" />}
               Exportar a Excel
-            </button>
+            </Button>
           </div>
 
           {/* KPIs */}

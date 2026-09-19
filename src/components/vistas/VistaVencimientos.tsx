@@ -34,6 +34,7 @@
 import { useMemo, useState } from 'react'
 import { z } from 'zod'
 import { AlertTriangle, CalendarClock, Check, Loader2, PackageX, RefreshCw, Undo2, X } from 'lucide-react'
+import { Button } from '../ui/Button'
 import type { LoteReporte } from '../../hooks/queries/useLotesQuery'
 import { estadoVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import type { EstadoVencimiento } from '../../utils/vencimientos'
@@ -204,15 +205,16 @@ export default function VistaVencimientos({
             Rojo a {diasCritico} días, amarillo a {diasAlerta}. Se configura en Configuración.
           </p>
         </div>
-        <button
+        <Button
           type="button"
           onClick={onRefrescar}
           disabled={refrescando}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-lg dark:border-gray-600 dark:text-gray-200 hover:bg-stone-50 dark:hover:bg-gray-700 disabled:opacity-50"
+          variant="secondary"
+          size="sm"
         >
           <RefreshCw className={`w-4 h-4 ${refrescando ? 'animate-spin' : ''}`} aria-hidden="true" />
           Actualizar
-        </button>
+        </Button>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4">

@@ -1,5 +1,6 @@
 import React from 'react'
 import { X, Loader2 } from 'lucide-react'
+import { Button } from '../../ui/Button'
 import { moneyC } from './formato'
 import { useAlertaDetalleQuery } from '../../../hooks/queries'
 
@@ -39,7 +40,7 @@ export default function ModalAlertaDetalle({
           <h3 className="text-base font-bold text-gray-900 dark:text-white">
             {titulo}{!isLoading && <span className="ml-2 text-sm font-normal text-gray-400">{items.length}</span>}
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Cerrar"><X className="w-5 h-5" /></button>
+          <Button variant="ghost" size="iconSm" onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Cerrar"><X className="w-5 h-5" /></Button>
         </div>
         <div className="overflow-y-auto p-2">
           {isLoading ? (

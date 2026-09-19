@@ -18,6 +18,7 @@ import {
 } from '../../hooks/queries'
 import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { ANOMALIA_DISTANCIA_METROS } from '../../utils/geo'
+import { Button } from '../ui/Button'
 import KpiCard from '../geolocalizacion/KpiCard'
 import SidebarPreventistas from '../geolocalizacion/SidebarPreventistas'
 import MapaPreventistas from '../geolocalizacion/MapaPreventistas'
@@ -176,17 +177,19 @@ export default function VistaGeolocalizacion(): React.ReactElement {
               aria-label="Fecha hasta"
             />
           </div>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="md"
             onClick={() => refetch()}
             disabled={isFetching}
-            className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+            className="gap-1 dark:border-gray-700"
             aria-label="Actualizar"
             title={autoRefresh ? 'Auto-refresca cada 60 s' : 'Refrescar'}
           >
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Actualizar</span>
-          </button>
+          </Button>
         </div>
       </header>
 

@@ -7,8 +7,9 @@
  * dos bugs que la de clientes (contaba cancelados y se cortaba en 1.000 filas).
  */
 import React, { useState } from 'react';
-import { MapPin, Download, Loader2 } from 'lucide-react';
+import { MapPin, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import { Button } from '../../ui/Button';
 import { useVentasPorClienteQuery } from '../../../hooks/queries/useVentasPorClienteQuery';
 
 export interface ReporteVentasZonasProps {
@@ -77,18 +78,16 @@ export function ReporteVentasZonas({
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <button
+        <Button
           onClick={exportar}
           disabled={exportando}
-          className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+          loading={exportando}
+          variant="success"
+          size="md"
         >
-          {exportando ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Download className="w-4 h-4" />
-          )}
+          {!exportando && <Download className="w-4 h-4" />}
           Exportar a Excel
-        </button>
+        </Button>
       </div>
 
       <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg overflow-x-auto">

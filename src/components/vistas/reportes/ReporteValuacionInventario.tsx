@@ -7,8 +7,9 @@
  * usuario) y filtra por sucursal/categoría del lado del cliente.
  */
 import React, { useMemo, useState } from 'react';
-import { Package, AlertTriangle, Download, Loader2 } from 'lucide-react';
+import { Package, AlertTriangle, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import { Button } from '../../ui/Button';
 import {
   useValuacionInventarioQuery,
   type ValuacionProducto,
@@ -142,18 +143,16 @@ export function ReporteValuacionInventario({
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button
+        <Button
           onClick={exportar}
           disabled={exportando || productosFiltrados.length === 0}
-          className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+          loading={exportando}
+          variant="success"
+          size="md"
         >
-          {exportando ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Download className="w-4 h-4" />
-          )}
+          {!exportando && <Download className="w-4 h-4" />}
           Exportar a Excel
-        </button>
+        </Button>
       </div>
 
       {/* KPIs */}

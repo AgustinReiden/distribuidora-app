@@ -24,6 +24,7 @@ import {
   IdCard
 } from 'lucide-react'
 import { fechaLocalISO, formatDateTime, formatPrecio } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useTransportistasQuery, useClientesQuery } from '../../hooks/queries'
@@ -435,28 +436,32 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setExpandido(!expandido)}
-              className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
+              className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             >
               {expandido ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               Detalle
-            </button>
+            </Button>
 
             {resumen.estado === 'disconformidad' ? (
-              <button
+              <Button
                 onClick={() => onResolver(resumen)}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white"
+                variant="primary"
+                size="md"
               >
                 Resolver
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 onClick={() => onCerrar(resumen)}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white"
+                variant="primary"
+                size="md"
               >
                 {resumen.estado === 'pendiente' ? 'Cerrar rendición' : 'Editar cierre'}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -521,14 +526,16 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                     </button>
                   )}
                 </p>
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => { void handleExportarExcel() }}
                   disabled={exportando || !detalle || detalle.length === 0}
-                  className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                  className="text-xs gap-1"
                 >
                   <Download className="w-3 h-3" />
                   {exportando ? 'Exportando…' : 'Exportar Excel'}
-                </button>
+                </Button>
               </div>
 
               {/* Quién cobró: la rendición agrupa por transportista, pero la
@@ -628,12 +635,14 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                                           </span>
                                         </div>
                                       ))}
-                                      <button
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
                                         onClick={(e) => { e.stopPropagation(); onVerFicha(d.cliente_id) }}
-                                        className="mt-1 inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                        className="mt-1 text-xs gap-1"
                                       >
                                         <IdCard className="w-3 h-3" /> Ver ficha del cliente
-                                      </button>
+                                      </Button>
                                     </div>
                                   ) : (
                                     <p className="text-xs text-gray-400">Sin pagos para mostrar.</p>
@@ -806,21 +815,23 @@ export default function VistaRendiciones(): React.ReactElement {
         <div className="flex items-center gap-2 flex-wrap">
           {/* Deuda del mismo rango que la rendición, para poder cuadrar
               entregado vs cobrado vs pendiente en un solo lugar. */}
-          <button
+          <Button
             onClick={() => setVerCtaCte(true)}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            variant="secondary"
+            size="md"
           >
             <Wallet className="w-4 h-4" />
             Cta cte pendiente
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={cargar}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            variant="primary"
+            size="md"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refrescar
-          </button>
+          </Button>
         </div>
       </div>
 

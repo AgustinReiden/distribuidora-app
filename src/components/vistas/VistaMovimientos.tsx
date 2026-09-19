@@ -8,6 +8,7 @@
 import { memo } from 'react'
 import { Loader2, ArrowDownLeft, ArrowUpRight, Plus, Check, X, PackageX, Eye, Pencil, Ban, PackageMinus, Clock } from 'lucide-react'
 import { formatPrecio, formatDateTime } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 import { ESTADO_MOVIMIENTO_BADGE, VERBO_RESOLUCION, horasDesde } from '../../constants/movimientos'
 import type { MovimientoSucursalDB, EstadoMovimiento } from '../../hooks/queries'
 
@@ -49,12 +50,13 @@ const VistaMovimientos = memo(function VistaMovimientos({
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-xl font-bold text-gray-900 dark:text-white">Movimientos entre sucursales</h2>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={onNuevaSalida}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
         >
           <Plus className="w-4 h-4" /> Nueva salida
-        </button>
+        </Button>
       </div>
 
       {/* Tabs */}
@@ -169,12 +171,14 @@ const VistaMovimientos = memo(function VistaMovimientos({
                 </div>
 
                 <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t dark:border-gray-700">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="md"
                     onClick={() => onVerDetalle(mov)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                    className="gap-1.5"
                   >
                     <Eye className="w-4 h-4" /> Ver detalle
-                  </button>
+                  </Button>
                   {puedeResolver ? (
                     <div className="flex gap-2">
                       <button
@@ -183,12 +187,14 @@ const VistaMovimientos = memo(function VistaMovimientos({
                       >
                         <X className="w-4 h-4" /> Denegar
                       </button>
-                      <button
+                      <Button
+                        variant="success"
+                        size="md"
                         onClick={() => onAceptar(mov)}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700"
+                        className="gap-1.5"
                       >
                         <Check className="w-4 h-4" /> Aceptar
-                      </button>
+                      </Button>
                     </div>
                   ) : salientePendiente ? (
                     <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -197,12 +203,14 @@ const VistaMovimientos = memo(function VistaMovimientos({
                       </span>
                       {canEditar && (
                         <>
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="md"
                             onClick={() => onEditar(mov)}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                            className="gap-1.5"
                           >
                             <Pencil className="w-4 h-4" /> Editar
-                          </button>
+                          </Button>
                           <button
                             onClick={() => onCancelar(mov)}
                             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400"

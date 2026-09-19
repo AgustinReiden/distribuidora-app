@@ -16,6 +16,7 @@ import { memo, useState } from 'react';
 import { Loader2, ChevronRight, Target, Users, UserPlus, TrendingUp, Pencil, Trash2 } from 'lucide-react';
 import { formatPrecio } from '../../utils/formatters';
 import BarraProgresoMeta from '../metas/BarraProgresoMeta';
+import { Button } from '../ui/Button';
 import type { AvanceMeta, RendimientoPreventista, RendimientoResultado } from '../../hooks/queries';
 
 export interface VistaMetasPreventistasProps {
@@ -95,25 +96,29 @@ const FilaPreventista = memo(function FilaPreventista({
                     <BarraProgresoMeta meta={m} densa />
                   </div>
                   <div className="flex gap-0.5 shrink-0 pt-1.5">
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="iconSm"
                       onClick={() => onEditarMeta(m, p.preventista_id)}
-                      className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                      className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                       aria-label={`Editar objetivo de ${p.nombre}`}
                       title="Editar objetivo"
                     >
                       <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="iconSm"
                       onClick={() => onEliminarMeta(m)}
                       disabled={eliminando}
-                      className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
+                      className="text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
                       aria-label={`Eliminar objetivo de ${p.nombre}`}
                       title="Eliminar objetivo"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -213,14 +218,16 @@ const VistaMetasPreventistas = memo(function VistaMetasPreventistas({
           >
             {opcionesPeriodo().map(o => <option key={o.valor} value={o.valor}>{o.label}</option>)}
           </select>
-          <button
+          <Button
             type="button"
+            variant="primary"
+            size="md"
             onClick={onAbrirObjetivos}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-1.5"
+            className="gap-1.5"
           >
             <Target className="w-4 h-4" />
             Cargar objetivos
-          </button>
+          </Button>
         </div>
       </div>
 

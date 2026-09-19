@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import NumberInput from '../ui/NumberInput'
 import { Criterio } from '../ui/Criterio'
+import { Button } from '../ui/Button'
 import { linkAReportes } from '../../utils/paramsReporte'
 import { money, moneyC, pct, N, rolLabel } from './reportes-gerenciales/formato'
 import {
@@ -142,19 +143,20 @@ function BotonExportar({
   label?: string
 }): React.ReactElement {
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
+      size="sm"
       onClick={onExportar}
       disabled={exportando}
+      loading={exportando}
       title={titulo}
       aria-label={titulo}
-      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 shrink-0"
+      className="text-xs shrink-0"
     >
-      {exportando
-        ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-        : <Download className="w-3.5 h-3.5" aria-hidden="true" />}
+      {!exportando && <Download className="w-3.5 h-3.5" aria-hidden="true" />}
       {label ?? 'Excel'}
-    </button>
+    </Button>
   )
 }
 
@@ -394,14 +396,16 @@ export default function VistaReportesGerenciales({
             Comparar
           </button>
           {metasEditable && (
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setShowMetas(true)}
               title="Cargar las metas (objetivos) del mes"
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border shadow-sm bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="gap-1 text-xs shadow-sm"
             >
               <Target className="w-3.5 h-3.5" /> Metas
-            </button>
+            </Button>
           )}
           <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-2.5 py-1.5 shadow-sm">
             <Building2 className="w-4 h-4 text-gray-400" />

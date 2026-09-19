@@ -7,6 +7,7 @@
  */
 import React, { useMemo, useState } from 'react'
 import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Package, Gift, Layers, Ban, Zap, History, Filter } from 'lucide-react'
+import { Button } from '../ui/Button'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { PromocionConDetalles } from '../../hooks/queries/usePromocionesQuery'
 import type { PromoAcumuladorDB } from '../../types'
@@ -107,13 +108,14 @@ export default function VistaPromociones({
             <History className="w-4 h-4" />
             {mostrarHistorico ? 'Ocultar' : 'Ver'} histórico
           </button>
-          <button
+          <Button
             onClick={onNuevaPromocion}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            variant="primary"
+            size="md"
           >
             <Plus className="w-4 h-4" />
             Nueva Promoción
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -144,12 +146,14 @@ export default function VistaPromociones({
           <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
             Crea una promocion para ofrecer bonificaciones a tus clientes
           </p>
-          <button
+          <Button
             onClick={onNuevaPromocion}
-            className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
+            variant="primary"
+            size="md"
+            className="mt-4"
           >
             Crear primera promocion
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="grid gap-4">
@@ -227,9 +231,10 @@ export default function VistaPromociones({
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button
+                    <Button
                       onClick={() => onToggleActivo(promo)}
-                      className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      variant="ghost"
+                      size="iconSm"
                       title={promo.activo ? 'Desactivar' : 'Activar'}
                     >
                       {promo.activo ? (
@@ -237,21 +242,24 @@ export default function VistaPromociones({
                       ) : (
                         <ToggleLeft className="w-5 h-5 text-gray-400" />
                       )}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => onEditarPromocion(promo)}
-                      className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      variant="ghost"
+                      size="iconSm"
                       title="Editar"
                     >
                       <Edit2 className="w-4 h-4 text-blue-600" />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => onEliminarPromocion(promo.id)}
-                      className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      variant="ghost"
+                      size="iconSm"
+                      className="hover:bg-red-50 dark:hover:bg-red-900/20"
                       title="Eliminar"
                     >
                       <Trash2 className="w-4 h-4 text-red-500" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
 

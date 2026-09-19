@@ -1,5 +1,6 @@
 import React, { useState, useMemo, ChangeEvent } from 'react';
 import { Building2, Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, ToggleLeft, ToggleRight, ShoppingBag, FileText } from 'lucide-react';
+import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import { formatPrecio } from '../../utils/formatters';
 import type { ProveedorDBExtended, CompraDBExtended } from '../../types';
@@ -108,13 +109,14 @@ export default function VistaProveedores({
           </p>
         </div>
         {isAdmin && (
-          <button
+          <Button
             onClick={onNuevoProveedor}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            variant="primary"
+            size="md"
           >
             <Plus className="w-5 h-5" />
             <span>Nuevo Proveedor</span>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -190,12 +192,14 @@ export default function VistaProveedores({
             {busqueda || filtroActivo !== 'todos' ? 'No se encontraron proveedores' : 'No hay proveedores registrados'}
           </p>
           {isAdmin && !busqueda && filtroActivo === 'todos' && (
-            <button
+            <Button
               onClick={onNuevoProveedor}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              variant="primary"
+              size="md"
+              className="mt-4"
             >
               Agregar primer proveedor
-            </button>
+            </Button>
           )}
         </div>
       ) : (
@@ -308,20 +312,24 @@ export default function VistaProveedores({
                       {esActivo ? <ToggleLeft className="w-4 h-4" /> : <ToggleRight className="w-4 h-4" />}
                       {esActivo ? 'Desactivar' : 'Activar'}
                     </button>
-                    <button
+                    <Button
                       onClick={() => onEditarProveedor(proveedor)}
-                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                      variant="ghost"
+                      size="iconSm"
+                      className="text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                       title="Editar"
                     >
                       <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => onEliminarProveedor(proveedor.id)}
-                      className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                      variant="ghost"
+                      size="iconSm"
+                      className="text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                       title="Eliminar"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>

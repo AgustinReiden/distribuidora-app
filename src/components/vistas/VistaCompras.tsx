@@ -6,6 +6,7 @@ import { adminPuedeEditarCompra } from '../../utils/permisosCompra';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
+import { Button } from '../ui/Button';
 import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from '../../types';
 
 // =============================================================================
@@ -192,13 +193,14 @@ export default function VistaCompras({
           <p className="text-sm text-gray-500 dark:text-gray-400">Gestion de compras a proveedores</p>
         </div>
         {isAdmin && (
-          <button
+          <Button
+            variant="success"
+            size="md"
             onClick={onNuevaCompra}
-            className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
           >
             <Plus className="w-5 h-5" />
             <span>Nueva Compra</span>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -315,13 +317,15 @@ export default function VistaCompras({
 
         {/* Boton limpiar */}
         {hayFiltrosActivos && (
-          <button
+          <Button
+            variant="secondary"
+            size="md"
             onClick={limpiarFiltros}
-            className="w-full md:w-auto px-4 py-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center justify-center gap-1 border dark:border-gray-600 rounded-lg"
+            className="w-full md:w-auto gap-1"
           >
             <XCircle className="w-4 h-4" />
             Limpiar filtros
-          </button>
+          </Button>
         )}
       </div>
 
@@ -338,12 +342,14 @@ export default function VistaCompras({
           <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>{hayFiltrosActivos ? 'No se encontraron compras con los filtros aplicados' : 'No hay compras registradas'}</p>
           {isAdmin && !hayFiltrosActivos && (
-            <button
+            <Button
+              variant="success"
+              size="md"
               onClick={onNuevaCompra}
-              className="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              className="mt-4"
             >
               Registrar primera compra
-            </button>
+            </Button>
           )}
         </div>
       ) : (
@@ -434,39 +440,47 @@ export default function VistaCompras({
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => onVerDetalle(compra)}
-                            className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                            className="text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                             title="Ver detalle"
                           >
                             <Eye className="w-4 h-4" />
-                          </button>
+                          </Button>
                           {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin) && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => onEditarCompra(compra)}
-                              className="p-2 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition-colors"
+                              className="text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30"
                               title="Editar compra (hasta 7 dias desde la creacion)"
                             >
                               <Pencil className="w-4 h-4" />
-                            </button>
+                            </Button>
                           )}
                           {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && onNotaCredito && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => onNotaCredito(compra)}
-                              className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                              className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                               title="Nota de Credito"
                             >
                               <FileText className="w-4 h-4" />
-                            </button>
+                            </Button>
                           )}
                           {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => onAnularCompra(compra.id)}
-                              className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                              className="text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                               title="Anular compra"
                             >
                               <XCircle className="w-4 h-4" />
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </td>
@@ -536,43 +550,51 @@ export default function VistaCompras({
                     </span>
                   </div>
                   <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t dark:border-gray-700">
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       onClick={() => onVerDetalle(compra)}
-                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                      className="text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 min-h-11 min-w-11"
                       title="Ver detalle"
                       aria-label="Ver detalle"
                     >
                       <Eye className="w-4 h-4" />
-                    </button>
+                    </Button>
                     {onEditarCompra && adminPuedeEditarCompra(compra, isAdmin) && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => onEditarCompra(compra)}
-                        className="p-2 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                        className="text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 min-h-11 min-w-11"
                         title="Editar compra"
                         aria-label="Editar compra"
                       >
                         <Pencil className="w-4 h-4" />
-                      </button>
+                      </Button>
                     )}
                     {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && onNotaCredito && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => onNotaCredito(compra)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                        className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 min-h-11 min-w-11"
                         title="Nota de Credito"
                         aria-label="Nota de Credito"
                       >
                         <FileText className="w-4 h-4" />
-                      </button>
+                      </Button>
                     )}
                     {(isAdmin || isEncargado) && compra.estado !== 'cancelada' && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => onAnularCompra(compra.id)}
-                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors min-h-11 min-w-11 flex items-center justify-center"
+                        className="text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 min-h-11 min-w-11"
                         title="Anular compra"
                         aria-label="Anular compra"
                       >
                         <XCircle className="w-4 h-4" />
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>

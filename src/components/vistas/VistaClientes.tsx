@@ -172,38 +172,38 @@ export default function VistaClientes({
         actions={
           <div className="flex flex-wrap items-center gap-2 justify-end">
             {onVerDeudores && (
-              <button
+              <Button
+                variant="secondary"
+                size="lg"
                 onClick={onVerDeudores}
                 className={cn(
-                  'inline-flex items-center gap-2.5 h-11 px-5 rounded-lg text-[14px] font-medium',
-                  'bg-white dark:bg-gray-800 text-stone-700 dark:text-gray-200',
-                  'border border-stone-200/80 dark:border-gray-700',
+                  'gap-2.5 px-5 font-medium',
                   'shadow-warm',
-                  'hover:bg-stone-50 dark:hover:bg-gray-700/50 hover:border-stone-300 dark:hover:border-gray-600 hover:-translate-y-px hover:shadow-warm-md',
+                  'hover:border-stone-300 dark:hover:border-gray-600 hover:-translate-y-px hover:shadow-warm-md',
                   'active:translate-y-0 active:shadow-warm',
                   'transition-[transform,box-shadow,background-color,border-color] duration-150',
                 )}
               >
                 <AlertTriangle className="w-[18px] h-[18px] text-amber-600" aria-hidden="true" />
                 <span>Deudores</span>
-              </button>
+              </Button>
             )}
             {isAdmin && onGestionarZonas && (
-              <button
+              <Button
+                variant="secondary"
+                size="lg"
                 onClick={onGestionarZonas}
                 className={cn(
-                  'inline-flex items-center gap-2.5 h-11 px-5 rounded-lg text-[14px] font-medium',
-                  'bg-white dark:bg-gray-800 text-stone-700 dark:text-gray-200',
-                  'border border-stone-200/80 dark:border-gray-700',
+                  'gap-2.5 px-5 font-medium',
                   'shadow-warm',
-                  'hover:bg-stone-50 dark:hover:bg-gray-700/50 hover:border-stone-300 dark:hover:border-gray-600 hover:-translate-y-px hover:shadow-warm-md',
+                  'hover:border-stone-300 dark:hover:border-gray-600 hover:-translate-y-px hover:shadow-warm-md',
                   'active:translate-y-0 active:shadow-warm',
                   'transition-[transform,box-shadow,background-color,border-color] duration-150',
                 )}
               >
                 <MapPin className="w-[18px] h-[18px] text-purple-600" aria-hidden="true" />
                 <span>Gestionar Zonas</span>
-              </button>
+              </Button>
             )}
             {canCreate && (
               <Button
@@ -411,34 +411,40 @@ function ClienteCard({ cliente, idx, isAdmin, canEditar, puedeDesactivar, onEdit
         {(canEditar || isAdmin) && (
           <div className="flex gap-0.5 flex-shrink-0">
             {canEditar && (
-              <button
+              <Button
+                variant="ghost"
+                size="iconSm"
                 onClick={onEditar}
-                className="p-1.5 text-stone-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-md transition-colors"
+                className="text-stone-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                 aria-label={`Editar cliente ${cliente.nombre_fantasia}`}
               >
                 <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
+              </Button>
             )}
             {inactivo ? (
               puedeDesactivar && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="iconSm"
                   onClick={onReactivar}
-                  className="p-1.5 text-stone-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-md transition-colors"
+                  className="text-stone-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
                   aria-label={`Reactivar cliente ${cliente.nombre_fantasia}`}
                 >
                   <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                </Button>
               )
             ) : (
               (isAdmin || puedeDesactivar) && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="iconSm"
                   onClick={onEliminar}
-                  className="p-1.5 text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-md transition-colors"
+                  className="text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
                   aria-label={`Eliminar o desactivar cliente ${cliente.nombre_fantasia}`}
                   title="Eliminar. Si el cliente tiene historial, se ofrece desactivarlo."
                 >
                   <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                </Button>
               )
             )}
           </div>
@@ -509,13 +515,15 @@ function ClienteCard({ cliente, idx, isAdmin, canEditar, puedeDesactivar, onEdit
           </p>
         </div>
         {onVerFicha && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={onVerFicha}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 text-stone-700 dark:text-gray-200 shadow-warm hover:shadow-warm-md hover:-translate-y-px hover:border-stone-300 dark:hover:border-gray-600 transition-[transform,box-shadow,border-color] duration-150 flex-shrink-0"
+            className="gap-1.5 text-xs font-semibold shadow-warm hover:shadow-warm-md hover:-translate-y-px hover:border-stone-300 dark:hover:border-gray-600 transition-[transform,box-shadow,border-color] duration-150 flex-shrink-0"
           >
             <FileText className="w-3.5 h-3.5" aria-hidden="true" />
             Ver ficha
-          </button>
+          </Button>
         )}
       </div>
     </div>
