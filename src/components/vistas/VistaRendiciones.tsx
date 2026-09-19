@@ -23,7 +23,7 @@ import {
   Users,
   IdCard
 } from 'lucide-react'
-import { fechaLocalISO, formatDateTime } from '../../utils/formatters'
+import { fechaLocalISO, formatDateTime, formatPrecio } from '../../utils/formatters'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useTransportistasQuery, useClientesQuery } from '../../hooks/queries'
@@ -36,10 +36,6 @@ const ModalCerrarRendicion = lazyWithReload(() => import('../modals/ModalCerrarR
 const ModalResolverRendicion = lazyWithReload(() => import('../modals/ModalResolverRendicion'))
 const ModalCtaCtePendiente = lazyWithReload(() => import('../modals/ModalCtaCtePendiente'))
 const ModalFichaCliente = lazyWithReload(() => import('../modals/ModalFichaCliente'))
-
-function formatMoney(value: number | undefined | null): string {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)
-}
 
 function formatFechaCorta(fechaISO: string): string {
   const [y, m, d] = fechaISO.split('-')
@@ -177,8 +173,8 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
   const diferenciaStr = diferencia === 0
     ? 'Cobrado igual a entregado'
     : diferencia > 0
-      ? `+${formatMoney(diferencia)} cobrado sobre entregado`
-      : `${formatMoney(diferencia)} cobrado menos que entregado`
+      ? `+${formatPrecio(diferencia)} cobrado sobre entregado`
+      : `${formatPrecio(diferencia)} cobrado menos que entregado`
 
   // Detalle por cliente: se carga cada vez que se expande la tarjeta.
   // OJO: las deps NO pueden incluir `detalle`/`loadingDetalle`. Al setear el
@@ -335,10 +331,10 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
           <div className="text-right">
             <p className="text-xs text-gray-500 dark:text-gray-400">Cobrado ese día</p>
             <p className="text-2xl font-bold text-gray-800 dark:text-white">
-              {formatMoney(resumen.total_general)}
+              {formatPrecio(resumen.total_general)}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              Entregado: <span className="font-medium">{formatMoney(resumen.total_entregado)}</span>
+              Entregado: <span className="font-medium">{formatPrecio(resumen.total_entregado)}</span>
             </p>
           </div>
         </div>
@@ -347,11 +343,11 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
         <div className="grid grid-cols-2 gap-3 mt-4">
           <div className="bg-emerald-50 dark:bg-emerald-900/15 border border-emerald-200 dark:border-emerald-800 rounded-lg p-2.5">
             <p className="text-xs text-emerald-700 dark:text-emerald-300">Entregas (cobro del día)</p>
-            <p className="font-bold text-emerald-700 dark:text-emerald-400">{formatMoney(resumen.total_entregas)}</p>
+            <p className="font-bold text-emerald-700 dark:text-emerald-400">{formatPrecio(resumen.total_entregas)}</p>
           </div>
           <div className="bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 rounded-lg p-2.5">
             <p className="text-xs text-blue-700 dark:text-blue-300">Ctas Ctes (cobro de saldos)</p>
-            <p className="font-bold text-blue-700 dark:text-blue-400">{formatMoney(resumen.total_ctascte)}</p>
+            <p className="font-bold text-blue-700 dark:text-blue-400">{formatPrecio(resumen.total_ctascte)}</p>
           </div>
         </div>
 
@@ -361,7 +357,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
             {desgloses.map(({ meta, value }) => (
               <div key={meta.value} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
                 <p className="text-xs text-gray-500 dark:text-gray-400">{meta.label}</p>
-                <p className={`font-bold ${FORMA_PAGO_TEXT_COLOR[meta.color] ?? FORMA_PAGO_TEXT_COLOR_NEUTRAL}`}>{formatMoney(value)}</p>
+                <p className={`font-bold ${FORMA_PAGO_TEXT_COLOR[meta.color] ?? FORMA_PAGO_TEXT_COLOR_NEUTRAL}`}>{formatPrecio(value)}</p>
               </div>
             ))}
           </div>
@@ -373,7 +369,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
             {resumen.cantidad_gastos > 0 && (
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
                 <Receipt className="w-3 h-3" />
-                {resumen.cantidad_gastos} gasto{resumen.cantidad_gastos !== 1 ? 's' : ''} · {formatMoney(resumen.total_gastos)}
+                {resumen.cantidad_gastos} gasto{resumen.cantidad_gastos !== 1 ? 's' : ''} · {formatPrecio(resumen.total_gastos)}
               </span>
             )}
             {resumen.observaciones && (
@@ -492,14 +488,14 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                     }`}
                   >
                     <span className="text-gray-500">{label}:</span>{' '}
-                    <span className="font-medium">{formatMoney(valor)}</span>
+                    <span className="font-medium">{formatPrecio(valor)}</span>
                   </button>
                 ))}
                 {/* Cuenta corriente como forma de pago está deprecada (ya no se registran pagos así):
                     solo se muestra para datos históricos con monto, evitando un $0 permanente que confunde.
                     La cuenta corriente real (cobro de saldos) se ve arriba en la tarjeta "Ctas Ctes". */}
                 {resumen.total_cuenta_corriente > 0 && (
-                  <div className="px-1.5 py-1"><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatMoney(resumen.total_cuenta_corriente)}</span></div>
+                  <div className="px-1.5 py-1"><span className="text-gray-500">Cuenta Cte.:</span> <span className="font-medium">{formatPrecio(resumen.total_cuenta_corriente)}</span></div>
                 )}
               </div>
             </div>
@@ -513,7 +509,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                   {detalle && !formaFiltro && (
                     <span className="text-gray-400">
                       · {detalle.length} cliente{detalle.length !== 1 ? 's' : ''}
-                      {clientesCtasCtes.length > 0 && ` · ${clientesCtasCtes.length} con ctas ctes (${formatMoney(resumen.total_ctascte)})`}
+                      {clientesCtasCtes.length > 0 && ` · ${clientesCtasCtes.length} con ctas ctes (${formatPrecio(resumen.total_ctascte)})`}
                     </span>
                   )}
                   {formaFiltro && (
@@ -545,7 +541,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                       key={nombre}
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
                     >
-                      Cobró {nombre}: <strong>{formatMoney(monto)}</strong>
+                      Cobró {nombre}: <strong>{formatPrecio(monto)}</strong>
                     </span>
                   ))}
                 </div>
@@ -593,11 +589,11 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                               </td>
                               <td className="py-1 px-2 text-gray-500">{d.cobrado_por}</td>
                               {formaFiltro && (
-                                <td className="py-1 px-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatMoney(d[formaFiltro])}</td>
+                                <td className="py-1 px-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatPrecio(d[formaFiltro])}</td>
                               )}
-                              <td className="py-1 px-2 text-right font-medium text-gray-800 dark:text-gray-200">{formatMoney(d.total)}</td>
-                              <td className="py-1 px-2 text-right text-emerald-600 dark:text-emerald-400">{d.total_entregas > 0 ? formatMoney(d.total_entregas) : '—'}</td>
-                              <td className="py-1 pl-2 text-right text-blue-600 dark:text-blue-400">{d.total_ctascte > 0 ? formatMoney(d.total_ctascte) : '—'}</td>
+                              <td className="py-1 px-2 text-right font-medium text-gray-800 dark:text-gray-200">{formatPrecio(d.total)}</td>
+                              <td className="py-1 px-2 text-right text-emerald-600 dark:text-emerald-400">{d.total_entregas > 0 ? formatPrecio(d.total_entregas) : '—'}</td>
+                              <td className="py-1 pl-2 text-right text-blue-600 dark:text-blue-400">{d.total_ctascte > 0 ? formatPrecio(d.total_ctascte) : '—'}</td>
                             </tr>
 
                             {abierta && (
@@ -610,7 +606,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                                       {pagos.map(p => (
                                         <div key={p.pago_id} className="flex items-start justify-between gap-2 flex-wrap">
                                           <div className="min-w-0">
-                                            <span className="font-medium text-gray-800 dark:text-gray-200">{formatMoney(p.monto)}</span>
+                                            <span className="font-medium text-gray-800 dark:text-gray-200">{formatPrecio(p.monto)}</span>
                                             <span className="text-gray-500"> · {formaPagoLabel(p.forma_pago)}</span>
                                             <span className="text-gray-400"> · {formatDateTime(p.created_at)}</span>
                                             {p.pedido_id && (
@@ -654,7 +650,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
                         <tr className="border-t border-gray-300 dark:border-gray-600">
                           <td className="py-1 pr-2 font-medium text-gray-600 dark:text-gray-300" colSpan={2}>Total {FORMA_LABELS[formaFiltro]}</td>
                           <td className="py-1 px-2 text-right font-bold text-blue-700 dark:text-blue-300">
-                            {formatMoney(detalleVisible.reduce((acc, d) => acc + (d[formaFiltro] || 0), 0))}
+                            {formatPrecio(detalleVisible.reduce((acc, d) => acc + (d[formaFiltro] || 0), 0))}
                           </td>
                           <td colSpan={3} />
                         </tr>
@@ -848,11 +844,11 @@ export default function VistaRendiciones(): React.ReactElement {
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
           <p className="text-xs text-gray-500">Cobrado total</p>
-          <p className="text-lg font-bold">{formatMoney(stats.totalCobrado)}</p>
+          <p className="text-lg font-bold">{formatPrecio(stats.totalCobrado)}</p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
           <p className="text-xs text-gray-500">Entregado total</p>
-          <p className="text-lg font-bold">{formatMoney(stats.totalEntregado)}</p>
+          <p className="text-lg font-bold">{formatPrecio(stats.totalEntregado)}</p>
         </div>
       </div>
 
