@@ -39,6 +39,7 @@ import {
   useUsuariosQuery,
   useCrearClienteMutation,
   useActualizarClienteMutation,
+  verificarDuplicadoCliente,
   useDepositoCoords,
   useDestinoCoords,
   useCrearPedidoCambioEnRutaMutation,
@@ -2095,6 +2096,7 @@ export default function PedidosContainer(): React.ReactElement {
                   longitud: (clienteData.longitud as number | null) ?? null,
                   horarios_atencion: (clienteData.horariosAtencion as string) || undefined,
                   dias_atencion: (clienteData.dias_atencion as string | null) ?? null,
+                  duplicado_confirmado: Boolean(clienteData.duplicadoConfirmado),
                 }
                 const newCliente = await crearClienteMut.mutateAsync(dbData)
                 notify.success(`Cliente "${newCliente.nombre_fantasia}" creado`)
@@ -2104,6 +2106,7 @@ export default function PedidosContainer(): React.ReactElement {
                 throw e
               }
             }}
+            onVerificarDuplicado={(data) => verificarDuplicadoCliente(data)}
             onGuardarHorarioCliente={async (clienteId, patch) => {
               // Mutación aparte y previa a la creación del pedido: si falla, el
               // pedido armado no se pierde y el error se muestra en el bloque.
