@@ -1,4 +1,5 @@
 import colors from 'tailwindcss/colors'
+import defaultTheme from 'tailwindcss/defaultTheme'
 
 /* Color de marca del rediseño de UI (#698): petróleo alrededor de #0E5A75.
    Los primitivos nuevos (Button, Badge, IconBadge) nacen con `brand-*`, y
@@ -113,6 +114,19 @@ export default {
           '0%': { transform: 'translateY(0)' },
           '100%': { transform: 'translateY(100%)' },
         },
+      },
+      /* Tipografias auto-alojadas (WP-22, #701). Los @font-face viven en
+         src/index.css: ahi esta el porque de escribirlos a mano y de cargar
+         solo el subset latino. Los nombres son los que declaran los paquetes
+         @fontsource-variable, con el sufijo "Variable" incluido.
+
+         `display` cae a la pila de `sans` a proposito: mientras Bricolage no
+         haya bajado (font-display: swap) o si un caracter se le escapa al
+         subset latino, el titulo se dibuja con Plex y no con el Times del
+         navegador. */
+      fontFamily: {
+        sans: ['IBM Plex Sans Variable', ...defaultTheme.fontFamily.sans],
+        display: ['Bricolage Grotesque Variable', 'IBM Plex Sans Variable', ...defaultTheme.fontFamily.sans],
       },
       /* Sombras cálidas (tinte stone en vez de gray puro) */
       boxShadow: {

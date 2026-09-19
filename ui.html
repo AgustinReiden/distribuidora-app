@@ -6,7 +6,9 @@
     <meta name="color-scheme" content="light dark" />
     <title>Galería de UI · Distribuidora</title>
     <!--
-      Sin <script> inline a propósito: el server de desarrollo manda
+      Sin script inline a propósito (ni siquiera la palabra entre ángulos en
+      este comentario: el plugin react-preamble-sin-inline de vite.config.js
+      rechaza cualquier HTML donde aparezca): el server de desarrollo manda
       `script-src 'self' … blob:` sin 'unsafe-inline' (securityHeadersDevPlugin
       en vite.config.js). El entry se carga igual que en index.html: un módulo
       externo servido por Vite.

@@ -2,15 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
+/* === Tipografias auto-alojadas (WP-22, #701) ===============================
+   Bricolage Grotesque para los titulares, IBM Plex Sans para la interfaz.
+
+   Auto-alojadas y NO Google Fonts: el CSP de produccion (nginx.conf, el panel
+   de Coolify y el <meta> de index.html) es `style-src 'self' 'unsafe-inline'`
+   sin fonts.googleapis.com, asi que la hoja de Google nunca llega a cargar.
+   `font-src 'self'` en cambio alcanza de sobra para los woff2 que Vite emite
+   hasheados en dist/assets.
+
+   Los @font-face van escritos A MANO en vez de `@import`ar el `wght.css` del
+   paquete, y ese es el punto: ese CSS declara TODOS los subsets -cyrillic,
+   cyrillic-ext, greek, latin-ext, vietnamese-, y Vite emite un woff2 por cada
+   url() aunque el unicode-range no matchee jamas. Peor: el
+   `globPatterns` de vite.config.js precachea todo woff2 que quede en dist,
+   asi que cada deploy se los hace re-descargar ENTEROS a cada
+   usuaria. Solo latin son 134 KiB; los ocho archivos que trae el `wght.css`
+   de los dos paquetes suman 359. Un caracter fuera del subset cae al sans del
+   sistema por unicode-range, y el castellano entero (vocales con tilde, la
+   enie, la dieresis, los signos de apertura) vive dentro de U+0000-00FF.
+
+   Los ejes opsz/wdth quedan afuera a proposito (`standard.css` los trae y
+   pesa el triple): solo se usa el eje wght. Los unicode-range y los rangos de
+   peso estan copiados tal cual de los `wght.css` de @fontsource-variable
+   5.3.0 -- al actualizar el paquete hay que volver a mirarlos. */
+@font-face {
+  font-family: 'IBM Plex Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 700;
+  src: url('@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+/* La cursiva es un archivo aparte, no una inclinacion sintetica: el <em> del
+   periodo en los headers de vista es texto de 36px en peso 300, y ahi el
+   oblicuo que dibuja el navegador se nota (trazos disparejos, curvas
+   deformadas). Son 49 KiB para las ~38 cursivas de la app. */
+@font-face {
+  font-family: 'IBM Plex Sans Variable';
+  font-style: italic;
+  font-display: swap;
+  font-weight: 100 700;
+  src: url('@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-italic.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+/* Solo la redonda: Bricolage entra unicamente por `font-display`, que hoy son
+   los <h1> de los cuatro headers de vista. No hay titulo en cursiva. */
+@font-face {
+  font-family: 'Bricolage Grotesque Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
 /* Estilos base.
    Body background usa `stone` en lugar de `gray` puro para dar un tinte
    cálido apenas perceptible — la diferencia visual con gray-100 es mínima
    pero el feel general gana en calidez. Es la base del "editorial cálido"
    del panel de Pedidos sin tocar el resto de la app. */
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  @apply bg-stone-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
+  @apply font-sans bg-stone-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
   letter-spacing: -0.005em;
+  /* Numerales de ancho fijo: los montos de las tablas y de la cuenta
+     corriente se alinean en columna en vez de bailar digito a digito. */
+  font-variant-numeric: tabular-nums;
   /* Mata el pull-to-refresh / rubber-band de iOS que recargaba el PWA
      standalone al arrastrar el bottom sheet (vaul en modo no-modal no lockea
      el body). A nivel documento porque el overscroll nace del fondo, no del
