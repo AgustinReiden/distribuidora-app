@@ -79,7 +79,7 @@ export function SkipLinks({ targets = SKIP_TARGETS }: SkipLinksProps) {
           position: absolute;
           transform: translateY(-150%);
           padding: 12px 16px;
-          background: #1e40af;
+          background: #0A3D50;
           color: white;
           font-weight: 600;
           text-decoration: none;
@@ -95,7 +95,7 @@ export function SkipLinks({ targets = SKIP_TARGETS }: SkipLinksProps) {
         }
 
         .skip-link:hover {
-          background: #1e3a8a;
+          background: #0A3342;
         }
 
         /* High contrast mode */

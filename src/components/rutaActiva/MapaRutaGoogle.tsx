@@ -146,7 +146,7 @@ export default function MapaRutaGoogle({
     // pendientes azules.
     for (const p of ordenadas) {
       const activa = p.orden === paradaActivaOrden;
-      const color = p.noEntregado ? '#dc2626' : p.entregado ? '#16a34a' : activa ? '#1d4ed8' : '#2563eb';
+      const color = p.noEntregado ? '#dc2626' : p.entregado ? '#16a34a' : activa ? '#0B4A61' : '#0E5A75';
       const scale = activa ? 13 : (p.entregado || p.noEntregado) ? 7 : 10;
       const marker = new g.Marker({
         position: { lat: p.lat, lng: p.lng },
@@ -169,7 +169,7 @@ export default function MapaRutaGoogle({
         path: (rutaReal as [number, number][]).map(([lat, lng]) => ({ lat, lng })),
         map,
         geodesic: false,
-        strokeColor: '#2563eb',
+        strokeColor: '#0E5A75',
         strokeOpacity: 0.85,
         strokeWeight: 5,
       });
@@ -180,7 +180,7 @@ export default function MapaRutaGoogle({
       if (deposito) path.push({ lat: deposito.lat, lng: deposito.lng });
       if (path.length > 1) {
         polylineRef.current = new g.Polyline({
-          path, map, geodesic: false, strokeColor: '#2563eb', strokeOpacity: 0.55, strokeWeight: 3,
+          path, map, geodesic: false, strokeColor: '#0E5A75', strokeOpacity: 0.55, strokeWeight: 3,
           icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.6, scale: 3 }, offset: '0', repeat: '14px' }],
         });
       }
@@ -215,7 +215,7 @@ export default function MapaRutaGoogle({
     const pos = { lat: posicion.lat, lng: posicion.lng };
     // En guía con cámara heading-up, la posición es una flecha (apunta adelante);
     // si no, el punto azul de siempre.
-    const icon = USAR_VECTOR && modoGuia ? flechaSymbol('#2563eb', 6) : circleSymbol('#3b82f6', 6);
+    const icon = USAR_VECTOR && modoGuia ? flechaSymbol('#0E5A75', 6) : circleSymbol('#227A99', 6);
     if (!posMarkerRef.current) {
       posMarkerRef.current = new g.Marker({ position: pos, map, icon, zIndex: 2000 });
     } else {
@@ -226,7 +226,7 @@ export default function MapaRutaGoogle({
       if (!posCircleRef.current) {
         posCircleRef.current = new g.Circle({
           map, center: pos, radius: posicion.accuracy,
-          strokeColor: '#3b82f6', strokeOpacity: 0.4, strokeWeight: 1, fillColor: '#3b82f6', fillOpacity: 0.1,
+          strokeColor: '#227A99', strokeOpacity: 0.4, strokeWeight: 1, fillColor: '#227A99', fillOpacity: 0.1,
         });
       } else {
         posCircleRef.current.setCenter(pos);
