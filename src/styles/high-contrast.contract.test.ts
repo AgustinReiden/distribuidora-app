@@ -46,8 +46,8 @@ import { ThemeProvider, useTheme } from '../contexts/ThemeContext'
  *      de TOKENS_UTILIDAD_TAILWIND (ver mas abajo), que son los tokens
  *      individuales (no strings enteros) con forma de utilidad de Tailwind.
  *      Con ese corpus mas chico, "alert"/"error"/"success"/"warning" pasan a
- *      ser huerfanos genuinos (0 coincidencias), igual que "modal", "overlay",
- *      "tag" y "btn-primary".
+ *      ser huerfanos genuinos (0 coincidencias), igual que "modal", "overlay"
+ *      y "tag".
  *
  * Exclusiones documentadas:
  *   - ".high-contrast" y ".dark": clases de ESTADO que ThemeContext togglea
@@ -294,14 +294,21 @@ const CORPUS = construirCorpusDeSrc()
 // "utilidad" es uno de los prefijos de Tailwind que aparecen en este CSS
 // (bg, text, border, rounded, p/px/py, m, w, h, flex, grid, gap, items,
 // justify, font, shadow, opacity, z, ring, outline, cursor, overflow,
-// transition, animate, fill, stroke, sr). Verificado a mano sobre el corpus
-// actual (~59500 palabras, ~900 pasan el filtro): "border" y "shadow" siguen
-// dando >0 coincidencias (135 y 13 tokens respectivamente), "bg-" y "text-"
-// tambien (273 y 201), y "alert"/"error"/"success"/"warning"/"modal"/
-// "overlay"/"tag"/"btn-primary" dan 0 — son huerfanos genuinos, no un
-// artefacto de busqueda por substring sobre texto libre.
+// transition, animate, fill, stroke, sr) mas "btn". Verificado a mano sobre el
+// corpus actual (~59500 palabras, ~900 pasan el filtro): "border" y "shadow"
+// siguen dando >0 coincidencias (135 y 13 tokens respectivamente), "bg-" y
+// "text-" tambien (273 y 201), y "alert"/"error"/"success"/"warning"/"modal"/
+// "overlay"/"tag" dan 0 — son huerfanos genuinos, no un artefacto de busqueda
+// por substring sobre texto libre.
+//
+// Por que "btn" esta en la lista si NO es una utilidad de Tailwind: "btn-primary"
+// no pinta nada por si sola, es el gancho literal que Button variant="primary"
+// (src/components/ui/button-variants.ts) emite para que [class*="btn-primary"]
+// de este CSS lo alcance. Es una clase real de un className real; sin este
+// prefijo el filtro la descartaria por su forma y el selector parecería huerfano
+// teniendo cobertura.
 const UTILIDAD_TAILWIND_RE =
-  /^(?:[a-z][a-z0-9-]*:)*-?(bg|text|border|rounded|p|px|py|m|w|h|flex|grid|gap|items|justify|font|shadow|opacity|z|ring|outline|cursor|overflow|transition|animate|fill|stroke|sr)(-[a-z0-9./[\]%()#]+)*$/
+  /^(?:[a-z][a-z0-9-]*:)*-?(bg|text|border|rounded|p|px|py|m|w|h|flex|grid|gap|items|justify|font|shadow|opacity|z|ring|outline|cursor|overflow|transition|animate|fill|stroke|sr|btn)(-[a-z0-9./[\]%()#]+)*$/
 
 const TOKENS_UTILIDAD_TAILWIND = new Set(
   [...CORPUS.palabras].filter(palabra => UTILIDAD_TAILWIND_RE.test(palabra))
@@ -355,8 +362,12 @@ const HUERFANOS_CONOCIDOS_CLASES = new Set<string>([
 ])
 
 const HUERFANOS_CONOCIDOS_ATRIBUTOS = new Set<string>([
-  // Ningun token con pinta de utilidad Tailwind de src/ contiene "btn-primary".
-  'btn-primary',
+  // "btn-primary" ya NO es huerfano: lo emite Button variant="primary"
+  // (src/components/ui/button-variants.ts) como gancho literal para que
+  // [class*="btn-primary"] cubra al primario nuevo, que pinta con `brand` y no
+  // con `blue`. Si algun dia se saca ese gancho del primitivo, este selector
+  // vuelve a esta lista.
+  //
   // El unico lugar donde aparece el substring "modal" dentro de un string es
   // en specifiers de import ("../modals/ModalCliente"), que se neutralizan
   // antes de armar el corpus (ver quitarRutasDeImport). Ninguna clase real
@@ -410,6 +421,10 @@ describe('contrato: parser de high-contrast.css (sanity check)', () => {
       'bg-black/50',
       'bg-blue-500',
       'bg-blue-600',
+      // Lo emite Button variant="primary" (src/components/ui/button-variants.ts):
+      // el primitivo pinta con la escala `brand`, no con `blue`, asi que la regla
+      // del primario tuvo que sumar el selector para seguir cubriendolo.
+      'bg-brand-600',
       'bg-gray-100',
       'bg-gray-200',
       'bg-gray-300',
