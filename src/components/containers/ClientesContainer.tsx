@@ -30,7 +30,7 @@ import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
 import { cambiaIdentidadDuplicado, SIN_DUPLICADO_RPC } from '../../utils/duplicadoCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
-import { formatCurrency } from '../../utils/formatters'
+import { formatCurrency, formatPrecio } from '../../utils/formatters'
 
 // Lazy load de componentes
 const VistaClientes = lazyWithReload(() => import('../vistas/VistaClientes'))
@@ -313,7 +313,7 @@ export default function ClientesContainer(): React.ReactElement {
     queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     if (result.sobrante > 0) {
-      notify.success(`Pago registrado. $${result.sobrante.toLocaleString('es-AR')} quedó como saldo a favor.`)
+      notify.success(`Pago registrado. ${formatPrecio(result.sobrante)} quedó como saldo a favor.`)
     } else {
       notify.success('Pago registrado y aplicado a pedidos pendientes')
     }
@@ -333,7 +333,7 @@ export default function ClientesContainer(): React.ReactElement {
     queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     if (result.sobrante > 0) {
-      notify.success(`Pago registrado. $${result.sobrante.toLocaleString('es-AR')} quedó como saldo a favor.`)
+      notify.success(`Pago registrado. ${formatPrecio(result.sobrante)} quedó como saldo a favor.`)
     } else {
       notify.success('Pago registrado y aplicado a pedidos pendientes')
     }

@@ -10,8 +10,10 @@ import type { EstadoPedido, EstadoPago, FormaPago, RolUsuario } from '@/types';
 // FORMATEO DE MONEDA
 // ============================================
 
-export const formatPrecio = (p: number | null | undefined): string =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p || 0);
+export const formatPrecio = (p: number | null | undefined): string => {
+  const valor = p === null || p === undefined || isNaN(p) ? 0 : p;
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(valor);
+};
 
 /**
  * Formatea un monto como moneda argentina
