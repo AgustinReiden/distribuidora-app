@@ -143,13 +143,15 @@
 /* Primary buttons */
 .high-contrast .bg-blue-600,
 .high-contrast .bg-blue-500,
+.high-contrast .bg-brand-600,
 .high-contrast [class*="btn-primary"] {
   background-color: var(--color-text-primary) !important;
   color: var(--color-bg-primary) !important;
 }
 
 .high-contrast .bg-blue-600:hover,
-.high-contrast .bg-blue-500:hover {
+.high-contrast .bg-blue-500:hover,
+.high-contrast .bg-brand-600:hover {
   background-color: var(--color-bg-primary) !important;
   color: var(--color-text-primary) !important;
 }
