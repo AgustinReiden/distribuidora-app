@@ -45,6 +45,7 @@ import type {
   GuardarConfigDigestInput,
 } from '../../hooks/queries/useBotDigestConfig';
 import ModalConfigDigest from '../modals/ModalConfigDigest';
+import { Button } from '../ui/Button';
 
 const TIPO_OPCIONES: Array<{ value: string; label: string }> = [
   { value: '', label: 'Todos los tipos' },
@@ -220,14 +221,15 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
             </p>
           </div>
         </div>
-        <button
+        <Button
+          variant="secondary"
+          size="md"
           onClick={onRefresh}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           aria-label="Refrescar datos"
         >
           <RefreshCw className="w-4 h-4" aria-hidden="true" />
           <span className="text-sm font-medium">Refrescar</span>
-        </button>
+        </Button>
       </div>
 
       {/* Stats cards */}
@@ -432,15 +434,17 @@ export default function VistaBotTelegram(props: VistaBotTelegramProps): ReactEle
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setConfigEditando(c)}
-                        className="inline-flex items-center gap-1 px-3 py-1 rounded-md text-sm text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                        className="gap-1 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                         aria-label={`Configurar el resumen de ${c.perfil_nombre ?? ''}`}
                       >
                         <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
                         Configurar
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -777,24 +781,28 @@ function Paginacion({ page, totalPages, onChange }: PaginacionProps): ReactEleme
         Página {page + 1} de {totalPages}
       </span>
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="iconSm"
           onClick={() => onChange(Math.max(0, page - 1))}
           disabled={page === 0}
-          className="p-1 rounded border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="border border-gray-300 dark:border-gray-700"
           aria-label="Página anterior"
         >
           <ChevronLeft className="w-4 h-4" aria-hidden="true" />
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          size="iconSm"
           onClick={() => onChange(Math.min(totalPages - 1, page + 1))}
           disabled={page >= totalPages - 1}
-          className="p-1 rounded border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="border border-gray-300 dark:border-gray-700"
           aria-label="Página siguiente"
         >
           <ChevronRight className="w-4 h-4" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -841,14 +849,15 @@ function DetalleEventoModal({ evento, onClose }: DetalleEventoModalProps): React
           <h3 id="evento-detalle-h" className="font-semibold text-gray-800 dark:text-white">
             Evento #{evento.id} — {evento.tipo}
           </h3>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="iconSm"
             onClick={onClose}
-            className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
             aria-label="Cerrar detalle"
           >
             <X className="w-4 h-4" aria-hidden="true" />
-          </button>
+          </Button>
         </div>
         <pre className="overflow-auto p-4 text-xs text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 flex-1">
           {json}

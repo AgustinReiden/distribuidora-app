@@ -431,6 +431,10 @@ describe('contrato: parser de high-contrast.css (sanity check)', () => {
       'bg-gray-50',
       'bg-green-500',
       'bg-green-600',
+      // Lo emite Button variant="success" (green-700, porque green-600 con
+      // texto blanco no llega a AA): la regla de exito lo sumo para que un
+      // boton migrado no caiga en el generico monocromo.
+      'bg-green-700',
       'bg-red-500',
       'bg-red-600',
       'bg-white',

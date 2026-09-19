@@ -15,6 +15,7 @@
  */
 import { useMemo, useState } from 'react'
 import { Clock, Check, AlertTriangle } from 'lucide-react'
+import { Button } from '../ui/Button'
 import LoadingSpinner from '../layout/LoadingSpinner'
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor'
 import { serializarFranjas, parsearFranjas, type FranjaHoraria } from '../../utils/horariosCliente'
@@ -143,14 +144,15 @@ export default function VistaRevisionHorarios({
                   <Check className="w-4 h-4 text-emerald-600" aria-hidden="true" />
                   Se entendieron bien ({altas.length})
                 </h2>
-                <button
+                <Button
                   type="button"
                   onClick={() => void aceptarAltas()}
                   disabled={guardando}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium disabled:opacity-50"
+                  variant="success"
+                  size="sm"
                 >
                   {guardando ? 'Guardando…' : `Aceptar las ${altas.length}`}
-                </button>
+                </Button>
               </div>
               <ul className="divide-y dark:divide-gray-700">
                 {altas.map(c => (
@@ -174,14 +176,15 @@ export default function VistaRevisionHorarios({
                   <AlertTriangle className="w-4 h-4 text-amber-600" aria-hidden="true" />
                   Hay que decidirlas ({dudosas.length + sinPropuesta.length})
                 </h2>
-                <button
+                <Button
                   type="button"
                   onClick={() => void guardarRevisadas()}
                   disabled={guardando || editadasCount === 0}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium disabled:opacity-50"
+                  variant="primary"
+                  size="sm"
                 >
                   {guardando ? 'Guardando…' : `Guardar ${editadasCount}`}
-                </button>
+                </Button>
               </div>
               <div>
                 {[...dudosas, ...sinPropuesta].map(c => (

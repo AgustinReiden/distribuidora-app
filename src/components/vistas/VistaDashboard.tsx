@@ -10,6 +10,7 @@ import DashboardViewHeader from '../dashboard/DashboardViewHeader';
 import PanelMisMetas from '../dashboard/PanelMisMetas';
 import type { AvanceMetasResultado } from '../../hooks/queries';
 import DashboardToolbar from '../dashboard/DashboardToolbar';
+import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import type {
   ProductoDB,
@@ -453,12 +454,14 @@ export default function VistaDashboard({
                 className="h-9 px-3 rounded-lg border border-stone-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400"
               />
             </div>
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={aplicarFechasPersonalizadas}
-              className="h-9 px-4 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              className="h-9 font-semibold"
             >
               Aplicar
-            </button>
+            </Button>
           </div>
         )}
       </div>

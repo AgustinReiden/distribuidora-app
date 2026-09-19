@@ -1,5 +1,6 @@
 import { UserCog, Edit2 } from 'lucide-react';
 import { getRolColor, getRolLabel } from '../../utils/formatters';
+import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import type { PerfilDB } from '../../types';
 
@@ -58,14 +59,16 @@ export default function VistaUsuarios({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
+                    <Button
                       onClick={() => onEditarUsuario(usuario)}
-                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                      variant="ghost"
+                      size="iconSm"
+                      className="text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                       title="Editar"
                       aria-label={`Editar usuario ${usuario.nombre}`}
                     >
                       <Edit2 className="w-4 h-4" aria-hidden="true" />
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}

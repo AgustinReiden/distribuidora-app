@@ -2,8 +2,9 @@
  * Componente para mostrar el reporte de cuentas por cobrar con aging
  */
 import React, { useState } from 'react';
-import { DollarSign, Download, Loader2 } from 'lucide-react';
+import { DollarSign, Download } from 'lucide-react';
 import LoadingSpinner from '../../layout/LoadingSpinner';
+import { Button } from '../../ui/Button';
 import type { ClienteDB, ReporteCuentaPorCobrar } from '../../../types';
 
 export interface ReporteCuentasPorCobrarProps {
@@ -84,18 +85,16 @@ export function ReporteCuentasPorCobrar({
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button
+        <Button
           onClick={exportar}
           disabled={exportando || reporte.length === 0}
-          className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm transition-colors"
+          loading={exportando}
+          variant="success"
+          size="md"
         >
-          {exportando ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Download className="w-4 h-4" />
-          )}
+          {!exportando && <Download className="w-4 h-4" />}
           Exportar a Excel
-        </button>
+        </Button>
       </div>
 
       {/* Resumen Aging */}

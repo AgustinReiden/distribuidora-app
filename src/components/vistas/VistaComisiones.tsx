@@ -10,6 +10,7 @@
 import React, { useState } from 'react';
 import { Percent, TrendingUp, Calendar, Info, Settings2, ChevronRight } from 'lucide-react';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import { Button } from '../ui/Button';
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters';
 import { etiquetaOrigen } from '../../utils/origenPrecio';
 import type { ComisionesResultado, ComisionPreventista } from '../../hooks/queries/useComisionesQuery';
@@ -118,14 +119,16 @@ export default function VistaComisiones({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-2xl font-bold dark:text-white">Comisiones</h1>
         {onAbrirReglas && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="md"
             onClick={onAbrirReglas}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-sm font-medium shadow-sm dark:text-gray-200"
+            className="dark:border-gray-700 shadow-sm"
           >
             <Settings2 className="w-4 h-4 text-indigo-600" aria-hidden="true" />
             Reglas de comisión
-          </button>
+          </Button>
         )}
       </div>
 
@@ -168,12 +171,13 @@ export default function VistaComisiones({
               className="px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
             />
           </div>
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={() => onFiltrar(desdeLocal, hastaLocal)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
           >
             Calcular
-          </button>
+          </Button>
         </div>
       </div>
 

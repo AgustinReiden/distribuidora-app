@@ -18,6 +18,7 @@ import {
   Undo2
 } from 'lucide-react'
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 import { calcularEstadisticasSalvedades } from '../../utils/salvedades'
 import { useSalvedades } from '../../hooks/supabase'
 import { useAnularSalvedadMutation } from '../../hooks/queries'
@@ -240,13 +241,15 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
               el de `resolver_salvedad`: antes el encargado veia el boton y el
               servidor le contestaba "Solo admin". */}
           {puedeResolver && salvedad.estado_resolucion === 'pendiente' && (
-            <button
+            <Button
               onClick={() => onResolver(salvedad)}
-              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center gap-2"
+              variant="primary"
+              size="md"
+              className="w-full"
             >
               <CheckCircle className="w-4 h-4" />
               Resolver Salvedad
-            </button>
+            </Button>
           )}
 
           {/* Anular es otra cosa que resolver (mig 244, #621): deshace la
@@ -362,14 +365,15 @@ export default function VistaSalvedades(): React.ReactElement {
           </h1>
           <p className="text-gray-500 mt-1">Gestiona los items con problemas de entrega</p>
         </div>
-        <button
+        <Button
           onClick={cargarDatos}
           disabled={loading}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg flex items-center gap-2"
+          variant="primary"
+          size="md"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           Actualizar
-        </button>
+        </Button>
       </div>
 
       {/* Filtros */}

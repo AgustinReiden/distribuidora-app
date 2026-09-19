@@ -176,7 +176,10 @@
   color: #000000 !important;
 }
 
-/* Success buttons */
+/* Success buttons. `bg-green-700` es lo que pinta `Button variant="success"`
+   (button-variants.ts: green-600 con texto blanco no llega a AA); sin él acá,
+   un botón de éxito migrado caía en el genérico monocromo y perdía el verde. */
+.high-contrast .bg-green-700,
 .high-contrast .bg-green-600,
 .high-contrast .bg-green-500 {
   background-color: #006400 !important;
@@ -184,6 +187,7 @@
   border-color: #006400 !important;
 }
 
+.high-contrast.dark .bg-green-700,
 .high-contrast.dark .bg-green-600,
 .high-contrast.dark .bg-green-500 {
   background-color: #00ff00 !important;

@@ -2,6 +2,7 @@ import React, { useState, useMemo, Suspense, ChangeEvent } from 'react';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { Route, Truck, Calendar, Check, MapPin, Phone, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Navigation, RefreshCw, BarChart3, X } from 'lucide-react';
 import { formatPrecio, formatFecha, fechaLocalISO, fechaHaceDias, parseDateSafe } from '../../utils/formatters';
+import { Button } from '../ui/Button';
 import LoadingSpinner from '../layout/LoadingSpinner';
 import { useDepositoCoords } from '../../hooks/queries';
 import { decodePolylines } from '../../utils/polyline';
@@ -280,16 +281,18 @@ function RecorridoCard({ recorrido, defaultExpanded = false, onRecalcular }: Rec
               recalcula los cuatro contadores desde las paradas y es idempotente.
             */}
             {onRecalcular && (
-              <button
+              <Button
                 type="button"
                 onClick={() => void handleRecalcular()}
                 disabled={recalculando}
                 title="Recalcular los totales de esta ruta desde sus paradas"
                 aria-label="Recalcular totales del recorrido"
-                className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/60 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                variant="ghost"
+                size="iconSm"
+                className="hover:bg-white/60 dark:hover:bg-gray-700/60"
               >
                 <RefreshCw className={`w-4 h-4 ${recalculando ? 'animate-spin' : ''}`} />
-              </button>
+              </Button>
             )}
             <span className={`px-3 py-1 rounded-full border text-sm font-medium ${estadoRecorrido.color}`}>
               {estadoRecorrido.label}
@@ -477,14 +480,15 @@ export default function VistaRecorridos({
             <BarChart3 className="w-5 h-5" />
             <span>Estadisticas</span>
           </button>
-          <button
+          <Button
             onClick={onRefresh}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+            variant="primary"
+            size="md"
           >
             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
             <span>Actualizar</span>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -495,35 +499,39 @@ export default function VistaRecorridos({
             <Calendar className="w-5 h-5 text-gray-500" />
             <span className="text-gray-700 dark:text-gray-300">Fecha:</span>
           </div>
-          <button
+          <Button
             onClick={() => onFechaChange(fechaHaceDias(1, parseDateSafe(fechaSeleccionada)))}
-            className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            variant="ghost"
+            size="icon"
             aria-label="Día anterior"
             title="Día anterior"
           >
             <ChevronLeft className="w-5 h-5" />
-          </button>
+          </Button>
           <input
             type="date"
             value={fechaSeleccionada}
             onChange={handleFechaChange}
             className="px-3 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
           />
-          <button
+          <Button
             onClick={() => onFechaChange(fechaHaceDias(-1, parseDateSafe(fechaSeleccionada)))}
-            className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            variant="ghost"
+            size="icon"
             aria-label="Día siguiente"
             title="Día siguiente"
           >
             <ChevronRight className="w-5 h-5" />
-          </button>
+          </Button>
           {!esHoy && (
-            <button
+            <Button
+              variant="ghost"
+              size="md"
               onClick={() => onFechaChange(hoy)}
-              className="px-3 py-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors text-sm"
+              className="text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30"
             >
               Ir a hoy
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -536,12 +544,13 @@ export default function VistaRecorridos({
               <BarChart3 className="w-5 h-5 text-purple-600" />
               Estadisticas de Recorridos
             </h2>
-            <button
+            <Button
               onClick={() => setVistaEstadisticas(false)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+              variant="ghost"
+              size="iconSm"
             >
               <X className="w-5 h-5 text-gray-500" />
-            </button>
+            </Button>
           </div>
 
           <div className="flex flex-wrap gap-4 mb-4">

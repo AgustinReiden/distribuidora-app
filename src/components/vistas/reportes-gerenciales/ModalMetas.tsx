@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { X, Target } from 'lucide-react'
+import { Button } from '../../ui/Button'
 import type { MetasGerenciales } from '../../../hooks/queries'
 
 /** Modal para cargar las metas (objetivos) del mes: venta y margen neto. */
@@ -33,7 +34,15 @@ export default function ModalMetas({
           <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
             <Target className="w-5 h-5 text-blue-600" /> Metas del mes
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Cerrar"><X className="w-5 h-5" /></button>
+          <Button
+            variant="ghost"
+            size="iconSm"
+            onClick={onClose}
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+            aria-label="Cerrar"
+          >
+            <X className="w-5 h-5" />
+          </Button>
         </div>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">{sucursalNombre} · {periodoLabel}</p>
 
@@ -55,14 +64,15 @@ export default function ModalMetas({
         />
 
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">Cancelar</button>
-          <button
+          <Button variant="ghost" size="md" onClick={onClose}>Cancelar</Button>
+          <Button
             onClick={() => onGuardar(parse(venta), parse(margen))}
             disabled={guardando}
-            className="px-4 py-2 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400"
+            variant="primary"
+            size="md"
           >
             Guardar
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@
 import React, { useState } from 'react'
 import { Database, Download, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, Info } from 'lucide-react'
 import { fechaLocalISO } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 
 export interface VistaAnalyticsProps {
   onExportBI: (desde: string, hasta: string) => Promise<void>
@@ -213,10 +214,12 @@ export default function VistaAnalytics({
         </div>
 
         {/* Export button */}
-        <button
+        <Button
+          variant="primary"
+          size="lg"
           onClick={handleExport}
           disabled={exportando || !desde || !hasta}
-          className="flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+          className="w-full sm:w-auto"
         >
           {exportando ? (
             <>
@@ -229,7 +232,7 @@ export default function VistaAnalytics({
               Generar Exportacion Completa
             </>
           )}
-        </button>
+        </Button>
       </section>
 
       {/* Power BI instructions */}
