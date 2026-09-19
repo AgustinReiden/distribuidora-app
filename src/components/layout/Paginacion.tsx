@@ -38,7 +38,7 @@ export default function Paginacion({
       <button
         onClick={() => onPageChange(Math.max(1, paginaActual - 1))}
         disabled={paginaActual === 1}
-        className="p-2 rounded-lg border hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="p-2 rounded-lg border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         aria-label="Página anterior"
       >
         <ChevronLeft className="w-5 h-5" />
@@ -51,7 +51,7 @@ export default function Paginacion({
           className={`w-10 h-10 rounded-lg transition-colors ${
             paginaActual === num
               ? 'bg-blue-600 text-white'
-              : 'border hover:bg-gray-100'
+              : 'border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300'
           }`}
         >
           {num}
@@ -61,13 +61,13 @@ export default function Paginacion({
       <button
         onClick={() => onPageChange(Math.min(totalPaginas, paginaActual + 1))}
         disabled={paginaActual === totalPaginas}
-        className="p-2 rounded-lg border hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="p-2 rounded-lg border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         aria-label="Página siguiente"
       >
         <ChevronRight className="w-5 h-5" />
       </button>
 
-      <span className="text-sm text-gray-500 ml-4">
+      <span className="text-sm text-gray-500 dark:text-gray-400 ml-4">
         {totalItems} {totalItems !== 1 ? itemsLabel : itemsLabel.replace(/s$/, '')}
       </span>
     </div>
