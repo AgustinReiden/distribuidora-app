@@ -1,4 +1,4 @@
-import { useState, useMemo, memo, useRef } from 'react';
+import { useState, useMemo, memo, useRef, useEffect } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
@@ -20,6 +20,7 @@ import DiasAtencionSelector from '../ui/DiasAtencionSelector';
 import BloqueHorarioRequerido, { type PatchHorarioCliente } from '../ui/BloqueHorarioRequerido';
 import { serializarFranjas, validarFranjas, clienteSinHorario } from '../../utils/horariosCliente';
 import type { FranjaHoraria } from '../../utils/horariosCliente';
+import { mensajeDuplicado, cambiaIdentidadDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
 import type { ProductoDB, ClienteDB } from '../../types';
 
 /** Item en el pedido */
@@ -92,6 +93,19 @@ export interface ModalPedidoProps {
   onActualizarCantidad: (productoId: string, cantidad: number) => void;
   /** Callback al crear cliente */
   onCrearCliente: (cliente: Record<string, unknown>) => Promise<{ id: string | number }>;
+  /**
+   * Guard de duplicados (mig 250) para el alta rápida. Se llama ANTES de
+   * `onCrearCliente`, igual que `onVerificarDuplicado` en `ModalCliente`, para
+   * poder mostrar la confirmación acá adentro en vez de depender del texto del
+   * error que tira `createCliente` como última línea de defensa. Opcional:
+   * sin esto, un aviso de duplicado no confirmable deja al alta rápida sin
+   * forma de reintentar (ver #692).
+   */
+  onVerificarDuplicado?: (data: {
+    direccion: string | null;
+    latitud: number | null;
+    longitud: number | null;
+  }) => Promise<VeredictoDuplicadoRPC>;
   /** Callback al guardar pedido */
   onGuardar: () => void | Promise<void>;
   /** Indica si está guardando */
@@ -164,6 +178,7 @@ const ModalPedido = memo(function ModalPedido({
   onAgregarItem,
   onActualizarCantidad,
   onCrearCliente,
+  onVerificarDuplicado,
   onGuardar,
   guardando,
   isAdmin,
@@ -213,6 +228,14 @@ const ModalPedido = memo(function ModalPedido({
   const [diasAtencion, setDiasAtencion] = useState<string | null>(null);
   const [guardandoCliente, setGuardandoCliente] = useState<boolean>(false);
   const [errorCliente, setErrorCliente] = useState<string>('');
+  // Aviso de duplicado (mig 250) del alta rápida pendiente de confirmar. Guarda
+  // la identidad (dirección/coords) verificada para poder invalidarse sola si
+  // el usuario la sigue editando: confirmar sobre datos que ya cambiaron
+  // confirmaría el lugar equivocado.
+  const [duplicadoPendiente, setDuplicadoPendiente] = useState<{
+    mensaje: MensajeDuplicado;
+    identidad: { direccion: string | null; latitud: number | null; longitud: number | null };
+  } | null>(null);
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
 
   // GPS capture para cliente rapido. `gpsAccuracy` sirve como flag: si esta
@@ -298,6 +321,52 @@ const ModalPedido = memo(function ModalPedido({
     }
   };
 
+  // El aviso de duplicado se invalida solo si el usuario sigue tocando dónde
+  // está el cliente: confirmar tiene que confirmar la MISMA dirección/punto
+  // que se verificó, no una que cambió mientras el aviso estaba en pantalla.
+  useEffect(() => {
+    if (!duplicadoPendiente) return;
+    const actual = {
+      direccion: nuevoCliente.direccion ?? null,
+      latitud: nuevoCliente.latitud ?? null,
+      longitud: nuevoCliente.longitud ?? null,
+    };
+    if (cambiaIdentidadDuplicado(duplicadoPendiente.identidad, actual)) {
+      setDuplicadoPendiente(null);
+      setErrorCliente('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nuevoCliente.direccion, nuevoCliente.latitud, nuevoCliente.longitud]);
+
+  const crearClienteRapido = async (duplicadoConfirmado: boolean): Promise<void> => {
+    setGuardandoCliente(true);
+    try {
+      // Usar "nombre" como razonSocial (requerido por la DB)
+      const clienteData = {
+        ...nuevoCliente,
+        razonSocial: nuevoCliente.nombre?.trim(), // El "Nombre completo" es la razón social
+        horariosAtencion: serializarFranjas(franjasAtencion),
+        dias_atencion: diasAtencion,
+        duplicadoConfirmado,
+      };
+      const cliente = await onCrearCliente(clienteData);
+      onClienteChange(cliente.id.toString());
+      setMostrarNuevoCliente(false);
+      setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
+      setFranjasAtencion([{ apertura: '', cierre: '' }]);
+      setDiasAtencion(null);
+      setGpsAccuracy(null);
+      setGpsError(null);
+      setErrorCliente('');
+      setDuplicadoPendiente(null);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Error al crear cliente';
+      setErrorCliente(errorMsg);
+      setDuplicadoPendiente(null);
+    }
+    setGuardandoCliente(false);
+  };
+
   const handleCrearClienteRapido = async (): Promise<void> => {
     const nombre = nuevoCliente.nombre?.trim();
     const nombreFantasia = nuevoCliente.nombreFantasia?.trim();
@@ -310,37 +379,60 @@ const ModalPedido = memo(function ModalPedido({
     if (!direccion) camposFaltantes.push('Dirección');
     if (camposFaltantes.length > 0) {
       setErrorCliente(`Completá: ${camposFaltantes.join(', ')}`);
+      setDuplicadoPendiente(null);
       return;
     }
     // Las franjas son opcionales, pero si hay alguna cargada debe ser válida.
     if (!validarFranjas(franjasAtencion).valido) {
       setErrorCliente('Revisá los horarios de atención: la apertura debe ser anterior al cierre y las franjas no pueden superponerse.');
+      setDuplicadoPendiente(null);
       return;
     }
     setErrorCliente('');
+    setDuplicadoPendiente(null);
 
-    setGuardandoCliente(true);
-    try {
-      // Usar "nombre" como razonSocial (requerido por la DB)
-      const clienteData = {
-        ...nuevoCliente,
-        razonSocial: nombre, // El "Nombre completo" es la razón social
-        horariosAtencion: serializarFranjas(franjasAtencion),
-        dias_atencion: diasAtencion,
+    // Guard de duplicados (mig 250). Se verifica ACÁ, antes de crear, para
+    // poder ofrecer un botón de confirmación si sólo avisa: `createCliente`
+    // vuelve a correr el mismo chequeo como última línea de defensa, así que
+    // saltearlo acá no crearía nada igual si algo cambió entre medio.
+    if (onVerificarDuplicado) {
+      const identidad = {
+        direccion: nuevoCliente.direccion ?? null,
+        latitud: nuevoCliente.latitud ?? null,
+        longitud: nuevoCliente.longitud ?? null,
       };
-      const cliente = await onCrearCliente(clienteData);
-      onClienteChange(cliente.id.toString());
-      setMostrarNuevoCliente(false);
-      setNuevoCliente({ nombre: '', nombreFantasia: '', direccion: '', telefono: '', zona: '', latitud: null, longitud: null });
-      setFranjasAtencion([{ apertura: '', cierre: '' }]);
-      setDiasAtencion(null);
-      setGpsAccuracy(null);
-      setGpsError(null);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Error al crear cliente';
-      setErrorCliente(errorMsg);
+      let veredicto: VeredictoDuplicadoRPC;
+      setGuardandoCliente(true);
+      try {
+        veredicto = await onVerificarDuplicado(identidad);
+      } catch (err) {
+        setGuardandoCliente(false);
+        setErrorCliente(
+          err instanceof Error
+            ? err.message
+            : 'No se pudo verificar si ya existe un cliente igual. No se guardó nada; probá de nuevo.'
+        );
+        return;
+      }
+      setGuardandoCliente(false);
+
+      if (veredicto.bloquea) {
+        setErrorCliente(mensajeDuplicado(veredicto).mensaje);
+        return;
+      }
+      if (veredicto.avisa) {
+        setErrorCliente(mensajeDuplicado(veredicto).mensaje);
+        setDuplicadoPendiente({ mensaje: mensajeDuplicado(veredicto), identidad });
+        return;
+      }
     }
-    setGuardandoCliente(false);
+
+    await crearClienteRapido(false);
+  };
+
+  const handleConfirmarDuplicadoYCrear = async (): Promise<void> => {
+    if (!duplicadoPendiente) return;
+    await crearClienteRapido(true);
   };
 
   const getStockWarning = (productoId: string, cantidadEnPedido: number): StockWarning | null => {
@@ -437,7 +529,7 @@ const ModalPedido = memo(function ModalPedido({
             <div className="flex justify-between items-center mb-1">
               <label className="block text-sm font-medium dark:text-gray-200">Cliente *</label>
               {(isAdmin || isPreventista || isEncargado) && (
-                <button onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); setGpsError(null); setGpsAccuracy(null); }} className="text-sm text-blue-600">
+                <button onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); setDuplicadoPendiente(null); setGpsError(null); setGpsAccuracy(null); }} className="text-sm text-blue-600">
                   {mostrarNuevoCliente ? 'Cancelar' : '+ Nuevo'}
                 </button>
               )}
@@ -531,6 +623,16 @@ const ModalPedido = memo(function ModalPedido({
                 <DiasAtencionSelector valor={diasAtencion} onChange={setDiasAtencion} />
                 {errorCliente && (
                   <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 px-3 py-2 rounded-lg">{errorCliente}</p>
+                )}
+                {duplicadoPendiente && (
+                  <button
+                    type="button"
+                    onClick={() => { void handleConfirmarDuplicadoYCrear(); }}
+                    disabled={guardandoCliente}
+                    className="w-full py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-amber-400"
+                  >
+                    {guardandoCliente ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Sí, es otro comercio: crear igual'}
+                  </button>
                 )}
                 <button onClick={handleCrearClienteRapido} disabled={guardandoCliente} className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400">
                   {guardandoCliente ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Crear y seleccionar'}
