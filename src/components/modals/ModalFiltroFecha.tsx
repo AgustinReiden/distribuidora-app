@@ -22,8 +22,8 @@ const ModalFiltroFecha = memo(function ModalFiltroFecha({ filtros, onApply, onCl
         <div><label className="block text-sm font-medium mb-1">Desde</label><input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="w-full px-3 py-2 border rounded-lg" /></div>
         <div><label className="block text-sm font-medium mb-1">Hasta</label><input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="w-full px-3 py-2 border rounded-lg" /></div>
       </div>
-      <div className="flex justify-between p-4 border-t bg-gray-50">
-        <button onClick={() => { onApply({ fechaDesde: null, fechaHasta: null }); onClose(); }} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Limpiar</button>
+      <div className="flex justify-between p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+        <button onClick={() => { onApply({ fechaDesde: null, fechaHasta: null }); onClose(); }} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">Limpiar</button>
         <button onClick={() => { onApply({ fechaDesde: fechaDesde || null, fechaHasta: fechaHasta || null }); onClose(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Aplicar</button>
       </div>
     </ModalBase>

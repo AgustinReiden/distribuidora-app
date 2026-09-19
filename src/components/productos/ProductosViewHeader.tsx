@@ -81,7 +81,7 @@ export default function ProductosViewHeader({
 
         {/* Título editorial con período en cursiva */}
         <h1
-          className="mt-2 text-3xl sm:text-4xl text-stone-900 dark:text-white leading-[1.05]"
+          className="mt-2 font-display text-3xl sm:text-4xl text-stone-900 dark:text-white leading-[1.05]"
           style={{ fontWeight: 800, letterSpacing: '-0.035em' }}
         >
           <span className="bg-clip-text text-transparent bg-gradient-to-br from-stone-900 to-stone-700 dark:from-white dark:to-stone-300">
