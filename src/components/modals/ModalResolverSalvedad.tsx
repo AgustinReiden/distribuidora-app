@@ -24,6 +24,53 @@ interface ResolucionOptionInfo {
   color: string;
 }
 
+interface ResolucionColorStyle {
+  /** Botón seleccionado: borde + fondo */
+  selected: string;
+  /** Punto radio cuando esta opción está seleccionada */
+  radioSelected: string;
+  /** Color del label cuando está seleccionada */
+  labelSelected: string;
+}
+
+// WP-15 (#705): mapa estático, clases completas — Tailwind no ve una clase de
+// borde/color armada en runtime por interpolación (no hay safelist). Cubre
+// los colores que usa cada opción de RESOLUCIONES de arriba, con los mismos
+// tonos que tenía la interpolación; una clave fuera de ese set cae al neutro.
+const RESOLUCION_COLOR_STYLES: Record<string, ResolucionColorStyle> = {
+  blue: {
+    selected: 'border-blue-500 bg-blue-50 dark:bg-blue-900/20',
+    radioSelected: 'border-blue-500 bg-blue-500',
+    labelSelected: 'text-blue-700 dark:text-blue-400'
+  },
+  purple: {
+    selected: 'border-purple-500 bg-purple-50 dark:bg-purple-900/20',
+    radioSelected: 'border-purple-500 bg-purple-500',
+    labelSelected: 'text-purple-700 dark:text-purple-400'
+  },
+  red: {
+    selected: 'border-red-500 bg-red-50 dark:bg-red-900/20',
+    radioSelected: 'border-red-500 bg-red-500',
+    labelSelected: 'text-red-700 dark:text-red-400'
+  },
+  amber: {
+    selected: 'border-amber-500 bg-amber-50 dark:bg-amber-900/20',
+    radioSelected: 'border-amber-500 bg-amber-500',
+    labelSelected: 'text-amber-700 dark:text-amber-400'
+  },
+  gray: {
+    selected: 'border-gray-500 bg-gray-50 dark:bg-gray-900/20',
+    radioSelected: 'border-gray-500 bg-gray-500',
+    labelSelected: 'text-gray-700 dark:text-gray-400'
+  }
+}
+
+const RESOLUCION_COLOR_STYLE_NEUTRAL: ResolucionColorStyle = {
+  selected: 'border-gray-500 bg-gray-50 dark:bg-gray-900/20',
+  radioSelected: 'border-gray-500 bg-gray-500',
+  labelSelected: 'text-gray-700 dark:text-gray-400'
+}
+
 const RESOLUCIONES: ResolucionOptionInfo[] = [
   {
     value: 'reprogramada',
@@ -232,38 +279,41 @@ export default function ModalResolverSalvedad({
               Tipo de resolucion *
             </label>
             <div className="space-y-2">
-              {RESOLUCIONES.map(r => (
-                <button
-                  key={r.value}
-                  type="button"
-                  onClick={() => setResolucion(r.value)}
-                  className={`w-full flex items-start gap-3 p-3 border rounded-lg text-left transition-colors ${
-                    resolucion === r.value
-                      ? `border-${r.color}-500 bg-${r.color}-50 dark:bg-${r.color}-900/20`
-                      : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
-                    resolucion === r.value
-                      ? `border-${r.color}-500 bg-${r.color}-500`
-                      : 'border-gray-300 dark:border-gray-500'
-                  }`}>
-                    {resolucion === r.value && (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <div className="w-1.5 h-1.5 bg-white rounded-full" />
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <p className={`font-medium ${
-                      resolucion === r.value ? `text-${r.color}-700 dark:text-${r.color}-400` : 'text-gray-700 dark:text-gray-300'
+              {RESOLUCIONES.map(r => {
+                const colorStyle = RESOLUCION_COLOR_STYLES[r.color] ?? RESOLUCION_COLOR_STYLE_NEUTRAL
+                return (
+                  <button
+                    key={r.value}
+                    type="button"
+                    onClick={() => setResolucion(r.value)}
+                    className={`w-full flex items-start gap-3 p-3 border rounded-lg text-left transition-colors ${
+                      resolucion === r.value
+                        ? colorStyle.selected
+                        : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
+                      resolucion === r.value
+                        ? colorStyle.radioSelected
+                        : 'border-gray-300 dark:border-gray-500'
                     }`}>
-                      {r.label}
-                    </p>
-                    <p className="text-xs text-gray-500">{r.descripcion}</p>
-                  </div>
-                </button>
-              ))}
+                      {resolucion === r.value && (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <div className="w-1.5 h-1.5 bg-white rounded-full" />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <p className={`font-medium ${
+                        resolucion === r.value ? colorStyle.labelSelected : 'text-gray-700 dark:text-gray-300'
+                      }`}>
+                        {r.label}
+                      </p>
+                      <p className="text-xs text-gray-500">{r.descripcion}</p>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </div>
 

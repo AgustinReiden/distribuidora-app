@@ -32,6 +32,8 @@
   },
   "dependencies": {
     "@axe-core/react": "^4.11.0",
+    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-select": "^2.2.6",

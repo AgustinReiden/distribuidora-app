@@ -36,6 +36,65 @@ interface SalvedadCardProps {
   puedeResolver: boolean;
 }
 
+interface EstadoResolucionStyle {
+  iconBg: string;
+  iconText: string;
+  badge: string;
+}
+
+// WP-15 (#705): mapa estático, clases completas — Tailwind no ve una clase de
+// color armada en runtime por interpolación (no hay safelist), así que sin
+// esto el badge/icono queda sin color en producción. Cubre TODAS las claves
+// del dominio
+// (EstadoResolucionSalvedad, ver ESTADOS_RESOLUCION_LABELS en lib/schemas.ts),
+// preservando exactamente los mismos tonos que tenía el ternario:
+// pendiente=amber, anulada=gray, cualquier resolución concretada=green.
+const ESTADO_RESOLUCION_STYLES: Record<EstadoResolucionSalvedad, EstadoResolucionStyle> = {
+  pendiente: {
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconText: 'text-amber-600',
+    badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+  },
+  anulada: {
+    iconBg: 'bg-gray-100 dark:bg-gray-900/30',
+    iconText: 'text-gray-600',
+    badge: 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400'
+  },
+  reprogramada: {
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconText: 'text-green-600',
+    badge: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+  },
+  nota_credito: {
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconText: 'text-green-600',
+    badge: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+  },
+  descuento_transportista: {
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconText: 'text-green-600',
+    badge: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+  },
+  absorcion_empresa: {
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconText: 'text-green-600',
+    badge: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+  },
+  resuelto_otro: {
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconText: 'text-green-600',
+    badge: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+  }
+}
+
+// Clave fuera del dominio conocido (dato viejo/inesperado): cae al neutro en
+// vez de romper el render con `undefined`.
+const ESTADO_RESOLUCION_STYLE_NEUTRAL: EstadoResolucionStyle = {
+  iconBg: 'bg-gray-100 dark:bg-gray-900/30',
+  iconText: 'text-gray-600',
+  badge: 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400'
+}
+
 function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolver }: SalvedadCardProps) {
   const [expandido, setExpandido] = useState(false)
 
@@ -44,8 +103,7 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
     return new Date(dateStr).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })
   }
 
-  const estadoColor = salvedad.estado_resolucion === 'pendiente' ? 'amber' :
-    salvedad.estado_resolucion === 'anulada' ? 'gray' : 'green'
+  const estadoStyle = ESTADO_RESOLUCION_STYLES[salvedad.estado_resolucion] ?? ESTADO_RESOLUCION_STYLE_NEUTRAL
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 overflow-hidden">
@@ -56,8 +114,8 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3 flex-1">
-            <div className={`p-2 rounded-lg bg-${estadoColor}-100 dark:bg-${estadoColor}-900/30`}>
-              <AlertTriangle className={`w-5 h-5 text-${estadoColor}-600`} />
+            <div className={`p-2 rounded-lg ${estadoStyle.iconBg}`}>
+              <AlertTriangle className={`w-5 h-5 ${estadoStyle.iconText}`} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -65,7 +123,7 @@ function SalvedadCard({ salvedad, onResolver, onAnular, puedeAnular, puedeResolv
                 <span className="font-medium text-gray-800 dark:text-white truncate">
                   {salvedad.producto_nombre || salvedad.producto?.nombre || 'Producto'}
                 </span>
-                <span className={`px-2 py-0.5 rounded-full text-xs bg-${estadoColor}-100 text-${estadoColor}-700 dark:bg-${estadoColor}-900/30 dark:text-${estadoColor}-400`}>
+                <span className={`px-2 py-0.5 rounded-full text-xs ${estadoStyle.badge}`}>
                   {ESTADOS_RESOLUCION_LABELS[salvedad.estado_resolucion]}
                 </span>
               </div>

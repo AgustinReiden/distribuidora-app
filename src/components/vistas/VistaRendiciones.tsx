@@ -42,6 +42,22 @@ function formatFechaCorta(fechaISO: string): string {
   return `${d}/${m}/${y}`
 }
 
+// WP-15 (#705): mapa estático, clases completas — Tailwind no ve una clase de
+// texto/color armada en runtime por interpolación (no hay safelist). Cubre
+// los 7 colores que puede traer `meta.color` (ver FORMAS_PAGO en
+// constants/formasPago.ts); una clave fuera de ese set cae al neutro.
+const FORMA_PAGO_TEXT_COLOR: Record<string, string> = {
+  emerald: 'text-emerald-700 dark:text-emerald-400',
+  sky: 'text-sky-700 dark:text-sky-400',
+  purple: 'text-purple-700 dark:text-purple-400',
+  amber: 'text-amber-700 dark:text-amber-400',
+  indigo: 'text-indigo-700 dark:text-indigo-400',
+  rose: 'text-rose-700 dark:text-rose-400',
+  slate: 'text-slate-700 dark:text-slate-400'
+}
+
+const FORMA_PAGO_TEXT_COLOR_NEUTRAL = 'text-gray-700 dark:text-gray-400'
+
 const ESTADO_STYLES: Record<EstadoRendicion, { label: string; badge: string; border: string }> = {
   pendiente: {
     label: 'Pendiente',
@@ -341,7 +357,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onVerFicha }: ResumenCardP
             {desgloses.map(({ meta, value }) => (
               <div key={meta.value} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
                 <p className="text-xs text-gray-500 dark:text-gray-400">{meta.label}</p>
-                <p className={`font-bold text-${meta.color}-700 dark:text-${meta.color}-400`}>{formatPrecio(value)}</p>
+                <p className={`font-bold ${FORMA_PAGO_TEXT_COLOR[meta.color] ?? FORMA_PAGO_TEXT_COLOR_NEUTRAL}`}>{formatPrecio(value)}</p>
               </div>
             ))}
           </div>
