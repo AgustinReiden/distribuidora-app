@@ -21,6 +21,7 @@ import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, FileText, Undo2 } from 'lucide-react'
 import { z } from 'zod'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
+import { formatPrecio } from '../../utils/formatters'
 import type { SalvedadItemDBExtended } from '../../types'
 
 /** Las notas son obligatorias: mueve stock y plata, tiene que quedar el por que. */
@@ -50,9 +51,6 @@ export default function ModalAnularSalvedad({
   const [error, setError] = useState<string>('')
 
   const dejoMerma = (MOTIVOS_CON_MERMA as readonly string[]).includes(salvedad.motivo)
-
-  const formatMoney = (value: number): string =>
-    new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value)
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
@@ -102,7 +100,7 @@ export default function ModalAnularSalvedad({
             </p>
             <p className="text-gray-600 dark:text-gray-400">
               {MOTIVOS_SALVEDAD_LABELS[salvedad.motivo]} · {salvedad.cantidad_afectada} u. ·{' '}
-              {formatMoney(salvedad.monto_afectado)}
+              {formatPrecio(salvedad.monto_afectado)}
             </p>
             <p className="text-gray-600 dark:text-gray-400">
               Cliente: {salvedad.cliente_nombre || '-'}
@@ -118,7 +116,7 @@ export default function ModalAnularSalvedad({
                 <ul className="list-disc pl-4 space-y-1">
                   <li>
                     devolver la línea a {salvedad.cantidad_original} u. y recalcular el total del
-                    pedido: el cliente vuelve a pagar {formatMoney(salvedad.monto_afectado)}
+                    pedido: el cliente vuelve a pagar {formatPrecio(salvedad.monto_afectado)}
                   </li>
                   {salvedad.stock_devuelto && (
                     <li>

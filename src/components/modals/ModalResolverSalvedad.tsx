@@ -4,6 +4,7 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, CheckCircle, Package, User, Truck, Calendar, FileText, AlertCircle } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
+import { formatPrecio } from '../../utils/formatters'
 import type { SalvedadItemDBExtended, EstadoResolucionSalvedad } from '../../types'
 
 /**
@@ -160,10 +161,6 @@ export default function ModalResolverSalvedad({
     }
   }
 
-  const formatMoney = (value: number): string => {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value)
-  }
-
   const formatDate = (dateStr: string | undefined): string => {
     if (!dateStr) return '-'
     return new Date(dateStr).toLocaleString('es-AR')
@@ -242,7 +239,7 @@ export default function ModalResolverSalvedad({
             <div className="text-right">
               <p className="text-xs text-amber-600">Monto afectado</p>
               <p className="text-xl font-bold text-amber-700 dark:text-amber-400">
-                {formatMoney(salvedad.monto_afectado)}
+                {formatPrecio(salvedad.monto_afectado)}
               </p>
             </div>
           </div>

@@ -17,7 +17,7 @@ import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
 import { abreEnDia, clasificarBarrida, encajeEnHorario, ETIQUETA_BARRIDA, finJornadaSugerida } from '../../utils/barridas';
 import type { EncajeHorario } from '../../utils/barridas';
-import { fechaLocalISO, fechaHaceDias, formatFecha } from '../../utils/formatters';
+import { fechaLocalISO, fechaHaceDias, formatFecha, formatPrecio } from '../../utils/formatters';
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 
@@ -240,7 +240,7 @@ const PedidoRutaCard = memo(function PedidoRutaCard({ pedido, orden, isFirst, is
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 text-gray-600">
                 <DollarSign className="w-4 h-4 text-gray-400" />
-                <span className="font-medium">${pedido.total?.toLocaleString('es-AR')}</span>
+                <span className="font-medium">{formatPrecio(pedido.total)}</span>
               </div>
               <div className="flex items-center gap-2 text-gray-500">
                 <Package className="w-4 h-4 text-gray-400" />
@@ -1249,7 +1249,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-bold">${totales.total.toLocaleString('es-AR')}</p>
+                          <p className="text-2xl font-bold">{formatPrecio(totales.total)}</p>
                           <p className="text-indigo-100 text-sm">Total a cobrar</p>
                         </div>
                       </div>
@@ -1279,7 +1279,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="text-2xl font-bold">${totales.total.toLocaleString('es-AR')}</p>
+                          <p className="text-2xl font-bold">{formatPrecio(totales.total)}</p>
                           <p className="text-blue-100 text-sm">Total a cobrar</p>
                         </div>
                       </div>
@@ -1492,7 +1492,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                 </p>
                               </div>
                               <div className="text-right ml-2">
-                                <p className="font-medium text-gray-900">${pedido.total?.toLocaleString('es-AR')}</p>
+                                <p className="font-medium text-gray-900">{formatPrecio(pedido.total)}</p>
                                 {pedido.cliente?.latitud && pedido.cliente?.longitud ? (
                                   <MapPin className="w-4 h-4 text-green-500 inline" />
                                 ) : (
@@ -1610,7 +1610,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   </div>
                   <div className="bg-white/10 rounded-lg p-3 text-center">
                     <DollarSign className="w-5 h-5 mx-auto mb-1" />
-                    <p className="text-xl font-bold">${totales.total.toLocaleString('es-AR')}</p>
+                    <p className="text-xl font-bold">{formatPrecio(totales.total)}</p>
                     <p className="text-xs text-green-100">Total</p>
                   </div>
                 </div>
@@ -1621,11 +1621,11 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-500">Pendiente de cobro</p>
-                    <p className="text-xl font-bold text-red-600">${totales.pendienteCobro.toLocaleString('es-AR')}</p>
+                    <p className="text-xl font-bold text-red-600">{formatPrecio(totales.pendienteCobro)}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-gray-500">Ya cobrado</p>
-                    <p className="text-xl font-bold text-green-600">${(totales.total - totales.pendienteCobro).toLocaleString('es-AR')}</p>
+                    <p className="text-xl font-bold text-green-600">{formatPrecio(totales.total - totales.pendienteCobro)}</p>
                   </div>
                 </div>
               </div>

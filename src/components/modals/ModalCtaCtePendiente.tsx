@@ -13,6 +13,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, Loader2, Users, FileText, Clock } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { supabase } from '../../hooks/supabase/base'
+import { formatPrecio } from '../../utils/formatters'
 
 export interface CtaCtePendienteRow {
   pedido_id: number
@@ -34,10 +35,6 @@ export interface ModalCtaCtePendienteProps {
   /** Transportista del filtro de la vista ('' = todos) */
   transportistaId?: string
   onClose: () => void
-}
-
-function formatMoney(value: number | undefined | null): string {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value || 0)
 }
 
 function formatFechaCorta(fechaISO: string | null): string {
@@ -216,12 +213,12 @@ function ModalCtaCtePendiente({
           </div>
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
             <p className="text-xs text-gray-500">Entregado</p>
-            <p className="text-lg font-bold text-gray-800 dark:text-white">{formatMoney(totales.total)}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Cobrado: {formatMoney(totales.cobrado)}</p>
+            <p className="text-lg font-bold text-gray-800 dark:text-white">{formatPrecio(totales.total)}</p>
+            <p className="text-xs text-gray-500 mt-0.5">Cobrado: {formatPrecio(totales.cobrado)}</p>
           </div>
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
             <p className="text-xs text-blue-700 dark:text-blue-300">Saldo en cta cte</p>
-            <p className="text-lg font-bold text-blue-700 dark:text-blue-300">{formatMoney(totales.saldo)}</p>
+            <p className="text-lg font-bold text-blue-700 dark:text-blue-300">{formatPrecio(totales.saldo)}</p>
           </div>
         </div>
 
@@ -276,11 +273,11 @@ function ModalCtaCtePendiente({
                     <td className="py-2 px-2 text-gray-500">#{f.pedido_id}</td>
                     <td className="py-2 px-2 text-gray-500">{formatFechaCorta(f.fecha_entrega)}</td>
                     <td className="py-2 px-2 text-right text-gray-500">{f.dias}</td>
-                    <td className="py-2 px-2 text-right text-gray-700 dark:text-gray-300">{formatMoney(f.total)}</td>
+                    <td className="py-2 px-2 text-right text-gray-700 dark:text-gray-300">{formatPrecio(f.total)}</td>
                     <td className="py-2 px-2 text-right text-emerald-600 dark:text-emerald-400">
-                      {f.cobrado > 0 ? formatMoney(f.cobrado) : '—'}
+                      {f.cobrado > 0 ? formatPrecio(f.cobrado) : '—'}
                     </td>
-                    <td className="py-2 pl-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatMoney(f.saldo)}</td>
+                    <td className="py-2 pl-2 text-right font-semibold text-blue-700 dark:text-blue-300">{formatPrecio(f.saldo)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -289,9 +286,9 @@ function ModalCtaCtePendiente({
                   <td colSpan={4} className="py-2 pr-2 font-semibold text-gray-700 dark:text-gray-200">
                     Total ({totales.pedidos} pedido{totales.pedidos !== 1 ? 's' : ''})
                   </td>
-                  <td className="py-2 px-2 text-right font-semibold text-gray-700 dark:text-gray-200">{formatMoney(totales.total)}</td>
-                  <td className="py-2 px-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">{formatMoney(totales.cobrado)}</td>
-                  <td className="py-2 pl-2 text-right font-bold text-blue-700 dark:text-blue-300">{formatMoney(totales.saldo)}</td>
+                  <td className="py-2 px-2 text-right font-semibold text-gray-700 dark:text-gray-200">{formatPrecio(totales.total)}</td>
+                  <td className="py-2 px-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">{formatPrecio(totales.cobrado)}</td>
+                  <td className="py-2 pl-2 text-right font-bold text-blue-700 dark:text-blue-300">{formatPrecio(totales.saldo)}</td>
                 </tr>
               </tfoot>
             </table>
