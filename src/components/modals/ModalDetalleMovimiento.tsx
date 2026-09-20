@@ -10,6 +10,7 @@
 import { memo, useMemo } from 'react'
 import { Loader2, ArrowRight, Check, PlusCircle, PackageMinus } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { formatPrecio, formatDateTime } from '../../utils/formatters'
 import { ESTADO_MOVIMIENTO_BADGE, VERBO_RESOLUCION } from '../../constants/movimientos'
 import type { ProductoDB } from '../../types'
@@ -163,9 +164,9 @@ const ModalDetalleMovimiento = memo(function ModalDetalleMovimiento({
       </div>
 
       <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">
+        <Button onClick={onClose} variant="ghost" size="md">
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

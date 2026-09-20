@@ -6,13 +6,14 @@
  */
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Loader2, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy } from 'lucide-react'
+import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import { redondearSQL } from '../../utils/calculations'
 import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, claveCondicionIva, labelCondicionIva } from '../../utils/condicionIva'
 import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra } from '../../utils/prorrateoCompra'
 import type { CostosCompra, TotalesCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import NumberInput from '../ui/NumberInput'
+import { Button } from '../ui/Button'
 import { supabase } from '../../lib/supabase'
 // Del módulo y no del barrel: éste es un modal lazy y el barrel se lleva puesto
 // todo el resto de los hooks de query al chunk.
@@ -554,23 +555,23 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
                     e.target.value = ''
                   }}
                 />
-                <button
+                <Button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={state.escaneando}
-                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 text-sm transition-colors"
+                  loading={state.escaneando}
+                  variant="primary"
+                  size="sm"
+                  className="gap-1.5 px-2.5 sm:px-3"
                 >
-                  {state.escaneando ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> <span className="hidden sm:inline">Escaneando...</span></>
-                  ) : (
-                    <><Camera className="w-4 h-4" /> <span className="hidden sm:inline">Escanear Factura</span></>
-                  )}
-                </button>
+                  {!state.escaneando && <Camera className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{state.escaneando ? 'Escaneando...' : 'Escanear Factura'}</span>
+                </Button>
               </>
             )}
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+            <Button onClick={onClose} variant="ghost" size="iconSm">
               <X className="w-5 h-5" />
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -613,9 +614,9 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             <div className="flex-1">
               <p className="text-sm text-red-600 dark:text-red-400">{state.errorEscaneo}</p>
             </div>
-            <button onClick={() => dispatch({ type: 'SET_ERROR_ESCANEO', payload: '' })} className="text-red-400 hover:text-red-600">
+            <Button onClick={() => dispatch({ type: 'SET_ERROR_ESCANEO', payload: '' })} variant="ghost" size="iconSm" className="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-600">
               <X className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
         )}
 
@@ -694,31 +695,27 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
             </div>
           )}
           <div className="flex gap-3">
-            <button
+            <Button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              variant="secondary"
+              size="md"
+              className="flex-1"
             >
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={handleSubmit}
               disabled={state.guardando || state.items.length === 0}
-              className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              loading={state.guardando}
+              variant="success"
+              size="md"
+              className="flex-1"
             >
-              {state.guardando ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Registrando...
-                </>
-              ) : (
-                <>
-                  <ShoppingCart className="w-4 h-4" />
-                  Registrar Compra
-                </>
-              )}
-            </button>
+              {!state.guardando && <ShoppingCart className="w-4 h-4" />}
+              {state.guardando ? 'Registrando...' : 'Registrar Compra'}
+            </Button>
           </div>
         </div>
       </div>
@@ -788,15 +785,17 @@ function ProveedorSection({ state, dispatch, proveedores, onAgregarProveedor }: 
           ))}
         </select>
         {onAgregarProveedor && (
-          <button
+          <Button
             type="button"
             onClick={onAgregarProveedor}
-            className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors whitespace-nowrap text-sm"
+            variant="success"
+            size="md"
+            className="gap-1 whitespace-nowrap"
             title="Agregar proveedor nuevo"
           >
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">Nuevo</span>
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -930,14 +929,16 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
           <h3 className="font-medium text-gray-800 dark:text-white">Productos</h3>
         </div>
         {onImportarExcel && (
-          <button
+          <Button
             type="button"
             onClick={onImportarExcel}
-            className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-blue-600 hover:text-blue-700 dark:text-blue-400"
           >
             <FileText className="w-4 h-4" />
             Importar Excel
-          </button>
+          </Button>
         )}
       </div>
 
@@ -957,17 +958,18 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
             />
           </div>
           {onCrearProductoRapido && (
-            <button
+            <Button
               type="button"
               onClick={() => {
                 dispatch({ type: 'SET_MODO_ITEM_RAPIDO', payload: !state.modoItemRapido })
                 dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })
               }}
-              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              variant="primary"
+              size="icon"
               title="Crear producto nuevo"
             >
               <Plus className="w-4 h-4" />
-            </button>
+            </Button>
           )}
         </div>
 
@@ -996,17 +998,19 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
               <div className="px-4 py-2">
                 <p className="text-sm text-gray-500">No se encontraron productos</p>
                 {onCrearProductoRapido && (
-                  <button
+                  <Button
                     type="button"
                     onClick={() => {
                       dispatch({ type: 'SET_MODO_ITEM_RAPIDO', payload: true })
                       dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })
                       setItemRapido(prev => ({ ...prev, nombre: state.busquedaProducto }))
                     }}
-                    className="mt-1 text-green-600 hover:underline text-sm flex items-center gap-1"
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 gap-1 text-green-600 hover:underline dark:text-green-400"
                   >
                     <Plus className="w-3 h-3" /> Crear producto rapido
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
@@ -1019,13 +1023,15 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-blue-800 dark:text-blue-300">Crear producto rapido</p>
-            <button
+            <Button
               type="button"
               onClick={() => dispatch({ type: 'SET_MODO_ITEM_RAPIDO', payload: false })}
-              className="text-blue-400 hover:text-blue-600"
+              variant="ghost"
+              size="iconSm"
+              className="text-blue-400 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-600"
             >
               <X className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
@@ -1061,18 +1067,18 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
               />
             </div>
           </div>
-          <button
+          <Button
             type="button"
             onClick={handleCrearProductoRapido}
             disabled={!itemRapido.nombre.trim() || creandoItem}
-            className="w-full px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-blue-400 text-sm flex items-center justify-center gap-1"
+            loading={creandoItem}
+            variant="primary"
+            size="sm"
+            className="w-full gap-1"
           >
-            {creandoItem ? (
-              <><Loader2 className="w-3 h-3 animate-spin" /> Creando...</>
-            ) : (
-              <><Plus className="w-3 h-3" /> Crear y Agregar</>
-            )}
-          </button>
+            {!creandoItem && <Plus className="w-3 h-3" />}
+            {creandoItem ? 'Creando...' : 'Crear y Agregar'}
+          </Button>
         </div>
       )}
 
@@ -1360,9 +1366,9 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
             {confianzaPct}% confianza
           </span>
         </div>
-        <button onClick={onDescartar} className="text-purple-400 hover:text-purple-600">
+        <Button onClick={onDescartar} variant="ghost" size="iconSm" className="text-purple-400 hover:text-purple-600 dark:text-purple-400 dark:hover:text-purple-600">
           <X className="w-4 h-4" />
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
@@ -1401,18 +1407,22 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
       </p>
 
       <div className="flex gap-2">
-        <button
+        <Button
           onClick={onAplicar}
-          className="flex-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors"
+          variant="primary"
+          size="sm"
+          className="flex-1"
         >
           Aplicar datos
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={onDescartar}
-          className="px-3 py-1.5 border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 text-sm transition-colors"
+          variant="ghost"
+          size="sm"
+          className="border border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30"
         >
           Descartar
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -1453,14 +1463,16 @@ function ItemsPendientesScanPanel({
             </p>
           </div>
         </div>
-        <button
+        <Button
           type="button"
           onClick={onDescartarTodos}
+          variant="ghost"
+          size="sm"
           className="text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 text-xs font-medium underline"
           title="Descartar todos los pendientes"
         >
           Descartar todo
-        </button>
+        </Button>
       </div>
 
       <div className="space-y-2">
@@ -1562,32 +1574,37 @@ function ItemPendienteRow({
       {/* Acciones */}
       {modo === 'idle' && (
         <div className="flex flex-wrap gap-2">
-          <button
+          <Button
             type="button"
             onClick={() => { setModo('vincular'); setBusqueda('') }}
-            className="flex-1 min-w-[120px] px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
+            variant="primary"
+            size="sm"
+            className="flex-1 min-w-[120px] gap-1"
           >
             <Search className="w-3.5 h-3.5" />
             Vincular existente
-          </button>
+          </Button>
           {puedeCrear && (
-            <button
+            <Button
               type="button"
               onClick={() => setModo('crear')}
-              className="flex-1 min-w-[120px] px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
+              variant="success"
+              size="sm"
+              className="flex-1 min-w-[120px] gap-1"
             >
               <Plus className="w-3.5 h-3.5" />
               Crear nuevo
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
             onClick={() => onOmitir(index)}
-            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg text-sm font-medium transition-colors"
+            variant="secondary"
+            size="sm"
             title="Omitir esta línea"
           >
             Omitir
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1627,13 +1644,15 @@ function ItemPendienteRow({
               ))
             )}
           </div>
-          <button
+          <Button
             type="button"
             onClick={() => setModo('idle')}
-            className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+            variant="ghost"
+            size="sm"
+            className="text-xs underline"
           >
             Cancelar
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1674,23 +1693,27 @@ function ItemPendienteRow({
             />
           </div>
           <div className="flex gap-2 pt-1">
-            <button
+            <Button
               type="button"
               onClick={handleCrear}
               disabled={!nombreNuevo.trim() || creando}
-              className="flex-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded text-sm font-medium transition-colors flex items-center justify-center gap-1"
+              loading={creando}
+              variant="success"
+              size="sm"
+              className="flex-1 gap-1"
             >
-              {creando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              {!creando && <Plus className="w-3.5 h-3.5" />}
               Crear y vincular
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => setModo('idle')}
               disabled={creando}
-              className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded text-sm transition-colors"
+              variant="secondary"
+              size="sm"
             >
               Cancelar
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -2059,15 +2082,17 @@ function CargoRow({ cargo, items, dispatch, resolucion }: CargoRowProps) {
       )}
 
       <div className="pt-2 border-t dark:border-gray-700">
-        <button
+        <Button
           type="button"
           onClick={() => setMostrarPesos(v => !v)}
-          className="text-sm text-blue-600 hover:underline"
+          variant="ghost"
+          size="sm"
+          className="text-blue-600 hover:underline dark:text-blue-400"
         >
           {mostrarPesos
             ? 'Ocultar reparto'
             : `Ver reparto entre ${items.length} ${items.length === 1 ? 'línea' : 'líneas'} ▸`}
-        </button>
+        </Button>
         {mostrarPesos && <GrillaPesos cargo={cargo} items={items} dispatch={dispatch} />}
       </div>
     </div>
@@ -2136,27 +2161,31 @@ function CargosSection({ state, dispatch, plantilla, resolucion }: CargosSection
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => dispatch({ type: 'AGREGAR_CARGO' })}
-              className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm transition-colors"
+              variant="success"
+              size="sm"
+              className="gap-1"
             >
               <Plus className="w-4 h-4" /> Agregar cargo
-            </button>
+            </Button>
 
             {/* Plantilla del proveedor: el flete y los pallets de Manaos son los
                 mismos todos los meses y el reparto a mano no es sostenible. Se
                 traen los conceptos, las banderas y los pesos; el monto queda en
                 0 porque es lo único que cambia factura a factura. */}
             {paraTraer.length > 0 && (
-              <button
+              <Button
                 type="button"
                 onClick={() => dispatch({ type: 'APLICAR_CARGOS_PLANTILLA', payload: deLaPlantilla })}
                 title={`Trae ${paraTraer.map(c => c.concepto).join(', ')} de ${facturaPlantilla}, con sus pesos y el monto en 0`}
-                className="flex items-center gap-1 px-3 py-1.5 border border-green-600 text-green-700 dark:text-green-400 rounded hover:bg-green-50 dark:hover:bg-green-900/30 text-sm transition-colors"
+                variant="ghost"
+                size="sm"
+                className="gap-1 border border-green-600 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30"
               >
                 <Copy className="w-4 h-4" /> Traer cargos de la última compra de este proveedor
-              </button>
+              </Button>
             )}
           </div>
 
@@ -2429,13 +2458,14 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
             commitOnChange
             className="w-16 px-2 py-1 text-center border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
           />
-          <button
+          <Button
             type="button"
             onClick={() => dispatch({ type: 'APLICAR_BONIF_GLOBAL', payload: bonifGlobal })}
-            className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+            variant="success"
+            size="sm"
           >
             Aplicar
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -2589,13 +2619,15 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
       {/* Control contra factura: reemplaza las columnas "control" del Excel */}
       {esFC && (
         <div className="pt-2 border-t dark:border-gray-700">
-          <button
+          <Button
             type="button"
             onClick={() => setMostrarControl(v => !v)}
-            className="text-sm text-blue-600 hover:underline"
+            variant="ghost"
+            size="sm"
+            className="text-blue-600 hover:underline dark:text-blue-400"
           >
             {mostrarControl ? 'Ocultar control contra factura' : 'Control contra factura ▸'}
-          </button>
+          </Button>
           {mostrarControl && (
             <div className="mt-2 space-y-1.5">
               <div className="grid grid-cols-12 gap-2 text-xs text-gray-500">

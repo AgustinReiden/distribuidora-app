@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { LucideIcon } from 'lucide-react'
 import { User, MapPin, Phone, CreditCard, ShoppingBag, TrendingUp, DollarSign, Clock, Package, ChevronDown, ChevronUp, FileText, Plus, AlertTriangle, CheckCircle, Tag, Building2, Percent, ArrowLeftRight, Trash2 } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -193,24 +194,28 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                 )}
               </div>
               {puedeRegistrarPago && (
-                <button
+                <Button
                   onClick={() => onRegistrarPago?.(cliente)}
-                  className="ml-4 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
                   title={saldoActual > 0 ? 'Registrar pago del cliente' : 'Registrar pago anticipado / saldo a favor'}
+                  variant="success"
+                  size="md"
+                  className="ml-4"
                 >
                   <Plus className="w-4 h-4" />
                   Registrar Pago
-                </button>
+                </Button>
               )}
               {onCambioEnRuta && (
-                <button
+                <Button
                   onClick={() => onCambioEnRuta(cliente)}
-                  className="ml-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2"
                   title="Agregar un cambio/devolución como parada del recorrido"
+                  variant="primary"
+                  size="md"
+                  className="ml-2"
                 >
                   <ArrowLeftRight className="w-4 h-4" />
                   Cambio/devolución
-                </button>
+                </Button>
               )}
             </div>
             {limiteCredito > 0 && (
@@ -436,13 +441,15 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                           </tbody>
                         </table>
                         {onVerPedido && (
-                          <button
+                          <Button
                             onClick={() => onVerPedido(pedido)}
-                            className="mt-3 text-blue-600 hover:text-blue-700 text-sm flex items-center gap-1"
+                            variant="ghost"
+                            size="sm"
+                            className="mt-3 gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                           >
                             <FileText className="w-4 h-4" />
                             Ver detalle completo
-                          </button>
+                          </Button>
                         )}
                       </div>
                     )}
@@ -455,13 +462,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-semibold text-gray-900 dark:text-white">Historial de Pagos</h3>
                 {puedeRegistrarPago && (
-                  <button
-                    onClick={() => onRegistrarPago?.(cliente)}
-                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm flex items-center gap-1"
-                  >
+                  <Button onClick={() => onRegistrarPago?.(cliente)} variant="success" size="sm" className="gap-1">
                     <Plus className="w-4 h-4" />
                     Nuevo Pago
-                  </button>
+                  </Button>
                 )}
               </div>
               {pagos.length === 0 ? (
@@ -489,13 +493,15 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                           {pago.pedido_id && <p>Pedido #{pago.pedido_id}</p>}
                         </div>
                         {puedeAnular && anulandoId !== String(pago.id) && (
-                          <button
+                          <Button
                             onClick={() => setAnulandoId(String(pago.id))}
-                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                             title="Anular pago"
+                            variant="ghost"
+                            size="iconSm"
+                            className="text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20"
                           >
                             <Trash2 className="w-4 h-4" />
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -511,20 +517,22 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                           </span>
                         </p>
                         <div className="flex gap-2 justify-end">
-                          <button
+                          <Button
                             onClick={() => setAnulandoId(null)}
                             disabled={procesandoAnular}
-                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                            variant="secondary"
+                            size="sm"
                           >
                             Cancelar
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             onClick={() => { void handleConfirmarAnular(pago.id) }}
                             disabled={procesandoAnular}
-                            className="px-3 py-1.5 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+                            variant="danger"
+                            size="sm"
                           >
                             {procesandoAnular ? 'Anulando…' : 'Sí, anular'}
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     )}

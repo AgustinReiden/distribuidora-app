@@ -2,6 +2,7 @@ import { useState, memo, useRef, useMemo, Suspense } from 'react';
 import { z } from 'zod';
 import { Loader2, MapPin, CreditCard, Clock, Tag, FileText, Users, LocateFixed, AlertCircle, Percent, Plus, Trash2, Lock } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import NumberInput from '../ui/NumberInput';
 import FranjasHorariasEditor from '../ui/FranjasHorariasEditor';
 import DiasAtencionSelector from '../ui/DiasAtencionSelector';
@@ -1152,27 +1153,31 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
                         />
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
                       </div>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="iconSm"
                         onClick={() => eliminarDescuentoCategoria(index)}
-                        className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg"
                         aria-label="Eliminar descuento de categoría"
+                        className="text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 dark:text-rose-400"
                       >
                         <Trash2 className="w-4 h-4" />
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
               )}
 
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="md"
                 onClick={agregarDescuentoCategoria}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
+                className="text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 dark:text-blue-400"
               >
                 <Plus className="w-4 h-4" />
                 Agregar categoría
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
@@ -1202,11 +1207,16 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
         )}
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
-        <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">Cancelar</button>
-        <button onClick={() => { void handleSubmit(); }} disabled={guardando || verificandoDuplicado} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
-          {(guardando || verificandoDuplicado) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+        <Button variant="ghost" size="md" onClick={onClose}>Cancelar</Button>
+        <Button
+          variant="primary"
+          size="md"
+          onClick={() => { void handleSubmit(); }}
+          disabled={guardando || verificandoDuplicado}
+          loading={guardando || verificandoDuplicado}
+        >
           {verificandoDuplicado ? 'Verificando...' : 'Guardar'}
-        </button>
+        </Button>
       </div>
 
       {/* Confirmación del aviso de duplicado. Va ACÁ ADENTRO: como hermano en

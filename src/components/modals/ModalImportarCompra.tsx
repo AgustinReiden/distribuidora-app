@@ -7,6 +7,7 @@
 import { useState, useCallback } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download } from 'lucide-react';
+import { Button } from '../ui/Button';
 const loadExcelUtils = () => import('../../utils/excel');
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
 import { normalizarNumero } from '../../utils/normalizarNumero';
@@ -235,12 +236,9 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-          >
+          <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Contenido */}
@@ -278,13 +276,15 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
 
           {/* Descargar plantilla */}
           <div className="flex justify-center">
-            <button
+            <Button
               onClick={descargarPlantilla}
-              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700"
+              variant="ghost"
+              size="sm"
+              className="gap-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
             >
               <Download className="w-4 h-4" />
               Descargar plantilla de ejemplo
-            </button>
+            </Button>
           </div>
 
           {/* Archivo seleccionado */}
@@ -294,16 +294,18 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
                 <FileSpreadsheet className="w-5 h-5 text-green-600" />
                 <span className="text-sm font-medium dark:text-white">{archivo.name}</span>
               </div>
-              <button
+              <Button
                 onClick={() => {
                   setArchivo(null);
                   setPreview([]);
                   setErroresParseo([]);
                 }}
-                className="text-sm text-red-600 hover:underline"
+                variant="ghost"
+                size="sm"
+                className="text-red-600 dark:text-red-400 hover:underline"
               >
                 Cambiar archivo
-              </button>
+              </Button>
             </div>
           )}
 
@@ -410,21 +412,14 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
 
         {/* Footer */}
         <div className="flex gap-3 p-4 border-t dark:border-gray-700 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors dark:text-gray-300"
-          >
+          <Button type="button" onClick={onClose} variant="secondary" size="md" className="flex-1">
             Cancelar
-          </button>
+          </Button>
           {productosEncontrados.length > 0 && (
-            <button
-              onClick={handleImportar}
-              className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
+            <Button onClick={handleImportar} variant="success" size="md" className="flex-1">
               <Upload className="w-4 h-4" />
               Importar {productosEncontrados.length} items
-            </button>
+            </Button>
           )}
         </div>
       </div>

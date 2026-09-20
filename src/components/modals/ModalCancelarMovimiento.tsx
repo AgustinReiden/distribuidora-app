@@ -7,6 +7,7 @@
 import { memo, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import type { MovimientoSucursalDB } from '../../hooks/queries'
 
 export interface ModalCancelarMovimientoProps {
@@ -49,20 +50,17 @@ function ModalCancelarMovimiento({ movimiento, guardando, onConfirmar, onClose }
         </div>
 
         <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            disabled={guardando}
-            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
-          >
+          <Button variant="secondary" size="md" onClick={onClose} disabled={guardando}>
             Volver
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="danger"
+            size="md"
             onClick={() => { void onConfirmar(motivo.trim()) }}
             disabled={guardando}
-            className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
           >
             {guardando ? 'Cancelando…' : 'Cancelar envío'}
-          </button>
+          </Button>
         </div>
       </div>
     </ModalBase>

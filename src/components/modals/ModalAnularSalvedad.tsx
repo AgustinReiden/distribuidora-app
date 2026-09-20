@@ -20,6 +20,7 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, FileText, Undo2 } from 'lucide-react'
 import { z } from 'zod'
+import { Button } from '../ui/Button'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { formatPrecio } from '../../utils/formatters'
 import type { SalvedadItemDBExtended } from '../../types'
@@ -87,9 +88,9 @@ export default function ModalAnularSalvedad({
               <p className="text-sm text-gray-500">ID: {salvedad.id}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          <Button variant="ghost" size="iconSm" onClick={onClose} aria-label="Cerrar">
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
@@ -159,21 +160,19 @@ export default function ModalAnularSalvedad({
           )}
 
           <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
+            <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
+              variant="danger"
+              size="md"
               disabled={guardando || notas.trim().length < 5}
-              className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              className="flex-1"
             >
               <Undo2 className="w-4 h-4" />
               {guardando ? 'Anulando...' : 'Anular salvedad'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

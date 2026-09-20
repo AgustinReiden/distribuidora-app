@@ -13,8 +13,9 @@
  * es la forma explícita de decir "a mí no me mandes".
  */
 import { useMemo, useState, type ReactElement } from 'react';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { DIAS_SEMANA, SECCIONES_DIGEST, formatHora } from '../../utils/digestSecciones';
 import type {
   BotDigestConfig,
@@ -210,23 +211,25 @@ export default function ModalConfigDigest({
         )}
 
         <div className="flex justify-end gap-2 pt-2 border-t dark:border-gray-700">
-          <button
+          <Button
             type="button"
             onClick={onClose}
             disabled={guardando}
-            className="px-4 py-2 rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+            variant="ghost"
+            size="md"
           >
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={handleGuardar}
             disabled={guardando || problema !== null}
-            className="px-4 py-2 rounded-md bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            loading={guardando}
+            variant="primary"
+            size="md"
           >
-            {guardando && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
             Guardar
-          </button>
+          </Button>
         </div>
       </div>
     </ModalBase>

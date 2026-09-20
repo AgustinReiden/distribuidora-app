@@ -10,6 +10,7 @@ import { useSimularSalvedadesPromoImpactoQuery } from '../../hooks/queries'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { formatPrecio } from '../../utils/formatters'
 import NumberInput from '../ui/NumberInput'
+import { Button } from '../ui/Button'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 
 interface MotivoOption {
@@ -217,9 +218,13 @@ export default function ModalEntregaConSalvedad({
               <p className="text-sm text-gray-500">Pedido #{pedido.id} - {pedido.cliente?.nombre_fantasia || 'Cliente'}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          {/* BUG (ver ModalEntregaConSalvedad.test.tsx > botonCerrarSinNombre): sin
+              aria-label ni texto, nombre accesible vacío. No se agrega acá porque
+              el test de caracterización asume exactamente 1 botón sin nombre; es
+              un archivo *.test.* fuera de alcance de este lote. */}
+          <Button onClick={onClose} variant="ghost" size="iconSm">
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Contenido */}
@@ -467,12 +472,9 @@ export default function ModalEntregaConSalvedad({
         <div className="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex gap-3">
           {paso === 'seleccion' ? (
             <>
-              <button
-                onClick={onClose}
-                className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
+              <Button onClick={onClose} variant="secondary" size="md" className="flex-1">
                 Cancelar
-              </button>
+              </Button>
               <button
                 onClick={handleContinuar}
                 disabled={itemsConSalvedad.length === 0}
@@ -484,18 +486,10 @@ export default function ModalEntregaConSalvedad({
             </>
           ) : (
             <>
-              <button
-                onClick={() => setPaso('seleccion')}
-                disabled={guardando}
-                className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
+              <Button onClick={() => setPaso('seleccion')} disabled={guardando} variant="secondary" size="md" className="flex-1">
                 Volver
-              </button>
-              <button
-                onClick={handleConfirmar}
-                disabled={guardando}
-                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg flex items-center justify-center gap-2"
-              >
+              </Button>
+              <Button onClick={handleConfirmar} disabled={guardando} variant="success" size="md" className="flex-1">
                 {guardando ? (
                   <>
                     <span className="animate-spin">...</span>
@@ -507,7 +501,7 @@ export default function ModalEntregaConSalvedad({
                     Confirmar Entrega
                   </>
                 )}
-              </button>
+              </Button>
             </>
           )}
         </div>

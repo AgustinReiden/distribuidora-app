@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import type { ChangeEvent } from 'react';
 import { FileDown, Package, Truck, Printer, Loader2, CalendarDays, Search } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { useRecorridosHojaRutaQuery } from '../../hooks/queries';
 import type { PedidoDB, PerfilDB } from '../../types';
@@ -536,23 +537,20 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
               ))}
         </p>
         <div className="flex space-x-3">
-          <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">
+          <Button onClick={onClose} variant="ghost" size="md">
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={handleExportar}
             disabled={usaRecorrido
               ? !recorridoSeleccionado || pedidosSeleccionados.length === 0 || recargandoRecorridos
               : pedidosSeleccionados.length === 0}
-            className={`flex items-center space-x-2 px-4 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
-              tipoExport === 'comanda'
-                ? 'bg-purple-600 hover:bg-purple-700'
-                : 'bg-green-600 hover:bg-green-700'
-            }`}
+            variant={tipoExport === 'comanda' ? 'primary' : 'success'}
+            size="md"
           >
             {tipoExport === 'comanda' ? <Printer className="w-4 h-4" /> : <FileDown className="w-4 h-4" />}
             <span>{tipoExport === 'comanda' ? 'Imprimir Comandas' : 'Exportar PDF'}</span>
-          </button>
+          </Button>
         </div>
       </div>
     </ModalBase>

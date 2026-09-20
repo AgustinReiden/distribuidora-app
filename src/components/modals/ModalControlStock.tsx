@@ -12,6 +12,7 @@
 import { useState, useMemo, memo } from 'react';
 import { Download, Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { exportControlStock, readControlStockPlanilla, type ControlStockRow } from '../../utils/excel';
 import type { ProductoDB } from '../../types';
 import type { AplicarControlStockResult } from '../../hooks/queries/useControlStockQuery';
@@ -138,8 +139,8 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
           </p>
 
           <div className="flex items-center gap-3 mb-2 text-xs">
-            <button type="button" onClick={seleccionarTodas} className="text-blue-600 hover:underline">Todas</button>
-            <button type="button" onClick={seleccionarNinguna} className="text-blue-600 hover:underline">Ninguna</button>
+            <Button type="button" onClick={seleccionarTodas} variant="ghost" size="sm" className="text-blue-600 dark:text-blue-400 hover:underline">Todas</Button>
+            <Button type="button" onClick={seleccionarNinguna} variant="ghost" size="sm" className="text-blue-600 dark:text-blue-400 hover:underline">Ninguna</Button>
             <span className="text-gray-400">{categoriasSel.size}/{categoriasDisponibles.length} categorías · {productosFiltrados.length} productos</span>
           </div>
 
@@ -188,9 +189,9 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                 {resultado.no_encontrados.length > 0 && (
                   <p className="text-xs text-amber-600 mt-1">{resultado.no_encontrados.length} fila(s) no se pudieron asociar a un producto.</p>
                 )}
-                <button type="button" onClick={() => setResultado(null)} className="mt-2 text-sm text-blue-600 hover:underline">
+                <Button type="button" onClick={() => setResultado(null)} variant="ghost" size="sm" className="mt-2 text-blue-600 dark:text-blue-400 hover:underline">
                   Cargar otra planilla
-                </button>
+                </Button>
               </div>
             ) : preview ? (
               <div className="space-y-3">
@@ -231,18 +232,20 @@ const ModalControlStock = memo(function ModalControlStock({ productos, puedeCarg
                 )}
 
                 <div className="flex items-center gap-2">
-                  <button
+                  <Button
                     type="button"
                     onClick={handleAplicar}
                     disabled={aplicando || cambios.length === 0}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                    loading={aplicando}
+                    variant="success"
+                    size="md"
                   >
-                    {aplicando ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {!aplicando && <CheckCircle2 className="w-4 h-4" />}
                     Aplicar ajustes
-                  </button>
-                  <button type="button" onClick={() => setPreview(null)} className="inline-flex items-center gap-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                  </Button>
+                  <Button type="button" onClick={() => setPreview(null)} variant="ghost" size="md" className="gap-1">
                     <X className="w-4 h-4" /> Descartar
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (

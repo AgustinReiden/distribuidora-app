@@ -1,6 +1,7 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 // DENTRO del ModalBase: es un Radix Dialog portaleado con z-50 y un hermano
 // `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
@@ -228,20 +229,18 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
           {selectedIds.size} pedido{selectedIds.size !== 1 ? 's' : ''} seleccionado{selectedIds.size !== 1 ? 's' : ''}
         </span>
         <div className="flex space-x-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg"
-          >
+          <Button onClick={onClose} variant="ghost" size="md">
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => canConfirm && pedirConfirmacion()}
             disabled={!canConfirm}
-            className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            loading={guardando}
+            variant="success"
+            size="md"
           >
-            {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Marcar como Entregados
-          </button>
+          </Button>
         </div>
       </div>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
