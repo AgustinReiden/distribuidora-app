@@ -8,6 +8,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Loader2, Check, X, AlertTriangle, Search, ChevronDown } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import { sugerirMatchProducto } from '../../utils/matchProducto'
 import type { ProductoDB } from '../../types'
@@ -243,28 +244,42 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
       <div className="flex justify-between gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
         {!modoDenegar ? (
           <>
-            <button onClick={() => setModoDenegar(true)} disabled={guardando}
-              className="px-4 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-50">
+            <Button
+              variant="ghost"
+              size="md"
+              onClick={() => setModoDenegar(true)}
+              disabled={guardando}
+              className="text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+            >
               Denegar
-            </button>
+            </Button>
             <div className="flex gap-2">
-              <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">Cancelar</button>
-              <button onClick={() => { void handleAceptar() }} disabled={guardando || loadingItems || items.length === 0}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center disabled:opacity-50">
-                {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}<Check className="w-4 h-4 mr-1" /> Aceptar e ingresar stock
-              </button>
+              <Button variant="ghost" size="md" onClick={onClose}>Cancelar</Button>
+              <Button
+                variant="success"
+                size="md"
+                onClick={() => { void handleAceptar() }}
+                disabled={guardando || loadingItems || items.length === 0}
+                loading={guardando}
+              >
+                <Check className="w-4 h-4" /> Aceptar e ingresar stock
+              </Button>
             </div>
           </>
         ) : (
           <>
-            <button onClick={() => setModoDenegar(false)} disabled={guardando}
-              className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg disabled:opacity-50">
+            <Button variant="ghost" size="md" onClick={() => setModoDenegar(false)} disabled={guardando}>
               Volver
-            </button>
-            <button onClick={() => { void handleDenegar() }} disabled={guardando}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center disabled:opacity-50">
-              {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}<X className="w-4 h-4 mr-1" /> Confirmar rechazo
-            </button>
+            </Button>
+            <Button
+              variant="danger"
+              size="md"
+              onClick={() => { void handleDenegar() }}
+              disabled={guardando}
+              loading={guardando}
+            >
+              <X className="w-4 h-4" /> Confirmar rechazo
+            </Button>
           </>
         )}
       </div>

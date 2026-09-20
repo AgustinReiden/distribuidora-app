@@ -14,8 +14,9 @@
  * recálculo de promos/mayorista/descuento.
  */
 import { useState, memo, Suspense } from 'react'
-import { Loader2, Building2, Plus, AlertTriangle, ArrowRight } from 'lucide-react'
+import { Building2, Plus, AlertTriangle, ArrowRight } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import type {
   CompraDBExtended,
@@ -113,15 +114,17 @@ const ModalCambiarProveedor = memo(function ModalCambiarProveedor({
               ))}
             </select>
             {onCrearProveedor && (
-              <button
+              <Button
                 type="button"
+                variant="success"
+                size="md"
                 onClick={() => setModalProveedorOpen(true)}
-                className="flex items-center gap-1 shrink-0 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors whitespace-nowrap text-sm"
+                className="shrink-0 whitespace-nowrap"
                 title="Crear proveedor nuevo"
               >
                 <Plus className="w-4 h-4" />
                 <span className="hidden sm:inline">Nuevo</span>
-              </button>
+              </Button>
             )}
           </div>
           {mismoProveedor && (
@@ -162,23 +165,19 @@ const ModalCambiarProveedor = memo(function ModalCambiarProveedor({
 
         {/* Acciones */}
         <div className="flex justify-end gap-2 pt-2 border-t dark:border-gray-700">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={guardando}
-            className="px-4 py-2 text-sm rounded-lg border dark:border-gray-600 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-          >
+          <Button type="button" variant="secondary" size="md" onClick={onClose} disabled={guardando}>
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="success"
+            size="md"
             onClick={handleConfirmar}
             disabled={!puedeConfirmar}
-            className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            loading={guardando}
           >
-            {guardando ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             Cambiar proveedor
-          </button>
+          </Button>
         </div>
       </div>
 

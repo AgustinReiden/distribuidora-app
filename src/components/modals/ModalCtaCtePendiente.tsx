@@ -12,6 +12,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, Loader2, Users, FileText, Clock } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { supabase } from '../../hooks/supabase/base'
 import { formatPrecio } from '../../utils/formatters'
 
@@ -187,12 +188,14 @@ function ModalCtaCtePendiente({
             className="w-20 px-2 py-1 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />
           {diasMin > 0 && (
-            <button
+            <Button
               onClick={() => setDiasMin(0)}
-              className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+              variant="ghost"
+              size="sm"
+              className="underline"
             >
               Quitar filtro
-            </button>
+            </Button>
           )}
           {diasMin > 0 && (
             <span className="text-xs text-gray-500">
@@ -223,14 +226,16 @@ function ModalCtaCtePendiente({
         </div>
 
         <div className="flex justify-end">
-          <button
+          <Button
             onClick={() => { void handleExportar() }}
             disabled={exportando || loading || filasVisibles.length === 0}
-            className="text-sm inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+            variant="secondary"
+            size="sm"
+            className="gap-1.5"
           >
             <Download className="w-4 h-4" />
             {exportando ? 'Exportando…' : 'Exportar Excel'}
-          </button>
+          </Button>
         </div>
 
         {/* Detalle */}

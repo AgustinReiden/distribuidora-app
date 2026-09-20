@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, Suspense } from 'react'
 import type { ChangeEvent } from 'react'
 import { Percent, Search, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { useActualizarPreciosMasivoMutation } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { calcularNuevosPrecios } from '../../utils/precios'
@@ -366,21 +367,19 @@ export default function ModalActualizacionMasivaPrecios({
 
           {/* Footer sticky */}
           <div className="sticky bottom-0 flex justify-end gap-2 px-5 sm:px-6 py-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 font-medium transition-colors"
-            >
+            <Button type="button" variant="ghost" size="md" onClick={onClose}>
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="primary"
+              size="md"
               onClick={handleAplicar}
               disabled={!puedeAplicar}
-              className="px-5 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm transition-colors"
+              className="shadow-sm"
             >
               {mutation.isPending ? 'Aplicando...' : 'Aplicar'}
-            </button>
+            </Button>
           </div>
         </div>
 

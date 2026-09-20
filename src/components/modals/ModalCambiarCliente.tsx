@@ -1,6 +1,7 @@
 import { useMemo, useState, memo } from 'react';
 import { Search, X, Loader2, ArrowRight, AlertCircle, Gift, RefreshCw } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { formatPrecio } from '../../utils/formatters';
 import { calcularNetoVenta } from '../../utils/calculations';
 import { usePromocionPedido } from '../../hooks/usePromocionPedido';
@@ -308,26 +309,28 @@ const ModalCambiarCliente = memo(function ModalCambiarCliente({
 
       {/* Acciones */}
       <div className="flex gap-2 p-4 border-t dark:border-gray-700">
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="md"
           onClick={onClose}
           disabled={guardando}
-          className="flex-1 py-2.5 border dark:border-gray-600 rounded-lg font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+          className="flex-1"
         >
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="primary"
+          size="md"
           onClick={handleConfirmar}
           disabled={!clienteNuevo || isLoading || guardando}
-          className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          loading={guardando}
+          className="flex-1"
         >
-          {guardando ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Cambiando…</>
-          ) : (
-            <><RefreshCw className="w-4 h-4" /> Confirmar cambio</>
-          )}
-        </button>
+          {!guardando && <RefreshCw className="w-4 h-4" />}
+          {guardando ? 'Cambiando…' : 'Confirmar cambio'}
+        </Button>
       </div>
     </ModalBase>
   );

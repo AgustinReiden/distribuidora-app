@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react'
 import { Plus, Trash2, Percent, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
+import { Button } from '../ui/Button'
 import {
   useComisionReglasQuery,
   useGuardarComisionReglaMutation,
@@ -231,15 +232,17 @@ export default function ModalComisionReglas({
             </div>
           </div>
           <div className="flex justify-end">
-            <button
+            <Button
               type="button"
               onClick={() => void handleAgregar()}
               disabled={guardar.isPending}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium disabled:opacity-50"
+              variant="primary"
+              size="md"
+              className="gap-1.5"
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
               {guardar.isPending ? 'Guardando…' : 'Agregar regla'}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -298,13 +301,14 @@ export default function ModalComisionReglas({
       </div>
 
       <div className="flex justify-end p-4 border-t dark:border-gray-700">
-        <button
+        <Button
           type="button"
           onClick={onClose}
-          className="px-4 py-2 rounded-lg border dark:border-gray-600 text-sm dark:text-gray-200"
+          variant="secondary"
+          size="md"
         >
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

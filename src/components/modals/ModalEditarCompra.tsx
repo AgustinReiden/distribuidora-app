@@ -18,9 +18,10 @@
  */
 
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Trash2, AlertCircle, Building2 } from 'lucide-react'
+import { Trash2, AlertCircle, Building2 } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
+import { Button } from '../ui/Button'
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
 import type { VencimientoLinea } from './ModalCompra.reducer'
 import { formatPrecio } from '../../utils/formatters'
@@ -515,7 +516,7 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
 
         {puedeCambiarProveedor && (
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => onCambiarProveedor?.()}
               disabled={itemsModificados}
@@ -524,11 +525,13 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
                   ? 'Guardá o descartá los cambios de items primero'
                   : 'Anular y recrear la compra con otro proveedor'
               }
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              variant="ghost"
+              size="md"
+              className="text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/30"
             >
               <Building2 className="w-4 h-4" />
               Cambiar proveedor
-            </button>
+            </Button>
             {itemsModificados && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 Guardá los cambios de items primero.
@@ -791,23 +794,25 @@ const ModalEditarCompra = memo(function ModalEditarCompra({
 
         {/* Acciones */}
         <div className="flex justify-end gap-2 pt-2 border-t dark:border-gray-700">
-          <button
+          <Button
             type="button"
             onClick={onClose}
             disabled={guardando}
-            className="px-4 py-2 text-sm rounded-lg border dark:border-gray-600 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            variant="secondary"
+            size="md"
           >
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={handleGuardar}
             disabled={guardando}
-            className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 inline-flex items-center gap-2"
+            loading={guardando}
+            variant="primary"
+            size="md"
           >
-            {guardando ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             Guardar cambios
-          </button>
+          </Button>
         </div>
       </div>
     </ModalBase>

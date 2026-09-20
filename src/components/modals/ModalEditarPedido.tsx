@@ -1,9 +1,10 @@
 import { Suspense, useState, memo, useEffect, useMemo } from 'react';
 import { z } from 'zod';
-import { Loader2, AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck, Check } from 'lucide-react';
+import { AlertCircle, Package, Plus, Minus, Trash2, Search, X, ShoppingCart, Pencil, Gift, RefreshCw, UserCheck, Check } from 'lucide-react';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import NumberInput from '../ui/NumberInput';
+import { Button } from '../ui/Button';
 import { formatPrecio, parseDateSafe, fechaHaceDias } from '../../utils/formatters';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
@@ -788,13 +789,20 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   </span>
                 )}
               </div>
-              <button
+              <Button
                 onClick={() => setMostrarBuscador(!mostrarBuscador)}
-                className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                variant="ghost"
+                size="sm"
+                // hover:bg-transparent: el original no tenía fondo al hover, solo
+                // oscurecía el texto. Además, sin esto el ghost hereda
+                // "hover:bg-gray-100" y ModalEditarPedido.test.jsx (líneas 199-201,
+                // "not the Agregar button") lo confunde con los +/- de cantidad,
+                // que filtran botones por ese literal + ícono Plus.
+                className="gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-transparent dark:hover:bg-transparent"
               >
                 <Plus className="w-4 h-4" />
                 Agregar
-              </button>
+              </Button>
             </div>
 
             {/* Buscador de productos */}
@@ -932,13 +940,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       <div className="flex items-center gap-2">
                         {/* Controles de cantidad */}
                         <div className="flex items-center border dark:border-gray-600 rounded-lg">
-                          <button
+                          <Button
                             onClick={() => handleCantidadChange(item.productoId, -1)}
                             disabled={item.cantidad <= (moqMap.get(String(item.productoId)) || 1)}
-                            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 rounded-l-lg"
+                            variant="ghost"
+                            size="iconSm"
+                            className="rounded-l-lg rounded-r-none"
                           >
                             <Minus className="w-4 h-4" />
-                          </button>
+                          </Button>
                           <NumberInput
                             integer
                             min={moqMap.get(String(item.productoId)) || 1}
@@ -949,13 +959,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                             aria-label="Cantidad"
                             className="w-12 px-1 py-1 text-center font-medium dark:text-white bg-transparent focus:outline-none"
                           />
-                          <button
+                          <Button
                             onClick={() => handleCantidadChange(item.productoId, 1)}
                             disabled={item.cantidad >= stockDisponible}
-                            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 rounded-r-lg"
+                            variant="ghost"
+                            size="iconSm"
+                            className="rounded-r-lg rounded-l-none"
                           >
                             <Plus className="w-4 h-4" />
-                          </button>
+                          </Button>
                         </div>
 
                         {/* Subtotal */}
@@ -964,12 +976,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                         </span>
 
                         {/* Eliminar */}
-                        <button
+                        <Button
                           onClick={() => handleEliminarItem(item.productoId)}
-                          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                          variant="ghost"
+                          size="iconSm"
+                          className="text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   );
@@ -1014,13 +1028,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   <p className="text-xs text-gray-500 dark:text-gray-400 min-w-0 truncate">
                     Promoción quitada: <span className="font-medium">{p.promoNombre}</span>
                   </p>
-                  <button
+                  <Button
                     type="button"
                     onClick={() => handleRestaurarPromo(p.promoId)}
-                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                    variant="ghost"
+                    size="sm"
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
                   >
                     Restaurar
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -1049,14 +1065,16 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                     </div>
                   </div>
                   {bonif.promocionId && (
-                    <button
+                    <Button
                       type="button"
                       onClick={() => handleQuitarPromo(String(bonif.promocionId), bonif.promoNombre ?? bonif.nombre)}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-lg shrink-0"
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 shrink-0 text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/30"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       Quitar
-                    </button>
+                    </Button>
                   )}
                 </div>
               ))}
@@ -1065,13 +1083,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   <p className="text-xs text-gray-500 dark:text-gray-400 min-w-0 truncate">
                     Promoción quitada: <span className="font-medium">{p.promoNombre}</span>
                   </p>
-                  <button
+                  <Button
                     type="button"
                     onClick={() => handleRestaurarPromo(p.promoId)}
-                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                    variant="ghost"
+                    size="sm"
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
                   >
                     Restaurar
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -1110,13 +1130,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                       </p>
                     </div>
                   </div>
-                  <button
+                  <Button
                     onClick={() => setSustItemTarget(regalo)}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 border border-emerald-300 dark:border-emerald-700 rounded-lg"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/30"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     Cambiar regalo
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -1142,16 +1164,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             cuando se eligió mal el cliente al cargarlo. */}
         {puedeCambiarCliente && (
           <div>
-            <button
+            <Button
               type="button"
               onClick={() => setMostrarCambioCliente(true)}
               disabled={guardando || cambiandoCliente || itemsModificados}
               title={itemsModificados ? 'Guardá los cambios de items antes de cambiar el cliente' : undefined}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              variant="ghost"
+              size="md"
+              className="w-full text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30"
             >
               <UserCheck className="w-4 h-4" />
               Cambiar cliente
-            </button>
+            </Button>
             {itemsModificados && (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Guardá primero los cambios de items para poder cambiar el cliente.
@@ -1301,20 +1325,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       )}
 
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-        >
+        <Button onClick={onClose} variant="ghost" size="md">
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleGuardar}
           disabled={guardando || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
+          loading={guardando}
+          variant="primary"
+          size="md"
         >
-          {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           {itemsModificados ? 'Guardar Todo' : 'Guardar'}
-        </button>
+        </Button>
       </div>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
 

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react'
 import { formatearFechaVencimiento } from '../../utils/vencimientos'
 import { X, ShoppingCart, Package, Building2, Calendar, CreditCard, FileText, TrendingUp, Hash } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 import type { CondicionIva, Producto, Proveedor, Usuario } from '../../types'
 
 type EstadoCompra = 'pendiente' | 'recibida' | 'parcial' | 'cancelada';
@@ -161,9 +162,9 @@ export default function ModalDetalleCompra({
             <span className={`px-3 py-1 rounded-full text-xs font-medium ${estado.color}`}>
               {estado.label}
             </span>
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+            <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
               <X className="w-5 h-5" />
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -410,21 +411,25 @@ export default function ModalDetalleCompra({
         {/* Footer */}
         <div className="flex gap-3 p-4 border-t dark:border-gray-700">
           {compra.estado !== 'cancelada' && onNotaCredito && (
-            <button
+            <Button
               onClick={() => onNotaCredito(compra)}
-              className="px-4 py-2 text-blue-600 border border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors flex items-center gap-2"
+              variant="ghost"
+              size="md"
+              className="text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20"
             >
               <FileText className="w-4 h-4" />
               Nota de Credito
-            </button>
+            </Button>
           )}
           {compra.estado !== 'cancelada' && onAnular && (
-            <button
+            <Button
               onClick={() => onAnular(compra.id)}
-              className="px-4 py-2 text-red-600 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+              variant="ghost"
+              size="md"
+              className="text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
             >
               Anular Compra
-            </button>
+            </Button>
           )}
           <button
             onClick={onClose}

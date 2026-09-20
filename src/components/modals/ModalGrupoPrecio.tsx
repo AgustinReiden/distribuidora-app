@@ -14,6 +14,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { Plus, Trash2, Search, ChevronDown, ChevronRight, Layers } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
@@ -491,12 +492,14 @@ export default function ModalGrupoPrecio({
           <div>
             <div className="flex justify-between items-center mb-2">
               <label className="block text-sm font-medium dark:text-gray-200">Escalas de precio *</label>
-              <button
+              <Button
                 onClick={agregarEscala}
-                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                variant="ghost"
+                size="sm"
+                className="gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
               >
                 <Plus className="w-3 h-3" /> Agregar escala
-              </button>
+              </Button>
             </div>
             <div className="space-y-2">
               {escalas.map((escala, index) => {
@@ -561,13 +564,15 @@ export default function ModalGrupoPrecio({
                         placeholder="Etiqueta (ej: Fardo)"
                       />
                       {escalas.length > 1 && (
-                        <button
+                        <Button
                           onClick={() => eliminarEscala(index)}
-                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                          variant="ghost"
+                          size="iconSm"
                           aria-label="Eliminar escala"
+                          className="text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </Button>
                       )}
                     </div>
 
@@ -596,13 +601,15 @@ export default function ModalGrupoPrecio({
                           Exigir además un mínimo por producto
                         </label>
                         {escala.combinada && (
-                          <button
+                          <Button
                             onClick={() => actualizarEscala(index, { expandido: !escala.expandido })}
-                            className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1 hover:text-gray-700 dark:hover:text-gray-300"
                           >
                             {escala.expandido ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                             {escala.expandido ? 'Colapsar' : 'Configurar minimos'}
-                          </button>
+                          </Button>
                         )}
                       </div>
 
@@ -701,22 +708,15 @@ export default function ModalGrupoPrecio({
           <p role="alert" className="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>
         )}
         <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-          >
+          <Button onClick={onClose} variant="ghost" size="md">
             Cancelar
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={guardando}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 flex items-center gap-2"
-          >
+          </Button>
+          <Button onClick={handleSubmit} disabled={guardando} variant="primary" size="md" className="px-6">
             {guardando && (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             )}
             {isEditing ? 'Guardar cambios' : 'Crear condición'}
-          </button>
+          </Button>
         </div>
       </div>
     </ModalBase>

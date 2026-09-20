@@ -4,6 +4,7 @@ import { X, ArrowLeftRight, ArrowDown, ArrowUp, FileText, Search, Package, Alert
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { formatPrecio } from '../../utils/formatters'
 import NumberInput from '../ui/NumberInput'
+import { Button } from '../ui/Button'
 import type { ClienteDB, ProductoDB } from '../../types'
 
 export type MotivoCambio = 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' | 'otro'
@@ -266,9 +267,9 @@ export default function ModalCambioProducto({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" aria-label="Cerrar">
+          <Button variant="ghost" size="iconSm" onClick={onClose} aria-label="Cerrar">
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
@@ -525,18 +526,10 @@ export default function ModalCambioProducto({
 
           {/* Botones */}
           <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
+            <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
               Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={submitDeshabilitado}
-              className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 dark:disabled:bg-indigo-800 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
+            </Button>
+            <Button type="submit" variant="primary" size="md" disabled={submitDeshabilitado} className="flex-1">
               {guardando ? (
                 <span className="animate-pulse">{enRuta ? 'Agregando...' : 'Registrando...'}</span>
               ) : (
@@ -545,7 +538,7 @@ export default function ModalCambioProducto({
                   {enRuta ? 'Agregar a la ruta' : 'Registrar cambio'}
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

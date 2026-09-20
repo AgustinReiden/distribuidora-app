@@ -11,6 +11,7 @@ import ModalBase from './ModalBase';
 // `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
 import ModalCambioProducto, { type CambioProductoSaveData } from './ModalCambioProducto';
+import { Button } from '../ui/Button';
 import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDestinoMutation, useRecorridoExistenteQuery, useRutasEnCursoQuery, useRutasEnCursoMultiQuery, useCambiarTransportistaRutaMutation } from '../../hooks/queries';
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
@@ -955,13 +956,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                       <p className="text-xs text-gray-500">
                         Tip: Busca tu direccion en Google Maps, click derecho y copia las coordenadas
                       </p>
-                      <button
+                      <Button
                         onClick={handleGuardarDeposito}
-                        className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                        variant="success"
+                        size="md"
                       >
                         {depositoGuardado ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
                         <span>{depositoGuardado ? 'Guardado!' : 'Guardar'}</span>
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1186,14 +1188,16 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                 : <Check className="w-4 h-4" />}
                               {cambiarChofer.isPending ? 'Cambiando…' : 'Confirmar'}
                             </button>
-                            <button
+                            <Button
                               type="button"
                               onClick={() => { setReasignando(false); setErrorReasignar(null); }}
                               disabled={cambiarChofer.isPending}
-                              className="px-3 py-2 text-sm text-amber-800 hover:bg-amber-100 rounded-lg disabled:opacity-50"
+                              variant="ghost"
+                              size="md"
+                              className="text-amber-800 dark:text-amber-800 hover:bg-amber-100 dark:hover:bg-amber-100"
                             >
                               Cancelar
-                            </button>
+                            </Button>
                           </div>
                           <p className="text-xs text-amber-700">
                             Se mantienen las {paradasExistentes.length} paradas y su orden. No se puede
@@ -1711,42 +1715,43 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
         </div>
 
         {/* Footer con acciones */}
-        <div className="flex justify-between items-center p-4 border-t bg-gray-50">
-          <button
+        <div className="flex justify-between items-center p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
+          <Button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+            variant="ghost"
+            size="lg"
           >
             Cerrar
-          </button>
+          </Button>
 
           <div className="flex space-x-3">
             {vistaActiva === 'optimizar' ? (
               modoDividir ? (
-                <button
+                <Button
                   onClick={handleDividir}
                   disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0}
-                  className="flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  variant="primary"
+                  size="lg"
+                  loading={loading || guardando}
                 >
-                  {(loading || guardando) ? <Loader2 className="w-5 h-5 animate-spin" /> : <Route className="w-5 h-5" />}
+                  {!(loading || guardando) && <Route className="w-5 h-5" />}
                   <span>
                     {loading ? 'Optimizando…' : guardando ? 'Guardando…' : `Dividir y armar (${repartidoresSel.size} chofer/es)`}
                   </span>
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
                   onClick={handleArmar}
                   disabled={!transportistaSeleccionado || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0}
-                  className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  variant="primary"
+                  size="lg"
+                  loading={loading || guardando}
                 >
-                  {(loading || guardando) ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Route className="w-5 h-5" />
-                  )}
+                  {!(loading || guardando) && <Route className="w-5 h-5" />}
                   <span>
                     {loading ? 'Optimizando…' : guardando ? 'Guardando…' : `Armar ruta del día (${pedidosSeleccionados.length})`}
                   </span>
-                </button>
+                </Button>
               )
             ) : rutaMulti ? null : (
               <>
@@ -1758,13 +1763,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                   <span>Hoja de ruta</span>
                 </button>
                 {onImprimirComandas && (
-                  <button
+                  <Button
                     onClick={handleImprimirComandas}
-                    className="flex items-center space-x-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                    variant="primary"
+                    size="lg"
                   >
                     <FileText className="w-5 h-5" />
                     <span>Comandas</span>
-                  </button>
+                  </Button>
                 )}
               </>
             )}

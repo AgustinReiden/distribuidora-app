@@ -7,6 +7,7 @@
 import { memo, useMemo, useState } from 'react'
 import { Loader2, Search, AlertTriangle, User, ChevronRight } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import { useDeudoresMoraQuery } from '../../hooks/queries'
 
@@ -119,12 +120,9 @@ const ModalDeudoresMora = memo(function ModalDeudoresMora({ onClose, onVerFicha 
       </div>
 
       <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-        >
+        <Button onClick={onClose} variant="ghost" size="md">
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

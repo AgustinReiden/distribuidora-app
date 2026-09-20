@@ -9,6 +9,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import { Loader2, Search, Plus, Trash2, Building2, PackageMinus } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
+import { Button } from '../ui/Button'
 import { stockDisponibleParaEnvio } from '../../utils/movimientos'
 import type { MovimientoSucursalDB, MovimientoItemDB } from '../../hooks/queries'
 import type { ProductoDB, SucursalDB } from '../../types'
@@ -241,17 +242,18 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
       </div>
 
       <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">
+        <Button onClick={onClose} variant="ghost" size="md">
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={() => { void handleSubmit() }}
           disabled={guardando}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
+          loading={guardando}
+          variant="primary"
+          size="md"
         >
-          {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           {esEditar ? 'Guardar cambios' : 'Crear salida'}
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

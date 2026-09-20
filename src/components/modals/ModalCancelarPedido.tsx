@@ -1,6 +1,7 @@
 import { useState, memo } from 'react'
-import { Loader2, AlertTriangle } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import { MOTIVOS_NO_ENTREGA, MOTIVOS_CANCELACION_ADMIN } from '../../constants/motivosNoEntrega'
 import type { PedidoDB } from '../../types'
@@ -104,20 +105,18 @@ const ModalCancelarPedido = memo(function ModalCancelarPedido({
 
       {/* Footer */}
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg"
-        >
+        <Button variant="ghost" size="md" onClick={onClose}>
           Volver
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="danger"
+          size="md"
           onClick={() => canConfirm && confirmar()}
           disabled={!canConfirm}
-          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+          loading={guardando}
         >
-          {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           Cancelar Pedido
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

@@ -10,8 +10,9 @@
  *      `rendiciones_control` e inserta las filas de gastos en una transacción.
  */
 import { useState, memo, useMemo } from 'react'
-import { Loader2, Plus, Trash2, CheckCircle2, AlertTriangle, FileText } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, AlertTriangle, FileText } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import type { RendicionGastoInput } from '../../types'
@@ -206,14 +207,16 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
                 </span>
               )}
             </label>
-            <button
+            <Button
               type="button"
               onClick={addGasto}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
             >
               <Plus className="w-3 h-3" />
               Agregar
-            </button>
+            </Button>
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
             No mueven caja. Son solo registro para dejar constancia (combustible, peaje, etc.).
@@ -243,14 +246,16 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
                     placeholder="0.00"
                     className="w-28 px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   />
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="iconSm"
                     onClick={() => removeGasto(idx)}
-                    className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
                     aria-label="Eliminar gasto"
+                    className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 dark:text-red-400"
                   >
                     <Trash2 className="w-4 h-4" />
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -260,25 +265,18 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
 
       {/* Footer */}
       <div className="flex items-center justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <button
-          onClick={onClose}
-          disabled={guardando}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg disabled:opacity-50"
-        >
+        <Button variant="ghost" size="md" onClick={onClose} disabled={guardando}>
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={estado === 'confirmada' ? 'success' : 'danger'}
+          size="md"
           onClick={handleSubmit}
           disabled={guardando || (estado === 'disconformidad' && !observaciones.trim())}
-          className={`px-4 py-2 rounded-lg text-white flex items-center gap-2 disabled:opacity-50 ${
-            estado === 'confirmada'
-              ? 'bg-emerald-600 hover:bg-emerald-700'
-              : 'bg-red-600 hover:bg-red-700'
-          }`}
+          loading={guardando}
         >
-          {guardando && <Loader2 className="w-4 h-4 animate-spin" />}
           {estado === 'confirmada' ? 'Confirmar rendición' : 'Marcar disconformidad'}
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )
