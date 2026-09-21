@@ -165,6 +165,10 @@ describe('registrar una merma manual — contrato con el servidor', () => {
    * El caso del reporte: iPhone con 4G de una barra. La request no llegó nunca
    * al servidor (los edge logs de Supabase no la registran) y supabase-js
    * devuelve `{ message: 'TypeError: Failed to fetch', code: '' }`.
+   *
+   * El mensaje NO puede decir "no se registró": el mismo error tapa el caso en
+   * que la RPC commiteó y se perdió la respuesta, y `registrar_merma_manual` no
+   * es idempotente. Un "reintentá" a ciegas descuenta el stock dos veces.
    */
   it('un fallo de red dice que no hay conexión, no "Failed to fetch"', async () => {
     rpcResult = {
@@ -184,8 +188,10 @@ describe('registrar una merma manual — contrato con el servidor', () => {
 
     expect(err).toBeInstanceOf(Error)
     expect((err as Error).message).toMatch(/sin conexión/i)
-    expect((err as Error).message).toMatch(/no se registró/i)
+    expect((err as Error).message).toMatch(/revisá el stock/i)
     expect((err as Error).message).not.toMatch(/failed to fetch/i)
+    // Nada que afirme que la baja no quedó: no se sabe.
+    expect((err as Error).message).not.toMatch(/no se registró/i)
   })
 
   it('devuelve la merma que creó el servidor, con el id y el costo congelado', async () => {
