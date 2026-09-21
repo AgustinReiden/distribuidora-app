@@ -4,6 +4,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   MermaDBExtended,
   MermaFormInputExtended,
@@ -51,7 +52,18 @@ async function registrarMerma(
     p_sucursal_id: sucursalId
   })
 
-  if (error) throw error
+  // `throw error` pelado tiraba un OBJETO PLANO, no un Error: supabase-js sólo
+  // instancia `PostgrestError` con `.throwOnError()`. Aguas abajo, el
+  // `err instanceof Error ? err.message : '<generico>'` del modal y del
+  // container daba false SIEMPRE y el mensaje real —"se requiere rol admin",
+  // "el stock del producto es 3 y la baja es de 5"— se perdía: se veía "Error
+  // al registrar la merma", que es su literal de fallback. Ver errorDeSupabase.
+  if (error) {
+    throw errorDeSupabase(
+      error,
+      'Sin conexión: la baja NO se registró. Revisá la señal y volvé a intentar.',
+    )
+  }
 
   const resultado = data as { ok: boolean; merma: MermaDBExtended } | null
   return { success: true, merma: resultado?.merma ?? null }
