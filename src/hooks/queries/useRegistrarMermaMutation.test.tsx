@@ -20,7 +20,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = []
 /** Cualquier uso de `.from()` es una regresión: la merma ya no escribe tablas. */
 const fromCalls: string[] = []
-let rpcResult: { data: unknown; error: { message: string } | null } = {
+/**
+ * La forma REAL del error de supabase-js: un objeto plano, nunca un `Error`.
+ * `PostgrestError` sólo se instancia con `.throwOnError()`, que no se usa en el
+ * repo. Mockearlo como `new Error(...)` hacía pasar en verde el bug que dejaba
+ * al usuario con "Error al registrar la merma" en vez del mensaje del servidor.
+ */
+type ErrorDeSupabase = { message: string; details?: string; hint?: string; code: string }
+let rpcResult: { data: unknown; error: ErrorDeSupabase | null } = {
   data: { ok: true, merma: { id: 926, producto_id: 72, cantidad: 10 } },
   error: null,
 }
@@ -111,7 +118,15 @@ describe('registrar una merma manual — contrato con el servidor', () => {
   })
 
   it('propaga el error del servidor en vez de compensar a mano', async () => {
-    rpcResult = { data: null, error: { message: 'El stock del producto es 3 y la baja es de 5' } }
+    rpcResult = {
+      data: null,
+      error: {
+        message: 'El stock del producto es 3 y la baja es de 5',
+        details: '',
+        hint: '',
+        code: 'P0001',
+      },
+    }
     const { result } = setup()
 
     await expect(
@@ -120,6 +135,63 @@ describe('registrar una merma manual — contrato con el servidor', () => {
 
     // Sin DELETE compensatorio: la transacción del servidor ya deshizo todo.
     expect(fromCalls).toEqual([])
+  })
+
+  /**
+   * El mensaje llega a la PANTALLA, que es donde se cortaba.
+   *
+   * `rejects.toThrow(/.../)` de arriba pasa con un objeto plano —matchea contra
+   * `.message` sin mirar el tipo—, pero el modal y el container preguntan
+   * `err instanceof Error` antes de mostrarlo. Con el objeto plano de
+   * supabase-js eso da false y sale el literal de fallback: "Error al registrar
+   * la merma". Lo que se fija acá es el TIPO, no el texto.
+   */
+  it('lo que lanza es un Error de verdad, no el objeto plano de supabase-js', async () => {
+    rpcResult = {
+      data: null,
+      error: { message: 'Acceso denegado: se requiere rol admin', details: '', hint: '', code: '42501' },
+    }
+    const { result } = setup()
+
+    const err = await result.current
+      .mutateAsync({ productoId: '72', cantidad: 1, motivo: 'rotura' })
+      .catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe('Acceso denegado: se requiere rol admin')
+  })
+
+  /**
+   * El caso del reporte: iPhone con 4G de una barra. La request no llegó nunca
+   * al servidor (los edge logs de Supabase no la registran) y supabase-js
+   * devuelve `{ message: 'TypeError: Failed to fetch', code: '' }`.
+   *
+   * El mensaje NO puede decir "no se registró": el mismo error tapa el caso en
+   * que la RPC commiteó y se perdió la respuesta, y `registrar_merma_manual` no
+   * es idempotente. Un "reintentá" a ciegas descuenta el stock dos veces.
+   */
+  it('un fallo de red dice que no hay conexión, no "Failed to fetch"', async () => {
+    rpcResult = {
+      data: null,
+      error: {
+        message: 'TypeError: Failed to fetch',
+        details: 'TypeError: Failed to fetch',
+        hint: '',
+        code: '',
+      },
+    }
+    const { result } = setup()
+
+    const err = await result.current
+      .mutateAsync({ productoId: '72', cantidad: 1, motivo: 'devolucion' })
+      .catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toMatch(/sin conexión/i)
+    expect((err as Error).message).toMatch(/revisá el stock/i)
+    expect((err as Error).message).not.toMatch(/failed to fetch/i)
+    // Nada que afirme que la baja no quedó: no se sabe.
+    expect((err as Error).message).not.toMatch(/no se registró/i)
   })
 
   it('devuelve la merma que creó el servidor, con el id y el costo congelado', async () => {

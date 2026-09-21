@@ -31,6 +31,7 @@ import {
 } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { formatPrecio } from '../../utils/formatters'
+import { getErrorMessage } from '../../utils/errorHandling'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 
@@ -368,8 +369,9 @@ export default function ProductosContainer(): React.ReactElement {
       setModalMermaOpen(false)
       setProductoMerma(null)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al registrar merma'
-      notify.error(msg)
+      // Ídem el modal: `err instanceof Error` daba false para todo error de
+      // supabase-js y el toast tapaba el mensaje real con su propio literal.
+      notify.error(getErrorMessage(err))
       throw err
     }
   }, [registrarMerma, notify])

@@ -2,6 +2,7 @@ import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { z } from 'zod'
 import { X, AlertTriangle, Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
+import { getErrorMessage } from '../../utils/errorHandling'
 import NumberInput from '../ui/NumberInput'
 import type { Producto } from '../../types'
 
@@ -117,8 +118,10 @@ export default function ModalMermaStock({
       })
       onClose()
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Error al registrar la merma'
-      setError(errorMessage)
+      // getErrorMessage, no `err instanceof Error`: el error de supabase-js es
+      // un objeto plano y ese ternario mostraba su fallback generico en vez del
+      // mensaje del servidor. Ver src/utils/errorDeSupabase.ts.
+      setError(getErrorMessage(err))
     } finally {
       setGuardando(false)
     }

@@ -194,6 +194,29 @@ describe('ModalMermaStock — validación', () => {
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /registrar baja/i })).toBeEnabled()
   })
+
+  /**
+   * El mismo caso, con la forma de error que llega DE VERDAD.
+   *
+   * El test de arriba rechaza con `new Error(...)` y por eso pasaba en verde
+   * mientras en producción se veía "Error al registrar la merma": supabase-js
+   * no lanza `Error`, lanza un objeto plano, y el `err instanceof Error` que
+   * tenía este catch daba false para todos los errores reales. Se vio en un
+   * iPhone con 4G de una barra: el modal y el toast mostraron sus dos literales
+   * de fallback a la vez. Ver src/utils/errorDeSupabase.ts.
+   */
+  it('muestra el mensaje aunque el error NO sea una instancia de Error', async () => {
+    const plano = { message: 'Acceso denegado: se requiere rol admin', details: '', hint: '', code: '42501' }
+    const onSave = vi.fn<OnSave>().mockRejectedValue(plano)
+    const { user, onClose } = renderModal({ onSave })
+
+    await user.click(screen.getByRole('button', { name: /rotura/i }))
+    await user.click(screen.getByRole('button', { name: /registrar baja/i }))
+
+    expect(await screen.findByText('Acceso denegado: se requiere rol admin')).toBeVisible()
+    expect(screen.queryByText(/error al registrar la merma/i)).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })
 
 describe('ModalMermaStock — guardar y cerrar', () => {

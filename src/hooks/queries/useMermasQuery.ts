@@ -4,6 +4,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   MermaDBExtended,
   MermaFormInputExtended,
@@ -51,7 +52,25 @@ async function registrarMerma(
     p_sucursal_id: sucursalId
   })
 
-  if (error) throw error
+  // `throw error` pelado tiraba un OBJETO PLANO, no un Error: supabase-js sólo
+  // instancia `PostgrestError` con `.throwOnError()`. Aguas abajo, el
+  // `err instanceof Error ? err.message : '<generico>'` del modal y del
+  // container daba false SIEMPRE y el mensaje real —"se requiere rol admin",
+  // "el stock del producto es 3 y la baja es de 5"— se perdía: se veía "Error
+  // al registrar la merma", que es su literal de fallback. Ver errorDeSupabase.
+  //
+  // El mensaje de red dice "no se pudo confirmar", no "no se registró": un
+  // `Failed to fetch` también tapa el caso en que la RPC commiteó y se perdió
+  // la RESPUESTA (señal débil, no caída — con 3G malo `navigator.onLine` sigue
+  // en true). Y `registrar_merma_manual` NO es idempotente: no tiene
+  // `client_request_id` como los pagos (167) ni `offline_id` como el alta de
+  // pedido (071), así que reintentar a ciegas descuenta el stock dos veces.
+  if (error) {
+    throw errorDeSupabase(
+      error,
+      'Sin conexión: no se pudo confirmar la baja. Revisá el stock del producto antes de reintentar, puede haber quedado registrada.',
+    )
+  }
 
   const resultado = data as { ok: boolean; merma: MermaDBExtended } | null
   return { success: true, merma: resultado?.merma ?? null }
