@@ -16,6 +16,7 @@ import { formatDistancia } from '../../utils/geo';
 import { googleMapsNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
 import type { PedidoItemDB, ProductoDB } from '../../types';
 import type { PedidoConCliente } from './useEntregaParada';
+import { Button } from '../ui/Button';
 
 export interface LinkRutaMaps {
   url: string;
@@ -228,16 +229,14 @@ export default function SheetParada({
 
                 {/* Acciones completas dentro del panel */}
                 {onToggleGuia && (guiando || !llegaste) && tieneCoords && (
-                  <button
+                  <Button
                     onClick={() => onToggleGuia(paradaActiva)}
-                    className={`flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-colors ${
-                      guiando
-                        ? 'bg-red-600 text-white active:bg-red-800'
-                        : 'bg-blue-600 text-white active:bg-blue-800'
-                    }`}
+                    variant={guiando ? 'danger' : 'primary'}
+                    size="touch"
+                    className={`w-full text-sm font-semibold ${guiando ? 'active:bg-red-800' : 'active:bg-blue-800'}`}
                   >
                     {guiando ? <><Square className="h-5 w-5" /> Parar guía</> : <><Navigation className="h-5 w-5" /> Navegar</>}
-                  </button>
+                  </Button>
                 )}
                 <div className="grid grid-cols-2 gap-2">
                   <a
@@ -249,17 +248,19 @@ export default function SheetParada({
                     <MapIcon className="h-4 w-4" />
                     Maps
                   </a>
-                  <button
+                  <Button
                     onClick={() => entregar(paradaActiva)}
-                    className={`flex min-h-[52px] items-center justify-center gap-1.5 rounded-xl text-sm font-semibold transition-colors ${
+                    variant={llegaste ? 'success' : 'ghost'}
+                    size="touch"
+                    className={`gap-1.5 text-sm font-semibold ${
                       llegaste
-                        ? 'bg-green-600 text-white active:bg-green-800'
-                        : 'bg-green-50 text-green-700 active:bg-green-100 dark:bg-green-900/30 dark:text-green-300'
+                        ? 'active:bg-green-800'
+                        : 'bg-green-50 text-green-700 hover:bg-green-50 active:bg-green-100 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/30'
                     }`}
                   >
                     <Check className="h-5 w-5" />
                     {esCambio(paradaActiva) ? 'Completar cambio' : 'Entregar'}
-                  </button>
+                  </Button>
                 </div>
 
                 {/* No se pudo entregar. Antes esto no existía: el chofer solo
@@ -267,13 +268,15 @@ export default function SheetParada({
                     con un texto libre. Ahora queda el motivo y el pedido vuelve
                     al pool para repartirlo otro día. */}
                 {onNoEntregar && !esCambio(paradaActiva) && (
-                  <button
+                  <Button
                     onClick={() => noEntregar(paradaActiva)}
-                    className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 text-sm font-semibold text-rose-700 transition-colors active:bg-rose-50 dark:border-rose-800/50 dark:text-rose-300 dark:active:bg-rose-900/25"
+                    variant="ghost"
+                    size="touch"
+                    className="mt-2 w-full gap-1.5 border border-rose-200 text-sm font-semibold text-rose-700 hover:bg-rose-50 active:bg-rose-50 dark:border-rose-800/50 dark:text-rose-300 dark:hover:bg-rose-900/20 dark:active:bg-rose-900/25"
                   >
                     <XCircle className="h-4 w-4" />
                     No se pudo entregar
-                  </button>
+                  </Button>
                 )}
               </div>
 
@@ -389,26 +392,32 @@ export default function SheetParada({
 
               {/* Acción primaria contextual (compacta → barra fina, más mapa) */}
               {llegaste ? (
-                <button
+                <Button
                   onClick={() => entregar(paradaActiva)}
-                  className="flex h-12 flex-shrink-0 items-center gap-1.5 rounded-xl bg-green-600 px-4 text-sm font-semibold text-white active:bg-green-800"
+                  variant="success"
+                  size="touch"
+                  className="flex-shrink-0 gap-1.5 px-4 text-sm font-semibold active:bg-green-800"
                 >
                   <Check className="h-5 w-5" /> {esCambio(paradaActiva) ? 'Completar' : 'Entregar'}
-                </button>
+                </Button>
               ) : guiando && onToggleGuia ? (
-                <button
+                <Button
                   onClick={() => onToggleGuia(paradaActiva)}
-                  className="flex h-12 flex-shrink-0 items-center gap-1.5 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white active:bg-red-800"
+                  variant="danger"
+                  size="touch"
+                  className="flex-shrink-0 gap-1.5 px-4 text-sm font-semibold active:bg-red-800"
                 >
                   <Square className="h-5 w-5" /> Parar
-                </button>
+                </Button>
               ) : onToggleGuia && tieneCoords ? (
-                <button
+                <Button
                   onClick={() => onToggleGuia(paradaActiva)}
-                  className="flex h-12 flex-shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white active:bg-blue-800"
+                  variant="primary"
+                  size="touch"
+                  className="flex-shrink-0 gap-1.5 px-4 text-sm font-semibold active:bg-blue-800"
                 >
                   <Navigation className="h-5 w-5" /> Navegar
-                </button>
+                </Button>
               ) : null}
             </>
           ) : (

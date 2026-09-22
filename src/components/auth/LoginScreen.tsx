@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Truck, Loader2 } from 'lucide-react';
 import { useAuth } from '../../hooks/supabase';
+import { Button } from '../ui/Button';
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -64,13 +65,9 @@ export default function LoginScreen() {
               required
             />
           </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center transition-colors"
-          >
+          <Button type="submit" variant="primary" size="lg" disabled={loading} className="w-full">
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Ingresar'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

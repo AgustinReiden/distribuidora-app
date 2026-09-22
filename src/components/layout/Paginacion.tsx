@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Button } from '../ui/Button';
 
 export interface PaginacionProps {
   paginaActual: number;
@@ -35,14 +36,16 @@ export default function Paginacion({
 
   return (
     <div className="flex items-center justify-center space-x-2 mt-4">
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={() => onPageChange(Math.max(1, paginaActual - 1))}
         disabled={paginaActual === 1}
-        className="p-2 rounded-lg border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="border dark:border-gray-600 text-gray-900 dark:text-gray-300"
         aria-label="Página anterior"
       >
         <ChevronLeft className="w-5 h-5" />
-      </button>
+      </Button>
 
       {getPageNumbers().map(num => (
         <button
@@ -58,14 +61,16 @@ export default function Paginacion({
         </button>
       ))}
 
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={() => onPageChange(Math.min(totalPaginas, paginaActual + 1))}
         disabled={paginaActual === totalPaginas}
-        className="p-2 rounded-lg border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="border dark:border-gray-600 text-gray-900 dark:text-gray-300"
         aria-label="Página siguiente"
       >
         <ChevronRight className="w-5 h-5" />
-      </button>
+      </Button>
 
       <span className="text-sm text-gray-500 dark:text-gray-400 ml-4">
         {totalItems} {totalItems !== 1 ? itemsLabel : itemsLabel.replace(/s$/, '')}

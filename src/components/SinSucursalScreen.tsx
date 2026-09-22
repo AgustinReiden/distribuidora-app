@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { Building2 } from 'lucide-react'
+import { Button } from './ui/Button'
 
 interface SinSucursalScreenProps {
   onLogout: () => void
@@ -26,13 +27,9 @@ export default function SinSucursalScreen({ onLogout }: SinSucursalScreenProps):
           Tu cuenta no tiene sucursales asignadas. Por favor contactá a un administrador
           para que te asigne al menos una sucursal antes de poder usar la aplicación.
         </p>
-        <button
-          type="button"
-          onClick={onLogout}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-        >
+        <Button type="button" variant="primary" size="md" onClick={onLogout}>
           Cerrar sesión
-        </button>
+        </Button>
       </div>
     </div>
   )

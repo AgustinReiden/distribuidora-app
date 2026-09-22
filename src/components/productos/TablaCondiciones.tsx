@@ -9,6 +9,7 @@
 import { Edit2, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import { cn } from '../../lib/utils'
+import { Button } from '../ui/Button'
 import type { GrupoPrecioConDetalles } from '../../types'
 
 export interface TablaCondicionesProps {
@@ -114,32 +115,38 @@ export default function TablaCondiciones({
 
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1.5">
-                      <button
+                      <Button
                         onClick={() => onToggleActivo(grupo)}
-                        className="p-1.5 rounded-md text-stone-500 hover:bg-stone-100 dark:hover:bg-gray-700"
+                        variant="ghost"
+                        size="iconSm"
+                        className="text-stone-500 hover:bg-stone-100 dark:hover:bg-gray-700"
                         title={activo ? 'Desactivar' : 'Activar'}
                         aria-label={`${activo ? 'Desactivar' : 'Activar'} ${grupo.nombre}`}
                       >
                         {activo
                           ? <ToggleRight className="w-4 h-4 text-emerald-600" aria-hidden="true" />
                           : <ToggleLeft className="w-4 h-4" aria-hidden="true" />}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => onEditarGrupo(grupo)}
-                        className="p-1.5 rounded-md text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                        variant="ghost"
+                        size="iconSm"
+                        className="text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                         title="Editar"
                         aria-label={`Editar ${grupo.nombre}`}
                       >
                         <Edit2 className="w-4 h-4" aria-hidden="true" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => onEliminarGrupo(grupo.id)}
-                        className="p-1.5 rounded-md text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                        variant="ghost"
+                        size="iconSm"
+                        className="text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/20"
                         title="Eliminar"
                         aria-label={`Eliminar ${grupo.nombre}`}
                       >
                         <Trash2 className="w-4 h-4" aria-hidden="true" />
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
