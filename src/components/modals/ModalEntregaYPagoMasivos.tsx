@@ -7,10 +7,12 @@ import { Button } from '../ui/Button'
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import { usePedidosParaEntregaYPagoQuery, useRendicionCerradaQuery } from '../../hooks/queries'
 import {
-  getEstadoColor, getEstadoLabel,
-  getEstadoPagoColor, getEstadoPagoLabel,
+  getEstadoLabel,
+  getEstadoPagoLabel,
   formatPrecio, fechaLocalISO,
 } from '../../utils/formatters'
+import { Badge } from '../ui/Badge'
+import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 import type { PerfilDB } from '../../types'
 
@@ -294,12 +296,12 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs text-gray-400">#{pedido.id}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoColor(pedido.estado)}`}>
+                      <Badge tone={toneDeEstadoPedido(pedido.estado)} className="font-medium">
                         {getEstadoLabel(pedido.estado)}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoPagoColor(pedido.estado_pago)}`}>
+                      </Badge>
+                      <Badge tone={toneDeEstadoPago(pedido.estado_pago)} className="font-medium">
                         {getEstadoPagoLabel(pedido.estado_pago)}
-                      </span>
+                      </Badge>
                     </div>
                     <p className="font-medium text-gray-800 dark:text-white truncate">
                       {pedido.cliente?.nombre_fantasia || 'Sin cliente'}

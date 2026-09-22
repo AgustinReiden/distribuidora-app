@@ -14,8 +14,10 @@ const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { f
   const mod = await importConRecarga(() => import('../../lib/pdfExport')) as any
   return mod.generarReciboPedido(pedido, _empresa, options)
 };
-import { formatPrecio, formatFecha, formatHora, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
+import { formatPrecio, formatFecha, formatHora, getEstadoColor, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
+import { Badge } from '../ui/Badge';
+import { toneDeEstadoPago } from '../../lib/estadoTones';
 import AccionesDropdown from './PedidoActions';
 import { useCambiarTipoFacturaMutation } from '../../hooks/queries/usePedidosQuery';
 import { useAuthData } from '../../contexts/AuthDataContext';
@@ -412,9 +414,9 @@ function PedidoCard({
             <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
               {pedido.estado_pago && (
-                <span className={`px-2.5 py-1 rounded-full text-[12.5px] font-semibold ${getEstadoPagoColor(pedido.estado_pago)}`}>
+                <Badge tone={toneDeEstadoPago(pedido.estado_pago)} className="px-2.5 py-1 text-[12.5px]">
                   {getEstadoPagoLabel(pedido.estado_pago)}
-                </span>
+                </Badge>
               )}
               <BadgeTipoFactura pedido={pedido} isAdmin={isAdmin} isEncargado={isEncargado} />
             </div>
@@ -471,9 +473,9 @@ function PedidoCard({
         <EstadoStepper estado={pedido.estado} tieneSalvedad={tieneSalvedad} />
         <div className="flex items-center gap-1.5 flex-wrap">
           {pedido.estado_pago && (
-            <span className={`px-2.5 py-1 rounded-full text-[12.5px] font-semibold ${getEstadoPagoColor(pedido.estado_pago)}`}>
+            <Badge tone={toneDeEstadoPago(pedido.estado_pago)} className="px-2.5 py-1 text-[12.5px]">
               {getEstadoPagoLabel(pedido.estado_pago)}
-            </span>
+            </Badge>
           )}
           <BadgeTipoFactura pedido={pedido} isAdmin={isAdmin} isEncargado={isEncargado} />
         </div>

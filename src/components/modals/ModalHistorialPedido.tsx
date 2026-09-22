@@ -2,8 +2,10 @@ import { memo } from 'react';
 import { Loader2, History } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatFecha } from './utils';
-import { formatPrecio, getEstadoColor, getEstadoPagoColor, getEstadoPagoLabel } from '../../utils/formatters';
+import { formatPrecio, getEstadoPagoLabel } from '../../utils/formatters';
 import { parsePrecio } from '../../utils/calculations';
+import { Badge } from '../ui/Badge';
+import { toneDeEstadoPedido, toneDeEstadoPago, type Tone } from '../../lib/estadoTones';
 import type { PedidoDB } from '../../types';
 
 // =============================================================================
@@ -80,13 +82,13 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
     return valor;
   };
 
-  // Color del badge según el valor, usando el mismo código de colores que la
-  // tarjeta de pedido (getEstadoColor / getEstadoPagoColor). Para el resto de
-  // los campos (total, notas, forma de pago, transportista) un gris neutro.
-  const colorValor = (campo: string, valor: string): string => {
-    if (campo === "estado") return getEstadoColor(valor);
-    if (campo === "estado_pago") return getEstadoPagoColor(valor);
-    return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200";
+  // Tono del badge según el valor, usando el mismo mapa estado -> tono que la
+  // tarjeta de pedido (toneDeEstadoPedido / toneDeEstadoPago). Para el resto de
+  // los campos (total, notas, forma de pago, transportista) el neutro por defecto.
+  const toneValor = (campo: string, valor: string): Tone => {
+    if (campo === "estado") return toneDeEstadoPedido(valor);
+    if (campo === "estado_pago") return toneDeEstadoPago(valor);
+    return "neutral";
   };
 
   return (
@@ -120,13 +122,13 @@ const ModalHistorialPedido = memo(function ModalHistorialPedido({ pedido, histor
                   <p className="text-sm text-green-600 font-medium">{cambio.valor_nuevo}</p>
                 ) : (
                   <div className="flex items-center gap-2 text-sm flex-wrap">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${colorValor(cambio.campo_modificado, cambio.valor_anterior)}`}>
+                    <Badge tone={toneValor(cambio.campo_modificado, cambio.valor_anterior)} className="px-2.5 py-1">
                       {formatearValor(cambio.campo_modificado, cambio.valor_anterior)}
-                    </span>
+                    </Badge>
                     <span className="text-gray-400">→</span>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${colorValor(cambio.campo_modificado, cambio.valor_nuevo)}`}>
+                    <Badge tone={toneValor(cambio.campo_modificado, cambio.valor_nuevo)} className="px-2.5 py-1">
                       {formatearValor(cambio.campo_modificado, cambio.valor_nuevo)}
-                    </span>
+                    </Badge>
                   </div>
                 )}
               </div>

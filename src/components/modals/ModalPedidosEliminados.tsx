@@ -2,7 +2,9 @@ import { useState, useEffect, type ReactElement } from 'react';
 import { Trash2, Calendar, User, Package, DollarSign, Loader2, AlertCircle } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
 import { formatPrecio, formatFecha } from '../../utils/formatters';
+import { toneDeEstadoPedido } from '../../lib/estadoTones';
 import type { EstadoPedido, FormaPago } from '../../types';
 
 type EstadoPago = 'pendiente' | 'parcial' | 'pagado';
@@ -63,16 +65,6 @@ export default function ModalPedidosEliminados({
     cargarPedidos();
   }, [onFetch]);
 
-  const getEstadoColor = (estado: EstadoPedido): string => {
-    const colores: Record<string, string> = {
-      pendiente: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
-      en_preparacion: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-      asignado: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-      entregado: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-    };
-    return colores[estado] || 'bg-gray-100 text-gray-700';
-  };
-
   return (
     <ModalBase title="Historial de Pedidos Eliminados" onClose={onClose} maxWidth="max-w-4xl">
       <div className="p-4 max-h-[70vh] overflow-y-auto">
@@ -120,9 +112,10 @@ export default function ModalPedidosEliminados({
                       <p className="font-semibold text-lg text-blue-600">
                         {formatPrecio(pedido.total)}
                       </p>
-                      <span className={`text-xs px-2 py-0.5 rounded ${getEstadoColor(pedido.estado)}`}>
+                      {/* Antes con una paleta local propia; ahora la común de estadoTones. */}
+                      <Badge tone={toneDeEstadoPedido(pedido.estado)} className="rounded font-normal">
                         {pedido.estado}
-                      </span>
+                      </Badge>
                     </div>
                   </div>
 

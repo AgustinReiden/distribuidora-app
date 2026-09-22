@@ -67,6 +67,21 @@ export default {
            cambio; las paletas de gráficos y de marcadores por preventista NO,
            porque son categorías de datos, no marca. */
         blue: brand,
+        /* Familias gemelas (#712): la app usaba dos nombres para el mismo
+           significado según quién escribió el componente ("Pendientes" era
+           `amber` en el KPI y `yellow` en el badge; "Entregados", `emerald`
+           en el KPI y `green` en el stepper; lo destructivo, `rose` o `red`).
+           Mismo truco que `gray` y `blue`: el nombre de clase no cambia —ni los
+           tests que aseveran 'yellow' ni high-contrast.css se enteran— y cada
+           línea se revierte sola. Contraste de lo que se mueve, sobre blanco:
+           yellow-600 → amber-600 sube de 2,94 a 3,19; rose-600 → red-600 sube
+           de 4,70 a 4,83; emerald-600 → green-600 baja de 3,77 a 3,30 y
+           emerald-700 → green-700 de 5,48 a 5,02 (sigue en AA). Los botones
+           con texto blanco sobre emerald ya pasaron a `Button variant="success"`
+           (green-700) en #707. */
+        yellow: colors.amber,
+        emerald: colors.green,
+        rose: colors.red,
       },
       animation: {
         'slide-in': 'slide-in 0.2s ease-out',

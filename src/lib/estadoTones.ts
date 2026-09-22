@@ -35,6 +35,8 @@ export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefi
       return 'success';
     case 'cancelado':
     case 'anulado':
+      // 'anulado' va con 'cancelado': en la base los dos significan "no es una
+      // venta". `getEstadoColor` (formatters.ts) no lo mapea y cae al gris.
       return 'danger';
     default:
       return 'neutral';
@@ -50,6 +52,8 @@ export function toneDeEstadoPedido(estado: EstadoPedido | string | null | undefi
  * que no consta es plata que el cliente debe, y en el mostrador se mira igual
  * que un pendiente. Mandar el desconocido al gris lo esconde justo donde hay
  * que verlo.
+ *
+ * `parcial` va en `warning` (ámbar); `getEstadoPagoColor` lo pintaba amarillo.
  */
 export function toneDeEstadoPago(estado: EstadoPago | string | null | undefined): Tone {
   switch (estado) {
@@ -81,3 +85,34 @@ export function toneDeRol(rol: RolUsuario | string | null | undefined): Tone {
       return 'neutral';
   }
 }
+
+/**
+ * Tono del estado de una compra. No hay un tipo `EstadoCompra` compartido en
+ * `src/types/index.ts` (vive local en cada componente de Compras), asi que la
+ * firma acepta `string` como el resto de este archivo.
+ */
+export function toneDeEstadoCompra(estado: string | null | undefined): Tone {
+  switch (estado) {
+    case 'pendiente':
+      return 'warning';
+    case 'recibida':
+      return 'success';
+    case 'parcial':
+      return 'brand';
+    case 'cancelada':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+/**
+ * Labels de estado de compra, mismos textos que usaban los `ESTADOS_COMPRA`
+ * locales de `VistaCompras` y `ModalDetalleCompra` antes de consolidarse aca.
+ */
+export const ETIQUETA_ESTADO_COMPRA: Record<string, string> = {
+  pendiente: 'Pendiente',
+  recibida: 'Recibida',
+  parcial: 'Parcial',
+  cancelada: 'Cancelada',
+};
