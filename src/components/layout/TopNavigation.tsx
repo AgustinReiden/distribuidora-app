@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -32,12 +32,23 @@ interface MenuItem {
   label: string;
   roles: RolUsuario[];
   hidden?: boolean;
+  /**
+   * La <Route> de este id en App.tsx NO tiene gate: la abre cualquier rol. Por
+   * eso se filtra por la union de roles efectivos (el rol extra suma) y no por
+   * el rol primario como el resto (#731).
+   */
+  sinGate?: true;
 }
 
 interface MenuGroup {
   id: string;
   label: string | null;
   icon?: LucideIcon;
+  /**
+   * Union de los roles de sus items. El filtro no la usa: un grupo se ve si le
+   * queda algun item visible, asi que un item nuevo no puede esconder su grupo
+   * entero por olvidarse de sumar su rol aca.
+   */
   roles?: RolUsuario[];
   items: MenuItem[];
 }
@@ -52,7 +63,7 @@ const menuGroups: MenuGroup[] = [
     label: null, // Items sin grupo (se muestran directo)
     items: [
       { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
-      { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'] },
+      { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'], sinGate: true },
       { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['admin', 'encargado', 'preventista'] },
     ]
   },
@@ -62,11 +73,12 @@ const menuGroups: MenuGroup[] = [
     icon: Users,
     roles: ['admin', 'encargado', 'preventista'],
     items: [
-      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'] },
+      { id: 'clientes', icon: Users, label: 'Clientes', roles: ['admin', 'encargado', 'preventista'], sinGate: true },
       { id: 'recorrido-preventista', icon: Route, label: 'Recorrido Preventista', roles: ['admin'], hidden: true },
       { id: 'reportes', icon: TrendingUp, label: 'Reportes', roles: ['admin'] },
       { id: 'reportes-gerenciales', icon: BarChart3, label: 'Reportes Gerenciales', roles: ['admin'] },
-      { id: 'analytics', icon: Database, label: 'Centro de Analisis', roles: ['admin'], hidden: true },
+      // La pantalla es un boton que baja el Excel para Power BI: el label dice eso.
+      { id: 'analytics', icon: Database, label: 'Exportar a Power BI', roles: ['admin'] },
       { id: 'comisiones', icon: Percent, label: 'Comisiones', roles: ['admin'] },
       { id: 'metas', icon: Target, label: 'Objetivos', roles: ['admin'] },
     ]
@@ -77,7 +89,7 @@ const menuGroups: MenuGroup[] = [
     icon: Package,
     roles: ['admin', 'encargado', 'preventista', 'deposito'],
     items: [
-      { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'encargado', 'preventista', 'deposito'] },
+      { id: 'productos', icon: Package, label: 'Productos', roles: ['admin', 'encargado', 'preventista', 'deposito'], sinGate: true },
       { id: 'compras', icon: ShoppingBag, label: 'Compras', roles: ['admin', 'encargado'] },
       { id: 'vencimientos', icon: CalendarClock, label: 'Vencimientos', roles: ['admin', 'encargado', 'deposito'] },
       { id: 'proveedores', icon: Building2, label: 'Proveedores', roles: ['admin'] },
@@ -97,11 +109,17 @@ const menuGroups: MenuGroup[] = [
       { id: 'salvedades', icon: AlertTriangle, label: 'Salvedades', roles: ['admin', 'encargado'] },
       { id: 'geolocalizacion', icon: MapPin, label: 'Geolocalización', roles: ['admin'] },
       { id: 'horarios-clientes', icon: Clock, label: 'Horarios a revisar', roles: ['admin', 'encargado'] },
-      { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
-      { id: 'bot-telegram', icon: Send, label: 'Bot Telegram', roles: ['admin'] },
-      { id: 'configuracion', icon: Settings, label: 'Configuración', roles: ['admin', 'encargado'] },
     ]
   }
+];
+
+// Administracion no es un grupo de la barra: vive en el menu del usuario
+// (#713). Las tres <Route> tienen gate, asi que se filtran con la misma regla
+// que el resto: por el rol primario.
+const itemsAdministracion: MenuItem[] = [
+  { id: 'usuarios', icon: UserCog, label: 'Usuarios', roles: ['admin'] },
+  { id: 'configuracion', icon: Settings, label: 'Configuración', roles: ['admin', 'encargado'] },
+  { id: 'bot-telegram', icon: Send, label: 'Bot Telegram', roles: ['admin'] },
 ];
 
 // =============================================================================
@@ -120,39 +138,55 @@ export default function TopNavigation({
   const [userMenuAbierto, setUserMenuAbierto] = useState<boolean>(false);
   const [dropdownAbierto, setDropdownAbierto] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const hamburguesaRef = useRef<HTMLButtonElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const dropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const idTituloAdministracion = useId();
 
   // Obtener la vista actual desde la ruta
   const vista = location.pathname.replace('/', '') || 'dashboard';
 
-  // Filtrar grupos y items por rol.
+  // Filtrar items por rol.
   //
   // Usa los roles EFECTIVOS (rol de la sucursal activa + capacidades extra de
-  // la mig 155), no `perfil.rol`. Dos motivos: el rol global ignoraba el rol
-  // por sucursal (el menu podia mostrar items que el router despues redirigia),
-  // y el multi-rol necesita la union — el preventista que tambien reparte ve
-  // los items de ambos.
+  // la mig 155), no `perfil.rol`: el rol global ignoraba el rol por sucursal.
+  //
+  // Pero no la union a secas: las <Route> de App.tsx calculan isAdmin /
+  // isPreventista / isEncargado sobre el rol PRIMARIO (el primero de
+  // rolesEfectivos) y solo suman los extras en isTransportista. Un item con
+  // gate se ofrece si lo habilita el rol primario (o el transportista, que si
+  // suma); ofrecer lo que el router rebota es un click que termina en /pedidos
+  // sin explicacion (#731). Las rutas `sinGate` las abre cualquiera, y ahi el
+  // rol extra si suma: el transportista que tambien vende ve Clientes.
+  const rolPrimario = rolesEfectivos[0];
+  const tieneTransportista = rolesEfectivos.includes('transportista');
+  const puedeVer = (item: MenuItem): boolean => {
+    if (item.hidden) return false;
+    if (item.sinGate) return item.roles.some(r => rolesEfectivos.includes(r));
+    return item.roles.includes(rolPrimario) || (item.roles.includes('transportista') && tieneTransportista);
+  };
+
   const getMenuFiltrado = (): MenuGroup[] => {
     if (rolesEfectivos.length === 0) return [];
 
+    // Un grupo se ve si le queda algun item visible (ver MenuGroup.roles).
     return menuGroups.map(group => ({
       ...group,
-      items: group.items.filter(item => item.roles.some(r => rolesEfectivos.includes(r)) && !item.hidden)
-    })).filter(group => {
-      // Filtrar grupos vacios o sin permiso
-      if (group.items.length === 0) return false;
-      if (group.roles && !group.roles.some(r => rolesEfectivos.includes(r))) return false;
-      return true;
-    });
+      items: group.items.filter(puedeVer)
+    })).filter(group => group.items.length > 0);
   };
 
   const menuFiltrado = getMenuFiltrado();
+  const administracionVisible = rolesEfectivos.length === 0 ? [] : itemsAdministracion.filter(puedeVer);
 
   // Cerrar menus al hacer click fuera
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      // La hamburguesa vive en el header, fuera de menuRef: si su mousedown
+      // cerrara el menu, el onClick del mismo toque lo volveria a abrir (#730).
+      // Ese boton se alterna solo con su onClick.
+      const enHamburguesa = hamburguesaRef.current?.contains(event.target as Node) ?? false;
+      if (menuRef.current && !menuRef.current.contains(event.target as Node) && !enHamburguesa) {
         setMenuAbierto(false);
       }
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
@@ -177,6 +211,11 @@ export default function TopNavigation({
     setDropdownAbierto(null);
   };
 
+  const handleAdministracion = (vistaId: string): void => {
+    setUserMenuAbierto(false);
+    handleVistaChange(vistaId);
+  };
+
   const toggleDropdown = (groupId: string): void => {
     setDropdownAbierto(dropdownAbierto === groupId ? null : groupId);
   };
@@ -194,15 +233,23 @@ export default function TopNavigation({
     <>
       {/* Barra de navegacion fija */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-sm z-50">
-        <div className="h-full max-w-7xl mx-auto px-4 flex items-center justify-between">
-          {/* Logo y Menu hamburguesa (movil) */}
-          <div className="flex items-center space-x-4">
-            {/* Boton hamburguesa - visible en movil */}
+        {/* La barra completa aparece recien en 2xl (1536 px, #713): con `lg`
+            la del admin desbordaba el header. Debajo de 2xl manda la
+            hamburguesa, tambien en las notebooks. */}
+        <div className="h-full max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 flex items-center justify-between">
+          {/* Logo, hamburguesa y barra.
+              `main-navigation` es el destino del skip link "Ir a la navegacion"
+              (SkipLinks.tsx). Va en este contenedor y no en el <nav> de la
+              barra porque el <nav> esta oculto debajo de 2xl: desde aca el
+              siguiente Tab cae en la hamburguesa o en la barra, segun el ancho. */}
+          <div id="main-navigation" className="flex items-center space-x-4">
+            {/* Boton hamburguesa - visible debajo de 2xl */}
             <Button
+              ref={hamburguesaRef}
               variant="ghost"
               size="icon"
               onClick={() => setMenuAbierto(!menuAbierto)}
-              className="lg:hidden"
+              className="2xl:hidden"
               aria-label={menuAbierto ? 'Cerrar menu' : 'Abrir menu'}
               aria-expanded={menuAbierto}
             >
@@ -223,8 +270,8 @@ export default function TopNavigation({
               </span>
             </div>
 
-            {/* Menu horizontal - visible en desktop */}
-            <nav id="main-navigation" className="hidden lg:flex items-center space-x-1 ml-8" aria-label="Navegacion principal">
+            {/* Menu horizontal - visible desde 2xl */}
+            <nav className="hidden 2xl:flex items-center space-x-1 ml-8" aria-label="Navegacion principal">
               {menuFiltrado.map(group => {
                 // Items sin grupo (se muestran directo)
                 if (!group.label) {
@@ -341,9 +388,19 @@ export default function TopNavigation({
                 <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${userMenuAbierto ? 'rotate-180' : ''}`} />
               </Button>
 
-              {/* Dropdown de usuario */}
+              {/* Dropdown de usuario. Con "Administración" (#713) el del admin
+                  mide unos 400 px y cuelga de un header `fixed`: sin tope de
+                  alto ni scroll propio, en una pantalla baja (celular apaisado,
+                  zoom al 200 %) "Cerrar sesion" queda debajo de la ventana y no
+                  hay forma de llegar. 5rem = header + mt-2 + aire.
+                  El scroll recorta tambien a los costados, y los botones miden
+                  lo mismo que el desplegable: con el anillo de foco por fuera
+                  (`ring-offset-2`) se perdian los lados. Por eso los tres van
+                  con `focus-visible:ring-inset focus-visible:ring-offset-0`, y
+                  el `px-1.5` del contenedor deja lugar al contorno de 3 px + 2
+                  de separacion que pone high-contrast.css en :focus. */}
               {userMenuAbierto && (
-                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 z-50">
+                <div className="absolute right-0 mt-2 w-64 max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 px-1.5 z-50">
                   <div className="px-4 py-3 border-b dark:border-gray-700">
                     <p className="font-medium text-gray-800 dark:text-white truncate">{perfil?.nombre}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{perfil?.email}</p>
@@ -353,12 +410,47 @@ export default function TopNavigation({
                   </div>
                   {/* Vincular Telegram (Phase 1 MVP del bot) */}
                   <VincularTelegramButton
-                    className="w-full flex items-center space-x-3 px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    className="w-full flex items-center space-x-3 px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus-visible:ring-inset focus-visible:ring-offset-0"
                   />
+                  {/* Administracion (#713): no es un grupo de la barra. */}
+                  {administracionVisible.length > 0 && (
+                    <div
+                      role="group"
+                      aria-labelledby={idTituloAdministracion}
+                      className="py-1 border-y dark:border-gray-700"
+                    >
+                      <p
+                        id={idTituloAdministracion}
+                        className="px-4 pt-2 pb-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider"
+                      >
+                        Administración
+                      </p>
+                      {administracionVisible.map(item => {
+                        const ItemIcon = item.icon;
+                        const activo = vista === item.id;
+                        return (
+                          <Button
+                            key={item.id}
+                            variant="ghost"
+                            onClick={() => handleAdministracion(item.id)}
+                            aria-current={activo ? 'page' : undefined}
+                            className={`w-full h-auto justify-start gap-3 px-4 py-2.5 focus-visible:ring-inset focus-visible:ring-offset-0 ${
+                              activo
+                                ? 'bg-blue-50/70 dark:bg-blue-900/20 text-blue-700 dark:text-blue-200'
+                                : 'text-gray-700 dark:text-gray-200'
+                            }`}
+                          >
+                            <ItemIcon className="w-5 h-5" />
+                            <span>{item.label}</span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  )}
                   <Button
                     variant="ghost"
                     onClick={onLogout}
-                    className="w-full h-auto justify-start gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    className="w-full h-auto justify-start gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 focus-visible:ring-inset focus-visible:ring-offset-0"
                   >
                     <LogOut className="w-5 h-5" />
                     <span>Cerrar sesion</span>
@@ -375,13 +467,16 @@ export default function TopNavigation({
         </div>
       </header>
 
-      {/* Menu desplegable movil */}
+      {/* Menu desplegable (debajo de 2xl). Desde #713 lo usan tambien las
+          notebooks, y el del admin mide unos 800 px: con tope de alto y scroll
+          propio no se corta en una pantalla baja. `invisible` cerrado lo saca
+          del orden de Tab y del arbol de accesibilidad; la opacidad sola no. */}
       <div
         ref={menuRef}
-        className={`fixed top-16 left-0 right-0 bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 lg:hidden transition-all duration-300 ease-in-out ${
+        className={`fixed top-16 left-0 right-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 2xl:hidden transition-all duration-300 ease-in-out ${
           menuAbierto
             ? 'opacity-100 translate-y-0'
-            : 'opacity-0 -translate-y-4 pointer-events-none'
+            : 'opacity-0 -translate-y-4 pointer-events-none invisible'
         }`}
       >
         <nav className="max-w-7xl mx-auto p-4 space-y-4">
@@ -428,7 +523,7 @@ export default function TopNavigation({
       {/* Overlay para cerrar menu movil */}
       {menuAbierto && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-25 z-30 lg:hidden"
+          className="fixed inset-0 bg-black bg-opacity-25 z-30 2xl:hidden"
           onClick={() => setMenuAbierto(false)}
           aria-hidden="true"
         />

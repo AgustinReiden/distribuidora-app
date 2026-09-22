@@ -36,10 +36,19 @@ function NavegacionDeRol({ rol }: { rol: RolUsuario }) {
         `transform` hace que los hijos `position: fixed` se anclen a este div.
         Sin esto las cinco barras se apilarían arriba de la ventana, una sobre otra.
 
-        `overflow-x-clip` (y no `overflow-x-hidden`): el menú de escritorio del
-        admin no entra por debajo de ~1300 px y desbordaría la página entera con
-        una barra horizontal. `clip` corta sin crear un contenedor de scroll, así
-        que los dropdowns del menú siguen pudiendo salirse hacia abajo.
+        Los breakpoints miran la VENTANA, no el marco. La barra completa aparece
+        desde 2xl (#713): con la ventana por debajo de 1536 px estos marcos
+        muestran la hamburguesa, y al tocarla el panel desplegable. Con la
+        ventana en 1536 px o más muestran la barra, que en el admin no entra en
+        un marco de `max-w-7xl`: para verla entera está el marco ancho de abajo.
+        Lo mismo con el tope de alto del panel y del menú del usuario, que se
+        mide contra `100dvh`: para ver su scroll hay que achicar la ventana en
+        alto, no el marco.
+
+        `overflow-x-clip` (y no `overflow-x-hidden`): la barra del admin no
+        entra en el marco y desbordaría la página entera con una barra
+        horizontal. `clip` corta sin crear un contenedor de scroll, así que los
+        dropdowns del menú siguen pudiendo salirse hacia abajo.
       */}
       <div
         className="relative h-16 overflow-x-clip"
@@ -48,6 +57,34 @@ function NavegacionDeRol({ rol }: { rol: RolUsuario }) {
         <AuthDataProvider value={authDataDeRol(rol)}>
           <TopNavigation perfil={PERFILES_FIXTURE[rol]} onLogout={noop} />
         </AuthDataProvider>
+      </div>
+    </Marco>
+  )
+}
+
+function BarraCompletaAdmin() {
+  return (
+    <Marco
+      etiqueta={`TopNavigation · ${ETIQUETA_ROL.admin} · marco de 1536 px (barra completa con la ventana en 1536 px o más)`}
+      compacto
+    >
+      {/*
+        Mismo truco del `transform` que arriba, en un div de 1536 px: el ancho
+        desde el que la app muestra la barra completa. Igual la barra sólo
+        aparece si la VENTANA mide 1536 px o más; con una más chica este marco
+        también muestra la hamburguesa.
+
+        `overflow-x-auto`: el marco es más angosto que 1536 px y se scrollea en
+        horizontal. Un contenedor de scroll recorta en los dos ejes, así que la
+        altura le deja lugar a los desplegables y al menú del usuario (el del
+        admin, con la sección "Administración", baja unos 480 px).
+      */}
+      <div className="overflow-x-auto">
+        <div className="relative w-[1536px] h-[32rem]" style={{ transform: 'translateZ(0)' }}>
+          <AuthDataProvider value={authDataDeRol('admin')}>
+            <TopNavigation perfil={PERFILES_FIXTURE.admin} onLogout={noop} />
+          </AuthDataProvider>
+        </div>
       </div>
     </Marco>
   )
@@ -66,6 +103,13 @@ export default function SeccionNavegacion() {
           {ROLES_GALERIA.map((rol) => (
             <NavegacionDeRol key={rol} rol={rol} />
           ))}
+        </div>
+      </div>
+
+      <div>
+        <Subtitulo>Barra completa del admin (desde 1536 px)</Subtitulo>
+        <div className="mt-3">
+          <BarraCompletaAdmin />
         </div>
       </div>
 

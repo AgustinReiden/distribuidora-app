@@ -62,7 +62,9 @@ import TopNavigation from '../TopNavigation'
 /**
  * A que rutas puede ENTRAR cada rol, leido de los gates de <Route> en
  * src/App.tsx (lineas 283-411). Ojo: los gates miran el rol PRIMARIO
- * (`effectiveRol`), no la union `rolesEfectivos` que usa este menu.
+ * (`effectiveRol`), no la union `rolesEfectivos`; desde #731 el menu filtra
+ * igual para los items con gate (rol primario, y de los extras solo el
+ * transportista), y por la union para las tres rutas sin gate.
  *
  *   L283-286  /dashboard             isAdmin || isPreventista
  *   L288-293  /mis-entregas          isPreventista || isAdminOrEncargado
@@ -105,27 +107,50 @@ const RUTAS_PERMITIDAS_POR_ROL: Record<RolUsuario, readonly string[]> = {
   deposito: ['/pedidos', '/clientes', '/productos', '/vencimientos'],
 }
 
-/** Los dos items con `hidden: true` en la config del menu. No los ve nadie. */
+/**
+ * Etiquetas que no ve nadie: el item con `hidden: true` en la config del menu, y
+ * el label viejo de /analytics, que desde #713 se ve como "Exportar a Power BI"
+ * y no tiene que volver a aparecer con el nombre anterior.
+ */
 const ITEMS_OCULTOS = ['Recorrido Preventista', 'Centro de Analisis'] as const
 
+/**
+ * Lo que cada rol ve en la barra y en el panel desplegable. Usuarios,
+ * Configuración y Bot Telegram no estan: desde #713 viven en el menu del
+ * usuario (ADMINISTRACION_POR_ROL).
+ */
 const LABELS_POR_ROL = {
   admin: [
     'Dashboard', 'Pedidos', 'Mis entregas',
-    'Clientes', 'Reportes', 'Reportes Gerenciales', 'Comisiones', 'Objetivos',
+    'Clientes', 'Reportes', 'Reportes Gerenciales', 'Exportar a Power BI', 'Comisiones', 'Objetivos',
     'Productos', 'Compras', 'Vencimientos', 'Proveedores', 'Promociones', 'Mov. Sucursales',
     'Recorridos', 'Rendiciones', 'Salvedades', 'Geolocalización', 'Horarios a revisar',
-    'Usuarios', 'Bot Telegram', 'Configuración',
   ],
   encargado: [
     'Pedidos', 'Mis entregas',
     'Clientes',
     'Productos', 'Compras', 'Vencimientos', 'Mov. Sucursales',
-    'Recorridos', 'Rendiciones', 'Salvedades', 'Horarios a revisar', 'Configuración',
+    'Recorridos', 'Rendiciones', 'Salvedades', 'Horarios a revisar',
   ],
   preventista: ['Dashboard', 'Pedidos', 'Mis entregas', 'Clientes', 'Productos'],
   transportista: ['Pedidos'],
   deposito: ['Pedidos', 'Productos', 'Vencimientos'],
 } as const satisfies Record<RolUsuario, readonly string[]>
+
+/** La seccion "Administración" del menu del usuario, por rol (#713). */
+const ADMINISTRACION_POR_ROL = {
+  admin: ['Usuarios', 'Configuración', 'Bot Telegram'],
+  encargado: ['Configuración'],
+  preventista: [],
+  transportista: [],
+  deposito: [],
+} as const satisfies Record<RolUsuario, readonly string[]>
+
+/**
+ * Los items cuyas <Route> no tienen gate (App.tsx L295-297): los abre
+ * cualquier rol, asi que el rol extra si los suma (#731).
+ */
+const ETIQUETAS_SIN_GATE: readonly string[] = ['Pedidos', 'Clientes', 'Productos']
 
 /** Label del menu -> ruta a la que navega (el id del item). */
 const RUTA_DE_LA_ETIQUETA: Record<string, string> = {
@@ -135,6 +160,7 @@ const RUTA_DE_LA_ETIQUETA: Record<string, string> = {
   'Clientes': '/clientes',
   'Reportes': '/reportes',
   'Reportes Gerenciales': '/reportes-gerenciales',
+  'Exportar a Power BI': '/analytics',
   'Comisiones': '/comisiones',
   'Objetivos': '/metas',
   'Productos': '/productos',
@@ -228,6 +254,23 @@ async function etiquetasDelEscritorio(): Promise<string[]> {
 const etiquetasDelMovil = (): string[] =>
   within(navMovil()).queryAllByRole('button').map(textoDe)
 
+const seccionAdministracion = (): HTMLElement | null =>
+  screen.queryByRole('group', { name: 'Administración' })
+
+/**
+ * Abre el menu del usuario, devuelve las etiquetas de su seccion
+ * "Administración" (vacio si no la hay) y lo vuelve a cerrar.
+ */
+async function etiquetasDeAdministracion(): Promise<string[]> {
+  const user = userEvent.setup()
+  const boton = screen.getByRole('button', { name: 'Menu de usuario' })
+  await user.click(boton)
+  const seccion = seccionAdministracion()
+  const etiquetas = seccion ? within(seccion).getAllByRole('button').map(textoDe) : []
+  await user.click(boton)
+  return etiquetas
+}
+
 /** Clickea un item del menu de escritorio, este suelto o dentro de un grupo. */
 async function irA(etiqueta: string): Promise<void> {
   const user = userEvent.setup()
@@ -289,10 +332,44 @@ describe('TopNavigation — que ve cada rol', () => {
       .toEqual(ordenado(LABELS_POR_ROL.preventista))
   })
 
+  it.each(['admin', 'encargado', 'preventista', 'deposito'] as const)(
+    'el %s con transportista como rol extra ve lo mismo que su rol solo, en escritorio y en movil',
+    async rol => {
+      renderNav([rol, 'transportista'])
+      // El transportista solo aporta "Pedidos", que todos estos roles ya tienen:
+      // el extra no suma ni quita nada.
+      expect(ordenado(await etiquetasDelEscritorio())).toEqual(ordenado(LABELS_POR_ROL[rol]))
+      expect(ordenado(etiquetasDelMovil())).toEqual(ordenado(LABELS_POR_ROL[rol]))
+    },
+  )
+
+  it('un rol extra que no es transportista no suma items con gate: el encargado con preventista extra no ve "Dashboard"', async () => {
+    renderNav(['encargado', 'preventista'])
+    // /dashboard exige isAdmin || isPreventista, calculadas sobre el rol
+    // primario (App.tsx): ofrecerlo seria un click que rebota a /pedidos.
+    const visibles = await etiquetasDelEscritorio()
+    expect(visibles).not.toContain('Dashboard')
+    expect(ordenado(visibles)).toEqual(ordenado(LABELS_POR_ROL.encargado))
+  })
+
+  it('el deposito con preventista extra suma "Clientes" (sin gate) y no "Dashboard" ni "Mis entregas"', async () => {
+    renderNav(['deposito', 'preventista'])
+    // /clientes no tiene gate en App.tsx: la abre el deposito igual. /dashboard
+    // y /mis-entregas si, sobre el rol primario: se las rebotaria.
+    const esperado = ordenado([...LABELS_POR_ROL.deposito, 'Clientes'])
+    expect(ordenado(await etiquetasDelEscritorio())).toEqual(esperado)
+    expect(ordenado(etiquetasDelMovil())).toEqual(esperado)
+  })
+
   it('sin roles efectivos el menu queda vacio, en escritorio y en movil', () => {
     renderNav([])
     expect(within(navEscritorio()).queryAllByRole('button')).toHaveLength(0)
     expect(within(navMovil()).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('sin roles efectivos el menu del usuario no tiene seccion "Administración"', async () => {
+    renderNav([])
+    expect(await etiquetasDeAdministracion()).toEqual([])
   })
 
   it.each(Object.keys(LABELS_POR_ROL) as RolUsuario[])(
@@ -313,6 +390,119 @@ describe('TopNavigation — que ve cada rol', () => {
     rol => {
       renderNav([rol])
       expect(within(navEscritorio()).queryByRole('button', { name: /Operaciones/ })).toBeNull()
+    },
+  )
+})
+
+// =============================================================================
+// ADMINISTRACION EN EL MENU DEL USUARIO Y "EXPORTAR A POWER BI" (#713)
+// =============================================================================
+
+describe('TopNavigation — Administración en el menu del usuario y "Exportar a Power BI"', () => {
+  async function itemsDelGrupo(nombre: RegExp): Promise<string[]> {
+    const user = userEvent.setup()
+    await user.click(within(navEscritorio()).getByRole('button', { name: nombre }))
+    const desplegable = within(navEscritorio()).getByRole('menu')
+    return within(desplegable).getAllByRole('menuitem').map(textoDe)
+  }
+
+  it('el admin ve "Exportar a Power BI" en Comercial, junto a los reportes', async () => {
+    renderNav(['admin'])
+    const comercial = await itemsDelGrupo(/Comercial/)
+    expect(comercial).toContain('Exportar a Power BI')
+    expect(comercial).toContain('Reportes')
+    expect(comercial).toContain('Reportes Gerenciales')
+  })
+
+  it('"Exportar a Power BI" navega a /analytics', async () => {
+    renderNav(['admin'])
+    await irA('Exportar a Power BI')
+    expect(screen.getByText('Ruta actual: /analytics')).toBeInTheDocument()
+  })
+
+  it('el encargado no ve "Exportar a Power BI"', async () => {
+    renderNav(['encargado'])
+    expect(await etiquetasDelEscritorio()).not.toContain('Exportar a Power BI')
+    expect(etiquetasDelMovil()).not.toContain('Exportar a Power BI')
+  })
+
+  it('el menu del usuario cerrado no ofrece la seccion "Administración"', () => {
+    renderNav(['admin'])
+    expect(seccionAdministracion()).toBeNull()
+    expect(screen.queryByText('Administración')).toBeNull()
+  })
+
+  it('el admin ve en el menu del usuario la seccion "Administración" con Usuarios, Configuración y Bot Telegram', async () => {
+    renderNav(['admin'])
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Menu de usuario' }))
+
+    const seccion = screen.getByRole('group', { name: 'Administración' })
+    expect(within(seccion).getByText('Administración')).toBeInTheDocument()
+    expect(ordenado(within(seccion).getAllByRole('button').map(textoDe)))
+      .toEqual(ordenado(['Usuarios', 'Configuración', 'Bot Telegram']))
+    // "Cerrar sesion" sigue en el menu, fuera de la seccion.
+    expect(within(seccion).queryByRole('button', { name: 'Cerrar sesion' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Cerrar sesion' })).toBeInTheDocument()
+  })
+
+  it('el encargado ve en la seccion "Administración" solo "Configuración"', async () => {
+    renderNav(['encargado'])
+    expect(await etiquetasDeAdministracion()).toEqual(['Configuración'])
+  })
+
+  it.each(['preventista', 'transportista', 'deposito'] as const)(
+    'el %s no ve la seccion "Administración" en el menu del usuario',
+    async rol => {
+      renderNav([rol])
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'Menu de usuario' }))
+
+      // El menu esta abierto: "Cerrar sesion" se ve y la seccion no.
+      expect(screen.getByRole('button', { name: 'Cerrar sesion' })).toBeInTheDocument()
+      expect(seccionAdministracion()).toBeNull()
+      expect(screen.queryByText('Administración')).toBeNull()
+      for (const item of ['Usuarios', 'Configuración', 'Bot Telegram']) {
+        expect(screen.queryByRole('button', { name: item })).toBeNull()
+      }
+    },
+  )
+
+  it.each([
+    ['admin', 'Usuarios'],
+    ['admin', 'Configuración'],
+    ['admin', 'Bot Telegram'],
+    ['encargado', 'Configuración'],
+  ] as const)(
+    'el %s elige "%s" en el menu del usuario: navega a su ruta y cierra el menu',
+    async (rol, etiqueta) => {
+      renderNav([rol])
+      const user = userEvent.setup()
+      const boton = screen.getByRole('button', { name: 'Menu de usuario' })
+      await user.click(boton)
+
+      const seccion = screen.getByRole('group', { name: 'Administración' })
+      await user.click(within(seccion).getByRole('button', { name: etiqueta }))
+
+      expect(screen.getByText(`Ruta actual: ${RUTA_DE_LA_ETIQUETA[etiqueta]}`)).toBeInTheDocument()
+      expect(boton).toHaveAttribute('aria-expanded', 'false')
+      expect(seccionAdministracion()).toBeNull()
+    },
+  )
+
+  it.each(['admin', 'encargado'] as const)(
+    'para el %s, Usuarios, Configuración y Bot Telegram ya no estan en la barra ni en el panel',
+    async rol => {
+      renderNav([rol])
+      const barra = await etiquetasDelEscritorio()
+      const panel = etiquetasDelMovil()
+      for (const movido of ['Usuarios', 'Configuración', 'Bot Telegram']) {
+        expect(barra).not.toContain(movido)
+        expect(panel).not.toContain(movido)
+      }
+      // Tampoco como grupo: ni boton en la barra ni titulo en el panel.
+      expect(within(navEscritorio()).queryByRole('button', { name: /Administración/ })).toBeNull()
+      expect(within(navMovil()).queryByText('Administración')).toBeNull()
     },
   )
 })
@@ -374,7 +564,10 @@ describe('TopNavigation — invariante menu <-> router', () => {
     'todo item visible para %s lleva a una ruta que ese rol puede abrir',
     async rol => {
       renderNav([rol])
-      const visibles = await etiquetasDelEscritorio()
+      // La barra y, desde #713, la seccion "Administración" del menu del usuario.
+      const administracion = await etiquetasDeAdministracion()
+      expect(ordenado(administracion)).toEqual(ordenado(ADMINISTRACION_POR_ROL[rol]))
+      const visibles = [...await etiquetasDelEscritorio(), ...administracion]
       expect(visibles.length).toBeGreaterThan(0)
 
       for (const etiqueta of visibles) {
@@ -406,25 +599,57 @@ describe('TopNavigation — invariante menu <-> router', () => {
     }
   })
 
-  it('el multi-rol transportista+preventista SI ofrece rutas que el router le rebota', async () => {
-    // BUG: el menu filtra por la UNION `rolesEfectivos` (TopNavigation L140) y
-    // las <Route> gatean por el rol PRIMARIO (`effectiveRol`, App.tsx L225-234).
-    // Para un transportista con 'preventista' como rol extra (mig 155) el menu
-    // ofrece "Dashboard" y "Mis entregas", pero /dashboard exige
-    // isAdmin||isPreventista y /mis-entregas isPreventista||isAdminOrEncargado,
-    // las dos calculadas sobre el rol primario 'transportista': el click rebota
-    // a /pedidos sin ningun mensaje. Se asevera el comportamiento ACTUAL.
+  it('el multi-rol transportista+preventista ya no ofrece rutas que el router le rebota: ve Pedidos, Clientes y Productos', async () => {
+    // #731: las <Route> gatean por el rol PRIMARIO (`effectiveRol`, App.tsx
+    // L225-234). Cuando el menu filtraba todo por la union `rolesEfectivos`, a
+    // un transportista con 'preventista' como rol extra (mig 155) le ofrecia
+    // "Dashboard" y "Mis entregas", y el click rebotaba a /pedidos sin ningun
+    // mensaje. Ahora esas dos se filtran por el rol primario; "Clientes" y
+    // "Productos" no tienen gate (App.tsx L295-297), y el extra si las suma.
     renderNav(['transportista', 'preventista'])
     const visibles = await etiquetasDelEscritorio()
 
-    expect(ordenado(visibles))
-      .toEqual(ordenado(['Dashboard', 'Pedidos', 'Mis entregas', 'Clientes', 'Productos']))
+    expect(visibles).not.toContain('Dashboard')
+    expect(visibles).not.toContain('Mis entregas')
+    expect(ordenado(visibles)).toEqual(ordenado(['Pedidos', 'Clientes', 'Productos']))
+    expect(ordenado(etiquetasDelMovil())).toEqual(ordenado(['Pedidos', 'Clientes', 'Productos']))
 
     const fueraDelRouter = visibles
       .map(etiqueta => RUTA_DE_LA_ETIQUETA[etiqueta])
       .filter(ruta => !RUTAS_PERMITIDAS_POR_ROL.transportista.includes(ruta))
-    expect(fueraDelRouter).toEqual(['/dashboard', '/mis-entregas'])
+    expect(fueraDelRouter).toEqual([])
   })
+
+  const ROLES = Object.keys(LABELS_POR_ROL) as RolUsuario[]
+  const MULTI_ROLES = ROLES.flatMap(primario =>
+    ROLES.filter(extra => extra !== primario).map(extra => [primario, extra] as const),
+  )
+
+  it.each(MULTI_ROLES)(
+    'el multi-rol %s (primario) + %s (extra) no ofrece nada que el router del primario rebote',
+    async (primario, extra) => {
+      // Ninguna <Route> gatea por isTransportista (el unico flag que suma los
+      // extras), asi que el router de este usuario es el de su rol primario,
+      // mas las tres rutas sin gate, que abre cualquiera. Lo que ve es lo de su
+      // primario mas lo sin gate que le toca al extra.
+      renderNav([primario, extra])
+      const barra = await etiquetasDelEscritorio()
+      const administracion = await etiquetasDeAdministracion()
+
+      for (const etiqueta of [...barra, ...administracion]) {
+        expect(
+          RUTAS_PERMITIDAS_POR_ROL[primario],
+          `"${etiqueta}" rebota para ${primario} con ${extra} extra`,
+        ).toContain(RUTA_DE_LA_ETIQUETA[etiqueta])
+      }
+
+      const sinGateDelExtra = LABELS_POR_ROL[extra].filter(e => ETIQUETAS_SIN_GATE.includes(e))
+      expect(ordenado(barra))
+        .toEqual(ordenado([...new Set([...LABELS_POR_ROL[primario], ...sinGateDelExtra])]))
+      // Administración tiene gate en las tres rutas: la decide el primario.
+      expect(ordenado(administracion)).toEqual(ordenado(ADMINISTRACION_POR_ROL[primario]))
+    },
+  )
 })
 
 // =============================================================================
@@ -447,21 +672,31 @@ describe('TopNavigation — menu movil', () => {
     expect(boton).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('un segundo click en la hamburguesa NO lo cierra', async () => {
-    // BUG: el `mousedown` del listener de "click afuera" (TopNavigation
-    // L152-171) ya pone menuAbierto=false porque el boton vive en el header y
-    // no dentro de `menuRef`; para cuando corre el `onClick` el estado ya es
-    // false y `setMenuAbierto(!menuAbierto)` lo vuelve a abrir. El menu queda
-    // abierto y aria-expanded en "true". Se cierra eligiendo un item o tocando
-    // el overlay; por el boton, no. Se asevera el comportamiento ACTUAL.
+  it('un segundo click en la hamburguesa lo cierra', async () => {
+    // #730: el boton vive en el header, fuera de `menuRef`. El `mousedown` del
+    // listener de "click afuera" cerraba el menu y el `onClick` del mismo toque
+    // lo volvia a abrir. Ahora el listener ignora los toques sobre la
+    // hamburguesa y el unico que la alterna es su onClick.
     renderNav(['admin'])
     const user = userEvent.setup()
 
     await user.click(screen.getByRole('button', { name: 'Abrir menu' }))
     await user.click(screen.getByRole('button', { name: 'Cerrar menu' }))
 
-    expect(screen.getByRole('button', { name: 'Cerrar menu' }))
-      .toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByRole('button', { name: 'Cerrar menu' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Abrir menu' }))
+      .toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('un click afuera del menu movil abierto lo sigue cerrando', async () => {
+    renderNav(['admin'])
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Abrir menu' }))
+    await user.click(screen.getByText(/Ruta actual:/))
+
+    expect(screen.getByRole('button', { name: 'Abrir menu' }))
+      .toHaveAttribute('aria-expanded', 'false')
   })
 
   it('elegir un item del menu movil navega y cierra el menu', async () => {
@@ -490,6 +725,23 @@ describe('TopNavigation — menu movil', () => {
     expect(within(movil).getByText('Inventario')).toBeInTheDocument()
     expect(within(movil).queryByText('Comercial')).toBeNull()
     expect(within(movil).queryByText('Operaciones')).toBeNull()
+  })
+})
+
+// =============================================================================
+// DESTINO DEL SKIP LINK
+// =============================================================================
+
+describe('TopNavigation — destino del skip link "Ir a la navegación"', () => {
+  // SkipLinks.tsx enfoca document.getElementById('main-navigation'). Desde #713
+  // la barra solo se muestra desde 2xl, asi que el destino tiene que envolver
+  // tambien a la hamburguesa, que es la navegacion en cualquier ancho menor.
+  it('envuelve a la hamburguesa y a la barra de navegacion', () => {
+    renderNav(['admin'])
+    const destino = document.getElementById('main-navigation')
+    if (!destino) throw new Error('No hay ningun elemento con id "main-navigation"')
+    expect(within(destino).getByRole('button', { name: 'Abrir menu' })).toBeInTheDocument()
+    expect(within(destino).getByRole('navigation', { name: 'Navegacion principal' })).toBeInTheDocument()
   })
 })
 
