@@ -18,6 +18,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Send, Copy, Check, RefreshCcw, Loader2, AlertTriangle } from 'lucide-react'
 import ModalBase from '../modals/ModalBase'
+import { Button } from '../ui/Button'
 import { useGenerarCodigoVinculacionBot } from '../../hooks/queries/useBotVinculacion'
 
 // El username del bot se inyecta vía env var (`VITE_TELEGRAM_BOT_USERNAME`)
@@ -150,32 +151,23 @@ function VincularTelegramModal({
 
       {/* Acciones */}
       <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-        >
+        <Button variant="ghost" size="md" onClick={onClose}>
           Cerrar
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="secondary"
+          size="md"
           onClick={onRegenerar}
           disabled={generando}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 flex items-center justify-center gap-2"
+          loading={generando}
         >
-          {generando ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <RefreshCcw className="w-4 h-4" />
-          )}
+          {!generando && <RefreshCcw className="w-4 h-4" />}
           Generar otro código
-        </button>
-        <button
-          onClick={handleCopiar}
-          disabled={expirado}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
-        >
+        </Button>
+        <Button variant="primary" size="md" onClick={handleCopiar} disabled={expirado}>
           {copiado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
           {copiado ? '¡Copiado!' : 'Copiar código'}
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )
@@ -209,20 +201,18 @@ function VincularTelegramErrorModal({
         </div>
       </div>
       <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-        >
+        <Button variant="ghost" size="md" onClick={onClose}>
           Cerrar
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          size="md"
           onClick={onReintentar}
           disabled={reintentando}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+          loading={reintentando}
         >
-          {reintentando && <Loader2 className="w-4 h-4 animate-spin" />}
           Reintentar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

@@ -31,6 +31,7 @@ import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import CondicionEscalaFila from './CondicionEscalaFila'
 import FormEscalaMayorista from './FormEscalaMayorista'
 import type { ValoresEscala } from './FormEscalaMayorista'
+import { Button } from '../ui/Button'
 
 export interface ProductoCondicionesMayoristasProps {
   /** Producto en edición. Sin id (alta nueva) la sección no se muestra. */
@@ -223,14 +224,16 @@ export default function ProductoCondicionesMayoristas({
                 {/* El camino directo: "de este sabor, a partir de 12, $850".
                     La condición se crea por debajo con el nombre del producto;
                     no hay que decidir nada más. */}
-                <button
+                <Button
                   type="button"
                   onClick={() => setCreandoPropia(true)}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-indigo-600 text-white"
+                  variant="primary"
+                  size="sm"
+                  className="gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                   Ponerle precio por cantidad
-                </button>
+                </Button>
 
                 {/* Sumarlo a un fardo que ya existe: es lo que hace que la
                     mezcla entre sabores cuente para el mínimo. */}
@@ -310,32 +313,36 @@ export default function ProductoCondicionesMayoristas({
                       quitandoDe === cond.grupoId ? (
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span className="text-xs text-stone-600 dark:text-gray-300">¿Sacarlo?</span>
-                          <button
+                          <Button
                             type="button"
                             onClick={() => setQuitandoDe(null)}
-                            className="px-2 py-0.5 text-xs rounded border dark:border-gray-600 dark:text-gray-200"
+                            variant="secondary"
+                            size="sm"
                           >
                             No
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
                             onClick={() => void quitarDe(cond.grupoId, cond.grupoNombre)}
                             disabled={quitarDeCondicion.isPending}
-                            className="px-2 py-0.5 text-xs rounded bg-rose-600 text-white disabled:opacity-50"
+                            variant="danger"
+                            size="sm"
                           >
                             Sí
-                          </button>
+                          </Button>
                         </div>
                       ) : (
-                        <button
+                        <Button
                           type="button"
                           onClick={() => setQuitandoDe(cond.grupoId)}
-                          className="shrink-0 p-1 rounded text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                          variant="ghost"
+                          size="iconSm"
+                          className="shrink-0 text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
                           aria-label={`Sacar este producto de ${cond.grupoNombre}`}
                           title="Sacar este producto de la condición"
                         >
                           <X className="w-3.5 h-3.5" aria-hidden="true" />
-                        </button>
+                        </Button>
                       )
                     )}
                   </div>

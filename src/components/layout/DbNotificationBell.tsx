@@ -10,6 +10,7 @@ import { memo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, Check, Loader2, CheckCheck } from 'lucide-react'
 import { formatDateTime } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 import QueryErrorState from './QueryErrorState'
 import {
   useNotificacionesQuery,
@@ -44,9 +45,11 @@ const DbNotificationBell = memo(function DbNotificationBell() {
 
   return (
     <div className="relative">
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={() => setOpen(o => !o)}
-        className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+        className="relative"
         aria-label="Notificaciones"
         title="Notificaciones"
       >
@@ -56,7 +59,7 @@ const DbNotificationBell = memo(function DbNotificationBell() {
             {noLeidas > 9 ? '9+' : noLeidas}
           </span>
         )}
-      </button>
+      </Button>
 
       {open && (
         <>

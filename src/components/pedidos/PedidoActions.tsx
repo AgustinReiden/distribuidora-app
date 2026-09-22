@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator
 } from '../ui/DropdownMenu';
+import { Button } from '../ui/Button';
 import type { PedidoDB } from '../../types';
 import { preventistaPuedeEditar } from '../../utils/permisosPedido';
 
@@ -239,12 +240,9 @@ function AccionesDropdown({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
-          aria-label="Mas acciones"
-        >
+        <Button variant="ghost" size="icon" aria-label="Mas acciones">
           <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-        </button>
+        </Button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-56">

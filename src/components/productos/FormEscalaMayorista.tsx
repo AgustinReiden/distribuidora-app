@@ -5,10 +5,10 @@
  * y el repo no anida modales (ver ProductosContainer, "Crear condición").
  */
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
 import { parsePrecio } from '../../utils/calculations'
 import { formatPrecio } from '../../utils/formatters'
 import { margenesEscala, descuentoSobreLista } from './margenEscala'
+import { Button } from '../ui/Button'
 
 export interface ValoresEscala {
   cantidadMinima: number
@@ -131,22 +131,20 @@ export default function FormEscalaMayorista({
       {error && <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancelar}
-          className="px-2 py-1 text-xs rounded border dark:border-gray-600 dark:text-gray-200"
-        >
+        <Button type="button" onClick={onCancelar} variant="secondary" size="sm">
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={submit}
           disabled={guardando}
-          className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-indigo-600 text-white disabled:opacity-50"
+          loading={guardando}
+          variant="primary"
+          size="sm"
+          className="gap-1"
         >
-          {guardando && <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />}
           {textoGuardar}
-        </button>
+        </Button>
       </div>
     </div>
   )
