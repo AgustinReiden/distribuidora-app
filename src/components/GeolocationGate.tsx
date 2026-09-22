@@ -26,6 +26,7 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MapPin, AlertTriangle, Loader2 } from 'lucide-react'
+import { Button } from './ui/Button'
 
 export interface GeolocationGateProps {
   enabled: boolean
@@ -198,13 +199,9 @@ export default function GeolocationGate({
             ))}
           </ol>
         </div>
-        <button
-          type="button"
-          onClick={handleRequest}
-          className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg"
-        >
+        <Button type="button" variant="primary" size="lg" onClick={handleRequest} className="w-full">
           Ya lo activé, reintentar
-        </button>
+        </Button>
         {allowBypass && (
           <button
             type="button"
@@ -243,11 +240,13 @@ export default function GeolocationGate({
           <strong> "Permitir"</strong>.
         </p>
       </div>
-      <button
+      <Button
         type="button"
+        variant="primary"
+        size="lg"
         onClick={handleRequest}
         disabled={gateState === 'requesting'}
-        className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold rounded-lg flex items-center justify-center gap-2"
+        className="w-full"
       >
         {gateState === 'requesting' ? (
           <>
@@ -258,7 +257,7 @@ export default function GeolocationGate({
             <MapPin className="w-4 h-4" /> Activar GPS
           </>
         )}
-      </button>
+      </Button>
       {onCancel && (
         <button
           type="button"

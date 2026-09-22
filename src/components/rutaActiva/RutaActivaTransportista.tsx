@@ -34,6 +34,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 import { lazyWithReload } from '../../utils/lazyWithReload';
+import { Button } from '../ui/Button';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
 const MapaRuta = lazyWithReload(() => import('./MapaRutaGoogle'));
@@ -326,13 +327,15 @@ export default function RutaActivaTransportista({
           <p className="text-gray-500 dark:text-gray-500 mb-6">
             Puede ser la conexión. Tu ruta no se perdió: probá de nuevo.
           </p>
-          <button
+          <Button
             type="button"
             onClick={() => void reintentarRuta()}
-            className="min-h-[52px] px-8 rounded-xl bg-blue-600 text-white font-semibold active:bg-blue-700"
+            variant="primary"
+            size="touch"
+            className="px-8 font-semibold active:bg-blue-700"
           >
             Reintentar
-          </button>
+          </Button>
         </div>
       );
     }

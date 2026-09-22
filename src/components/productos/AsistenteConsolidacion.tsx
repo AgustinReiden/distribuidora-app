@@ -6,7 +6,7 @@
  * importa: "CODITO 1/2 FARDO" describiría muy mal una condición con 5 sabores.
  */
 import { useMemo, useState } from 'react'
-import { Layers, Loader2 } from 'lucide-react'
+import { Layers } from 'lucide-react'
 import {
   useProductosQuery,
   useConsolidarCondicionesMutation,
@@ -14,6 +14,7 @@ import {
 import { useNotification } from '../../contexts/NotificationContext'
 import { detectarConsolidables } from '../../utils/consolidacionCondiciones'
 import { formatPrecio } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 import type { GrupoPrecioConDetalles } from '../../types'
 
 export interface AsistenteConsolidacionProps {
@@ -81,14 +82,16 @@ export default function AsistenteConsolidacion({ grupos }: AsistenteConsolidacio
             condiciones distintas, lo que el cliente mezcle entre ellos no suma para llegar al mínimo.
           </p>
         </div>
-        <button
+        <Button
           type="button"
           onClick={() => setAbierto(!abierto)}
-          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-gray-800 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
+          variant="secondary"
+          size="sm"
+          className="shrink-0 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/30"
           aria-expanded={abierto}
         >
           {abierto ? 'Ocultar' : 'Ver qué se puede unir'}
-        </button>
+        </Button>
       </div>
 
       {abierto && (
@@ -126,15 +129,17 @@ export default function AsistenteConsolidacion({ grupos }: AsistenteConsolidacio
                       className="mt-0.5 block w-full px-2 py-1 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                     />
                   </label>
-                  <button
+                  <Button
                     type="button"
                     onClick={() => void aplicar(caso.firma)}
                     disabled={enCurso || !nombre.trim()}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white disabled:opacity-50"
+                    loading={enCurso}
+                    variant="primary"
+                    size="sm"
+                    className="gap-1"
                   >
-                    {enCurso && <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />}
                     {enCurso ? 'Unificando…' : 'Unificar'}
-                  </button>
+                  </Button>
                 </div>
               </li>
             )

@@ -26,7 +26,7 @@ export default function SeccionHeaders() {
     <Seccion
       id="headers"
       titulo="Headers de vista"
-      descripcion="Clientes, Productos y Dashboard. Comparten crumb, título con peso 800, sufijo en cursiva y el subrayado azul de 12 px."
+      descripcion="Clientes, Productos y Dashboard: envoltorios finos de PageHeader (#709). Crumb monoespaciado, título de 32 px con la fuente de títulos, sufijo en cursiva y el subrayado de marca de 12 px."
     >
       <div>
         <Subtitulo>ClientesViewHeader</Subtitulo>

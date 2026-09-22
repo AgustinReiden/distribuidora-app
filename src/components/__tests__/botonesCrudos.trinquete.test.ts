@@ -43,8 +43,9 @@ const EXCLUIDO = path.join(SRC, 'components', 'ui') + path.sep
  *  - 2026-09-19, WP-17b (vistas/** a Button): 139.
  *  - 2026-09-20, WP-17c (modals A–L a Button): 92.
  *  - 2026-09-22, WP-17d (modals M–Z a Button): 66.
+ *  - 2026-09-22, WP-17e (resto de src/ a Button, cierra #707): 44.
  */
-const TECHO_BOTONES_CRUDOS = 66
+const TECHO_BOTONES_CRUDOS = 44
 
 // Colores SATURADOS, con o sin `hover:`/`active:`. Los neutros (gray, stone,
 // slate, zinc, neutral) quedan afuera: `hover:bg-gray-700` es un ghost en modo
