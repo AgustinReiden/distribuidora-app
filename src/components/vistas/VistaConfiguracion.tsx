@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, type FormEvent } from 'react';
 import { Loader2, Settings, AlertTriangle, Percent, CalendarClock } from 'lucide-react';
+import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
 
 export interface VistaConfiguracionProps {
@@ -124,7 +125,7 @@ function FormAlertasVencimiento({
               value={amarillo}
               onChange={(e) => { setAmarillo(e.target.value); setError(null); }}
               aria-invalid={!validoAmarillo}
-              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <span className="text-stone-500 dark:text-stone-400">dias antes</span>
           </div>
@@ -145,7 +146,7 @@ function FormAlertasVencimiento({
               value={rojo}
               onChange={(e) => { setRojo(e.target.value); setError(null); }}
               aria-invalid={!validoRojo || !ordenOk}
-              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <span className="text-stone-500 dark:text-stone-400">dias antes</span>
           </div>
@@ -157,14 +158,15 @@ function FormAlertasVencimiento({
       )}
 
       <div className="flex items-center gap-3">
-        <button
+        <Button
           type="submit"
+          variant="primary"
+          size="md"
           disabled={guardando || !cambio}
-          className="px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold text-sm hover:bg-amber-700 disabled:bg-stone-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center gap-2"
+          loading={guardando}
         >
-          {guardando && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
           Guardar avisos
-        </button>
+        </Button>
         {!cambio && valido && (
           <span className="text-xs text-stone-500 dark:text-stone-400">
             Vigente: amarillo a {diasAlerta} dias / rojo a {diasCritico}
@@ -257,7 +259,7 @@ function FormComisiones({
               value={prev}
               onChange={(e) => { setPrev(e.target.value); setError(null); }}
               aria-invalid={!validoPrev}
-              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <span className="text-stone-500 dark:text-stone-400">%</span>
           </div>
@@ -278,7 +280,7 @@ function FormComisiones({
               value={otros}
               onChange={(e) => { setOtros(e.target.value); setError(null); }}
               aria-invalid={!validoOtros}
-              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <span className="text-stone-500 dark:text-stone-400">%</span>
           </div>
@@ -290,14 +292,15 @@ function FormComisiones({
       )}
 
       <div className="flex items-center gap-3">
-        <button
+        <Button
           type="submit"
+          variant="primary"
+          size="md"
           disabled={guardando || !cambio}
-          className="px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold text-sm hover:bg-amber-700 disabled:bg-stone-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center gap-2"
+          loading={guardando}
         >
-          {guardando && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
           Guardar comisiones
-        </button>
+        </Button>
         {!cambio && valido && (
           <span className="text-xs text-stone-500 dark:text-stone-400">
             Vigente: {pctPreventista}% preventistas · {pctOtros}% el resto
@@ -368,7 +371,7 @@ export default function VistaConfiguracion({
       <header className="flex items-center gap-3">
         <Settings className="w-6 h-6 text-stone-500" aria-hidden="true" />
         <div>
-          <h1 className="text-2xl font-semibold text-stone-900 dark:text-white">Configuración</h1>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Configuración</h1>
           <p className="text-sm text-stone-500 dark:text-stone-400">
             Políticas comerciales de {nombreSucursal || 'la sucursal activa'}
           </p>
@@ -403,7 +406,7 @@ export default function VistaConfiguracion({
               onChange={(e) => handleChange(e.target.value)}
               aria-invalid={!valido}
               aria-describedby={error ? 'monto-minimo-error' : undefined}
-              className="w-48 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-48 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
@@ -439,14 +442,15 @@ export default function VistaConfiguracion({
         )}
 
         <div className="flex items-center gap-3">
-          <button
+          <Button
             type="submit"
+            variant="primary"
+            size="md"
             disabled={guardando || !cambio}
-            className="px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold text-sm hover:bg-amber-700 disabled:bg-stone-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center gap-2"
+            loading={guardando}
           >
-            {guardando && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
             Guardar
-          </button>
+          </Button>
           {!cambio && valido && (
             <span className="text-xs text-stone-500 dark:text-stone-400">
               Mínimo vigente: {formatCurrency(montoMinimoActual)}
