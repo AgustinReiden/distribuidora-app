@@ -19,9 +19,13 @@ import {
   useNotasCreditoResumenQuery,
   useRegistrarNotaCreditoMutation,
   useActualizarProductoMutation,
+  useCategoriasQuery,
+  useMarcasQuery,
+  useAsegurarCatalogo,
 } from '../../hooks/queries'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
 import type { CambiarProveedorPayload } from '../modals/ModalCambiarProveedor'
+import type { ProductoRapidoInput } from '../modals/ModalCompra'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useLotesCompraQuery } from '../../hooks/queries/useLotesQuery'
@@ -103,6 +107,10 @@ export default function ComprasContainer(): React.ReactElement {
   const { data: compras = [], isLoading, isError, refetch } = useComprasQuery()
   const { data: proveedores = [] } = useProveedoresQuery()
   const { data: productos = [] } = useProductosQuery()
+  // Para clasificar el producto que se crea desde la factura.
+  const { data: categorias = [] } = useCategoriasQuery()
+  const { data: marcas = [] } = useMarcasQuery()
+  const { asegurar: asegurarCatalogo } = useAsegurarCatalogo()
 
   // Mutations
   const registrarCompra = useRegistrarCompraMutation()
@@ -233,14 +241,26 @@ export default function ComprasContainer(): React.ReactElement {
   // muestra acá no se muestra en ningún lado. Pasó en prod (Tucumán, 10/09):
   // el alta chocaba contra el código duplicado del producto que la usuaria
   // acababa de crear, el botón no hacía nada visible y lo apretó diez veces.
-  const handleCrearProductoRapido = useCallback(async (data: { nombre: string; codigo: string; costoSinIva: number }) => {
+  const handleCrearProductoRapido = useCallback(async (data: ProductoRapidoInput) => {
     try {
+      // La categoría o la marca nueva se crea antes que el producto, igual que
+      // desde la ficha (ver useAsegurarCatalogo). Si eso falla, el producto no
+      // se crea y el aviso es el mismo de abajo.
+      const catalogo = await asegurarCatalogo({
+        categoria_nueva: data.categoriaNueva,
+        marca_nueva: data.marcaNueva,
+      })
       const producto = await crearProducto.mutateAsync({
         nombre: data.nombre,
         codigo: data.codigo || undefined,
         precio: data.costoSinIva * 1.21,
         stock: 0,
-        costo_sin_iva: data.costoSinIva
+        costo_sin_iva: data.costoSinIva,
+        categoria: data.categoria || undefined,
+        marca_id: data.marcaId || null,
+        // Arranca en el de la factura; el alta deja cambiarlo.
+        proveedor_id: data.proveedorId || null,
+        ...catalogo,
       })
       notify.success(`Producto "${data.nombre}" creado`)
       return producto
@@ -250,7 +270,7 @@ export default function ComprasContainer(): React.ReactElement {
       // rechazo, y sobre eso decide si agrega la línea o deja el pendiente.
       throw err
     }
-  }, [crearProducto, notify])
+  }, [crearProducto, notify, asegurarCatalogo])
 
   const handleNotaCredito = useCallback((compra: CompraDBExtended) => {
     setCompraParaNC(compra)
@@ -375,6 +395,8 @@ export default function ComprasContainer(): React.ReactElement {
           <ModalCompra
             productos={productos}
             proveedores={proveedores as Parameters<typeof ModalCompra>[0]['proveedores']}
+            categorias={categorias}
+            marcas={marcas}
             onSave={handleGuardarCompra as unknown as Parameters<typeof ModalCompra>[0]['onSave']}
             onClose={() => setModalCompraOpen(false)}
             onCrearProductoRapido={handleCrearProductoRapido}

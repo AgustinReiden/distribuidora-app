@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
 import NumberInput from '../ui/NumberInput';
+import SelectorConAlta from '../productos/SelectorConAlta';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { useMarcasQuery } from '../../hooks/queries';
 import {
@@ -109,6 +110,13 @@ export interface ProductoFormData {
   categoria: string;
   /** FK a `marcas` (mig 158). '' = sin marca. Ortogonal a la categoría. */
   marca_id?: string | null;
+  /**
+   * Nombres tipeados con "+ Nueva categoría" / "+ Nueva marca". Sólo viajan en
+   * el guardado: el container los crea antes que el producto
+   * (`useAsegurarCatalogo`) y mandan sobre lo elegido en la lista.
+   */
+  categoria_nueva?: string;
+  marca_nueva?: string;
   proveedor_id: string;
   /**
    * Saldo de stock. Opcional porque en una edición se OMITE si el admin no lo
@@ -179,11 +187,6 @@ const getCategoryName = (cat: string | CategoriaOption): string => {
   return typeof cat === 'string' ? cat : cat.nombre;
 };
 
-/** Helper to get category key */
-const getCategoryKey = (cat: string | CategoriaOption): string => {
-  return typeof cat === 'string' ? cat : (cat.id || cat.nombre);
-};
-
 const ModalProducto = memo(function ModalProducto({ producto, categorias, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
@@ -236,8 +239,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
     unidades_de_venta_por_fardo: undefined,
     etiqueta_bulto: undefined
   });
-  const [nuevaCategoria, setNuevaCategoria] = useState<string>('');
-  const [mostrarNuevaCategoria, setMostrarNuevaCategoria] = useState<boolean>(false);
+  // null = eligiendo de la lista; un string = escribiendo una nueva.
+  const [categoriaNueva, setCategoriaNueva] = useState<string | null>(null);
+  const [marcaNueva, setMarcaNueva] = useState<string | null>(null);
 
   // ── Costo promedio (valuación, mig 127) ───────────────────────────────────
   // Solo lectura por defecto: lo recalcula cada compra (forward-only). El admin
@@ -378,9 +382,6 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
       : { ...form, etiqueta_bulto: undefined };
     const result = validate(formNormalizado);
     if (result.success) {
-      const categoriaFinal = mostrarNuevaCategoria && nuevaCategoria.trim()
-        ? nuevaCategoria.trim()
-        : formNormalizado.categoria;
       // Mantener el costo_real canónico alineado con la edición manual del costo.
       // La semántica FC/ZZ la da la última compra registrada (sin compra → FC).
       const costoReal = calcularCostoReal(
@@ -394,7 +395,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         : undefined;
       onSave({
         ...formNormalizado,
-        categoria: categoriaFinal,
+        // Antes el nombre nuevo iba directo a `categoria` como texto, y como
+        // nadie creaba la fila en `categorias` el producto quedaba sin
+        // `categoria_id`. Ahora viaja aparte y lo crea el container.
+        categoria_nueva: categoriaNueva?.trim() ? categoriaNueva : undefined,
+        marca_nueva: marcaNueva?.trim() ? marcaNueva : undefined,
         // '' es la opción "sin marca" del select; la columna es una FK y no
         // acepta string vacío.
         marca_id: formNormalizado.marca_id || null,
@@ -520,61 +525,27 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
           {errores.nombre && <p className="text-red-500 text-xs mt-1">{errores.nombre}</p>}
         </div>
 
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <label className="block text-sm font-medium">Categoria</label>
-            <button
-              type="button"
-              onClick={() => setMostrarNuevaCategoria(!mostrarNuevaCategoria)}
-              className="text-sm text-blue-600 hover:text-blue-700"
-            >
-              {mostrarNuevaCategoria ? 'Elegir existente' : '+ Nueva categoria'}
-            </button>
-          </div>
-          {mostrarNuevaCategoria ? (
-            <input
-              type="text"
-              value={nuevaCategoria}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setNuevaCategoria(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg"
-              placeholder="Escribir nueva categoria..."
-            />
-          ) : (
-            <select
-              value={form.categoria || ''}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, categoria: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg"
-            >
-              <option value="">Sin categoria</option>
-              {categorias.map(cat => (
-                <option key={getCategoryKey(cat)} value={getCategoryName(cat)}>{getCategoryName(cat)}</option>
-              ))}
-            </select>
-          )}
-        </div>
+        <SelectorConAlta
+          sustantivo="categoría"
+          opciones={categorias.map(cat => ({ valor: getCategoryName(cat), texto: getCategoryName(cat) }))}
+          valor={form.categoria || ''}
+          onValor={(categoria) => setForm({ ...form, categoria })}
+          nuevo={categoriaNueva}
+          onNuevo={setCategoriaNueva}
+        />
 
         {/* Marca (mig 158). Independiente de la categoría: un producto es
             Manaos (marca) y gaseosas (categoría). La usan los objetivos por
             marca, así que un producto nuevo sin marca queda fuera de esa
             medición. */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Marca</label>
-          <select
-            value={form.marca_id || ''}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, marca_id: e.target.value })}
-            className="w-full px-3 py-2 border rounded-lg"
-          >
-            <option value="">Sin marca</option>
-            {marcas.filter(m => m.activa).map(m => (
-              <option key={m.id} value={m.id}>{m.nombre}</option>
-            ))}
-          </select>
-          {marcas.length === 0 && (
-            <p className="text-xs text-gray-500 mt-1">
-              Todavía no hay marcas cargadas. Se crean desde Catálogo → Marcas.
-            </p>
-          )}
-        </div>
+        <SelectorConAlta
+          sustantivo="marca"
+          opciones={marcas.filter(m => m.activa).map(m => ({ valor: m.id, texto: m.nombre }))}
+          valor={form.marca_id || ''}
+          onValor={(marca_id) => setForm({ ...form, marca_id })}
+          nuevo={marcaNueva}
+          onNuevo={setMarcaNueva}
+        />
 
         {/* Proveedor */}
         {proveedores.length > 0 && (

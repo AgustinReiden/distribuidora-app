@@ -4,7 +4,7 @@
  * Refactorizado con useReducer para mejor gestión de estado
  * Validación con Zod
  */
-import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, Suspense } from 'react'
+import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
@@ -35,6 +35,10 @@ import type {
 } from './ModalCompra.reducer'
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
 import { validarVencimientosLineas } from '../../utils/vencimientos'
+import SelectorConAlta from '../productos/SelectorConAlta'
+import type { OpcionCatalogo } from '../productos/SelectorConAlta'
+import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
+import type { MarcaDB } from '../../hooks/queries/useMarcasQuery'
 
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
@@ -48,14 +52,42 @@ const ModalImportarCompra = lazyWithReload(() => import('./ModalImportarCompra')
 const claveCondicionLinea = (item: CompraItemForm): string =>
   claveCondicionIva(item.condicionIva, item.porcentajeIva)
 
+/** Lo que manda el alta de un producto nuevo desde la factura. */
+export interface ProductoRapidoInput {
+  nombre: string;
+  codigo: string;
+  costoSinIva: number;
+  /** Categoría elegida de la lista ('' = sin categoría). */
+  categoria: string;
+  /** Marca elegida de la lista ('' = sin marca). */
+  marcaId: string;
+  /** Proveedor habitual del producto; arranca en el de la factura ('' = sin proveedor). */
+  proveedorId: string;
+  /** Tipeadas con "+ Nueva": las crea el container y mandan sobre las elegidas. */
+  categoriaNueva?: string;
+  marcaNueva?: string;
+}
+
 /** Props del componente principal */
 export interface ModalCompraProps {
   productos: ProductoDB[];
   proveedores: ProveedorDBExtended[];
+  /** Para clasificar el producto que se crea desde la factura. */
+  categorias?: CategoriaDB[];
+  marcas?: MarcaDB[];
   onSave: (compra: CompraFormInputExtended) => Promise<void>;
   onClose: () => void;
-  onCrearProductoRapido?: (data: { nombre: string; codigo: string; costoSinIva: number }) => Promise<ProductoDB>;
+  onCrearProductoRapido?: (data: ProductoRapidoInput) => Promise<ProductoDB>;
   onCrearProveedor?: (data: ProveedorFormInputExtended) => Promise<ProveedorDBExtended>;
+}
+
+/** Las listas que ofrecen las dos altas rápidas, y el proveedor de la factura. */
+interface CatalogoAltaRapida {
+  categorias: OpcionCatalogo[];
+  marcas: OpcionCatalogo[];
+  proveedores: OpcionCatalogo[];
+  /** '' = la factura todavía no tiene proveedor, o tiene uno nuevo sin dar de alta. */
+  proveedorFactura: string;
 }
 
 /** Props de ProveedorSection */
@@ -85,7 +117,8 @@ interface ProductosSectionProps {
   onEliminarItem: (index: number) => void;
   /** Vencimientos de la línea (migs 223/224). Viajan aparte de p_items. */
   onVencimientosItem: (index: number, vencimientos: VencimientoLinea[]) => void;
-  onCrearProductoRapido?: (data: { nombre: string; codigo: string; costoSinIva: number }) => Promise<ProductoDB>;
+  catalogo: CatalogoAltaRapida;
+  onCrearProductoRapido?: (data: ProductoRapidoInput) => Promise<ProductoDB>;
   onImportarExcel?: () => void;
 }
 
@@ -211,7 +244,7 @@ function useCalculosImpuestos(
 const N8N_FACTURA_WEBHOOK_URL: string = import.meta.env.VITE_N8N_FACTURA_WEBHOOK_URL || ''
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024 // 8MB
 
-export default function ModalCompra({ productos, proveedores, onSave, onClose, onCrearProductoRapido, onCrearProveedor }: ModalCompraProps) {
+export default function ModalCompra({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor }: ModalCompraProps) {
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
   const [modalImportarOpen, setModalImportarOpen] = useState(false)
@@ -259,6 +292,23 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
   const plantillaCargos = useCargosPlantillaProveedorQuery(
     state.usarProveedorNuevo ? null : state.proveedorId
   )
+
+  const catalogoAlta = useMemo<CatalogoAltaRapida>(() => ({
+    // Sólo las categorías que tienen fila. La ficha ofrece también los nombres
+    // que existen nada más como texto en algún producto, y elegir uno de esos
+    // deja al producto nuevo sin `categoria_id`; acá no se ofrecen. Si falta
+    // alguna, "+ Nueva categoría" la crea de verdad.
+    categorias: categorias
+      .filter(c => c.activa !== false)
+      .map(c => ({ valor: c.nombre, texto: c.nombre })),
+    marcas: marcas
+      .filter(m => m.activa)
+      .map(m => ({ valor: m.id, texto: m.nombre })),
+    proveedores: proveedores.map(p => ({ valor: String(p.id), texto: p.nombre })),
+    // Un proveedor nuevo del escaneo todavía no tiene id: no hay a quién
+    // vincular el producto hasta que se registre la compra.
+    proveedorFactura: state.usarProveedorNuevo ? '' : String(state.proveedorId || ''),
+  }), [categorias, marcas, proveedores, state.usarProveedorNuevo, state.proveedorId])
 
   // Productos filtrados
   const productosFiltrados = useMemo(() => {
@@ -591,6 +641,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
           <ItemsPendientesScanPanel
             pendientes={state.itemsPendientesScan}
             productos={productos}
+            catalogo={catalogoAlta}
             puedeCrear={!!onCrearProductoRapido}
             onVincular={(index, producto) =>
               dispatch({ type: 'RESOLVER_PENDIENTE_VINCULAR', payload: { index, producto } })
@@ -646,6 +697,7 @@ export default function ModalCompra({ productos, proveedores, onSave, onClose, o
               onCondicionItem={handleCondicionItem}
               onEliminarItem={handleEliminarItem}
               onVencimientosItem={handleVencimientosItem}
+              catalogo={catalogoAlta}
               onCrearProductoRapido={onCrearProductoRapido}
               onImportarExcel={() => setModalImportarOpen(true)}
             />
@@ -880,8 +932,97 @@ function DatosCompraSection({ state, dispatch }: DatosCompraSectionProps) {
   )
 }
 
-function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
+/** Categoría, marca y proveedor del producto que se crea desde la factura. */
+interface ClasificacionRapida {
+  categoria: string;
+  /** null = eligiendo de la lista; un string = escribiendo una nueva. */
+  categoriaNueva: string | null;
+  marcaId: string;
+  marcaNueva: string | null;
+  /** null = el de la factura, y lo sigue si cambia; un string = elegido a mano. */
+  proveedorId: string | null;
+}
+
+const CLASIFICACION_VACIA: ClasificacionRapida = {
+  categoria: '',
+  categoriaNueva: null,
+  marcaId: '',
+  marcaNueva: null,
+  proveedorId: null,
+}
+
+function datosClasificacion(
+  c: ClasificacionRapida,
+  proveedorFactura: string,
+): Pick<ProductoRapidoInput, 'categoria' | 'marcaId' | 'proveedorId' | 'categoriaNueva' | 'marcaNueva'> {
+  return {
+    categoria: c.categoria,
+    marcaId: c.marcaId,
+    proveedorId: c.proveedorId ?? proveedorFactura,
+    categoriaNueva: c.categoriaNueva?.trim() ? c.categoriaNueva : undefined,
+    marcaNueva: c.marcaNueva?.trim() ? c.marcaNueva : undefined,
+  }
+}
+
+/**
+ * Los campos de clasificación de las dos altas rápidas: la del buscador y la de
+ * los ítems del escaneo que no se vincularon solos.
+ *
+ * El proveedor arranca en el de la factura y lo sigue: si se elige o se cambia
+ * el de la compra con el alta abierta, el del producto cambia con él. Deja de
+ * seguirlo cuando se lo elige a mano, que es el caso del producto que
+ * habitualmente trae otro.
+ */
+function CamposClasificacion({ catalogo, valor, onChange }: {
+  catalogo: CatalogoAltaRapida;
+  valor: ClasificacionRapida;
+  onChange: React.Dispatch<React.SetStateAction<ClasificacionRapida>>;
+}) {
+  const idProveedor = useId()
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      <SelectorConAlta
+        compacto
+        sustantivo="categoría"
+        opciones={catalogo.categorias}
+        valor={valor.categoria}
+        onValor={(categoria) => onChange(prev => ({ ...prev, categoria }))}
+        nuevo={valor.categoriaNueva}
+        onNuevo={(categoriaNueva) => onChange(prev => ({ ...prev, categoriaNueva }))}
+      />
+      <SelectorConAlta
+        compacto
+        sustantivo="marca"
+        opciones={catalogo.marcas}
+        valor={valor.marcaId}
+        onValor={(marcaId) => onChange(prev => ({ ...prev, marcaId }))}
+        nuevo={valor.marcaNueva}
+        onNuevo={(marcaNueva) => onChange(prev => ({ ...prev, marcaNueva }))}
+      />
+      <div>
+        <label htmlFor={idProveedor} className="block text-xs text-gray-500 mb-1">Proveedor</label>
+        <select
+          id={idProveedor}
+          value={valor.proveedorId ?? catalogo.proveedorFactura}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+            const proveedorId = e.target.value
+            onChange(prev => ({ ...prev, proveedorId }))
+          }}
+          className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+        >
+          <option value="">Sin proveedor</option>
+          {catalogo.proveedores.map(p => (
+            <option key={p.valor} value={p.valor}>{p.texto}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condicionMaster, onAgregarItem, onActualizarItem, onCondicionItem, onEliminarItem, onVencimientosItem, catalogo, onCrearProductoRapido, onImportarExcel }: ProductosSectionProps) {
   const [itemRapido, setItemRapido] = useState({ nombre: '', codigo: '', costo: 0 })
+  const [clasificacion, setClasificacion] = useState<ClasificacionRapida>(CLASIFICACION_VACIA)
   const [creandoItem, setCreandoItem] = useState(false)
   const buscadorRef = useRef<HTMLDivElement>(null)
 
@@ -904,7 +1045,8 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
       const producto = await onCrearProductoRapido({
         nombre: itemRapido.nombre,
         codigo: itemRapido.codigo,
-        costoSinIva: itemRapido.costo
+        costoSinIva: itemRapido.costo,
+        ...datosClasificacion(clasificacion, catalogo.proveedorFactura),
       })
       dispatch({ type: 'AGREGAR_ITEM_RAPIDO', payload: {
         productoId: producto.id,
@@ -913,6 +1055,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
         costoUnitario: producto.costo_sin_iva || itemRapido.costo
       }})
       setItemRapido({ nombre: '', codigo: '', costo: 0 })
+      setClasificacion(CLASIFICACION_VACIA)
     } catch {
       // El toast lo tira el container. Acá se deja el formulario intacto —con
       // lo que la usuaria tipeó— para que pueda corregir el dato que falló.
@@ -1067,6 +1210,7 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
               />
             </div>
           </div>
+          <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
           <Button
             type="button"
             onClick={handleCrearProductoRapido}
@@ -1431,9 +1575,10 @@ function ScanPreview({ resultado, productos, proveedores, onAplicar, onDescartar
 interface ItemsPendientesScanPanelProps {
   pendientes: FacturaItemEscaneado[];
   productos: ProductoDB[];
+  catalogo: CatalogoAltaRapida;
   puedeCrear: boolean;
   onVincular: (index: number, producto: ProductoDB) => void;
-  onCrearNuevo: (index: number, datos: { nombre: string; codigo: string; costoSinIva: number }) => Promise<void>;
+  onCrearNuevo: (index: number, datos: ProductoRapidoInput) => Promise<void>;
   onOmitir: (index: number) => void;
   onDescartarTodos: () => void;
 }
@@ -1443,6 +1588,7 @@ type PendienteRowMode = 'idle' | 'vincular' | 'crear'
 function ItemsPendientesScanPanel({
   pendientes,
   productos,
+  catalogo,
   puedeCrear,
   onVincular,
   onCrearNuevo,
@@ -1482,6 +1628,7 @@ function ItemsPendientesScanPanel({
             index={index}
             scanItem={scanItem}
             productos={productos}
+            catalogo={catalogo}
             puedeCrear={puedeCrear}
             onVincular={onVincular}
             onCrearNuevo={onCrearNuevo}
@@ -1497,9 +1644,10 @@ interface ItemPendienteRowProps {
   index: number;
   scanItem: FacturaItemEscaneado;
   productos: ProductoDB[];
+  catalogo: CatalogoAltaRapida;
   puedeCrear: boolean;
   onVincular: (index: number, producto: ProductoDB) => void;
-  onCrearNuevo: (index: number, datos: { nombre: string; codigo: string; costoSinIva: number }) => Promise<void>;
+  onCrearNuevo: (index: number, datos: ProductoRapidoInput) => Promise<void>;
   onOmitir: (index: number) => void;
 }
 
@@ -1507,6 +1655,7 @@ function ItemPendienteRow({
   index,
   scanItem,
   productos,
+  catalogo,
   puedeCrear,
   onVincular,
   onCrearNuevo,
@@ -1517,6 +1666,7 @@ function ItemPendienteRow({
   const [nombreNuevo, setNombreNuevo] = useState(scanItem.descripcion)
   const [codigoNuevo, setCodigoNuevo] = useState(scanItem.codigo || '')
   const [costoNuevo, setCostoNuevo] = useState(scanItem.costoUnitario || 0)
+  const [clasificacion, setClasificacion] = useState<ClasificacionRapida>(CLASIFICACION_VACIA)
   const [creando, setCreando] = useState(false)
 
   const productosFiltrados = useMemo(() => {
@@ -1537,7 +1687,8 @@ function ItemPendienteRow({
       await onCrearNuevo(index, {
         nombre: nombreNuevo.trim(),
         codigo: codigoNuevo.trim(),
-        costoSinIva: costoNuevo
+        costoSinIva: costoNuevo,
+        ...datosClasificacion(clasificacion, catalogo.proveedorFactura),
       })
       // El reducer remueve la fila; este componente se desmonta.
     } catch {
@@ -1692,6 +1843,7 @@ function ItemPendienteRow({
               className="w-full px-2 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
             />
           </div>
+          <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
           <div className="flex gap-2 pt-1">
             <Button
               type="button"

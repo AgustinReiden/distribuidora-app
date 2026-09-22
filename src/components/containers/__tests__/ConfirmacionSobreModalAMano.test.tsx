@@ -96,6 +96,9 @@ vi.mock('../../../hooks/queries', () => ({
   useCrearProveedorMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRegistrarNotaCreditoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useActualizarProductoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCategoriasQuery: () => ({ data: [] }),
+  useMarcasQuery: () => ({ data: [] }),
+  useAsegurarCatalogo: () => ({ asegurar: vi.fn(), creando: false }),
 }))
 
 vi.mock('../../../hooks/queries/useLotesQuery', () => ({
