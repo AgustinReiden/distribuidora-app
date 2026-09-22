@@ -15,8 +15,12 @@
  * había roto. Los logs del gateway muestran el intento repetido y ninguna
  * respuesta de error: nunca llegó a haber INSERT.
  *
+ * Y el producto nacía sin categoría, sin marca y sin proveedor: el alta rápida
+ * no los tenía. Ahora los tiene, y la categoría o la marca nueva se crea antes
+ * que el producto (ver `useAsegurarCatalogo`).
+ *
  * Se monta el container con el modal stubbeado porque lo que se rompió es el
- * cableado —quién avisa—, no el formulario.
+ * cableado —quién avisa, qué se guarda—, no el formulario.
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -24,8 +28,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const mockCrearProducto = vi.fn()
+const mockAsegurar = vi.fn()
 const notifyError = vi.fn()
 const notifySuccess = vi.fn()
+
+/** Lo que el modal manda al apretar "Crear y Agregar". Cada test lo ajusta. */
+const ALTA_BASICA = { nombre: 'MANI JAMON x 1kg', codigo: '0802', costoSinIva: 7533 }
+let altaQueMandaElModal: Record<string, unknown> = ALTA_BASICA
 
 vi.mock('../../hooks/queries', () => ({
   useComprasQuery: () => ({ data: [], isLoading: false }),
@@ -41,6 +50,9 @@ vi.mock('../../hooks/queries', () => ({
   useCrearProveedorMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRegistrarNotaCreditoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useActualizarProductoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCategoriasQuery: () => ({ data: [] }),
+  useMarcasQuery: () => ({ data: [] }),
+  useAsegurarCatalogo: () => ({ asegurar: mockAsegurar, creando: false }),
 }))
 
 vi.mock('../../hooks/queries/useLotesQuery', () => ({
@@ -69,13 +81,13 @@ vi.mock('../vistas/VistaCompras', () => ({
 // tal como la dispara él —await, y si rechaza, seguir sin romper la pantalla—.
 vi.mock('../modals/ModalCompra', () => ({
   default: ({ onCrearProductoRapido }: {
-    onCrearProductoRapido?: (d: { nombre: string; codigo: string; costoSinIva: number }) => Promise<unknown>
+    onCrearProductoRapido?: (d: Record<string, unknown>) => Promise<unknown>
   }) => (
     <button
       type="button"
       onClick={async () => {
         try {
-          await onCrearProductoRapido?.({ nombre: 'MANI JAMON x 1kg', codigo: '0802', costoSinIva: 7533 })
+          await onCrearProductoRapido?.(altaQueMandaElModal)
         } catch {
           // Igual que el modal de verdad: deja el formulario como estaba.
         }
@@ -99,6 +111,8 @@ async function abrirCompraYCrearProducto() {
 describe('alta rápida de producto desde la factura', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    altaQueMandaElModal = ALTA_BASICA
+    mockAsegurar.mockResolvedValue({})
   })
 
   it('muestra el error de la base cuando el alta falla', async () => {
@@ -128,5 +142,74 @@ describe('alta rápida de producto desde la factura', () => {
 
     await waitFor(() => expect(notifySuccess).toHaveBeenCalledTimes(1))
     expect(notifyError).not.toHaveBeenCalled()
+  })
+
+  it('guarda la categoría, la marca y el proveedor elegidos en el alta', async () => {
+    altaQueMandaElModal = {
+      ...ALTA_BASICA,
+      categoria: 'SNACKS',
+      marcaId: 'm-1',
+      proveedorId: '7',
+    }
+    mockCrearProducto.mockResolvedValue({ id: 398, nombre: 'MANI JAMON x 1kg' })
+
+    await abrirCompraYCrearProducto()
+
+    await waitFor(() => expect(mockCrearProducto).toHaveBeenCalledTimes(1))
+    expect(mockCrearProducto).toHaveBeenCalledWith(expect.objectContaining({
+      categoria: 'SNACKS',
+      marca_id: 'm-1',
+      proveedor_id: '7',
+    }))
+  })
+
+  it('la categoría y la marca nuevas se crean antes que el producto y mandan sobre las elegidas', async () => {
+    altaQueMandaElModal = {
+      ...ALTA_BASICA,
+      categoria: 'SNACKS',
+      marcaId: 'm-1',
+      proveedorId: '7',
+      categoriaNueva: 'frutos secos',
+      marcaNueva: 'frau',
+    }
+    mockAsegurar.mockResolvedValue({ categoria: 'FRUTOS SECOS', marca_id: 'm-9' })
+    mockCrearProducto.mockResolvedValue({ id: 398, nombre: 'MANI JAMON x 1kg' })
+
+    await abrirCompraYCrearProducto()
+
+    await waitFor(() => expect(mockCrearProducto).toHaveBeenCalledTimes(1))
+    expect(mockAsegurar).toHaveBeenCalledWith({ categoria_nueva: 'frutos secos', marca_nueva: 'frau' })
+    expect(mockAsegurar.mock.invocationCallOrder[0]).toBeLessThan(mockCrearProducto.mock.invocationCallOrder[0])
+    expect(mockCrearProducto).toHaveBeenCalledWith(expect.objectContaining({
+      categoria: 'FRUTOS SECOS',
+      marca_id: 'm-9',
+      proveedor_id: '7',
+    }))
+  })
+
+  it('sin proveedor en la factura el producto nace sin proveedor, no con un string vacío', async () => {
+    altaQueMandaElModal = { ...ALTA_BASICA, categoria: '', marcaId: '', proveedorId: '' }
+    mockCrearProducto.mockResolvedValue({ id: 398, nombre: 'MANI JAMON x 1kg' })
+
+    await abrirCompraYCrearProducto()
+
+    await waitFor(() => expect(mockCrearProducto).toHaveBeenCalledTimes(1))
+    expect(mockCrearProducto).toHaveBeenCalledWith(expect.objectContaining({
+      categoria: undefined,
+      marca_id: null,
+      proveedor_id: null,
+    }))
+  })
+
+  it('si la marca nueva no se puede crear, el producto tampoco y se avisa por qué', async () => {
+    altaQueMandaElModal = { ...ALTA_BASICA, marcaNueva: 'descontinuada' }
+    mockAsegurar.mockRejectedValue(new Error('La marca "DESCONTINUADA" ya existe pero está desactivada. Reactivala desde Productos → Marcas, o elegí otra.'))
+
+    await abrirCompraYCrearProducto()
+
+    await waitFor(() => expect(notifyError).toHaveBeenCalledTimes(1))
+    expect(notifyError.mock.calls[0][0]).toContain('está desactivada')
+    expect(mockCrearProducto).not.toHaveBeenCalled()
+    expect(notifySuccess).not.toHaveBeenCalled()
   })
 })
