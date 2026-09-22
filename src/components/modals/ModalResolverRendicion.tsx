@@ -8,8 +8,9 @@
  *      anterior con sello de usuario y fecha.
  */
 import { useState, memo } from 'react'
-import { Loader2, FileText, CheckCircle } from 'lucide-react'
+import { FileText, CheckCircle } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 
 export interface ModalResolverRendicionProps {
   fecha: string
@@ -80,21 +81,25 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
       </div>
 
       <div className="flex items-center justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <button
+        <Button
           onClick={onClose}
           disabled={guardando}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg disabled:opacity-50"
+          variant="ghost"
+          size="md"
+          className="text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
         >
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleSubmit}
           disabled={guardando || !observaciones.trim()}
-          className="px-4 py-2 rounded-lg text-white flex items-center gap-2 disabled:opacity-50 bg-blue-600 hover:bg-blue-700"
+          loading={guardando}
+          variant="primary"
+          size="md"
         >
-          {guardando ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+          {!guardando && <CheckCircle className="w-4 h-4" />}
           Marcar como resuelta
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

@@ -17,6 +17,7 @@
 import { memo, useMemo, useState } from 'react';
 import { Loader2, Plus, Pencil, Trash2, Check, X, Award, AlertCircle, ToggleLeft, ToggleRight, Search, ChevronLeft } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import {
   useMarcasQuery,
   useCrearMarcaMutation,
@@ -269,23 +270,25 @@ const ModalMarcas = memo(function ModalMarcas({ productos, onClose }: ModalMarca
         </div>
 
         <div className="p-4 border-t dark:border-gray-600 flex flex-wrap justify-end gap-2">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="md"
             onClick={() => handleAsignar(true)}
             disabled={asignarMut.isPending || seleccion.size === 0}
-            className="px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg disabled:opacity-50"
           >
             Quitar marca
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="primary"
+            size="md"
             onClick={() => handleAsignar(false)}
             disabled={asignarMut.isPending || seleccion.size === 0}
-            className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-1.5"
+            loading={asignarMut.isPending}
           >
-            {asignarMut.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
             Asignar a {asignando.nombre}
-          </button>
+          </Button>
         </div>
       </ModalBase>
     );
@@ -319,15 +322,17 @@ const ModalMarcas = memo(function ModalMarcas({ productos, onClose }: ModalMarca
               className="flex-1 px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
               disabled={crearMut.isPending}
             />
-            <button
+            <Button
               type="button"
+              variant="primary"
+              size="md"
               onClick={handleCrear}
               disabled={crearMut.isPending || !nuevoNombre.trim()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-1.5 font-medium"
+              loading={crearMut.isPending}
             >
-              {crearMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {!crearMut.isPending && <Plus className="w-4 h-4" />}
               Agregar
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -401,64 +406,75 @@ const ModalMarcas = memo(function ModalMarcas({ productos, onClose }: ModalMarca
 
                     {editing ? (
                       <div className="flex gap-1 shrink-0">
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => handleConfirmarRename(marca)}
                           disabled={renameMut.isPending}
-                          className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded disabled:opacity-50"
+                          loading={renameMut.isPending}
                           aria-label="Guardar"
+                          className="text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 dark:text-green-400"
                         >
-                          {renameMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                        </button>
-                        <button
+                          {!renameMut.isPending && <Check className="w-4 h-4" />}
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => setEditandoId(null)}
                           disabled={renameMut.isPending}
-                          className="p-1.5 text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 rounded disabled:opacity-50"
                           aria-label="Cancelar"
                         >
                           <X className="w-4 h-4" />
-                        </button>
+                        </Button>
                       </div>
                     ) : (
                       <div className="flex gap-1 shrink-0">
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           onClick={() => abrirAsignar(marca)}
                           disabled={working}
-                          className="px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded disabled:opacity-50"
+                          className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                         >
                           Productos
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => { setEditandoId(marca.id); setEditNombre(marca.nombre); setError(''); }}
                           disabled={working}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded disabled:opacity-50"
                           aria-label={`Renombrar ${marca.nombre}`}
+                          className="text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 dark:text-blue-400"
                         >
                           <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => toggleMut.mutateAsync({ id: marca.id, activa: !marca.activa })}
                           disabled={working}
-                          className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50"
                           aria-label={marca.activa ? `Desactivar ${marca.nombre}` : `Activar ${marca.nombre}`}
                         >
                           {marca.activa
                             ? <ToggleRight className="w-5 h-5 text-green-600" />
                             : <ToggleLeft className="w-5 h-5 text-gray-400" />}
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => setConfirmDelete(marca)}
                           disabled={working}
-                          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
                           aria-label={`Eliminar ${marca.nombre}`}
+                          className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 dark:text-red-400"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </li>
@@ -479,35 +495,27 @@ const ModalMarcas = memo(function ModalMarcas({ productos, onClose }: ModalMarca
             {' '}Los objetivos que apunten a esta marca se van a quedar sin nada que medir.
           </p>
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(null)}
-              disabled={deleteMut.isPending}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleteMut.isPending}>
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="danger"
+              size="sm"
               onClick={() => handleEliminar(confirmDelete)}
               disabled={deleteMut.isPending}
-              className="px-3 py-1.5 text-sm bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-400 flex items-center gap-1.5"
+              loading={deleteMut.isPending}
             >
-              {deleteMut.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
               Eliminar
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       <div className="p-4 border-t dark:border-gray-600 flex justify-end">
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-        >
+        <Button type="button" variant="ghost" size="md" onClick={onClose}>
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   );

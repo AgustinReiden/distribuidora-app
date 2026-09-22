@@ -9,6 +9,7 @@ import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
 import ModalBase from './ModalBase';
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion';
+import { Button } from '../ui/Button';
 import { obtenerMOQ } from '../../utils/precioMayorista';
 import { motivoMontoMinimo } from '../../utils/montoMinimo';
 import { avisoDeudaCliente } from '../../utils/deudaCliente';
@@ -529,9 +530,14 @@ const ModalPedido = memo(function ModalPedido({
             <div className="flex justify-between items-center mb-1">
               <label className="block text-sm font-medium dark:text-gray-200">Cliente *</label>
               {(isAdmin || isPreventista || isEncargado) && (
-                <button onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); setDuplicadoPendiente(null); setGpsError(null); setGpsAccuracy(null); }} className="text-sm text-blue-600">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setMostrarNuevoCliente(!mostrarNuevoCliente); setErrorCliente(''); setDuplicadoPendiente(null); setGpsError(null); setGpsAccuracy(null); }}
+                  className="text-blue-600 dark:text-blue-400"
+                >
                   {mostrarNuevoCliente ? 'Cancelar' : '+ Nuevo'}
-                </button>
+                </Button>
               )}
             </div>
 
@@ -554,25 +560,19 @@ const ModalPedido = memo(function ModalPedido({
                     la direccion no se encuentra o devuelve coords de otra localidad.
                     Para preventistas, es el flujo mas comun (estan parados en el local). */}
                 <div>
-                  <button
+                  <Button
                     type="button"
                     onClick={handleCapturarGps}
                     disabled={gpsCapturando}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                    loading={gpsCapturando}
+                    variant="ghost"
+                    size="md"
+                    className="w-full sm:w-auto border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40"
                     aria-label="Usar mi ubicación actual para fijar las coordenadas del cliente"
                   >
-                    {gpsCapturando ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Obteniendo ubicación…
-                      </>
-                    ) : (
-                      <>
-                        <LocateFixed className="w-4 h-4" />
-                        Usar mi ubicación actual
-                      </>
-                    )}
-                  </button>
+                    {!gpsCapturando && <LocateFixed className="w-4 h-4" />}
+                    {gpsCapturando ? 'Obteniendo ubicación…' : 'Usar mi ubicación actual'}
+                  </Button>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     Útil si estás parado en el local del cliente.
                   </p>
@@ -634,14 +634,26 @@ const ModalPedido = memo(function ModalPedido({
                     {guardandoCliente ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Sí, es otro comercio: crear igual'}
                   </button>
                 )}
-                <button onClick={handleCrearClienteRapido} disabled={guardandoCliente} className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400">
+                <Button onClick={handleCrearClienteRapido} disabled={guardandoCliente} variant="primary" size="md" className="w-full">
                   {guardandoCliente ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Crear y seleccionar'}
-                </button>
+                </Button>
               </div>
             ) : clienteSeleccionado ? (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex justify-between items-center">
                 <div><p className="font-medium">{clienteSeleccionado.nombre_fantasia}</p><p className="text-sm text-gray-600">{clienteSeleccionado.direccion}</p></div>
-                <button onClick={() => onClienteChange('')} className="text-red-500 p-1"><X className="w-5 h-5" /></button>
+                <Button
+                  variant="ghost"
+                  size="iconSm"
+                  onClick={() => onClienteChange('')}
+                  aria-label="Quitar cliente"
+                  // La tarjeta (bg-blue-50 border-blue-200) no tiene variante dark:,
+                  // así que sigue clara en modo oscuro: el className pisa también
+                  // dark:text/dark:hover para que el ícono siga siendo rojo sobre
+                  // fondo claro en los dos modos, como en el footer de ModalProducto.
+                  className="text-red-500 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-50"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
               </div>
             ) : (
               <div>
@@ -1386,15 +1398,17 @@ const ModalPedido = memo(function ModalPedido({
               <ChevronUp className={`w-5 h-5 text-gray-600 dark:text-gray-300 shrink-0 transition-transform duration-200 ${carritoAbierto ? 'rotate-180' : ''}`} />
             )}
           </button>
-          <button
+          <Button
             type="button"
             onClick={onGuardar}
             disabled={guardando || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null}
-            className="px-5 bg-green-600 text-white font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 text-sm"
+            loading={guardando}
+            variant="success"
+            size="lg"
+            className="gap-1.5"
           >
-            {guardando && <Loader2 className="w-4 h-4 animate-spin" />}
             Confirmar
-          </button>
+          </Button>
         </div>
       </GeolocationGate>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />

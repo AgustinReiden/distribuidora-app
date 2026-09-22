@@ -3,6 +3,7 @@
  */
 import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, CheckCircle, Package, User, Truck, Calendar, FileText, AlertCircle } from 'lucide-react'
+import { Button } from '../ui/Button'
 import { MOTIVOS_SALVEDAD_LABELS, ESTADOS_RESOLUCION_LABELS } from '../../lib/schemas'
 import { formatPrecio } from '../../utils/formatters'
 import type { SalvedadItemDBExtended, EstadoResolucionSalvedad } from '../../types'
@@ -180,9 +181,9 @@ export default function ModalResolverSalvedad({
               <p className="text-sm text-gray-500">ID: {salvedad.id}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Detalle de la salvedad */}
@@ -342,17 +343,21 @@ export default function ModalResolverSalvedad({
 
           {/* Botones */}
           <div className="flex gap-3 pt-2">
-            <button
+            <Button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              variant="secondary"
+              size="md"
+              className="flex-1"
             >
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={guardando || !resolucion || notas.trim().length < 5}
-              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              variant="primary"
+              size="md"
+              className="flex-1"
             >
               {guardando ? (
                 <>
@@ -365,7 +370,7 @@ export default function ModalResolverSalvedad({
                   Resolver Salvedad
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { X, FileText, AlertTriangle } from 'lucide-react'
+import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../types'
@@ -145,12 +146,9 @@ export default function ModalNotaCredito({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-          >
+          <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
             <X className="w-5 h-5 text-gray-500" />
-          </button>
+          </Button>
         </div>
 
         {/* Content */}
@@ -278,19 +276,18 @@ export default function ModalNotaCredito({
 
         {/* Footer */}
         <div className="flex gap-3 p-4 border-t dark:border-gray-700">
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-lg transition-colors"
-          >
+          <Button variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
             onClick={handleGuardar}
             disabled={saving || itemsConCantidad.length === 0}
-            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+            className="flex-1"
           >
             {saving ? 'Guardando...' : 'Guardar'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

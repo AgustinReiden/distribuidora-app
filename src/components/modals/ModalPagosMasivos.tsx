@@ -1,6 +1,7 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 // La confirmación se renderiza DENTRO del ModalBase: ModalBase es un Radix
 // Dialog que portalea su contenido con z-50, así que un hermano `fixed inset-0
 // z-50` pierde el empate de z-index y queda inalcanzable. Misma convención que
@@ -289,20 +290,18 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
           )}
         </div>
         <div className="flex space-x-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg"
-          >
+          <Button variant="ghost" size="md" onClick={onClose}>
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="success"
+            size="md"
             onClick={() => canConfirm && pedirConfirmacion()}
             disabled={!canConfirm}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            loading={guardando}
           >
-            {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Marcar como Pagados
-          </button>
+          </Button>
         </div>
       </div>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />

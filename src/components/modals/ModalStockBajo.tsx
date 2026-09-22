@@ -16,6 +16,7 @@
 import React, { memo, useMemo, useState } from 'react';
 import { Edit2, Search, X, AlertTriangle, ChevronDown } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import type { ProductoDB } from '../../types';
 
@@ -242,14 +243,16 @@ const ModalStockBajo = memo(function ModalStockBajo({
             ? totalLabel
             : `Mostrando ${productosFiltrados.length} de ${productos.length}`}
         </p>
-        <button
+        <Button
           type="button"
           onClick={onClose}
-          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-sm font-medium text-stone-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 hover:bg-stone-50 dark:hover:bg-gray-700/50 hover:border-stone-300 transition-colors"
+          variant="secondary"
+          size="md"
+          className="gap-1.5"
         >
           <X className="w-4 h-4" aria-hidden="true" />
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   );
