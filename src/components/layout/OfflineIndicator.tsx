@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Wifi, WifiOff, Cloud, CloudOff, RefreshCw, AlertTriangle, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
+import { Button } from '../ui/Button'
 
 interface PedidoOffline {
   offlineId: string;
@@ -93,9 +94,15 @@ export default function OfflineIndicator({
                 Pendientes de sincronizar
               </span>
             </div>
-            <button onClick={() => setExpandido(false)} className="text-gray-400 hover:text-gray-600">
+            <Button
+              variant="ghost"
+              size="iconSm"
+              onClick={() => setExpandido(false)}
+              className="text-gray-400 hover:text-gray-600"
+              aria-label="Cerrar panel"
+            >
               <X className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
 
           {/* Lista de pedidos pendientes */}
@@ -156,10 +163,11 @@ export default function OfflineIndicator({
           {/* Boton de sincronizar */}
           <div className="p-3">
             {isOnline ? (
-              <button
+              <Button
+                variant="primary"
                 onClick={onSincronizar}
                 disabled={sincronizando}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+                className="w-full"
               >
                 {sincronizando ? (
                   <>
@@ -172,7 +180,7 @@ export default function OfflineIndicator({
                     <span>Sincronizar ahora</span>
                   </>
                 )}
-              </button>
+              </Button>
             ) : (
               <div className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded text-sm text-gray-600 dark:text-gray-400">
                 <AlertTriangle className="w-4 h-4" />

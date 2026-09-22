@@ -14,6 +14,7 @@ import DbNotificationBell from './DbNotificationBell';
 import SucursalSelector from './SucursalSelector';
 import VincularTelegramButton from '../perfil/VincularTelegramButton';
 import { BUILD_ACTUAL } from '../../hooks/useActualizacionDisponible';
+import { Button } from '../ui/Button';
 import type { PerfilDB, RolUsuario } from '../../types';
 
 // =============================================================================
@@ -197,9 +198,11 @@ export default function TopNavigation({
           {/* Logo y Menu hamburguesa (movil) */}
           <div className="flex items-center space-x-4">
             {/* Boton hamburguesa - visible en movil */}
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setMenuAbierto(!menuAbierto)}
-              className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              className="lg:hidden"
               aria-label={menuAbierto ? 'Cerrar menu' : 'Abrir menu'}
               aria-expanded={menuAbierto}
             >
@@ -208,7 +211,7 @@ export default function TopNavigation({
               ) : (
                 <Menu className="w-6 h-6 text-gray-600 dark:text-gray-300" />
               )}
-            </button>
+            </Button>
 
             {/* Logo */}
             <div className="flex items-center space-x-2">
@@ -302,13 +305,14 @@ export default function TopNavigation({
           {/* Lado derecho: notificaciones, tema, usuario */}
           <div className="flex items-center space-x-2 sm:space-x-4">
             {/* Toggle tema */}
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={toggleDarkMode}
-              className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
               aria-label={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
             >
               {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
+            </Button>
 
             {/* Notificaciones (persistentes, DB) */}
             <DbNotificationBell />
@@ -318,12 +322,13 @@ export default function TopNavigation({
 
             {/* Menu de usuario */}
             <div className="relative" ref={userMenuRef}>
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => setUserMenuAbierto(!userMenuAbierto)}
                 aria-expanded={userMenuAbierto}
                 aria-haspopup="true"
                 aria-label="Menu de usuario"
-                className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                className="h-auto p-2"
               >
                 <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
                   <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
@@ -334,7 +339,7 @@ export default function TopNavigation({
                   {perfil?.nombre?.split(' ')[0] || 'Usuario'}
                 </span>
                 <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${userMenuAbierto ? 'rotate-180' : ''}`} />
-              </button>
+              </Button>
 
               {/* Dropdown de usuario */}
               {userMenuAbierto && (
@@ -350,13 +355,14 @@ export default function TopNavigation({
                   <VincularTelegramButton
                     className="w-full flex items-center space-x-3 px-4 py-3 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                   />
-                  <button
+                  <Button
+                    variant="ghost"
                     onClick={onLogout}
-                    className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    className="w-full h-auto justify-start gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
                   >
                     <LogOut className="w-5 h-5" />
                     <span>Cerrar sesion</span>
-                  </button>
+                  </Button>
                   {/* Sin esto, cuando alguien reporta "me sale distinto" no hay
                       forma de saber que build esta corriendo. */}
                   <p className="px-4 pt-2 border-t dark:border-gray-700 text-[11px] text-gray-400 dark:text-gray-500">

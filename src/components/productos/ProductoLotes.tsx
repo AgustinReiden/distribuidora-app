@@ -30,6 +30,7 @@ import { useAuth } from '../../hooks/supabase/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { bolsaSinVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import BadgeVencimiento from '../vencimientos/BadgeVencimiento'
+import { Button } from '../ui/Button'
 
 export interface ProductoLotesProps {
   /** Producto en edición. Sin id (alta nueva) la sección no se muestra. */
@@ -161,15 +162,17 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
               className="w-24 px-2 py-1 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
             />
           </div>
-          <button
+          <Button
             type="button"
             onClick={() => void guardarLoteNuevo()}
             disabled={crearLote.isPending}
-            className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1"
+            loading={crearLote.isPending}
+            variant="primary"
+            size="sm"
+            className="gap-1"
           >
-            {crearLote.isPending && <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />}
             Guardar
-          </button>
+          </Button>
           <button
             type="button"
             onClick={() => { setCargando(false); setFechaNueva(''); setCantidadNueva('') }}
