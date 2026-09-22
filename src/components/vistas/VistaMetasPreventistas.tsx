@@ -204,7 +204,7 @@ const VistaMetasPreventistas = memo(function VistaMetasPreventistas({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold dark:text-white">Objetivos y rendimiento</h1>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Objetivos y rendimiento</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Sobre pedidos entregados del mes, sin bonificaciones.
           </p>
