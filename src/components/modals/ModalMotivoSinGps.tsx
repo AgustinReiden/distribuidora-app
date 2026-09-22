@@ -12,6 +12,7 @@
 import { useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import type { GpsStatus } from '../../hooks/useGeolocationCapture'
 
 const MIN_LEN = 5
@@ -71,14 +72,11 @@ export default function ModalMotivoSinGps({
         </label>
 
         <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={guardando}
-            className="flex-1 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
-          >
+          <Button type="button" variant="secondary" size="md" onClick={onCancel} disabled={guardando} className="flex-1">
             Cancelar
-          </button>
+          </Button>
+          {/* Ámbar sólido: la tabla de mapeo lo deja tal cual (no hay variante
+              de warning en el primitivo). */}
           <button
             type="button"
             onClick={() => onConfirm(motivo.trim())}

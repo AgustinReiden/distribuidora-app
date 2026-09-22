@@ -1,7 +1,8 @@
 import { useState, useEffect, memo, useRef } from 'react';
 import { z } from 'zod';
-import { Loader2, Truck } from 'lucide-react';
+import { Truck } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import {
   usePerfilRolesQuery,
@@ -248,20 +249,23 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
         </div>
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
-        <button
+        <Button
           onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
+          variant="ghost"
+          size="md"
+          className="text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
         >
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleSubmit}
           disabled={guardando || asignarRolesMut.isPending}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
+          loading={guardando || asignarRolesMut.isPending}
+          variant="primary"
+          size="md"
         >
-          {(guardando || asignarRolesMut.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           Guardar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   );

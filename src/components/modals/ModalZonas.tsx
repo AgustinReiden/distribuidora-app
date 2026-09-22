@@ -10,6 +10,7 @@
 import { memo, useMemo, useState } from 'react';
 import { Loader2, Plus, Pencil, Trash2, Check, X, MapPin, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import {
   useZonasEstandarizadasQuery,
   useCrearZonaMutation,
@@ -149,15 +150,17 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
               className="flex-1 px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
               disabled={crearMut.isPending}
             />
-            <button
+            <Button
               type="button"
+              variant="primary"
+              size="md"
               onClick={handleCrear}
               disabled={crearMut.isPending || !nuevoNombre.trim()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-1.5 font-medium"
+              loading={crearMut.isPending}
             >
-              {crearMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {!crearMut.isPending && <Plus className="w-4 h-4" />}
               Agregar
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -220,44 +223,51 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
 
                     {editing ? (
                       <div className="flex gap-1 shrink-0">
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => handleConfirmarRename(entry)}
                           disabled={renameMut.isPending}
-                          className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded disabled:opacity-50"
+                          loading={renameMut.isPending}
                           title="Guardar"
                           aria-label="Guardar"
+                          className="text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 dark:text-green-400"
                         >
-                          {renameMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                        </button>
-                        <button
+                          {!renameMut.isPending && <Check className="w-4 h-4" />}
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={handleCancelarRename}
                           disabled={renameMut.isPending}
-                          className="p-1.5 text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 rounded disabled:opacity-50"
                           title="Cancelar"
                           aria-label="Cancelar"
                         >
                           <X className="w-4 h-4" />
-                        </button>
+                        </Button>
                       </div>
                     ) : (
                       <div className="flex gap-1 shrink-0">
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => handleIniciarRename(entry)}
                           disabled={working}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded disabled:opacity-50"
                           title={`Renombrar ${entry.nombre}`}
                           aria-label={`Renombrar ${entry.nombre}`}
+                          className="text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 dark:text-blue-400"
                         >
                           <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => handleToggleActiva(entry)}
                           disabled={working}
-                          className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50"
                           title={activa ? `Desactivar ${entry.nombre}` : `Activar ${entry.nombre}`}
                           aria-label={activa ? `Desactivar ${entry.nombre}` : `Activar ${entry.nombre}`}
                         >
@@ -265,17 +275,19 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
                             ? <ToggleRight className="w-5 h-5 text-green-600" />
                             : <ToggleLeft className="w-5 h-5 text-gray-400" />
                           }
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => setConfirmDelete(entry)}
                           disabled={working}
-                          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
                           title={`Eliminar ${entry.nombre}`}
                           aria-label={`Eliminar ${entry.nombre}`}
+                          className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 dark:text-red-400"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </li>
@@ -295,35 +307,33 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
             rechazará la operación y deberás reasignarlos primero.
           </p>
           <div className="flex justify-end gap-2">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setConfirmDelete(null)}
               disabled={deleteMut.isPending}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
             >
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="danger"
+              size="sm"
               onClick={() => handleEliminar(confirmDelete)}
               disabled={deleteMut.isPending}
-              className="px-3 py-1.5 text-sm bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-400 flex items-center gap-1.5"
+              loading={deleteMut.isPending}
             >
-              {deleteMut.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
               Eliminar
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       <div className="p-4 border-t dark:border-gray-600 flex justify-end">
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-        >
+        <Button type="button" variant="ghost" size="md" onClick={onClose}>
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   );

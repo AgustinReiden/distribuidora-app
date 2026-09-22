@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactElement } from 'react';
 import { Trash2, Calendar, User, Package, DollarSign, Loader2, AlertCircle } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { formatPrecio, formatFecha } from '../../utils/formatters';
 import type { EstadoPedido, FormaPago } from '../../types';
 
@@ -212,12 +213,9 @@ export default function ModalPedidosEliminados({
       </div>
 
       <div className="flex justify-end p-4 border-t dark:border-gray-700">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-        >
+        <Button variant="secondary" size="md" onClick={onClose}>
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   );

@@ -4,6 +4,7 @@
  */
 import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { X, AlertTriangle, Package, FileText, AlertCircle, Gift, Minus, Plus } from 'lucide-react'
+import { Button } from '../ui/Button'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { useSimularSalvedadPromoImpactoQuery } from '../../hooks/queries'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
@@ -181,9 +182,9 @@ export default function ModalSalvedadItem({
               <p className="text-sm text-gray-500">Item no entregado o con problema</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Info del producto */}
@@ -384,13 +385,21 @@ export default function ModalSalvedadItem({
 
           {/* Botones touch-friendly */}
           <div className="flex gap-3 pt-2">
-            <button
+            {/* size="touch" (48px) no llega a los 56px del submit de al lado:
+                min-h-[56px] en el className gana y empareja el footer. */}
+            <Button
               type="button"
+              variant="secondary"
+              size="touch"
               onClick={onClose}
-              className="flex-1 min-h-[56px] px-4 py-3 border-2 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium"
+              className="flex-1 min-h-[56px] border-2"
             >
               Cancelar
-            </button>
+            </Button>
+            {/* Cambia de color en runtime: ámbar por defecto, rojo si la salvedad
+                rompe una promo (tienePromoRota). El ámbar se deja crudo (tabla de
+                mapeo); se deja fuera de Button a propósito por el mismo swap
+                condicional que en ModalPagoPedido. */}
             <button
               type="submit"
               disabled={guardando || !motivo || cantidadNum <= 0}

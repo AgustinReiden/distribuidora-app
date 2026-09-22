@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { X, Loader2, AlertTriangle } from 'lucide-react';
+import { X, AlertTriangle } from 'lucide-react';
+import { Button } from '../ui/Button';
 import { MOTIVOS_NO_ENTREGA, type MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 
 export interface ModalNoEntregaProps {
@@ -43,14 +44,16 @@ export default function ModalNoEntrega({
             <h3 className="font-semibold text-stone-800 dark:text-white">No se pudo entregar</h3>
             <p className="text-sm text-stone-500 dark:text-gray-400 truncate">{clienteNombre}</p>
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={onCancelar}
-            className="p-2 rounded-lg hover:bg-stone-100 dark:hover:bg-gray-700 shrink-0"
             aria-label="Cerrar"
+            className="shrink-0"
           >
             <X className="w-5 h-5 text-stone-500 dark:text-gray-400" />
-          </button>
+          </Button>
         </div>
 
         <div className="p-4 space-y-3">
@@ -108,22 +111,22 @@ export default function ModalNoEntrega({
         </div>
 
         <div className="sticky bottom-0 bg-white dark:bg-gray-800 flex gap-2 px-4 py-3 border-t dark:border-gray-700">
-          <button
-            type="button"
-            onClick={onCancelar}
-            disabled={guardando}
-            className="flex-1 py-3 rounded-xl border border-stone-300 dark:border-gray-600 text-stone-700 dark:text-gray-200 font-medium disabled:opacity-50"
-          >
+          {/* size="touch": modal de chofer, parado al lado del camión y con
+              una mano (ver docstring del componente). */}
+          <Button type="button" variant="secondary" size="touch" onClick={onCancelar} disabled={guardando} className="flex-1">
             Volver
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="danger"
+            size="touch"
             onClick={() => motivo && onConfirmar(motivo, nota.trim())}
             disabled={!puedeConfirmar}
-            className="flex-1 py-3 rounded-xl bg-rose-600 text-white font-semibold hover:bg-rose-700 disabled:opacity-50 flex items-center justify-center gap-2"
+            loading={guardando}
+            className="flex-1"
           >
-            {guardando ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirmar'}
-          </button>
+            {!guardando && 'Confirmar'}
+          </Button>
         </div>
       </div>
     </div>

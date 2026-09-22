@@ -4,6 +4,7 @@ import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } f
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import NumberInput from '../ui/NumberInput'
+import { Button } from '../ui/Button'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
@@ -395,12 +396,9 @@ export default function ModalRegistrarPago({
             )}
           </div>
           <div className="mt-6 flex justify-center">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg"
-            >
+            <Button onClick={onClose} variant="secondary" size="md">
               Cerrar
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -424,20 +422,14 @@ export default function ModalRegistrarPago({
             </p>
             <div className="flex gap-3 justify-center">
               {onGenerarRecibo && (
-                <button
-                  onClick={() => onGenerarRecibo(pagoRegistrado, cliente)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2"
-                >
+                <Button onClick={() => onGenerarRecibo(pagoRegistrado, cliente)} variant="primary" size="md">
                   <FileText className="w-4 h-4" />
                   Generar Recibo
-                </button>
+                </Button>
               )}
-              <button
-                onClick={onClose}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg"
-              >
+              <Button onClick={onClose} variant="secondary" size="md">
                 Cerrar
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -455,9 +447,9 @@ export default function ModalRegistrarPago({
               <h2 className="text-xl font-bold text-gray-900 dark:text-white">Registrar Pago</h2>
               <p className="text-gray-600 dark:text-gray-400">{cliente.nombre_fantasia}</p>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+            <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
               <X className="w-5 h-5" />
-            </button>
+            </Button>
           </div>
 
           {/* Balance info */}
@@ -573,14 +565,16 @@ export default function ModalRegistrarPago({
                     )}
                   </div>
                 ))}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="md"
                   onClick={handleAddPago}
-                  className="w-full flex items-center justify-center gap-1 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg border border-dashed border-blue-300 dark:border-blue-700"
+                  className="w-full gap-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-dashed border-blue-300 dark:border-blue-700"
                 >
                   <Plus className="w-4 h-4" />
                   Agregar forma de pago
-                </button>
+                </Button>
               </div>
 
               {/* Total dividido */}
@@ -747,17 +741,17 @@ export default function ModalRegistrarPago({
               </button>
             )}
             <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg font-medium"
-              >
+              {/* size="touch" (48px), no "lg": iguala al botón ámbar crudo de
+                  arriba (py-3 = 48px) para no desnivelar el footer. */}
+              <Button type="button" variant="secondary" size="touch" onClick={onClose} className="flex-1">
                 Cancelar
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
+                variant="success"
+                size="touch"
                 disabled={loading || (pagoDividido ? totalDividido <= 0 : !monto)}
-                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium flex items-center justify-center gap-2"
+                className="flex-1"
               >
                 {loading ? (
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
@@ -767,7 +761,7 @@ export default function ModalRegistrarPago({
                     Registrar
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         </form>

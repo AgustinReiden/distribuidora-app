@@ -18,8 +18,9 @@
  * combinaciones que van a fallar del otro lado.
  */
 import { memo, useMemo, useState } from 'react';
-import { Loader2, Plus, AlertCircle, Target, Search, Check } from 'lucide-react';
+import { Plus, AlertCircle, Target, Search, Check } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import NumberInput from '../ui/NumberInput';
 import {
   useGuardarMetaPreventistaMutation,
@@ -423,21 +424,22 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
           </p>
         )}
 
-        <button
+        <Button
           type="button"
+          variant="primary"
+          size="md"
           onClick={handleGuardar}
           disabled={guardarMut.isPending}
-          className="w-full py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          loading={guardarMut.isPending}
+          className="w-full gap-1.5"
         >
-          {guardarMut.isPending
-            ? <Loader2 className="w-4 h-4 animate-spin" />
-            : esEdicion ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          {!guardarMut.isPending && (esEdicion ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />)}
           {esEdicion
             ? 'Guardar cambios'
             : seleccionados.size > 1
               ? `Agregar objetivo a ${seleccionados.size} preventistas`
               : 'Agregar objetivo'}
-        </button>
+        </Button>
       </div>
 
       <div className="p-4 border-t dark:border-gray-600 flex items-center justify-between gap-2">
@@ -445,13 +447,9 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
           <Target className="w-3.5 h-3.5" />
           Los objetivos y su avance se ven en el panel.
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-        >
+        <Button type="button" variant="ghost" size="md" onClick={onClose}>
           Cerrar
-        </button>
+        </Button>
       </div>
     </ModalBase>
   );

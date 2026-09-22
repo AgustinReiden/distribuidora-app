@@ -1,8 +1,8 @@
 import { useState, memo, Suspense } from 'react';
 import type { ChangeEvent } from 'react';
 import { z } from 'zod';
-import { Loader2 } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import NumberInput from '../ui/NumberInput';
 import SelectorConAlta from '../productos/SelectorConAlta';
 import { useZodValidation } from '../../hooks/useZodValidation';
@@ -748,8 +748,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
                   />
                 </div>
                 {esAdmin && (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="md"
                     onClick={() => {
                       if (corrigiendoCpp) {
                         // Cancelar: volver al valor original sin persistir
@@ -758,10 +760,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
                       }
                       setCorrigiendoCpp(!corrigiendoCpp);
                     }}
-                    className="px-3 py-2 text-xs font-medium border rounded-lg text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                    className="border text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                   >
                     {corrigiendoCpp ? 'Cancelar' : 'Corregir'}
-                  </button>
+                  </Button>
                 )}
               </div>
               <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
@@ -922,10 +924,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, provee
         )}
       </div>
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
-        <button onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg">Cancelar</button>
-        <button onClick={handleSubmit} disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center">
-          {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar
-        </button>
+        {/* El footer (bg-gray-50) no tiene dark:bg, así que sigue claro en modo
+            oscuro: el className pisa también dark:text/dark:hover para que
+            siga siendo texto oscuro sobre fondo claro, como el <button> original. */}
+        <Button variant="ghost" size="md" onClick={onClose} className="text-gray-700 hover:bg-gray-200 dark:text-gray-700 dark:hover:bg-gray-200">Cancelar</Button>
+        <Button variant="primary" size="md" onClick={handleSubmit} disabled={guardando} loading={guardando}>Guardar</Button>
       </div>
     </ModalBase>
   );

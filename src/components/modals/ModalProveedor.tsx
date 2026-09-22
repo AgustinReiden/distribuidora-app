@@ -2,6 +2,7 @@ import React, { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { z } from 'zod';
 import { X, Building2, Phone, Mail, MapPin, FileText, User, Hash, CheckCircle } from 'lucide-react';
 import { AddressAutocomplete } from '../AddressAutocomplete';
+import { Button } from '../ui/Button';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { formatCuitInput } from '../../utils/formatters';
 import { useZonasEstandarizadasQuery } from '../../hooks/queries';
@@ -186,12 +187,14 @@ export default function ModalProveedor({
               </p>
             </div>
           </div>
-          <button
+          <Button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            variant="ghost"
+            size="iconSm"
+            aria-label="Cerrar"
           >
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Formulario */}
@@ -338,17 +341,21 @@ export default function ModalProveedor({
 
         {/* Footer */}
         <div className="flex gap-3 p-4 border-t dark:border-gray-700 shrink-0">
-          <button
+          <Button
             type="button"
             onClick={onClose}
-            className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            variant="secondary"
+            size="md"
+            className="flex-1"
           >
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => handleSubmit(e as unknown as FormEvent<HTMLFormElement>)}
             disabled={guardando}
-            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+            variant="primary"
+            size="md"
+            className="flex-1"
           >
             {guardando ? (
               <>
@@ -361,7 +368,7 @@ export default function ModalProveedor({
                 {proveedor ? 'Actualizar' : 'Crear Proveedor'}
               </>
             )}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

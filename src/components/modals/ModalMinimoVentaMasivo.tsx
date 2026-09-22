@@ -12,6 +12,7 @@
 import { useMemo, useState } from 'react'
 import { PackageMinus, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { useActualizarMinimoVentaMasivoMutation } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -189,21 +190,12 @@ export default function ModalMinimoVentaMasivo({
       </div>
 
       <div className="flex justify-end gap-2 p-4 border-t dark:border-gray-700">
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-4 py-2 rounded-lg border dark:border-gray-600 text-sm dark:text-gray-200"
-        >
+        <Button type="button" variant="secondary" size="md" onClick={onClose}>
           Cancelar
-        </button>
-        <button
-          type="button"
-          onClick={handleAplicar}
-          disabled={!puedeAplicar}
-          className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-indigo-700"
-        >
+        </Button>
+        <Button type="button" variant="primary" size="md" onClick={handleAplicar} disabled={!puedeAplicar}>
           {mutation.isPending ? 'Aplicando…' : quitaMinimo ? 'Quitar mínimo' : 'Aplicar mínimo'}
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )

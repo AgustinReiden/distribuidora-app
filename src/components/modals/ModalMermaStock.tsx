@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { X, AlertTriangle, Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { getErrorMessage } from '../../utils/errorHandling'
+import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import type { Producto } from '../../types'
 
@@ -143,9 +144,12 @@ export default function ModalMermaStock({
               <p className="text-sm text-gray-500">Registrar merma o perdida</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          {/* Sin aria-label a propósito: ModalMermaStock.test.tsx fija que este
+              botón no tiene nombre accesible hoy; ModalBase ya lo va a rotular
+              cuando WP-26 migre este modal a mano. */}
+          <Button onClick={onClose} variant="ghost" size="iconSm">
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Info del producto */}
@@ -245,17 +249,18 @@ export default function ModalMermaStock({
 
           {/* Botones */}
           <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
+            <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
               Cancelar
-            </button>
-            <button
+            </Button>
+            {/* No es el spinner Loader2 (es un "..." literal), así que no
+                encaja en el contrato de `loading` del primitivo: se deja la
+                doble rama tal cual estaba. */}
+            <Button
               type="submit"
+              variant="danger"
+              size="md"
               disabled={guardando || !motivo || cantidadNum <= 0}
-              className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              className="flex-1"
             >
               {guardando ? (
                 <>
@@ -268,7 +273,7 @@ export default function ModalMermaStock({
                   Registrar Baja
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

@@ -1,7 +1,8 @@
 import { useState, useMemo, memo, useEffect } from 'react';
 import type { ChangeEvent } from 'react';
-import { Loader2, AlertTriangle, Check, Users, MapPin, Route, Clock, Navigation, Settings, Save } from 'lucide-react';
+import { AlertTriangle, Check, Users, MapPin, Route, Clock, Navigation, Settings, Save } from 'lucide-react';
 import ModalBase from './ModalBase';
+import { Button } from '../ui/Button';
 import { getDepositoCoords, setDepositoCoords } from '../../hooks/useOptimizarRuta';
 import type { ClienteDB, PerfilDB } from '../../types';
 import type { RutaPreventistaResponse } from '../../hooks/useOptimizarRutaPreventista';
@@ -96,6 +97,9 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
     <ModalBase title="Optimizar Recorrido de Preventista" onClose={onClose} maxWidth="max-w-2xl">
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Depot config (collapsible) */}
+        {/* Header de disclosure con varios hijos (icono + label + chevron) y
+            padding p-3 uniforme: no calza con ningún tamaño de la tabla del
+            primitivo y no es color crudo, así que se deja (WP-17d). */}
         <div className="border dark:border-gray-600 rounded-lg">
           <button
             onClick={() => setMostrarConfigDeposito(!mostrarConfigDeposito)}
@@ -142,16 +146,13 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
                 <p className="text-xs text-gray-500">
                   Tip: Busca tu direccion en Google Maps, click derecho y copia las coordenadas
                 </p>
-                <button
-                  onClick={handleGuardarDeposito}
-                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-                >
+                <Button onClick={handleGuardarDeposito} variant="success" size="md">
                   {depositoGuardado ? (
                     <><Check className="w-4 h-4" /><span>Guardado!</span></>
                   ) : (
                     <><Save className="w-4 h-4" /><span>Guardar</span></>
                   )}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -305,21 +306,19 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
       </div>
 
       <div className="flex justify-between items-center p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-        <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">
+        <Button onClick={onClose} variant="ghost" size="md">
           Cerrar
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleOptimizar}
           disabled={!preventistaSeleccionado || loading || clientesParaOptimizar.length === 0}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          variant="primary"
+          size="md"
+          loading={loading}
         >
-          {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Route className="w-4 h-4" />
-          )}
+          {!loading && <Route className="w-4 h-4" />}
           <span>{loading ? 'Optimizando...' : 'Optimizar Recorrido'}</span>
-        </button>
+        </Button>
       </div>
     </ModalBase>
   );

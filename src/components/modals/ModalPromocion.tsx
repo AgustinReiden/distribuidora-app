@@ -6,6 +6,7 @@
  */
 import { useState, useMemo } from 'react'
 import { X, Search, Gift, ChevronDown, ChevronRight, Layers, Ban, Package, Droplet, AlertTriangle } from 'lucide-react'
+import { Button } from '../ui/Button'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
@@ -282,9 +283,9 @@ export default function ModalPromocion({
           <h2 className="text-lg font-semibold dark:text-white">
             {isEditing ? 'Editar Promocion' : 'Nueva Promocion'}
           </h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
             <X className="w-5 h-5 text-gray-500" />
-          </button>
+          </Button>
         </div>
 
         {/* Body */}
@@ -744,14 +745,16 @@ export default function ModalPromocion({
 
           {/* Opciones avanzadas (collapsible) */}
           <div className="border-t dark:border-gray-700 pt-3">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setMostrarAvanzadas(v => !v)}
-              className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+              className="text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
             >
               {mostrarAvanzadas ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
               <span>Opciones avanzadas</span>
-            </button>
+            </Button>
             {mostrarAvanzadas && (
               <div className="mt-3 pl-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -782,19 +785,12 @@ export default function ModalPromocion({
 
         {/* Footer */}
         <div className="flex justify-end gap-2 px-5 py-4 border-t dark:border-gray-700">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-          >
+          <Button onClick={onClose} variant="ghost" size="md">
             Cancelar
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+          </Button>
+          <Button onClick={handleSubmit} variant="primary" size="md" disabled={saving}>
             {saving ? 'Guardando...' : isEditing ? 'Actualizar' : 'Crear Promocion'}
-          </button>
+          </Button>
         </div>
 
         {/* Confirmación del cambio de factor. Va DENTRO del modal: como hermano
@@ -843,19 +839,12 @@ export default function ModalPromocion({
               )}
 
               <div className="flex justify-end gap-2 mt-4">
-                <button
-                  onClick={() => setConfirmandoFactor(false)}
-                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-                >
+                <Button onClick={() => setConfirmandoFactor(false)} variant="ghost" size="md">
                   Volver
-                </button>
-                <button
-                  onClick={guardar}
-                  disabled={saving || cargandoPreview}
-                  className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                </Button>
+                <Button onClick={guardar} variant="primary" size="md" disabled={saving || cargandoPreview}>
                   Guardar igual
-                </button>
+                </Button>
               </div>
             </div>
           </div>

@@ -19,6 +19,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, DollarSign, Plus, Trash2, AlertCircle, X } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
@@ -323,11 +324,13 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                       // se apaga y dice por qué, para no llegar al error crudo.
                       const cajaCerrada = !!fechaMinima && !!p.fecha && p.fecha < fechaMinima
                       return (
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="iconSm"
                           onClick={() => { if (!cajaCerrada) void onAnularPago(p.id) }}
                           disabled={guardando || cajaCerrada}
-                          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 dark:text-red-400"
                           aria-label="Anular pago"
                           title={
                             cajaCerrada
@@ -336,7 +339,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                           }
                         >
                           <X className="w-4 h-4" />
-                        </button>
+                        </Button>
                       )
                     })()}
                   </div>
@@ -457,18 +460,19 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         </div>
       )}
 
-      <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
-        >
+      <div className="flex flex-wrap justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800">
+        <Button variant="ghost" size="md" onClick={onClose}>
           Cancelar
-        </button>
+        </Button>
         {/* Mismo botón, dos situaciones. Con saldo es entregar fiado, y va en
             ámbar porque deja plata en la calle. Sin saldo el pedido ya está
             cobrado y esto sólo confirma la entrega: ofrecerle "cuenta corriente
             (sin cobrar)" al chofer que acaba de recibir la plata en la mano lo
-            hace cancelar, y la parada le queda sin entregar. */}
+            hace cancelar, y la parada le queda sin entregar.
+            Se deja fuera de Button a propósito: el color cambia en runtime
+            entre ámbar (se deja, tabla de mapeo) y verde crudo (que sí sería
+            obligatorio migrar), y el primitivo no tiene una variante que
+            cubra ese swap condicional sin perder el matiz ámbar. */}
         {modoEntregaTransportista && onEntregarSinPago && (
           <button
             onClick={() => { void handleEntregarSinPago() }}
@@ -484,14 +488,15 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           </button>
         )}
         {!soloAnulacion && saldoPendiente > 0 && (
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={() => { void handleSubmit() }}
             disabled={guardando || excedeSaldo || !algunMontoValido}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center disabled:opacity-50"
+            loading={guardando}
           >
-            {guardando && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             {modoEntregaTransportista ? 'Entregar y registrar pago' : 'Registrar pago'}
-          </button>
+          </Button>
         )}
       </div>
     </ModalBase>

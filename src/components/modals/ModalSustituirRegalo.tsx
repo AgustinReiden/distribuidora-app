@@ -19,8 +19,9 @@
  * Maneja idempotencia (UUID generado en el primer render).
  */
 import { useMemo, useState, memo } from 'react'
-import { Loader2, Gift, AlertTriangle, ChevronDown, ChevronUp, Info } from 'lucide-react'
+import { Gift, AlertTriangle, ChevronDown, ChevronUp, Info } from 'lucide-react'
 import ModalBase from './ModalBase'
+import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { useProductosQuery, usePromoAcumuladorQuery } from '../../hooks/queries'
 import { useSustituirRegaloMutation } from '../../hooks/queries/useSustituirRegaloMutation'
@@ -320,21 +321,24 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
       </div>
 
       <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
-        <button
+        <Button
           onClick={onClose}
           disabled={sustituirMut.isPending}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg disabled:opacity-50"
+          variant="ghost"
+          size="md"
+          className="text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
         >
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleConfirmar}
           disabled={!puedeConfirmar}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+          loading={sustituirMut.isPending}
+          variant="primary"
+          size="md"
         >
-          {sustituirMut.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
           Cambiar regalo
-        </button>
+        </Button>
       </div>
     </ModalBase>
   )
