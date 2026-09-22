@@ -9,8 +9,7 @@ import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
-import PanelPedidosNoEntregados from '../pedidos/PanelPedidosNoEntregados'
-import PanelPedidosTrabados from '../pedidos/PanelPedidosTrabados'
+import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { fechaLocalISO, fechaHaceDias, getFormaPagoDisplay, formatPrecio } from '../../utils/formatters'
 import { explicarErrorDeSesion } from '../../utils/sesionVencida'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
@@ -1944,22 +1943,17 @@ export default function PedidosContainer(): React.ReactElement {
 
   return (
     <>
-      {/* Los que volvieron sin entregar (mig 144). Van arriba de la lista
-          porque vuelven a 'pendiente' y ahi se confunden con los nuevos. */}
-      <div className="mb-3">
-        <PanelPedidosNoEntregados />
-      </div>
-
-      {/* Los que quedaron trabados en 'asignado': no los ve el pool de "Armar
-          ruta", asi que sin este panel no aparecen en ninguna pantalla. Dispara
-          el MISMO handler que la fila del pedido — el boton ya existia, lo que
-          faltaba era enterarse de que habia que usarlo. */}
-      <div className="mb-3">
-        <PanelPedidosTrabados
-          enabled={isAdmin || isEncargado}
-          onVolverAPendiente={p => handleVolverAPendiente(p as unknown as PedidoDB)}
-        />
-      </div>
+      {/* Una linea de resumen que despliega los dos paneles de alerta (#714):
+          los que volvieron sin entregar (mig 144), que van arriba de la lista
+          porque vuelven a 'pendiente' y ahi se confunden con los nuevos, y los
+          que quedaron trabados en 'asignado', que no los ve el pool de "Armar
+          ruta" y sin este panel no aparecen en ninguna pantalla. El de trabados
+          dispara el MISMO handler que la fila del pedido — el boton ya existia,
+          lo que faltaba era enterarse de que habia que usarlo. */}
+      <AvisosPedidos
+        enabled={isAdmin || isEncargado}
+        onVolverAPendiente={p => handleVolverAPendiente(p as unknown as PedidoDB)}
+      />
 
       <Suspense fallback={<LoadingState />}>
         <VistaPedidos
