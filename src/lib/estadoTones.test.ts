@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { toneDeEstadoPedido, toneDeEstadoPago, toneDeRol, type Tone } from './estadoTones'
+import {
+  toneDeEstadoPedido,
+  toneDeEstadoPago,
+  toneDeRol,
+  toneDeEstadoCompra,
+  ETIQUETA_ESTADO_COMPRA,
+  type Tone,
+} from './estadoTones'
 
 describe('toneDeEstadoPedido', () => {
   it.each<[string, Tone]>([
@@ -55,5 +62,31 @@ describe('toneDeRol', () => {
 
   it.each([null, undefined, '', 'inventado'])('%s cae en neutral', (rol) => {
     expect(toneDeRol(rol)).toBe('neutral')
+  })
+})
+
+describe('toneDeEstadoCompra', () => {
+  it.each<[string, Tone]>([
+    ['pendiente', 'warning'],
+    ['recibida', 'success'],
+    ['parcial', 'brand'],
+    ['cancelada', 'danger'],
+  ])('%s -> %s', (estado, tono) => {
+    expect(toneDeEstadoCompra(estado)).toBe(tono)
+  })
+
+  it.each([null, undefined, '', 'inventado'])('%s cae en neutral', (estado) => {
+    expect(toneDeEstadoCompra(estado)).toBe('neutral')
+  })
+})
+
+describe('ETIQUETA_ESTADO_COMPRA', () => {
+  it('tiene los mismos labels que usaban los ESTADOS_COMPRA locales', () => {
+    expect(ETIQUETA_ESTADO_COMPRA).toEqual({
+      pendiente: 'Pendiente',
+      recibida: 'Recibida',
+      parcial: 'Parcial',
+      cancelada: 'Cancelada',
+    })
   })
 })

@@ -3,8 +3,10 @@ import type { ChangeEvent } from 'react';
 import { FileDown, Package, Truck, Printer, Loader2, CalendarDays, Search } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { useRecorridosHojaRutaQuery } from '../../hooks/queries';
+import { toneDeEstadoPedido } from '../../lib/estadoTones';
 import type { PedidoDB, PerfilDB } from '../../types';
 
 // Normaliza para búsquedas: saca acentos y pasa a minúsculas.
@@ -217,7 +219,6 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
   };
 
   const getEstadoLabel = (e: string): string => e === 'pendiente' ? 'Pendiente' : e === 'en_preparacion' ? 'En preparacion' : e === 'asignado' ? 'En camino' : 'Entregado';
-  const getEstadoColor = (e: string): string => e === 'pendiente' ? 'bg-yellow-100 text-yellow-800' : e === 'en_preparacion' ? 'bg-orange-100 text-orange-800' : e === 'asignado' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800';
 
   // El alcance (página/todos) solo aplica a Orden de Preparación. Hoja de Ruta
   // se descarga desde la ruta armada (día + transportista) y Comandas carga todo.
@@ -502,9 +503,9 @@ const ModalExportarPDF = memo(function ModalExportarPDF({
                     <div className="flex-1">
                       <div className="flex items-center justify-between">
                         <p className="font-medium">#{pedido.id} - {pedido.cliente?.nombre_fantasia}</p>
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${getEstadoColor(pedido.estado)}`}>
+                        <Badge tone={toneDeEstadoPedido(pedido.estado)} className="font-normal">
                           {getEstadoLabel(pedido.estado)}
-                        </span>
+                        </Badge>
                       </div>
                       <p className="text-sm text-gray-500">{pedido.cliente?.direccion}</p>
                       <p className="text-sm font-medium text-blue-600">{formatPrecio(pedido.total)}</p>
