@@ -17,7 +17,7 @@ import { useRegistrarMermaMutation } from '../../hooks/queries'
 import { useProveedoresActivosQuery } from '../../hooks/queries'
 import { useClientesQuery } from '../../hooks/queries'
 import { useRegistrarCambioProductoMutation, type RegistrarCambioInput } from '../../hooks/queries'
-import { useCategoriasQuery } from '../../hooks/queries'
+import { useCategoriasQuery, useAsegurarCatalogo, type NombresNuevosCatalogo } from '../../hooks/queries'
 import { useCrearGrupoPrecioMutation, useGruposPrecioQuery } from '../../hooks/queries'
 import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
 import type { TabProductos } from '../productos/ProductosTabs'
@@ -109,6 +109,7 @@ export default function ProductosContainer(): React.ReactElement {
   const registrarCambioProducto = useRegistrarCambioProductoMutation()
   const aplicarControlStock = useAplicarControlStockMutation()
   const crearGrupoPrecio = useCrearGrupoPrecioMutation()
+  const { asegurar: asegurarCatalogo, creando: creandoCatalogo } = useAsegurarCatalogo()
 
   // Estado de modales
   const [modalProductoOpen, setModalProductoOpen] = useState(false)
@@ -312,8 +313,14 @@ export default function ProductosContainer(): React.ReactElement {
     }
   }, [registrarCambioProducto, productos, notify])
 
-  const handleGuardarProducto = useCallback(async (data: ProductoFormInput) => {
+  const handleGuardarProducto = useCallback(async (
+    { categoria_nueva, marca_nueva, ...ficha }: ProductoFormInput & NombresNuevosCatalogo
+  ) => {
     try {
+      // La categoría o la marca tipeada con "+ Nueva" se crea antes que el
+      // producto: la marca es una FK, y la categoría necesita su fila para que
+      // el trigger le ponga el id (mig 146).
+      const data = { ...ficha, ...(await asegurarCatalogo({ categoria_nueva, marca_nueva })) }
       if (productoEditando) {
         await actualizarProducto.mutateAsync({ id: productoEditando.id, data })
         notify.success('Producto actualizado')
@@ -330,7 +337,7 @@ export default function ProductosContainer(): React.ReactElement {
       notify.error(error instanceof Error ? error.message : 'Error al guardar producto')
       throw error
     }
-  }, [productoEditando, actualizarProducto, crearProducto, notify])
+  }, [productoEditando, actualizarProducto, crearProducto, notify, asegurarCatalogo])
 
   // "Crear condición" desde la ficha: se cierra la ficha y se abre el modal de
   // condición mayorista con el producto ya tildado. No se anidan los dos
@@ -426,7 +433,7 @@ export default function ProductosContainer(): React.ReactElement {
               setModalProductoOpen(false)
               setProductoEditando(null)
             }}
-            guardando={crearProducto.isPending || actualizarProducto.isPending}
+            guardando={crearProducto.isPending || actualizarProducto.isPending || creandoCatalogo}
             esAdmin={isAdmin}
             onCrearCondicionMayorista={isAdmin ? handleCrearCondicionMayorista : undefined}
           />

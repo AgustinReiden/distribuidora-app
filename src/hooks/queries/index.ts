@@ -52,6 +52,10 @@ export {
 } from './useMarcasQuery'
 export type { MarcaDB, AsignarMarcaMasivaArgs } from './useMarcasQuery'
 
+// Alta de categoría y marca desde la ficha y desde la compra
+export { useAsegurarCatalogo } from './useAsegurarCatalogo'
+export type { NombresNuevosCatalogo, CatalogoResuelto } from './useAsegurarCatalogo'
+
 // Metas por preventista (migs 159-161)
 export {
   metasKeys,
