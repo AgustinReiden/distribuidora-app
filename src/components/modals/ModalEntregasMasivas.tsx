@@ -6,7 +6,9 @@ import { Button } from '../ui/Button'
 // `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import { usePedidosNoEntregadosQuery } from '../../hooks/queries'
-import { getEstadoColor, getEstadoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { getEstadoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { Badge } from '../ui/Badge'
+import { toneDeEstadoPedido } from '../../lib/estadoTones'
 import type { PerfilDB } from '../../types'
 
 export interface ModalEntregasMasivasProps {
@@ -200,9 +202,9 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-400">#{pedido.id}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoColor(pedido.estado)}`}>
+                    <Badge tone={toneDeEstadoPedido(pedido.estado)} className="font-medium">
                       {getEstadoLabel(pedido.estado)}
-                    </span>
+                    </Badge>
                   </div>
                   <p className="font-medium text-gray-800 dark:text-white truncate">
                     {pedido.cliente?.nombre_fantasia || 'Sin cliente'}

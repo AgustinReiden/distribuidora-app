@@ -1,7 +1,9 @@
 import { UserCog, Edit2 } from 'lucide-react';
-import { getRolColor, getRolLabel } from '../../utils/formatters';
+import { getRolLabel } from '../../utils/formatters';
 import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
 import LoadingSpinner from '../layout/LoadingSpinner';
+import { toneDeRol } from '../../lib/estadoTones';
 import type { PerfilDB } from '../../types';
 
 export interface VistaUsuariosProps {
@@ -47,9 +49,9 @@ export default function VistaUsuarios({
                   <td className="px-4 py-3 font-medium text-gray-800 dark:text-white">{usuario.nombre}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{usuario.email}</td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-sm ${getRolColor(usuario.rol)}`}>
+                    <Badge tone={toneDeRol(usuario.rol)} className="py-1 text-sm font-normal">
                       {getRolLabel(usuario.rol)}
-                    </span>
+                    </Badge>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-sm ${

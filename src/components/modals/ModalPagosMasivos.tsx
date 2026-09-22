@@ -8,7 +8,9 @@ import { Button } from '../ui/Button'
 // ModalPedido/ModalEditarPedido.
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import { usePedidosNoPagadosQuery, useRendicionCerradaQuery } from '../../hooks/queries'
-import { getEstadoPagoColor, getEstadoPagoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { getEstadoPagoLabel, formatPrecio, fechaLocalISO } from '../../utils/formatters'
+import { Badge } from '../ui/Badge'
+import { toneDeEstadoPago } from '../../lib/estadoTones'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 
 export interface ModalPagosMasivosProps {
@@ -256,9 +258,9 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-400">#{pedido.id}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getEstadoPagoColor(pedido.estado_pago)}`}>
+                    <Badge tone={toneDeEstadoPago(pedido.estado_pago)} className="font-medium">
                       {getEstadoPagoLabel(pedido.estado_pago)}
-                    </span>
+                    </Badge>
                   </div>
                   <p className="font-medium text-gray-800 dark:text-white truncate">
                     {pedido.cliente?.nombre_fantasia || 'Sin cliente'}

@@ -8,7 +8,9 @@ import { useFichaCliente, usePagos } from '../../hooks/supabase'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { puedeRegistrarPagoCliente, puedeAnularPago } from '../../lib/permisos'
-import { formatPrecio as formatCurrency, formatFecha as formatDate, getEstadoColor, getEstadoPagoColor } from '../../utils/formatters'
+import { formatPrecio as formatCurrency, formatFecha as formatDate } from '../../utils/formatters'
+import { Badge } from '../ui/Badge'
+import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
 import { logger } from '../../utils/logger'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
 
@@ -402,12 +404,12 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                         <div>
                           <p className="text-sm text-gray-500">{formatDate(pedido.created_at)}</p>
                           <div className="flex gap-2 mt-1">
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getEstadoColor(pedido.estado)}`}>
+                            <Badge tone={toneDeEstadoPedido(pedido.estado)} className="rounded font-medium">
                               {pedido.estado}
-                            </span>
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getEstadoPagoColor(pedido.estado_pago)}`}>
+                            </Badge>
+                            <Badge tone={toneDeEstadoPago(pedido.estado_pago)} className="rounded font-medium">
                               {pedido.estado_pago}
-                            </span>
+                            </Badge>
                           </div>
                         </div>
                       </div>

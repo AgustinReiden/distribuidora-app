@@ -3,22 +3,12 @@ import { formatearFechaVencimiento } from '../../utils/vencimientos'
 import { X, ShoppingCart, Package, Building2, Calendar, CreditCard, FileText, TrendingUp, Hash } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import { Button } from '../ui/Button'
+import { Badge } from '../ui/Badge'
+import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones'
 import type { CondicionIva, Producto, Proveedor, Usuario } from '../../types'
 
 type EstadoCompra = 'pendiente' | 'recibida' | 'parcial' | 'cancelada';
 type FormaPagoCompra = 'efectivo' | 'transferencia' | 'cheque' | 'cuenta_corriente' | 'tarjeta';
-
-interface EstadoConfig {
-  label: string;
-  color: string;
-}
-
-const ESTADOS_COMPRA: Record<EstadoCompra, EstadoConfig> = {
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' },
-  recibida: { label: 'Recibida', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' },
-  parcial: { label: 'Parcial', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' },
-  cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' }
-}
 
 const FORMAS_PAGO: Record<FormaPagoCompra, string> = {
   efectivo: 'Efectivo',
@@ -127,7 +117,7 @@ export default function ModalDetalleCompra({
 
   if (!compra) return null
 
-  const estado = ESTADOS_COMPRA[compra.estado] || ESTADOS_COMPRA.pendiente
+  const estadoNormalizado = ETIQUETA_ESTADO_COMPRA[compra.estado] ? compra.estado : 'pendiente'
   // `bonificacion` es un PORCENTAJE (mig 113), no unidades bonificadas: sumarlo
   // acá le agregaba "5" unidades a una línea con 5% de descuento.
   const totalUnidades = (compra.items || []).reduce((sum, i) => sum + i.cantidad, 0)
@@ -159,9 +149,9 @@ export default function ModalDetalleCompra({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`px-3 py-1 rounded-full text-xs font-medium ${estado.color}`}>
-              {estado.label}
-            </span>
+            <Badge tone={toneDeEstadoCompra(estadoNormalizado)} className="px-3 py-1 font-medium">
+              {ETIQUETA_ESTADO_COMPRA[estadoNormalizado]}
+            </Badge>
             <Button onClick={onClose} variant="ghost" size="iconSm" aria-label="Cerrar">
               <X className="w-5 h-5" />
             </Button>

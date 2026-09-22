@@ -7,6 +7,8 @@ import LoadingSpinner from '../layout/LoadingSpinner';
 import QueryErrorState from '../layout/QueryErrorState';
 import Paginacion from '../layout/Paginacion';
 import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
+import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones';
 import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from '../../types';
 
 // =============================================================================
@@ -16,19 +18,7 @@ import type { CompraDBExtended, ProveedorDBExtended, CompraItemDBExtended } from
 type EstadoCompra = 'pendiente' | 'recibida' | 'parcial' | 'cancelada';
 type FiltroEstado = 'todos' | EstadoCompra;
 
-interface EstadoConfig {
-  label: string;
-  color: string;
-}
-
 const ITEMS_PER_PAGE = 15;
-
-const ESTADOS_COMPRA: Record<EstadoCompra, EstadoConfig> = {
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' },
-  recibida: { label: 'Recibida', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' },
-  parcial: { label: 'Parcial', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' },
-  cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' }
-};
 
 // =============================================================================
 // INTERFACES DE PROPS
@@ -275,7 +265,7 @@ export default function VistaCompras({
             className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 text-sm"
           >
             <option value="todos">Todos estados</option>
-            {Object.entries(ESTADOS_COMPRA).map(([key, { label }]) => (
+            {Object.entries(ETIQUETA_ESTADO_COMPRA).map(([key, label]) => (
               <option key={key} value={key}>{label}</option>
             ))}
           </select>
@@ -371,7 +361,7 @@ export default function VistaCompras({
               <tbody className="divide-y dark:divide-gray-700">
                 {comprasPaginadas.map(compra => {
                   const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
-                  const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
+                  const estadoNormalizado = ETIQUETA_ESTADO_COMPRA[estadoKey] ? estadoKey : 'pendiente';
                   const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
                   const nc = ncMap.get(String(compra.id));
 
@@ -415,9 +405,9 @@ export default function VistaCompras({
                       </td>
                       <td className="px-4 py-3 text-center">
                         <div className="flex flex-col items-center gap-1">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${estado.color}`}>
-                            {estado.label}
-                          </span>
+                          <Badge tone={toneDeEstadoCompra(estadoNormalizado)} className="py-1 font-medium">
+                            {ETIQUETA_ESTADO_COMPRA[estadoNormalizado]}
+                          </Badge>
                           {nc && (
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-1">
                               <FileText className="w-3 h-3" />
@@ -495,7 +485,7 @@ export default function VistaCompras({
           <div className="grid gap-3 md:hidden">
             {comprasPaginadas.map(compra => {
               const estadoKey = (compra.estado || 'pendiente') as EstadoCompra;
-              const estado = ESTADOS_COMPRA[estadoKey] || ESTADOS_COMPRA.pendiente;
+              const estadoNormalizado = ETIQUETA_ESTADO_COMPRA[estadoKey] ? estadoKey : 'pendiente';
               const totalItems = (compra.items || []).reduce((sum: number, i: CompraItemDBExtended) => sum + i.cantidad, 0);
               const nc = ncMap.get(String(compra.id));
               const proveedorNombre = compra.proveedor?.nombre || compra.proveedor_nombre || 'Sin proveedor';
@@ -535,9 +525,9 @@ export default function VistaCompras({
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${estado.color}`}>
-                      {estado.label}
-                    </span>
+                    <Badge tone={toneDeEstadoCompra(estadoNormalizado)} className="py-1 font-medium">
+                      {ETIQUETA_ESTADO_COMPRA[estadoNormalizado]}
+                    </Badge>
                     {nc && (
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 flex items-center gap-1">
                         <FileText className="w-3 h-3" />

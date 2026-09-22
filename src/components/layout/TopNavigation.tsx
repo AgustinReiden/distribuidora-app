@@ -7,7 +7,7 @@ import {
   UserCog,
   Settings, Route, ShoppingBag, Building2, Banknote, AlertTriangle, Database, Percent, ArrowRightLeft, Gift, Send, MapPin, Clock, Target, ClipboardCheck, CalendarClock
 } from 'lucide-react';
-import { getRolColor, getRolLabel } from '../../utils/formatters';
+import { getRolLabel } from '../../utils/formatters';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuthData } from '../../contexts/AuthDataContext';
 import DbNotificationBell from './DbNotificationBell';
@@ -15,6 +15,8 @@ import SucursalSelector from './SucursalSelector';
 import VincularTelegramButton from '../perfil/VincularTelegramButton';
 import { BUILD_ACTUAL } from '../../hooks/useActualizacionDisponible';
 import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
+import { toneDeRol } from '../../lib/estadoTones';
 import type { PerfilDB, RolUsuario } from '../../types';
 
 // =============================================================================
@@ -347,9 +349,9 @@ export default function TopNavigation({
                   <div className="px-4 py-3 border-b dark:border-gray-700">
                     <p className="font-medium text-gray-800 dark:text-white truncate">{perfil?.nombre}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{perfil?.email}</p>
-                    <span className={`inline-block mt-2 text-xs px-2 py-1 rounded-full ${getRolColor(perfil?.rol || '')}`}>
+                    <Badge tone={toneDeRol(perfil?.rol || '')} className="mt-2 py-1 font-normal">
                       {getRolLabel(perfil?.rol || '')}
-                    </span>
+                    </Badge>
                   </div>
                   {/* Vincular Telegram (Phase 1 MVP del bot) */}
                   <VincularTelegramButton
