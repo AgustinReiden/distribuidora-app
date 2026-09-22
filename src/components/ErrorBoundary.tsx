@@ -9,6 +9,7 @@
  */
 import React, { ReactNode, ErrorInfo } from 'react';
 import { AlertTriangle, RefreshCw, X, WifiOff, Lock, Database, Bug, LucideIcon } from 'lucide-react';
+import { Button } from './ui/Button';
 import { captureException, addBreadcrumb } from '../lib/sentry';
 import { categorizeError, getRecoveryInfo } from '../utils/errorUtils';
 import type { ErrorCategory } from '../types';
@@ -269,21 +270,15 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
               )}
 
               {recoveryInfo.action === 'relogin' ? (
-                <button
-                  onClick={this.handleRelogin}
-                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
+                <Button variant="primary" size="md" onClick={this.handleRelogin}>
                   <Lock className="w-4 h-4" />
                   <span>Iniciar sesión</span>
-                </button>
+                </Button>
               ) : (
-                <button
-                  onClick={this.handleReload}
-                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
+                <Button variant="primary" size="md" onClick={this.handleReload}>
                   <RefreshCw className="w-4 h-4" />
                   <span>Recargar página</span>
-                </button>
+                </Button>
               )}
             </div>
           </div>

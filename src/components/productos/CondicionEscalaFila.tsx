@@ -17,6 +17,7 @@ import { margenesEscala, descuentoSobreLista } from './margenEscala'
 import FormEscalaMayorista from './FormEscalaMayorista'
 import type { ValoresEscala } from './FormEscalaMayorista'
 import type { EscalaDeProducto } from '../../utils/condicionesMayoristas'
+import { Button } from '../ui/Button'
 
 function ChipMargen({ label, valor }: { label: string; valor: number | null }) {
   if (valor === null) {
@@ -161,21 +162,18 @@ export default function CondicionEscalaFila({
           {modo === 'confirmar' ? (
             <div className="flex items-center gap-2 justify-end">
               <span className="text-xs text-stone-600 dark:text-gray-300">¿Borrar esta escala?</span>
-              <button
-                type="button"
-                onClick={() => setModo('ver')}
-                className="px-2 py-1 text-xs rounded border dark:border-gray-600 dark:text-gray-200"
-              >
+              <Button type="button" onClick={() => setModo('ver')} variant="secondary" size="sm">
                 No
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => void borrar()}
                 disabled={eliminar.isPending}
-                className="px-2 py-1 text-xs rounded bg-rose-600 text-white disabled:opacity-50"
+                variant="danger"
+                size="sm"
               >
                 {eliminar.isPending ? 'Borrando…' : 'Sí, borrar'}
-              </button>
+              </Button>
             </div>
           ) : (
             <div className="inline-flex items-center gap-2">
