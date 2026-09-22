@@ -88,7 +88,7 @@ export const FAMILIAS_COLOR: FamiliaColor[] = [
   },
   {
     nombre: "emerald",
-    uso: "Entregados y exportaciones a Excel.",
+    uso: "Entregados y exportaciones a Excel. Desde #712 tiene los valores de green: mismo significado, un solo verde.",
     pasos: [
       { paso: 50, clase: 'bg-emerald-50', texto: 'text-gray-900' },
       { paso: 100, clase: 'bg-emerald-100', texto: 'text-gray-900' },
@@ -120,7 +120,7 @@ export const FAMILIAS_COLOR: FamiliaColor[] = [
   },
   {
     nombre: "rose",
-    uso: "Impagos y deuda previa del cliente.",
+    uso: "Impagos y deuda previa del cliente. Desde #712 tiene los valores de red.",
     pasos: [
       { paso: 50, clase: 'bg-rose-50', texto: 'text-gray-900' },
       { paso: 100, clase: 'bg-rose-100', texto: 'text-gray-900' },
@@ -152,7 +152,7 @@ export const FAMILIAS_COLOR: FamiliaColor[] = [
   },
   {
     nombre: "yellow",
-    uso: "Notas del pedido y toasts de advertencia.",
+    uso: "Notas del pedido y toasts de advertencia. Desde #712 tiene los valores de amber: un solo color de atención.",
     pasos: [
       { paso: 50, clase: 'bg-yellow-50', texto: 'text-gray-900' },
       { paso: 100, clase: 'bg-yellow-100', texto: 'text-gray-900' },
