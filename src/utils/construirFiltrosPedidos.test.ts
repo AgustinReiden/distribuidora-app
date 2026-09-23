@@ -98,6 +98,59 @@ describe('construirFiltrosPedidos', () => {
     expect(orsDeClientes).toHaveLength(0)
   })
 
+  it('estadoPago=impago (tile "Impagos", #715) filtra lo no pagado INCLUIDO el NULL', () => {
+    // Mismo criterio que el bucket `impagos` del summary (`estado_pago !==
+    // 'pagado'`). Un `.neq` pelado dejaría afuera los NULL y el tile y la lista
+    // darían números distintos.
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estadoPago: 'impago' })
+
+    expect(llamadas).toContainEqual({
+      metodo: 'or',
+      args: ['estado_pago.is.null,estado_pago.neq.pagado'],
+    })
+    // El sentinela no es un valor de la columna: no puede llegar como `.eq`.
+    expect(llamadas.some(l => l.args[0] === 'estado_pago' && l.metodo === 'eq')).toBe(false)
+    expect(llamadas.some(l => l.metodo === 'neq')).toBe(false)
+  })
+
+  it('estadoPago=impago convive con la exclusión de cancelados: son dos `.or()` separados', () => {
+    // Dos llamadas a `.or()` son dos parámetros `or=` que PostgREST combina con
+    // AND; si se fundieran en uno solo, "impago O no cancelado" traería todo.
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estadoPago: 'impago' })
+
+    const ors = llamadas.filter(l => l.metodo === 'or').map(l => l.args)
+    expect(ors).toEqual([
+      ['estado_pago.is.null,estado_pago.neq.pagado'],
+      ['estado.is.null,and(estado.neq.cancelado,estado.neq.anulado)'],
+    ])
+  })
+
+  it('estadoPago=impago con estado aplica los dos filtros (tile de estado + tile impagos)', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estado: 'asignado', estadoPago: 'impago' })
+
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['estado', 'asignado'] })
+    expect(llamadas).toContainEqual({ metodo: 'or', args: ['estado_pago.is.null,estado_pago.neq.pagado'] })
+  })
+
+  it('un estadoPago real sigue yendo por `.eq` (el select de pago)', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estadoPago: 'parcial' })
+
+    expect(llamadas).toContainEqual({ metodo: 'eq', args: ['estado_pago', 'parcial'] })
+    expect(llamadas.some(l => l.metodo === 'or' && l.args[0] === 'estado_pago.is.null,estado_pago.neq.pagado')).toBe(false)
+  })
+
+  it('estadoPago=todos no agrega ningún filtro de pago', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    construirFiltrosPedidos(builder, { estadoPago: 'todos' })
+
+    expect(llamadas.some(l => l.args[0] === 'estado_pago')).toBe(false)
+    expect(llamadas.some(l => typeof l.args[0] === 'string' && (l.args[0] as string).includes('estado_pago'))).toBe(false)
+  })
+
   it('los tres armados posibles (paginada / stats / export) dan la MISMA secuencia de filtros', () => {
     const filtros: Partial<FiltrosPedidosState> = {
       estado: 'todos',

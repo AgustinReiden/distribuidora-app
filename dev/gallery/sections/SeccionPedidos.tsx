@@ -23,6 +23,7 @@ import PanelPedidosNoEntregados from '../../../src/components/pedidos/PanelPedid
 import AvisosPedidos from '../../../src/components/pedidos/AvisosPedidos'
 import { useAuthData } from '../../../src/contexts/AuthDataContext'
 import type { FiltrosPedidosState, RolUsuario } from '../../../src/types'
+import { kpiActivo, type FiltrosKpi } from '../../../src/utils/kpiFiltroPedidos'
 import {
   PEDIDOS_FIXTURE,
   STATS_APROXIMADO,
@@ -75,6 +76,29 @@ function BloqueFiltros({ isAdmin, etiqueta }: { isAdmin: boolean; etiqueta: stri
         onBusquedaChange={setBusqueda}
         onFiltrosChange={(cambios) => setFiltros((prev) => ({ ...prev, ...cambios }))}
         onModalFiltroFecha={noop}
+      />
+    </Marco>
+  )
+}
+
+/**
+ * Los tiles como filtro (#715): con `filtros` + `onFiltrosChange` son botones
+ * toggle. El estado es local; arranca con "En camino" + "Impagos" aplicados para
+ * que se vean los dos modos (presionado / suelto) sin tocar nada.
+ */
+function StatsInteractivos({ isEncargado }: { isEncargado: boolean }) {
+  const [filtros, setFiltros] = useState<FiltrosKpi>({ estado: 'asignado', estadoPago: 'impago' })
+  const activo = kpiActivo(filtros)
+
+  return (
+    <Marco
+      etiqueta={`interactivo · estado=${filtros.estado} · pago=${filtros.estadoPago} · tile principal: ${activo ?? 'ninguno'}`}
+    >
+      <PedidoStats
+        summary={STATS_TIPICO}
+        isEncargado={isEncargado}
+        filtros={filtros}
+        onFiltrosChange={(cambios) => setFiltros((prev) => ({ ...prev, ...cambios }))}
       />
     </Marco>
   )
@@ -173,6 +197,7 @@ export default function SeccionPedidos() {
           <Marco etiqueta="aproximado · se pasó el tope de 20.000 filas (#524)">
             <PedidoStats summary={STATS_APROXIMADO} isEncargado={isEncargado} />
           </Marco>
+          <StatsInteractivos isEncargado={isEncargado} />
         </div>
       </div>
 

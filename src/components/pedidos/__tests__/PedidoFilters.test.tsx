@@ -560,3 +560,76 @@ describe('PedidoFilters — bottom sheet de filtros', () => {
     expect(onFiltrosChange).not.toHaveBeenCalled()
   })
 })
+
+// =============================================================================
+// PAGO "IMPAGO": EL QUE APLICA EL TILE "Impagos" DE PedidoStats (#715)
+// =============================================================================
+//
+// El tile manda `estadoPago: 'impago'`, un valor que antes no estaba entre las
+// opciones del select: el select mostraba "Todos los pagos" (la primera) con
+// un filtro puesto, y no había cómo sacarlo desde ahí.
+
+describe('PedidoFilters — el pago "impago" del tile (#715)', () => {
+  it('con estadoPago impago el select de pago lo muestra elegido', () => {
+    renderFilters({ filtros: { estadoPago: 'impago' } })
+
+    const pago = screen.getByRole('combobox', { name: /filtrar por estado de pago/i })
+    expect(pago).toHaveValue('impago')
+    expect(within(pago).getByRole('option', { name: 'Impagos (sin pagar o parcial)', selected: true })).toBeInTheDocument()
+  })
+
+  it('elegir "Todos los pagos" lo quita', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderFilters({ filtros: { estadoPago: 'impago' } })
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /filtrar por estado de pago/i }), 'Todos los pagos')
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({ estadoPago: 'todos' })
+  })
+
+  it('también se puede elegir desde el select, con el mismo valor que el tile', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderFilters()
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /filtrar por estado de pago/i }),
+      'Impagos (sin pagar o parcial)',
+    )
+
+    expect(onFiltrosChange).toHaveBeenCalledWith({ estadoPago: 'impago' })
+  })
+})
+
+// El tile "Impagos" filtra para TODOS los roles, no sólo para el admin: un
+// no-admin puede tener `estadoPago: 'impago'` puesto sin haber visto nunca el
+// select de pago. Para él, el badge "Filtros (N)" y "Limpiar todo" son, junto
+// con el tile presionado, la forma de ver y quitar ese filtro. Estos casos
+// fijan que los dos lo cuenten: el comentario del test "BUG: cuenta filtros de
+// admin aunque el rol no los pueda ver" (más arriba) dice que la UI del no-admin
+// nunca los pone en otra cosa que 'todos', y desde #715 eso ya no vale para el
+// pago. Si alguien "arregla" ese BUG haciendo que el contador respete
+// `isAdmin`, el no-admin con impagos vería el badge en 0 y "Limpiar todo"
+// deshabilitado, y estos casos se ponen en rojo.
+describe('PedidoFilters — el no-admin con el filtro de impagos del tile (#715)', () => {
+  it('el badge lo cuenta aunque no tenga select de pago', () => {
+    renderFilters({ isAdmin: false, filtros: { estadoPago: 'impago' } })
+
+    expect(screen.queryByRole('combobox', { name: /filtrar por estado de pago/i })).not.toBeInTheDocument()
+    expect(within(botonFiltros()).getByText('1')).toBeInTheDocument()
+  })
+
+  it('"Limpiar todo" del sheet está habilitado y lo quita', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderFilters({ isAdmin: false, filtros: { estadoPago: 'impago' } })
+
+    await user.click(botonFiltros())
+    const limpiar = await screen.findByRole('button', { name: 'Limpiar todo' })
+    expect(limpiar).toBeEnabled()
+
+    await user.click(limpiar)
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith(expect.objectContaining({ estadoPago: 'todos' }))
+  })
+})

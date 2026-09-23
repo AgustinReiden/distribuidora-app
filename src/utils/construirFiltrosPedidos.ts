@@ -6,6 +6,8 @@
  * `fechaEntregaProgramada`, y excluía cancelados con `.neq('estado',
  * 'cancelado')` en vez del `.or(...)` que también cubre `estado IS NULL` — el
  * Excel "todo lo filtrado" salía con otro universo que la pantalla (#524).
+ * Las cards pasan por este mismo armado, pero con los filtros sin estado ni
+ * pago (`filtrosParaStats`, #715): cada card es a la vez un filtro de la lista.
  *
  * PURA a propósito: no pagina ni llama a la base, sólo encadena filtros sobre
  * el query builder que le pasan. Por eso `conSalvedad` queda afuera —
@@ -15,6 +17,7 @@
  */
 import type { FiltrosPedidosState } from '../types'
 import { escapePostgrestFilter } from './postgrest'
+import { ESTADO_PAGO_IMPAGO } from './kpiFiltroPedidos'
 
 /** Lo mínimo que necesita un builder de supabase-js para poder filtrarse acá. */
 export interface QueryFiltrablePedidos {
@@ -34,7 +37,21 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
   let q = query
 
   if (filtros?.estado && filtros.estado !== 'todos') q = q.eq('estado', filtros.estado)
-  if (filtros?.estadoPago && filtros.estadoPago !== 'todos') q = q.eq('estado_pago', filtros.estadoPago)
+  if (filtros?.estadoPago === ESTADO_PAGO_IMPAGO) {
+    // Sentinela del tile "Impagos" (#715): todo lo que no está pagado, NULL
+    // incluido — el mismo criterio con el que `usePedidoStatsQuery` cuenta el
+    // bucket (`estado_pago !== 'pagado'`). Un `.neq('estado_pago','pagado')`
+    // pelado excluye NULL en PostgREST (NULL <> 'pagado' no es true) y el tile
+    // diría 120 donde la lista muestra 87.
+    //
+    // Convive con el `.or()` de cancelados de más abajo: supabase-js agrega cada
+    // `.or()` con `searchParams.append`, o sea como otro parámetro `or=(...)`, y
+    // PostgREST combina con AND todos los filtros de primer nivel, repetidos
+    // incluidos. No se pisan ni se funden en un solo OR.
+    q = q.or('estado_pago.is.null,estado_pago.neq.pagado')
+  } else if (filtros?.estadoPago && filtros.estadoPago !== 'todos') {
+    q = q.eq('estado_pago', filtros.estadoPago)
+  }
   if (filtros?.transportistaId && filtros.transportistaId !== 'todos') q = q.eq('transportista_id', filtros.transportistaId)
   if (filtros?.usuarioId && filtros.usuarioId !== 'todos') q = q.eq('usuario_id', filtros.usuarioId)
   if (filtros?.fechaDesde) q = q.gte('fecha', filtros.fechaDesde)

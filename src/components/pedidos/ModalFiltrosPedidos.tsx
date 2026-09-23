@@ -24,6 +24,7 @@ import BottomSheet from '../ui/BottomSheet';
 import { Button } from '../ui/Button';
 import { fechaLocalISO } from '../../utils/formatters';
 import { cn } from '../../lib/utils';
+import { ESTADO_PAGO_IMPAGO } from '../../utils/kpiFiltroPedidos';
 import type { Usuario } from '../../types';
 
 interface FiltrosPedido {
@@ -180,6 +181,8 @@ export default function ModalFiltrosPedidos({
             <option value="pendiente">Pago pendiente</option>
             <option value="parcial">Pago parcial</option>
             <option value="pagado">Pagado</option>
+            {/* Lo aplica el tile "Impagos" (#715): ver PedidoFilters. */}
+            <option value={ESTADO_PAGO_IMPAGO}>Impagos (sin pagar o parcial)</option>
           </select>
         </Section>
       )}

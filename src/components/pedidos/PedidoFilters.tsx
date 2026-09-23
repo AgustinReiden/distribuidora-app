@@ -19,6 +19,7 @@ import React, { memo, useState, type ChangeEvent } from 'react';
 import { Search, Calendar, X, Truck, User, SlidersHorizontal } from 'lucide-react';
 import { fechaLocalISO } from '../../utils/formatters';
 import { cn } from '../../lib/utils';
+import { ESTADO_PAGO_IMPAGO } from '../../utils/kpiFiltroPedidos';
 import ModalFiltrosPedidos from './ModalFiltrosPedidos';
 import type { Usuario } from '../../types';
 
@@ -223,6 +224,9 @@ function PedidoFilters({
             <option value="pendiente">Pago pendiente</option>
             <option value="parcial">Pago parcial</option>
             <option value="pagado">Pagado</option>
+            {/* Lo aplica el tile "Impagos" (#715): con la opción acá el select
+                lo muestra y lo puede quitar, en vez de caer en "Todos los pagos". */}
+            <option value={ESTADO_PAGO_IMPAGO}>Impagos (sin pagar o parcial)</option>
           </select>
 
           <label htmlFor="filtro-transportista" className="sr-only">Filtrar por transportista</label>

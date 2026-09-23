@@ -488,3 +488,62 @@ describe('ModalFiltrosPedidos — qué secciones ve cada rol', () => {
     }
   })
 })
+
+// =============================================================================
+// PAGO "IMPAGO": EL QUE APLICA EL TILE "Impagos" DE PedidoStats (#715)
+// =============================================================================
+
+describe('ModalFiltrosPedidos — el pago "impago" del tile (#715)', () => {
+  it('con estadoPago impago el select de pago lo muestra elegido', () => {
+    renderSheet({ filtros: { estadoPago: 'impago' }, activosCount: 1 })
+
+    const pago = selectQueOfrece('Todos los pagos')
+    expect(pago).toHaveValue('impago')
+    expect(within(pago).getByRole('option', { name: 'Impagos (sin pagar o parcial)', selected: true })).toBeInTheDocument()
+  })
+
+  it('elegir "Todos los pagos" lo quita en el acto', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet({ filtros: { estadoPago: 'impago' }, activosCount: 1 })
+
+    await user.selectOptions(selectQueOfrece('Todos los pagos'), 'Todos los pagos')
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({ estadoPago: 'todos' })
+  })
+
+  it('también se puede elegir desde el sheet, con el mismo valor que el tile', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet()
+
+    await user.selectOptions(selectQueOfrece('Todos los pagos'), 'Impagos (sin pagar o parcial)')
+
+    expect(onFiltrosChange).toHaveBeenCalledWith({ estadoPago: 'impago' })
+  })
+
+  // El tile "Impagos" filtra para todos los roles. El no-admin no tiene la
+  // sección de pago en el sheet, así que "Limpiar todo" es, además del tile,
+  // la forma de quitarle ese filtro: tiene que estar habilitado y mandar el
+  // pago a 'todos' aunque ese select no se vea.
+  it('el no-admin sin sección de pago igual lo quita con "Limpiar todo"', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderSheet({ isAdmin: false, filtros: { estadoPago: 'impago' }, activosCount: 1 })
+
+    expect(screen.queryByRole('option', { name: 'Todos los pagos' })).not.toBeInTheDocument()
+    const limpiar = screen.getByRole('button', { name: 'Limpiar todo' })
+    expect(limpiar).toBeEnabled()
+
+    await user.click(limpiar)
+
+    expect(onFiltrosChange).toHaveBeenCalledTimes(1)
+    expect(onFiltrosChange).toHaveBeenCalledWith({
+      estado: 'todos',
+      estadoPago: 'todos',
+      transportistaId: 'todos',
+      usuarioId: 'todos',
+      conSalvedad: 'todos',
+      fechaEntregaProgramada: null,
+      verCancelados: false,
+    })
+  })
+})

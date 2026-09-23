@@ -48,6 +48,7 @@ import {
   type RegistrarCambioInput,
 } from '../../hooks/queries'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import { filtrosParaStats } from '../../utils/kpiFiltroPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
@@ -206,8 +207,12 @@ export default function PedidosContainer(): React.ReactElement {
   } = usePedidosPaginatedQuery(
     paginaActual, ITEMS_PER_PAGE, filtros, debouncedBusqueda, authReady
   )
+  // Los tiles son a la vez resumen y filtro (#715): el summary se calcula SIN
+  // estado ni pago, o al tocar uno los otros cinco caerían a 0. Sigue siendo
+  // UNA query (pagina hasta 20.000 filas); la lista usa los filtros reales.
+  const filtrosStats = useMemo(() => filtrosParaStats(filtros), [filtros])
   const { data: statsSummary = EMPTY_PEDIDO_STATS_SUMMARY } = usePedidoStatsQuery(
-    filtros, debouncedBusqueda, authReady
+    filtrosStats, debouncedBusqueda, authReady
   )
   const { data: clientes = [], dataUpdatedAt: clientesActualizadosAt } = useClientesQuery()
   const { data: productos = [] } = useProductosQuery()
