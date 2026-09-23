@@ -239,8 +239,14 @@ export default function VistaPedidos({
         onModalFiltroFecha={onModalFiltroFecha}
       />
 
-      {/* Resumen de estados (totales sobre todos los pedidos filtrados) */}
-      <PedidoStats summary={statsSummary} isEncargado={isEncargado} />
+      {/* Resumen de estados, que además filtra la lista al tocarlo (#715). Va por
+          el mismo onFiltrosChange que los selects: el reset de página es uno. */}
+      <PedidoStats
+        summary={statsSummary}
+        isEncargado={isEncargado}
+        filtros={filtros}
+        onFiltrosChange={onFiltrosChange}
+      />
 
       {/* Lista de pedidos */}
       {loading ? (

@@ -146,6 +146,55 @@
   color: var(--color-bg-primary) !important;
 }
 
+/* El hover de arriba invierte el fondo del botón, pero la regla de texto
+   (`.high-contrast span/p/div`) le fuerza el color primario a CADA hijo: con el
+   fondo ya invertido, todo rótulo que viva en un <span> —casi todos: ícono +
+   <span>texto</span>— quedaba del mismo color que el fondo, 1:1, invisible.
+   Acá los hijos heredan el color invertido del botón. El
+   `:not([class*="bg-"])` deja afuera a los que pintan su propio fondo (badges,
+   chips): ésos no se invirtieron y conservan su texto. Especificidad (0,3,2)
+   o más contra (0,1,1) de `.high-contrast span`; los dos con !important, gana
+   ésta. */
+.high-contrast button:hover :is(span, p, div):not([class*="bg-"]),
+.high-contrast [role="button"]:hover :is(span, p, div):not([class*="bg-"]),
+.high-contrast .btn:hover :is(span, p, div):not([class*="bg-"]) {
+  color: inherit !important;
+}
+
+/* Mismo problema con los íconos: `.high-contrast svg[class*="text-"]` (0,2,1)
+   les fuerza el color primario, y un ícono con `text-*` adentro de un botón en
+   hover desaparecía contra el fondo invertido. (0,3,2) o más le gana. */
+.high-contrast button:hover svg[class*="text-"],
+.high-contrast [role="button"]:hover svg[class*="text-"],
+.high-contrast .btn:hover svg[class*="text-"] {
+  color: inherit !important;
+}
+
+/* Las dos reglas de arriba dan por hecho que el hover invirtió el FONDO del
+   botón, y en dos casos no lo invierte (el color del botón sí):
+   - Deshabilitado: `.high-contrast button:disabled` (0,2,1) está más abajo en
+     la hoja que `button:hover` (0,2,1) y le deja el fondo en
+     --color-bg-secondary. Heredar daba blanco sobre #f0f0f0 en claro y negro
+     sobre #1a1a1a en oscuro.
+   - Modo oscuro con `dark:bg-gray-800/900` (los tiles de /pedidos, «Fechas» y
+     «Filtros», la variante `secondary` de Button): `.high-contrast.dark
+     .dark\:bg-gray-800` (0,3,0) le gana a `button:hover` y el fondo queda
+     negro. Heredar daba negro sobre negro.
+   Ahí los hijos vuelven al color primario, que es lo que les ponía
+   `.high-contrast span/p/div` (y `svg[class*="text-"]`) antes de la herencia:
+   sobre un fondo que no se invirtió, el color sin invertir es el legible.
+   Sólo `button`: en `[role="button"]` y `.btn` los hover son (0,3,0) y van
+   después de la regla del modo oscuro, así que ahí el fondo sí se invierte.
+   Especificidad (0,4,2) y (0,5,2) contra (0,3,2) de las de arriba. */
+.high-contrast button:disabled:hover :is(span, p, div):not([class*="bg-"]),
+.high-contrast button:disabled:hover svg[class*="text-"],
+.high-contrast.dark button.dark\:bg-gray-800:hover :is(span, p, div):not([class*="bg-"]),
+.high-contrast.dark button.dark\:bg-gray-800:hover svg[class*="text-"],
+.high-contrast.dark button.dark\:bg-gray-900:hover :is(span, p, div):not([class*="bg-"]),
+.high-contrast.dark button.dark\:bg-gray-900:hover svg[class*="text-"] {
+  color: var(--color-text-primary) !important;
+}
+
 /* Primary buttons */
 .high-contrast .bg-blue-600,
 .high-contrast .bg-blue-500,

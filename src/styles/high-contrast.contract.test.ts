@@ -570,6 +570,172 @@ describe('contrato: selectores de atributo [class*="..."] de high-contrast.css',
   }
 })
 
+// -----------------------------------------------------------------------
+// 5) El hover de un botón no deja sus rótulos 1:1
+// -----------------------------------------------------------------------
+//
+// `.high-contrast button:hover` invierte fondo y color del botón, pero
+// `.high-contrast span/p/div` le fuerza el color primario a CADA hijo: con el
+// fondo ya invertido, el rótulo en <span> (ícono + <span>texto</span>, casi
+// todos los botones) quedaba del color del fondo. Lo arreglan dos reglas que
+// hacen heredar el color invertido; jsdom no aplica hojas de estilo, así que
+// se fijan acá por texto. Los selectores se comparan ENTEROS a propósito: su
+// forma es la que les da la especificidad ((0,3,2) o más) con la que le ganan a
+// `.high-contrast span` (0,1,1) y a `.high-contrast svg[class*="text-"]` (0,2,1),
+// todas con !important. Un "simplificado" a `.high-contrast button:hover span`
+// sigue ganando, pero pierde el `:not([class*="bg-"])` que deja a los badges
+// con su propio texto sobre su propio fondo.
+
+interface ReglaCss {
+  selectores: string[]
+  cuerpo: string
+}
+
+/** Parte una lista de selectores por las comas de primer nivel (no las de `:is(a, b)`). */
+function partirSelectores(lista: string): string[] {
+  const partes: string[] = []
+  let profundidad = 0
+  let actual = ''
+  for (const c of lista) {
+    if (c === '(') profundidad++
+    if (c === ')') profundidad--
+    if (c === ',' && profundidad === 0) {
+      partes.push(actual)
+      actual = ''
+      continue
+    }
+    actual += c
+  }
+  partes.push(actual)
+  return partes.map(s => s.trim().replace(/\s+/g, ' '))
+}
+
+/** Las reglas del CSS plano (mismo supuesto que extraerSelectores: sin anidar). */
+function reglasDelCss(css: string): ReglaCss[] {
+  const sinComentarios = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const reglas: ReglaCss[] = []
+  const reglaRe = /([^{}]+)\{([^}]*)\}/g
+  let match: RegExpExecArray | null
+  while ((match = reglaRe.exec(sinComentarios))) {
+    reglas.push({ selectores: partirSelectores(match[1]), cuerpo: match[2] })
+  }
+  return reglas
+}
+
+const REGLAS_CSS = reglasDelCss(cssCrudo)
+const HOVERS_DE_BOTON = ['button:hover', '[role="button"]:hover', '.btn:hover'] as const
+
+function reglaConSelector(selector: string): ReglaCss | undefined {
+  return REGLAS_CSS.find(regla => regla.selectores.includes(selector))
+}
+
+describe('contrato: el hover de un botón no deja sus rótulos 1:1', () => {
+  it.each(HOVERS_DE_BOTON)('".high-contrast %s" sigue invirtiendo fondo y texto (el motivo de las reglas de abajo)', hover => {
+    const regla = reglaConSelector(`.high-contrast ${hover}`)
+    expect(regla, `No hay regla ".high-contrast ${hover}" en high-contrast.css`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/background-color:\s*var\(--color-text-primary\)\s*!important/)
+    expect(regla?.cuerpo).toMatch(/(?:^|[;\s])color:\s*var\(--color-bg-primary\)\s*!important/)
+  })
+
+  it.each(HOVERS_DE_BOTON)('en "%s" los span/p/div sin fondo propio heredan el color invertido', hover => {
+    const selector = `.high-contrast ${hover} :is(span, p, div):not([class*="bg-"])`
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, el rótulo en <span> de un botón en hover ` +
+        'queda forzado al color primario sobre el fondo ya invertido (1:1, invisible).'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/color:\s*inherit\s*!important/)
+  })
+
+  it.each(HOVERS_DE_BOTON)('en "%s" los íconos con text-* heredan el color invertido', hover => {
+    const selector = `.high-contrast ${hover} svg[class*="text-"]`
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, \`.high-contrast svg[class*="text-"]\` le ` +
+        'fuerza el color primario al ícono y desaparece contra el fondo invertido del botón.'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/color:\s*inherit\s*!important/)
+  })
+})
+
+// -----------------------------------------------------------------------
+// 6) Donde el hover NO invierte el fondo, los rótulos no heredan
+// -----------------------------------------------------------------------
+//
+// Las reglas de la sección 5 dan por hecho que el hover invirtió el FONDO del
+// botón. En dos casos otra regla le gana el fondo y lo deja fijo, mientras el
+// color del botón sí se invierte: el deshabilitado (--color-bg-secondary) y,
+// en modo oscuro, el de `dark:bg-gray-800/900` (negro). Heredar ahí dejaba el
+// rótulo del color del fondo: blanco sobre #f0f0f0 en claro, negro sobre negro
+// en oscuro (medido en Chromium con la hoja real). Las excepciones devuelven
+// los hijos al color primario, como antes de la herencia.
+//
+// Se fijan los DOS lados. Si desaparece la regla que fija el fondo (o el
+// deshabilitado sube por encima del hover en la hoja), el fondo vuelve a
+// invertirse y la excepción pasa a ser el bug: color primario sobre el fondo
+// invertido. Por eso se asevera también el motivo, no sólo la excepción.
+
+const FONDOS_FIJOS_EN_HOVER = [
+  {
+    caso: 'deshabilitado',
+    boton: '.high-contrast button:disabled:hover',
+    fija: '.high-contrast button:disabled',
+    fondo: '--color-bg-secondary',
+  },
+  {
+    caso: 'modo oscuro con dark:bg-gray-800',
+    boton: '.high-contrast.dark button.dark\\:bg-gray-800:hover',
+    fija: '.high-contrast.dark .dark\\:bg-gray-800',
+    fondo: '--color-bg-primary',
+  },
+  {
+    caso: 'modo oscuro con dark:bg-gray-900',
+    boton: '.high-contrast.dark button.dark\\:bg-gray-900:hover',
+    fija: '.high-contrast.dark .dark\\:bg-gray-900',
+    fondo: '--color-bg-primary',
+  },
+] as const
+
+describe('contrato: donde el hover no invierte el fondo, los rótulos no heredan', () => {
+  it.each(FONDOS_FIJOS_EN_HOVER)('$caso: sigue la regla que le fija el fondo (el motivo de la excepción)', ({ fija, fondo }) => {
+    const regla = reglaConSelector(fija)
+    expect(regla, `No hay regla "${fija}" en high-contrast.css: si ya no fija el fondo, sacá también su excepción`).toBeDefined()
+    expect(regla?.cuerpo).toMatch(new RegExp(`background-color:\\s*var\\(${fondo}\\)\\s*!important`))
+  })
+
+  it('el deshabilitado le gana el fondo al hover por orden: misma especificidad, va después en la hoja', () => {
+    const hover = REGLAS_CSS.findIndex(regla => regla.selectores.includes('.high-contrast button:hover'))
+    const deshabilitado = REGLAS_CSS.findIndex(regla => regla.selectores.includes('.high-contrast button:disabled'))
+
+    expect(hover).toBeGreaterThanOrEqual(0)
+    expect(deshabilitado).toBeGreaterThan(hover)
+  })
+
+  it.each(FONDOS_FIJOS_EN_HOVER)('$caso: span/p/div sin fondo propio vuelven al color primario', ({ boton }) => {
+    const selector = `${boton} :is(span, p, div):not([class*="bg-"])`
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, el rótulo hereda el color invertido del botón ` +
+        'sobre un fondo que no se invirtió (1:1, invisible).'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/color:\s*var\(--color-text-primary\)\s*!important/)
+  })
+
+  it.each(FONDOS_FIJOS_EN_HOVER)('$caso: los íconos con text-* vuelven al color primario', ({ boton }) => {
+    const selector = `${boton} svg[class*="text-"]`
+    const regla = reglaConSelector(selector)
+    expect(
+      regla,
+      `Falta el selector ${selector} en high-contrast.css: sin él, el ícono hereda el color invertido del botón ` +
+        'sobre un fondo que no se invirtió.'
+    ).toBeDefined()
+    expect(regla?.cuerpo).toMatch(/color:\s*var\(--color-text-primary\)\s*!important/)
+  })
+})
+
 describe('contrato: cableado de alto contraste', () => {
   afterEach(() => {
     // Los tests de comportamiento de abajo togglean la clase de verdad sobre
