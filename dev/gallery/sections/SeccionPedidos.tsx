@@ -7,7 +7,8 @@
  *
  * `PanelPedidosTrabados` y `PanelPedidosNoEntregados` no reciben datos por props:
  * los piden con su propio `useQuery`. Se alimentan precargando la cache con la
- * queryKey real (ver `fixtures/cacheSeed.ts`).
+ * queryKey real (ver `fixtures/cacheSeed.ts`). `AvisosPedidos`, la línea que los
+ * pliega en /pedidos, lee esas mismas queries, así que la misma siembra le alcanza.
  */
 import { useState } from 'react'
 import PedidoCard from '../../../src/components/pedidos/PedidoCard'
@@ -19,6 +20,7 @@ import PedidoToolbar from '../../../src/components/pedidos/PedidoToolbar'
 import PedidosViewHeader from '../../../src/components/pedidos/PedidosViewHeader'
 import PanelPedidosTrabados from '../../../src/components/pedidos/PanelPedidosTrabados'
 import PanelPedidosNoEntregados from '../../../src/components/pedidos/PanelPedidosNoEntregados'
+import AvisosPedidos from '../../../src/components/pedidos/AvisosPedidos'
 import { useAuthData } from '../../../src/contexts/AuthDataContext'
 import type { FiltrosPedidosState, RolUsuario } from '../../../src/types'
 import {
@@ -194,6 +196,12 @@ export default function SeccionPedidos() {
       <div>
         <Subtitulo>Paneles de rescate (alimentados por cache)</Subtitulo>
         <div className="mt-3 space-y-4">
+          <Marco etiqueta="AvisosPedidos · admin/encargado · plegado; al desplegar muestra los dos paneles">
+            <AvisosPedidos enabled onVolverAPendiente={noop} />
+          </Marco>
+          <Marco etiqueta="AvisosPedidos · sin permiso de rescate · los trabados no cuentan">
+            <AvisosPedidos enabled={false} onVolverAPendiente={noop} />
+          </Marco>
           <Marco etiqueta="PanelPedidosTrabados · admin/encargado · 4 pedidos, el más viejo de 23 días">
             <PanelPedidosTrabados enabled onVolverAPendiente={noop} />
           </Marco>
