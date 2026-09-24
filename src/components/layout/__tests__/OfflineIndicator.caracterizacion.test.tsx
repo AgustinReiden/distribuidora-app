@@ -47,6 +47,10 @@ describe('OfflineIndicator — caracterización', () => {
   it('no renderiza nada online y sin pendientes', () => {
     const { container } = render(<OfflineIndicator isOnline pedidosPendientes={[]} mermasPendientes={[]} />)
     expect(container.firstChild).toBeNull()
+    // El aviso se dibuja por portal en la pila (#716), no en el container: hay
+    // que mirar afuera para que esto diga algo.
+    expect(document.getElementById('notice-root')?.childElementCount ?? 0).toBe(0)
+    expect(screen.queryByRole('button', { name: /sin conexion|pendiente|conectado/i })).toBeNull()
   })
 
   it('offline sin pendientes muestra el aviso de sin conexion', () => {
