@@ -93,6 +93,9 @@ export function authDataDeRol(rol: RolUsuario): AuthDataContextValue {
   // Y transportista. Ver el comentario de App.tsx.
   const isTransportista = rol === 'transportista' || rolesExtra.includes('transportista')
   const isEncargado = rol === 'encargado'
+  // Sin roles extra, como en App.tsx: `deposito` no se otorga como capacidad
+  // extra (mig 155).
+  const isDeposito = rol === 'deposito'
 
   return {
     user: { id: perfil.id, email: perfil.email },
@@ -102,6 +105,7 @@ export function authDataDeRol(rol: RolUsuario): AuthDataContextValue {
     isPreventista,
     isTransportista,
     isEncargado,
+    isDeposito,
     isAdminOrEncargado: isAdmin || isEncargado,
     rolesEfectivos: [rol, ...rolesExtra],
     isOnline: true,

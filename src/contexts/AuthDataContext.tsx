@@ -19,6 +19,11 @@ export interface AuthDataContextValue {
   isPreventista: boolean
   isTransportista: boolean
   isEncargado: boolean
+  /**
+   * Rol primario `deposito` en la sucursal activa. Sin rama por roles extra:
+   * `deposito` no se otorga como capacidad extra (mig 155).
+   */
+  isDeposito: boolean
   isAdminOrEncargado: boolean
   /**
    * Rol primario en la sucursal activa + capacidades extra (mig 155).

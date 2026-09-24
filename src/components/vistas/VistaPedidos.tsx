@@ -47,6 +47,8 @@ export interface VistaPedidosProps {
   isPreventista: boolean;
   isTransportista: boolean;
   isEncargado?: boolean;
+  /** Sólo gatea los montos de los KPIs: depósito ve conteos, no plata (#717). */
+  isDeposito?: boolean;
   /**
    * Multi-rol (mig 155): el usuario tiene la lista Y el mapa de la ruta, y
    * alterna con el botón "Mi ruta". El transportista puro no lo usa: para él
@@ -134,6 +136,7 @@ export default function VistaPedidos({
   isPreventista,
   isTransportista,
   isEncargado,
+  isDeposito,
   userId,
   transportistas = [],
   usuarios = [],
@@ -244,6 +247,7 @@ export default function VistaPedidos({
       <PedidoStats
         summary={statsSummary}
         isEncargado={isEncargado}
+        isDeposito={isDeposito}
         filtros={filtros}
         onFiltrosChange={onFiltrosChange}
       />
