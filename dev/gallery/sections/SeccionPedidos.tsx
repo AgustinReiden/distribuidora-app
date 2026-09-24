@@ -86,7 +86,7 @@ function BloqueFiltros({ isAdmin, etiqueta }: { isAdmin: boolean; etiqueta: stri
  * toggle. El estado es local; arranca con "En camino" + "Impagos" aplicados para
  * que se vean los dos modos (presionado / suelto) sin tocar nada.
  */
-function StatsInteractivos({ isEncargado }: { isEncargado: boolean }) {
+function StatsInteractivos({ isEncargado, isDeposito }: { isEncargado: boolean; isDeposito: boolean }) {
   const [filtros, setFiltros] = useState<FiltrosKpi>({ estado: 'asignado', estadoPago: 'impago' })
   const activo = kpiActivo(filtros)
 
@@ -97,6 +97,7 @@ function StatsInteractivos({ isEncargado }: { isEncargado: boolean }) {
       <PedidoStats
         summary={STATS_TIPICO}
         isEncargado={isEncargado}
+        isDeposito={isDeposito}
         filtros={filtros}
         onFiltrosChange={(cambios) => setFiltros((prev) => ({ ...prev, ...cambios }))}
       />
@@ -136,7 +137,7 @@ function ToolbarDeRol({ rol }: { rol: RolUsuario }) {
 }
 
 export default function SeccionPedidos() {
-  const { isAdmin, isPreventista, isTransportista, isEncargado } = useAuthData()
+  const { isAdmin, isPreventista, isTransportista, isEncargado, isDeposito } = useAuthData()
 
   return (
     <Seccion
@@ -189,15 +190,15 @@ export default function SeccionPedidos() {
         <Subtitulo>PedidoStats</Subtitulo>
         <div className="mt-3 space-y-4">
           <Marco etiqueta="summary típico · el encargado sólo ve el monto de impagos">
-            <PedidoStats summary={STATS_TIPICO} isEncargado={isEncargado} />
+            <PedidoStats summary={STATS_TIPICO} isEncargado={isEncargado} isDeposito={isDeposito} />
           </Marco>
           <Marco etiqueta="todo en cero">
-            <PedidoStats summary={STATS_EN_CERO} isEncargado={isEncargado} />
+            <PedidoStats summary={STATS_EN_CERO} isEncargado={isEncargado} isDeposito={isDeposito} />
           </Marco>
           <Marco etiqueta="aproximado · se pasó el tope de 20.000 filas (#524)">
-            <PedidoStats summary={STATS_APROXIMADO} isEncargado={isEncargado} />
+            <PedidoStats summary={STATS_APROXIMADO} isEncargado={isEncargado} isDeposito={isDeposito} />
           </Marco>
-          <StatsInteractivos isEncargado={isEncargado} />
+          <StatsInteractivos isEncargado={isEncargado} isDeposito={isDeposito} />
         </div>
       </div>
 

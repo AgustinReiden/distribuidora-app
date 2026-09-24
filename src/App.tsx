@@ -232,6 +232,9 @@ function MainAppInner({ user, perfil, logout, authReady }: {
   const isTransportista = effectiveRol === 'transportista'
     || currentSucursalRolesExtra.includes('transportista')
   const isEncargado = effectiveRol === 'encargado'
+  // Sin rama por roles extra, a diferencia de isTransportista: `deposito` no
+  // se otorga como capacidad extra (mig 155, CHECK de perfil_roles).
+  const isDeposito = effectiveRol === 'deposito'
   const isAdminOrEncargado = isAdmin || isEncargado
   const rolesEfectivos = useMemo(
     () => (effectiveRol ? [effectiveRol, ...currentSucursalRolesExtra] : [...currentSucursalRolesExtra]),
@@ -248,13 +251,14 @@ function MainAppInner({ user, perfil, logout, authReady }: {
     isPreventista,
     isTransportista,
     isEncargado,
+    isDeposito,
     isAdminOrEncargado,
     rolesEfectivos,
     isOnline,
     logout: handleLogout,
     currentSucursalId,
     currentSucursalNombre,
-  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isAdminOrEncargado, rolesEfectivos, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
+  }), [user, perfil, authReady, isAdmin, isPreventista, isTransportista, isEncargado, isDeposito, isAdminOrEncargado, rolesEfectivos, isOnline, handleLogout, currentSucursalId, currentSucursalNombre])
 
   const handleRetrySync = useCallback(async () => {
     await refreshPendingOperations()
