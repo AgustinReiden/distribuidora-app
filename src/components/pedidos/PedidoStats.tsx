@@ -36,6 +36,8 @@ import { hayFiltroQueLimpiar, kpiEstaActivo, togglearKpi, type FiltrosKpi } from
 export interface PedidoStatsProps {
   summary: PedidoStatsSummary;
   isEncargado?: boolean;
+  /** Depósito ve los conteos y ningún monto (#717). */
+  isDeposito?: boolean;
   /**
    * Filtros actuales de la lista: marcan qué tile está activo. Hace falta junto
    * con `onFiltrosChange` para que los tiles sean botones.
@@ -78,9 +80,11 @@ interface StatItem {
 // COMPONENT
 // =============================================================================
 
-function PedidoStats({ summary, isEncargado, filtros, onFiltrosChange }: PedidoStatsProps): React.ReactElement {
-  // El rol determina qué montos se muestran: el encargado solo ve los impagos.
-  const rol = isEncargado ? 'encargado' : 'admin';
+function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFiltrosChange }: PedidoStatsProps): React.ReactElement {
+  // El rol determina qué montos se muestran: el encargado solo ve los impagos y
+  // depósito ninguno. El resto cae en 'admin', que para mostrarMontosEnStats es
+  // lo mismo que preventista o transportista: ven todos.
+  const rol = isEncargado ? 'encargado' : isDeposito ? 'deposito' : 'admin';
   // Un tile que no sabe si está activo no puede ser un toggle: hacen falta las dos.
   const interactivo = filtros !== undefined && onFiltrosChange !== undefined;
   const items: StatItem[] = [

@@ -121,10 +121,13 @@ vi.mock('../../../hooks/queries/useRecorridoActivoQuery', () => ({
   useRecorridoActivoQuery: () => ({ data: null }),
 }))
 
+// El rol se puede cambiar por test (WP-31, #717): admin por defecto, depósito
+// para ver que el container le pasa isDeposito a la vista.
+const auth = vi.hoisted(() => ({ deposito: false }))
 vi.mock('../../../contexts/AuthDataContext', () => ({
   useAuthData: () => ({
-    isAdmin: true, isEncargado: false, isPreventista: false, isTransportista: false, isDeposito: false,
-    user: { id: 'u1' }, perfil: { id: 'u1', rol: 'admin' },
+    isAdmin: !auth.deposito, isEncargado: false, isPreventista: false, isTransportista: false, isDeposito: auth.deposito,
+    user: { id: 'u1' }, perfil: { id: 'u1', rol: auth.deposito ? 'deposito' : 'admin' },
   }),
 }))
 
@@ -164,12 +167,20 @@ vi.mock('../../vistas/VistaPedidos', async () => {
     '../../pedidos/PedidoStats',
   )
   return {
-    default: ({ filtros, onFiltrosChange }: {
+    default: ({ filtros, onFiltrosChange, isEncargado, isDeposito }: {
       filtros: FiltrosPedidosState
       onFiltrosChange: (cambios: Partial<FiltrosPedidosState>) => void
+      isEncargado?: boolean
+      isDeposito?: boolean
     }) => (
       <>
-        <PedidoStats summary={SUMMARY} filtros={filtros} onFiltrosChange={onFiltrosChange} />
+        <PedidoStats
+          summary={SUMMARY}
+          filtros={filtros}
+          onFiltrosChange={onFiltrosChange}
+          isEncargado={isEncargado}
+          isDeposito={isDeposito}
+        />
         <button type="button" onClick={() => onFiltrosChange({ estado: 'cancelado' })}>
           Elegir estado cancelado
         </button>
@@ -208,7 +219,29 @@ function renderContainer() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  auth.deposito = false
   rpc.mockResolvedValue({ data: { success: true }, error: null })
+})
+
+/** Textos de monto ('$ …') dentro del grupo de tiles. */
+function montosEnTiles(): string[] {
+  const grupo = screen.getByRole('group', { name: 'Filtrar pedidos por estado o pago' })
+  return within(grupo).queryAllByText(/^\$/).map((n) => n.textContent ?? '')
+}
+
+describe('PedidosContainer — le pasa a la vista el rol real para los montos (#717)', () => {
+  it('admin: los tiles muestran montos', async () => {
+    renderContainer()
+    await screen.findByRole('button', { name: /^Pendientes/ })
+    expect(montosEnTiles().length).toBeGreaterThan(0)
+  })
+
+  it('depósito: el container le pasa isDeposito a la vista y los tiles no muestran ningún monto', async () => {
+    auth.deposito = true
+    renderContainer()
+    await screen.findByRole('button', { name: /^Pendientes/ })
+    expect(montosEnTiles()).toEqual([])
+  })
 })
 
 describe('PedidosContainer — el summary de los tiles va sin estado ni pago (#715)', () => {
@@ -256,7 +289,7 @@ describe('PedidosContainer — el summary de los tiles va sin estado ni pago (#7
 // VistaPedidos REAL → PedidoStats
 // =============================================================================
 
-type Roles = Pick<VistaPedidosProps, 'isAdmin' | 'isPreventista' | 'isTransportista' | 'isEncargado'>
+type Roles = Pick<VistaPedidosProps, 'isAdmin' | 'isPreventista' | 'isTransportista' | 'isEncargado' | 'isDeposito'>
 
 const FILTROS_VISTA: FiltrosPedidosState = {
   fechaDesde: null,
@@ -311,7 +344,7 @@ const ROLES_CON_LISTA: Array<[string, Roles]> = [
   ['admin', { isAdmin: true, isPreventista: false, isTransportista: false, isEncargado: false }],
   ['preventista', { isAdmin: false, isPreventista: true, isTransportista: false, isEncargado: false }],
   ['encargado', { isAdmin: false, isPreventista: false, isTransportista: false, isEncargado: true }],
-  ['depósito (ningún flag)', { isAdmin: false, isPreventista: false, isTransportista: false, isEncargado: false }],
+  ['depósito', { isAdmin: false, isPreventista: false, isTransportista: false, isEncargado: false, isDeposito: true }],
   ['preventista que también reparte, fuera del modo ruta', { isAdmin: false, isPreventista: true, isTransportista: true, isEncargado: false }],
 ]
 
@@ -346,6 +379,14 @@ describe('VistaPedidos real — le pasa a PedidoStats los filtros y el onFiltros
     expect(within(grupo).getByRole('button', { name: /^En camino/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(grupo).getByRole('button', { name: /^Impagos/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(grupo).getByRole('button', { name: /^Pendientes/ })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('depósito: la vista le pasa isDeposito a los tiles y no muestran ningún monto (#717)', () => {
+    const roles: Roles = { isAdmin: false, isPreventista: false, isTransportista: false, isEncargado: false, isDeposito: true }
+    render(<VistaPedidosReal {...propsVista(roles)} />)
+
+    const grupo = screen.getByRole('group', { name: NOMBRE_GRUPO })
+    expect(within(grupo).queryAllByText(/^\$/)).toEqual([])
   })
 
   it('el transportista puro ve el mapa de la ruta, sin tiles', () => {

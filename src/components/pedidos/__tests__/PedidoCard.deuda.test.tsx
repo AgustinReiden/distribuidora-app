@@ -75,6 +75,7 @@ function renderCard(
     isPreventista: rol === 'preventista',
     isTransportista: rol === 'transportista',
     isEncargado: rol === 'encargado',
+    isDeposito: rol === 'deposito',
     isAdminOrEncargado: rol === 'admin' || rol === 'encargado',
     rolesEfectivos: [rol],
     isOnline: extra.isOnline ?? true,

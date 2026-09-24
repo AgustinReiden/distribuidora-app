@@ -191,5 +191,9 @@ export function mostrarMontosEnStats(
   key: PedidoStatKey,
 ): boolean {
   if (rol === 'encargado') return key === 'impagos'
+  // Depósito entra a /pedidos para preparar la mercadería: ve los conteos, no
+  // la plata. Mismo criterio que `puedeVerDeudaCliente`, que ya le niega la
+  // deuda en la tarjeta del pedido (#717).
+  if (rol === 'deposito') return false
   return true
 }
