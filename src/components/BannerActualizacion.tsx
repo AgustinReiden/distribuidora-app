@@ -9,17 +9,21 @@
  */
 import { RefreshCw, X } from 'lucide-react'
 import type { ReactElement } from 'react'
+import { createPortal } from 'react-dom'
 import { useActualizacionDisponible } from '../hooks/useActualizacionDisponible'
+import { getNoticeRoot } from './ui/noticeRoot'
 
 export function BannerActualizacion(): ReactElement | null {
   const { disponible, actualizar, posponer } = useActualizacionDisponible()
 
   if (!disponible) return null
 
-  return (
+  // La posición la pone la pila de avisos (ver ui/noticeRoot), no este wrapper.
+  const root = getNoticeRoot()
+  const aviso = (
     <div
       role="status"
-      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50"
+      className="pointer-events-auto w-full max-w-sm md:w-96 bg-blue-600 text-white p-4 rounded-lg shadow-lg"
     >
       <div className="flex items-start gap-3">
         <RefreshCw className="w-5 h-5 mt-0.5 flex-shrink-0" />
@@ -54,6 +58,8 @@ export function BannerActualizacion(): ReactElement | null {
       </div>
     </div>
   )
+
+  return root ? createPortal(aviso, root) : aviso
 }
 
 export default BannerActualizacion

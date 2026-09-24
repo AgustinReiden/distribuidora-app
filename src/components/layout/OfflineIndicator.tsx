@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Wifi, WifiOff, Cloud, CloudOff, RefreshCw, AlertTriangle, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { formatPrecio } from '../../utils/formatters'
 import { Button } from '../ui/Button'
+import { getNoticeRoot } from '../ui/noticeRoot'
 
 interface PedidoOffline {
   offlineId: string;
@@ -42,8 +44,12 @@ export default function OfflineIndicator({
   // No mostrar nada si esta online y no hay pendientes
   if (isOnline && cantidadTotal === 0) return null
 
-  return (
-    <div className={`fixed bottom-4 right-4 z-50 max-w-sm ${expandido ? 'w-80' : ''}`}>
+  // La posición la pone la pila de avisos (ver ui/noticeRoot), no este wrapper.
+  // Sin `w-full` a propósito: colapsado es una pastilla que se ajusta a su texto
+  // y la pila la alinea a la derecha; a lo ancho, el botón quedaría a la izquierda.
+  const root = getNoticeRoot()
+  const aviso = (
+    <div className={`pointer-events-auto max-w-sm ${expandido ? 'w-80' : ''}`}>
       {/* Boton principal */}
       <button
         onClick={() => setExpandido(!expandido)}
@@ -192,4 +198,6 @@ export default function OfflineIndicator({
       )}
     </div>
   )
+
+  return root ? createPortal(aviso, root) : aviso
 }

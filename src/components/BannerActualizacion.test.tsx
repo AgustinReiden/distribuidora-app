@@ -38,6 +38,10 @@ describe('BannerActualizacion', () => {
     mockHook(false)
     const { container } = render(<BannerActualizacion />)
     expect(container.firstChild).toBeNull()
+    // El aviso se dibuja por portal en la pila (#716), no en el container: hay
+    // que mirar afuera para que esto diga algo.
+    expect(document.getElementById('notice-root')?.childElementCount ?? 0).toBe(0)
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('muestra el aviso con role status y su texto cuando hay actualizacion disponible', () => {
