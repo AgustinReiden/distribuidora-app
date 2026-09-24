@@ -144,6 +144,89 @@ function BloqueModalBase() {
   )
 }
 
+const LINEAS_COMPRA = Array.from({ length: 30 }).map((_, i) => {
+  const cantidad = 12 + i * 6
+  const costo = 1450 + (i % 5) * 120
+  return { id: i + 1, cantidad, costo, subtotal: cantidad * costo }
+})
+
+/**
+ * `bodyBare`: el hijo trae su propia columna, con el área larga en
+ * `flex-1 overflow-y-auto` y un footer `flex-shrink-0`. Scrollea sólo la lista;
+ * el footer con los botones queda siempre a la vista (con el `DialogBody` de
+ * siempre se iría abajo junto con el contenido).
+ */
+function BloqueModalBaseBare() {
+  const [abierto, setAbierto] = useState(false)
+  const total = LINEAS_COMPRA.reduce((acc, l) => acc + l.subtotal, 0)
+
+  return (
+    <Marco etiqueta="ModalBase · bodyBare + max-w-6xl: el contenido trae su scroll y el footer queda fijo">
+      <button type="button" className={BOTON} onClick={() => setAbierto(true)}>
+        Abrir ModalBase bodyBare
+      </button>
+      {abierto && (
+        <ModalBase
+          title="Nueva compra"
+          description="Manaos Tucumán S.A. · 30 líneas"
+          maxWidth="max-w-6xl"
+          bodyBare
+          onClose={() => setAbierto(false)}
+        >
+          <div className="flex flex-1 min-h-0 flex-col">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4">
+              <table className="w-full text-sm text-gray-700 dark:text-gray-300">
+                <thead className="text-xs text-left text-gray-500 dark:text-gray-400">
+                  <tr className="border-b dark:border-gray-700">
+                    <th className="py-2 font-medium">Producto</th>
+                    <th className="py-2 font-medium text-right">Cantidad</th>
+                    <th className="py-2 font-medium text-right">Costo unit.</th>
+                    <th className="py-2 font-medium text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {LINEAS_COMPRA.map((l) => (
+                    <tr key={l.id} className="border-b dark:border-gray-700 last:border-0">
+                      <td className="py-2">Línea {l.id} · Manaos Cola 2,25 L</td>
+                      <td className="py-2 text-right tabular-nums">{l.cantidad}</td>
+                      <td className="py-2 text-right tabular-nums">
+                        $ {l.costo.toLocaleString('es-AR')}
+                      </td>
+                      <td className="py-2 text-right tabular-nums font-medium">
+                        $ {l.subtotal.toLocaleString('es-AR')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex-shrink-0 flex flex-wrap items-center justify-between gap-3 p-4 border-t dark:border-gray-700">
+              <span className="text-sm text-gray-600 dark:text-gray-300">
+                Total{' '}
+                <span className="tabular-nums font-semibold text-gray-900 dark:text-white">
+                  $ {total.toLocaleString('es-AR')}
+                </span>
+              </span>
+              <div className="flex gap-2">
+                <button type="button" className={BOTON} onClick={() => setAbierto(false)}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAbierto(false)}
+                  className="h-10 px-4 rounded-lg bg-blue-600 text-white text-sm font-medium"
+                >
+                  Registrar compra
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalBase>
+      )}
+    </Marco>
+  )
+}
+
 function BloqueBottomSheet() {
   const [abierto, setAbierto] = useState(false)
 
@@ -326,6 +409,7 @@ export default function SeccionCompartidos() {
         <div className="mt-3 space-y-4">
           <BloqueConfirmaciones />
           <BloqueModalBase />
+          <BloqueModalBaseBare />
           <BloqueBottomSheet />
           <Marco etiqueta="DropdownMenu · label, items, separador y shortcut">
             <DropdownMenu>
