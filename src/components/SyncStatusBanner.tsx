@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, type ReactElement } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, RefreshCw, X, ChevronDown, ChevronUp } from 'lucide-react'
 import {
   getOperationCounts,
@@ -16,6 +17,7 @@ import {
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
 import { Button } from './ui/Button'
+import { getNoticeRoot } from './ui/noticeRoot'
 
 interface SyncStatusBannerProps {
   /** Callback cuando se reintenta sincronización */
@@ -115,9 +117,11 @@ export function SyncStatusBanner({
     return labels[type] || type
   }
 
-  return (
+  // La posición la pone la pila de avisos (ver ui/noticeRoot), no este wrapper.
+  const root = getNoticeRoot()
+  const aviso = (
     <div
-      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg shadow-lg z-40 overflow-hidden"
+      className="pointer-events-auto w-full max-w-sm md:w-96 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg shadow-lg overflow-hidden"
       role="alert"
       aria-live="polite"
     >
@@ -201,6 +205,8 @@ export function SyncStatusBanner({
       </div>
     </div>
   )
+
+  return root ? createPortal(aviso, root) : aviso
 }
 
 export default SyncStatusBanner
