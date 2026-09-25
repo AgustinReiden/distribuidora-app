@@ -105,6 +105,54 @@ function BloqueConfirmaciones() {
   )
 }
 
+/**
+ * El caso de 8 de los 15 usos reales: la confirmación se dispara desde ADENTRO
+ * de un `ModalBase` y se renderiza como hija suya. Tiene que verse por encima
+ * del modal, y Escape tiene que cerrar sólo la confirmación.
+ */
+function BloqueConfirmacionAnidada() {
+  const [abierto, setAbierto] = useState(false)
+  const [confirmando, setConfirmando] = useState(false)
+
+  const config: ModalConfirmacionConfig | null = confirmando
+    ? {
+        visible: true,
+        tipo: 'danger',
+        titulo: 'Quitar línea',
+        mensaje: 'Se quita "Manaos Cola 2,25 L × 12" del pedido. El stock vuelve al depósito al guardar.',
+        onConfirm: () => setConfirmando(false),
+      }
+    : null
+
+  return (
+    <Marco etiqueta="ModalConfirmacion anidada · se abre desde adentro de un ModalBase y queda por encima">
+      <button type="button" className={BOTON} onClick={() => setAbierto(true)}>
+        Abrir ModalBase con confirmación
+      </button>
+      {abierto && (
+        <ModalBase title="Editar pedido #18398" onClose={() => setAbierto(false)}>
+          <div className="p-4 space-y-3 text-sm text-gray-700 dark:text-gray-300">
+            <div className="flex items-center justify-between border-b dark:border-gray-700 pb-2">
+              <span>Manaos Cola 2,25 L × 12</span>
+              <button
+                type="button"
+                onClick={() => setConfirmando(true)}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+              >
+                Quitar
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Escape con la confirmación abierta cierra sólo la confirmación; el modal sigue abierto.
+            </p>
+          </div>
+          <ModalConfirmacion config={config} onClose={() => setConfirmando(false)} />
+        </ModalBase>
+      )}
+    </Marco>
+  )
+}
+
 function BloqueModalBase() {
   const [abierto, setAbierto] = useState(false)
 
@@ -408,6 +456,7 @@ export default function SeccionCompartidos() {
         <Subtitulo>Modales y menús</Subtitulo>
         <div className="mt-3 space-y-4">
           <BloqueConfirmaciones />
+          <BloqueConfirmacionAnidada />
           <BloqueModalBase />
           <BloqueModalBaseBare />
           <BloqueBottomSheet />
