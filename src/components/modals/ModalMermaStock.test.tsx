@@ -1,18 +1,19 @@
 /**
- * Caracterización de ModalMermaStock antes del rediseño de UI.
+ * Caracterización de ModalMermaStock, escrita antes del rediseño de UI.
  *
- * Hoy es un `<div className="fixed inset-0">` hecho a mano. Lo que tiene que
- * sobrevivir a la migración a `ModalBase` (Radix) está acá: los textos que se
- * ven, el payload EXACTO de `onSave` (viaja la cantidad, no el saldo — #518 /
- * mig 232), qué motivos se ofrecen y cuál no (`promociones` nunca), y qué pasa
- * cuando el guardado falla.
+ * Era un `<div className="fixed inset-0">` hecho a mano; desde WP-26 (#719) es
+ * un `ModalBase` (Radix). Lo que tenía que sobrevivir a la migración está acá:
+ * los textos que se ven, el payload EXACTO de `onSave` (viaja la cantidad, no
+ * el saldo — #518 / mig 232), qué motivos se ofrecen y cuál no (`promociones`
+ * nunca), y qué pasa cuando el guardado falla.
  *
  * El schema `modalMermaSchema` está co-locado a propósito (regla de CLAUDE.md
  * sobre chunks desincronizados del PWA) y está exportado, así que se cubre
  * directo: los mensajes son parte del contrato aunque la UI no los alcance.
  */
+import { useState } from 'react'
 import { describe, it, expect, vi, type Mock } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ModalMermaStock, { modalMermaSchema, type ModalMermaStockProps } from './ModalMermaStock'
 import type { Producto } from '../../types'
@@ -50,25 +51,18 @@ function renderModal(
  * `getByLabelText(/cantidad a dar de baja/i)` no lo encuentra y un lector de
  * pantalla anuncia el campo sin nombre. Se lo ubica por rol y posición (es el
  * primer `textbox`; el segundo es el textarea de observaciones). Se asevera el
- * comportamiento ACTUAL: al migrar a ModalBase conviene atar el label y este
- * helper puede pasar a `getByLabelText`.
+ * comportamiento ACTUAL. WP-26 migró el modal a ModalBase sin tocar el
+ * formulario; atar el label (y pasar este helper a `getByLabelText`) es #801.
  */
 const inputCantidad = (): HTMLElement => screen.getAllByRole('textbox')[0]
 
 /**
  * La X del header.
  *
- * BUG: no tiene `aria-label` ni texto, así que su nombre accesible es vacío —
- * el único botón del modal en esa condición. `ModalBase` ya la rotula
- * ("Cerrar"), de modo que al migrar esto se arregla solo.
+ * Antes de WP-26 no tenía `aria-label` ni texto y su nombre accesible era
+ * vacío; la X de `ModalBase` se llama "Cerrar", y por ese nombre se la busca.
  */
-function botonCerrarSinNombre(): HTMLElement {
-  const sinNombre = screen
-    .getAllByRole('button')
-    .filter(b => (b.textContent ?? '').trim() === '' && !b.getAttribute('aria-label'))
-  expect(sinNombre).toHaveLength(1)
-  return sinNombre[0]
-}
+const botonCerrar = (): HTMLElement => screen.getByRole('button', { name: 'Cerrar' })
 
 describe('ModalMermaStock — qué se ve', () => {
   it('no renderiza nada sin producto', () => {
@@ -88,17 +82,39 @@ describe('ModalMermaStock — qué se ve', () => {
   })
 
   /**
-   * BUG (a arreglar en la migración): el contenedor es un `<div fixed>` sin
-   * `role="dialog"` ni `aria-modal`, así que no hay diálogo ni nombre que
-   * anunciar. Se fija con qué nombre tiene que quedar al pasar a `ModalBase`:
-   * el título visible, no uno inventado ni ninguno.
+   * Antes de WP-26 el contenedor era un `<div fixed>` sin `role="dialog"`: no
+   * había diálogo ni nombre que anunciar. Ahora hay UNO, que se llama como el
+   * título visible (no uno inventado ni ninguno) y al que el subtítulo describe.
    */
-  it('hoy no hay role="dialog"; el nombre a heredar es "Baja de Stock"', () => {
+  it('es un dialog cuyo nombre es "Baja de Stock"', () => {
     renderModal()
 
-    expect(screen.queryAllByRole('dialog')).toHaveLength(0)
+    const dialogos = screen.getAllByRole('dialog')
+    expect(dialogos).toHaveLength(1)
+    expect(screen.getByRole('dialog', { name: 'Baja de Stock' })).toBe(dialogos[0])
+    expect(dialogos[0]).toHaveAccessibleDescription('Registrar merma o perdida')
     expect(screen.getByRole('heading', { name: 'Baja de Stock' })).toBeInTheDocument()
     expect(screen.getByText('Registrar merma o perdida')).toBeVisible()
+  })
+
+  /**
+   * Lo modal no se asevera con el atributo `aria-modal`: Radix 1.1.15 no lo pone
+   * y ModalBase tampoco (los comentarios de ModalBase.tsx y ui/Dialog.tsx que
+   * dicen lo contrario están mal: #800). Lo que hace Radix es marcar `aria-hidden`
+   * todo lo que queda fuera del diálogo, que es el efecto que se busca (un
+   * lector de pantalla no se escapa a la vista de atrás) y lo que se fija acá.
+   */
+  it('es modal: la vista de atrás sale del árbol accesible', () => {
+    render(
+      <>
+        <button type="button">Vista de fondo</button>
+        <ModalMermaStock producto={PRODUCTO} onSave={vi.fn<OnSave>()} onClose={vi.fn()} />
+      </>,
+    )
+
+    expect(screen.getByRole('dialog', { name: 'Baja de Stock' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Vista de fondo' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Vista de fondo', hidden: true })).toBeInTheDocument()
   })
 
   it('adelanta el stock que va a quedar después de la baja', async () => {
@@ -273,10 +289,76 @@ describe('ModalMermaStock — guardar y cerrar', () => {
   it('la X del header también cierra sin guardar', async () => {
     const { user, onSave, onClose } = renderModal()
 
-    await user.click(botonCerrarSinNombre())
+    await user.click(botonCerrar())
 
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('Escape cierra sin guardar', async () => {
+    const { user, onSave, onClose } = renderModal()
+
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('el foco queda dentro del diálogo al abrir', () => {
+    renderModal()
+
+    expect(screen.getByRole('dialog', { name: 'Baja de Stock' }))
+      .toContainElement(document.activeElement as HTMLElement)
+  })
+
+  /**
+   * BUG (de ModalBase, no de este modal): al cerrar, el foco NO vuelve al botón
+   * que abrió el modal; cae en `<body>`. ModalBase monta `<Dialog open>` sin
+   * `Dialog.Trigger`, y el `onCloseAutoFocus` de Radix 1.1.15 hace
+   * `preventDefault()` + `triggerRef.current?.focus()` con un `triggerRef` nulo:
+   * cancela la devolución de FocusScope y no enfoca nada. No es una regresión de
+   * WP-26 (el div hecho a mano tampoco lo devolvía), y los comentarios de
+   * ModalBase.tsx y ui/Dialog.tsx que dicen lo contrario están mal. Se asevera
+   * lo que pasa HOY; cuando ModalBase lo arregle (#800), este test se pone rojo
+   * y se invierte a `expect(abrir).toHaveFocus()`.
+   */
+  it.each([
+    ['Escape', (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+    ['Cancelar', (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(screen.getByRole('button', { name: /^cancelar$/i }))],
+  ])('al cerrar con %s el foco NO vuelve al botón que lo abrió: cae en body', async (_, cerrar) => {
+    function Host() {
+      const [abierto, setAbierto] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setAbierto(true)}>Abrir baja</button>
+          {abierto && (
+            <ModalMermaStock
+              producto={PRODUCTO}
+              onSave={vi.fn<OnSave>()}
+              onClose={() => setAbierto(false)}
+            />
+          )}
+        </>
+      )
+    }
+    render(<Host />)
+    const user = userEvent.setup()
+    const abrir = screen.getByRole('button', { name: 'Abrir baja' })
+
+    await user.click(abrir)
+    expect(screen.getByRole('dialog', { name: 'Baja de Stock' }))
+      .toContainElement(document.activeElement as HTMLElement)
+
+    await cerrar(user)
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    // FocusScope decide a dónde va el foco en un `setTimeout(0)` al desmontar:
+    // sin dejarlo correr, "no volvió" pasaría aunque ModalBase lo arreglara.
+    await act(() => new Promise<void>(resolve => setTimeout(resolve, 0)))
+
+    expect(abrir).not.toHaveFocus()
+    expect(document.body).toHaveFocus()
   })
 })
 
