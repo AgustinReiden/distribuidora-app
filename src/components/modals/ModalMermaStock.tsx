@@ -1,8 +1,9 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react'
 import { z } from 'zod'
-import { X, AlertTriangle, Package, Minus, FileText } from 'lucide-react'
+import { AlertTriangle, Package, Minus, FileText } from 'lucide-react'
 import { useZodValidation } from '../../hooks/useZodValidation'
 import { getErrorMessage } from '../../utils/errorHandling'
+import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import type { Producto } from '../../types'
@@ -130,153 +131,140 @@ export default function ModalMermaStock({
 
   const cantidadNum = typeof cantidad === 'string' ? parseInt(cantidad) || 0 : cantidad
 
+  // El "−" rojo que acompañaba al título no va a `headerExtra`: ese slot queda
+  // pegado a la X de ModalBase, y un "−" al lado de una "×" se lee como el par
+  // minimizar/cerrar de una ventana. El "−" sigue en el botón "Registrar Baja".
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
-              <Minus className="w-5 h-5 text-red-600" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Baja de Stock</h2>
-              <p className="text-sm text-gray-500">Registrar merma o perdida</p>
-            </div>
+    <ModalBase
+      title="Baja de Stock"
+      description="Registrar merma o perdida"
+      onClose={onClose}
+      maxWidth="max-w-md"
+    >
+      {/* Info del producto */}
+      <div className="p-4 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+            <Package className="w-6 h-6 text-gray-400" />
           </div>
-          {/* Sin aria-label a propósito: ModalMermaStock.test.tsx fija que este
-              botón no tiene nombre accesible hoy; ModalBase ya lo va a rotular
-              cuando WP-26 migre este modal a mano. */}
-          <Button onClick={onClose} variant="ghost" size="iconSm">
-            <X className="w-5 h-5" />
-          </Button>
-        </div>
-
-        {/* Info del producto */}
-        <div className="p-4 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
-              <Package className="w-6 h-6 text-gray-400" />
-            </div>
-            <div>
-              <p className="font-medium text-gray-800 dark:text-white">{producto.nombre}</p>
-              {producto.codigo && <p className="text-sm text-gray-500">Codigo: {producto.codigo}</p>}
-              <p className="text-sm">
-                Stock actual: <span className="font-bold text-blue-600">{producto.stock}</span> unidades
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Formulario */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {/* Indicador offline */}
-          {isOffline && (
-            <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-              <AlertTriangle className="w-4 h-4 text-amber-600" />
-              <p className="text-sm text-amber-700 dark:text-amber-400">
-                Sin conexion. Se guardara localmente y sincronizara despues.
-              </p>
-            </div>
-          )}
-
-          {/* Cantidad */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Cantidad a dar de baja *
-            </label>
-            <NumberInput
-              integer
-              min={1}
-              max={producto.stock}
-              emptyValue={1}
-              commitOnChange
-              value={Number(cantidad) || 0}
-              onChange={(n) => setCantidad(n)}
-              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
-              required
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Stock despues de la baja: <span className="font-bold">{Math.max(0, producto.stock - cantidadNum)}</span>
+            <p className="font-medium text-gray-800 dark:text-white">{producto.nombre}</p>
+            {producto.codigo && <p className="text-sm text-gray-500">Codigo: {producto.codigo}</p>}
+            <p className="text-sm">
+              Stock actual: <span className="font-bold text-blue-600">{producto.stock}</span> unidades
             </p>
           </div>
-
-          {/* Motivo */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Motivo de la baja *
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {MOTIVOS_MERMA.map(m => (
-                <button
-                  key={m.value}
-                  type="button"
-                  onClick={() => setMotivo(m.value)}
-                  className={`flex items-center gap-2 p-2 border rounded-lg text-sm text-left transition-colors ${
-                    motivo === m.value
-                      ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
-                      : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  <span>{m.icon}</span>
-                  <span>{m.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Observaciones */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              <FileText className="w-4 h-4 inline mr-1" />
-              Observaciones (opcional)
-            </label>
-            <textarea
-              value={observaciones}
-              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setObservaciones(e.target.value)}
-              placeholder="Detalle adicional sobre la baja..."
-              rows={2}
-              className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
-            />
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-            </div>
-          )}
-
-          {/* Botones */}
-          <div className="flex gap-3 pt-2">
-            <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
-              Cancelar
-            </Button>
-            {/* No es el spinner Loader2 (es un "..." literal), así que no
-                encaja en el contrato de `loading` del primitivo: se deja la
-                doble rama tal cual estaba. */}
-            <Button
-              type="submit"
-              variant="danger"
-              size="md"
-              disabled={guardando || !motivo || cantidadNum <= 0}
-              className="flex-1"
-            >
-              {guardando ? (
-                <>
-                  <span className="animate-spin">...</span>
-                  Registrando...
-                </>
-              ) : (
-                <>
-                  <Minus className="w-4 h-4" />
-                  Registrar Baja
-                </>
-              )}
-            </Button>
-          </div>
-        </form>
+        </div>
       </div>
-    </div>
+
+      {/* Formulario */}
+      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        {/* Indicador offline */}
+        {isOffline && (
+          <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              Sin conexion. Se guardara localmente y sincronizara despues.
+            </p>
+          </div>
+        )}
+
+        {/* Cantidad */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Cantidad a dar de baja *
+          </label>
+          <NumberInput
+            integer
+            min={1}
+            max={producto.stock}
+            emptyValue={1}
+            commitOnChange
+            value={Number(cantidad) || 0}
+            onChange={(n) => setCantidad(n)}
+            className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
+            required
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Stock despues de la baja: <span className="font-bold">{Math.max(0, producto.stock - cantidadNum)}</span>
+          </p>
+        </div>
+
+        {/* Motivo */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Motivo de la baja *
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {MOTIVOS_MERMA.map(m => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setMotivo(m.value)}
+                className={`flex items-center gap-2 p-2 border rounded-lg text-sm text-left transition-colors ${
+                  motivo === m.value
+                    ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
+                    : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                <span>{m.icon}</span>
+                <span>{m.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Observaciones */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <FileText className="w-4 h-4 inline mr-1" />
+            Observaciones (opcional)
+          </label>
+          <textarea
+            value={observaciones}
+            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setObservaciones(e.target.value)}
+            placeholder="Detalle adicional sobre la baja..."
+            rows={2}
+            className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white"
+          />
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          </div>
+        )}
+
+        {/* Botones */}
+        <div className="flex gap-3 pt-2">
+          <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
+            Cancelar
+          </Button>
+          {/* No es el spinner Loader2 (es un "..." literal), así que no
+              encaja en el contrato de `loading` del primitivo: se deja la
+              doble rama tal cual estaba. */}
+          <Button
+            type="submit"
+            variant="danger"
+            size="md"
+            disabled={guardando || !motivo || cantidadNum <= 0}
+            className="flex-1"
+          >
+            {guardando ? (
+              <>
+                <span className="animate-spin">...</span>
+                Registrando...
+              </>
+            ) : (
+              <>
+                <Minus className="w-4 h-4" />
+                Registrar Baja
+              </>
+            )}
+          </Button>
+        </div>
+      </form>
+    </ModalBase>
   )
 }
