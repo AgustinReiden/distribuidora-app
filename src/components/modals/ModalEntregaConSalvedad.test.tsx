@@ -1,9 +1,10 @@
 /**
- * Caracterización de ModalEntregaConSalvedad antes del rediseño de UI.
+ * Caracterización de ModalEntregaConSalvedad, escrita antes del rediseño de UI.
  *
- * Es un `<div className="fixed inset-0">` hecho a mano con DOS pasos
- * (selección -> confirmación) en el mismo montaje. Lo que tiene que sobrevivir
- * a la migración a `ModalBase` (Radix) está acá:
+ * Era un `<div className="fixed inset-0">` hecho a mano; desde WP-27 (#720) es
+ * un `ModalBase` (Radix) con `bodyBare`. Tiene DOS pasos (selección ->
+ * confirmación) en el mismo montaje. Lo que tenía que sobrevivir a la
+ * migración está acá:
  *
  *  - el ida y vuelta entre pasos sin perder lo seleccionado,
  *  - las validaciones por item, con el nombre del producto adelante,
@@ -13,6 +14,9 @@
  *  - que `onMarcarEntregado` corre DESPUÉS de las salvedades y sólo si todas
  *    entraron,
  *  - y el resumen de regalos que devuelve el dry-run de la promo (mig 174).
+ *
+ * Lo que la migración cambió a propósito está en "cerrar": Escape ahora cierra,
+ * pero sólo si no hay nada tildado (`entregaSalvedadTieneCambios`).
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
@@ -27,7 +31,7 @@ let simulando = false
  * Con qué `enabled` se llamó al dry-run en cada render, en orden.
  *
  * El hook va mockeado entero, así que el `enabled: paso === 'confirmacion'`
- * (ModalEntregaConSalvedad.tsx:93) se perdería: el RPC de la mig 174 se
+ * (ModalEntregaConSalvedad.tsx:97) se perdería: el RPC de la mig 174 se
  * dispararía en cada tecla del paso 1 y ningún test se pondría rojo. Se
  * registra el tercer argumento para poder aseverarlo.
  */
@@ -124,15 +128,18 @@ const inputCantidadAfectada = (): HTMLElement => screen.getAllByRole('textbox')[
 /**
  * La X del header.
  *
- * BUG: sin `aria-label` ni texto — nombre accesible vacío. `ModalBase` ya la
- * rotula "Cerrar", así que migrar lo arregla solo.
+ * Antes de WP-27 no tenía `aria-label` ni texto y su nombre accesible era
+ * vacío; la X de `ModalBase` se llama "Cerrar", y por ese nombre se la busca.
  */
-function botonCerrarSinNombre(): HTMLElement {
-  const sinNombre = screen
-    .getAllByRole('button')
-    .filter(b => (b.textContent ?? '').trim() === '' && !b.getAttribute('aria-label'))
-  expect(sinNombre).toHaveLength(1)
-  return sinNombre[0]
+const botonCerrar = (): HTMLElement => screen.getByRole('button', { name: 'Cerrar' })
+
+/** Lleva el modal al paso de confirmación con una salvedad válida sobre el aceite. */
+async function llegarAConfirmacion(user: ReturnType<typeof userEvent.setup>) {
+  await tildarItem(user, 'Aceite Girasol 900ml')
+  await user.clear(inputCantidadAfectada())
+  await user.type(inputCantidadAfectada(), '2')
+  await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+  await user.click(screen.getByRole('button', { name: /continuar/i }))
 }
 
 beforeEach(() => {
@@ -153,16 +160,42 @@ describe('ModalEntregaConSalvedad — paso de selección', () => {
   })
 
   /**
-   * BUG (a arreglar en la migración): el contenedor es un `<div fixed>` sin
-   * `role="dialog"` ni `aria-modal`. Se fija con qué nombre tiene que quedar el
-   * diálogo al pasar a `ModalBase`: el título visible, no uno inventado.
+   * Antes de WP-27 el contenedor era un `<div fixed>` sin `role="dialog"`: no
+   * había diálogo ni nombre que anunciar. Ahora hay UNO, que se llama como el
+   * título visible (no uno inventado ni ninguno), y el pedido sigue a la vista.
    */
-  it('hoy no hay role="dialog"; el nombre a heredar es "Entrega con Salvedad"', () => {
+  it('es un dialog cuyo nombre es "Entrega con Salvedad"', () => {
     renderModal()
 
-    expect(screen.queryAllByRole('dialog')).toHaveLength(0)
+    const dialogos = screen.getAllByRole('dialog')
+    expect(dialogos).toHaveLength(1)
+    expect(screen.getByRole('dialog', { name: 'Entrega con Salvedad' })).toBe(dialogos[0])
     expect(screen.getByRole('heading', { name: 'Entrega con Salvedad' })).toBeInTheDocument()
-    expect(screen.getByText('Pedido #42 - Kiosco Sur')).toBeVisible()
+    expect(within(dialogos[0]).getByText('Pedido #42 - Kiosco Sur')).toBeVisible()
+  })
+
+  /**
+   * Lo modal no se asevera con el atributo `aria-modal`: Radix 1.1.15 no lo
+   * pone (#800). Lo que hace es marcar `aria-hidden` todo lo que queda fuera
+   * del diálogo —un lector de pantalla no se escapa a la vista de atrás—, y es
+   * eso lo que se fija acá.
+   */
+  it('es modal: la vista de atrás sale del árbol accesible', () => {
+    render(
+      <>
+        <button type="button">Vista de fondo</button>
+        <ModalEntregaConSalvedad
+          pedido={PEDIDO}
+          onSave={vi.fn<OnSave>()}
+          onMarcarEntregado={vi.fn<OnMarcarEntregado>()}
+          onClose={vi.fn()}
+        />
+      </>,
+    )
+
+    expect(screen.getByRole('dialog', { name: 'Entrega con Salvedad' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Vista de fondo' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Vista de fondo', hidden: true })).toBeInTheDocument()
   })
 
   it('el dry-run de promos está APAGADO en el paso 1 y sólo se enciende al confirmar', async () => {
@@ -192,7 +225,7 @@ describe('ModalEntregaConSalvedad — paso de selección', () => {
 
   /**
    * BUG: la fila de un item es un `<div onClick>` sin `role` ni `tabIndex`
-   * (ModalEntregaConSalvedad.tsx:255-257), y el "checkbox" es un `<div>`
+   * (ModalEntregaConSalvedad.tsx:266-268), y el "checkbox" es un `<div>`
    * pintado, no un `<input type="checkbox">`. O sea: con el teclado solo NO se
    * puede tildar un item, y la entrega con salvedad entera queda fuera de
    * alcance. Se asevera lo de HOY; migrar a controles de verdad lo pone rojo, y
@@ -290,14 +323,6 @@ describe('ModalEntregaConSalvedad — validaciones antes de continuar', () => {
 })
 
 describe('ModalEntregaConSalvedad — paso de confirmación', () => {
-  async function llegarAConfirmacion(user: ReturnType<typeof userEvent.setup>) {
-    await tildarItem(user, 'Aceite Girasol 900ml')
-    await user.clear(inputCantidadAfectada())
-    await user.type(inputCantidadAfectada(), '2')
-    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
-    await user.click(screen.getByRole('button', { name: /continuar/i }))
-  }
-
   it('resume lo entregado, lo afectado y los totales', async () => {
     const { user } = renderModal()
 
@@ -484,20 +509,87 @@ describe('ModalEntregaConSalvedad — cerrar', () => {
   it('la X del header también cierra', async () => {
     const { user, onClose } = renderModal()
 
-    await user.click(botonCerrarSinNombre())
+    await user.click(botonCerrar())
 
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  // BUG: el modal hecho a mano no cierra con Escape. Se asevera lo de HOY; al
-  // migrar a ModalBase (Radix) Escape va a llamar onClose y esto se pone rojo a
-  // propósito — con un formulario a medio llenar, ese cambio hay que decidirlo.
-  it('hoy Escape NO cierra el modal', async () => {
-    const { user, onClose } = renderModal()
+  // El modal hecho a mano no cerraba con Escape. Con ModalBase (Radix) Escape
+  // cierra, pero sólo si no hay nada que perder: sin ningún item tildado, como
+  // acá. Con algo tildado se lo traga (tests de abajo).
+  it('sin nada tildado, Escape cierra sin guardar nada', async () => {
+    const { user, onSave, onMarcarEntregado, onClose } = renderModal()
 
     await user.keyboard('{Escape}')
 
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onMarcarEntregado).not.toHaveBeenCalled()
+  })
+
+  it('con un item tildado, Escape NO cierra y lo cargado sigue ahí', async () => {
+    const { user, onClose } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await user.keyboard('{Escape}')
+
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole('heading', { name: 'Entrega con Salvedad' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Entrega con Salvedad' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox')).toHaveValue('cliente_rechaza')
+    expect(screen.getByRole('button', { name: /continuar/i })).toBeEnabled()
+  })
+
+  it('destildar todo vuelve a dejar cerrar con Escape', async () => {
+    const { user, onClose } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('en el paso de confirmación, Escape NO cierra', async () => {
+    const { user, onSave, onClose } = renderModal()
+
+    await llegarAConfirmacion(user)
+    await user.keyboard('{Escape}')
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'Resumen de la entrega' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /confirmar entrega/i })).toBeEnabled()
+  })
+
+  it('con un item tildado, la X cierra igual (es un click deliberado)', async () => {
+    const { user, onSave, onClose } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.click(botonCerrar())
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('con un item tildado, Cancelar cierra igual', async () => {
+    const { user, onSave, onClose } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.click(screen.getByRole('button', { name: /^cancelar$/i }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('en el paso de confirmación, la X cierra igual sin guardar', async () => {
+    const { user, onSave, onMarcarEntregado, onClose } = renderModal()
+
+    await llegarAConfirmacion(user)
+    await user.click(botonCerrar())
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onMarcarEntregado).not.toHaveBeenCalled()
   })
 })

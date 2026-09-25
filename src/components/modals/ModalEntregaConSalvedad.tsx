@@ -4,11 +4,13 @@
  * Validación con Zod
  */
 import React, { useState, useCallback, useMemo } from 'react'
-import { X, AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
+import { AlertTriangle, Package, Check, ChevronDown, ChevronUp, Truck, Gift } from 'lucide-react'
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas'
 import { useSimularSalvedadesPromoImpactoQuery } from '../../hooks/queries'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { formatPrecio } from '../../utils/formatters'
+import { entregaSalvedadTieneCambios } from '../../utils/entregaSalvedadTieneCambios'
+import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
@@ -204,30 +206,37 @@ export default function ModalEntregaConSalvedad({
 
   const totalSalvedades = itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * i.cantidadAfectada), 0)
 
+  // Escape cierra sólo si no hay nada que perder (ver la util). La X y
+  // "Cancelar" cierran siempre, como antes de pasar a ModalBase.
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    if (entregaSalvedadTieneCambios({ paso, seleccionados: itemsConSalvedad.length })) {
+      event.preventDefault()
+    }
+  }
+
+  // bodyBare: el modal trae su propia columna. Con el DialogBody de siempre
+  // habría doble scroll y el footer con los botones se iría con la lista,
+  // fuera de la pantalla del transportista.
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 bg-white dark:bg-gray-800">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
-              <AlertTriangle className="w-5 h-5 text-amber-600" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Entrega con Salvedad</h2>
-              <p className="text-sm text-gray-500">Pedido #{pedido.id} - {pedido.cliente?.nombre_fantasia || 'Cliente'}</p>
-            </div>
+    <ModalBase
+      title="Entrega con Salvedad"
+      onClose={onClose}
+      maxWidth="max-w-2xl"
+      bodyBare
+      onEscapeKeyDown={handleEscapeKeyDown}
+    >
+      <div className="flex flex-1 min-h-0 flex-col">
+        {/* Pedido: queda fijo arriba del área que scrollea. No va como
+            `description` de ModalBase: la visible queda cruzada por el borde
+            del header (#800). */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b dark:border-gray-700 flex-shrink-0">
+          <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+            <AlertTriangle className="w-5 h-5 text-amber-600" />
           </div>
-          {/* BUG (ver ModalEntregaConSalvedad.test.tsx > botonCerrarSinNombre): sin
-              aria-label ni texto, nombre accesible vacío. No se agrega acá porque
-              el test de caracterización asume exactamente 1 botón sin nombre; es
-              un archivo *.test.* fuera de alcance de este lote. */}
-          <Button onClick={onClose} variant="ghost" size="iconSm">
-            <X className="w-5 h-5" />
-          </Button>
+          <p className="text-sm text-gray-500">Pedido #{pedido.id} - {pedido.cliente?.nombre_fantasia || 'Cliente'}</p>
         </div>
 
-        {/* Contenido */}
+        {/* Contenido: lo único que scrollea */}
         <div className="flex-1 overflow-y-auto p-4">
           {paso === 'seleccion' ? (
             <div className="space-y-4">
@@ -468,8 +477,8 @@ export default function ModalEntregaConSalvedad({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex gap-3">
+        {/* Footer: fijo abajo, fuera del scroll */}
+        <div className="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex gap-3 flex-shrink-0">
           {paso === 'seleccion' ? (
             <>
               <Button onClick={onClose} variant="secondary" size="md" className="flex-1">
@@ -506,6 +515,6 @@ export default function ModalEntregaConSalvedad({
           )}
         </div>
       </div>
-    </div>
+    </ModalBase>
   )
 }
