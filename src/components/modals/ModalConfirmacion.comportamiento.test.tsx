@@ -4,8 +4,9 @@
  * Ya existe `ModalConfirmacion.test.jsx`, que asevera clases de Tailwind
  * (`className` contiene `text-red-600`, el overlay por `.bg-black`). Eso es
  * justo lo que el rediseño de UI va a mover, así que este archivo fija lo que
- * NO tiene que cambiar cuando el modal pase de un `<div className="fixed
- * inset-0">` hecho a mano a `ModalBase` (Radix Dialog):
+ * NO tenía que cambiar cuando el modal pasó de un `<div className="fixed
+ * inset-0">` hecho a mano a un Dialog de Radix (WP-28, con los primitivos de
+ * `ui/Dialog`, no con ModalBase, que le agregaría una X):
  *
  *  - qué se ve (título, mensaje, ayuda) por TEXTO,
  *  - qué se puede hacer (confirmar / cancelar) por ROL ARIA,
@@ -13,8 +14,8 @@
  *  - que el componente es `memo` SIN `key`: se reusa entre confirmaciones
  *    distintas y la fecha tiene que resetearse sola (hay un `useEffect` para
  *    eso, y es lo único que lo sostiene),
- *  - y el contrato de accesibilidad que hoy está escrito a mano y mañana lo
- *    pone Radix: `role="dialog"`, `aria-modal`, nombre = título,
+ *  - y el contrato de accesibilidad: `role="dialog"`, `aria-modal` (Radix 1.1
+ *    no lo pone; el componente lo escribe explícito), nombre = título,
  *    descripción = mensaje.
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -24,6 +25,7 @@ import ModalConfirmacion, {
   type ModalConfirmacionConfig,
   type ModalConfirmacionCampoFecha,
 } from './ModalConfirmacion'
+import ModalBase from './ModalBase'
 
 function config(extra: Partial<ModalConfirmacionConfig> = {}): ModalConfirmacionConfig {
   return {
@@ -118,19 +120,107 @@ describe('ModalConfirmacion — qué dispara cada botón', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  // BUG: el modal hecho a mano no cierra con Escape ni ofrece un botón "Cerrar"
-  // con nombre accesible. Hoy la única salida es "Cancelar". Se asevera el
-  // comportamiento ACTUAL; al migrar a ModalBase (Radix) Escape va a llamar
-  // onClose y este test se pone rojo a propósito.
-  it('hoy Escape NO cierra el diálogo', async () => {
+  // El modal hecho a mano no cerraba con Escape: la única salida era "Cancelar".
+  // Desde que es un Dialog de Radix (WP-28, #721) Escape equivale a Cancelar.
+  it('Escape equivale a Cancelar: llama onClose y no confirma nada', async () => {
     const user = userEvent.setup()
+    const onConfirm = vi.fn()
     const onClose = vi.fn()
-    render(<ModalConfirmacion config={config()} onClose={onClose} />)
+    render(<ModalConfirmacion config={config({ onConfirm })} onClose={onClose} />)
 
     await user.keyboard('{Escape}')
 
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('un clic en el fondo, fuera de la caja, no cierra ni confirma', async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    const onClose = vi.fn()
+    render(<ModalConfirmacion config={config({ onConfirm })} onClose={onClose} />)
+
+    // Radix engancha su listener de "clic afuera" un tick después de montar.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    // El fondo oscuro es el hermano anterior de la caja del diálogo.
+    const fondo = screen.getByRole('dialog').previousElementSibling as HTMLElement
+    expect(fondo).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).not.toContainElement(fondo)
+    await user.click(fondo)
+
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Eliminar producto' })).toBeInTheDocument()
+  })
+})
+
+describe('ModalConfirmacion — foco', () => {
+  it('al abrir, el foco arranca en Cancelar', () => {
+    render(<ModalConfirmacion config={config()} onClose={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toHaveFocus()
+  })
+
+  it('con campo de fecha el foco también arranca en Cancelar, no en el input', () => {
+    render(<ModalConfirmacion config={config({ campoFecha: CAMPO_FECHA })} onClose={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toHaveFocus()
+    expect(screen.getByLabelText('Fecha de entrega')).not.toHaveFocus()
+  })
+
+  it('Tab recorre sólo el diálogo y vuelve a empezar', async () => {
+    const user = userEvent.setup()
+    render(<ModalConfirmacion config={config({ campoFecha: CAMPO_FECHA })} onClose={vi.fn()} />)
+
+    // Arranca en Cancelar. Después de Confirmar, el último, no se va al resto
+    // de la página: vuelve al primero del diálogo, el input de fecha.
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Confirmar' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByLabelText('Fecha de entrega')).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toHaveFocus()
+  })
+})
+
+describe('ModalConfirmacion — anidada dentro de un ModalBase', () => {
+  // 8 de los 15 usos renderizan la confirmación ADENTRO de un ModalBase. Las dos
+  // son Dialogs de Radix y la confirmación queda como la capa de arriba.
+  function renderAnidada() {
+    const onCloseModal = vi.fn()
+    const onCloseConfirmacion = vi.fn()
+    const onConfirm = vi.fn()
+    render(
+      <ModalBase title="Editar pedido" onClose={onCloseModal}>
+        <p>Contenido del modal de abajo</p>
+        <ModalConfirmacion config={config({ onConfirm })} onClose={onCloseConfirmacion} />
+      </ModalBase>,
+    )
+    return { onCloseModal, onCloseConfirmacion, onConfirm }
+  }
+
+  it('Escape cierra sólo la confirmación, no el modal de abajo', async () => {
+    const user = userEvent.setup()
+    const { onCloseModal, onCloseConfirmacion, onConfirm } = renderAnidada()
+
+    await user.keyboard('{Escape}')
+
+    expect(onCloseConfirmacion).toHaveBeenCalledTimes(1)
+    expect(onCloseModal).not.toHaveBeenCalled()
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('Confirmar queda por encima del modal de abajo y es clickeable', async () => {
+    const user = userEvent.setup()
+    const { onCloseModal, onCloseConfirmacion, onConfirm } = renderAnidada()
+
+    // `userEvent` respeta pointer-events y aria-hidden: si la confirmación
+    // quedara detrás del overlay del ModalBase, esto falla.
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+    expect(onCloseConfirmacion).not.toHaveBeenCalled()
+    expect(onCloseModal).not.toHaveBeenCalled()
   })
 })
 

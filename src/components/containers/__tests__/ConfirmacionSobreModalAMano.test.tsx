@@ -150,8 +150,12 @@ describe('ModalConfirmacion como hermano de un modal a mano (ComprasContainer)',
     await user.click(await screen.findByRole('button', { name: 'Anular Compra' }))
 
     // El detalle SIGUE montado: el container no lo cierra al abrir la
-    // confirmación. Esto es lo que hoy funciona y mañana, con Radix, no.
-    expect(screen.getByRole('heading', { name: 'Detalle de Compra #77' })).toBeInTheDocument()
+    // confirmación. `hidden: true` porque, desde que la confirmación es un
+    // Dialog de Radix (WP-28), con ella abierta el resto de la página queda
+    // `aria-hidden` —es lo correcto— y sin la opción esta consulta sólo pasaba
+    // si el chunk lazy de la confirmación todavía no había cargado. Lo que se
+    // asevera no cambia: que el detalle sigue en el documento.
+    expect(screen.getByRole('heading', { name: 'Detalle de Compra #77', hidden: true })).toBeInTheDocument()
 
     const confirmacion = await screen.findByRole('dialog', { name: 'Anular compra' })
     expect(confirmacion).toBeVisible()
