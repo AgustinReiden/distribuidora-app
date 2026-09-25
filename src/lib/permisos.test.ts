@@ -120,9 +120,19 @@ describe('permisos por rol', () => {
       }
     })
 
-    it('otros roles ven monto en todas (sin restriccion)', () => {
+    it('preventista y transportista ven monto (sin restriccion)', () => {
       expect(mostrarMontosEnStats('preventista', 'pendientes')).toBe(true)
       expect(mostrarMontosEnStats('transportista', 'entregados')).toBe(true)
+    })
+
+    // #717: depósito entra a /pedidos a preparar la mercadería y ve los
+    // conteos, no la plata. Mismo criterio que puedeVerDeudaCliente, que ya le
+    // niega la deuda en la tarjeta del pedido.
+    it('deposito no ve monto en ninguna tarjeta', () => {
+      const keys = ['pendientes', 'enPreparacion', 'enCamino', 'entregados', 'impagos', 'total'] as const
+      for (const k of keys) {
+        expect(mostrarMontosEnStats('deposito', k)).toBe(false)
+      }
     })
   })
 

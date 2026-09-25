@@ -12,9 +12,11 @@
  *    y cualquier consumidor sin esas props), y las caracterizaciones de acá
  *    abajo corren contra ese modo. El modo que ve producción lo cubre el
  *    describe de #715 al final, que las repite con los tiles como botones
- *    (orden, conteos, cero, miles, aproximado, montos por rol y el BUG #717).
- *  - Los montos se gatean con UN booleano (`isEncargado`), no con el rol. Ver
- *    el BUG #717 más abajo.
+ *    (orden, conteos, cero, miles, aproximado y montos por rol, depósito
+ *    incluido).
+ *  - Los montos se gateaban con UN booleano (`isEncargado`) y depósito caía en
+ *    la rama 'admin': veía la facturación completa. WP-31 (#717) le sumó
+ *    `isDeposito`, y ahora depósito ve los conteos y ningún monto.
  *
  * Nada acá asevera clases de Tailwind: el acoplamiento a clases es lo que el
  * rediseño viene a romper.
@@ -181,19 +183,23 @@ describe('PedidoStats — qué montos ve cada rol', () => {
     expect(within(tarjeta('Total filtrado')).getByText('18')).toBeInTheDocument()
   })
 
-  // BUG #717: depósito ve todos los montos; se corrige en WP-31.
-  //
-  // `PedidoStats` no recibe el rol: recibe `isEncargado` y adentro resuelve
-  // `const rol = isEncargado ? 'encargado' : 'admin'`. Cualquier rol que NO sea
-  // encargado —depósito y transportista entran a /pedidos por TopNavigation—
-  // llega con `isEncargado={false}` y cae en la rama 'admin', así que ve la
-  // facturación completa. `mostrarMontosEnStats` sabe distinguir roles; el
-  // componente le miente la entrada. Se asevera el comportamiento ACTUAL.
-  it('BUG #717: depósito (isEncargado=false) ve los seis montos como si fuera admin', () => {
-    render(<PedidoStats summary={hacerSummary()} isEncargado={false} />)
+  // #717 (WP-31): antes depósito llegaba con `isEncargado={false}`, caía en la
+  // rama 'admin' y veía la facturación completa. Con `isDeposito` el componente
+  // le pasa el rol real a `mostrarMontosEnStats`, que le niega los seis montos
+  // —mismo criterio que `puedeVerDeudaCliente`—. Los conteos los sigue viendo:
+  // son lo que necesita para preparar la mercadería.
+  it('depósito ve los seis conteos y ningún monto (#717)', () => {
+    render(<PedidoStats summary={hacerSummary()} isDeposito />)
 
-    expect(montosVisibles()).toHaveLength(6)
-    expect(within(tarjeta('Total filtrado')).getByText(montoTexto(15000))).toBeInTheDocument()
+    expect(within(tarjeta('Pendientes')).getByText('3')).toBeInTheDocument()
+    expect(within(tarjeta('En preparación')).getByText('4')).toBeInTheDocument()
+    expect(within(tarjeta('En camino')).getByText('5')).toBeInTheDocument()
+    expect(within(tarjeta('Entregados')).getByText('6')).toBeInTheDocument()
+    expect(within(tarjeta('Impagos')).getByText('7')).toBeInTheDocument()
+    expect(within(tarjeta('Total filtrado')).getByText('18')).toBeInTheDocument()
+    expect(within(tarjeta('Total filtrado')).queryByText(montoTexto(15000))).not.toBeInTheDocument()
+    expect(within(tarjeta('Impagos')).queryByText(montoTexto(5000))).not.toBeInTheDocument()
+    expect(montosVisibles()).toHaveLength(0)
   })
 })
 
@@ -426,20 +432,22 @@ describe('PedidoStats — con onFiltrosChange los tiles filtran (#715)', () => {
 //
 // VistaPedidos siempre pasa `filtros` + `onFiltrosChange`, así que ÉSTE es el
 // camino que ve producción. Los casos de arriba (orden, conteos, cero, miles,
-// aproximado, montos por rol, BUG #717) corren contra la rama <div>; acá se
-// repiten contra la rama <button> para que la red no quede más fina justo donde
-// se usa. Cada tile se busca por su rol y su nombre accesible, no por posición.
+// aproximado, montos por rol, depósito sin montos #717) corren contra la rama
+// <div>; acá se repiten contra la rama <button> para que la red no quede más
+// fina justo donde se usa. Cada tile se busca por su rol y su nombre accesible,
+// no por posición.
 
 /** PedidoStats en modo botón, como lo monta VistaPedidos. */
 function renderInteractivo(
   summary: PedidoStatsSummary = hacerSummary(),
-  props: { isEncargado?: boolean } = {},
+  props: { isEncargado?: boolean; isDeposito?: boolean } = {},
 ) {
   const onFiltrosChange = vi.fn()
   render(
     <PedidoStats
       summary={summary}
       isEncargado={props.isEncargado}
+      isDeposito={props.isDeposito}
       filtros={SIN_FILTRO}
       onFiltrosChange={onFiltrosChange}
     />,
@@ -541,16 +549,34 @@ describe('PedidoStats — modo botón: mismas caracterizaciones (#715)', () => {
     expect(montosVisibles()).toHaveLength(1)
   })
 
-  // BUG #717: depósito ve todos los montos; se corrige en WP-31.
-  //
-  // El mismo caso de más arriba, en el modo que ve producción: volverse botón
-  // no toca la entrada `isEncargado`, así que depósito (y transportista) siguen
-  // cayendo en la rama 'admin'. Se asevera el comportamiento ACTUAL.
-  it('BUG #717 (modo botón): depósito (isEncargado=false) ve los seis montos como si fuera admin', () => {
-    renderInteractivo(hacerSummary(), { isEncargado: false })
+  // #717 (WP-31): el mismo caso de más arriba, en el modo que ve producción.
+  // Las dos ramas comparten el contenido del tile, así que depósito tampoco ve
+  // montos acá: ni en el texto ni en el nombre accesible del botón.
+  it('depósito ve los seis conteos y ningún monto (#717)', () => {
+    renderInteractivo(hacerSummary(), { isDeposito: true })
 
-    expect(montosVisibles()).toHaveLength(6)
-    expect(within(tile('Total filtrado')).getByText(montoTexto(15000))).toBeInTheDocument()
+    expect(within(tile('Pendientes')).getByText('3')).toBeInTheDocument()
+    expect(within(tile('En preparación')).getByText('4')).toBeInTheDocument()
+    expect(within(tile('En camino')).getByText('5')).toBeInTheDocument()
+    expect(within(tile('Entregados')).getByText('6')).toBeInTheDocument()
+    expect(within(tile('Impagos')).getByText('7')).toBeInTheDocument()
+    expect(within(tile('Total filtrado')).getByText('18')).toBeInTheDocument()
+    expect(within(tile('Total filtrado')).queryByText(montoTexto(15000))).not.toBeInTheDocument()
+    expect(montosVisibles()).toHaveLength(0)
+    for (const etiqueta of ETIQUETAS) {
+      expect(tile(etiqueta)).not.toHaveAccessibleName(/\$/)
+    }
+  })
+
+  it('sin montos, los tiles de depósito siguen filtrando', async () => {
+    const user = userEvent.setup()
+    const { onFiltrosChange } = renderInteractivo(hacerSummary(), { isDeposito: true })
+
+    await user.click(tile('Impagos'))
+    await user.click(tile('Pendientes'))
+
+    expect(onFiltrosChange).toHaveBeenNthCalledWith(1, { estadoPago: 'impago' })
+    expect(onFiltrosChange).toHaveBeenNthCalledWith(2, { estado: 'pendiente' })
   })
 })
 

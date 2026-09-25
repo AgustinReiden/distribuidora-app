@@ -29,7 +29,8 @@ export type ModalMaxWidth =
   | 'max-w-2xl'
   | 'max-w-3xl'
   | 'max-w-4xl'
-  | 'max-w-5xl';
+  | 'max-w-5xl'
+  | 'max-w-6xl';
 
 export interface ModalBaseProps {
   /** Contenido del modal */
@@ -46,6 +47,21 @@ export interface ModalBaseProps {
   className?: string;
   /** Contenido adicional en el header (derecha del título, izquierda del botón de cerrar) */
   headerExtra?: ReactNode;
+  /**
+   * Se pasa tal cual al `DialogContent` de Radix. Un `event.preventDefault()`
+   * aborta el cierre por Escape (p. ej. para confirmar antes de descartar
+   * cambios sin guardar). Sin la prop, Escape cierra como siempre.
+   */
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
+  /**
+   * Para contenido que ya trae su propio contenedor con scroll y un footer que
+   * tiene que quedar siempre visible: el cuerpo pasa a ser una columna flex sin
+   * overflow ni padding, y el hijo pone su propio `flex-1 overflow-y-auto`.
+   * Con el `DialogBody` de siempre habría doble scroll y el footer se iría con
+   * el contenido. Es una decisión fija del modal: alternarla con el modal
+   * abierto cambia el contenedor y React remonta el cuerpo (se pierde el estado).
+   */
+  bodyBare?: boolean;
 }
 
 const MAX_WIDTH_MAP: Record<ModalMaxWidth, string> = {
@@ -57,6 +73,7 @@ const MAX_WIDTH_MAP: Record<ModalMaxWidth, string> = {
   'max-w-3xl': 'max-w-3xl',
   'max-w-4xl': 'max-w-4xl',
   'max-w-5xl': 'max-w-5xl',
+  'max-w-6xl': 'max-w-6xl',
 };
 
 const ModalBase = memo(function ModalBase({
@@ -66,8 +83,18 @@ const ModalBase = memo(function ModalBase({
   description,
   maxWidth = 'max-w-md',
   className,
-  headerExtra
+  headerExtra,
+  onEscapeKeyDown,
+  bodyBare = false
 }: ModalBaseProps) {
+  // El boundary envuelve sólo el cuerpo (no el header), con o sin `bodyBare`:
+  // si algo tira adentro, el modal sigue teniendo título y botón de cerrar.
+  const cuerpo = (
+    <CompactErrorBoundary componentName={title || 'Modal'} onClose={onClose}>
+      {children}
+    </CompactErrorBoundary>
+  );
+
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
@@ -86,6 +113,8 @@ const ModalBase = memo(function ModalBase({
         // Radix como interacción externa y disparar el cierre.
         onPointerDown={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
+        // undefined cuando no se pasa: Radix cierra con Escape como siempre.
+        onEscapeKeyDown={onEscapeKeyDown}
       >
         <DialogHeader onClose={onClose}>
           <div className="flex items-center justify-between flex-1 gap-3 min-w-0">
@@ -97,11 +126,14 @@ const ModalBase = memo(function ModalBase({
         <DialogDescription className={description ? 'px-4 -mt-2 mb-2' : 'sr-only'}>
           {description || `Modal de ${title}`}
         </DialogDescription>
-        <DialogBody>
-          <CompactErrorBoundary componentName={title || 'Modal'} onClose={onClose}>
-            {children}
-          </CompactErrorBoundary>
-        </DialogBody>
+        {bodyBare ? (
+          // min-h-0 deja que la columna se achique dentro del max-h-[90vh] del
+          // DialogContent; sin él, el `flex-1 overflow-y-auto` del hijo nunca
+          // scrollea y el footer se corta abajo.
+          <div className="flex flex-1 min-h-0 flex-col">{cuerpo}</div>
+        ) : (
+          <DialogBody>{cuerpo}</DialogBody>
+        )}
       </DialogContent>
     </Dialog>
   );

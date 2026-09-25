@@ -145,7 +145,7 @@ const campoFechaEntrega = (): NonNullable<ConfirmConfig['campoFecha']> => ({
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
-  const { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isOnline, authReady } = useAuthData()
+  const { user, perfil, isAdmin, isPreventista, isTransportista, isEncargado, isDeposito, isOnline, authReady } = useAuthData()
   // Cola offline del alta. La cola real vive en IndexedDB, asi que esta
   // instancia del hook convive sin problema con la de App.tsx (se avisan por
   // el evento OFFLINE_QUEUE_CHANGED).
@@ -1974,6 +1974,7 @@ export default function PedidosContainer(): React.ReactElement {
           isPreventista={isPreventista}
           isTransportista={isTransportista}
           isEncargado={isEncargado}
+          isDeposito={isDeposito}
           modoRuta={modoRuta}
           onVerMiRuta={puedeAlternarRuta ? verMiRuta : undefined}
           onSalirDeRuta={salirDeRuta}
