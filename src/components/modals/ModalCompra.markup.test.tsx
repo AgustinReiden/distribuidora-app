@@ -6,20 +6,21 @@
  * camino mínimo "proveedor + producto + guardar", el toggle FC/ZZ por su
  * EFECTO, el alta de proveedor desde la compra, los cargos con su reparto, los
  * vencimientos por línea, y las dos salidas (X y Cancelar)— más las dos teclas
- * que importan para la migración a `ModalBase`:
+ * que importaban para la migración a `ModalBase` (WP-29, hecha):
  *
- *  - Escape con el modal abierto HOY **no** cierra nada. Radix sí cierra con
- *    Escape, así que ese cambio hay que hacerlo a propósito (WP-29) y no de
- *    arrastre: son horas de carga de una factura las que se pierden.
+ *  - Escape. El modal hecho a mano no cerraba con él; Radix sí. Desde WP-29
+ *    cierra SÓLO si la compra no tiene nada cargado (`compraTieneCambios`): con
+ *    cualquier dato adentro se ignora, porque son horas de carga de una factura
+ *    las que se perderían por un teclazo. La X y Cancelar cierran siempre.
  *  - Escape dentro del sub-buscador de productos cierra SOLO el dropdown. Ese
- *    handler es del `<input>`, y si el Escape de Radix se lo come por arriba,
- *    el dropdown deja de poder cerrarse con teclado.
+ *    handler es del `<input>`, y Radix escucha Escape antes (en captura): si
+ *    no mirara que la lista está abierta, se comería el modal entero.
  *
  * El detalle fiscal (cargos, prorrateo, cuadre de II) vive testeado en
  * `ModalCompra.reducer` y en `utils/prorrateoCompra`; acá no se duplica.
  */
 import { describe, it, expect, vi, beforeEach, afterAll, type Mock } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 
@@ -73,6 +74,22 @@ vi.mock('./ModalProveedor', () => ({
       </button>
       <button type="button" onClick={onClose}>
         Descartar el alta
+      </button>
+    </div>
+  ),
+}))
+
+/**
+ * El import de ítems desde Excel, el otro modal hecho a mano que la compra abre
+ * anidado y lazy. Stubbeado por lo mismo que el alta de proveedor: el de verdad
+ * parsea un archivo, y acá sólo importa el cableado con la compra.
+ */
+vi.mock('./ModalImportarCompra', () => ({
+  default: ({ onClose }: { onClose: () => void }) => (
+    <div>
+      <h2>Importar Items desde Excel</h2>
+      <button type="button" onClick={onClose}>
+        Descartar la importación
       </button>
     </div>
   ),
@@ -207,18 +224,42 @@ describe('ModalCompra — esqueleto del formulario', () => {
   })
 
   /**
-   * BUG (a arreglar en la migración): el contenedor es un `<div fixed>` sin
-   * `role="dialog"` ni `aria-modal`, así que para un lector de pantalla esto no
-   * es un diálogo y no tiene nombre. Se fija acá con qué nombre tiene que
-   * quedar al pasar a `ModalBase` —el título visible, "Nueva Compra"— para que
-   * la migración no invente uno ni lo deje sin ninguno.
+   * Antes de WP-29 el contenedor era un `<div fixed>` sin `role="dialog"`: para
+   * un lector de pantalla no había diálogo ni nombre. Ahora hay UNO, que se
+   * llama como el título visible —"Nueva Compra"—, no uno inventado ni ninguno.
    */
-  it('hoy no hay role="dialog"; el nombre a heredar es "Nueva Compra"', () => {
+  it('es un dialog cuyo nombre es "Nueva Compra"', () => {
     renderModal()
 
-    expect(screen.queryAllByRole('dialog')).toHaveLength(0)
+    const dialogos = screen.getAllByRole('dialog')
+    expect(dialogos).toHaveLength(1)
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBe(dialogos[0])
     expect(screen.getByRole('heading', { name: 'Nueva Compra', level: 2 })).toBeInTheDocument()
-    expect(screen.getByText('Registrar compra a proveedor')).toBeInTheDocument()
+    expect(within(dialogos[0]).getByText('Registrar compra a proveedor')).toBeInTheDocument()
+  })
+
+  /**
+   * Lo modal no se asevera con el atributo `aria-modal`: Radix 1.1.15 no lo
+   * pone (#800). Lo que hace es marcar `aria-hidden` todo lo que queda fuera
+   * del diálogo —un lector de pantalla no se escapa a la vista de atrás—, y es
+   * eso lo que se fija acá.
+   */
+  it('es modal: la vista de atrás sale del árbol accesible', () => {
+    render(
+      <>
+        <button type="button">Vista de fondo</button>
+        <ModalCompra
+          productos={PRODUCTOS}
+          proveedores={PROVEEDORES}
+          onSave={vi.fn<OnSave>()}
+          onClose={vi.fn<OnClose>()}
+        />
+      </>,
+    )
+
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Vista de fondo' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Vista de fondo', hidden: true })).toBeInTheDocument()
   })
 
   it('agregar una línea abre cargos, costo por producto y resumen', async () => {
@@ -709,6 +750,24 @@ describe('ModalCompra — sub-buscador de productos', () => {
     expect(screen.queryByRole('button', { name: /Aceite Girasol 900ml/ })).toBeNull()
   })
 
+  /**
+   * El dropdown se cierra con un `mousedown` escuchado en el `document`. El
+   * contenido de `ModalBase` corta la propagación de `mousedown` (ModalBase.tsx,
+   * para que Radix no confunda un arrastre con un click afuera), así que un
+   * listener en fase de burbujeo deja de enterarse de cualquier click adentro
+   * del modal: el dropdown quedaría abierto tapando las líneas.
+   */
+  it('un click fuera del buscador cierra el dropdown', async () => {
+    const { user } = renderModal()
+
+    await user.click(buscador())
+    expect(screen.getByRole('button', { name: /Aceite Girasol 900ml/ })).toBeInTheDocument()
+
+    await user.click(screen.getByPlaceholderText('Ej: 0001-00012345'))
+
+    expect(screen.queryByRole('button', { name: /Aceite Girasol 900ml/ })).toBeNull()
+  })
+
   it('Escape dentro del buscador cierra SÓLO el dropdown, no el modal', async () => {
     const { user, onClose } = renderModal()
 
@@ -727,28 +786,16 @@ describe('ModalCompra — salidas del modal', () => {
   /**
    * La X del header.
    *
-   * BUG: no tiene `aria-label` ni texto. Es el único botón sin nombre accesible
-   * con el formulario recién abierto (el "+" de alta rápida se llama por su
-   * `title`, y el tacho de borrar línea sólo existe si hay líneas).
-   * `ModalBase` ya la rotula "Cerrar".
+   * Hasta WP-29 era un botón sin `aria-label` ni texto y se la ubicaba por
+   * descarte. La X de `ModalBase` se llama "Cerrar", y por ese nombre se la
+   * busca.
    */
-  function botonCerrarSinNombre(): HTMLElement {
-    const sinNombre = screen
-      .getAllByRole('button')
-      .filter(
-        b =>
-          (b.textContent ?? '').trim() === '' &&
-          !b.getAttribute('aria-label') &&
-          !b.getAttribute('title'),
-      )
-    expect(sinNombre).toHaveLength(1)
-    return sinNombre[0]
-  }
+  const botonCerrar = (): HTMLElement => screen.getByRole('button', { name: 'Cerrar' })
 
   it('la X del header llama onClose', async () => {
     const { user, onClose } = renderModal()
 
-    await user.click(botonCerrarSinNombre())
+    await user.click(botonCerrar())
 
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -761,19 +808,93 @@ describe('ModalCompra — salidas del modal', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  // BUG (a propósito, hasta WP-29): el modal hecho a mano no escucha Escape, así
-  // que una factura a medio cargar no se pierde por un teclazo. Radix SÍ cierra
-  // con Escape: cuando este test se ponga rojo, es porque la migración cambió
-  // ese comportamiento — y acá hace falta una confirmación de descarte, no un
-  // cierre directo.
-  it('hoy Escape con el modal abierto NO llama onClose', async () => {
-    const { user, onClose } = renderModal()
+  // La X y Cancelar son un click deliberado: cierran con la compra a medio
+  // cargar, igual que antes de ModalBase. Lo que se frena es sólo Escape.
+  it.each([
+    ['la X', () => botonCerrar()],
+    ['Cancelar', () => screen.getByRole('button', { name: /^cancelar$/i })],
+  ])('%s cierra aunque la compra tenga datos cargados', async (_salida, boton) => {
+    const { user, onClose, onSave } = renderModal()
+
+    await user.selectOptions(selectProveedor(), 'prov-1')
+    await agregarProducto(user, 'Aceite Girasol 900ml')
+    await user.click(boton())
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  // El modal hecho a mano no escuchaba Escape. Con ModalBase (Radix) Escape
+  // cierra, pero sólo si no hay nada que perder (`compraTieneCambios`). La
+  // confirmación de descarte que se pensó para acá no hace falta: con la
+  // compra a medio cargar, Escape directamente se ignora.
+  it('con la compra sin tocar, Escape cierra sin guardar', async () => {
+    const { user, onClose, onSave } = renderModal()
 
     await user.click(screen.getByPlaceholderText('Ej: 0001-00012345'))
     await user.keyboard('{Escape}')
 
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('con un proveedor elegido y sin líneas, Escape NO cierra', async () => {
+    const { user, onClose } = renderModal()
+
+    await user.selectOptions(selectProveedor(), 'prov-1')
+    await user.keyboard('{Escape}')
+
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole('heading', { name: /^nueva compra$/i })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
+    expect(selectProveedor()).toHaveValue('prov-1')
+  })
+
+  // Lo que se tipea en el alta rápida vive en el estado local del buscador, no
+  // en el reducer: con el panel abierto se lo trata como carga.
+  it('con el alta rápida de producto abierta, Escape NO cierra', async () => {
+    const { user, onClose } = renderModal()
+
+    await user.click(screen.getByRole('button', { name: 'Crear producto nuevo' }))
+    await user.type(screen.getByPlaceholderText('Nombre del producto'), 'Gaseosa Cola 2.25L')
+    await user.keyboard('{Escape}')
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByPlaceholderText('Nombre del producto')).toHaveValue('Gaseosa Cola 2.25L')
+  })
+
+  // El alta de proveedor es un modal hecho a mano anidado: para Radix sigue
+  // siendo "adentro de la compra", así que su Escape le llega a la compra. Con
+  // la compra sin tocar, cerraría las dos y se perdería lo tipeado en el alta.
+  it('con el alta de proveedor abierta, Escape NO cierra la compra', async () => {
+    const { user, onClose } = renderModal({ onCrearProveedor: vi.fn<OnCrearProveedor>() })
+
+    await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
+    // El alta es un chunk lazy: hay que esperar a que resuelva.
+    expect(await screen.findByRole('heading', { name: 'Nuevo Proveedor' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'Nuevo Proveedor' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
+  })
+
+  // Ídem el import desde Excel: con la compra sin tocar, su Escape cerraría la
+  // compra y el import juntos, y se perdería la vista previa ya parseada.
+  it('con el import desde Excel abierto, Escape NO cierra la compra', async () => {
+    const { user, onClose } = renderModal()
+
+    await user.click(screen.getByRole('button', { name: /importar excel/i }))
+    // Chunk lazy, como el alta de proveedor.
+    expect(
+      await screen.findByRole('heading', { name: 'Importar Items desde Excel' }),
+    ).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'Importar Items desde Excel' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
   })
 
   it('Escape tampoco cierra con una línea ya cargada', async () => {

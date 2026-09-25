@@ -129,8 +129,13 @@ export const AddressAutocomplete = ({
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    // En CAPTURA: ModalBase corta la propagación de mousedown (onMouseDown con
+    // stopPropagation) y, en burbujeo, este listener no se enteraba de ningún
+    // click adentro de un modal: las sugerencias quedaban abiertas tapando los
+    // campos de abajo (ModalCliente, ModalPedido, el alta de proveedor abierta
+    // desde una compra).
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, []);
 
   // Buscar predicciones cuando cambia el valor
