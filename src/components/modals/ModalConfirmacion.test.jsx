@@ -30,6 +30,9 @@ describe('ModalConfirmacion', () => {
         />
       )
       expect(container.firstChild).toBeNull()
+      // Radix portalea el diálogo a document.body: `container` queda vacío
+      // aunque esté abierto, así que además se lo busca en todo el documento.
+      expect(screen.queryByRole('dialog')).toBeNull()
     })
 
     it('no renderiza nada cuando config es null', () => {
@@ -37,6 +40,9 @@ describe('ModalConfirmacion', () => {
         <ModalConfirmacion config={null} onClose={vi.fn()} />
       )
       expect(container.firstChild).toBeNull()
+      // Radix portalea el diálogo a document.body: `container` queda vacío
+      // aunque esté abierto, así que además se lo busca en todo el documento.
+      expect(screen.queryByRole('dialog')).toBeNull()
     })
 
     it('renderiza el modal cuando visible es true', () => {
@@ -198,8 +204,10 @@ describe('ModalConfirmacion', () => {
 
   describe('Accesibilidad', () => {
     it('el modal tiene overlay con fondo oscuro', () => {
-      const { container } = render(<ModalConfirmacion {...defaultProps} />)
-      const overlay = container.querySelector('.bg-black.bg-opacity-50')
+      // El overlay es el de Radix (`DialogOverlay`), que se portalea a
+      // document.body: no queda dentro de `container`.
+      const { baseElement } = render(<ModalConfirmacion {...defaultProps} />)
+      const overlay = baseElement.querySelector('.bg-black\\/50')
       expect(overlay).toBeInTheDocument()
     })
 
