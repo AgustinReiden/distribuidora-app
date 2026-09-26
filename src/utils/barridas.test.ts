@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  absorberVecinos,
+  barridasEfectivas,
   clasificarBarrida,
   abreEnDia,
   encajeEnHorario,
@@ -296,5 +298,68 @@ describe('finJornadaSugerida', () => {
   it('hora vacia o mal formada cae en un default usable', () => {
     expect(finJornadaSugerida('')).toBe('18:00');
     expect(finJornadaSugerida('no-es-hora')).toBe('18:00');
+  });
+});
+
+/**
+ * Casos de una hoja de ruta real (Marcos, 26/09): Pablo y Los Redonditos están
+ * a 57 m sobre J. M. Paz y salían en las paradas 2 y 6, porque uno cae en la
+ * barrida 1 y el otro en la 5 y el orden entre bloques es duro.
+ */
+describe('absorberVecinos — el vecino de un bloque anterior se adelanta', () => {
+  const PABLO = { id: '948', cliente: { latitud: '-26.8291368', longitud: '-65.2410498', h: '08:00-13:00' } };
+  const REDONDITOS = { id: '36', cliente: { latitud: '-26.8289321', longitud: '-65.2405223', h: '08:30-24:00' } };
+  const horario = (p: { cliente: { h: string } }) => p.cliente.h;
+
+  it('Los Redonditos (corrido, barrida 5) va en la 1 con Pablo', () => {
+    expect(clasificarBarrida(REDONDITOS.cliente.h).barrida).toBe(5);
+    const ef = barridasEfectivas([PABLO, REDONDITOS], horario);
+    expect(ef.get('948')).toBe(1);
+    expect(ef.get('36')).toBe(1);
+  });
+
+  it('el que abre a la tarde NO se adelanta aunque esté pegado: no está abierto', () => {
+    const TARDE = { id: '9', cliente: { ...REDONDITOS.cliente, h: '17:00-21:00' } };
+    expect(barridasEfectivas([PABLO, TARDE], horario).get('9')).toBe(5);
+  });
+
+  it('a más de 100 m no es vecino', () => {
+    // ~200 m al oeste sobre la misma calle.
+    const LEJOS = { id: '9', cliente: { ...REDONDITOS.cliente, longitud: '-65.2430498' } };
+    expect(barridasEfectivas([PABLO, LEJOS], horario).get('9')).toBe(5);
+  });
+
+  it('nunca atrasa: el de la barrida 1 sigue en la 1', () => {
+    expect(barridasEfectivas([REDONDITOS, PABLO], horario).get('948')).toBe(1);
+  });
+
+  it('elige el bloque más temprano entre sus vecinos', () => {
+    const TRES = { id: '3', cliente: { latitud: '-26.8290', longitud: '-65.2407', h: '09:00-14:00' } };
+    const ef = barridasEfectivas([TRES, REDONDITOS, PABLO], horario);
+    expect(clasificarBarrida(TRES.cliente.h).barrida).toBe(3);
+    expect(ef.get('3')).toBe(1);
+    expect(ef.get('36')).toBe(1);
+  });
+
+  it('no encadena: el vecino del adelantado no se arrastra al primer bloque', () => {
+    // Redonditos está a 57 m de Pablo; ESTE está a ~80 m de Redonditos pero a
+    // ~130 m de Pablo. Se ancla en barridas propias, así que queda en la 5.
+    const ESTE = { id: '7', cliente: { latitud: '-26.8289321', longitud: '-65.2397223', h: '08:00-22:00' } };
+    const ef = barridasEfectivas([PABLO, REDONDITOS, ESTE], horario);
+    expect(ef.get('36')).toBe(1);
+    expect(ef.get('7')).toBe(5);
+  });
+
+  it('sin horario (barrida 4) o sin coordenadas no se mueve', () => {
+    const SIN_H = { id: '1', cliente: { ...REDONDITOS.cliente, h: '' } };
+    const SIN_COORD = { id: '2', cliente: { latitud: null, longitud: null, h: '08:30-24:00' } };
+    const ef = barridasEfectivas([PABLO, SIN_H, SIN_COORD], horario);
+    expect(ef.get('1')).toBe(4);
+    expect(ef.get('2')).toBe(5);
+  });
+
+  it('absorberVecinos devuelve una entrada por parada aunque no mueva nada', () => {
+    const ef = absorberVecinos([{ pedido_id: 'x', barrida: 2, ventanas: [] }]);
+    expect([...ef.entries()]).toEqual([['x', 2]]);
   });
 });

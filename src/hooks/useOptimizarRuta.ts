@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { supabase } from './supabase/base';
 import { parsearFranjas } from '../utils/horariosCliente';
-import { clasificarBarrida, type Barrida } from '../utils/barridas';
+import { barridasEfectivas, clasificarBarrida, type Barrida } from '../utils/barridas';
 import type { PedidoDB, ClienteDB } from '../types';
 
 // ============================================================================
@@ -94,9 +94,14 @@ export function derivarVentanasYBarridas(
 ): { ventanas: VentanaPedido[]; barridas: BarridaPedido[] } {
   const ventanas: VentanaPedido[] = [];
   const barridas: BarridaPedido[] = [];
+  // La barrida que viaja es la efectiva: el vecino de un bloque anterior se
+  // adelanta (ver absorberVecinos). Las ventanas siguen siendo las propias.
+  const efectivas = barridasEfectivas(pedidos, p => horarioParaRutear(p.cliente));
 
   for (const p of pedidos) {
-    const { barrida, ventanas: franjas } = clasificarBarrida(horarioParaRutear(p.cliente));
+    const propia = clasificarBarrida(horarioParaRutear(p.cliente));
+    const franjas = propia.ventanas;
+    const barrida = efectivas.get(String(p.id)) ?? propia.barrida;
     barridas.push({ pedido_id: String(p.id), barrida });
     if (franjas.length > 0) {
       ventanas.push({

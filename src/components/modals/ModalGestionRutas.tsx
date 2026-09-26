@@ -16,7 +16,7 @@ import { useDepositoCoords, useSetDepositoMutation, useDestinoCoords, useSetDest
 import type { RegistrarCambioInput } from '../../hooks/queries';
 import type { RepartidorParam } from '../../hooks/useOptimizarRuta';
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta';
-import { abreEnDia, clasificarBarrida, encajeEnHorario, ETIQUETA_BARRIDA, finJornadaSugerida } from '../../utils/barridas';
+import { abreEnDia, barridasEfectivas, encajeEnHorario, ETIQUETA_BARRIDA, finJornadaSugerida } from '../../utils/barridas';
 import type { EncajeHorario } from '../../utils/barridas';
 import { fechaLocalISO, fechaHaceDias, formatFecha, formatPrecio } from '../../utils/formatters';
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
@@ -534,8 +534,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const composicionBarridas = useMemo(() => {
     const conteo = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     const cerradosEseDia: PedidoDB[] = [];
+    // La misma barrida efectiva que va a usar el optimizador (vecinos adelantados).
+    const efectivas = barridasEfectivas(pedidosSeleccionados, p => horarioParaRutear(p.cliente));
     for (const p of pedidosSeleccionados) {
-      const { barrida } = clasificarBarrida(horarioParaRutear(p.cliente));
+      const barrida = efectivas.get(String(p.id)) ?? 4;
       conteo[barrida] += 1;
       if (!abreEnDia(p.cliente?.dias_atencion, fechaEntrega)) cerradosEseDia.push(p);
     }
