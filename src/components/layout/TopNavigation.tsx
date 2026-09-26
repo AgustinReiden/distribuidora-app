@@ -66,7 +66,9 @@ const menuGroups: MenuGroup[] = [
     items: [
       { id: 'dashboard', icon: BarChart3, label: 'Dashboard', roles: ['admin', 'preventista'] },
       { id: 'pedidos', icon: ShoppingCart, label: 'Pedidos', roles: ['admin', 'encargado', 'preventista', 'transportista', 'deposito'], sinGate: true },
-      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['admin', 'encargado', 'preventista'] },
+      // El admin no la usa: la suya va al final de Operaciones (#799), y eso le
+      // deja lugar a la barra completa desde xl.
+      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['encargado', 'preventista'] },
     ]
   },
   {
@@ -111,6 +113,10 @@ const menuGroups: MenuGroup[] = [
       { id: 'salvedades', icon: AlertTriangle, label: 'Salvedades', roles: ['admin', 'encargado'] },
       { id: 'geolocalizacion', icon: MapPin, label: 'Geolocalización', roles: ['admin'] },
       { id: 'horarios-clientes', icon: Clock, label: 'Horarios a revisar', roles: ['admin', 'encargado'] },
+      // Mismo id y misma ruta que el de la barra, con roles disjuntos: a cada
+      // rol primario le toca uno solo, y las keys no chocan porque cada lista
+      // de items se renderiza aparte.
+      { id: 'mis-entregas', icon: ClipboardCheck, label: 'Mis entregas', roles: ['admin'] },
     ]
   }
 ];
@@ -235,23 +241,32 @@ export default function TopNavigation({
     <>
       {/* Barra de navegacion fija */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-sm z-50">
-        {/* La barra completa aparece recien en 2xl (1536 px, #713): con `lg`
-            la del admin desbordaba el header. Debajo de 2xl manda la
-            hamburguesa, tambien en las notebooks. */}
-        <div className="h-full max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 flex items-center justify-between">
+        {/* La barra completa aparece desde xl (1280 px, #799). Con `lg` la del
+            admin desbordaba el header (#713); desde que "Mis entregas" del
+            admin vive en Operaciones, entra en xl con la compactacion de abajo,
+            que rige solo entre xl y 2xl: botones de la barra con `px-2`, lado
+            derecho con `space-x-2`, el logo sin los 16 px de margen y el
+            nombre del avatar cortado en 64 px. Desde 2xl todo vuelve al aire
+            de siempre. Debajo de xl manda la hamburguesa. */}
+        <div className="h-full max-w-7xl xl:max-w-screen-2xl mx-auto px-4 flex items-center justify-between">
           {/* Logo, hamburguesa y barra.
               `main-navigation` es el destino del skip link "Ir a la navegacion"
               (SkipLinks.tsx). Va en este contenedor y no en el <nav> de la
-              barra porque el <nav> esta oculto debajo de 2xl: desde aca el
-              siguiente Tab cae en la hamburguesa o en la barra, segun el ancho. */}
-          <div id="main-navigation" className="flex items-center space-x-4">
-            {/* Boton hamburguesa - visible debajo de 2xl */}
+              barra porque el <nav> esta oculto debajo de xl: desde aca el
+              siguiente Tab cae en la hamburguesa o en la barra, segun el ancho.
+              `gap-4` y no `space-x-4`: el margen de `space-x` lo ponia el
+              hermano anterior aunque estuviera oculto, y con la hamburguesa
+              en `display: none` el logo arrancaba 16 px corrido. Entre xl y 2xl
+              esos 16 px son parte de la compactacion; desde 2xl el `2xl:ml-4`
+              del logo los repone y la barra queda donde estuvo siempre. */}
+          <div id="main-navigation" className="flex items-center gap-4">
+            {/* Boton hamburguesa - visible debajo de xl */}
             <Button
               ref={hamburguesaRef}
               variant="ghost"
               size="icon"
               onClick={() => setMenuAbierto(!menuAbierto)}
-              className="2xl:hidden"
+              className="xl:hidden"
               aria-label={menuAbierto ? 'Cerrar menu' : 'Abrir menu'}
               aria-expanded={menuAbierto}
             >
@@ -263,7 +278,7 @@ export default function TopNavigation({
             </Button>
 
             {/* Logo */}
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 2xl:ml-4">
               <div className="p-2 bg-blue-600 rounded-lg">
                 <Truck className="w-5 h-5 text-white" />
               </div>
@@ -272,8 +287,16 @@ export default function TopNavigation({
               </span>
             </div>
 
-            {/* Menu horizontal - visible desde 2xl */}
-            <nav className="hidden 2xl:flex items-center space-x-1 ml-8" aria-label="Navegacion principal">
+            {/* Menu horizontal - visible desde xl. Sin `ml-8`: con `space-x-4`
+                en el padre nunca rigio (el margen de `space-x` le ganaba), y
+                con `gap-4` sumaria 32 px que la barra no tiene. Los botones de
+                primer nivel van con `px-2` hasta 2xl. Medido en la galeria: sin
+                compactar (como desde 2xl) el admin pide 1300 px; compactada, la
+                mas ancha es la del encargado ("Mis entregas" suelta y ademas
+                Operaciones), con 1223 px y 1246 con un nombre que llena el
+                avatar; la del admin, 1221 y 1234. En una ventana de 1280 con
+                barra de scroll clasica quedan ~1263. */}
+            <nav className="hidden xl:flex items-center space-x-1" aria-label="Navegacion principal">
               {menuFiltrado.map(group => {
                 // Items sin grupo (se muestran directo)
                 if (!group.label) {
@@ -283,7 +306,7 @@ export default function TopNavigation({
                       <button
                         key={item.id}
                         onClick={() => handleVistaChange(item.id)}
-                        className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors ${
+                        className={`flex items-center space-x-2 px-2 2xl:px-3 py-2 rounded-lg transition-colors ${
                           vista === item.id
                             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 font-semibold'
                             : 'text-gray-600 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-gray-700/60'
@@ -311,7 +334,7 @@ export default function TopNavigation({
                       onClick={() => toggleDropdown(group.id)}
                       aria-expanded={isOpen}
                       aria-haspopup="true"
-                      className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors ${
+                      className={`flex items-center space-x-2 px-2 2xl:px-3 py-2 rounded-lg transition-colors ${
                         isActive
                           ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 font-semibold'
                           : 'text-gray-600 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-gray-700/60'
@@ -351,8 +374,9 @@ export default function TopNavigation({
             </nav>
           </div>
 
-          {/* Lado derecho: notificaciones, tema, usuario */}
-          <div className="flex items-center space-x-2 sm:space-x-4">
+          {/* Lado derecho: notificaciones, tema, usuario. Entre xl y 2xl, con
+              la barra al lado, va apretado como en el celular (#799). */}
+          <div className="flex items-center space-x-2 sm:space-x-4 xl:space-x-2 2xl:space-x-4">
             {/* Toggle tema */}
             <Button
               variant="ghost"
@@ -384,7 +408,11 @@ export default function TopNavigation({
                     {perfil?.nombre?.charAt(0)?.toUpperCase() || 'U'}
                   </span>
                 </div>
-                <span className="hidden sm:block text-sm font-medium text-gray-700 dark:text-gray-300 max-w-24 truncate">
+                {/* Entre xl y 2xl el nombre se corta antes (64 px y no 96): con
+                    un nombre largo la barra del encargado, la mas ancha en xl
+                    (tiene "Mis entregas" y Operaciones), no entraba en una
+                    ventana de 1280 con barra de scroll clasica (#799). */}
+                <span className="hidden sm:block text-sm font-medium text-gray-700 dark:text-gray-300 max-w-24 xl:max-w-16 2xl:max-w-24 truncate">
                   {perfil?.nombre?.split(' ')[0] || 'Usuario'}
                 </span>
                 <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${userMenuAbierto ? 'rotate-180' : ''}`} />
@@ -469,13 +497,14 @@ export default function TopNavigation({
         </div>
       </header>
 
-      {/* Menu desplegable (debajo de 2xl). Desde #713 lo usan tambien las
-          notebooks, y el del admin mide unos 800 px: con tope de alto y scroll
-          propio no se corta en una pantalla baja. `invisible` cerrado lo saca
-          del orden de Tab y del arbol de accesibilidad; la opacidad sola no. */}
+      {/* Menu desplegable (debajo de xl). Lo usan tambien las notebooks de
+          menos de 1280 px, y el del admin mide unos 800 px: con tope de alto y
+          scroll propio no se corta en una pantalla baja. `invisible` cerrado lo
+          saca del orden de Tab y del arbol de accesibilidad; la opacidad sola
+          no. */}
       <div
         ref={menuRef}
-        className={`fixed top-16 left-0 right-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 2xl:hidden transition-all duration-300 ease-in-out ${
+        className={`fixed top-16 left-0 right-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-b dark:border-gray-700 shadow-lg z-40 xl:hidden transition-all duration-300 ease-in-out ${
           menuAbierto
             ? 'opacity-100 translate-y-0'
             : 'opacity-0 -translate-y-4 pointer-events-none invisible'
@@ -525,7 +554,7 @@ export default function TopNavigation({
       {/* Overlay para cerrar menu movil */}
       {menuAbierto && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-25 z-30 2xl:hidden"
+          className="fixed inset-0 bg-black bg-opacity-25 z-30 xl:hidden"
           onClick={() => setMenuAbierto(false)}
           aria-hidden="true"
         />
