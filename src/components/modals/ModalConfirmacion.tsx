@@ -98,6 +98,12 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
   };
   const { bg, icon, btn } = iconConfig[config.tipo] || iconConfig.success;
 
+  // `max` limita el selector del input date, pero no lo que se tipea a mano en
+  // escritorio: un año mal escrito fechaba la entrega en el futuro (la fecha se
+  // compara como texto porque `YYYY-MM-DD` ordena igual que el calendario).
+  const maxFecha = config.campoFecha?.max;
+  const fechaPasaDelMax = !!maxFecha && !!fecha && fecha > maxFecha;
+
   return (
     <Dialog open={config.visible} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
@@ -150,8 +156,14 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
                 value={fecha}
                 max={config.campoFecha.max}
                 onChange={e => setFecha(e.target.value)}
+                aria-invalid={fechaPasaDelMax || undefined}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               />
+              {fechaPasaDelMax && maxFecha && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  La fecha no puede ser posterior al {maxFecha.split('-').reverse().join('/')}.
+                </p>
+              )}
               {config.campoFecha.ayuda && (
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{config.campoFecha.ayuda}</p>
               )}
@@ -170,7 +182,7 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
           <button
             type="button"
             onClick={() => config.onConfirm(config.campoFecha ? fecha : undefined)}
-            disabled={!!config.campoFecha && !fecha}
+            disabled={!!config.campoFecha && (!fecha || fechaPasaDelMax)}
             className={`flex-1 px-4 py-3 border-l dark:border-gray-700 rounded-br-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btn}`}
           >
             Confirmar

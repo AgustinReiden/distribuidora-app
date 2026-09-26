@@ -1943,6 +1943,9 @@ export default function PedidosContainer(): React.ReactElement {
     tipo: confirmConfig.tipo || ('warning' as const),
     titulo: confirmConfig.titulo || '',
     mensaje: confirmConfig.mensaje || '',
+    // Sin esto, «Confirmar entrega» y «Confirmar cambio/devolución» perdían el
+    // campo de fecha y toda entrega quedaba con la de hoy (#804).
+    campoFecha: confirmConfig.campoFecha,
     onConfirm: confirmConfig.onConfirm || (() => {}),
   } : null
 
