@@ -122,8 +122,10 @@ const ModalBase = memo(function ModalBase({
             {headerExtra && <div className="flex-shrink-0">{headerExtra}</div>}
           </div>
         </DialogHeader>
-        {/* DialogDescription para accesibilidad (aria-describedby) - visualmente oculto si no se pasa description */}
-        <DialogDescription className={description ? 'px-4 -mt-2 mb-2' : 'sr-only'}>
+        {/* DialogDescription para accesibilidad (aria-describedby) - visualmente oculto si no se pasa description.
+            Visible va entera DEBAJO del borde del header, con `pt-3`: el `-mt-2`
+            que tenía la subía 8 px y el borde le cruzaba los glifos (#800). */}
+        <DialogDescription className={description ? 'px-4 pt-3 mb-2' : 'sr-only'}>
           {description || `Modal de ${title}`}
         </DialogDescription>
         {bodyBare ? (

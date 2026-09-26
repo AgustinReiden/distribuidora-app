@@ -108,17 +108,18 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
     <Dialog open={config.visible} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
         // Radix 1.1 no pone `aria-modal` (esconde el resto con `aria-hidden`);
-        // el contrato del diálogo lo exige, así que va explícito.
+        // desde #800 lo pone ui/Dialog, y acá queda explícito igual.
         aria-modal="true"
         // `w-[calc(100%-2rem)]` conserva el margen de 16px a cada lado que en
-        // el celular le daba el `p-4` del overlay hecho a mano.
+        // el celular le daba el `p-4` del overlay hecho a mano (desde #800 es
+        // también el ancho por defecto del primitivo).
         //
-        // Sin animación de apertura, como la caja hecha a mano. La del
-        // primitivo anima `transform` y, mientras dura, pisa el translate que
-        // centra la caja: aparecía corrida y a los 200 ms saltaba al centro
-        // (#800; ModalBase lo sufre igual). Va con `!` porque tailwind-merge no
-        // conoce las animaciones propias y no la reemplaza; al ser `none`, no
-        // hay movimiento que la preferencia de reducirlo tenga que frenar.
+        // Sin animación de apertura, como la caja hecha a mano: es una
+        // decisión de diseño (la confirmación aparece seca). La del primitivo
+        // (`dialog-in`, #800) ya no descentra la caja. Va con `!` porque
+        // tailwind-merge no conoce las animaciones propias y no la reemplaza; al
+        // ser `none`, no hay movimiento que la preferencia de reducirlo tenga
+        // que frenar.
         className="max-w-sm w-[calc(100%-2rem)] data-[state=open]:!animate-none"
         // Clic afuera NO cierra, igual que antes: el overlay a mano no tenía
         // onClick. La salida es Cancelar o Escape.

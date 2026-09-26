@@ -239,10 +239,11 @@ describe('ModalCompra — esqueleto del formulario', () => {
   })
 
   /**
-   * Lo modal no se asevera con el atributo `aria-modal`: Radix 1.1.15 no lo
-   * pone (#800). Lo que hace es marcar `aria-hidden` todo lo que queda fuera
-   * del diálogo —un lector de pantalla no se escapa a la vista de atrás—, y es
-   * eso lo que se fija acá.
+   * Lo modal se fija por su efecto y no por el atributo `aria-modal` (Radix
+   * 1.1.15 no lo pone; lo agrega ui/Dialog desde #800 y lo cubre
+   * ui/Dialog.test.tsx). Lo que hace Radix es marcar `aria-hidden` todo lo que
+   * queda fuera del diálogo —un lector de pantalla no se escapa a la vista de
+   * atrás—, y es eso lo que se fija acá.
    */
   it('es modal: la vista de atrás sale del árbol accesible', () => {
     render(

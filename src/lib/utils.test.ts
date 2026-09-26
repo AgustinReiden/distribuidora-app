@@ -91,7 +91,7 @@ describe('cn — alias viejos de flex (validos en Tailwind 3)', () => {
 describe('cn — call sites reales que no pueden cambiar', () => {
   it('Dialog: el contenido acepta un ancho del consumidor', () => {
     const base =
-      'fixed left-[50%] top-[50%] z-50 flex flex-col w-full max-w-md translate-x-[-50%] translate-y-[-50%] bg-white dark:bg-gray-800 shadow-xl rounded-xl max-h-[90vh] overflow-hidden'
+      'fixed left-[50%] top-[50%] z-50 flex flex-col w-[calc(100%-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] bg-white dark:bg-gray-800 shadow-xl rounded-xl max-h-[90vh] overflow-hidden'
     const out = cn(base, 'focus:outline-none', 'max-w-4xl')
     expect(out).toContain('max-w-4xl')
     expect(out).not.toContain('max-w-md')
