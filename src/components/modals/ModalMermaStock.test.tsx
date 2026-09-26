@@ -98,11 +98,11 @@ describe('ModalMermaStock — qué se ve', () => {
   })
 
   /**
-   * Lo modal no se asevera con el atributo `aria-modal`: Radix 1.1.15 no lo pone
-   * y ModalBase tampoco (los comentarios de ModalBase.tsx y ui/Dialog.tsx que
-   * dicen lo contrario están mal: #800). Lo que hace Radix es marcar `aria-hidden`
-   * todo lo que queda fuera del diálogo, que es el efecto que se busca (un
-   * lector de pantalla no se escapa a la vista de atrás) y lo que se fija acá.
+   * Lo modal se fija por su efecto y no por el atributo `aria-modal` (Radix
+   * 1.1.15 no lo pone; lo agrega ui/Dialog desde #800 y lo cubre
+   * ui/Dialog.test.tsx). Lo que hace Radix es marcar `aria-hidden` todo lo que
+   * queda fuera del diálogo, que es el efecto que se busca (un lector de
+   * pantalla no se escapa a la vista de atrás) y lo que se fija acá.
    */
   it('es modal: la vista de atrás sale del árbol accesible', () => {
     render(
@@ -312,21 +312,18 @@ describe('ModalMermaStock — guardar y cerrar', () => {
   })
 
   /**
-   * BUG (de ModalBase, no de este modal): al cerrar, el foco NO vuelve al botón
-   * que abrió el modal; cae en `<body>`. ModalBase monta `<Dialog open>` sin
-   * `Dialog.Trigger`, y el `onCloseAutoFocus` de Radix 1.1.15 hace
-   * `preventDefault()` + `triggerRef.current?.focus()` con un `triggerRef` nulo:
-   * cancela la devolución de FocusScope y no enfoca nada. No es una regresión de
-   * WP-26 (el div hecho a mano tampoco lo devolvía), y los comentarios de
-   * ModalBase.tsx y ui/Dialog.tsx que dicen lo contrario están mal. Se asevera
-   * lo que pasa HOY; cuando ModalBase lo arregle (#800), este test se pone rojo
-   * y se invierte a `expect(abrir).toHaveFocus()`.
+   * Al cerrar, el foco vuelve al botón que abrió el modal: el usuario de teclado
+   * o de lector de pantalla sigue donde estaba. ModalBase monta `<Dialog open>`
+   * sin `Dialog.Trigger`, así que la devolución de Radix 1.1.15 (que va al
+   * Trigger) no alcanza; la hace `DialogContent` de ui/Dialog, que guarda quién
+   * tenía el foco al abrir (#800). Hasta ese arreglo el foco caía en `<body>`,
+   * también con el div hecho a mano de antes de WP-26.
    */
   it.each([
     ['Escape', (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
     ['Cancelar', (user: ReturnType<typeof userEvent.setup>) =>
       user.click(screen.getByRole('button', { name: /^cancelar$/i }))],
-  ])('al cerrar con %s el foco NO vuelve al botón que lo abrió: cae en body', async (_, cerrar) => {
+  ])('al cerrar con %s el foco vuelve al botón que lo abrió', async (_, cerrar) => {
     function Host() {
       const [abierto, setAbierto] = useState(false)
       return (
@@ -354,11 +351,10 @@ describe('ModalMermaStock — guardar y cerrar', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
 
     // FocusScope decide a dónde va el foco en un `setTimeout(0)` al desmontar:
-    // sin dejarlo correr, "no volvió" pasaría aunque ModalBase lo arreglara.
+    // sin dejarlo correr, el foco todavía no volvió y la aserción mediría nada.
     await act(() => new Promise<void>(resolve => setTimeout(resolve, 0)))
 
-    expect(abrir).not.toHaveFocus()
-    expect(document.body).toHaveFocus()
+    expect(abrir).toHaveFocus()
   })
 })
 

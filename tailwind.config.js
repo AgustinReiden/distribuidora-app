@@ -88,6 +88,7 @@ export default {
         'fade-in': 'fade-in 0.2s ease-out',
         'fade-out': 'fade-out 0.15s ease-in',
         'scale-in': 'scale-in 0.2s ease-out',
+        'dialog-in': 'dialog-in 0.2s ease-out',
         'fadeSlideIn': 'fadeSlideIn 0.3s ease-out',
         'card-in': 'card-in 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
         'slide-up': 'slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -109,6 +110,15 @@ export default {
         'scale-in': {
           '0%': { opacity: '0', transform: 'scale(0.95)' },
           '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        /* Apertura de ui/Dialog (#800). Lleva el translate porque la caja se
+           centra con `translate-x/y-[-50%]`, que también va por `transform`:
+           con `scale-in` el keyframe lo pisaba y durante 200 ms la caja
+           aparecía con la esquina en el centro de la pantalla. `scale-in`
+           queda como estaba porque lo usa DropdownMenu, que no se centra así. */
+        'dialog-in': {
+          '0%': { opacity: '0', transform: 'translate(-50%, -50%) scale(0.95)' },
+          '100%': { opacity: '1', transform: 'translate(-50%, -50%) scale(1)' },
         },
         /* Fade + slide leve para el período del título cuando cambia */
         'fadeSlideIn': {
