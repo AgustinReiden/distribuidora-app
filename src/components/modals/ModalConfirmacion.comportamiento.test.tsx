@@ -262,6 +262,33 @@ describe('ModalConfirmacion — campo de fecha', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
+  it('no deja confirmar una fecha tipeada a mano después del máximo, y dice por qué', async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    render(
+      <ModalConfirmacion config={config({ campoFecha: CAMPO_FECHA, onConfirm })} onClose={vi.fn()} />,
+    )
+
+    const input = screen.getByLabelText('Fecha de entrega')
+    await user.clear(input)
+    // El año mal escrito que el selector no deja elegir pero el teclado sí.
+    await user.type(input, '2062-09-17')
+
+    const confirmar = screen.getByRole('button', { name: 'Confirmar' })
+    expect(confirmar).toBeDisabled()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText('La fecha no puede ser posterior al 17/09/2026.')).toBeVisible()
+    await user.click(confirmar)
+    expect(onConfirm).not.toHaveBeenCalled()
+
+    // El mismo día del máximo sí vale.
+    await user.clear(input)
+    await user.type(input, '2026-09-17')
+    expect(confirmar).toBeEnabled()
+    expect(input).not.toHaveAttribute('aria-invalid')
+    expect(screen.queryByText(/no puede ser posterior/)).not.toBeInTheDocument()
+  })
+
   it('reusado con OTRA config, la fecha arranca en el nuevo valor inicial', async () => {
     const user = userEvent.setup()
     const { rerender } = render(
