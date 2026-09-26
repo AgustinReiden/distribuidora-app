@@ -117,14 +117,15 @@ const ITEMS_OCULTOS = ['Recorrido Preventista', 'Centro de Analisis'] as const
 /**
  * Lo que cada rol ve en la barra y en el panel desplegable. Usuarios,
  * Configuración y Bot Telegram no estan: desde #713 viven en el menu del
- * usuario (ADMINISTRACION_POR_ROL).
+ * usuario (ADMINISTRACION_POR_ROL). "Mis entregas" del admin esta en la linea
+ * de Operaciones: desde #799 va en ese grupo y no suelta en la barra.
  */
 const LABELS_POR_ROL = {
   admin: [
-    'Dashboard', 'Pedidos', 'Mis entregas',
+    'Dashboard', 'Pedidos',
     'Clientes', 'Reportes', 'Reportes Gerenciales', 'Exportar a Power BI', 'Comisiones', 'Objetivos',
     'Productos', 'Compras', 'Vencimientos', 'Proveedores', 'Promociones', 'Mov. Sucursales',
-    'Recorridos', 'Rendiciones', 'Salvedades', 'Geolocalización', 'Horarios a revisar',
+    'Recorridos', 'Rendiciones', 'Salvedades', 'Geolocalización', 'Horarios a revisar', 'Mis entregas',
   ],
   encargado: [
     'Pedidos', 'Mis entregas',
@@ -556,6 +557,109 @@ describe('TopNavigation — navegar', () => {
 })
 
 // =============================================================================
+// "MIS ENTREGAS": SUELTA PARA ENCARGADO Y PREVENTISTA, EN OPERACIONES PARA ADMIN (#799)
+// =============================================================================
+
+describe('TopNavigation — "Mis entregas" (#799)', () => {
+  /** Los botones de primer nivel de la barra que no abren un grupo. */
+  const itemsSueltos = (): string[] =>
+    within(navEscritorio())
+      .queryAllByRole('button')
+      .filter(b => b.getAttribute('aria-haspopup') !== 'true')
+      .map(textoDe)
+
+  async function itemsDeOperaciones(): Promise<string[]> {
+    const user = userEvent.setup()
+    const grupo = within(navEscritorio()).getByRole('button', { name: /Operaciones/ })
+    await user.click(grupo)
+    const items = within(within(navEscritorio()).getByRole('menu')).getAllByRole('menuitem').map(textoDe)
+    await user.click(grupo)
+    return items
+  }
+
+  /** `b` viene despues de `a` en el documento. */
+  const vieneDespues = (a: Node, b: Node): boolean =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+
+  it('el admin no la ve suelta en la barra: la ve al final de Operaciones', async () => {
+    renderNav(['admin'])
+    expect(within(navEscritorio()).queryByRole('button', { name: 'Mis entregas' })).toBeNull()
+    expect(itemsSueltos()).toEqual(['Dashboard', 'Pedidos'])
+    const operaciones = await itemsDeOperaciones()
+    expect(operaciones[operaciones.length - 1]).toBe('Mis entregas')
+  })
+
+  it('el admin la elige en Operaciones: navega a /mis-entregas y cierra el desplegable', async () => {
+    renderNav(['admin'])
+    const user = userEvent.setup()
+    const grupo = within(navEscritorio()).getByRole('button', { name: /Operaciones/ })
+    await user.click(grupo)
+
+    const desplegable = within(navEscritorio()).getByRole('menu')
+    await user.click(within(desplegable).getByRole('menuitem', { name: 'Mis entregas' }))
+
+    expect(screen.getByText('Ruta actual: /mis-entregas')).toBeInTheDocument()
+    expect(within(navEscritorio()).queryByRole('menu')).toBeNull()
+    expect(grupo).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('en el panel del admin, "Mis entregas" va bajo el titulo "Operaciones"', () => {
+    renderNav(['admin'])
+    const panel = navMovil()
+    const botones = within(panel).getAllByRole('button', { name: 'Mis entregas' })
+    expect(botones).toHaveLength(1)
+    // Operaciones es el ultimo grupo del panel: lo que viene despues de su
+    // titulo es de Operaciones.
+    expect(vieneDespues(within(panel).getByText('Operaciones'), botones[0])).toBe(true)
+  })
+
+  it.each(['encargado', 'preventista'] as const)(
+    'el %s la sigue viendo suelta en la barra, y lleva a /mis-entregas',
+    async rol => {
+      renderNav([rol])
+      const user = userEvent.setup()
+      const boton = within(navEscritorio()).getByRole('button', { name: 'Mis entregas' })
+      expect(boton).not.toHaveAttribute('aria-haspopup')
+      expect(itemsSueltos()).toContain('Mis entregas')
+
+      await user.click(boton)
+      expect(screen.getByText('Ruta actual: /mis-entregas')).toBeInTheDocument()
+    },
+  )
+
+  it.each(['encargado', 'preventista'] as const)(
+    'en el panel del %s, "Mis entregas" va con los items sueltos, antes del primer grupo',
+    rol => {
+      renderNav([rol])
+      const panel = navMovil()
+      const boton = within(panel).getByRole('button', { name: 'Mis entregas' })
+      expect(vieneDespues(boton, within(panel).getByText('Comercial'))).toBe(true)
+    },
+  )
+
+  it('el encargado no la tiene repetida dentro de Operaciones', async () => {
+    renderNav(['encargado'])
+    expect(await itemsDeOperaciones()).not.toContain('Mis entregas')
+  })
+
+  it.each([
+    [['admin', 'preventista'], 'en Operaciones'],
+    [['admin', 'encargado'], 'en Operaciones'],
+    [['encargado', 'admin'], 'suelta'],
+    [['preventista', 'admin'], 'suelta'],
+  ] as const)(
+    'el multi-rol %j la ve una sola vez, %s: la decide el rol primario',
+    async (roles, donde) => {
+      renderNav([...roles])
+      const barra = await etiquetasDelEscritorio()
+      expect(barra.filter(e => e === 'Mis entregas')).toHaveLength(1)
+      expect(etiquetasDelMovil().filter(e => e === 'Mis entregas')).toHaveLength(1)
+      expect(itemsSueltos().includes('Mis entregas')).toBe(donde === 'suelta')
+    },
+  )
+})
+
+// =============================================================================
 // INVARIANTE MENU <-> ROUTER
 // =============================================================================
 
@@ -733,9 +837,10 @@ describe('TopNavigation — menu movil', () => {
 // =============================================================================
 
 describe('TopNavigation — destino del skip link "Ir a la navegación"', () => {
-  // SkipLinks.tsx enfoca document.getElementById('main-navigation'). Desde #713
-  // la barra solo se muestra desde 2xl, asi que el destino tiene que envolver
-  // tambien a la hamburguesa, que es la navegacion en cualquier ancho menor.
+  // SkipLinks.tsx enfoca document.getElementById('main-navigation'). La barra
+  // solo se muestra desde xl (#799; con #713 era desde 2xl), asi que el destino
+  // tiene que envolver tambien a la hamburguesa, que es la navegacion en
+  // cualquier ancho menor.
   it('envuelve a la hamburguesa y a la barra de navegacion', () => {
     renderNav(['admin'])
     const destino = document.getElementById('main-navigation')
