@@ -35,6 +35,8 @@ import type {
 } from './ModalCompra.reducer'
 import VencimientosLineaCompra from '../vencimientos/VencimientosLineaCompra'
 import { validarVencimientosLineas } from '../../utils/vencimientos'
+import { compraTieneCambios } from '../../utils/compraTieneCambios'
+import ModalBase from './ModalBase'
 import SelectorConAlta from '../productos/SelectorConAlta'
 import type { OpcionCatalogo } from '../productos/SelectorConAlta'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
@@ -577,53 +579,96 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
     }
   }
 
+  // Los dos modales anidados (alta de proveedor, importar Excel) son hechos a
+  // mano: Radix no los registra como capas propias, así que para él siguen
+  // siendo "adentro de la compra". Ver `handleEscapeKeyDown` y el `className`
+  // de ModalBase más abajo.
+  const modalAnidadoAbierto = modalProveedorOpen || modalImportarOpen
+
+  // Escape cierra sólo si no hay nada que perder (ver `compraTieneCambios`).
+  // La X y "Cancelar" cierran siempre, como antes de pasar a ModalBase.
+  //
+  // Radix escucha Escape en el `document` en fase de CAPTURA: le llega antes
+  // que al `onKeyDown` de cualquier input, y ningún `stopPropagation` de adentro
+  // lo frena. Por eso la lista del buscador abierta se mira acá: ese Escape es
+  // para cerrarla a ella (lo hace el input), no al modal. Con un modal anidado
+  // abierto pasa lo mismo: sin esto, un Escape adentro del alta de proveedor
+  // cerraría la compra entera por detrás.
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    if (state.mostrarBuscador || modalAnidadoAbierto || compraTieneCambios(state)) {
+      event.preventDefault()
+    }
+  }
+
+  const botonEscanear = N8N_FACTURA_WEBHOOK_URL ? (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleEscanearFactura(file)
+          e.target.value = ''
+        }}
+      />
+      <Button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={state.escaneando}
+        loading={state.escaneando}
+        variant="primary"
+        size="sm"
+        className="gap-1.5 px-2.5 sm:px-3"
+        // En celular el rótulo está oculto y el ícono es decorativo: sin esto el
+        // botón no tiene nombre, y es el primer tabulable del diálogo (el foco
+        // inicial de Radix cae acá cuando el webhook está configurado).
+        aria-label={state.escaneando ? 'Escaneando...' : 'Escanear Factura'}
+      >
+        {!state.escaneando && <Camera className="w-4 h-4" />}
+        <span className="hidden sm:inline">{state.escaneando ? 'Escaneando...' : 'Escanear Factura'}</span>
+      </Button>
+    </>
+  ) : undefined
+
+  // bodyBare: el modal trae su propia columna. Con el DialogBody de siempre
+  // habría doble scroll y el footer con "Registrar Compra" se iría con el
+  // formulario, abajo de todo.
+  //
+  // El carrito verde que acompañaba al título no pasa a `headerExtra`: ese
+  // slot queda pegado a la X, y ahí sería un adorno. Sigue en el botón
+  // "Registrar Compra".
+  //
+  // `h-[90vh]` sólo con un modal anidado abierto: el contenido de ModalBase va
+  // centrado con `transform`, y un `fixed` adentro de un elemento transformado
+  // se posiciona contra ESE elemento y no contra la pantalla (y su
+  // `overflow-hidden` lo recorta). El anidado queda encerrado en la caja de la
+  // compra; así esa caja le da toda la altura que la pantalla permite, y un
+  // "Importar" al pie de una vista previa larga no queda cortado.
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-3 sm:p-4 border-b dark:border-gray-700 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="p-1.5 sm:p-2 bg-green-100 dark:bg-green-900/30 rounded-lg shrink-0">
-              <ShoppingCart className="w-5 h-5 text-green-600" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-white truncate">Nueva Compra</h2>
-              <p className="text-sm text-gray-500 hidden sm:block">Registrar compra a proveedor</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {N8N_FACTURA_WEBHOOK_URL && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) handleEscanearFactura(file)
-                    e.target.value = ''
-                  }}
-                />
-                <Button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={state.escaneando}
-                  loading={state.escaneando}
-                  variant="primary"
-                  size="sm"
-                  className="gap-1.5 px-2.5 sm:px-3"
-                >
-                  {!state.escaneando && <Camera className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{state.escaneando ? 'Escaneando...' : 'Escanear Factura'}</span>
-                </Button>
-              </>
-            )}
-            <Button onClick={onClose} variant="ghost" size="iconSm">
-              <X className="w-5 h-5" />
-            </Button>
-          </div>
-        </div>
+    <ModalBase
+      title="Nueva Compra"
+      onClose={onClose}
+      maxWidth="max-w-6xl"
+      bodyBare
+      headerExtra={botonEscanear}
+      onEscapeKeyDown={handleEscapeKeyDown}
+      className={modalAnidadoAbierto ? 'h-[90vh]' : undefined}
+    >
+      <div className="flex flex-1 min-h-0 flex-col">
+        {/* Subtítulo: queda fijo arriba del área que scrollea. No va como
+            `description` de ModalBase: la visible queda cruzada por el borde
+            del header (#800). */}
+        <p className="hidden sm:block px-4 py-2 border-b dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">
+          Registrar compra a proveedor
+        </p>
+
+        {/* Los paneles del escaneo quedan fijos entre el header y el
+            formulario, fuera del scroll, como antes de ModalBase: el botón
+            "Escanear Factura" está siempre a la vista y el resultado (o el
+            error) llega asíncrono, así que tiene que aparecer donde se lo ve
+            aunque el formulario esté scrolleado. */}
 
         {/* Preview resultado escaneo */}
         {state.resultadoEscaneo && (
@@ -671,75 +716,77 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
           </div>
         )}
 
-        {/* Contenido scrolleable */}
-        <CompactErrorBoundary componentName="ModalCompra" onClose={onClose}>
-          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
-            {/* Sección Proveedor */}
-            <ProveedorSection
-              state={state}
-              dispatch={dispatch}
-              proveedores={proveedores}
-              onAgregarProveedor={onCrearProveedor ? () => setModalProveedorOpen(true) : undefined}
-            />
-
-            {/* Datos de la compra */}
-            <DatosCompraSection state={state} dispatch={dispatch} />
-
-            {/* Productos */}
-            <ProductosSection
-              state={state}
-              dispatch={dispatch}
-              productosFiltrados={productosFiltrados}
-              iiMaster={iiMaster}
-              condicionMaster={condicionMaster}
-              onAgregarItem={handleAgregarItem}
-              onActualizarItem={handleActualizarItem}
-              onCondicionItem={handleCondicionItem}
-              onEliminarItem={handleEliminarItem}
-              onVencimientosItem={handleVencimientosItem}
-              catalogo={catalogoAlta}
-              onCrearProductoRapido={onCrearProductoRapido}
-              onImportarExcel={() => setModalImportarOpen(true)}
-            />
-
-            {/* Cargos y prorrateo. También en ZZ —el 47,9% de las compras—: el
-                tipo de comprobante decide si se agregan impuestos encima, no si
-                se ignoran costos, y un flete que factura un transportista aparte
-                no está adentro del precio pagado. La regla de ZZ se aplica en el
-                borde del motor (lineasParaMotor), no apagando la sección.
-                El único gate es tener líneas donde repartir. */}
-            {state.items.length > 0 && (
-              <>
-                <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII} />
-                <VistaPreviaCostosSection state={state} />
-              </>
-            )}
-
-            {/* Totales */}
-            {state.items.length > 0 && (
-              <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} />
-            )}
-
-            {/* Notas */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                <FileText className="w-4 h-4 inline mr-1" />
-                Notas (opcional)
-              </label>
-              <textarea
-                value={state.notas}
-                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => dispatch({ type: 'SET_NOTAS', payload: e.target.value })}
-                placeholder="Observaciones adicionales..."
-                rows={2}
-                className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+        {/* Contenido: lo único que scrollea. */}
+        <div className="flex-1 overflow-y-auto">
+          <CompactErrorBoundary componentName="ModalCompra" onClose={onClose}>
+            <form onSubmit={handleSubmit} className="p-3 sm:p-4 space-y-4">
+              {/* Sección Proveedor */}
+              <ProveedorSection
+                state={state}
+                dispatch={dispatch}
+                proveedores={proveedores}
+                onAgregarProveedor={onCrearProveedor ? () => setModalProveedorOpen(true) : undefined}
               />
-            </div>
 
-          </form>
-        </CompactErrorBoundary>
+              {/* Datos de la compra */}
+              <DatosCompraSection state={state} dispatch={dispatch} />
 
-        {/* Footer con botones */}
-        <div className="p-3 sm:p-4 border-t dark:border-gray-700 shrink-0 space-y-3">
+              {/* Productos */}
+              <ProductosSection
+                state={state}
+                dispatch={dispatch}
+                productosFiltrados={productosFiltrados}
+                iiMaster={iiMaster}
+                condicionMaster={condicionMaster}
+                onAgregarItem={handleAgregarItem}
+                onActualizarItem={handleActualizarItem}
+                onCondicionItem={handleCondicionItem}
+                onEliminarItem={handleEliminarItem}
+                onVencimientosItem={handleVencimientosItem}
+                catalogo={catalogoAlta}
+                onCrearProductoRapido={onCrearProductoRapido}
+                onImportarExcel={() => setModalImportarOpen(true)}
+              />
+
+              {/* Cargos y prorrateo. También en ZZ —el 47,9% de las compras—: el
+                  tipo de comprobante decide si se agregan impuestos encima, no si
+                  se ignoran costos, y un flete que factura un transportista aparte
+                  no está adentro del precio pagado. La regla de ZZ se aplica en el
+                  borde del motor (lineasParaMotor), no apagando la sección.
+                  El único gate es tener líneas donde repartir. */}
+              {state.items.length > 0 && (
+                <>
+                  <CargosSection state={state} dispatch={dispatch} plantilla={plantillaCargos.data} resolucion={resolucionII} />
+                  <VistaPreviaCostosSection state={state} />
+                </>
+              )}
+
+              {/* Totales */}
+              {state.items.length > 0 && (
+                <ResumenSection totales={totales} state={state} dispatch={dispatch} resolucion={resolucionII} />
+              )}
+
+              {/* Notas */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <FileText className="w-4 h-4 inline mr-1" />
+                  Notas (opcional)
+                </label>
+                <textarea
+                  value={state.notas}
+                  onChange={(e: ChangeEvent<HTMLTextAreaElement>) => dispatch({ type: 'SET_NOTAS', payload: e.target.value })}
+                  placeholder="Observaciones adicionales..."
+                  rows={2}
+                  className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+                />
+              </div>
+
+            </form>
+          </CompactErrorBoundary>
+        </div>
+
+        {/* Footer con botones: fuera del scroll, siempre a la vista */}
+        <div className="p-3 sm:p-4 border-t dark:border-gray-700 flex-shrink-0 space-y-3">
           {/* Error visible junto al botón */}
           {state.error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -771,6 +818,10 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
           </div>
         </div>
       </div>
+
+      {/* Los modales anidados van ADENTRO de ModalBase: afuera quedarían
+          detrás del overlay de Radix, con `pointer-events: none` heredado del
+          body y fuera del focus trap (CLAUDE.md). */}
 
       {/* Modal Proveedor anidado */}
       {modalProveedorOpen && onCrearProveedor && (
@@ -811,7 +862,7 @@ export default function ModalCompra({ productos, proveedores, categorias = [], m
           />
         </Suspense>
       )}
-    </div>
+    </ModalBase>
   )
 }
 
@@ -1026,7 +1077,10 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
   const [creandoItem, setCreandoItem] = useState(false)
   const buscadorRef = useRef<HTMLDivElement>(null)
 
-  // Cerrar dropdown al hacer click fuera
+  // Cerrar dropdown al hacer click fuera. En fase de CAPTURA: el contenido de
+  // ModalBase corta la propagación de `mousedown` (para que Radix no tome un
+  // arrastre como click afuera), y en burbujeo este listener no se enteraría
+  // de ningún click adentro del modal.
   useEffect(() => {
     if (!state.mostrarBuscador) return
     const handleClickOutside = (e: MouseEvent) => {
@@ -1034,8 +1088,8 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
         dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })
       }
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('mousedown', handleClickOutside, true)
+    return () => document.removeEventListener('mousedown', handleClickOutside, true)
   }, [state.mostrarBuscador, dispatch])
 
   const handleCrearProductoRapido = async () => {
@@ -1095,7 +1149,15 @@ function ProductosSection({ state, dispatch, productosFiltrados, iiMaster, condi
               value={state.busquedaProducto}
               onChange={(e: ChangeEvent<HTMLInputElement>) => dispatch({ type: 'SET_BUSQUEDA', payload: e.target.value })}
               onFocus={() => dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: true })}
-              onKeyDown={(e) => { if (e.key === 'Escape') dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false }) }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Escape') return
+                // Este Escape es de la lista, no del modal. El stopPropagation
+                // no alcanza para frenar a Radix, que lo escucha en captura
+                // antes que este handler: lo que deja el modal abierto es el
+                // `mostrarBuscador` que mira su onEscapeKeyDown.
+                e.stopPropagation()
+                dispatch({ type: 'SET_MOSTRAR_BUSCADOR', payload: false })
+              }}
               placeholder="Buscar producto por nombre o codigo..."
               className="w-full pl-10 pr-4 py-2 border dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
             />
