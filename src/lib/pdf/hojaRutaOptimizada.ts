@@ -14,7 +14,7 @@ import {
 import { formatAclaracionBulto } from './utils/formatBulto'
 import { lineaItemImpresion, nombreSinConteo } from './utils/lineaItem'
 import { esCantidadEnSubunidades, factorDeLaLinea } from '../../utils/unidadesRegalo'
-import { clasificarBarrida, ETIQUETA_BARRIDA, type Barrida } from '../../utils/barridas'
+import { barridasEfectivas, ETIQUETA_BARRIDA, type Barrida } from '../../utils/barridas'
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta'
 
 /** Info opcional de ruta para el encabezado (fecha, duracion, distancia). */
@@ -807,9 +807,12 @@ export function generarHojaRutaOptimizada(transportista: PerfilDB, pedidos: Pedi
   // esto el chofer ve una lista corrida y no sabe que los primeros son los que
   // cierran al mediodia. Se recalcula del horario del cliente en vez de leer
   // recorrido_pedidos.barrida para que valga tambien al exportar antes de armar.
+  // Es la barrida EFECTIVA, la misma que uso el optimizador: el vecino adelantado
+  // a la barrida 1 va bajo el rotulo de la 1, no abre un "Barrida 5" en el medio.
+  const efectivas = barridasEfectivas(pedidos, p => horarioParaRutear(p?.cliente))
   let barridaPrevia: Barrida | null = null
   pedidos.forEach((pedido, idx) => {
-    const { barrida } = clasificarBarrida(horarioParaRutear(pedido?.cliente))
+    const barrida: Barrida = efectivas.get(String(pedido.id)) ?? 4
     const ops = buildCardOps(doc, pedido, idx + 1)
     const height = measureCardHeight(ops)
     const cambiaBarrida = barrida !== barridaPrevia

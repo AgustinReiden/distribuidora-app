@@ -116,6 +116,126 @@ export function clasificarBarrida(horario?: string | null): ClasificacionBarrida
   return { barrida: 5, ventanas: franjas };
 }
 
+/**
+ * Distancia hasta la cual dos paradas cuentan como "vecinas": dos o tres puertas.
+ * Más allá ya es otra cuadra y el costo de volver deja de ser obvio.
+ */
+export const RADIO_VECINO_METROS = 100;
+
+/** Parada candidata a absorberse: su barrida propia, dónde queda y cuándo abre. */
+export interface ParadaConLugar {
+  pedido_id: string;
+  barrida: Barrida;
+  ventanas: FranjaHoraria[];
+  latitud?: number | string | null;
+  longitud?: number | string | null;
+}
+
+function coordenada(v: number | string | null | undefined): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Distancia en metros (equirectangular: sobra para 100 m). */
+function metrosEntre(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const rad = Math.PI / 180;
+  const x = (bLng - aLng) * rad * Math.cos(((aLat + bLat) / 2) * rad);
+  const y = (bLat - aLat) * rad;
+  return Math.sqrt(x * x + y * y) * 6_371_000;
+}
+
+function seSolapan(a: FranjaHoraria[], b: FranjaHoraria[]): boolean {
+  return a.some(fa => b.some(fb =>
+    horaAMinutos(fa.apertura) < horaAMinutos(fb.cierre) &&
+    horaAMinutos(fb.apertura) < horaAMinutos(fa.cierre)));
+}
+
+/**
+ * Adelanta a la barrida de su vecino la parada que queda pegada a una de un
+ * bloque anterior y está abierta mientras ese vecino atiende.
+ *
+ * El orden ENTRE barridas es duro, y eso tiene un costo que se vio en la calle:
+ * Pablo (J. M. Paz 2758, 08-13, barrida 1) y Los Redonditos (J. M. Paz 2743,
+ * 08:30-24, barrida 5) están a 57 m, y la ruta los mandaba en la parada 2 y en
+ * la 6 — el chofer pasaba por la puerta y tenía que volver. La barrida 5 existe
+ * porque esos locales *toleran* ir tarde, no porque haya que ir tarde.
+ *
+ * Sólo se adelanta, nunca se atrasa: adelantar no le hace perder a nadie la
+ * ventana de cierre, que es lo que las barridas cuidan. Y exige que las franjas
+ * se solapen, porque el que abre a las 17 no se atiende en la vuelta de la
+ * mañana por más que esté al lado. La hora exacta la sigue decidiendo el
+ * optimizador con la ventana real de cada uno.
+ *
+ * Las anclas son las barridas PROPIAS, no las ya adelantadas: sin eso una cadena
+ * de vecinos a 90 m arrastraría media calle al primer bloque, que es el recurso
+ * escaso. Sin horario (barrida 4) o sin coordenadas no se mueve nada: no hay
+ * cómo saber si está abierto ni si está cerca.
+ *
+ * @returns la barrida efectiva de cada parada, por pedido_id.
+ */
+export function absorberVecinos(
+  paradas: ParadaConLugar[],
+  radioMetros: number = RADIO_VECINO_METROS,
+): Map<string, Barrida> {
+  const efectiva = new Map<string, Barrida>();
+  const ubicadas = paradas
+    .map(p => ({ p, lat: coordenada(p.latitud), lng: coordenada(p.longitud) }))
+    .filter((u): u is { p: ParadaConLugar; lat: number; lng: number } => u.lat != null && u.lng != null);
+
+  for (const p of paradas) efectiva.set(p.pedido_id, p.barrida);
+
+  for (const u of ubicadas) {
+    if (u.p.barrida === 4 || u.p.ventanas.length === 0) continue;
+    let mejor = u.p.barrida;
+    for (const ancla of ubicadas) {
+      if (ancla.p.barrida >= mejor || ancla.p.barrida === 4) continue;
+      if (metrosEntre(u.lat, u.lng, ancla.lat, ancla.lng) > radioMetros) continue;
+      if (!seSolapan(u.p.ventanas, ancla.p.ventanas)) continue;
+      mejor = ancla.p.barrida;
+    }
+    efectiva.set(u.p.pedido_id, mejor);
+  }
+
+  return efectiva;
+}
+
+/** Pedido con lo mínimo para clasificarlo: su id y el cliente (horario + lugar). */
+export interface PedidoParaBarrida {
+  id: string | number;
+  cliente?: {
+    latitud?: number | string | null;
+    longitud?: number | string | null;
+  } | null;
+}
+
+/**
+ * Barrida efectiva de cada pedido de una ruta: la de su horario, adelantada si
+ * tiene un vecino en un bloque anterior (ver `absorberVecinos`).
+ *
+ * Es la ÚNICA forma de preguntar "en qué barrida va este pedido" cuando se mira
+ * la ruta entera: el optimizador, el guardado de la ruta, la hoja de ruta y la
+ * previa del modal tienen que dar lo mismo. Si uno calculara sólo por horario,
+ * la hoja imprimiría "Barrida 5" en medio de la 1.
+ *
+ * @param horarioDe cómo se lee el horario del cliente (horario de entrega o de atención).
+ */
+export function barridasEfectivas<P extends PedidoParaBarrida>(
+  pedidos: P[],
+  horarioDe: (p: P) => string | null | undefined,
+): Map<string, Barrida> {
+  return absorberVecinos(pedidos.map(p => {
+    const { barrida, ventanas } = clasificarBarrida(horarioDe(p));
+    return {
+      pedido_id: String(p.id),
+      barrida,
+      ventanas,
+      latitud: p.cliente?.latitud,
+      longitud: p.cliente?.longitud,
+    };
+  }));
+}
+
 /** Parada ya ruteada por el optimizador (trae la barrida que le tocó). */
 export interface ParadaRuteada {
   pedido_id: string;

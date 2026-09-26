@@ -54,7 +54,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
-import { clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
+import { barridasEfectivas, clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido'
 import { useDebounce } from '../../hooks/useAsync'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
@@ -1590,7 +1590,13 @@ export default function PedidosContainer(): React.ReactElement {
     if (!ruta) return
 
     type ParadaPlan = { pedido_id: string; barrida?: Barrida; hora_estimada?: string }
-    const optimizados = (ruta.orden_optimizado ?? []) as Array<ParadaPlan & { orden: number }>
+    // La barrida de cada parada es la EFECTIVA (vecinos adelantados, ver
+    // absorberVecinos): la misma que viajo al optimizador y la que imprime la
+    // hoja. Se fija aca y no se confia en el eco, para que las etiquetas que se
+    // guardan y el bloque donde se intercalan las sin coordenadas no difieran.
+    const efectivas = barridasEfectivas(pedidosSeleccionados, p => horarioParaRutear(p.cliente))
+    const optimizados = ((ruta.orden_optimizado ?? []) as Array<ParadaPlan & { orden: number }>)
+      .map(o => ({ ...o, barrida: efectivas.get(String(o.pedido_id)) ?? o.barrida }))
     // Los pedidos sin coordenadas NO los devuelve el optimizador (Google necesita
     // el punto), pero igual son entregables y deben formar parte de la ruta. Van
     // al final de SU barrida, no al final de la ruta: sin coordenadas no se sabe
@@ -1665,6 +1671,8 @@ export default function PedidosContainer(): React.ReactElement {
     const byId = new Map(pedidosSeleccionados.map(p => [String(p.id), p]))
 
     // Orden por repartidor desde el resultado del optimizador (geocodificados).
+    // Barrida efectiva sobre toda la seleccion: es la que viajo al optimizador.
+    const efectivas = barridasEfectivas(pedidosSeleccionados, p => horarioParaRutear(p.cliente))
     const ruteadasPorRep = new Map<string, Array<{ pedido_id: string; barrida?: Barrida }>>()
     for (const rep of repartidores) ruteadasPorRep.set(rep.transportista_id, [])
     for (const r of resp.recorridos) {
@@ -1673,7 +1681,7 @@ export default function PedidosContainer(): React.ReactElement {
         (r.orden_optimizado ?? [])
           .slice()
           .sort((a, b) => a.orden - b.orden)
-          .map(o => ({ pedido_id: String(o.pedido_id), barrida: o.barrida })),
+          .map(o => ({ pedido_id: String(o.pedido_id), barrida: efectivas.get(String(o.pedido_id)) ?? o.barrida })),
       )
     }
 
