@@ -187,7 +187,7 @@ export default function ClientesContainer(): React.ReactElement {
       return
     }
 
-    // Con movimientos la base rechaza el DELETE (FKs RESTRICT, migs 200/024/089).
+    // Con movimientos la base rechaza el DELETE (FKs RESTRICT, migs 200/024/089/265).
     // Se explica por que y se ofrece la accion que si corresponde: desactivarlo.
     const detalle: string[] = []
     if (referencias.pedidos.cantidad > 0) {
@@ -201,6 +201,9 @@ export default function ClientesContainer(): React.ReactElement {
     }
     if (referencias.recorridoCambios > 0) {
       detalle.push(`${referencias.recorridoCambios} ${referencias.recorridoCambios === 1 ? 'parada' : 'paradas'} de cambio`)
+    }
+    if (referencias.pagos > 0) {
+      detalle.push(`${referencias.pagos} ${referencias.pagos === 1 ? 'pago' : 'pagos'}`)
     }
 
     setConfirmConfig({

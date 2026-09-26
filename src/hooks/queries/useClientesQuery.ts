@@ -445,6 +445,9 @@ async function deleteCliente(id: string): Promise<void> {
       if (referencias.recorridoCambios > 0) {
         partes.push(`${referencias.recorridoCambios} parada${referencias.recorridoCambios === 1 ? '' : 's'} de cambio`)
       }
+      if (referencias.pagos > 0) {
+        partes.push(`${referencias.pagos} pago${referencias.pagos === 1 ? '' : 's'}`)
+      }
     }
     const ref = partes.length > 0 ? partes.join(', ') : 'movimientos asociados'
     throw new Error(
@@ -531,6 +534,11 @@ export interface ReferenciasCliente {
   cambiosProductos: number
   /** Paradas de cambio en recorridos (mig 089). FK sin ON DELETE => RESTRICT. */
   recorridoCambios: number
+  /**
+   * Pagos del cliente (mig 265). La FK era ON DELETE CASCADE: borrar la ficha
+   * borraba los cobros, y las boletas volvian a figurar como deuda. Hoy RESTRICT.
+   */
+  pagos: number
   /** true si alguna FK RESTRICT va a rechazar el DELETE. */
   bloqueanBorrado: boolean
 }
@@ -553,19 +561,22 @@ export interface ReferenciasCliente {
 export async function contarReferenciasDeCliente(
   clienteId: string
 ): Promise<ReferenciasCliente> {
-  const [pedidosRes, cambiosRes, recorridoRes] = await Promise.all([
+  const [pedidosRes, cambiosRes, recorridoRes, pagosRes] = await Promise.all([
     supabase.from('pedidos').select('total').eq('cliente_id', clienteId),
     supabase.from('cambios_productos').select('id').eq('cliente_id', clienteId),
     supabase.from('recorrido_cambios').select('id').eq('cliente_id', clienteId),
+    supabase.from('pagos').select('id').eq('cliente_id', clienteId),
   ])
 
   if (pedidosRes.error) throw pedidosRes.error
   if (cambiosRes.error) throw cambiosRes.error
   if (recorridoRes.error) throw recorridoRes.error
+  if (pagosRes.error) throw pagosRes.error
 
   const filas = pedidosRes.data || []
   const cambiosProductos = (cambiosRes.data || []).length
   const recorridoCambios = (recorridoRes.data || []).length
+  const pagos = (pagosRes.data || []).length
 
   return {
     pedidos: {
@@ -574,7 +585,8 @@ export async function contarReferenciasDeCliente(
     },
     cambiosProductos,
     recorridoCambios,
-    bloqueanBorrado: filas.length > 0 || cambiosProductos > 0 || recorridoCambios > 0,
+    pagos,
+    bloqueanBorrado: filas.length > 0 || cambiosProductos > 0 || recorridoCambios > 0 || pagos > 0,
   }
 }
 
